@@ -2,3 +2,4 @@ numpy
 numba
 PySide6
 pytest
+absl-py
