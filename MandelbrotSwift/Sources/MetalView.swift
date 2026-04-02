@@ -76,8 +76,9 @@ class DraggableMTKView: MTKView {
         let h = Float(bounds.height)
 
         coordinator.parent.centerX -= dx / w * coordinator.parent.scale
-        // Note: AppKit y is flipped (0 at bottom), so dy is already correct direction
-        coordinator.parent.centerY += dy / h * (coordinator.parent.scale * (h / w))
+        // AppKit y=0 is bottom; dragging up (positive dy) should move center up (positive y)
+        // But Metal renders y-flipped, so we subtract to match visual direction
+        coordinator.parent.centerY -= dy / h * (coordinator.parent.scale * (h / w))
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -98,8 +99,9 @@ class DraggableMTKView: MTKView {
         let h = Float(bounds.height)
 
         // Mouse position in fractal coordinates
+        // AppKit y=0 is bottom, Metal gid.y=0 is top, so: gid.y = h - location.y
         let mx = (Float(location.x) / w - 0.5) * coordinator.parent.scale + coordinator.parent.centerX
-        let my = (0.5 - Float(location.y) / h) * (coordinator.parent.scale * (h / w)) + coordinator.parent.centerY
+        let my = (Float(location.y) / h - 0.5) * (coordinator.parent.scale * (h / w)) + coordinator.parent.centerY
 
         coordinator.parent.scale *= factor
         coordinator.parent.centerX = mx + (coordinator.parent.centerX - mx) * factor
