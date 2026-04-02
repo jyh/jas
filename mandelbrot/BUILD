@@ -3,6 +3,7 @@ load("@rules_python//python:defs.bzl", "py_library", "py_test", "py_binary")
 py_library(
     name = "mandelbrot_lib",
     srcs = ["mandelbrot_app.py"],
+    imports = ["."],
     deps = [
         "@pip_deps//numpy",
         "@pip_deps//numba",
