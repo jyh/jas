@@ -22,6 +22,6 @@ py_test(
     srcs = ["mandelbrot_test.py"],
     deps = [
         ":mandelbrot_lib",
-        "@pip_deps//pytest",
+        "@pip_deps//absl_py",
     ],
 )
