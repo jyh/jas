@@ -4,7 +4,6 @@
 #
 #    pip-compile --output-file=requirements.txt.lock requirements.txt
 #
---index-url https://us-python.pkg.dev/artifact-foundry-prod/ah-3p-staging-python/simple/
 
 absl-py==2.4.0
     # via -r requirements.txt

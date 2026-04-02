@@ -3,7 +3,7 @@ import math
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 
-from PySide6.QtCore import Qt, QTimer, QSize, QPointF
+from PySide6.QtCore import Qt, QTimer, QSize, QPointF, Signal, QThread
 from PySide6.QtGui import QImage, QPainter, QColor
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QSlider
 
@@ -49,49 +49,28 @@ def apply_colormap(frac, max_iter):
     gamma = 0.7 + math.log10(max_iter + 1) / 2.5
     data = np.clip(frac, 0.0, 1.0)
     intensity = np.power(data, gamma)
-    # Edges: sharpen with a negative-power contrast accent
     edges = np.clip(1.0 - np.sqrt(intensity), 0.0, 1.0)
 
-    # Colour from blue to magenta to yellow
-    hue = 0.66 + 0.34 * intensity
-    hue = np.mod(hue, 1.0)
+    hue = np.mod(0.66 + 0.34 * intensity, 1.0)
+    v = 0.25 + 0.75 * edges
 
-    rgb = np.empty((frac.shape[0], frac.shape[1], 3), dtype=np.uint8)
+    hi = (hue * 6.0).astype(np.int32) % 6
+    f = hue * 6.0 - (hue * 6.0).astype(np.int32)
+    p = np.zeros_like(v)   # s=1, so p = v*(1-s) = 0
+    q = v * (1.0 - f)
+    t = v * f
 
-    for j in range(frac.shape[0]):
-        for i in range(frac.shape[1]):
-            if frac[j, i] >= 1.0:
-                rgb[j, i, :] = 0  # inside set: black
-                continue
+    r = np.select([hi == 0, hi == 1, hi == 2, hi == 3, hi == 4, hi == 5], [v, q, p, p, t, v])
+    g = np.select([hi == 0, hi == 1, hi == 2, hi == 3, hi == 4, hi == 5], [t, v, v, q, p, p])
+    b = np.select([hi == 0, hi == 1, hi == 2, hi == 3, hi == 4, hi == 5], [p, p, t, v, v, q])
 
-            h = hue[j, i]
-            s = 1.0
-            v = 0.25 + 0.75 * edges[j, i]
+    inside = frac >= 1.0
+    r = np.where(inside, 0.0, r)
+    g = np.where(inside, 0.0, g)
+    b = np.where(inside, 0.0, b)
 
-            hi = int(h * 6.0) % 6
-            f = h * 6.0 - hi
-            p = v * (1.0 - s)
-            q = v * (1.0 - f * s)
-            t = v * (1.0 - (1.0 - f) * s)
-
-            if hi == 0:
-                r, g, b = v, t, p
-            elif hi == 1:
-                r, g, b = q, v, p
-            elif hi == 2:
-                r, g, b = p, v, t
-            elif hi == 3:
-                r, g, b = p, q, v
-            elif hi == 4:
-                r, g, b = t, p, v
-            else:
-                r, g, b = v, p, q
-
-            rgb[j, i, 0] = int(np.uint8(r * 255))
-            rgb[j, i, 1] = int(np.uint8(g * 255))
-            rgb[j, i, 2] = int(np.uint8(b * 255))
-
-    return rgb
+    rgb = np.stack([r, g, b], axis=-1)
+    return np.clip(rgb * 255, 0, 255).astype(np.uint8)
 
 
 def iterations_to_qimage(iterations, max_iter):
@@ -99,14 +78,21 @@ def iterations_to_qimage(iterations, max_iter):
     norm = iterations / float(max_iter)
     rgb = apply_colormap(norm, max_iter)
 
-    image = QImage(width, height, QImage.Format_RGB888)
-    ptr = image.bits()
-    ptr.setsize(width * height * 3)
-    ptr[:] = rgb.tobytes()
-    return image
+    # Ensure memory is contiguous
+    rgb = np.ascontiguousarray(rgb)
+    bytes_per_line = width * 3
+    
+    # Create QImage directly from the memory buffer
+    image = QImage(rgb.data, width, height, bytes_per_line, QImage.Format_RGB888)
+    
+    # Use .copy() to ensure the image data persists after the numpy array is garbage collected
+    return image.copy()
 
 
 class MandelbrotWidget(QWidget):
+    # Define a signal to safely pass the rendered image back to the main thread
+    new_image_ready = Signal(QImage)
+
     def __init__(self):
         super().__init__()
         self.center_x = -0.75
@@ -120,12 +106,15 @@ class MandelbrotWidget(QWidget):
         self.image = None
         self.requested_compute = False
 
-        self.executor = ThreadPoolExecutor(max_workers=4)
+        self.executor = ThreadPoolExecutor(max_workers=1)
         self.future = None
 
         self.render_timer = QTimer(self)
         self.render_timer.setSingleShot(True)
         self.render_timer.timeout.connect(self._compute_fractal)
+        
+        # Connect the signal to the GUI update method
+        self.new_image_ready.connect(self._apply_new_image)
 
         self.setMinimumSize(640, 480)
 
@@ -164,17 +153,22 @@ class MandelbrotWidget(QWidget):
 
         def job():
             iters = compute_mandelbrot(xmin, xmax, ymin, ymax, w, h, max_iter)
-            return iterations_to_qimage(iters, max_iter)
+            return iters, max_iter
 
         self.future = self.executor.submit(job)
         self.future.add_done_callback(self._on_render_done)
 
     def _on_render_done(self, future):
         try:
-            img = future.result()
-        except Exception:
-            return
+            iters, max_iter = future.result()
+            img = iterations_to_qimage(iters, max_iter)
+            # Emit the signal instead of directly modifying self.image and calling self.update()
+            self.new_image_ready.emit(img)
+        except Exception as e:
+            # Print the exception so you can see if something else breaks in the future
+            print(f"Render failed: {e}")
 
+    def _apply_new_image(self, img):
         self.image = img
         self.update()
 
