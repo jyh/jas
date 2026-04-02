@@ -1,0 +1,4 @@
+Remove .bazelrc.
+--This line, and those below, will be ignored--
+
+D    mandelbrot/.bazelrc
