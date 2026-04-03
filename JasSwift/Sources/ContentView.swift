@@ -13,31 +13,79 @@ public enum Tool: String, CaseIterable {
 public struct ContentView: View {
     @State private var currentTool: Tool = .selection
     @State private var canvasPosition: CGPoint = CGPoint(x: 50, y: 50)
+    @State private var toolbarPosition: CGPoint = CGPoint(x: 10, y: 10)
     @StateObject private var model = JasModel()
 
     public init() {}
 
     public var body: some View {
-        HStack(spacing: 0) {
-            ToolbarView(currentTool: $currentTool)
+        ZStack(alignment: .topLeading) {
+            // Workspace background
+            Color(nsColor: NSColor(white: 0.235, alpha: 1.0))
 
-            ZStack(alignment: .topLeading) {
-                // Workspace background
-                Color(nsColor: NSColor(white: 0.235, alpha: 1.0))
+            // Embedded canvas subwindow (view observes model)
+            CanvasSubwindow(
+                model: model,
+                position: $canvasPosition,
+                bbox: CanvasBoundingBox()
+            )
 
-                // Embedded canvas subwindow (view observes model)
-                CanvasSubwindow(
-                    model: model,
-                    position: $canvasPosition,
-                    bbox: CanvasBoundingBox()
-                )
-            }
-            .frame(minWidth: 640, minHeight: 480)
-            .clipped()
+            // Floating toolbar
+            FloatingToolbar(
+                currentTool: $currentTool,
+                position: $toolbarPosition
+            )
         }
+        .frame(minWidth: 640, minHeight: 480)
+        .clipped()
         .background(
             KeyboardShortcutHandler(currentTool: $currentTool)
         )
+    }
+}
+
+// MARK: - Floating Toolbar
+
+struct FloatingToolbar: View {
+    @Binding var currentTool: Tool
+    @Binding var position: CGPoint
+
+    private let titleBarHeight: CGFloat = 24
+    private let toolbarWidth: CGFloat = 80
+
+    var body: some View {
+        let contentHeight: CGFloat = 40
+        let totalHeight = titleBarHeight + contentHeight
+
+        VStack(spacing: 0) {
+            // Title bar
+            ZStack {
+                Color(nsColor: NSColor(white: 0.6, alpha: 1.0))
+                Text("Tools")
+                    .font(.system(size: 11))
+                    .foregroundColor(.black)
+            }
+            .frame(width: toolbarWidth, height: titleBarHeight)
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        position.x += value.translation.width
+                        position.y += value.translation.height
+                    }
+            )
+
+            // Tool buttons
+            HStack(spacing: 2) {
+                ToolbarView.toolButton(currentTool: $currentTool, tool: .selection)
+                ToolbarView.toolButton(currentTool: $currentTool, tool: .directSelection)
+            }
+            .padding(4)
+            .frame(width: toolbarWidth, height: contentHeight)
+            .background(Color(nsColor: NSColor(white: 0.30, alpha: 1.0)))
+        }
+        .border(Color(nsColor: NSColor(white: 0.4, alpha: 1.0)), width: 1)
+        .frame(width: toolbarWidth, height: totalHeight)
+        .position(x: position.x + toolbarWidth / 2, y: position.y + totalHeight / 2)
     }
 }
 

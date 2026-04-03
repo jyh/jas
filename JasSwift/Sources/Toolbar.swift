@@ -1,28 +1,13 @@
 import SwiftUI
 import AppKit
 
-/// A vertical toolbar with tool icons in a 2-column grid.
-public struct ToolbarView: View {
-    @Binding var currentTool: Tool
-
-    public var body: some View {
-        VStack(spacing: 2) {
-            HStack(spacing: 2) {
-                toolButton(.selection)
-                toolButton(.directSelection)
-            }
-            Spacer()
-        }
-        .padding(4)
-        .frame(width: 76)
-        .background(Color(nsColor: NSColor(white: 0.30, alpha: 1.0)))
-    }
-
-    private func toolButton(_ tool: Tool) -> some View {
-        Button(action: { currentTool = tool }) {
+/// Tool button and icon drawing utilities for the toolbar.
+public struct ToolbarView {
+    static func toolButton(currentTool: Binding<Tool>, tool: Tool) -> some View {
+        Button(action: { currentTool.wrappedValue = tool }) {
             toolIcon(tool)
                 .frame(width: 32, height: 32)
-                .background(currentTool == tool
+                .background(currentTool.wrappedValue == tool
                     ? Color(nsColor: NSColor(white: 0.38, alpha: 1.0))
                     : Color.clear)
                 .cornerRadius(3)
@@ -30,7 +15,7 @@ public struct ToolbarView: View {
         .buttonStyle(.plain)
     }
 
-    private func toolIcon(_ tool: Tool) -> some View {
+    static func toolIcon(_ tool: Tool) -> some View {
         Canvas { context, size in
             let ox = (size.width - 28) / 2
             let oy = (size.height - 28) / 2
