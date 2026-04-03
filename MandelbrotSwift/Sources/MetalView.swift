@@ -2,9 +2,9 @@ import SwiftUI
 import MetalKit
 
 struct MetalView: NSViewRepresentable {
-    @Binding var centerX: Float
-    @Binding var centerY: Float
-    @Binding var scale: Float
+    @Binding var centerX: Double
+    @Binding var centerY: Double
+    @Binding var scale: Double
     @Binding var maxIter: Int32
 
     class Coordinator: NSObject {
@@ -68,40 +68,36 @@ class DraggableMTKView: MTKView {
     override func mouseDragged(with event: NSEvent) {
         guard let coordinator = coordinator else { return }
         let location = convert(event.locationInWindow, from: nil)
-        let dx = Float(location.x - lastDragLocation.x)
-        let dy = Float(location.y - lastDragLocation.y)
+        let dx = location.x - lastDragLocation.x
+        let dy = location.y - lastDragLocation.y
         lastDragLocation = location
 
-        let w = Float(bounds.width)
-        let h = Float(bounds.height)
+        let w = Double(bounds.width)
+        let h = Double(bounds.height)
 
         coordinator.parent.centerX -= dx / w * coordinator.parent.scale
-        // AppKit y=0 is bottom; dragging up (positive dy) should move center up (positive y)
-        // But Metal renders y-flipped, so we subtract to match visual direction
-        coordinator.parent.centerY -= dy / h * (coordinator.parent.scale * (h / w))
+        coordinator.parent.centerY += dy / h * (coordinator.parent.scale * (h / w))
     }
 
     override func scrollWheel(with event: NSEvent) {
         guard let coordinator = coordinator else { return }
-        let delta = Float(event.scrollingDeltaY)
-        // Normalize: trackpad gives large values, mouse wheel gives small ones
-        let angle: Float
+        let delta = Double(event.scrollingDeltaY)
+        let angle: Double
         if event.hasPreciseScrollingDeltas {
             angle = delta / 30.0
         } else {
             angle = delta / 3.0
         }
 
-        let factor = pow(Float(0.85), angle)
+        let factor = pow(0.85, angle)
 
         let location = convert(event.locationInWindow, from: nil)
-        let w = Float(bounds.width)
-        let h = Float(bounds.height)
+        let w = Double(bounds.width)
+        let h = Double(bounds.height)
 
         // Mouse position in fractal coordinates
-        // AppKit y=0 is bottom, Metal gid.y=0 is top, so: gid.y = h - location.y
-        let mx = (Float(location.x) / w - 0.5) * coordinator.parent.scale + coordinator.parent.centerX
-        let my = (Float(location.y) / h - 0.5) * (coordinator.parent.scale * (h / w)) + coordinator.parent.centerY
+        let mx = (Double(location.x) / w - 0.5) * coordinator.parent.scale + coordinator.parent.centerX
+        let my = (0.5 - Double(location.y) / h) * (coordinator.parent.scale * (h / w)) + coordinator.parent.centerY
 
         coordinator.parent.scale *= factor
         coordinator.parent.centerX = mx + (coordinator.parent.centerX - mx) * factor
@@ -109,8 +105,8 @@ class DraggableMTKView: MTKView {
 
         // Adjust max iterations on zoom
         let iterAdjust = 1.0 + abs(angle) * 0.12
-        var newIter = Int32(Float(coordinator.parent.maxIter) * iterAdjust)
-        newIter = max(100, min(4000, newIter))
+        var newIter = Int32(Double(coordinator.parent.maxIter) * iterAdjust)
+        newIter = max(100, min(10000, newIter))
         coordinator.parent.maxIter = newIter
     }
 }

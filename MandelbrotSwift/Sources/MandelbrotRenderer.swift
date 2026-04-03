@@ -3,12 +3,16 @@ import Metal
 import MetalKit
 
 struct MandelbrotUniforms {
-    var centerX: Float
-    var centerY: Float
-    var scale: Float
+    var centerX_hi: Float
+    var centerX_lo: Float
+    var centerY_hi: Float
+    var centerY_lo: Float
+    var scale_hi: Float
+    var scale_lo: Float
     var maxIter: Int32
     var width: Int32
     var height: Int32
+    var refOrbitLen: Int32
 }
 
 class MandelbrotRenderer: NSObject, MTKViewDelegate {
@@ -16,10 +20,47 @@ class MandelbrotRenderer: NSObject, MTKViewDelegate {
     let commandQueue: MTLCommandQueue
     let pipelineState: MTLComputePipelineState
 
-    var centerX: Float = -0.75
-    var centerY: Float = 0.0
-    var scale: Float = 3.5
-    var maxIter: Int32 = 500
+    var centerX: Double = -0.75
+    var centerY: Double = 0.0
+    var scale: Double = 3.5
+    var maxIter: Int32 = 200
+
+    private var refOrbitBuffer: MTLBuffer?
+
+    /// Split a Double into two Floats: hi + lo ≈ value
+    private func splitDouble(_ value: Double) -> (Float, Float) {
+        let hi = Float(value)
+        let lo = Float(value - Double(hi))
+        return (hi, lo)
+    }
+
+    /// Compute reference orbit at center using Double precision
+    private func computeReferenceOrbit() -> ([SIMD2<Float>], Int32) {
+        var zx: Double = 0.0
+        var zy: Double = 0.0
+        let cx = centerX
+        let cy = centerY
+        let maxN = Int(maxIter)
+
+        var orbit = [SIMD2<Float>]()
+        orbit.reserveCapacity(maxN + 1)
+
+        // Store Z_0 = (0, 0)
+        orbit.append(SIMD2<Float>(0, 0))
+
+        for _ in 0..<maxN {
+            let zx2 = zx * zx
+            let zy2 = zy * zy
+            if zx2 + zy2 > 256.0 { break }  // large bailout for reference stability
+            let newZx = zx2 - zy2 + cx
+            let newZy = 2.0 * zx * zy + cy
+            zx = newZx
+            zy = newZy
+            orbit.append(SIMD2<Float>(Float(zx), Float(zy)))
+        }
+
+        return (orbit, Int32(orbit.count))
+    }
 
     init?(mtkView: MTKView) {
         guard let device = mtkView.device,
@@ -29,7 +70,6 @@ class MandelbrotRenderer: NSObject, MTKViewDelegate {
         self.device = device
         self.commandQueue = commandQueue
 
-        // Compile Metal shader from source at runtime
         do {
             let library = try device.makeLibrary(source: metalShaderSource, options: nil)
             guard let function = library.makeFunction(name: "mandelbrot") else {
@@ -45,9 +85,7 @@ class MandelbrotRenderer: NSObject, MTKViewDelegate {
         super.init()
     }
 
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-        // Nothing needed; we read size each frame
-    }
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
         guard let drawable = view.currentDrawable,
@@ -60,18 +98,32 @@ class MandelbrotRenderer: NSObject, MTKViewDelegate {
         let w = texture.width
         let h = texture.height
 
+        // Compute reference orbit on CPU
+        let (orbit, refLen) = computeReferenceOrbit()
+        let orbitByteLen = orbit.count * MemoryLayout<SIMD2<Float>>.stride
+        refOrbitBuffer = device.makeBuffer(bytes: orbit, length: orbitByteLen, options: .storageModeShared)
+
+        let (cxHi, cxLo) = splitDouble(centerX)
+        let (cyHi, cyLo) = splitDouble(centerY)
+        let (sHi, sLo) = splitDouble(scale)
+
         var uniforms = MandelbrotUniforms(
-            centerX: centerX,
-            centerY: centerY,
-            scale: scale,
+            centerX_hi: cxHi,
+            centerX_lo: cxLo,
+            centerY_hi: cyHi,
+            centerY_lo: cyLo,
+            scale_hi: sHi,
+            scale_lo: sLo,
             maxIter: maxIter,
             width: Int32(w),
-            height: Int32(h)
+            height: Int32(h),
+            refOrbitLen: refLen
         )
 
         encoder.setComputePipelineState(pipelineState)
         encoder.setTexture(texture, index: 0)
         encoder.setBytes(&uniforms, length: MemoryLayout<MandelbrotUniforms>.size, index: 0)
+        encoder.setBuffer(refOrbitBuffer, offset: 0, index: 1)
 
         let threadGroupSize = MTLSize(width: 16, height: 16, depth: 1)
         let threadGroups = MTLSize(
