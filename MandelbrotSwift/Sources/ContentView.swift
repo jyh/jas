@@ -1,10 +1,10 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var centerX: Float = -0.75
-    @State private var centerY: Float = 0.0
-    @State private var scale: Float = 3.5
-    @State private var maxIter: Int32 = 500
+    @State private var centerX: Double = -0.75
+    @State private var centerY: Double = 0.0
+    @State private var scale: Double = 3.5
+    @State private var maxIter: Int32 = 200
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,7 +21,7 @@ struct ContentView: View {
                     centerX = -0.75
                     centerY = 0.0
                     scale = 3.5
-                    maxIter = 500
+                    maxIter = 200
                 }
                 .controlSize(.regular)
 
@@ -30,10 +30,10 @@ struct ContentView: View {
 
                 Slider(
                     value: Binding(
-                        get: { Float(maxIter) },
+                        get: { Double(maxIter) },
                         set: { maxIter = Int32($0) }
                     ),
-                    in: 100...4000,
+                    in: 100...10000,
                     step: 10
                 )
             }
