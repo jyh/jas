@@ -1,9 +1,8 @@
 import SwiftUI
-import AppKit
-import MandelbrotLib
+import JasLib
 
 @main
-struct MandelbrotExplorerApp: App {
+struct JasApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()

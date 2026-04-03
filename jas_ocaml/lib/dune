@@ -1,0 +1,3 @@
+(library
+ (name jas)
+ (libraries lablgtk3))
