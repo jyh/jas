@@ -3,7 +3,7 @@ from absl.testing import absltest
 from element import (
     Color, Fill, Stroke, LineCap, LineJoin, Transform,
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo, ClosePath,
-    Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, Group,
+    Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, Group, Layer,
 )
 
 
@@ -215,6 +215,29 @@ class ElementTest(absltest.TestCase):
         self.assertEqual(y, 0)
         self.assertEqual(w, 23)
         self.assertEqual(h, 23)
+
+    def test_layer_default_name(self):
+        layer = Layer(children=(Rect(x=0, y=0, width=10, height=10),))
+        self.assertEqual(layer.name, "Layer")
+
+    def test_layer_custom_name(self):
+        layer = Layer(children=(Rect(x=0, y=0, width=10, height=10),), name="Background")
+        self.assertEqual(layer.name, "Background")
+
+    def test_layer_bounds(self):
+        layer = Layer(children=(
+            Rect(x=0, y=0, width=10, height=10),
+            Circle(cx=50, cy=50, r=5),
+        ), name="Shapes")
+        self.assertEqual(layer.bounds(), (0, 0, 55, 55))
+
+    def test_layer_empty(self):
+        layer = Layer(children=(), name="Empty")
+        self.assertEqual(layer.bounds(), (0, 0, 0, 0))
+
+    def test_layer_is_group(self):
+        layer = Layer(children=(), name="Test")
+        self.assertIsInstance(layer, Group)
 
 
 if __name__ == "__main__":

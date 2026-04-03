@@ -199,4 +199,22 @@ let () =
   let (x, y, w, h) = bounds deep_outer in
   assert (x = 0.0 && y = 0.0 && w = 23.0 && h = 23.0);
 
+  (* Test layer default name *)
+  let layer = make_layer [make_rect 0.0 0.0 10.0 10.0] in
+  (match layer with Layer { name; _ } -> assert (name = "Layer") | _ -> assert false);
+
+  (* Test layer custom name *)
+  let layer2 = make_layer ~name:"Background" [make_rect 0.0 0.0 10.0 10.0] in
+  (match layer2 with Layer { name; _ } -> assert (name = "Background") | _ -> assert false);
+
+  (* Test layer bounds *)
+  let layer3 = make_layer ~name:"Shapes" [make_rect 0.0 0.0 10.0 10.0; make_circle 50.0 50.0 5.0] in
+  let (x, y, w, h) = bounds layer3 in
+  assert (x = 0.0 && y = 0.0 && w = 55.0 && h = 55.0);
+
+  (* Test empty layer *)
+  let layer4 = make_layer ~name:"Empty" [] in
+  let (x, y, w, h) = bounds layer4 in
+  assert (x = 0.0 && y = 0.0 && w = 0.0 && h = 0.0);
+
   Printf.printf "All element tests passed.\n"

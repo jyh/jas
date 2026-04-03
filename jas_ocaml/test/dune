@@ -9,3 +9,7 @@
 (test
  (name menu_test)
  (libraries jas lablgtk3))
+
+(test
+ (name document_test)
+ (libraries jas))

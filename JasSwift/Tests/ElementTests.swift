@@ -240,3 +240,33 @@ import Testing
     let b = outer.bounds
     #expect(b.x == 0 && b.y == 0 && b.width == 23 && b.height == 23)
 }
+
+@Test func layerDefaultName() {
+    let layer = JasLayer(children: [.rect(JasRect(x: 0, y: 0, width: 10, height: 10))])
+    #expect(layer.name == "Layer")
+}
+
+@Test func layerCustomName() {
+    let layer = JasLayer(name: "Background", children: [.rect(JasRect(x: 0, y: 0, width: 10, height: 10))])
+    #expect(layer.name == "Background")
+}
+
+@Test func layerBounds() {
+    let layer = JasLayer(name: "Shapes", children: [
+        .rect(JasRect(x: 0, y: 0, width: 10, height: 10)),
+        .circle(JasCircle(cx: 50, cy: 50, r: 5)),
+    ])
+    let b = layer.bounds
+    #expect(b.x == 0 && b.y == 0 && b.width == 55 && b.height == 55)
+}
+
+@Test func layerEmpty() {
+    let layer = JasLayer(name: "Empty", children: [])
+    let b = layer.bounds
+    #expect(b.x == 0 && b.y == 0 && b.width == 0 && b.height == 0)
+}
+
+@Test func layerBoundsDispatch() {
+    let layer = Element.layer(JasLayer(name: "Test", children: [.rect(JasRect(x: 5, y: 5, width: 20, height: 20))]))
+    #expect(layer.bounds.x == 5 && layer.bounds.width == 20)
+}
