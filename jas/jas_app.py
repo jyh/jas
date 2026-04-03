@@ -3,7 +3,7 @@ import sys
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QMdiArea, QMdiSubWindow, QDockWidget,
+    QApplication, QMainWindow, QMdiArea, QMdiSubWindow,
 )
 
 from canvas import CanvasWidget
@@ -21,18 +21,20 @@ class MainWindow(QMainWindow):
         # Menubar
         create_menus(self)
 
-        # Toolbar
-        self.toolbar = Toolbar()
-        dock = QDockWidget("Tools", self)
-        dock.setWidget(self.toolbar)
-        dock.setFeatures(QDockWidget.DockWidgetMovable)
-        dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        self.addDockWidget(Qt.LeftDockWidgetArea, dock)
-
         # Workspace
         self.mdi_area = QMdiArea()
         self.mdi_area.setBackground(QColor("#3c3c3c"))
         self.setCentralWidget(self.mdi_area)
+
+        # Floating toolbar
+        self.toolbar = Toolbar()
+        self.toolbar_window = QMdiSubWindow()
+        self.toolbar_window.setWidget(self.toolbar)
+        self.toolbar_window.setWindowTitle("Tools")
+        self.mdi_area.addSubWindow(self.toolbar_window)
+        self.toolbar_window.resize(80, 100)
+        self.toolbar_window.move(10, 10)
+        self.toolbar_window.show()
 
         # Model and Controller
         self.model = Model()
