@@ -2,7 +2,7 @@ load("@rules_python//python:defs.bzl", "py_library", "py_test", "py_binary")
 
 py_library(
     name = "jas_lib",
-    srcs = ["jas_app.py"],
+    srcs = ["jas_app.py", "canvas.py", "toolbar.py"],
     imports = ["."],
     deps = [
         "@pip_deps//pyside6",
