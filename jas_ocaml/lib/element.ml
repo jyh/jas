@@ -126,6 +126,12 @@ type element =
       opacity : float;
       transform : transform option;
     }
+  | Layer of {
+      name : string;
+      children : element list;
+      opacity : float;
+      transform : transform option;
+    }
 
 (** Return the bounding box as (x, y, width, height). *)
 let rec bounds = function
@@ -177,7 +183,7 @@ let rec bounds = function
   | Text { x; y; content; font_size; _ } ->
     let approx_width = float_of_int (String.length content) *. font_size *. 0.6 in
     (x, y -. font_size, approx_width, font_size)
-  | Group { children; _ } ->
+  | Group { children; _ } | Layer { children; _ } ->
     begin match children with
     | [] -> (0.0, 0.0, 0.0, 0.0)
     | _ ->
@@ -234,3 +240,6 @@ let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(fill = None) ?
 
 let make_group ?(opacity = 1.0) ?(transform = None) children =
   Group { children; opacity; transform }
+
+let make_layer ?(name = "Layer") ?(opacity = 1.0) ?(transform = None) children =
+  Layer { name; children; opacity; transform }

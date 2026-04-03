@@ -346,3 +346,9 @@ class Group(Element):
         max_x = max(b[0] + b[2] for b in all_bounds)
         max_y = max(b[1] + b[3] for b in all_bounds)
         return (min_x, min_y, max_x - min_x, max_y - min_y)
+
+
+@dataclass(frozen=True)
+class Layer(Group):
+    """A named group (layer) of elements."""
+    name: str = "Layer"

@@ -137,6 +137,8 @@ public enum Element: Equatable {
     case text(JasText)
     /// SVG \<g\>
     case group(JasGroup)
+    /// Named layer
+    case layer(JasLayer)
 
     public var bounds: BBox {
         switch self {
@@ -149,6 +151,7 @@ public enum Element: Equatable {
         case .path(let v): return v.bounds
         case .text(let v): return v.bounds
         case .group(let v): return v.bounds
+        case .layer(let v): return v.bounds
         }
     }
 }
@@ -346,6 +349,29 @@ public struct JasGroup: Equatable {
     public let transform: JasTransform?
 
     public init(children: [Element], opacity: Double = 1.0, transform: JasTransform? = nil) {
+        self.children = children
+        self.opacity = opacity; self.transform = transform
+    }
+
+    public var bounds: BBox {
+        guard !children.isEmpty else { return (0, 0, 0, 0) }
+        let all = children.map(\.bounds)
+        let minX = all.map(\.x).min()!, minY = all.map(\.y).min()!
+        let maxX = all.map { $0.x + $0.width }.max()!
+        let maxY = all.map { $0.y + $0.height }.max()!
+        return (minX, minY, maxX - minX, maxY - minY)
+    }
+}
+
+/// A named group (layer) of elements.
+public struct JasLayer: Equatable {
+    public let name: String
+    public let children: [Element]
+    public let opacity: Double
+    public let transform: JasTransform?
+
+    public init(name: String = "Layer", children: [Element], opacity: Double = 1.0, transform: JasTransform? = nil) {
+        self.name = name
         self.children = children
         self.opacity = opacity; self.transform = transform
     }
