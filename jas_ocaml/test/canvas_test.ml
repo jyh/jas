@@ -11,10 +11,22 @@ let () =
   toolbar#select_tool Jas.Toolbar.Direct_selection;
   assert (toolbar#current_tool = Jas.Toolbar.Direct_selection);
 
-  (* Test canvas subwindow creation *)
+  (* Test canvas subwindow with default model *)
+  let model = Jas.Model.create () in
   let canvas = Jas.Canvas_subwindow.create
-    ~title:"Untitled" ~x:100 ~y:50 ~width:820 ~height:640 fixed in
+    ~model ~x:100 ~y:50 ~width:820 ~height:640 fixed in
   assert (canvas#title = "Untitled");
+
+  (* Test canvas with named document via model *)
+  let doc = Jas.Document.make_document ~title:"My Drawing" [] in
+  let model2 = Jas.Model.create ~document:doc () in
+  let canvas2 = Jas.Canvas_subwindow.create
+    ~model:model2 ~x:100 ~y:50 ~width:820 ~height:640 fixed in
+  assert (canvas2#title = "My Drawing");
+
+  (* Test title updates when model changes document *)
+  model2#set_document (Jas.Document.make_document ~title:"Renamed" []);
+  assert (canvas2#title = "Renamed");
 
   (* Test default bounding box *)
   let bbox = canvas#bbox in

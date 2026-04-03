@@ -17,3 +17,11 @@
 (test
  (name measure_test)
  (libraries jas))
+
+(test
+ (name model_test)
+ (libraries jas))
+
+(test
+ (name controller_test)
+ (libraries jas))

@@ -13,6 +13,7 @@ public enum Tool: String, CaseIterable {
 public struct ContentView: View {
     @State private var currentTool: Tool = .selection
     @State private var canvasPosition: CGPoint = CGPoint(x: 50, y: 50)
+    @StateObject private var model = JasModel()
 
     public init() {}
 
@@ -24,9 +25,9 @@ public struct ContentView: View {
                 // Workspace background
                 Color(nsColor: NSColor(white: 0.235, alpha: 1.0))
 
-                // Embedded canvas subwindow
+                // Embedded canvas subwindow (view observes model)
                 CanvasSubwindow(
-                    title: "Untitled",
+                    model: model,
                     position: $canvasPosition,
                     bbox: CanvasBoundingBox()
                 )

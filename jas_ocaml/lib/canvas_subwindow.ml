@@ -13,7 +13,7 @@ let make_bounding_box ?(x = 0.0) ?(y = 0.0) ?(width = 800.0) ?(height = 600.0) (
 
 let title_bar_height = 24
 
-class canvas_subwindow ~title ~x ~y ~width ~height ~(bbox : bounding_box) (fixed : GPack.fixed) =
+class canvas_subwindow ~(model : Model.model) ~x ~y ~width ~height ~(bbox : bounding_box) (fixed : GPack.fixed) =
   let frame = GBin.frame ~shadow_type:`ETCHED_IN () in
   let vbox = GPack.vbox ~packing:frame#add () in
 
@@ -25,7 +25,7 @@ class canvas_subwindow ~title ~x ~y ~width ~height ~(bbox : bounding_box) (fixed
   (* Canvas drawing area *)
   let canvas_area = GMisc.drawing_area
     ~packing:(vbox#pack ~expand:true ~fill:true) () in
-  object
+  object (_self)
     val mutable pos_x = x
     val mutable pos_y = y
     val mutable sub_width = width
@@ -33,11 +33,12 @@ class canvas_subwindow ~title ~x ~y ~width ~height ~(bbox : bounding_box) (fixed
     val mutable dragging = false
     val mutable drag_offset_x = 0.0
     val mutable drag_offset_y = 0.0
-    val mutable win_title = title
+    val mutable current_doc = model#document
 
     method widget = frame#coerce
     method canvas = canvas_area
-    method title = win_title
+    method model = model
+    method title = current_doc.Document.title
     method x = pos_x
     method y = pos_y
     method bbox = bbox
@@ -45,6 +46,13 @@ class canvas_subwindow ~title ~x ~y ~width ~height ~(bbox : bounding_box) (fixed
     initializer
       fixed#put frame#coerce ~x:pos_x ~y:pos_y;
       frame#misc#set_size_request ~width:sub_width ~height:sub_height ();
+
+      (* Register for document changes *)
+      model#on_document_changed (fun doc ->
+        current_doc <- doc;
+        title_bar#misc#queue_draw ();
+        canvas_area#misc#queue_draw ()
+      );
 
       (* Draw title bar *)
       title_bar#misc#connect#draw ~callback:(fun cr ->
@@ -57,11 +65,12 @@ class canvas_subwindow ~title ~x ~y ~width ~height ~(bbox : bounding_box) (fixed
         Cairo.set_source_rgb cr 0.0 0.0 0.0;
         Cairo.select_font_face cr "Sans";
         Cairo.set_font_size cr 13.0;
-        let extents = Cairo.text_extents cr win_title in
+        let title = current_doc.Document.title in
+        let extents = Cairo.text_extents cr title in
         let tx = (w -. extents.Cairo.width) /. 2.0 in
         let ty = (h +. extents.Cairo.height) /. 2.0 in
         Cairo.move_to cr tx ty;
-        Cairo.show_text cr win_title;
+        Cairo.show_text cr title;
         true
       ) |> ignore;
 
@@ -106,5 +115,5 @@ class canvas_subwindow ~title ~x ~y ~width ~height ~(bbox : bounding_box) (fixed
       ) |> ignore
   end
 
-let create ~title ~x ~y ~width ~height ?(bbox = make_bounding_box ()) fixed =
-  new canvas_subwindow ~title ~x ~y ~width ~height ~bbox fixed
+let create ?(model = Model.create ()) ~x ~y ~width ~height ?(bbox = make_bounding_box ()) fixed =
+  new canvas_subwindow ~model ~x ~y ~width ~height ~bbox fixed

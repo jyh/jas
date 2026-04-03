@@ -1,6 +1,16 @@
 import Testing
 @testable import JasLib
 
+@Test func defaultDocumentTitle() {
+    let doc = JasDocument()
+    #expect(doc.title == "Untitled")
+}
+
+@Test func customDocumentTitle() {
+    let doc = JasDocument(title: "My Drawing")
+    #expect(doc.title == "My Drawing")
+}
+
 @Test func emptyDocument() {
     let doc = JasDocument()
     let b = doc.bounds
