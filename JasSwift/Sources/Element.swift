@@ -1,17 +1,6 @@
 import Foundation
 
-// MARK: - Basic value types
-
-/// A 2D point.
-public struct JasPoint: Equatable, Hashable {
-    public let x: Double
-    public let y: Double
-
-    public init(x: Double, y: Double) {
-        self.x = x
-        self.y = y
-    }
-}
+// MARK: - SVG presentation attributes
 
 /// RGBA color with components in [0, 1].
 public struct JasColor: Equatable, Hashable {
@@ -28,154 +17,345 @@ public struct JasColor: Equatable, Hashable {
     }
 }
 
-/// Stroke alignment relative to the path.
-public enum StrokeAlignment: Equatable, Hashable {
-    case center
-    case inside
-    case outside
+/// SVG stroke-linecap.
+public enum LineCap: Equatable, Hashable {
+    case butt
+    case round
+    case square
 }
 
-/// Fill style for a closed path.
+/// SVG stroke-linejoin.
+public enum LineJoin: Equatable, Hashable {
+    case miter
+    case round
+    case bevel
+}
+
+/// SVG fill presentation attribute.
 public struct JasFill: Equatable, Hashable {
     public let color: JasColor
-
-    public init(color: JasColor) {
-        self.color = color
-    }
+    public init(color: JasColor) { self.color = color }
 }
 
-/// Stroke style for a path.
+/// SVG stroke presentation attributes.
 public struct JasStroke: Equatable, Hashable {
     public let color: JasColor
     public let width: Double
-    public let alignment: StrokeAlignment
+    public let linecap: LineCap
+    public let linejoin: LineJoin
 
-    public init(color: JasColor, width: Double = 1.0, alignment: StrokeAlignment = .center) {
+    public init(color: JasColor, width: Double = 1.0, linecap: LineCap = .butt, linejoin: LineJoin = .miter) {
         self.color = color
         self.width = width
-        self.alignment = alignment
+        self.linecap = linecap
+        self.linejoin = linejoin
     }
 }
 
-// MARK: - Path components
+/// SVG transform as a 2D affine matrix [a b c d e f].
+public struct JasTransform: Equatable, Hashable {
+    public let a: Double, b: Double, c: Double, d: Double, e: Double, f: Double
 
-/// An anchor point on a path, with optional control handles for curves.
-public struct AnchorPoint: Equatable, Hashable {
-    public let position: JasPoint
-    public let handleIn: JasPoint?
-    public let handleOut: JasPoint?
+    public init(a: Double = 1, b: Double = 0, c: Double = 0, d: Double = 1, e: Double = 0, f: Double = 0) {
+        self.a = a; self.b = b; self.c = c; self.d = d; self.e = e; self.f = f
+    }
 
-    public init(position: JasPoint, handleIn: JasPoint? = nil, handleOut: JasPoint? = nil) {
-        self.position = position
-        self.handleIn = handleIn
-        self.handleOut = handleOut
+    public static func translate(_ tx: Double, _ ty: Double) -> JasTransform {
+        JasTransform(e: tx, f: ty)
+    }
+
+    public static func scale(_ sx: Double, _ sy: Double? = nil) -> JasTransform {
+        JasTransform(a: sx, d: sy ?? sx)
+    }
+
+    public static func rotate(_ angleDeg: Double) -> JasTransform {
+        let rad = angleDeg * .pi / 180
+        return JasTransform(a: cos(rad), b: sin(rad), c: -sin(rad), d: cos(rad))
     }
 }
 
-// MARK: - Elements
+// MARK: - SVG path commands
 
-/// A document element. All elements are immutable value types.
-public enum Element: Equatable {
-    /// A vector path defined by anchor points.
-    case path(JasPath)
-    /// A rectangle defined by origin and size.
-    case rect(JasRect)
-    /// An ellipse defined by center and radii.
-    case ellipse(JasEllipse)
-    /// A group of elements treated as a single unit.
-    case group(JasGroup)
+/// SVG path commands (the 'd' attribute).
+public enum PathCommand: Equatable {
+    /// M x y
+    case moveTo(Double, Double)
+    /// L x y
+    case lineTo(Double, Double)
+    /// C x1 y1 x2 y2 x y
+    case curveTo(x1: Double, y1: Double, x2: Double, y2: Double, x: Double, y: Double)
+    /// S x2 y2 x y
+    case smoothCurveTo(x2: Double, y2: Double, x: Double, y: Double)
+    /// Q x1 y1 x y
+    case quadTo(x1: Double, y1: Double, x: Double, y: Double)
+    /// T x y
+    case smoothQuadTo(Double, Double)
+    /// A rx ry rotation largeArc sweep x y
+    case arcTo(rx: Double, ry: Double, rotation: Double, largeArc: Bool, sweep: Bool, x: Double, y: Double)
+    /// Z
+    case closePath
 
-    /// Return the bounding box as (topLeft, bottomRight).
-    public var bounds: (JasPoint, JasPoint) {
+    /// The endpoint of this command, if any.
+    public var endpoint: (Double, Double)? {
         switch self {
-        case .path(let p): return p.bounds
-        case .rect(let r): return r.bounds
-        case .ellipse(let e): return e.bounds
-        case .group(let g): return g.bounds
+        case .moveTo(let x, let y), .lineTo(let x, let y), .smoothQuadTo(let x, let y):
+            return (x, y)
+        case .curveTo(_, _, _, _, let x, let y), .smoothCurveTo(_, _, let x, let y):
+            return (x, y)
+        case .quadTo(_, _, let x, let y):
+            return (x, y)
+        case .arcTo(_, _, _, _, _, let x, let y):
+            return (x, y)
+        case .closePath:
+            return nil
         }
     }
 }
 
-/// A vector path defined by anchor points.
-public struct JasPath: Equatable {
-    public let anchors: [AnchorPoint]
-    public let closed: Bool
-    public let fill: JasFill?
-    public let stroke: JasStroke?
+// MARK: - SVG Elements
 
-    public init(anchors: [AnchorPoint], closed: Bool = false, fill: JasFill? = nil, stroke: JasStroke? = nil) {
-        self.anchors = anchors
-        self.closed = closed
-        self.fill = fill
-        self.stroke = stroke
-    }
+/// Bounding box as (x, y, width, height).
+public typealias BBox = (x: Double, y: Double, width: Double, height: Double)
 
-    public var bounds: (JasPoint, JasPoint) {
-        guard !anchors.isEmpty else { return (JasPoint(x: 0, y: 0), JasPoint(x: 0, y: 0)) }
-        let xs = anchors.map(\.position.x)
-        let ys = anchors.map(\.position.y)
-        return (JasPoint(x: xs.min()!, y: ys.min()!), JasPoint(x: xs.max()!, y: ys.max()!))
+/// An SVG document element. All elements are immutable value types.
+public enum Element: Equatable {
+    /// SVG \<line\>
+    case line(JasLine)
+    /// SVG \<rect\>
+    case rect(JasRect)
+    /// SVG \<circle\>
+    case circle(JasCircle)
+    /// SVG \<ellipse\>
+    case ellipse(JasEllipse)
+    /// SVG \<polyline\>
+    case polyline(JasPolyline)
+    /// SVG \<polygon\>
+    case polygon(JasPolygon)
+    /// SVG \<path\>
+    case path(JasPath)
+    /// SVG \<text\>
+    case text(JasText)
+    /// SVG \<g\>
+    case group(JasGroup)
+
+    public var bounds: BBox {
+        switch self {
+        case .line(let v): return v.bounds
+        case .rect(let v): return v.bounds
+        case .circle(let v): return v.bounds
+        case .ellipse(let v): return v.bounds
+        case .polyline(let v): return v.bounds
+        case .polygon(let v): return v.bounds
+        case .path(let v): return v.bounds
+        case .text(let v): return v.bounds
+        case .group(let v): return v.bounds
+        }
     }
 }
 
-/// A rectangle defined by origin and size.
+/// SVG \<line\> element.
+public struct JasLine: Equatable {
+    public let x1: Double, y1: Double, x2: Double, y2: Double
+    public let stroke: JasStroke?
+    public let opacity: Double
+    public let transform: JasTransform?
+
+    public init(x1: Double, y1: Double, x2: Double, y2: Double,
+                stroke: JasStroke? = nil, opacity: Double = 1.0, transform: JasTransform? = nil) {
+        self.x1 = x1; self.y1 = y1; self.x2 = x2; self.y2 = y2
+        self.stroke = stroke; self.opacity = opacity; self.transform = transform
+    }
+
+    public var bounds: BBox {
+        let minX = min(x1, x2), minY = min(y1, y2)
+        return (minX, minY, abs(x2 - x1), abs(y2 - y1))
+    }
+}
+
+/// SVG \<rect\> element.
 public struct JasRect: Equatable {
-    public let origin: JasPoint
-    public let width: Double
-    public let height: Double
+    public let x: Double, y: Double, width: Double, height: Double
+    public let rx: Double, ry: Double
     public let fill: JasFill?
     public let stroke: JasStroke?
+    public let opacity: Double
+    public let transform: JasTransform?
 
-    public init(origin: JasPoint, width: Double, height: Double, fill: JasFill? = nil, stroke: JasStroke? = nil) {
-        self.origin = origin
-        self.width = width
-        self.height = height
-        self.fill = fill
-        self.stroke = stroke
+    public init(x: Double, y: Double, width: Double, height: Double,
+                rx: Double = 0, ry: Double = 0,
+                fill: JasFill? = nil, stroke: JasStroke? = nil,
+                opacity: Double = 1.0, transform: JasTransform? = nil) {
+        self.x = x; self.y = y; self.width = width; self.height = height
+        self.rx = rx; self.ry = ry
+        self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
     }
 
-    public var bounds: (JasPoint, JasPoint) {
-        (origin, JasPoint(x: origin.x + width, y: origin.y + height))
-    }
+    public var bounds: BBox { (x, y, width, height) }
 }
 
-/// An ellipse defined by center and radii.
+/// SVG \<circle\> element.
+public struct JasCircle: Equatable {
+    public let cx: Double, cy: Double, r: Double
+    public let fill: JasFill?
+    public let stroke: JasStroke?
+    public let opacity: Double
+    public let transform: JasTransform?
+
+    public init(cx: Double, cy: Double, r: Double,
+                fill: JasFill? = nil, stroke: JasStroke? = nil,
+                opacity: Double = 1.0, transform: JasTransform? = nil) {
+        self.cx = cx; self.cy = cy; self.r = r
+        self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
+    }
+
+    public var bounds: BBox { (cx - r, cy - r, r * 2, r * 2) }
+}
+
+/// SVG \<ellipse\> element.
 public struct JasEllipse: Equatable {
-    public let center: JasPoint
-    public let rx: Double
-    public let ry: Double
+    public let cx: Double, cy: Double, rx: Double, ry: Double
     public let fill: JasFill?
     public let stroke: JasStroke?
+    public let opacity: Double
+    public let transform: JasTransform?
 
-    public init(center: JasPoint, rx: Double, ry: Double, fill: JasFill? = nil, stroke: JasStroke? = nil) {
-        self.center = center
-        self.rx = rx
-        self.ry = ry
-        self.fill = fill
-        self.stroke = stroke
+    public init(cx: Double, cy: Double, rx: Double, ry: Double,
+                fill: JasFill? = nil, stroke: JasStroke? = nil,
+                opacity: Double = 1.0, transform: JasTransform? = nil) {
+        self.cx = cx; self.cy = cy; self.rx = rx; self.ry = ry
+        self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
     }
 
-    public var bounds: (JasPoint, JasPoint) {
-        (JasPoint(x: center.x - rx, y: center.y - ry),
-         JasPoint(x: center.x + rx, y: center.y + ry))
+    public var bounds: BBox { (cx - rx, cy - ry, rx * 2, ry * 2) }
+}
+
+/// SVG \<polyline\> element.
+public struct JasPolyline: Equatable {
+    public let points: [(Double, Double)]
+    public let fill: JasFill?
+    public let stroke: JasStroke?
+    public let opacity: Double
+    public let transform: JasTransform?
+
+    public init(points: [(Double, Double)],
+                fill: JasFill? = nil, stroke: JasStroke? = nil,
+                opacity: Double = 1.0, transform: JasTransform? = nil) {
+        self.points = points
+        self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
+    }
+
+    public var bounds: BBox {
+        guard !points.isEmpty else { return (0, 0, 0, 0) }
+        let xs = points.map(\.0), ys = points.map(\.1)
+        let minX = xs.min()!, minY = ys.min()!
+        return (minX, minY, xs.max()! - minX, ys.max()! - minY)
+    }
+
+    public static func == (lhs: JasPolyline, rhs: JasPolyline) -> Bool {
+        lhs.points.count == rhs.points.count
+            && zip(lhs.points, rhs.points).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
+            && lhs.fill == rhs.fill && lhs.stroke == rhs.stroke
+            && lhs.opacity == rhs.opacity && lhs.transform == rhs.transform
     }
 }
 
-/// A group of elements treated as a single unit.
+/// SVG \<polygon\> element.
+public struct JasPolygon: Equatable {
+    public let points: [(Double, Double)]
+    public let fill: JasFill?
+    public let stroke: JasStroke?
+    public let opacity: Double
+    public let transform: JasTransform?
+
+    public init(points: [(Double, Double)],
+                fill: JasFill? = nil, stroke: JasStroke? = nil,
+                opacity: Double = 1.0, transform: JasTransform? = nil) {
+        self.points = points
+        self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
+    }
+
+    public var bounds: BBox {
+        guard !points.isEmpty else { return (0, 0, 0, 0) }
+        let xs = points.map(\.0), ys = points.map(\.1)
+        let minX = xs.min()!, minY = ys.min()!
+        return (minX, minY, xs.max()! - minX, ys.max()! - minY)
+    }
+
+    public static func == (lhs: JasPolygon, rhs: JasPolygon) -> Bool {
+        lhs.points.count == rhs.points.count
+            && zip(lhs.points, rhs.points).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
+            && lhs.fill == rhs.fill && lhs.stroke == rhs.stroke
+            && lhs.opacity == rhs.opacity && lhs.transform == rhs.transform
+    }
+}
+
+/// SVG \<path\> element.
+public struct JasPath: Equatable {
+    public let d: [PathCommand]
+    public let fill: JasFill?
+    public let stroke: JasStroke?
+    public let opacity: Double
+    public let transform: JasTransform?
+
+    public init(d: [PathCommand],
+                fill: JasFill? = nil, stroke: JasStroke? = nil,
+                opacity: Double = 1.0, transform: JasTransform? = nil) {
+        self.d = d
+        self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
+    }
+
+    public var bounds: BBox {
+        let endpoints = d.compactMap(\.endpoint)
+        guard !endpoints.isEmpty else { return (0, 0, 0, 0) }
+        let xs = endpoints.map(\.0), ys = endpoints.map(\.1)
+        let minX = xs.min()!, minY = ys.min()!
+        return (minX, minY, xs.max()! - minX, ys.max()! - minY)
+    }
+}
+
+/// SVG \<text\> element.
+public struct JasText: Equatable {
+    public let x: Double, y: Double
+    public let content: String
+    public let fontFamily: String
+    public let fontSize: Double
+    public let fill: JasFill?
+    public let stroke: JasStroke?
+    public let opacity: Double
+    public let transform: JasTransform?
+
+    public init(x: Double, y: Double, content: String,
+                fontFamily: String = "sans-serif", fontSize: Double = 16.0,
+                fill: JasFill? = nil, stroke: JasStroke? = nil,
+                opacity: Double = 1.0, transform: JasTransform? = nil) {
+        self.x = x; self.y = y; self.content = content
+        self.fontFamily = fontFamily; self.fontSize = fontSize
+        self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
+    }
+
+    public var bounds: BBox {
+        let approxWidth = Double(content.count) * fontSize * 0.6
+        return (x, y - fontSize, approxWidth, fontSize)
+    }
+}
+
+/// SVG \<g\> element.
 public struct JasGroup: Equatable {
     public let children: [Element]
+    public let opacity: Double
+    public let transform: JasTransform?
 
-    public init(children: [Element]) {
+    public init(children: [Element], opacity: Double = 1.0, transform: JasTransform? = nil) {
         self.children = children
+        self.opacity = opacity; self.transform = transform
     }
 
-    public var bounds: (JasPoint, JasPoint) {
-        guard !children.isEmpty else { return (JasPoint(x: 0, y: 0), JasPoint(x: 0, y: 0)) }
-        let allBounds = children.map(\.bounds)
-        let minX = allBounds.map(\.0.x).min()!
-        let minY = allBounds.map(\.0.y).min()!
-        let maxX = allBounds.map(\.1.x).max()!
-        let maxY = allBounds.map(\.1.y).max()!
-        return (JasPoint(x: minX, y: minY), JasPoint(x: maxX, y: maxY))
+    public var bounds: BBox {
+        guard !children.isEmpty else { return (0, 0, 0, 0) }
+        let all = children.map(\.bounds)
+        let minX = all.map(\.x).min()!, minY = all.map(\.y).min()!
+        let maxX = all.map { $0.x + $0.width }.max()!
+        let maxY = all.map { $0.y + $0.height }.max()!
+        return (minX, minY, maxX - minX, maxY - minY)
     }
 }
