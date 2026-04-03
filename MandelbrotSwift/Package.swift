@@ -5,12 +5,26 @@ let package = Package(
     name: "MandelbrotExplorer",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(
-            name: "MandelbrotExplorer",
+        .target(
+            name: "MandelbrotLib",
             path: "Sources",
+            exclude: ["MandelbrotApp.swift"],
             linkerSettings: [
                 .unsafeFlags(["-framework", "Metal", "-framework", "MetalKit", "-framework", "AppKit"]),
             ]
+        ),
+        .executableTarget(
+            name: "MandelbrotExplorer",
+            dependencies: ["MandelbrotLib"],
+            path: "App",
+            linkerSettings: [
+                .unsafeFlags(["-framework", "Metal", "-framework", "MetalKit", "-framework", "AppKit"]),
+            ]
+        ),
+        .testTarget(
+            name: "MandelbrotTests",
+            dependencies: ["MandelbrotLib"],
+            path: "Tests"
         ),
     ]
 )

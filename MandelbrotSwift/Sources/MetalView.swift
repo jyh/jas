@@ -1,13 +1,13 @@
 import SwiftUI
 import MetalKit
 
-struct MetalView: NSViewRepresentable {
+public struct MetalView: NSViewRepresentable {
     @Binding var centerX: Double
     @Binding var centerY: Double
     @Binding var scale: Double
     @Binding var maxIter: Int32
 
-    class Coordinator: NSObject {
+    public class Coordinator: NSObject {
         var renderer: MandelbrotRenderer?
         var parent: MetalView
         var isDragging = false
@@ -18,11 +18,11 @@ struct MetalView: NSViewRepresentable {
         }
     }
 
-    func makeCoordinator() -> Coordinator {
+    public func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
     }
 
-    func makeNSView(context: Context) -> MTKView {
+    public func makeNSView(context: Context) -> MTKView {
         let mtkView = DraggableMTKView()
         mtkView.device = MTLCreateSystemDefaultDevice()
         mtkView.colorPixelFormat = .bgra8Unorm
@@ -44,7 +44,7 @@ struct MetalView: NSViewRepresentable {
         return mtkView
     }
 
-    func updateNSView(_ mtkView: MTKView, context: Context) {
+    public func updateNSView(_ mtkView: MTKView, context: Context) {
         guard let renderer = context.coordinator.renderer else { return }
         renderer.centerX = centerX
         renderer.centerY = centerY

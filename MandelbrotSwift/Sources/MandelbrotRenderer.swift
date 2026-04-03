@@ -2,7 +2,7 @@ import Foundation
 import Metal
 import MetalKit
 
-struct MandelbrotUniforms {
+public struct MandelbrotUniforms {
     var centerX_hi: Float
     var centerX_lo: Float
     var centerY_hi: Float
@@ -15,27 +15,27 @@ struct MandelbrotUniforms {
     var refOrbitLen: Int32
 }
 
-class MandelbrotRenderer: NSObject, MTKViewDelegate {
-    let device: MTLDevice
+public class MandelbrotRenderer: NSObject, MTKViewDelegate {
+    public let device: MTLDevice
     let commandQueue: MTLCommandQueue
     let pipelineState: MTLComputePipelineState
 
-    var centerX: Double = -0.75
-    var centerY: Double = 0.0
-    var scale: Double = 3.5
-    var maxIter: Int32 = 200
+    public var centerX: Double = -0.75
+    public var centerY: Double = 0.0
+    public var scale: Double = 3.5
+    public var maxIter: Int32 = 200
 
     private var refOrbitBuffer: MTLBuffer?
 
     /// Split a Double into two Floats: hi + lo ≈ value
-    private func splitDouble(_ value: Double) -> (Float, Float) {
+    public func splitDouble(_ value: Double) -> (Float, Float) {
         let hi = Float(value)
         let lo = Float(value - Double(hi))
         return (hi, lo)
     }
 
     /// Compute reference orbit at center using Double precision
-    private func computeReferenceOrbit() -> ([SIMD2<Float>], Int32) {
+    public func computeReferenceOrbit() -> ([SIMD2<Float>], Int32) {
         var zx: Double = 0.0
         var zy: Double = 0.0
         let cx = centerX
@@ -62,7 +62,7 @@ class MandelbrotRenderer: NSObject, MTKViewDelegate {
         return (orbit, Int32(orbit.count))
     }
 
-    init?(mtkView: MTKView) {
+    public init?(mtkView: MTKView) {
         guard let device = mtkView.device,
               let commandQueue = device.makeCommandQueue() else {
             return nil
@@ -85,9 +85,9 @@ class MandelbrotRenderer: NSObject, MTKViewDelegate {
         super.init()
     }
 
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    public func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
-    func draw(in view: MTKView) {
+    public func draw(in view: MTKView) {
         guard let drawable = view.currentDrawable,
               let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeComputeCommandEncoder() else {

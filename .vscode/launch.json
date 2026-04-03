@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:mandelbrot}/MandelbrotSwift",
+            "name": "Debug MandelbrotExplorer (MandelbrotSwift)",
+            "target": "MandelbrotExplorer",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug MandelbrotExplorer (MandelbrotSwift)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:mandelbrot}/MandelbrotSwift",
+            "name": "Release MandelbrotExplorer (MandelbrotSwift)",
+            "target": "MandelbrotExplorer",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release MandelbrotExplorer (MandelbrotSwift)"
+        }
+    ]
+}

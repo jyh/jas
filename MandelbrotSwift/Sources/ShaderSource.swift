@@ -1,6 +1,6 @@
 import Foundation
 
-let metalShaderSource = """
+public let metalShaderSource = """
 #include <metal_stdlib>
 using namespace metal;
 
