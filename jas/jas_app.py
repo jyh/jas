@@ -1,26 +1,13 @@
 import sys
 
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QPainter, QColor
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QMdiArea, QMdiSubWindow, QWidget,
+    QApplication, QMainWindow, QMdiArea, QMdiSubWindow, QDockWidget,
 )
 
-
-class CanvasWidget(QWidget):
-    """The main drawing canvas."""
-
-    def __init__(self):
-        super().__init__()
-        self.setMinimumSize(320, 240)
-        self.setMouseTracking(True)
-
-    def sizeHint(self):
-        return QSize(800, 600)
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("white"))
+from canvas import CanvasWidget
+from toolbar import Tool, Toolbar
 
 
 class MainWindow(QMainWindow):
@@ -28,10 +15,20 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Jas")
 
+        # Toolbar
+        self.toolbar = Toolbar()
+        dock = QDockWidget("Tools", self)
+        dock.setWidget(self.toolbar)
+        dock.setFeatures(QDockWidget.DockWidgetMovable)
+        dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.addDockWidget(Qt.LeftDockWidgetArea, dock)
+
+        # Workspace
         self.mdi_area = QMdiArea()
         self.mdi_area.setBackground(QColor("#3c3c3c"))
         self.setCentralWidget(self.mdi_area)
 
+        # Canvas subwindow
         self.canvas = CanvasWidget()
         self.sub_window = QMdiSubWindow()
         self.sub_window.setWidget(self.canvas)
@@ -39,6 +36,12 @@ class MainWindow(QMainWindow):
         self.mdi_area.addSubWindow(self.sub_window)
         self.sub_window.resize(820, 640)
         self.sub_window.show()
+
+        # Keyboard shortcuts
+        QShortcut(QKeySequence("V"), self,
+                  lambda: self.toolbar.select_tool(Tool.SELECTION))
+        QShortcut(QKeySequence("A"), self,
+                  lambda: self.toolbar.select_tool(Tool.DIRECT_SELECTION))
 
 
 def main():
