@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(bazel run:*)"
+      "Bash(bazel run:*)",
+      "Bash(swift run:*)"
     ]
   }
 }

@@ -76,14 +76,11 @@ inline dd dd_from(float hi, float lo) {
 }
 
 // =====================================================================
-// Hybrid perturbation + dd fallback Mandelbrot kernel
-//
-// Phase 1: Perturbation theory using precomputed reference orbit
-// Phase 2: If reference orbit exhausted, continue with dd arithmetic
+// Pass 1: Compute smooth iteration counts into a float texture
 // =====================================================================
 
-kernel void mandelbrot(
-    texture2d<float, access::write> output [[texture(0)]],
+kernel void mandelbrot_iterations(
+    texture2d<float, access::write> iterTex [[texture(0)]],
     constant MandelbrotUniforms &uniforms [[buffer(0)]],
     constant float2 *refOrbit [[buffer(1)]],
     uint2 gid [[thread_position_in_grid]]
@@ -94,7 +91,6 @@ kernel void mandelbrot(
     float h = float(uniforms.height);
     float aspect = h / w;
 
-    // Compute δc using dd arithmetic for precision at deep zoom
     dd scaleX = dd_from(uniforms.scale_hi, uniforms.scale_lo);
     dd scaleY = dd_mul_scalar(scaleX, aspect);
 
@@ -135,20 +131,32 @@ kernel void mandelbrot(
         iter++;
     }
 
-    // Phase 2: If reference orbit exhausted, continue with dd direct computation
+    // Phase 2: dd fallback
     if (!escaped && iter < maxIter) {
-        // Reconstruct full z as dd from Z_n + δz
         dd zx_dd, zy_dd;
         if (iter < refLen) {
+            // Phase 1 escaped early — should not happen since escaped==false, but guard anyway.
             float2 Zn = refOrbit[iter];
             zx_dd = two_sum(Zn.x, dzx);
             zy_dd = two_sum(Zn.y, dzy);
         } else {
-            zx_dd = dd_from(dzx);
-            zy_dd = dd_from(dzy);
+            // Phase 1 exhausted the reference orbit (iter == refLen, center is exterior).
+            // Reconstruct z = Z_{refLen} + δz, where Z_{refLen} = f(orbit[refLen-1]).
+            // Without this, δz is used as z directly, misclassifying interior pixels.
+            float2 Zlast = refOrbit[refLen - 1];
+            dd Zx_last = dd_from(Zlast.x);
+            dd Zy_last = dd_from(Zlast.y);
+            dd cx_ref = dd_from(uniforms.centerX_hi, uniforms.centerX_lo);
+            dd cy_ref = dd_from(uniforms.centerY_hi, uniforms.centerY_lo);
+            dd x2r = dd_mul(Zx_last, Zx_last);
+            dd y2r = dd_mul(Zy_last, Zy_last);
+            dd xyr = dd_mul(Zx_last, Zy_last);
+            dd Zx_next = dd_add(dd_sub(x2r, y2r), cx_ref);
+            dd Zy_next = dd_add(dd_mul_scalar(xyr, 2.0f), cy_ref);
+            zx_dd = dd_add(Zx_next, dd_from(dzx));
+            zy_dd = dd_add(Zy_next, dd_from(dzy));
         }
 
-        // Full c = center + δc
         dd cx_dd = dd_add(dd_from(uniforms.centerX_hi, uniforms.centerX_lo), dc_x_dd);
         dd cy_dd = dd_sub(dd_from(uniforms.centerY_hi, uniforms.centerY_lo), dc_y_dd);
 
@@ -172,51 +180,48 @@ kernel void mandelbrot(
         }
     }
 
-    // Smooth iteration count
+    // Smooth iteration count; -1 marks interior (in-set) pixels
     float smoothIter;
     if (!escaped) {
-        smoothIter = float(maxIter);
-        iter = maxIter;
+        smoothIter = -1.0;
     } else {
         float mag = fx * fx + fy * fy;
         float mu = log2(log2(mag) * 0.5);
         smoothIter = float(iter) + 1.0 - mu;
     }
 
-    float frac = smoothIter / float(maxIter);
-    frac = clamp(frac, 0.0, 1.0);
+    iterTex.write(float4(smoothIter, 0.0, 0.0, 0.0), gid);
+}
 
-    if (iter == maxIter) {
+// =====================================================================
+// Pass 2: Colorize using a precomputed color LUT (built on CPU)
+// =====================================================================
+
+struct ColorUniforms {
+    int width;
+    int height;
+    int lutSize;
+    float maxIter;
+};
+
+kernel void mandelbrot_colorize(
+    texture2d<float, access::read> iterTex [[texture(0)]],
+    texture2d<float, access::write> output [[texture(1)]],
+    constant ColorUniforms &uniforms [[buffer(0)]],
+    constant float4 *colorLUT [[buffer(1)]],
+    uint2 gid [[thread_position_in_grid]]
+) {
+    if (gid.x >= uint(uniforms.width) || gid.y >= uint(uniforms.height)) return;
+
+    float smoothIter = iterTex.read(gid).r;
+
+    if (smoothIter < 0.0) {
         output.write(float4(0.0, 0.0, 0.0, 1.0), gid);
         return;
     }
 
-    // Colormap
-    float gamma = 0.7 + log10(float(maxIter) + 1.0) / 2.5;
-    float intensity = pow(frac, gamma);
-    float edge = clamp(1.0 - sqrt(intensity), 0.0, 1.0);
-
-    float hue = fmod(0.66 + 0.34 * intensity, 1.0);
-    float v = 0.25 + 0.75 * edge;
-
-    // HSV to RGB (saturation = 1)
-    float hi = hue * 6.0;
-    int hi_i = int(hi) % 6;
-    float f = hi - float(int(hi));
-    float p = 0.0;
-    float q = v * (1.0 - f);
-    float t = v * f;
-
-    float r, g, b;
-    switch (hi_i) {
-        case 0: r = v; g = t; b = p; break;
-        case 1: r = q; g = v; b = p; break;
-        case 2: r = p; g = v; b = t; break;
-        case 3: r = p; g = q; b = v; break;
-        case 4: r = t; g = p; b = v; break;
-        default: r = v; g = p; b = q; break;
-    }
-
-    output.write(float4(r, g, b, 1.0), gid);
+    int lutSize = uniforms.lutSize;
+    int idx = clamp(int(smoothIter / uniforms.maxIter * float(lutSize)), 0, lutSize - 1);
+    output.write(colorLUT[idx], gid);
 }
 """

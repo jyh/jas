@@ -58,15 +58,29 @@ public struct MetalView: NSViewRepresentable {
 class DraggableMTKView: MTKView {
     weak var coordinator: MetalView.Coordinator?
     private var lastDragLocation: NSPoint = .zero
+    private var hasDragged = false
 
-    override var acceptsFirstResponder: Bool { true }
+    override var acceptsFirstResponder: Bool { false }
 
     override func mouseDown(with event: NSEvent) {
         lastDragLocation = convert(event.locationInWindow, from: nil)
+        hasDragged = false
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard !hasDragged, let coordinator = coordinator else { return }
+        let location = convert(event.locationInWindow, from: nil)
+        let w = Double(bounds.width)
+        let h = Double(bounds.height)
+        let mx = (Double(location.x) / w - 0.5) * coordinator.parent.scale + coordinator.parent.centerX
+        let my = (Double(location.y) / h - 0.5) * (coordinator.parent.scale * (h / w)) + coordinator.parent.centerY
+        coordinator.parent.centerX = mx
+        coordinator.parent.centerY = my
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard let coordinator = coordinator else { return }
+        hasDragged = true
         let location = convert(event.locationInWindow, from: nil)
         let dx = location.x - lastDragLocation.x
         let dy = location.y - lastDragLocation.y
@@ -76,7 +90,7 @@ class DraggableMTKView: MTKView {
         let h = Double(bounds.height)
 
         coordinator.parent.centerX -= dx / w * coordinator.parent.scale
-        coordinator.parent.centerY += dy / h * (coordinator.parent.scale * (h / w))
+        coordinator.parent.centerY -= dy / h * (coordinator.parent.scale * (h / w))
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -103,10 +117,5 @@ class DraggableMTKView: MTKView {
         coordinator.parent.centerX = mx + (coordinator.parent.centerX - mx) * factor
         coordinator.parent.centerY = my + (coordinator.parent.centerY - my) * factor
 
-        // Adjust max iterations on zoom
-        let iterAdjust = 1.0 + abs(angle) * 0.12
-        var newIter = Int32(Double(coordinator.parent.maxIter) * iterAdjust)
-        newIter = max(100, min(10000, newIter))
-        coordinator.parent.maxIter = newIter
     }
 }
