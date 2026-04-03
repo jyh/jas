@@ -1,3 +1,11 @@
 (test
- (name jas_test)
+ (name canvas_test)
+ (libraries jas lablgtk3))
+
+(test
+ (name element_test)
+ (libraries jas))
+
+(test
+ (name menu_test)
  (libraries jas lablgtk3))

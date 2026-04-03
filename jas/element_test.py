@@ -1,80 +1,10 @@
 from absl.testing import absltest
 
-from toolbar import Tool
 from element import (
     Color, Fill, Stroke, LineCap, LineJoin, Transform,
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, Group,
 )
-from jas_app import MainWindow
-from PySide6.QtWidgets import QApplication
-
-
-class ToolbarTest(absltest.TestCase):
-
-    def test_tool_enum_has_two_values(self):
-        tools = list(Tool)
-        self.assertEqual(len(tools), 2)
-        self.assertIn(Tool.SELECTION, tools)
-        self.assertIn(Tool.DIRECT_SELECTION, tools)
-
-    def test_tool_selection_value(self):
-        self.assertEqual(Tool.SELECTION.value, 1)
-
-    def test_tool_direct_selection_value(self):
-        self.assertEqual(Tool.DIRECT_SELECTION.value, 2)
-
-
-class MenubarTest(absltest.TestCase):
-    """Test the menubar structure in MainWindow."""
-
-    @classmethod
-    def setUpClass(cls):
-        # Create QApplication once for all tests in this class
-        if not QApplication.instance():
-            cls.app = QApplication([])
-        else:
-            cls.app = QApplication.instance()
-
-    def setUp(self):
-        # Create a fresh MainWindow for each test
-        self.window = MainWindow()
-
-    def test_menubar_exists(self):
-        menubar = self.window.menuBar()
-        self.assertIsNotNone(menubar)
-
-    def test_menubar_has_three_menus(self):
-        menubar = self.window.menuBar()
-        menu_actions = menubar.actions()
-        self.assertEqual(len(menu_actions), 3)
-
-    def test_menu_titles(self):
-        menubar = self.window.menuBar()
-        menu_actions = menubar.actions()
-        menu_texts = [action.text() for action in menu_actions]
-        self.assertEqual(menu_texts, ["&File", "&Edit", "&View"])
-
-    def test_file_menu_exists(self):
-        menubar = self.window.menuBar()
-        file_action = menubar.actions()[0]
-        # Verify File menu exists and has a submenu
-        file_menu = file_action.menu()
-        self.assertIsNotNone(file_menu)
-
-    def test_edit_menu_exists(self):
-        menubar = self.window.menuBar()
-        edit_action = menubar.actions()[1]
-        # Verify Edit menu exists and has a submenu
-        edit_menu = edit_action.menu()
-        self.assertIsNotNone(edit_menu)
-
-    def test_view_menu_exists(self):
-        menubar = self.window.menuBar()
-        view_action = menubar.actions()[2]
-        # Verify View menu exists and has a submenu
-        view_menu = view_action.menu()
-        self.assertIsNotNone(view_menu)
 
 
 class ElementTest(absltest.TestCase):
@@ -114,9 +44,23 @@ class ElementTest(absltest.TestCase):
         self.assertAlmostEqual(t.a, 0, places=10)
         self.assertAlmostEqual(t.b, 1, places=10)
 
+    def test_transform_scale_uniform(self):
+        t = Transform.scale(3)
+        self.assertEqual(t.a, 3)
+        self.assertEqual(t.d, 3)
+
     def test_line_bounds(self):
         ln = Line(x1=0, y1=0, x2=10, y2=20)
         self.assertEqual(ln.bounds(), (0, 0, 10, 20))
+
+    def test_line_reversed(self):
+        ln = Line(x1=10, y1=20, x2=0, y2=0)
+        self.assertEqual(ln.bounds(), (0, 0, 10, 20))
+
+    def test_line_immutable(self):
+        ln = Line(x1=0, y1=0, x2=10, y2=10)
+        with self.assertRaises(AttributeError):
+            ln.x1 = 5
 
     def test_rect_bounds(self):
         r = Rect(x=5, y=10, width=100, height=50)
@@ -127,21 +71,48 @@ class ElementTest(absltest.TestCase):
         self.assertEqual(r.rx, 2)
         self.assertEqual(r.ry, 2)
 
+    def test_rect_immutable(self):
+        r = Rect(x=0, y=0, width=10, height=10)
+        with self.assertRaises(AttributeError):
+            r.x = 5
+
     def test_circle_bounds(self):
         c = Circle(cx=50, cy=50, r=25)
         self.assertEqual(c.bounds(), (25, 25, 50, 50))
+
+    def test_circle_with_fill_and_stroke(self):
+        c = Circle(cx=50, cy=50, r=25,
+                   fill=Fill(Color(0, 1, 0)),
+                   stroke=Stroke(Color(0, 0, 0), width=3.0))
+        self.assertEqual(c.fill.color.g, 1.0)
+        self.assertEqual(c.stroke.width, 3.0)
 
     def test_ellipse_bounds(self):
         e = Ellipse(cx=50, cy=50, rx=25, ry=15)
         self.assertEqual(e.bounds(), (25, 35, 50, 30))
 
+    def test_ellipse_with_fill_and_stroke(self):
+        e = Ellipse(cx=50, cy=50, rx=25, ry=15,
+                    fill=Fill(Color(0, 0, 1)),
+                    stroke=Stroke(Color(1, 1, 1), linecap=LineCap.SQUARE))
+        self.assertEqual(e.fill.color.b, 1.0)
+        self.assertEqual(e.stroke.linecap, LineCap.SQUARE)
+
     def test_polyline_bounds(self):
         pl = Polyline(points=((0, 0), (10, 5), (20, 0)))
         self.assertEqual(pl.bounds(), (0, 0, 20, 5))
 
+    def test_empty_polyline(self):
+        pl = Polyline(points=())
+        self.assertEqual(pl.bounds(), (0, 0, 0, 0))
+
     def test_polygon_bounds(self):
         pg = Polygon(points=((0, 0), (10, 0), (5, 10)))
         self.assertEqual(pg.bounds(), (0, 0, 10, 10))
+
+    def test_empty_polygon(self):
+        pg = Polygon(points=())
+        self.assertEqual(pg.bounds(), (0, 0, 0, 0))
 
     def test_path_bounds(self):
         p = Path(d=(MoveTo(0, 0), LineTo(10, 20), LineTo(5, 15), ClosePath()))
@@ -150,6 +121,22 @@ class ElementTest(absltest.TestCase):
     def test_path_cubic_bezier(self):
         p = Path(d=(MoveTo(0, 0), CurveTo(5, 10, 15, 10, 20, 0)))
         self.assertEqual(p.bounds(), (0, 0, 20, 0))
+
+    def test_path_smooth_curve_to(self):
+        p = Path(d=(MoveTo(0, 0), CurveTo(1, 2, 3, 4, 5, 6), SmoothCurveTo(8, 9, 10, 12)))
+        self.assertEqual(p.bounds(), (0, 0, 10, 12))
+
+    def test_path_quad_to(self):
+        p = Path(d=(MoveTo(0, 0), QuadTo(5, 10, 10, 0)))
+        self.assertEqual(p.bounds(), (0, 0, 10, 0))
+
+    def test_path_smooth_quad_to(self):
+        p = Path(d=(MoveTo(0, 0), QuadTo(5, 10, 10, 0), SmoothQuadTo(20, 5)))
+        self.assertEqual(p.bounds(), (0, 0, 20, 5))
+
+    def test_path_arc_to(self):
+        p = Path(d=(MoveTo(0, 0), ArcTo(rx=25, ry=25, x_rotation=0, large_arc=True, sweep=False, x=50, y=0)))
+        self.assertEqual(p.bounds(), (0, 0, 50, 0))
 
     def test_path_empty(self):
         p = Path(d=())
@@ -200,68 +187,6 @@ class ElementTest(absltest.TestCase):
     def test_element_opacity(self):
         r = Rect(x=0, y=0, width=10, height=10, opacity=0.5)
         self.assertEqual(r.opacity, 0.5)
-
-    def test_path_smooth_curve_to(self):
-        p = Path(d=(MoveTo(0, 0), CurveTo(1, 2, 3, 4, 5, 6), SmoothCurveTo(8, 9, 10, 12)))
-        self.assertEqual(p.bounds(), (0, 0, 10, 12))
-
-    def test_path_quad_to(self):
-        p = Path(d=(MoveTo(0, 0), QuadTo(5, 10, 10, 0)))
-        self.assertEqual(p.bounds(), (0, 0, 10, 0))
-
-    def test_path_smooth_quad_to(self):
-        p = Path(d=(MoveTo(0, 0), QuadTo(5, 10, 10, 0), SmoothQuadTo(20, 5)))
-        self.assertEqual(p.bounds(), (0, 0, 20, 5))
-
-    def test_path_arc_to(self):
-        p = Path(d=(MoveTo(0, 0), ArcTo(rx=25, ry=25, x_rotation=0, large_arc=True, sweep=False, x=50, y=0)))
-        self.assertEqual(p.bounds(), (0, 0, 50, 0))
-
-    def test_empty_polyline(self):
-        pl = Polyline(points=())
-        self.assertEqual(pl.bounds(), (0, 0, 0, 0))
-
-    def test_empty_polygon(self):
-        pg = Polygon(points=())
-        self.assertEqual(pg.bounds(), (0, 0, 0, 0))
-
-    def test_line_reversed(self):
-        ln = Line(x1=10, y1=20, x2=0, y2=0)
-        self.assertEqual(ln.bounds(), (0, 0, 10, 20))
-
-    def test_circle_with_fill_and_stroke(self):
-        c = Circle(cx=50, cy=50, r=25,
-                   fill=Fill(Color(0, 1, 0)),
-                   stroke=Stroke(Color(0, 0, 0), width=3.0))
-        self.assertEqual(c.fill.color.g, 1.0)
-        self.assertEqual(c.stroke.width, 3.0)
-
-    def test_ellipse_with_fill_and_stroke(self):
-        e = Ellipse(cx=50, cy=50, rx=25, ry=15,
-                    fill=Fill(Color(0, 0, 1)),
-                    stroke=Stroke(Color(1, 1, 1), linecap=LineCap.SQUARE))
-        self.assertEqual(e.fill.color.b, 1.0)
-        self.assertEqual(e.stroke.linecap, LineCap.SQUARE)
-
-    def test_transform_rotate(self):
-        t = Transform.rotate(90)
-        self.assertAlmostEqual(t.a, 0, places=10)
-        self.assertAlmostEqual(t.b, 1, places=10)
-
-    def test_transform_scale_uniform(self):
-        t = Transform.scale(3)
-        self.assertEqual(t.a, 3)
-        self.assertEqual(t.d, 3)
-
-    def test_rect_immutable(self):
-        r = Rect(x=0, y=0, width=10, height=10)
-        with self.assertRaises(AttributeError):
-            r.x = 5
-
-    def test_line_immutable(self):
-        ln = Line(x1=0, y1=0, x2=10, y2=10)
-        with self.assertRaises(AttributeError):
-            ln.x1 = 5
 
     def test_group_all_element_types(self):
         children = (
