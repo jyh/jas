@@ -1,12 +1,14 @@
 import SwiftUI
 
-struct ContentView: View {
+public struct ContentView: View {
     @State private var centerX: Double = -0.75
     @State private var centerY: Double = 0.0
     @State private var scale: Double = 3.5
     @State private var maxIter: Int32 = 200
 
-    var body: some View {
+    public init() {}
+
+    public var body: some View {
         VStack(spacing: 0) {
             MetalView(
                 centerX: $centerX,
