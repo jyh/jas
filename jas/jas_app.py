@@ -7,7 +7,9 @@ from PySide6.QtWidgets import (
 )
 
 from canvas import CanvasWidget
+from controller import Controller
 from menu import create_menus
+from model import Model
 from toolbar import Tool, Toolbar
 
 
@@ -32,14 +34,18 @@ class MainWindow(QMainWindow):
         self.mdi_area.setBackground(QColor("#3c3c3c"))
         self.setCentralWidget(self.mdi_area)
 
-        # Canvas subwindow
-        self.canvas = CanvasWidget()
+        # Model and Controller
+        self.model = Model()
+        self.controller = Controller(model=self.model)
+
+        # Canvas subwindow (view)
+        self.canvas = CanvasWidget(model=self.model)
         self.sub_window = QMdiSubWindow()
         self.sub_window.setWidget(self.canvas)
-        self.sub_window.setWindowTitle("Untitled")
         self.mdi_area.addSubWindow(self.sub_window)
         self.sub_window.resize(820, 640)
         self.sub_window.show()
+        self.sub_window.setWindowTitle(self.model.document.title)
 
         # Keyboard shortcuts
         QShortcut(QKeySequence("V"), self,

@@ -1,7 +1,10 @@
 from absl.testing import absltest
 
 from toolbar import Tool
-from canvas import BoundingBox
+from canvas import BoundingBox, CanvasWidget
+from document import Document
+from model import Model
+from PySide6.QtWidgets import QApplication
 
 
 class ToolbarTest(absltest.TestCase):
@@ -39,6 +42,28 @@ class BoundingBoxTest(absltest.TestCase):
         bbox = BoundingBox(0, 0, 800, 600)
         with self.assertRaises(AttributeError):
             bbox.width = 1024
+
+
+class CanvasWidgetTest(absltest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        if not QApplication.instance():
+            cls.app = QApplication([])
+        else:
+            cls.app = QApplication.instance()
+
+    def test_default_bbox(self):
+        model = Model()
+        canvas = CanvasWidget(model=model)
+        self.assertEqual(canvas.bbox.width, 800)
+        self.assertEqual(canvas.bbox.height, 600)
+
+    def test_registers_with_model(self):
+        model = Model()
+        canvas = CanvasWidget(model=model)
+        # Changing the document should not raise
+        model.document = Document(title="Test")
 
 
 if __name__ == "__main__":

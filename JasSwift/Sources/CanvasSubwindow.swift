@@ -14,8 +14,9 @@ public struct CanvasBoundingBox: Equatable {
 }
 
 /// An embedded, draggable canvas subwindow within the workspace.
+/// The view observes the model's document for its title.
 public struct CanvasSubwindow: View {
-    let title: String
+    @ObservedObject var model: JasModel
     @Binding var position: CGPoint
     public let bbox: CanvasBoundingBox
 
@@ -31,7 +32,7 @@ public struct CanvasSubwindow: View {
                 // Title bar
                 ZStack {
                     Color(nsColor: NSColor(white: 0.6, alpha: 1.0))
-                    Text(title)
+                    Text(model.document.title)
                         .font(.system(size: 12))
                         .foregroundColor(.black)
                 }

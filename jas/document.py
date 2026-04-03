@@ -11,8 +11,9 @@ from element import Layer
 
 @dataclass(frozen=True)
 class Document:
-    """A document consisting of an ordered list of layers."""
-    layers: tuple[Layer, ...]
+    """A document consisting of a title and an ordered list of layers."""
+    title: str = "Untitled"
+    layers: tuple[Layer, ...] = ()
 
     def bounds(self) -> Tuple[float, float, float, float]:
         """Return the bounding box of all layers combined."""

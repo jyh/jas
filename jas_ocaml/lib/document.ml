@@ -4,12 +4,13 @@
 
 open Element
 
-(** A document consisting of an ordered list of layers. *)
+(** A document consisting of a title and an ordered list of layers. *)
 type document = {
+  title : string;
   layers : element list;
 }
 
-let make_document layers = { layers }
+let make_document ?(title = "Untitled") layers = { title; layers }
 
 let bounds doc =
   match doc.layers with

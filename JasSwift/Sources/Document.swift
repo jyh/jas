@@ -1,10 +1,12 @@
 import Foundation
 
-/// A document consisting of an ordered list of layers.
+/// A document consisting of a title and an ordered list of layers.
 public struct JasDocument: Equatable {
+    public let title: String
     public let layers: [JasLayer]
 
-    public init(layers: [JasLayer] = []) {
+    public init(title: String = "Untitled", layers: [JasLayer] = []) {
+        self.title = title
         self.layers = layers
     }
 
