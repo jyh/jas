@@ -1,45 +1,6 @@
 import Testing
 @testable import JasLib
 
-@Test func defaultToolIsSelection() {
-    let tool: Tool = .selection
-    #expect(tool == .selection)
-}
-
-@Test func toolEnumCases() {
-    let tools = Tool.allCases
-    #expect(tools.count == 2)
-    #expect(tools.contains(.selection))
-    #expect(tools.contains(.directSelection))
-}
-
-@Test func contentViewInitializes() {
-    let view = ContentView()
-    _ = view.body
-}
-
-@Test func toolEnumCasesExist() {
-    let tools = Tool.allCases
-    #expect(tools.count == 2)
-    #expect(tools.contains(.selection))
-    #expect(tools.contains(.directSelection))
-}
-
-@Test func jasCommandsInitializes() {
-    let commands = JasCommands()
-    #expect(commands != nil)
-}
-
-@Test func contentViewWithKeyboardHandlerInitializes() {
-    let view = ContentView()
-    // The view includes KeyboardShortcutHandler for keyboard shortcuts
-    // Accessing body ensures the view hierarchy is constructed
-    _ = view.body
-    #expect(true)
-}
-
-// MARK: - SVG Element tests
-
 @Test func colorDefaults() {
     let c = JasColor(r: 1.0, g: 0.0, b: 0.0)
     #expect(c.a == 1.0)
@@ -69,8 +30,20 @@ import Testing
     #expect(t.d == 3)
 }
 
+@Test func transformRotate() {
+    let t = JasTransform.rotate(90)
+    #expect(abs(t.a) < 1e-10)
+    #expect(abs(t.b - 1.0) < 1e-10)
+}
+
 @Test func lineBounds() {
     let ln = JasLine(x1: 0, y1: 0, x2: 10, y2: 20)
+    let b = ln.bounds
+    #expect(b.x == 0 && b.y == 0 && b.width == 10 && b.height == 20)
+}
+
+@Test func lineReversed() {
+    let ln = JasLine(x1: 10, y1: 20, x2: 0, y2: 0)
     let b = ln.bounds
     #expect(b.x == 0 && b.y == 0 && b.width == 10 && b.height == 20)
 }
@@ -92,10 +65,26 @@ import Testing
     #expect(b.x == 25 && b.y == 25 && b.width == 50 && b.height == 50)
 }
 
+@Test func circleWithFillAndStroke() {
+    let c = JasCircle(cx: 50, cy: 50, r: 25,
+                      fill: JasFill(color: JasColor(r: 0, g: 1, b: 0)),
+                      stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 3.0))
+    #expect(c.fill?.color.g == 1.0)
+    #expect(c.stroke?.width == 3.0)
+}
+
 @Test func ellipseBounds() {
     let e = JasEllipse(cx: 50, cy: 50, rx: 25, ry: 15)
     let b = e.bounds
     #expect(b.x == 25 && b.y == 35 && b.width == 50 && b.height == 30)
+}
+
+@Test func ellipseWithFillAndStroke() {
+    let e = JasEllipse(cx: 50, cy: 50, rx: 25, ry: 15,
+                       fill: JasFill(color: JasColor(r: 0, g: 0, b: 1)),
+                       stroke: JasStroke(color: JasColor(r: 1, g: 1, b: 1), linecap: .square))
+    #expect(e.fill?.color.b == 1.0)
+    #expect(e.stroke?.linecap == .square)
 }
 
 @Test func polylineBounds() {
@@ -104,10 +93,22 @@ import Testing
     #expect(b.x == 0 && b.y == 0 && b.width == 20 && b.height == 5)
 }
 
+@Test func emptyPolylineBounds() {
+    let pl = JasPolyline(points: [])
+    let b = pl.bounds
+    #expect(b.x == 0 && b.y == 0 && b.width == 0 && b.height == 0)
+}
+
 @Test func polygonBounds() {
     let pg = JasPolygon(points: [(0, 0), (10, 0), (5, 10)])
     let b = pg.bounds
     #expect(b.x == 0 && b.y == 0 && b.width == 10 && b.height == 10)
+}
+
+@Test func emptyPolygonBounds() {
+    let pg = JasPolygon(points: [])
+    let b = pg.bounds
+    #expect(b.x == 0 && b.y == 0 && b.width == 0 && b.height == 0)
 }
 
 @Test func pathBounds() {
@@ -120,6 +121,30 @@ import Testing
     let p = JasPath(d: [.moveTo(0, 0), .curveTo(x1: 5, y1: 10, x2: 15, y2: 10, x: 20, y: 0)])
     let b = p.bounds
     #expect(b.x == 0 && b.width == 20)
+}
+
+@Test func pathSmoothCurveTo() {
+    let p = JasPath(d: [.moveTo(0, 0), .curveTo(x1: 1, y1: 2, x2: 3, y2: 4, x: 5, y: 6), .smoothCurveTo(x2: 8, y2: 9, x: 10, y: 12)])
+    let b = p.bounds
+    #expect(b.x == 0 && b.width == 10 && b.height == 12)
+}
+
+@Test func pathQuadTo() {
+    let p = JasPath(d: [.moveTo(0, 0), .quadTo(x1: 5, y1: 10, x: 10, y: 0)])
+    let b = p.bounds
+    #expect(b.x == 0 && b.width == 10)
+}
+
+@Test func pathSmoothQuadTo() {
+    let p = JasPath(d: [.moveTo(0, 0), .quadTo(x1: 5, y1: 10, x: 10, y: 0), .smoothQuadTo(20, 5)])
+    let b = p.bounds
+    #expect(b.x == 0 && b.width == 20)
+}
+
+@Test func pathArcTo() {
+    let p = JasPath(d: [.moveTo(0, 0), .arcTo(rx: 25, ry: 25, rotation: 0, largeArc: true, sweep: false, x: 50, y: 0)])
+    let b = p.bounds
+    #expect(b.x == 0 && b.width == 50)
 }
 
 @Test func pathEmpty() {
@@ -190,70 +215,6 @@ import Testing
     let rectEl = Element.rect(JasRect(x: 5, y: 5, width: 20, height: 20))
     #expect(pathEl.bounds.x == 0 && pathEl.bounds.width == 10)
     #expect(rectEl.bounds.x == 5 && rectEl.bounds.width == 20)
-}
-
-@Test func pathSmoothCurveTo() {
-    let p = JasPath(d: [.moveTo(0, 0), .curveTo(x1: 1, y1: 2, x2: 3, y2: 4, x: 5, y: 6), .smoothCurveTo(x2: 8, y2: 9, x: 10, y: 12)])
-    let b = p.bounds
-    #expect(b.x == 0 && b.width == 10 && b.height == 12)
-}
-
-@Test func pathQuadTo() {
-    let p = JasPath(d: [.moveTo(0, 0), .quadTo(x1: 5, y1: 10, x: 10, y: 0)])
-    let b = p.bounds
-    #expect(b.x == 0 && b.width == 10)
-}
-
-@Test func pathSmoothQuadTo() {
-    let p = JasPath(d: [.moveTo(0, 0), .quadTo(x1: 5, y1: 10, x: 10, y: 0), .smoothQuadTo(20, 5)])
-    let b = p.bounds
-    #expect(b.x == 0 && b.width == 20)
-}
-
-@Test func pathArcTo() {
-    let p = JasPath(d: [.moveTo(0, 0), .arcTo(rx: 25, ry: 25, rotation: 0, largeArc: true, sweep: false, x: 50, y: 0)])
-    let b = p.bounds
-    #expect(b.x == 0 && b.width == 50)
-}
-
-@Test func emptyPolylineBounds() {
-    let pl = JasPolyline(points: [])
-    let b = pl.bounds
-    #expect(b.x == 0 && b.y == 0 && b.width == 0 && b.height == 0)
-}
-
-@Test func emptyPolygonBounds() {
-    let pg = JasPolygon(points: [])
-    let b = pg.bounds
-    #expect(b.x == 0 && b.y == 0 && b.width == 0 && b.height == 0)
-}
-
-@Test func lineReversed() {
-    let ln = JasLine(x1: 10, y1: 20, x2: 0, y2: 0)
-    let b = ln.bounds
-    #expect(b.x == 0 && b.y == 0 && b.width == 10 && b.height == 20)
-}
-
-@Test func circleWithFillAndStroke() {
-    let c = JasCircle(cx: 50, cy: 50, r: 25,
-                      fill: JasFill(color: JasColor(r: 0, g: 1, b: 0)),
-                      stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 3.0))
-    #expect(c.fill?.color.g == 1.0)
-    #expect(c.stroke?.width == 3.0)
-}
-
-@Test func ellipseWithFillAndStroke() {
-    let e = JasEllipse(cx: 50, cy: 50, rx: 25, ry: 15,
-                       fill: JasFill(color: JasColor(r: 0, g: 0, b: 1)),
-                       stroke: JasStroke(color: JasColor(r: 1, g: 1, b: 1), linecap: .square))
-    #expect(e.fill?.color.b == 1.0)
-    #expect(e.stroke?.linecap == .square)
-}
-
-@Test func transformRotate() {
-    let t = JasTransform.rotate(90)
-    #expect(abs(t.a) < 1e-10)
-    #expect(abs(t.b - 1.0) < 1e-10)
 }
 
 @Test func groupAllElementTypes() {
