@@ -1,8 +1,19 @@
 (** A floating canvas subwindow embedded inside the main workspace. *)
 
+(** Axis-aligned bounding box for the canvas coordinate space. *)
+type bounding_box = {
+  bbox_x : float;
+  bbox_y : float;
+  bbox_width : float;
+  bbox_height : float;
+}
+
+let make_bounding_box ?(x = 0.0) ?(y = 0.0) ?(width = 800.0) ?(height = 600.0) () =
+  { bbox_x = x; bbox_y = y; bbox_width = width; bbox_height = height }
+
 let title_bar_height = 24
 
-class canvas_subwindow ~title ~x ~y ~width ~height (fixed : GPack.fixed) =
+class canvas_subwindow ~title ~x ~y ~width ~height ~(bbox : bounding_box) (fixed : GPack.fixed) =
   let frame = GBin.frame ~shadow_type:`ETCHED_IN () in
   let vbox = GPack.vbox ~packing:frame#add () in
 
@@ -29,6 +40,7 @@ class canvas_subwindow ~title ~x ~y ~width ~height (fixed : GPack.fixed) =
     method title = win_title
     method x = pos_x
     method y = pos_y
+    method bbox = bbox
 
     initializer
       fixed#put frame#coerce ~x:pos_x ~y:pos_y;
@@ -94,5 +106,5 @@ class canvas_subwindow ~title ~x ~y ~width ~height (fixed : GPack.fixed) =
       ) |> ignore
   end
 
-let create ~title ~x ~y ~width ~height fixed =
-  new canvas_subwindow ~title ~x ~y ~width ~height fixed
+let create ~title ~x ~y ~width ~height ?(bbox = make_bounding_box ()) fixed =
+  new canvas_subwindow ~title ~x ~y ~width ~height ~bbox fixed
