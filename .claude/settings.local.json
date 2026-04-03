@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(bazel run:*)",
-      "Bash(swift run:*)"
+      "Bash(swift run:*)",
+      "Bash(bazel build:*)",
+      "Bash(bazel query:*)",
+      "Bash(dune build:*)",
+      "Bash(dune runtest:*)",
+      "Bash(dune exec:*)",
+      "Bash(jobs)"
     ]
   }
 }

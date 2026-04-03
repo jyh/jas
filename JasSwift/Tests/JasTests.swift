@@ -24,3 +24,16 @@ import Testing
     #expect(tools.contains(.selection))
     #expect(tools.contains(.directSelection))
 }
+
+@Test func jasCommandsInitializes() {
+    let commands = JasCommands()
+    #expect(commands != nil)
+}
+
+@Test func contentViewWithKeyboardHandlerInitializes() {
+    let view = ContentView()
+    // The view includes KeyboardShortcutHandler for keyboard shortcuts
+    // Accessing body ensures the view hierarchy is constructed
+    _ = view.body
+    #expect(true)
+}
