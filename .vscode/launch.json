@@ -19,6 +19,26 @@
             "target": "MandelbrotExplorer",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release MandelbrotExplorer (MandelbrotSwift)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:jas}/JasSwift",
+            "name": "Debug Jas (JasSwift)",
+            "target": "Jas",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Jas (JasSwift)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:jas}/JasSwift",
+            "name": "Release Jas (JasSwift)",
+            "target": "Jas",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Jas (JasSwift)"
         }
     ]
 }
