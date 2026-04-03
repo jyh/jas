@@ -27,7 +27,8 @@ public struct ContentView: View {
                 // Embedded canvas subwindow
                 CanvasSubwindow(
                     title: "Untitled",
-                    position: $canvasPosition
+                    position: $canvasPosition,
+                    bbox: CanvasBoundingBox()
                 )
             }
             .frame(minWidth: 640, minHeight: 480)

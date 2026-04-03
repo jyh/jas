@@ -13,3 +13,7 @@
 (test
  (name document_test)
  (libraries jas))
+
+(test
+ (name measure_test)
+ (libraries jas))
