@@ -421,3 +421,22 @@ class Controller:
             new_elem = move_control_points(elem, es.control_points, dx, dy)
             new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.document = new_doc
+
+    def copy_selection(self, dx: float, dy: float) -> None:
+        """Duplicate selected elements, offset by (dx, dy), leaving originals unchanged."""
+        doc = self._model.document
+        new_doc = doc
+        new_selection: set[ElementSelection] = set()
+        # Sort paths in reverse so insertions don't shift earlier paths
+        sorted_sels = sorted(doc.selection, key=lambda es: es.path, reverse=True)
+        for es in sorted_sels:
+            elem = doc.get_element(es.path)
+            copied = move_control_points(elem, es.control_points, dx, dy)
+            new_doc = new_doc.insert_element_after(es.path, copied)
+            # The copy is at path with last index incremented by 1
+            copy_path = es.path[:-1] + (es.path[-1] + 1,)
+            all_cps = frozenset(range(control_point_count(copied)))
+            new_selection.add(ElementSelection(path=copy_path,
+                                               control_points=all_cps))
+        self._model.document = replace(
+            new_doc, selection=frozenset(new_selection))

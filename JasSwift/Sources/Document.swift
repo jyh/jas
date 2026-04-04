@@ -99,6 +99,22 @@ public struct JasDocument: Equatable {
         }
         return JasDocument(title: title, layers: newLayers, selectedLayer: selectedLayer, selection: selection)
     }
+    /// Return a new document with newElem inserted immediately after path.
+    public func insertElementAfter(_ path: ElementPath, element newElem: Element) -> JasDocument {
+        precondition(!path.isEmpty, "Path must be non-empty")
+        var newLayers = layers
+        if path.count == 1 {
+            guard case .layer(let l) = newElem else {
+                preconditionFailure("Inserting at layer level requires a .layer element")
+            }
+            newLayers.insert(l, at: path[0] + 1)
+        } else {
+            let layerElem = insertAfterInGroup(.layer(layers[path[0]]), Array(path.dropFirst()), newElem)
+            guard case .layer(let l) = layerElem else { fatalError("unreachable") }
+            newLayers[path[0]] = l
+        }
+        return JasDocument(title: title, layers: newLayers, selectedLayer: selectedLayer, selection: selection)
+    }
 }
 
 // MARK: - Private helpers
@@ -120,6 +136,16 @@ private func withChildren(_ elem: Element, _ newChildren: [Element]) -> Element 
     default:
         fatalError("Element has no children")
     }
+}
+
+private func insertAfterInGroup(_ node: Element, _ rest: [Int], _ newElem: Element) -> Element {
+    var children = childrenOf(node)
+    if rest.count == 1 {
+        children.insert(newElem, at: rest[0] + 1)
+    } else {
+        children[rest[0]] = insertAfterInGroup(children[rest[0]], Array(rest.dropFirst()), newElem)
+    }
+    return withChildren(node, children)
 }
 
 private func replaceInGroup(_ node: Element, _ rest: [Int], _ newElem: Element) -> Element {

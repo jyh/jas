@@ -383,4 +383,22 @@ public class Controller {
         }
         model.document = doc
     }
+
+    public func copySelection(dx: Double, dy: Double) {
+        var doc = model.document
+        var newSelection: Selection = []
+        // Sort paths in reverse so insertions don't shift earlier paths
+        let sortedSels = doc.selection.sorted { $0.path.lexicographicallyPrecedes($1.path) }.reversed()
+        for es in sortedSels {
+            let elem = doc.getElement(es.path)
+            let copied = elem.moveControlPoints(es.controlPoints, dx: dx, dy: dy)
+            doc = doc.insertElementAfter(es.path, element: copied)
+            var copyPath = es.path
+            copyPath[copyPath.count - 1] += 1
+            let allCPs = Set(0..<copied.controlPointCount)
+            newSelection.insert(ElementSelection(path: copyPath, controlPoints: allCPs))
+        }
+        model.document = JasDocument(title: doc.title, layers: doc.layers,
+                                     selectedLayer: doc.selectedLayer, selection: newSelection)
+    }
 }

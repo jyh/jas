@@ -87,6 +87,33 @@ class Document:
         return dataclasses.replace(self, layers=tuple(new_layers))
 
 
+    def insert_element_after(self, path: ElementPath, new_elem: Element) -> "Document":
+        """Return a new Document with new_elem inserted immediately after path."""
+        if not path:
+            raise ValueError("Path must be non-empty")
+        if len(path) == 1:
+            new_layers = list(self.layers)
+            assert isinstance(new_elem, Layer)
+            new_layers.insert(path[0] + 1, new_elem)
+            return dataclasses.replace(self, layers=tuple(new_layers))
+        new_layers = list(self.layers)
+        new_layers[path[0]] = _insert_after_in_group(
+            self.layers[path[0]], path[1:], new_elem)
+        return dataclasses.replace(self, layers=tuple(new_layers))
+
+
+def _insert_after_in_group(node: _G, rest: ElementPath, new_elem: Element) -> _G:
+    """Insert new_elem after the position indicated by rest within a group."""
+    new_children = list(node.children)
+    if len(rest) == 1:
+        new_children.insert(rest[0] + 1, new_elem)
+    else:
+        child = node.children[rest[0]]
+        assert isinstance(child, Group)
+        new_children[rest[0]] = _insert_after_in_group(child, rest[1:], new_elem)
+    return dataclasses.replace(node, children=tuple(new_children))
+
+
 def _replace_in_group(node: _G, rest: ElementPath, new_elem: Element) -> _G:
     """Recursively replace the element at rest within a group, returning the same Group subtype."""
     new_children = list(node.children)

@@ -110,6 +110,45 @@ let rec replace_in_group node rest new_elem =
      | Layer { name; opacity; transform; _ } -> Layer { name; children = new_children; opacity; transform }
      | _ -> failwith "element has no children")
 
+(** Insert an element into a list after position n. *)
+let list_insert_after lst n x =
+  let rec aux i = function
+    | [] -> [x]
+    | e :: rest ->
+      if i = n then e :: x :: rest
+      else e :: aux (i + 1) rest
+  in
+  aux 0 lst
+
+(** Recursively insert new_elem after the position indicated by rest. *)
+let rec insert_after_in_group node rest new_elem =
+  let with_children cs = match node with
+    | Group { opacity; transform; _ } -> Group { children = cs; opacity; transform }
+    | Layer { name; opacity; transform; _ } -> Layer { name; children = cs; opacity; transform }
+    | _ -> failwith "element has no children"
+  in
+  match rest with
+  | [] -> failwith "rest must be non-empty"
+  | [i] ->
+    let cs = children_of node in
+    with_children (list_insert_after cs i new_elem)
+  | i :: rest ->
+    let cs = children_of node in
+    let child = List.nth cs i in
+    let new_child = insert_after_in_group child rest new_elem in
+    with_children (list_replace_nth cs i new_child)
+
+(** Return a new document with new_elem inserted immediately after path. *)
+let insert_element_after doc path new_elem =
+  match path with
+  | [] -> failwith "path must be non-empty"
+  | [i] ->
+    { doc with layers = list_insert_after doc.layers i new_elem }
+  | i :: rest ->
+    let layer = List.nth doc.layers i in
+    let new_layer = insert_after_in_group layer rest new_elem in
+    { doc with layers = list_replace_nth doc.layers i new_layer }
+
 (** Return a new document with the element at [path] replaced by [new_elem]. *)
 let replace_element doc path new_elem =
   match path with

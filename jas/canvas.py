@@ -391,6 +391,7 @@ class CanvasWidget(QWidget):
             tool = self._current_tool
             moving = self._moving
             shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            option = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
             self._drag_start = None
             self._drag_end = None
             self._moving = False
@@ -402,7 +403,10 @@ class CanvasWidget(QWidget):
                 dx = end.x() - start.x()
                 dy = end.y() - start.y()
                 if dx != 0 or dy != 0:
-                    self._controller.move_selection(dx, dy)
+                    if option:
+                        self._controller.copy_selection(dx, dy)
+                    else:
+                        self._controller.move_selection(dx, dy)
                 self.update()
                 return
             # Selection tools: shift means extend
