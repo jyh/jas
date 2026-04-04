@@ -13,7 +13,8 @@ from element import Layer
 class Document:
     """A document consisting of a title and an ordered list of layers."""
     title: str = "Untitled"
-    layers: tuple[Layer, ...] = ()
+    layers: tuple[Layer, ...] = (Layer(),)
+    selected_layer: int = 0
 
     def bounds(self) -> Tuple[float, float, float, float]:
         """Return the bounding box of all layers combined."""

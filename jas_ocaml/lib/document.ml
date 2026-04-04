@@ -8,9 +8,13 @@ open Element
 type document = {
   title : string;
   layers : element list;
+  selected_layer : int;
 }
 
-let make_document ?(title = "Untitled") layers = { title; layers }
+let make_document ?(title = "Untitled") ?(selected_layer = 0) layers =
+  { title; layers; selected_layer }
+
+let default_document () = make_document ~title:"Untitled" [Element.make_layer []]
 
 let bounds doc =
   match doc.layers with

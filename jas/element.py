@@ -333,7 +333,7 @@ class Text(Element):
 @dataclass(frozen=True)
 class Group(Element):
     """SVG <g> element."""
-    children: tuple[Element, ...]
+    children: tuple[Element, ...] = ()
     opacity: float = 1.0
     transform: Transform | None = None
 

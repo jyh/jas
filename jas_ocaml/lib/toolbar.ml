@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Line
+type tool = Selection | Direct_selection | Line | Rect
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -21,13 +21,16 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
   let selection_btn = GMisc.drawing_area () in
   let direct_btn = GMisc.drawing_area () in
   let line_btn = GMisc.drawing_area () in
+  let rect_btn = GMisc.drawing_area () in
   let () =
     selection_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     direct_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     line_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
+    rect_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     grid#attach ~left:0 ~top:0 selection_btn#coerce;
     grid#attach ~left:1 ~top:0 direct_btn#coerce;
-    grid#attach ~left:0 ~top:1 line_btn#coerce
+    grid#attach ~left:0 ~top:1 line_btn#coerce;
+    grid#attach ~left:1 ~top:1 rect_btn#coerce
   in
   object
     val mutable pos_x = x
@@ -46,7 +49,8 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       current_tool <- t;
       selection_btn#misc#queue_draw ();
       direct_btn#misc#queue_draw ();
-      line_btn#misc#queue_draw ()
+      line_btn#misc#queue_draw ();
+      rect_btn#misc#queue_draw ()
 
     initializer
       fixed#put frame#coerce ~x:pos_x ~y:pos_y;
@@ -124,9 +128,21 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
           true
         ) |> ignore
       in
+      let draw_rect_icon cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.set_line_width cr 1.5;
+        Cairo.rectangle cr (ox +. 4.0) (oy +. 6.0) ~w:20.0 ~h:16.0;
+        Cairo.stroke cr
+      in
+
       draw_tool_button selection_btn Selection (draw_arrow ~filled:true);
       draw_tool_button direct_btn Direct_selection (draw_arrow ~filled:false);
       draw_tool_button line_btn Line draw_line_icon;
+      draw_tool_button rect_btn Rect draw_rect_icon;
 
       (* Click events *)
       let connect_click area tool_id =
@@ -137,6 +153,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
             selection_btn#misc#queue_draw ();
             direct_btn#misc#queue_draw ();
             line_btn#misc#queue_draw ();
+            rect_btn#misc#queue_draw ();
             true
           end else false
         ) |> ignore
@@ -144,6 +161,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       connect_click selection_btn Selection;
       connect_click direct_btn Direct_selection;
       connect_click line_btn Line;
+      connect_click rect_btn Rect;
 
       (* Title bar drag *)
       title_bar#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION];

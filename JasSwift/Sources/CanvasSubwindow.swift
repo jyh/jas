@@ -227,7 +227,7 @@ class CanvasNSView: NSView {
     var currentTool: Tool = .selection
     var onToolRead: (() -> Tool)?
 
-    // Drag state for line tool
+    // Drag state for drawing tools
     private var dragStart: NSPoint?
     private var dragEnd: NSPoint?
 
@@ -243,20 +243,27 @@ class CanvasNSView: NSView {
         for layer in document.layers {
             drawElement(ctx, .layer(layer))
         }
-        // Draw drag preview for line tool
+        // Draw drag preview
         if let start = dragStart, let end = dragEnd {
+            let tool = onToolRead?() ?? currentTool
             ctx.setStrokeColor(CGColor(gray: 0.4, alpha: 1.0))
             ctx.setLineWidth(1.0)
             ctx.setLineDash(phase: 0, lengths: [4, 4])
-            ctx.move(to: start)
-            ctx.addLine(to: end)
+            if tool == .line {
+                ctx.move(to: start)
+                ctx.addLine(to: end)
+            } else if tool == .rect {
+                let r = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
+                               width: abs(end.x - start.x), height: abs(end.y - start.y))
+                ctx.addRect(r)
+            }
             ctx.strokePath()
         }
     }
 
     override func mouseDown(with event: NSEvent) {
         let tool = onToolRead?() ?? currentTool
-        if tool == .line {
+        if tool == .line || tool == .rect {
             let pt = convert(event.locationInWindow, from: nil)
             dragStart = pt
             dragEnd = pt
@@ -271,31 +278,56 @@ class CanvasNSView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        guard dragStart != nil else { return }
+        let end = convert(event.locationInWindow, from: nil)
+        commitDrag(to: end)
+    }
+
+    /// Test helper: simulate a complete drag from start to end point.
+    func simulateDrag(from start: NSPoint, to end: NSPoint) {
+        let tool = onToolRead?() ?? currentTool
+        guard tool == .line || tool == .rect else { return }
+        dragStart = start
+        dragEnd = end
+        commitDrag(to: end)
+    }
+
+    private func commitDrag(to end: NSPoint) {
         guard let start = dragStart, let controller = controller else {
             dragStart = nil
             dragEnd = nil
             return
         }
-        let end = convert(event.locationInWindow, from: nil)
+        let tool = onToolRead?() ?? currentTool
         dragStart = nil
         dragEnd = nil
 
-        let line = JasLine(
-            x1: start.x, y1: start.y, x2: end.x, y2: end.y,
-            stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)
-        )
-        let doc = controller.document
-        if let firstLayer = doc.layers.first {
-            let newChildren = firstLayer.children + [.line(line)]
-            let newLayer = JasLayer(name: firstLayer.name, children: newChildren,
-                                    opacity: firstLayer.opacity, transform: firstLayer.transform)
-            var layers = doc.layers
-            layers[0] = newLayer
-            controller.setDocument(JasDocument(title: doc.title, layers: layers))
+        let elem: Element
+        if tool == .line {
+            elem = .line(JasLine(
+                x1: start.x, y1: start.y, x2: end.x, y2: end.y,
+                stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)
+            ))
+        } else if tool == .rect {
+            elem = .rect(JasRect(
+                x: min(start.x, end.x), y: min(start.y, end.y),
+                width: abs(end.x - start.x), height: abs(end.y - start.y),
+                stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)
+            ))
         } else {
-            let layer = JasLayer(name: "Layer 1", children: [.line(line)])
-            controller.setDocument(JasDocument(title: doc.title, layers: [layer]))
+            return
         }
+        // Add to the selected layer
+        let doc = controller.document
+        let idx = doc.selectedLayer
+        let target = doc.layers[idx]
+        let newChildren = target.children + [elem]
+        let newLayer = JasLayer(name: target.name, children: newChildren,
+                                opacity: target.opacity, transform: target.transform)
+        var layers = doc.layers
+        layers[idx] = newLayer
+        controller.setDocument(JasDocument(title: doc.title, layers: layers,
+                                           selectedLayer: idx))
     }
 }
 

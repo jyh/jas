@@ -4,7 +4,7 @@ import Testing
 @Test func modelDefaultDocument() {
     let model = JasModel()
     #expect(model.document.title == "Untitled")
-    #expect(model.document.layers.isEmpty)
+    #expect(model.document.layers.count == 1)
 }
 
 @Test func modelInitialDocument() {

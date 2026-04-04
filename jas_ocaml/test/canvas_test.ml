@@ -49,5 +49,57 @@ let () =
   assert (toolbar#current_tool = Jas.Toolbar.Direct_selection);
   toolbar#select_tool Jas.Toolbar.Line;
   assert (toolbar#current_tool = Jas.Toolbar.Line);
+  toolbar#select_tool Jas.Toolbar.Rect;
+  assert (toolbar#current_tool = Jas.Toolbar.Rect);
+
+  (* Test adding a line element via controller *)
+  let model3 = Jas.Model.create () in
+  let ctrl3 = Jas.Controller.create ~model:model3 () in
+  let line = Jas.Element.Line {
+    x1 = 10.0; y1 = 20.0; x2 = 50.0; y2 = 60.0;
+    stroke = Some { stroke_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
+                    stroke_width = 1.0;
+                    stroke_linecap = Butt;
+                    stroke_linejoin = Miter };
+    opacity = 1.0; transform = None;
+  } in
+  let layer = Jas.Element.make_layer ~name:"Layer 1" [line] in
+  ctrl3#set_document (Jas.Document.make_document [layer]);
+  assert (List.length ctrl3#document.Jas.Document.layers = 1);
+  begin match List.hd ctrl3#document.Jas.Document.layers with
+  | Jas.Element.Layer { children; _ } ->
+    assert (List.length children = 1);
+    begin match List.hd children with
+    | Jas.Element.Line { x1; y1; x2; y2; _ } ->
+      assert (x1 = 10.0); assert (y1 = 20.0);
+      assert (x2 = 50.0); assert (y2 = 60.0)
+    | _ -> assert false
+    end
+  | _ -> assert false
+  end;
+
+  (* Test adding a rect element via controller *)
+  let rect = Jas.Element.Rect {
+    x = 10.0; y = 20.0; width = 40.0; height = 40.0;
+    rx = 0.0; ry = 0.0;
+    fill = None;
+    stroke = Some { stroke_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
+                    stroke_width = 1.0;
+                    stroke_linecap = Butt;
+                    stroke_linejoin = Miter };
+    opacity = 1.0; transform = None;
+  } in
+  let layer_r = Jas.Element.make_layer ~name:"Layer 1" [rect] in
+  ctrl3#set_document (Jas.Document.make_document [layer_r]);
+  begin match List.hd ctrl3#document.Jas.Document.layers with
+  | Jas.Element.Layer { children; _ } ->
+    begin match List.hd children with
+    | Jas.Element.Rect { x; y; width; height; _ } ->
+      assert (x = 10.0); assert (y = 20.0);
+      assert (width = 40.0); assert (height = 40.0)
+    | _ -> assert false
+    end
+  | _ -> assert false
+  end;
 
   Printf.printf "All canvas tests passed.\n"

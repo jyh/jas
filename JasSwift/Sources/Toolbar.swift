@@ -51,6 +51,10 @@ public struct ToolbarView {
                 path.move(to: CGPoint(x: ox + 4, y: oy + 24))
                 path.addLine(to: CGPoint(x: ox + 24, y: oy + 4))
                 context.stroke(path, with: .color(color), lineWidth: 2.0)
+
+            case .rect:
+                let rect = CGRect(x: ox + 4, y: oy + 6, width: 20, height: 16)
+                context.stroke(Path(rect), with: .color(color), lineWidth: 1.5)
             }
         }
     }

@@ -299,14 +299,22 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         Cairo.rectangle cr 0.0 0.0 ~w ~h;
         Cairo.fill cr;
         List.iter (draw_element cr) current_doc.Document.layers;
-        (* Draw drag preview for line tool *)
+        (* Draw drag preview *)
         begin match line_drag_start, line_drag_end with
         | Some (sx, sy), Some (ex, ey) ->
           Cairo.set_source_rgba cr 0.4 0.4 0.4 1.0;
           Cairo.set_line_width cr 1.0;
           Cairo.set_dash cr [| 4.0; 4.0 |];
-          Cairo.move_to cr sx sy;
-          Cairo.line_to cr ex ey;
+          if toolbar#current_tool = Toolbar.Rect then begin
+            let x = min sx ex in
+            let y = min sy ey in
+            let w = abs_float (ex -. sx) in
+            let h = abs_float (ey -. sy) in
+            Cairo.rectangle cr x y ~w ~h
+          end else begin
+            Cairo.move_to cr sx sy;
+            Cairo.line_to cr ex ey
+          end;
           Cairo.stroke cr;
           Cairo.set_dash cr [||]
         | _ -> ()
@@ -317,7 +325,8 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       (* Canvas mouse events for line tool *)
       canvas_area#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION];
       canvas_area#event#connect#button_press ~callback:(fun ev ->
-        if toolbar#current_tool = Toolbar.Line && GdkEvent.Button.button ev = 1 then begin
+        if (toolbar#current_tool = Toolbar.Line || toolbar#current_tool = Toolbar.Rect)
+           && GdkEvent.Button.button ev = 1 then begin
           let x = GdkEvent.Button.x ev in
           let y = GdkEvent.Button.y ev in
           line_drag_start <- Some (x, y);
@@ -343,22 +352,38 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
           let ey = GdkEvent.Button.y ev in
           line_drag_start <- None;
           line_drag_end <- None;
-          let line = Element.Line {
-            x1 = sx; y1 = sy; x2 = ex; y2 = ey;
-            stroke = Some { stroke_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
-                            stroke_width = 1.0;
-                            stroke_linecap = Butt;
-                            stroke_linejoin = Miter };
-            opacity = 1.0;
-            transform = None;
+          let default_stroke = Some Element.{
+            stroke_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
+            stroke_width = 1.0;
+            stroke_linecap = Butt;
+            stroke_linejoin = Miter;
           } in
-          let doc = controller#document in
-          let new_layers = match doc.Document.layers with
-            | (Element.Layer layer) :: rest ->
-              (Element.Layer { layer with children = layer.children @ [line] }) :: rest
-            | _ ->
-              [Element.make_layer ~name:"Layer 1" [line]]
+          let elem = if toolbar#current_tool = Toolbar.Rect then
+            Element.Rect {
+              x = min sx ex; y = min sy ey;
+              width = abs_float (ex -. sx); height = abs_float (ey -. sy);
+              rx = 0.0; ry = 0.0;
+              fill = None; stroke = default_stroke;
+              opacity = 1.0; transform = None;
+            }
+          else
+            Element.Line {
+              x1 = sx; y1 = sy; x2 = ex; y2 = ey;
+              stroke = default_stroke;
+              opacity = 1.0; transform = None;
+            }
           in
+          let line = elem in
+          let doc = controller#document in
+          let idx = doc.Document.selected_layer in
+          let new_layers = List.mapi (fun i l ->
+            if i = idx then
+              match l with
+              | Element.Layer layer ->
+                Element.Layer { layer with children = layer.children @ [line] }
+              | _ -> l
+            else l
+          ) doc.Document.layers in
           controller#set_document { doc with Document.layers = new_layers };
           true
         | _ ->

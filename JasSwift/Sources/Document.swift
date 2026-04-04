@@ -4,10 +4,12 @@ import Foundation
 public struct JasDocument: Equatable {
     public let title: String
     public let layers: [JasLayer]
+    public let selectedLayer: Int
 
-    public init(title: String = "Untitled", layers: [JasLayer] = []) {
+    public init(title: String = "Untitled", layers: [JasLayer] = [JasLayer(children: [])], selectedLayer: Int = 0) {
         self.title = title
         self.layers = layers
+        self.selectedLayer = selectedLayer
     }
 
     public var bounds: BBox {

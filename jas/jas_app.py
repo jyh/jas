@@ -59,6 +59,8 @@ class MainWindow(QMainWindow):
                   lambda: self.toolbar.select_tool(Tool.DIRECT_SELECTION))
         QShortcut(QKeySequence("\\"), self,
                   lambda: self.toolbar.select_tool(Tool.LINE))
+        QShortcut(QKeySequence("M"), self,
+                  lambda: self.toolbar.select_tool(Tool.RECT))
 
 
 def main():
