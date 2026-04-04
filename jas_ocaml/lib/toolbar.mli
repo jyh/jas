@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Line | Rect | Polygon
+type tool = Selection | Direct_selection | Group_selection | Text_tool | Line | Rect | Polygon
 
 class toolbar : title:string -> x:int -> y:int -> GPack.fixed -> object
   method current_tool : tool

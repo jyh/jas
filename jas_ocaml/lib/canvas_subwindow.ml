@@ -484,6 +484,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         if (toolbar#current_tool = Toolbar.Selection
             || toolbar#current_tool = Toolbar.Direct_selection
             || toolbar#current_tool = Toolbar.Group_selection
+            || toolbar#current_tool = Toolbar.Text_tool
             || toolbar#current_tool = Toolbar.Line
             || toolbar#current_tool = Toolbar.Rect
             || toolbar#current_tool = Toolbar.Polygon)
@@ -565,6 +566,14 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
             let w = abs_float (raw_ex -. sx) in
             let h = abs_float (raw_ey -. sy) in
             controller#direct_select_rect ~extend x y w h;
+            true
+          end else
+          (* Text tool: place text at click point *)
+          if toolbar#current_tool = Toolbar.Text_tool then begin
+            let elem = Element.make_text ~fill:(Some Element.{
+              fill_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }
+            }) sx sy "Lorem Ipsum" in
+            controller#add_element elem;
             true
           end else
           (* Drawing tools: shift means constrain angle *)

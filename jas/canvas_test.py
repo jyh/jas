@@ -19,10 +19,11 @@ class ToolbarTest(absltest.TestCase):
 
     def test_tool_enum_values(self):
         tools = list(Tool)
-        self.assertEqual(len(tools), 6)
+        self.assertEqual(len(tools), 7)
         self.assertIn(Tool.SELECTION, tools)
         self.assertIn(Tool.DIRECT_SELECTION, tools)
         self.assertIn(Tool.GROUP_SELECTION, tools)
+        self.assertIn(Tool.TEXT, tools)
         self.assertIn(Tool.LINE, tools)
         self.assertIn(Tool.RECT, tools)
         self.assertIn(Tool.POLYGON, tools)
@@ -33,11 +34,14 @@ class ToolbarTest(absltest.TestCase):
     def test_tool_direct_selection_value(self):
         self.assertEqual(Tool.DIRECT_SELECTION.value, 2)
 
+    def test_tool_text_value(self):
+        self.assertEqual(Tool.TEXT.value, 4)
+
     def test_tool_line_value(self):
-        self.assertEqual(Tool.LINE.value, 4)
+        self.assertEqual(Tool.LINE.value, 5)
 
     def test_tool_rect_value(self):
-        self.assertEqual(Tool.RECT.value, 5)
+        self.assertEqual(Tool.RECT.value, 6)
 
 
 class BoundingBoxTest(absltest.TestCase):

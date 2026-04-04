@@ -11,6 +11,7 @@ class Tool(Enum):
     SELECTION = auto()
     DIRECT_SELECTION = auto()
     GROUP_SELECTION = auto()
+    TEXT = auto()
     LINE = auto()
     RECT = auto()
     POLYGON = auto()
@@ -69,6 +70,8 @@ class ToolButton(QToolButton):
             self._draw_line_tool(painter)
         elif self.tool == Tool.RECT:
             self._draw_rect_tool(painter)
+        elif self.tool == Tool.TEXT:
+            self._draw_text_tool(painter)
         elif self.tool == Tool.POLYGON:
             self._draw_polygon_tool(painter)
 
@@ -109,6 +112,12 @@ class ToolButton(QToolButton):
     def _draw_rect_tool(self, painter):
         painter.setPen(QPen(QColor("#cccccc"), 1.5))
         painter.drawRect(4, 4, self.ICON_SIZE - 8, self.ICON_SIZE - 8)
+
+    def _draw_text_tool(self, painter):
+        painter.setPen(QPen(QColor("#cccccc"), 1.5))
+        font = QFont("sans-serif", 18, QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.drawText(4, 22, "T")
 
     def _draw_polygon_tool(self, painter):
         import math
@@ -179,8 +188,9 @@ class Toolbar(QWidget):
         tools = [
             (Tool.SELECTION, 0, 0),
             (Tool.DIRECT_SELECTION, 0, 1),
-            (Tool.LINE, 1, 0),
-            (Tool.RECT, 1, 1),
+            (Tool.TEXT, 1, 0),
+            (Tool.LINE, 2, 0),
+            (Tool.RECT, 2, 1),
         ]
         for tool, row, col in tools:
             has_alt = tool in _ARROW_SLOT_TOOLS or tool in _SHAPE_SLOT_TOOLS

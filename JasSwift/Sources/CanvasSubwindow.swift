@@ -450,7 +450,7 @@ class CanvasNSView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let tool = onToolRead?() ?? currentTool
-        if tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .line || tool == .rect || tool == .polygon {
+        if tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .text || tool == .line || tool == .rect || tool == .polygon {
             let pt = convert(event.locationInWindow, from: nil)
             if (tool == .selection || tool == .directSelection || tool == .groupSelection) && hitTestSelection(pt) {
                 dragStart = pt
@@ -487,7 +487,7 @@ class CanvasNSView: NSView {
     /// Test helper: simulate a complete drag from start to end point.
     func simulateDrag(from start: NSPoint, to end: NSPoint, extend: Bool = false) {
         let tool = onToolRead?() ?? currentTool
-        guard tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .line || tool == .rect || tool == .polygon else { return }
+        guard tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .text || tool == .line || tool == .rect || tool == .polygon else { return }
         dragStart = start
         dragEnd = end
         commitDrag(to: end, shift: extend)
@@ -551,6 +551,17 @@ class CanvasNSView: NSView {
             let w = abs(rawEnd.x - start.x)
             let h = abs(rawEnd.y - start.y)
             controller.directSelectRect(x: x, y: y, width: w, height: h, extend: extend)
+            return
+        }
+
+        // Text tool: place text at click point
+        if tool == .text {
+            let elem = Element.text(JasText(
+                x: start.x, y: start.y,
+                content: "Lorem Ipsum",
+                fill: JasFill(color: JasColor(r: 0, g: 0, b: 0))
+            ))
+            controller.addElement(elem)
             return
         }
 
