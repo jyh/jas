@@ -10,8 +10,9 @@ class ToolContext {
     let hitTestSelection: (NSPoint) -> Bool
     let hitTestHandle: (NSPoint) -> (path: ElementPath, anchorIdx: Int, handleType: String)?
     let hitTestText: (NSPoint) -> (ElementPath, JasText)?
+    let hitTestPathCurve: (Double, Double) -> (ElementPath, Element)?
     let requestUpdate: () -> Void
-    let startTextEdit: (ElementPath, JasText) -> Void
+    let startTextEdit: (ElementPath, Element) -> Void
     let commitTextEdit: () -> Void
     let drawElementOverlayFn: (CGContext, Element, Set<Int>) -> Void
 
@@ -20,8 +21,9 @@ class ToolContext {
          hitTestSelection: @escaping (NSPoint) -> Bool,
          hitTestHandle: @escaping (NSPoint) -> (path: ElementPath, anchorIdx: Int, handleType: String)?,
          hitTestText: @escaping (NSPoint) -> (ElementPath, JasText)?,
+         hitTestPathCurve: @escaping (Double, Double) -> (ElementPath, Element)?,
          requestUpdate: @escaping () -> Void,
-         startTextEdit: @escaping (ElementPath, JasText) -> Void,
+         startTextEdit: @escaping (ElementPath, Element) -> Void,
          commitTextEdit: @escaping () -> Void,
          drawElementOverlay: @escaping (CGContext, Element, Set<Int>) -> Void) {
         self.model = model
@@ -29,6 +31,7 @@ class ToolContext {
         self.hitTestSelection = hitTestSelection
         self.hitTestHandle = hitTestHandle
         self.hitTestText = hitTestText
+        self.hitTestPathCurve = hitTestPathCurve
         self.requestUpdate = requestUpdate
         self.startTextEdit = startTextEdit
         self.commitTextEdit = commitTextEdit

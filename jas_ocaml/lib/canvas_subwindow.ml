@@ -369,7 +369,7 @@ let draw_element_overlay cr (elem : Element.element) (selected_cps : int list) =
   | Polygon { points; _ } ->
     draw_points cr points true;
     Cairo.stroke cr
-  | Path { d; _ } ->
+  | Path { d; _ } | Text_path { d; _ } ->
     build_path cr d;
     Cairo.stroke cr
   | _ ->
@@ -380,7 +380,7 @@ let draw_element_overlay cr (elem : Element.element) (selected_cps : int list) =
   (* Draw Bezier handles for selected path control points *)
   let handle_circle_radius = 3.0 in
   (match elem with
-   | Path { d; _ } when selected_cps <> [] ->
+   | Path { d; _ } | Text_path { d; _ } when selected_cps <> [] ->
      let anchors = control_points elem in
      List.iter (fun cp_idx ->
        let ax, ay = try List.nth anchors cp_idx with _ -> (0.0, 0.0) in
@@ -538,6 +538,37 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         ) es.es_control_points
       ) current_doc.Document.selection
 
+    method private hit_test_path_curve px py =
+      let doc = current_doc in
+      let threshold = hit_radius +. 2.0 in
+      let result = ref None in
+      List.iteri (fun li layer ->
+        let children = match layer with
+          | Element.Layer { children; _ } -> children
+          | _ -> []
+        in
+        List.iteri (fun ci child ->
+          if !result = None then
+            match child with
+            | Element.Path { d; _ } | Element.Text_path { d; _ } ->
+              let dist = Element.path_distance_to_point d px py in
+              if dist <= threshold then
+                result := Some ([li; ci], child)
+            | Element.Group { children = gc; _ } ->
+              List.iteri (fun gi gchild ->
+                if !result = None then
+                  match gchild with
+                  | Element.Path { d; _ } | Element.Text_path { d; _ } ->
+                    let dist = Element.path_distance_to_point d px py in
+                    if dist <= threshold then
+                      result := Some ([li; ci; gi], gchild)
+                  | _ -> ()
+              ) gc
+            | _ -> ()
+        ) children
+      ) doc.Document.layers;
+      !result
+
     method private hit_test_handle px py =
       Document.PathMap.fold (fun _path (es : Document.element_selection) acc ->
         match acc with
@@ -576,6 +607,9 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
            | Element.Text t when t.content <> new_text ->
              let new_elem = Element.Text { t with content = new_text } in
              model#set_document (Document.replace_element doc path new_elem)
+           | Element.Text_path t when t.content <> new_text ->
+             let new_elem = Element.Text_path { t with content = new_text } in
+             model#set_document (Document.replace_element doc path new_elem)
            | _ -> ())
         with _ -> ());
         entry#misc#hide ();
@@ -602,6 +636,21 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         entry#misc#grab_focus ();
         entry#select_region ~start:0 ~stop:(String.length content);
         text_editor <- Some entry
+      | Element.Text_path { d; content; start_offset; font_size; font_family; _ } ->
+        let (px, py) = Element.path_point_at_offset d start_offset in
+        let entry = GEdit.entry ~packing:(fun w ->
+          fixed#put w ~x:(pos_x + int_of_float px) ~y:(pos_y + int_of_float (py -. font_size -. 4.0))
+        ) () in
+        entry#set_text content;
+        let font_desc = GPango.font_description_from_string (Printf.sprintf "%s %d" font_family (int_of_float font_size)) in
+        entry#misc#modify_font font_desc;
+        let bw = max (int_of_float (float_of_int (String.length content) *. font_size *. 0.7) + 20) 200 in
+        entry#misc#set_size_request ~width:bw ~height:(int_of_float font_size + 8) ();
+        entry#connect#activate ~callback:(fun () -> _self#commit_text_edit) |> ignore;
+        entry#misc#show ();
+        entry#misc#grab_focus ();
+        entry#select_region ~start:0 ~stop:(String.length content);
+        text_editor <- Some entry
       | _ -> ()
 
     method private tool_context : Canvas_tool.tool_context = {
@@ -610,6 +659,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       hit_test_selection = (fun x y -> _self#hit_test_selection x y);
       hit_test_handle = (fun x y -> _self#hit_test_handle x y);
       hit_test_text = (fun x y -> _self#hit_test_text x y);
+      hit_test_path_curve = (fun x y -> _self#hit_test_path_curve x y);
       request_update = (fun () -> canvas_area#misc#queue_draw ());
       start_text_edit = (fun path elem -> _self#start_text_edit path elem);
       commit_text_edit = (fun () -> _self#commit_text_edit);

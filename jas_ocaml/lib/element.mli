@@ -164,3 +164,9 @@ val move_path_handle : path_command list -> int -> string -> float -> float ->
 val control_point_count : element -> int
 val control_points : element -> (float * float) list
 val move_control_points : element -> int list -> float -> float -> element
+
+(** {2 Path geometry utilities} *)
+
+val path_point_at_offset : path_command list -> float -> float * float
+val path_closest_offset : path_command list -> float -> float -> float
+val path_distance_to_point : path_command list -> float -> float -> float

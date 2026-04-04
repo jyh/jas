@@ -35,7 +35,7 @@ class TextTool: CanvasTool {
         } else {
             let pt = NSPoint(x: sx, y: sy)
             if let (path, textElem) = ctx.hitTestText(pt) {
-                ctx.startTextEdit(path, textElem)
+                ctx.startTextEdit(path, .text(textElem))
             } else {
                 let elem = Element.text(JasText(
                     x: sx, y: sy, content: "Lorem Ipsum",

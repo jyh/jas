@@ -17,6 +17,8 @@ from element import (
     Color, Fill, LineCap, LineJoin, Stroke, Transform,
     control_points as element_control_points,
     path_handle_positions,
+    path_distance_to_point,
+    path_point_at_offset,
 )
 from model import Model
 from tool import CanvasTool, ToolContext
@@ -283,12 +285,14 @@ def _draw_element_overlay(painter: QPainter, elem: Element,
                 painter.drawPolyline([QPointF(x, y) for x, y in points])
         case Path(d=d):
             painter.drawPath(_build_path(d))
+        case TextPath(d=d):
+            painter.drawPath(_build_path(d))
         case _:
             bx, by, bw, bh = elem.bounds()
             painter.drawRect(QRectF(bx, by, bw, bh))
 
     # Draw Bezier handles for selected path control points
-    if isinstance(elem, Path) and selected_cps:
+    if isinstance(elem, (Path, TextPath)) and selected_cps:
         anchors = _control_points(elem)
         for cp_idx in selected_cps:
             if cp_idx >= len(anchors):
@@ -363,6 +367,7 @@ class CanvasWidget(QWidget):
             hit_test_selection=self._hit_test_selection,
             hit_test_handle=self._hit_test_handle,
             hit_test_text=self._hit_test_text,
+            hit_test_path_curve=self._hit_test_path_curve,
             request_update=self.update,
             start_text_edit=self._start_text_edit,
             commit_text_edit=self._commit_text_edit,
@@ -430,27 +435,58 @@ class CanvasWidget(QWidget):
                         return ((li, ci), child)
         return None
 
-    def _start_text_edit(self, path: tuple[int, ...], text_elem: Text) -> None:
+    def _hit_test_path_curve(self, x: float, y: float
+                             ) -> tuple[tuple[int, ...], Element] | None:
+        """Test if (x, y) is near a Path or TextPath element's curve."""
+        doc = self._model.document
+        threshold = self._HIT_RADIUS + 2
+        for li, layer in enumerate(doc.layers):
+            for ci, child in enumerate(layer.children):
+                if isinstance(child, (Path, TextPath)):
+                    dist = path_distance_to_point(child.d, x, y)
+                    if dist <= threshold:
+                        return ((li, ci), child)
+                elif isinstance(child, Group) and not isinstance(child, Layer):
+                    for gi, gc in enumerate(child.children):
+                        if isinstance(gc, (Path, TextPath)):
+                            dist = path_distance_to_point(gc.d, x, y)
+                            if dist <= threshold:
+                                return ((li, ci, gi), gc)
+        return None
+
+    def _start_text_edit(self, path: tuple[int, ...], text_elem: Text | TextPath) -> None:
         self._commit_text_edit()
         self._editing_path = path
         from PySide6.QtGui import QFont
-        font = QFont(text_elem.font_family, int(text_elem.font_size))
-        bx, by, bw, bh = text_elem.bounds()
         style = "background: white; border: 1px solid #4a90d9; padding: 0px;"
-        if text_elem.is_area_text:
-            editor = QTextEdit(self)
-            editor.setPlainText(text_elem.content)
-            editor.setFont(font)
-            editor.setGeometry(int(bx), int(by), int(bw), int(bh))
-            editor.setStyleSheet(style)
-            editor.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-        else:
+        if isinstance(text_elem, TextPath):
+            font = QFont(text_elem.font_family, int(text_elem.font_size))
+            px, py = path_point_at_offset(text_elem.d, text_elem.start_offset)
             editor = QLineEdit(self)
             editor.setText(text_elem.content)
             editor.setFont(font)
-            editor.setGeometry(int(bx), int(by), max(int(bw) + 20, 100), int(bh) + 4)
+            editor.setGeometry(int(px), int(py - text_elem.font_size - 4),
+                               max(200, int(text_elem.font_size * len(text_elem.content) * 0.7)),
+                               int(text_elem.font_size) + 8)
             editor.setStyleSheet(style)
             editor.returnPressed.connect(self._commit_text_edit)
+        else:
+            font = QFont(text_elem.font_family, int(text_elem.font_size))
+            bx, by, bw, bh = text_elem.bounds()
+            if text_elem.is_area_text:
+                editor = QTextEdit(self)
+                editor.setPlainText(text_elem.content)
+                editor.setFont(font)
+                editor.setGeometry(int(bx), int(by), int(bw), int(bh))
+                editor.setStyleSheet(style)
+                editor.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+            else:
+                editor = QLineEdit(self)
+                editor.setText(text_elem.content)
+                editor.setFont(font)
+                editor.setGeometry(int(bx), int(by), max(int(bw) + 20, 100), int(bh) + 4)
+                editor.setStyleSheet(style)
+                editor.returnPressed.connect(self._commit_text_edit)
         editor.show()
         editor.setFocus()
         editor.selectAll()
@@ -466,7 +502,7 @@ class CanvasWidget(QWidget):
         path = self._editing_path
         doc = self._model.document
         old_elem = doc.get_element(path)
-        if isinstance(old_elem, Text) and new_text != old_elem.content:
+        if isinstance(old_elem, (Text, TextPath)) and new_text != old_elem.content:
             import dataclasses
             new_elem = dataclasses.replace(old_elem, content=new_text)
             self._model.document = doc.replace_element(path, new_elem)

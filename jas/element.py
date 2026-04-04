@@ -437,7 +437,7 @@ def move_control_points(elem: Element, indices: frozenset[int],
                 if i in indices:
                     new_pts[i] = (new_pts[i][0] + dx, new_pts[i][1] + dy)
             return replace(elem, points=tuple(new_pts))
-        case Path(d=d):
+        case Path(d=d) | TextPath(d=d):
             # Map each anchor index to its command index
             new_cmds = list(d)
             anchor_idx = 0
@@ -606,7 +606,7 @@ def control_point_count(elem: Element) -> int:
         return 4
     if isinstance(elem, Polygon):
         return len(elem.points)
-    if isinstance(elem, Path):
+    if isinstance(elem, (Path, TextPath)):
         return len(_path_anchor_points(elem.d))
     return 4  # bounding box corners
 
@@ -624,8 +624,141 @@ def control_points(elem: Element) -> list[tuple[float, float]]:
             return [(cx, cy - ry), (cx + rx, cy), (cx, cy + ry), (cx - rx, cy)]
         case Polygon(points=pts):
             return list(pts)
-        case Path(d=d):
+        case Path(d=d) | TextPath(d=d):
             return _path_anchor_points(d)
         case _:
             bx, by, bw, bh = elem.bounds()
             return [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)]
+
+
+# ---------------------------------------------------------------------------
+# Path geometry utilities
+# ---------------------------------------------------------------------------
+
+def _flatten_path_commands(d: tuple) -> list[tuple[float, float]]:
+    """Flatten path commands into a polyline by evaluating Bezier curves."""
+    import math
+    pts: list[tuple[float, float]] = []
+    cx, cy = 0.0, 0.0
+    steps = 20
+    for cmd in d:
+        match cmd:
+            case MoveTo(x, y):
+                pts.append((x, y))
+                cx, cy = x, y
+            case LineTo(x, y):
+                pts.append((x, y))
+                cx, cy = x, y
+            case CurveTo(x1, y1, x2, y2, x, y):
+                for i in range(1, steps + 1):
+                    t = i / steps
+                    mt = 1.0 - t
+                    px = mt**3 * cx + 3 * mt**2 * t * x1 + 3 * mt * t**2 * x2 + t**3 * x
+                    py = mt**3 * cy + 3 * mt**2 * t * y1 + 3 * mt * t**2 * y2 + t**3 * y
+                    pts.append((px, py))
+                cx, cy = x, y
+            case QuadTo(x1, y1, x, y):
+                for i in range(1, steps + 1):
+                    t = i / steps
+                    mt = 1.0 - t
+                    px = mt**2 * cx + 2 * mt * t * x1 + t**2 * x
+                    py = mt**2 * cy + 2 * mt * t * y1 + t**2 * y
+                    pts.append((px, py))
+                cx, cy = x, y
+            case ClosePath():
+                if pts:
+                    pts.append(pts[0])
+            case _:
+                # SmoothCurveTo, SmoothQuadTo, ArcTo — approximate as line
+                if hasattr(cmd, 'x') and hasattr(cmd, 'y'):
+                    pts.append((cmd.x, cmd.y))
+                    cx, cy = cmd.x, cmd.y
+    return pts
+
+
+def _arc_lengths(pts: list[tuple[float, float]]) -> list[float]:
+    """Compute cumulative arc lengths for a polyline."""
+    import math
+    lengths = [0.0]
+    for i in range(1, len(pts)):
+        dx = pts[i][0] - pts[i - 1][0]
+        dy = pts[i][1] - pts[i - 1][1]
+        lengths.append(lengths[-1] + math.sqrt(dx * dx + dy * dy))
+    return lengths
+
+
+def path_point_at_offset(d: tuple, t: float) -> tuple[float, float]:
+    """Return the (x, y) point at fraction t (0..1) along the path."""
+    pts = _flatten_path_commands(d)
+    if len(pts) < 2:
+        return pts[0] if pts else (0.0, 0.0)
+    lengths = _arc_lengths(pts)
+    total = lengths[-1]
+    if total == 0:
+        return pts[0]
+    target = max(0.0, min(1.0, t)) * total
+    for i in range(1, len(lengths)):
+        if lengths[i] >= target:
+            seg_len = lengths[i] - lengths[i - 1]
+            if seg_len == 0:
+                return pts[i]
+            frac = (target - lengths[i - 1]) / seg_len
+            x = pts[i - 1][0] + frac * (pts[i][0] - pts[i - 1][0])
+            y = pts[i - 1][1] + frac * (pts[i][1] - pts[i - 1][1])
+            return (x, y)
+    return pts[-1]
+
+
+def path_closest_offset(d: tuple, px: float, py: float) -> float:
+    """Return the offset (0..1) of the closest point on the path to (px, py)."""
+    import math
+    pts = _flatten_path_commands(d)
+    if len(pts) < 2:
+        return 0.0
+    lengths = _arc_lengths(pts)
+    total = lengths[-1]
+    if total == 0:
+        return 0.0
+    best_dist = float('inf')
+    best_offset = 0.0
+    for i in range(1, len(pts)):
+        ax, ay = pts[i - 1]
+        bx, by = pts[i]
+        dx, dy = bx - ax, by - ay
+        seg_len_sq = dx * dx + dy * dy
+        if seg_len_sq == 0:
+            continue
+        t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / seg_len_sq))
+        qx = ax + t * dx
+        qy = ay + t * dy
+        dist = math.sqrt((px - qx) ** 2 + (py - qy) ** 2)
+        if dist < best_dist:
+            best_dist = dist
+            seg_arc = lengths[i - 1] + t * (lengths[i] - lengths[i - 1])
+            best_offset = seg_arc / total
+    return best_offset
+
+
+def path_distance_to_point(d: tuple, px: float, py: float) -> float:
+    """Return the minimum distance from point (px, py) to the path curve."""
+    import math
+    pts = _flatten_path_commands(d)
+    if len(pts) < 2:
+        if pts:
+            return math.sqrt((px - pts[0][0]) ** 2 + (py - pts[0][1]) ** 2)
+        return float('inf')
+    best_dist = float('inf')
+    for i in range(1, len(pts)):
+        ax, ay = pts[i - 1]
+        bx, by = pts[i]
+        dx, dy = bx - ax, by - ay
+        seg_len_sq = dx * dx + dy * dy
+        if seg_len_sq == 0:
+            continue
+        t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / seg_len_sq))
+        qx = ax + t * dx
+        qy = ay + t * dy
+        dist = math.sqrt((px - qx) ** 2 + (py - qy) ** 2)
+        if dist < best_dist:
+            best_dist = dist
+    return best_dist
