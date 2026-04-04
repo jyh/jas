@@ -669,11 +669,16 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
     method private switch_tool =
       let new_tool_type = toolbar#current_tool in
       if new_tool_type <> current_tool_type then begin
+        let saved_selection = current_doc.Document.selection in
         let ctx = _self#tool_context in
         active_tool#deactivate ctx;
         current_tool_type <- new_tool_type;
         active_tool <- Tool_factory.create_tool new_tool_type;
-        active_tool#activate ctx
+        active_tool#activate ctx;
+        (* Preserve selection across tool changes *)
+        let doc = current_doc in
+        if doc.Document.selection <> saved_selection then
+          model#set_document { doc with Document.selection = saved_selection }
       end
 
     method pen_finish =

@@ -385,9 +385,15 @@ class CanvasWidget(QWidget):
         return self._tools[self._current_tool_enum]
 
     def set_tool(self, tool: Tool) -> None:
+        saved_selection = self._model.document.selection
         self._active_tool.deactivate(self._tool_ctx)
         self._current_tool_enum = tool
         self._active_tool.activate(self._tool_ctx)
+        # Preserve selection across tool changes
+        if self._model.document.selection != saved_selection:
+            from dataclasses import replace
+            self._model.document = replace(self._model.document,
+                                           selection=saved_selection)
 
     def _on_document_changed(self, document: Document) -> None:
         self.update()
