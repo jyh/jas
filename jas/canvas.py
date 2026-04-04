@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import (
-    QBrush, QColor, QPainter, QPainterPath, QPen, QTransform,
+    QBrush, QColor, QPainter, QPainterPath, QPen, QTransform, QMouseEvent, QPaintEvent,
 )
 from PySide6.QtWidgets import QWidget
 
@@ -10,7 +10,7 @@ from controller import Controller
 from document import Document
 from element import (
     ArcTo, Circle, ClosePath, CurveTo, Element, Ellipse, Group, Layer, Line,
-    LineTo, MoveTo, Path, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
+    LineTo, MoveTo, Path, PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
     SmoothQuadTo, Text,
     Color, Fill, LineCap, LineJoin, Stroke, Transform,
 )
@@ -38,16 +38,16 @@ def _apply_fill(painter: QPainter, fill: Fill | None) -> None:
         painter.setBrush(QBrush())
 
 
-_CAP_MAP = {
-    LineCap.BUTT: Qt.FlatCap,
-    LineCap.ROUND: Qt.RoundCap,
-    LineCap.SQUARE: Qt.SquareCap,
+_CAP_MAP : dict[LineCap, Qt.PenCapStyle] = {
+    LineCap.BUTT: Qt.PenCapStyle.FlatCap,
+    LineCap.ROUND: Qt.PenCapStyle.RoundCap,
+    LineCap.SQUARE: Qt.PenCapStyle.SquareCap,
 }
 
-_JOIN_MAP = {
-    LineJoin.MITER: Qt.MiterJoin,
-    LineJoin.ROUND: Qt.RoundJoin,
-    LineJoin.BEVEL: Qt.BevelJoin,
+_JOIN_MAP : dict[LineJoin, Qt.PenJoinStyle] = {
+    LineJoin.MITER: Qt.PenJoinStyle.MiterJoin,
+    LineJoin.ROUND: Qt.PenJoinStyle.RoundJoin,
+    LineJoin.BEVEL: Qt.PenJoinStyle.BevelJoin,
 }
 
 
@@ -69,16 +69,16 @@ def _apply_transform(painter: QPainter, transform: Transform | None) -> None:
         )
 
 
-def _build_path(cmds) -> QPainterPath:
+def _build_path(cmds: tuple[PathCommand, ...]) -> QPainterPath:
     """Build a QPainterPath from SVG path commands."""
     path = QPainterPath()
     last_control = None
-    start = (0.0, 0.0)
+    # start = (0.0, 0.0)
     for cmd in cmds:
         match cmd:
             case MoveTo(x, y):
                 path.moveTo(x, y)
-                start = (x, y)
+                # start = (x, y)
                 last_control = None
             case LineTo(x, y):
                 path.lineTo(x, y)
@@ -115,6 +115,9 @@ def _build_path(cmds) -> QPainterPath:
             case ClosePath():
                 path.closeSubpath()
                 last_control = None
+            case _:
+                raise ValueError(f"Unknown path command: {cmd}")
+
     return path
 
 
@@ -188,6 +191,9 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
         case Group(children=children) | Layer(children=children):
             for child in children:
                 _draw_element(painter, child)
+        
+        case Element():
+            raise ValueError(f"Unknown element type: {elem}")
 
     painter.restore()
 
@@ -222,18 +228,18 @@ class CanvasWidget(QWidget):
     def sizeHint(self):
         return QSize(int(self._bbox.width), int(self._bbox.height))
 
-    def mousePressEvent(self, event):
-        if self._current_tool in (Tool.LINE, Tool.RECT) and event.button() == Qt.LeftButton:
+    def mousePressEvent(self, event: QMouseEvent):
+        if self._current_tool in (Tool.LINE, Tool.RECT) and event.button() == Qt.MouseButton.LeftButton:
             self._drag_start = event.position()
             self._drag_end = event.position()
 
-    def mouseMoveEvent(self, event):
+    def mouseMoveEvent(self, event: QMouseEvent):
         if self._drag_start is not None:
             self._drag_end = event.position()
             self.update()
 
-    def mouseReleaseEvent(self, event):
-        if self._drag_start is not None and event.button() == Qt.LeftButton:
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._drag_start is not None and event.button() == Qt.MouseButton.LeftButton:
             end = event.position()
             start = self._drag_start
             tool = self._current_tool
@@ -259,16 +265,16 @@ class CanvasWidget(QWidget):
                 return
             self._controller.add_element(elem)
 
-    def paintEvent(self, event):
+    def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor("white"))
         doc = self._model.document
         for layer in doc.layers:
             _draw_element(painter, layer)
         # Draw drag preview
         if self._drag_start is not None and self._drag_end is not None:
-            pen = QPen(QColor(100, 100, 100), 1.0, Qt.DashLine)
+            pen = QPen(QColor(100, 100, 100), 1.0, Qt.PenStyle.DashLine)
             painter.setPen(pen)
             painter.setBrush(QBrush())
             if self._current_tool == Tool.LINE:
