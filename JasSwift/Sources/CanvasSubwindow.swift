@@ -378,6 +378,9 @@ class CanvasNSView: NSView {
     // Move-drag state
     private var moving: Bool = false
     private let hitRadius: CGFloat = 6.0
+    // Inline text editing state
+    private var textEditor: NSTextField?
+    private var editingPath: ElementPath?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -446,6 +449,68 @@ class CanvasNSView: NSView {
             }
         }
         return false
+    }
+
+    private func hitTestText(_ pos: NSPoint) -> (ElementPath, JasText)? {
+        for (li, layer) in document.layers.enumerated() {
+            for (ci, child) in layer.children.enumerated() {
+                if case .text(let v) = child {
+                    let bx = v.x
+                    let by = v.y - v.fontSize
+                    let bw = Double(v.content.count) * v.fontSize * 0.6
+                    let bh = v.fontSize
+                    if pos.x >= bx && pos.x <= bx + bw && pos.y >= by && pos.y <= by + bh {
+                        return ([li, ci], v)
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    private func startTextEdit(path: ElementPath, textElem: JasText) {
+        commitTextEdit()
+        editingPath = path
+        let editor = NSTextField(frame: NSRect(
+            x: textElem.x,
+            y: textElem.y - textElem.fontSize,
+            width: max(Double(textElem.content.count) * textElem.fontSize * 0.6 + 20, 100),
+            height: textElem.fontSize + 4
+        ))
+        editor.stringValue = textElem.content
+        editor.font = NSFont(name: textElem.fontFamily, size: textElem.fontSize)
+            ?? NSFont.systemFont(ofSize: textElem.fontSize)
+        editor.isBordered = true
+        editor.backgroundColor = .white
+        editor.focusRingType = .exterior
+        editor.target = self
+        editor.action = #selector(textEditorAction(_:))
+        addSubview(editor)
+        editor.selectText(nil)
+        window?.makeFirstResponder(editor)
+        textEditor = editor
+    }
+
+    @objc private func textEditorAction(_ sender: NSTextField) {
+        commitTextEdit()
+    }
+
+    func commitTextEdit() {
+        guard let editor = textEditor, let path = editingPath else { return }
+        let newText = editor.stringValue
+        let elem = document.getElement(path)
+        if case .text(let v) = elem, v.content != newText {
+            let newElem = Element.text(JasText(
+                x: v.x, y: v.y, content: newText,
+                fontFamily: v.fontFamily, fontSize: v.fontSize,
+                fill: v.fill, stroke: v.stroke,
+                opacity: v.opacity, transform: v.transform
+            ))
+            controller?.model.document = document.replaceElement(path, with: newElem)
+        }
+        editor.removeFromSuperview()
+        textEditor = nil
+        editingPath = nil
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -554,14 +619,18 @@ class CanvasNSView: NSView {
             return
         }
 
-        // Text tool: place text at click point
+        // Text tool: edit existing text or place new text
         if tool == .text {
-            let elem = Element.text(JasText(
-                x: start.x, y: start.y,
-                content: "Lorem Ipsum",
-                fill: JasFill(color: JasColor(r: 0, g: 0, b: 0))
-            ))
-            controller.addElement(elem)
+            if let (path, textElem) = hitTestText(start) {
+                startTextEdit(path: path, textElem: textElem)
+            } else {
+                let elem = Element.text(JasText(
+                    x: start.x, y: start.y,
+                    content: "Lorem Ipsum",
+                    fill: JasFill(color: JasColor(r: 0, g: 0, b: 0))
+                ))
+                controller.addElement(elem)
+            }
             return
         }
 

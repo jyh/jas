@@ -4,7 +4,7 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QBrush, QColor, QPainter, QPainterPath, QPen, QTransform, QMouseEvent, QPaintEvent,
 )
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QLineEdit, QWidget
 
 import math
 
@@ -329,6 +329,9 @@ class CanvasWidget(QWidget):
         self._drag_end: QPointF | None = None
         # Move-drag state
         self._moving: bool = False
+        # Inline text editing state
+        self._text_editor: QLineEdit | None = None
+        self._editing_path: tuple[int, ...] | None = None
         self.setMinimumSize(320, 240)
         self.setMouseTracking(True)
         model.on_document_changed(self._on_document_changed)
@@ -338,6 +341,7 @@ class CanvasWidget(QWidget):
         return self._bbox
 
     def set_tool(self, tool: Tool) -> None:
+        self._commit_text_edit()
         self._current_tool = tool
 
     def _on_document_changed(self, document: Document) -> None:
@@ -358,6 +362,54 @@ class CanvasWidget(QWidget):
                     if abs(pos.x() - px) <= r and abs(pos.y() - py) <= r:
                         return True
         return False
+
+    def _hit_test_text(self, pos: QPointF) -> tuple[tuple[int, ...], Text] | None:
+        """Return (path, Text) if pos is within a text element's bounds."""
+        doc = self._model.document
+        for li, layer in enumerate(doc.layers):
+            for ci, child in enumerate(layer.children):
+                if isinstance(child, Text):
+                    bx, by, bw, bh = child.bounds()
+                    if bx <= pos.x() <= bx + bw and by <= pos.y() <= by + bh:
+                        return ((li, ci), child)
+        return None
+
+    def _start_text_edit(self, path: tuple[int, ...], text_elem: Text) -> None:
+        """Show an inline editor over the text element."""
+        self._commit_text_edit()
+        self._editing_path = path
+        from PySide6.QtGui import QFont
+        editor = QLineEdit(self)
+        editor.setText(text_elem.content)
+        font = QFont(text_elem.font_family, int(text_elem.font_size))
+        editor.setFont(font)
+        # Position the editor at the text element's location
+        bx, by, bw, bh = text_elem.bounds()
+        editor.setGeometry(int(bx), int(by), max(int(bw) + 20, 100), int(bh) + 4)
+        editor.setStyleSheet(
+            "background: white; border: 1px solid #4a90d9; padding: 0px;"
+        )
+        editor.returnPressed.connect(self._commit_text_edit)
+        editor.show()
+        editor.setFocus()
+        editor.selectAll()
+        self._text_editor = editor
+
+    def _commit_text_edit(self) -> None:
+        """Apply the edited text to the document and remove the editor."""
+        if self._text_editor is None or self._editing_path is None:
+            return
+        new_text = self._text_editor.text()
+        path = self._editing_path
+        doc = self._model.document
+        old_elem = doc.get_element(path)
+        if isinstance(old_elem, Text) and new_text != old_elem.content:
+            import dataclasses
+            new_elem = dataclasses.replace(old_elem, content=new_text)
+            self._model.document = doc.replace_element(path, new_elem)
+        self._text_editor.deleteLater()
+        self._text_editor = None
+        self._editing_path = None
 
     def mousePressEvent(self, event: QMouseEvent):
         if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION, Tool.TEXT, Tool.LINE, Tool.RECT, Tool.POLYGON) and event.button() == Qt.MouseButton.LeftButton:
@@ -434,14 +486,19 @@ class CanvasWidget(QWidget):
                 h = abs(end.y() - start.y())
                 self._controller.direct_select_rect(x, y, w, h, extend=extend)
                 return
-            # Text tool: place text at click point
+            # Text tool: edit existing text or place new text
             if tool == Tool.TEXT:
-                elem = Text(
-                    x=start.x(), y=start.y(),
-                    content="Lorem Ipsum",
-                    fill=Fill(color=Color(0, 0, 0)),
-                )
-                self._controller.add_element(elem)
+                hit = self._hit_test_text(start)
+                if hit is not None:
+                    path, text_elem = hit
+                    self._start_text_edit(path, text_elem)
+                else:
+                    elem = Text(
+                        x=start.x(), y=start.y(),
+                        content="Lorem Ipsum",
+                        fill=Fill(color=Color(0, 0, 0)),
+                    )
+                    self._controller.add_element(elem)
                 return
             # Drawing tools: shift means constrain angle
             if shift:
