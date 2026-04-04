@@ -170,7 +170,7 @@ let element_intersects_rect (elem : Element.element) rx ry rw rh =
 let all_cps elem = List.init (Element.control_point_count elem) Fun.id
 
 class controller ?(model = Model.create ()) () =
-  object (_self)
+  object (self)
     method model = model
 
     method document = model#document
@@ -201,7 +201,18 @@ class controller ?(model = Model.create ()) () =
       ) doc.Document.layers in
       model#set_document { doc with Document.layers = new_layers }
 
-    method select_rect x y w h =
+    method private toggle_selection current new_sel =
+      (* Add elements not in current, remove elements already in current *)
+      let merged = Document.PathMap.merge (fun _path cur nw ->
+        match cur, nw with
+        | Some _, Some _ -> None        (* in both: remove *)
+        | None, Some v -> Some v        (* only in new: add *)
+        | Some v, None -> Some v        (* only in current: keep *)
+        | None, None -> None
+      ) current new_sel in
+      merged
+
+    method select_rect ?(extend=false) x y w h =
       let doc = model#document in
       let selection = ref Document.PathMap.empty in
       List.iteri (fun li layer ->
@@ -227,9 +238,10 @@ class controller ?(model = Model.create ()) () =
           ) children
         | _ -> ()
       ) doc.Document.layers;
-      model#set_document { doc with Document.selection = !selection }
+      let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
+      model#set_document { doc with Document.selection = new_sel }
 
-    method group_select_rect x y w h =
+    method group_select_rect ?(extend=false) x y w h =
       let doc = model#document in
       let selection = ref Document.PathMap.empty in
       let rec check path (elem : Element.element) =
@@ -242,9 +254,10 @@ class controller ?(model = Model.create ()) () =
               (Document.make_element_selection ~control_points:(all_cps elem) path) !selection
       in
       List.iteri (fun li layer -> check [li] layer) doc.Document.layers;
-      model#set_document { doc with Document.selection = !selection }
+      let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
+      model#set_document { doc with Document.selection = new_sel }
 
-    method direct_select_rect x y w h =
+    method direct_select_rect ?(extend=false) x y w h =
       let doc = model#document in
       let selection = ref Document.PathMap.empty in
       let rec check path (elem : Element.element) =
@@ -263,7 +276,8 @@ class controller ?(model = Model.create ()) () =
               (Document.make_element_selection ~control_points:hit_cps path) !selection
       in
       List.iteri (fun li layer -> check [li] layer) doc.Document.layers;
-      model#set_document { doc with Document.selection = !selection }
+      let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
+      model#set_document { doc with Document.selection = new_sel }
 
     method set_selection (selection : Document.selection) =
       model#set_document { model#document with Document.selection }
