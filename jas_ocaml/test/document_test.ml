@@ -36,4 +36,79 @@ let () =
   (match List.nth doc4.layers 0 with Layer { name; _ } -> assert (name = "A") | _ -> assert false);
   (match List.nth doc4.layers 1 with Layer { name; _ } -> assert (name = "B") | _ -> assert false);
 
+  (* === Selection tests === *)
+
+  let rect = make_rect 0.0 0.0 10.0 10.0 in
+  let circle = make_circle 50.0 50.0 5.0 in
+  let line = make_line 0.0 0.0 1.0 1.0 in
+  let group = make_group [line] in
+  let layer0 = make_layer ~name:"L0" [rect; circle; group] in
+  let layer1 = make_layer ~name:"L1" [rect] in
+  let doc = make_document [layer0; layer1] in
+
+  (* Test default selection is empty *)
+  assert (PathSet.is_empty doc.selection);
+
+  (* Test selection with paths *)
+  let sel = PathSet.of_list [[0; 0]; [0; 1]] in
+  let doc_sel = make_document ~selection:sel [layer0; layer1] in
+  assert (PathSet.cardinal doc_sel.selection = 2);
+  assert (PathSet.mem [0; 0] doc_sel.selection);
+  assert (PathSet.mem [0; 1] doc_sel.selection);
+
+  (* Test get_element: layer *)
+  let elem = get_element doc [0] in
+  assert (elem = layer0);
+
+  (* Test get_element: child *)
+  let elem = get_element doc [0; 1] in
+  assert (elem = circle);
+
+  (* Test get_element: nested *)
+  let elem = get_element doc [0; 2; 0] in
+  assert (elem = line);
+
+  (* Test get_element: empty path raises *)
+  (try
+     let _ = get_element doc [] in
+     assert false
+   with Failure _ -> ());
+
+  (* Test replace_element: child *)
+  let new_rect = make_rect 5.0 5.0 20.0 20.0 in
+  let doc2 = replace_element doc [0; 0] new_rect in
+  assert (get_element doc2 [0; 0] = new_rect);
+  (* original unchanged *)
+  assert (get_element doc [0; 0] = rect);
+
+  (* Test replace_element: nested *)
+  let new_line = make_line 1.0 2.0 3.0 4.0 in
+  let doc3 = replace_element doc [0; 2; 0] new_line in
+  assert (get_element doc3 [0; 2; 0] = new_line);
+
+  (* Test replace_element: preserves other children *)
+  let doc4 = replace_element doc [0; 0] new_rect in
+  assert (get_element doc4 [0; 1] = circle);
+  assert (get_element doc4 [0; 2] = group);
+
+  (* Test replace_element: preserves other layers *)
+  let doc5 = replace_element doc [0; 0] new_rect in
+  assert (List.nth doc5.layers 1 = layer1);
+
+  (* Test replace_element: preserves selection *)
+  let sel = PathSet.of_list [[0; 1]] in
+  let doc_with_sel = make_document ~selection:sel [layer0; layer1] in
+  let doc6 = replace_element doc_with_sel [0; 0] new_rect in
+  assert (PathSet.equal doc6.selection sel);
+
+  (* Test replace_element: empty path raises *)
+  (try
+     let _ = replace_element doc [] new_rect in
+     assert false
+   with Failure _ -> ());
+
+  (* Test replace_element: result layer is still a Layer *)
+  let doc7 = replace_element doc [0; 0] new_rect in
+  (match List.nth doc7.layers 0 with Layer _ -> () | _ -> assert false);
+
   Printf.printf "All document tests passed.\n"

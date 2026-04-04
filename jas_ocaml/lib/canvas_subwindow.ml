@@ -225,6 +225,115 @@ and rounded_rect cr x y w h rx ry =
   Cairo.line_to cr x (y +. ry);
   Cairo.curve_to cr x y (x +. rx) y (x +. rx) y
 
+let handle_size = 6.0
+
+let control_points (elem : Element.element) =
+  let open Element in
+  match elem with
+  | Line { x1; y1; x2; y2; _ } -> [(x1, y1); (x2, y2)]
+  | Rect { x; y; width; height; _ } ->
+    [(x, y); (x +. width, y); (x +. width, y +. height); (x, y +. height)]
+  | Circle { cx; cy; r; _ } ->
+    [(cx, cy -. r); (cx +. r, cy); (cx, cy +. r); (cx -. r, cy)]
+  | Ellipse { cx; cy; rx; ry; _ } ->
+    [(cx, cy -. ry); (cx +. rx, cy); (cx, cy +. ry); (cx -. rx, cy)]
+  | _ ->
+    let (bx, by, bw, bh) = Element.bounds elem in
+    [(bx, by); (bx +. bw, by); (bx +. bw, by +. bh); (bx, by +. bh)]
+
+let draw_element_overlay cr (elem : Element.element) =
+  let open Element in
+  Cairo.set_source_rgb cr 0.0 0.47 1.0;
+  Cairo.set_line_width cr 1.0;
+  Cairo.set_dash cr [||];
+  begin match elem with
+  | Line { x1; y1; x2; y2; _ } ->
+    Cairo.move_to cr x1 y1;
+    Cairo.line_to cr x2 y2;
+    Cairo.stroke cr
+  | Rect { x; y; width; height; rx; ry; _ } ->
+    if rx > 0.0 || ry > 0.0 then
+      rounded_rect cr x y width height rx ry
+    else
+      Cairo.rectangle cr x y ~w:width ~h:height;
+    Cairo.stroke cr
+  | Circle { cx; cy; r; _ } ->
+    Cairo.arc cr cx cy ~r ~a1:0.0 ~a2:(2.0 *. Float.pi);
+    Cairo.stroke cr
+  | Ellipse { cx; cy; rx; ry; _ } ->
+    Cairo.save cr;
+    Cairo.translate cr cx cy;
+    Cairo.scale cr rx ry;
+    Cairo.arc cr 0.0 0.0 ~r:1.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
+    Cairo.restore cr;
+    Cairo.stroke cr
+  | Polyline { points; _ } ->
+    draw_points cr points false;
+    Cairo.stroke cr
+  | Polygon { points; _ } ->
+    draw_points cr points true;
+    Cairo.stroke cr
+  | Path { d; _ } ->
+    build_path cr d;
+    Cairo.stroke cr
+  | _ ->
+    let (bx, by, bw, bh) = Element.bounds elem in
+    Cairo.rectangle cr bx by ~w:bw ~h:bh;
+    Cairo.stroke cr
+  end;
+  (* Draw handles *)
+  let half = handle_size /. 2.0 in
+  List.iter (fun (px, py) ->
+    Cairo.rectangle cr (px -. half) (py -. half) ~w:handle_size ~h:handle_size;
+    Cairo.set_source_rgb cr 1.0 1.0 1.0;
+    Cairo.fill_preserve cr;
+    Cairo.set_source_rgb cr 0.0 0.47 1.0;
+    Cairo.stroke cr
+  ) (control_points elem)
+
+let draw_selection_overlays cr (doc : Document.document) =
+  let open Document in
+  PathSet.iter (fun path ->
+    match path with
+    | [] -> ()
+    | _ ->
+      Cairo.save cr;
+      let node = ref (List.nth doc.layers (List.hd path)) in
+      if List.length path > 1 then begin
+        apply_transform cr (match !node with
+          | Element.Layer { transform; _ } -> transform
+          | Element.Group { transform; _ } -> transform
+          | _ -> None);
+        let rest = List.tl path in
+        let intermediate = List.filteri (fun i _ -> i < List.length rest - 1) rest in
+        List.iter (fun idx ->
+          let children = match !node with
+            | Element.Group { children; _ } | Element.Layer { children; _ } -> children
+            | _ -> []
+          in
+          node := List.nth children idx;
+          apply_transform cr (match !node with
+            | Element.Group { transform; _ } | Element.Layer { transform; _ } -> transform
+            | _ -> None)
+        ) intermediate;
+        let children = match !node with
+          | Element.Group { children; _ } | Element.Layer { children; _ } -> children
+          | _ -> []
+        in
+        let last_idx = List.nth rest (List.length rest - 1) in
+        node := List.nth children last_idx
+      end;
+      (* Apply the selected element's own transform *)
+      apply_transform cr (match !node with
+        | Element.Line { transform; _ } | Element.Rect { transform; _ }
+        | Element.Circle { transform; _ } | Element.Ellipse { transform; _ }
+        | Element.Polyline { transform; _ } | Element.Polygon { transform; _ }
+        | Element.Path { transform; _ } | Element.Text { transform; _ }
+        | Element.Group { transform; _ } | Element.Layer { transform; _ } -> transform);
+      draw_element_overlay cr !node;
+      Cairo.restore cr
+  ) doc.selection
+
 class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controller)
     ~(toolbar : Toolbar.toolbar) ~x ~y ~width ~height ~(bbox : bounding_box) (fixed : GPack.fixed) =
   let frame = GBin.frame ~shadow_type:`ETCHED_IN () in
@@ -299,13 +408,15 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         Cairo.rectangle cr 0.0 0.0 ~w ~h;
         Cairo.fill cr;
         List.iter (draw_element cr) current_doc.Document.layers;
+        (* Draw selection overlays *)
+        draw_selection_overlays cr current_doc;
         (* Draw drag preview *)
         begin match line_drag_start, line_drag_end with
         | Some (sx, sy), Some (ex, ey) ->
           Cairo.set_source_rgba cr 0.4 0.4 0.4 1.0;
           Cairo.set_line_width cr 1.0;
           Cairo.set_dash cr [| 4.0; 4.0 |];
-          if toolbar#current_tool = Toolbar.Rect then begin
+          if toolbar#current_tool = Toolbar.Rect || toolbar#current_tool = Toolbar.Selection then begin
             let x = min sx ex in
             let y = min sy ey in
             let w = abs_float (ex -. sx) in
@@ -325,7 +436,9 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       (* Canvas mouse events for line tool *)
       canvas_area#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION];
       canvas_area#event#connect#button_press ~callback:(fun ev ->
-        if (toolbar#current_tool = Toolbar.Line || toolbar#current_tool = Toolbar.Rect)
+        if (toolbar#current_tool = Toolbar.Selection
+            || toolbar#current_tool = Toolbar.Line
+            || toolbar#current_tool = Toolbar.Rect)
            && GdkEvent.Button.button ev = 1 then begin
           let x = GdkEvent.Button.x ev in
           let y = GdkEvent.Button.y ev in
@@ -352,6 +465,14 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
           let ey = GdkEvent.Button.y ev in
           line_drag_start <- None;
           line_drag_end <- None;
+          if toolbar#current_tool = Toolbar.Selection then begin
+            let x = min sx ex in
+            let y = min sy ey in
+            let w = abs_float (ex -. sx) in
+            let h = abs_float (ey -. sy) in
+            controller#select_rect x y w h;
+            true
+          end else
           let default_stroke = Some Element.{
             stroke_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
             stroke_width = 1.0;

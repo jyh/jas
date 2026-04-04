@@ -57,4 +57,86 @@ let () =
   assert (before.Jas.Document.title = "Untitled");
   assert (after.Jas.Document.title = "New");
 
+  (* === Selection controller tests === *)
+
+  let rect = make_rect 0.0 0.0 10.0 10.0 in
+  let line1 = make_line 0.0 0.0 5.0 5.0 in
+  let line2 = make_line 1.0 1.0 2.0 2.0 in
+  let group = make_group [line1; line2] in
+  let layer = make_layer ~name:"L0" [rect; group] in
+  let doc_s = Jas.Document.make_document [layer] in
+  let model_s = Jas.Model.create ~document:doc_s () in
+  let ctrl_s = Jas.Controller.create ~model:model_s () in
+
+  (* Test set_selection *)
+  let sel = Jas.Document.PathSet.singleton [0; 0] in
+  ctrl_s#set_selection sel;
+  assert (Jas.Document.PathSet.equal ctrl_s#document.Jas.Document.selection sel);
+
+  (* Test set_selection clears *)
+  ctrl_s#set_selection Jas.Document.PathSet.empty;
+  assert (Jas.Document.PathSet.is_empty ctrl_s#document.Jas.Document.selection);
+
+  (* Test select_element: direct child of layer *)
+  ctrl_s#select_element [0; 0];
+  assert (Jas.Document.PathSet.equal ctrl_s#document.Jas.Document.selection
+    (Jas.Document.PathSet.singleton [0; 0]));
+
+  (* Test select_element: child inside a group selects all group children *)
+  ctrl_s#select_element [0; 1; 0];
+  let expected = Jas.Document.PathSet.of_list [[0; 1; 0]; [0; 1; 1]] in
+  assert (Jas.Document.PathSet.equal ctrl_s#document.Jas.Document.selection expected);
+
+  (* Test select_element: other child of same group *)
+  ctrl_s#select_element [0; 1; 1];
+  assert (Jas.Document.PathSet.equal ctrl_s#document.Jas.Document.selection expected);
+
+  (* Test select_element: layer path *)
+  ctrl_s#select_element [0];
+  assert (Jas.Document.PathSet.equal ctrl_s#document.Jas.Document.selection
+    (Jas.Document.PathSet.singleton [0]));
+
+  (* Test select_element notifies model *)
+  let model_n = Jas.Model.create ~document:doc_s () in
+  let ctrl_n = Jas.Controller.create ~model:model_n () in
+  let notify_count = ref 0 in
+  model_n#on_document_changed (fun _ -> notify_count := !notify_count + 1);
+  ctrl_n#select_element [0; 0];
+  assert (!notify_count = 1);
+
+  (* === select_rect tests === *)
+
+  let rect_far = make_rect 100.0 100.0 10.0 10.0 in
+  let sline1 = make_line 0.0 0.0 5.0 5.0 in
+  let sline2 = make_line 1.0 1.0 2.0 2.0 in
+  let sgroup = make_group [sline1; sline2] in
+  let slayer = make_layer ~name:"L0" [rect_far; sgroup] in
+  let sdoc = Jas.Document.make_document [slayer] in
+  let smodel = Jas.Model.create ~document:sdoc () in
+  let sctrl = Jas.Controller.create ~model:smodel () in
+
+  (* select_rect hits element *)
+  sctrl#select_rect 99.0 99.0 12.0 12.0;
+  assert (Jas.Document.PathSet.mem [0; 0] sctrl#document.Jas.Document.selection);
+
+  (* select_rect misses all *)
+  sctrl#select_rect 200.0 200.0 10.0 10.0;
+  assert (Jas.Document.PathSet.is_empty sctrl#document.Jas.Document.selection);
+
+  (* select_rect group expansion *)
+  sctrl#select_rect (-1.0) (-1.0) 7.0 7.0;
+  let expected_sr = Jas.Document.PathSet.of_list [[0; 1; 0]; [0; 1; 1]] in
+  assert (Jas.Document.PathSet.equal sctrl#document.Jas.Document.selection expected_sr);
+
+  (* select_rect replaces previous *)
+  sctrl#set_selection (Jas.Document.PathSet.singleton [0; 0]);
+  sctrl#select_rect 200.0 200.0 10.0 10.0;
+  assert (Jas.Document.PathSet.is_empty sctrl#document.Jas.Document.selection);
+
+  (* select_rect multiple elements *)
+  sctrl#select_rect (-1.0) (-1.0) 120.0 120.0;
+  assert (Jas.Document.PathSet.mem [0; 0] sctrl#document.Jas.Document.selection);
+  assert (Jas.Document.PathSet.mem [0; 1; 0] sctrl#document.Jas.Document.selection);
+  assert (Jas.Document.PathSet.mem [0; 1; 1] sctrl#document.Jas.Document.selection);
+
   Printf.printf "All controller tests passed.\n"
