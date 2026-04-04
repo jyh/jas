@@ -368,7 +368,7 @@ class CanvasNSView: NSView {
             if tool == .line {
                 ctx.move(to: start)
                 ctx.addLine(to: end)
-            } else if tool == .rect || tool == .selection || tool == .directSelection {
+            } else if tool == .rect || tool == .selection || tool == .directSelection || tool == .groupSelection {
                 let r = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
                                width: abs(end.x - start.x), height: abs(end.y - start.y))
                 ctx.addRect(r)
@@ -379,7 +379,7 @@ class CanvasNSView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let tool = onToolRead?() ?? currentTool
-        if tool == .selection || tool == .directSelection || tool == .line || tool == .rect {
+        if tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .line || tool == .rect {
             let pt = convert(event.locationInWindow, from: nil)
             dragStart = pt
             dragEnd = pt
@@ -402,7 +402,7 @@ class CanvasNSView: NSView {
     /// Test helper: simulate a complete drag from start to end point.
     func simulateDrag(from start: NSPoint, to end: NSPoint) {
         let tool = onToolRead?() ?? currentTool
-        guard tool == .selection || tool == .directSelection || tool == .line || tool == .rect else { return }
+        guard tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .line || tool == .rect else { return }
         dragStart = start
         dragEnd = end
         commitDrag(to: end)
@@ -424,6 +424,15 @@ class CanvasNSView: NSView {
             let w = abs(end.x - start.x)
             let h = abs(end.y - start.y)
             controller.selectRect(x: x, y: y, width: w, height: h)
+            return
+        }
+
+        if tool == .groupSelection {
+            let x = min(start.x, end.x)
+            let y = min(start.y, end.y)
+            let w = abs(end.x - start.x)
+            let h = abs(end.y - start.y)
+            controller.groupSelectRect(x: x, y: y, width: w, height: h)
             return
         }
 

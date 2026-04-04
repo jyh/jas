@@ -258,6 +258,30 @@ public class Controller {
                                      selectedLayer: doc.selectedLayer, selection: selection)
     }
 
+    public func groupSelectRect(x: Double, y: Double, width: Double, height: Double) {
+        let doc = model.document
+        var selection: Selection = []
+
+        func check(_ path: [Int], _ elem: Element) {
+            switch elem {
+            case .layer(let v):
+                for (i, child) in v.children.enumerated() { check(path + [i], child) }
+            case .group(let v):
+                for (i, child) in v.children.enumerated() { check(path + [i], child) }
+            default:
+                if elementIntersectsRect(elem, x, y, width, height) {
+                    selection.insert(ElementSelection(path: path, controlPoints: allCPs(elem)))
+                }
+            }
+        }
+
+        for (li, layer) in doc.layers.enumerated() {
+            check([li], .layer(layer))
+        }
+        model.document = JasDocument(title: doc.title, layers: doc.layers,
+                                     selectedLayer: doc.selectedLayer, selection: selection)
+    }
+
     public func directSelectRect(x: Double, y: Double, width: Double, height: Double) {
         let doc = model.document
         var selection: Selection = []

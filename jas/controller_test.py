@@ -2,7 +2,7 @@ from absl.testing import absltest
 
 from controller import Controller
 from document import Document, ElementSelection
-from element import Group, Layer, Line, Rect
+from element import Circle, Ellipse, Group, Layer, Line, Rect, control_points
 from model import Model
 
 
@@ -288,6 +288,74 @@ class DirectSelectionControllerTest(absltest.TestCase):
         paths = _sel_paths(ctrl.document.selection)
         self.assertIn((0, 0, 0), paths)
         self.assertIn((0, 0, 1), paths)
+
+
+class GroupSelectionControllerTest(absltest.TestCase):
+
+    def test_group_select_rect_no_group_expansion(self):
+        """Group selection does NOT expand groups — only the hit child is selected."""
+        line1 = Line(x1=0, y1=0, x2=5, y2=5)
+        line2 = Line(x1=50, y1=50, x2=55, y2=55)
+        group = Group(children=(line1, line2))
+        layer = Layer(children=(group,), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        ctrl.group_select_rect(-1, -1, 7, 7)
+        paths = _sel_paths(ctrl.document.selection)
+        self.assertIn((0, 0, 0), paths)
+        self.assertNotIn((0, 0, 1), paths)
+
+    def test_group_select_rect_selects_all_cps(self):
+        """Group selection always selects all control points."""
+        rect = Rect(x=0, y=0, width=100, height=100)
+        layer = Layer(children=(rect,), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        ctrl.group_select_rect(-5, -5, 10, 10)
+        sel = ctrl.document.selection
+        self.assertEqual(len(sel), 1)
+        es = next(iter(sel))
+        self.assertEqual(es.control_points, frozenset({0, 1, 2, 3}))
+
+    def test_group_select_rect_misses_element(self):
+        """Group selection marquee outside all elements selects nothing."""
+        rect = Rect(x=0, y=0, width=10, height=10)
+        layer = Layer(children=(rect,), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        ctrl.group_select_rect(200, 200, 10, 10)
+        self.assertEqual(ctrl.document.selection, frozenset())
+
+    def test_group_select_rect_individual_in_group(self):
+        """Group selection can select individual elements inside a group."""
+        rect1 = Rect(x=0, y=0, width=10, height=10)
+        rect2 = Rect(x=50, y=50, width=10, height=10)
+        group = Group(children=(rect1, rect2))
+        layer = Layer(children=(group,), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        ctrl.group_select_rect(-5, -5, 70, 70)
+        paths = _sel_paths(ctrl.document.selection)
+        self.assertIn((0, 0, 0), paths)
+        self.assertIn((0, 0, 1), paths)
+
+
+class ControlPointPositionsTest(absltest.TestCase):
+
+    def test_line_control_points(self):
+        line = Line(x1=10, y1=20, x2=30, y2=40)
+        self.assertEqual(control_points(line), [(10, 20), (30, 40)])
+
+    def test_rect_control_points(self):
+        rect = Rect(x=5, y=10, width=20, height=30)
+        self.assertEqual(control_points(rect),
+                         [(5, 10), (25, 10), (25, 40), (5, 40)])
+
+    def test_circle_control_points(self):
+        circle = Circle(cx=50, cy=50, r=10)
+        self.assertEqual(control_points(circle),
+                         [(50, 40), (60, 50), (50, 60), (40, 50)])
+
+    def test_ellipse_control_points(self):
+        ellipse = Ellipse(cx=50, cy=50, rx=20, ry=10)
+        self.assertEqual(control_points(ellipse),
+                         [(50, 40), (70, 50), (50, 60), (30, 50)])
 
 
 if __name__ == "__main__":

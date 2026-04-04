@@ -274,3 +274,75 @@ private func makeMarqueeCtrl() -> Controller {
     ctrl.directSelectRect(x: 200, y: 200, width: 10, height: 10)
     #expect(ctrl.document.selection.isEmpty)
 }
+
+// MARK: - Group selection tests
+
+@Test func groupSelectRectNoGroupExpansion() {
+    let line1 = Element.line(JasLine(x1: 0, y1: 0, x2: 5, y2: 5))
+    let line2 = Element.line(JasLine(x1: 50, y1: 50, x2: 55, y2: 55))
+    let group = Element.group(JasGroup(children: [line1, line2]))
+    let layer = JasLayer(name: "L0", children: [group])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.groupSelectRect(x: -1, y: -1, width: 7, height: 7)
+    let paths = selPaths(ctrl.document.selection)
+    #expect(paths.contains([0, 0, 0]))
+    #expect(!paths.contains([0, 0, 1]))
+}
+
+@Test func groupSelectRectSelectsAllCPs() {
+    let r = Element.rect(JasRect(x: 0, y: 0, width: 100, height: 100))
+    let layer = JasLayer(name: "L0", children: [r])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.groupSelectRect(x: -5, y: -5, width: 10, height: 10)
+    #expect(ctrl.document.selection.count == 1)
+    let es = ctrl.document.selection.first!
+    #expect(es.controlPoints == [0, 1, 2, 3])
+}
+
+@Test func groupSelectRectMissesElement() {
+    let r = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
+    let layer = JasLayer(name: "L0", children: [r])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.groupSelectRect(x: 200, y: 200, width: 10, height: 10)
+    #expect(ctrl.document.selection.isEmpty)
+}
+
+// MARK: - Control point positions tests
+
+@Test func lineControlPointPositions() {
+    let line = Element.line(JasLine(x1: 10, y1: 20, x2: 30, y2: 40))
+    let cps = line.controlPointPositions
+    #expect(cps.count == 2)
+    #expect(cps[0] == (10, 20))
+    #expect(cps[1] == (30, 40))
+}
+
+@Test func rectControlPointPositions() {
+    let r = Element.rect(JasRect(x: 5, y: 10, width: 20, height: 30))
+    let cps = r.controlPointPositions
+    #expect(cps.count == 4)
+    #expect(cps[0] == (5, 10))
+    #expect(cps[1] == (25, 10))
+    #expect(cps[2] == (25, 40))
+    #expect(cps[3] == (5, 40))
+}
+
+@Test func circleControlPointPositions() {
+    let c = Element.circle(JasCircle(cx: 50, cy: 50, r: 10))
+    let cps = c.controlPointPositions
+    #expect(cps.count == 4)
+    #expect(cps[0] == (50, 40))
+    #expect(cps[1] == (60, 50))
+    #expect(cps[2] == (50, 60))
+    #expect(cps[3] == (40, 50))
+}
+
+@Test func ellipseControlPointPositions() {
+    let e = Element.ellipse(JasEllipse(cx: 50, cy: 50, rx: 20, ry: 10))
+    let cps = e.controlPointPositions
+    #expect(cps.count == 4)
+    #expect(cps[0] == (50, 40))
+    #expect(cps[1] == (70, 50))
+    #expect(cps[2] == (50, 60))
+    #expect(cps[3] == (30, 50))
+}

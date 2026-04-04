@@ -408,7 +408,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
           Cairo.set_source_rgba cr 0.4 0.4 0.4 1.0;
           Cairo.set_line_width cr 1.0;
           Cairo.set_dash cr [| 4.0; 4.0 |];
-          if toolbar#current_tool = Toolbar.Rect || toolbar#current_tool = Toolbar.Selection || toolbar#current_tool = Toolbar.Direct_selection then begin
+          if toolbar#current_tool = Toolbar.Rect || toolbar#current_tool = Toolbar.Selection || toolbar#current_tool = Toolbar.Direct_selection || toolbar#current_tool = Toolbar.Group_selection then begin
             let x = min sx ex in
             let y = min sy ey in
             let w = abs_float (ex -. sx) in
@@ -430,6 +430,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       canvas_area#event#connect#button_press ~callback:(fun ev ->
         if (toolbar#current_tool = Toolbar.Selection
             || toolbar#current_tool = Toolbar.Direct_selection
+            || toolbar#current_tool = Toolbar.Group_selection
             || toolbar#current_tool = Toolbar.Line
             || toolbar#current_tool = Toolbar.Rect)
            && GdkEvent.Button.button ev = 1 then begin
@@ -464,6 +465,13 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
             let w = abs_float (ex -. sx) in
             let h = abs_float (ey -. sy) in
             controller#select_rect x y w h;
+            true
+          end else if toolbar#current_tool = Toolbar.Group_selection then begin
+            let x = min sx ex in
+            let y = min sy ey in
+            let w = abs_float (ex -. sx) in
+            let h = abs_float (ey -. sy) in
+            controller#group_select_rect x y w h;
             true
           end else if toolbar#current_tool = Toolbar.Direct_selection then begin
             let x = min sx ex in

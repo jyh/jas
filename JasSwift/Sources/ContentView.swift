@@ -6,6 +6,7 @@ import AppKit
 public enum Tool: String, CaseIterable {
     case selection
     case directSelection
+    case groupSelection
     case line
     case rect
 }
@@ -55,6 +56,7 @@ public struct ContentView: View {
 struct FloatingToolbar: View {
     @Binding var currentTool: Tool
     @Binding var position: CGPoint
+    @State private var arrowSlotTool: Tool = .directSelection
 
     private let titleBarHeight: CGFloat = 24
     private let toolbarWidth: CGFloat = 80
@@ -84,7 +86,11 @@ struct FloatingToolbar: View {
             VStack(spacing: 2) {
                 HStack(spacing: 2) {
                     ToolbarView.toolButton(currentTool: $currentTool, tool: .selection)
-                    ToolbarView.toolButton(currentTool: $currentTool, tool: .directSelection)
+                    ToolbarView.toolButtonWithAlternates(
+                        currentTool: $currentTool,
+                        visibleTool: $arrowSlotTool,
+                        alternates: [.directSelection, .groupSelection]
+                    )
                 }
                 HStack(spacing: 2) {
                     ToolbarView.toolButton(currentTool: $currentTool, tool: .line)

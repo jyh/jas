@@ -235,4 +235,44 @@ let () =
   ds_dctrl#direct_select_rect 200.0 200.0 10.0 10.0;
   assert (Jas.Document.PathMap.is_empty ds_dctrl#document.Jas.Document.selection);
 
+  (* === Group selection tests === *)
+
+  (* group_select_rect: no group expansion *)
+  let gs_line1 = make_line 0.0 0.0 5.0 5.0 in
+  let gs_line2 = make_line 50.0 50.0 55.0 55.0 in
+  let gs_group = make_group [gs_line1; gs_line2] in
+  let gs_layer = make_layer ~name:"L0" [gs_group] in
+  let gs_doc = Jas.Document.make_document [gs_layer] in
+  let gs_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:gs_doc ()) () in
+  gs_ctrl#group_select_rect (-1.0) (-1.0) 7.0 7.0;
+  assert (Jas.Document.PathMap.mem [0; 0; 0] gs_ctrl#document.Jas.Document.selection);
+  assert (not (Jas.Document.PathMap.mem [0; 0; 1] gs_ctrl#document.Jas.Document.selection));
+
+  (* group_select_rect: selects all control points *)
+  let gs_rect = make_rect 0.0 0.0 100.0 100.0 in
+  let gs_rlayer = make_layer ~name:"L0" [gs_rect] in
+  let gs_rdoc = Jas.Document.make_document [gs_rlayer] in
+  let gs_rctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:gs_rdoc ()) () in
+  gs_rctrl#group_select_rect (-5.0) (-5.0) 10.0 10.0;
+  let gs_res = Jas.Document.PathMap.find [0; 0] gs_rctrl#document.Jas.Document.selection in
+  assert (gs_res.Jas.Document.es_control_points = [0; 1; 2; 3]);
+
+  (* group_select_rect: misses element *)
+  gs_rctrl#group_select_rect 200.0 200.0 10.0 10.0;
+  assert (Jas.Document.PathMap.is_empty gs_rctrl#document.Jas.Document.selection);
+
+  (* === Control point positions tests === *)
+
+  let cp_line2 = make_line 10.0 20.0 30.0 40.0 in
+  assert (Jas.Element.control_points cp_line2 = [(10.0, 20.0); (30.0, 40.0)]);
+
+  let cp_rect2 = make_rect 5.0 10.0 20.0 30.0 in
+  assert (Jas.Element.control_points cp_rect2 = [(5.0, 10.0); (25.0, 10.0); (25.0, 40.0); (5.0, 40.0)]);
+
+  let cp_circle = make_circle 50.0 50.0 10.0 in
+  assert (Jas.Element.control_points cp_circle = [(50.0, 40.0); (60.0, 50.0); (50.0, 60.0); (40.0, 50.0)]);
+
+  let cp_ellipse = make_ellipse 50.0 50.0 20.0 10.0 in
+  assert (Jas.Element.control_points cp_ellipse = [(50.0, 40.0); (70.0, 50.0); (50.0, 60.0); (30.0, 50.0)]);
+
   Printf.printf "All controller tests passed.\n"
