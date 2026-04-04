@@ -259,6 +259,112 @@ let path_anchor_points d =
     | ClosePath -> acc
   ) [] d |> List.rev
 
+let path_handle_positions d anchor_idx =
+  (* Map anchor indices to command indices (skip ClosePath) *)
+  let cmd_arr = Array.of_list d in
+  let n = Array.length cmd_arr in
+  let cmd_indices = Array.make n 0 in
+  let count = ref 0 in
+  for ci = 0 to n - 1 do
+    match cmd_arr.(ci) with
+    | ClosePath -> ()
+    | _ -> cmd_indices.(!count) <- ci; incr count
+  done;
+  if anchor_idx < 0 || anchor_idx >= !count then (None, None)
+  else begin
+    let ci = cmd_indices.(anchor_idx) in
+    let cmd = cmd_arr.(ci) in
+    let anchor = match cmd with
+      | MoveTo (x, y) | LineTo (x, y) -> Some (x, y)
+      | CurveTo (_, _, _, _, x, y) -> Some (x, y)
+      | _ -> None
+    in
+    match anchor with
+    | None -> (None, None)
+    | Some (ax, ay) ->
+      let h_in = match cmd with
+        | CurveTo (_, _, x2, y2, _, _) ->
+          if abs_float (x2 -. ax) > 0.01 || abs_float (y2 -. ay) > 0.01
+          then Some (x2, y2) else None
+        | _ -> None
+      in
+      let h_out =
+        if ci + 1 < n then
+          match cmd_arr.(ci + 1) with
+          | CurveTo (x1, y1, _, _, _, _) ->
+            if abs_float (x1 -. ax) > 0.01 || abs_float (y1 -. ay) > 0.01
+            then Some (x1, y1) else None
+          | _ -> None
+        else None
+      in
+      (h_in, h_out)
+  end
+
+let reflect_handle_keep_distance ax ay nhx nhy opp_hx opp_hy =
+  let dnx = nhx -. ax in
+  let dny = nhy -. ay in
+  let dist_new = sqrt (dnx *. dnx +. dny *. dny) in
+  let dist_opp = sqrt ((opp_hx -. ax) *. (opp_hx -. ax) +. (opp_hy -. ay) *. (opp_hy -. ay)) in
+  if dist_new < 1e-6 then (opp_hx, opp_hy)
+  else
+    let scale = -. dist_opp /. dist_new in
+    (ax +. dnx *. scale, ay +. dny *. scale)
+
+let move_path_handle d anchor_idx handle_type dx dy =
+  let cmd_arr = Array.of_list d in
+  let n = Array.length cmd_arr in
+  let cmd_indices = Array.make n 0 in
+  let count = ref 0 in
+  for ci = 0 to n - 1 do
+    match cmd_arr.(ci) with
+    | ClosePath -> ()
+    | _ -> cmd_indices.(!count) <- ci; incr count
+  done;
+  if anchor_idx < 0 || anchor_idx >= !count then d
+  else begin
+    let ci = cmd_indices.(anchor_idx) in
+    let cmd = cmd_arr.(ci) in
+    (* Get anchor position *)
+    let anchor = match cmd with
+      | MoveTo (x, y) | LineTo (x, y) -> Some (x, y)
+      | CurveTo (_, _, _, _, x, y) -> Some (x, y)
+      | _ -> None
+    in
+    (match anchor with
+     | None -> ()
+     | Some (ax, ay) ->
+       if handle_type = "in" then begin
+         match cmd with
+         | CurveTo (x1, y1, x2, y2, x, y) ->
+           let nhx = x2 +. dx in
+           let nhy = y2 +. dy in
+           cmd_arr.(ci) <- CurveTo (x1, y1, nhx, nhy, x, y);
+           (* Rotate opposite (out) handle to stay collinear, keep its distance *)
+           if ci + 1 < n then
+             (match cmd_arr.(ci + 1) with
+              | CurveTo (ox1, oy1, nx2, ny2, nx, ny) ->
+                let (rx, ry) = reflect_handle_keep_distance ax ay nhx nhy ox1 oy1 in
+                cmd_arr.(ci + 1) <- CurveTo (rx, ry, nx2, ny2, nx, ny)
+              | _ -> ())
+         | _ -> ()
+       end else if handle_type = "out" then begin
+         if ci + 1 < n then
+           match cmd_arr.(ci + 1) with
+           | CurveTo (x1, y1, x2, y2, x, y) ->
+             let nhx = x1 +. dx in
+             let nhy = y1 +. dy in
+             cmd_arr.(ci + 1) <- CurveTo (nhx, nhy, x2, y2, x, y);
+             (* Rotate opposite (in) handle to stay collinear, keep its distance *)
+             (match cmd with
+              | CurveTo (cx1, cy1, cx2, cy2, cx, cy) ->
+                let (rx, ry) = reflect_handle_keep_distance ax ay nhx nhy cx2 cy2 in
+                cmd_arr.(ci) <- CurveTo (cx1, cy1, rx, ry, cx, cy)
+              | _ -> ())
+           | _ -> ()
+       end);
+    Array.to_list cmd_arr
+  end
+
 let control_point_count = function
   | Line _ -> 2
   | Rect _ | Circle _ | Ellipse _ -> 4

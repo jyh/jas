@@ -16,6 +16,7 @@ from element import (
     SmoothQuadTo, Text,
     Color, Fill, LineCap, LineJoin, Stroke, Transform,
     control_points as element_control_points, move_control_points,
+    path_handle_positions, move_path_handle,
 )
 from model import Model
 from toolbar import Tool
@@ -255,6 +256,7 @@ def _regular_polygon_points(x1: float, y1: float, x2: float, y2: float,
 
 _SELECTION_COLOR = QColor(0, 120, 255)
 _HANDLE_SIZE = 6.0
+_HANDLE_CIRCLE_RADIUS = 3.0
 
 
 def _control_points(elem: Element) -> list[tuple[float, float]]:
@@ -296,6 +298,25 @@ def _draw_element_overlay(painter: QPainter, elem: Element,
         case _:
             bx, by, bw, bh = elem.bounds()
             painter.drawRect(QRectF(bx, by, bw, bh))
+
+    # Draw Bezier handles for selected path control points
+    if isinstance(elem, Path) and selected_cps:
+        anchors = _control_points(elem)
+        for cp_idx in selected_cps:
+            if cp_idx >= len(anchors):
+                continue
+            ax, ay = anchors[cp_idx]
+            h_in, h_out = path_handle_positions(elem.d, cp_idx)
+            painter.setPen(QPen(_SELECTION_COLOR, 1.0))
+            painter.setBrush(QBrush(QColor("white")))
+            if h_in is not None:
+                painter.drawLine(QPointF(ax, ay), QPointF(*h_in))
+                painter.drawEllipse(QPointF(*h_in),
+                                    _HANDLE_CIRCLE_RADIUS, _HANDLE_CIRCLE_RADIUS)
+            if h_out is not None:
+                painter.drawLine(QPointF(ax, ay), QPointF(*h_out))
+                painter.drawEllipse(QPointF(*h_out),
+                                    _HANDLE_CIRCLE_RADIUS, _HANDLE_CIRCLE_RADIUS)
 
     # Draw handles
     half = _HANDLE_SIZE / 2
@@ -351,6 +372,10 @@ class CanvasWidget(QWidget):
         # Inline text editing state
         self._text_editor: QLineEdit | None = None
         self._editing_path: tuple[int, ...] | None = None
+        # Handle drag state (for Bezier control handles)
+        self._handle_drag: tuple[tuple[int, ...], int, str] | None = None  # (path, anchor_idx, 'in'|'out')
+        self._handle_drag_start: QPointF | None = None
+        self._handle_drag_end: QPointF | None = None
         # Pen tool state
         self._pen_points: list[PenPoint] = []
         self._pen_dragging: bool = False
@@ -387,6 +412,25 @@ class CanvasWidget(QWidget):
                     if abs(pos.x() - px) <= r and abs(pos.y() - py) <= r:
                         return True
         return False
+
+    def _hit_test_handle(self, pos: QPointF
+                         ) -> tuple[tuple[int, ...], int, str] | None:
+        """Return (path, anchor_idx, 'in'|'out') if pos is near a Bezier handle."""
+        doc = self._model.document
+        r = self._HIT_RADIUS
+        for es in doc.selection:
+            elem = doc.get_element(es.path)
+            if not isinstance(elem, Path):
+                continue
+            for cp_idx in es.control_points:
+                h_in, h_out = path_handle_positions(elem.d, cp_idx)
+                if h_in is not None:
+                    if abs(pos.x() - h_in[0]) <= r and abs(pos.y() - h_in[1]) <= r:
+                        return (es.path, cp_idx, 'in')
+                if h_out is not None:
+                    if abs(pos.x() - h_out[0]) <= r and abs(pos.y() - h_out[1]) <= r:
+                        return (es.path, cp_idx, 'out')
+        return None
 
     def _hit_test_text(self, pos: QPointF) -> tuple[tuple[int, ...], Text] | None:
         """Return (path, Text) if pos is within a text element's bounds."""
@@ -589,6 +633,14 @@ class CanvasWidget(QWidget):
             return
         if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION, Tool.PEN, Tool.TEXT, Tool.LINE, Tool.RECT, Tool.POLYGON) and event.button() == Qt.MouseButton.LeftButton:
             pos = event.position()
+            # Check if clicking on a Bezier handle → handle drag mode
+            if self._current_tool == Tool.DIRECT_SELECTION:
+                handle_hit = self._hit_test_handle(pos)
+                if handle_hit is not None:
+                    self._handle_drag = handle_hit
+                    self._handle_drag_start = pos
+                    self._handle_drag_end = pos
+                    return
             # Check if clicking on a selected CP → move mode
             if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION):
                 if self._hit_test_selection(pos):
@@ -601,6 +653,10 @@ class CanvasWidget(QWidget):
             self._moving = False
 
     def mouseMoveEvent(self, event: QMouseEvent):
+        if self._handle_drag is not None:
+            self._handle_drag_end = event.position()
+            self.update()
+            return
         if self._current_tool == Tool.PEN:
             pos = event.position()
             self._pen_mouse = pos
@@ -624,6 +680,19 @@ class CanvasWidget(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._handle_drag is not None and event.button() == Qt.MouseButton.LeftButton:
+            end = event.position()
+            start = self._handle_drag_start
+            path, anchor_idx, handle_type = self._handle_drag
+            dx = end.x() - start.x()
+            dy = end.y() - start.y()
+            self._handle_drag = None
+            self._handle_drag_start = None
+            self._handle_drag_end = None
+            if dx != 0 or dy != 0:
+                self._controller.move_path_handle(path, anchor_idx, handle_type, dx, dy)
+            self.update()
+            return
         if self._current_tool == Tool.PEN and event.button() == Qt.MouseButton.LeftButton:
             self._pen_dragging = False
             self.update()
@@ -745,6 +814,21 @@ class CanvasWidget(QWidget):
             _draw_element(painter, layer)
         # Draw selection overlays
         _draw_selection_overlays(painter, doc)
+        # Draw handle drag preview
+        if self._handle_drag is not None and self._handle_drag_start is not None and self._handle_drag_end is not None:
+            path, anchor_idx, handle_type = self._handle_drag
+            dx = self._handle_drag_end.x() - self._handle_drag_start.x()
+            dy = self._handle_drag_end.y() - self._handle_drag_start.y()
+            elem = doc.get_element(path)
+            if isinstance(elem, Path):
+                moved = move_path_handle(elem, anchor_idx, handle_type, dx, dy)
+                for es in doc.selection:
+                    if es.path == path:
+                        pen = QPen(_SELECTION_COLOR, 1.0, Qt.PenStyle.DashLine)
+                        painter.setPen(pen)
+                        painter.setBrush(QBrush())
+                        _draw_element_overlay(painter, moved, es.control_points)
+                        break
         # Draw drag preview
         if self._drag_start is not None and self._drag_end is not None:
             if self._moving:

@@ -374,6 +374,19 @@ public class Controller {
                                      selectedLayer: doc.selectedLayer, selection: [es])
     }
 
+    public func movePathHandle(_ path: ElementPath, anchorIdx: Int,
+                              handleType: String, dx: Double, dy: Double) {
+        var doc = model.document
+        let elem = doc.getElement(path)
+        if case .path(let v) = elem {
+            let newD = JasLib.movePathHandle(v.d, anchorIdx: anchorIdx, handleType: handleType, dx: dx, dy: dy)
+            let newElem = Element.path(JasPath(d: newD, fill: v.fill, stroke: v.stroke,
+                                               opacity: v.opacity, transform: v.transform))
+            doc = doc.replaceElement(path, with: newElem)
+            model.document = doc
+        }
+    }
+
     public func moveSelection(dx: Double, dy: Double) {
         var doc = model.document
         for es in doc.selection {

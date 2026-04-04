@@ -302,6 +302,45 @@ private func drawElementOverlay(_ ctx: CGContext, _ elem: Element, selectedCPs: 
         ctx.strokePath()
     }
 
+    // Draw Bezier handles for selected path control points
+    let handleCircleRadius: CGFloat = 3.0
+    if case .path(let v) = elem, !selectedCPs.isEmpty {
+        let anchors = controlPoints(elem)
+        for cpIdx in selectedCPs {
+            guard cpIdx < anchors.count else { continue }
+            let (ax, ay) = anchors[cpIdx]
+            let (hIn, hOut) = pathHandlePositions(v.d, anchorIdx: cpIdx)
+            ctx.setStrokeColor(selectionColor)
+            ctx.setLineWidth(1.0)
+            if let (hx, hy) = hIn {
+                ctx.move(to: CGPoint(x: ax, y: ay))
+                ctx.addLine(to: CGPoint(x: hx, y: hy))
+                ctx.strokePath()
+                ctx.addEllipse(in: CGRect(x: hx - handleCircleRadius, y: hy - handleCircleRadius,
+                                          width: handleCircleRadius * 2, height: handleCircleRadius * 2))
+                ctx.setFillColor(.white)
+                ctx.fillPath()
+                ctx.addEllipse(in: CGRect(x: hx - handleCircleRadius, y: hy - handleCircleRadius,
+                                          width: handleCircleRadius * 2, height: handleCircleRadius * 2))
+                ctx.setStrokeColor(selectionColor)
+                ctx.strokePath()
+            }
+            if let (hx, hy) = hOut {
+                ctx.move(to: CGPoint(x: ax, y: ay))
+                ctx.addLine(to: CGPoint(x: hx, y: hy))
+                ctx.strokePath()
+                ctx.addEllipse(in: CGRect(x: hx - handleCircleRadius, y: hy - handleCircleRadius,
+                                          width: handleCircleRadius * 2, height: handleCircleRadius * 2))
+                ctx.setFillColor(.white)
+                ctx.fillPath()
+                ctx.addEllipse(in: CGRect(x: hx - handleCircleRadius, y: hy - handleCircleRadius,
+                                          width: handleCircleRadius * 2, height: handleCircleRadius * 2))
+                ctx.setStrokeColor(selectionColor)
+                ctx.strokePath()
+            }
+        }
+    }
+
     // Draw handles
     let half = handleSize / 2
     for (i, (px, py)) in controlPoints(elem).enumerated() {
@@ -411,6 +450,10 @@ class CanvasNSView: NSView {
     // Inline text editing state
     private var textEditor: NSTextField?
     private var editingPath: ElementPath?
+    // Handle drag state (for Bezier control handles)
+    private var handleDrag: (path: ElementPath, anchorIdx: Int, handleType: String)?
+    private var handleDragStart: NSPoint?
+    private var handleDragEnd: NSPoint?
     // Pen tool state
     private var penPoints: [PenPoint] = []
     private var penDragging: Bool = false
@@ -441,6 +484,24 @@ class CanvasNSView: NSView {
         }
         // Draw selection overlays
         drawSelectionOverlays(ctx, document)
+        // Draw handle drag preview
+        if let hd = handleDrag, let start = handleDragStart, let end = handleDragEnd {
+            let dx = end.x - start.x
+            let dy = end.y - start.y
+            let elem = document.getElement(hd.path)
+            if case .path(let v) = elem {
+                let newD = movePathHandle(v.d, anchorIdx: hd.anchorIdx, handleType: hd.handleType, dx: dx, dy: dy)
+                let moved = Element.path(JasPath(d: newD, fill: v.fill, stroke: v.stroke,
+                                                  opacity: v.opacity, transform: v.transform))
+                if let es = document.selection.first(where: { $0.path == hd.path }) {
+                    ctx.setStrokeColor(selectionColor)
+                    ctx.setLineWidth(1.0)
+                    ctx.setLineDash(phase: 0, lengths: [4, 4])
+                    drawElementOverlay(ctx, moved, selectedCPs: es.controlPoints)
+                    ctx.setLineDash(phase: 0, lengths: [])
+                }
+            }
+        }
         // Draw drag preview
         if let start = dragStart, let end = dragEnd {
             if moving {
@@ -499,6 +560,27 @@ class CanvasNSView: NSView {
             }
         }
         return false
+    }
+
+    private func hitTestHandle(_ pos: NSPoint) -> (path: ElementPath, anchorIdx: Int, handleType: String)? {
+        for es in document.selection {
+            let elem = document.getElement(es.path)
+            guard case .path(let v) = elem else { continue }
+            for cpIdx in es.controlPoints {
+                let (hIn, hOut) = pathHandlePositions(v.d, anchorIdx: cpIdx)
+                if let (hx, hy) = hIn {
+                    if abs(pos.x - hx) <= hitRadius && abs(pos.y - hy) <= hitRadius {
+                        return (es.path, cpIdx, "in")
+                    }
+                }
+                if let (hx, hy) = hOut {
+                    if abs(pos.x - hx) <= hitRadius && abs(pos.y - hy) <= hitRadius {
+                        return (es.path, cpIdx, "out")
+                    }
+                }
+            }
+        }
+        return nil
     }
 
     private func hitTestText(_ pos: NSPoint) -> (ElementPath, JasText)? {
@@ -725,6 +807,13 @@ class CanvasNSView: NSView {
         }
         if tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .text || tool == .line || tool == .rect || tool == .polygon {
             let pt = convert(event.locationInWindow, from: nil)
+            // Check if clicking on a Bezier handle → handle drag mode
+            if tool == .directSelection, let hit = hitTestHandle(pt) {
+                handleDrag = hit
+                handleDragStart = pt
+                handleDragEnd = pt
+                return
+            }
             if (tool == .selection || tool == .directSelection || tool == .groupSelection) && hitTestSelection(pt) {
                 dragStart = pt
                 dragEnd = pt
@@ -748,6 +837,11 @@ class CanvasNSView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if handleDrag != nil {
+            handleDragEnd = convert(event.locationInWindow, from: nil)
+            needsDisplay = true
+            return
+        }
         let tool = onToolRead?() ?? currentTool
         if tool == .pen {
             let pt = convert(event.locationInWindow, from: nil)
@@ -775,6 +869,20 @@ class CanvasNSView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if let hd = handleDrag, let start = handleDragStart {
+            let end = convert(event.locationInWindow, from: nil)
+            let dx = end.x - start.x
+            let dy = end.y - start.y
+            handleDrag = nil
+            handleDragStart = nil
+            handleDragEnd = nil
+            if dx != 0 || dy != 0 {
+                controller?.movePathHandle(hd.path, anchorIdx: hd.anchorIdx,
+                                           handleType: hd.handleType, dx: dx, dy: dy)
+            }
+            needsDisplay = true
+            return
+        }
         let tool = onToolRead?() ?? currentTool
         if tool == .pen {
             penDragging = false
