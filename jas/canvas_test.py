@@ -111,9 +111,9 @@ class CanvasWidgetTest(absltest.TestCase):
     def test_set_tool(self):
         canvas = self._make_canvas()
         canvas.set_tool(Tool.LINE)
-        self.assertEqual(canvas._current_tool, Tool.LINE)
+        self.assertEqual(canvas._current_tool_enum, Tool.LINE)
         canvas.set_tool(Tool.RECT)
-        self.assertEqual(canvas._current_tool, Tool.RECT)
+        self.assertEqual(canvas._current_tool_enum, Tool.RECT)
 
     def test_line_tool_creates_line_element(self):
         """Simulate mouse press/release with the line tool."""

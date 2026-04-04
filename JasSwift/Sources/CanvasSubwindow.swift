@@ -199,7 +199,6 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
         let str = NSAttributedString(string: v.content, attributes: attrs)
         ctx.saveGState()
         if v.isAreaText {
-            // Area text: CTFrameDraw expects unflipped coordinates, so flip around the rect center
             ctx.translateBy(x: 0, y: v.y + v.height)
             ctx.scaleBy(x: 1, y: -1)
             let framesetter = CTFramesetterCreateWithAttributedString(str)
@@ -207,7 +206,6 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
             let frame = CTFramesetterCreateFrame(framesetter, CFRangeMake(0, 0), path, nil)
             CTFrameDraw(frame, ctx)
         } else {
-            // Point text: single line
             ctx.textMatrix = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
             let line = CTLineCreateWithAttributedString(str)
             ctx.textPosition = CGPoint(x: v.x, y: v.y)
@@ -228,36 +226,14 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
     ctx.restoreGState()
 }
 
-// MARK: - Pen tool support
-
-/// A control point in the pen tool's in-progress path.
-class PenPoint {
-    var x: Double
-    var y: Double
-    var hxIn: Double
-    var hyIn: Double
-    var hxOut: Double
-    var hyOut: Double
-    var smooth: Bool
-
-    init(x: Double, y: Double) {
-        self.x = x; self.y = y
-        self.hxIn = x; self.hyIn = y
-        self.hxOut = x; self.hyOut = y
-        self.smooth = false
-    }
-}
-
 // MARK: - Selection overlay drawing
 
 private let selectionColor = CGColor(red: 0, green: 0.47, blue: 1.0, alpha: 1.0)
 private let handleSize: CGFloat = 6.0
 
-private func controlPoints(_ elem: Element) -> [(Double, Double)] {
-    elem.controlPointPositions
-}
-
-private func drawElementOverlay(_ ctx: CGContext, _ elem: Element, selectedCPs: Set<Int> = []) {
+/// Draw an element's selection overlay (outline + control handles).
+/// Internal so tools can call it via the ToolContext.
+func drawElementOverlay(_ ctx: CGContext, _ elem: Element, selectedCPs: Set<Int> = []) {
     ctx.setStrokeColor(selectionColor)
     ctx.setLineWidth(1.0)
     ctx.setLineDash(phase: 0, lengths: [])
@@ -305,7 +281,7 @@ private func drawElementOverlay(_ ctx: CGContext, _ elem: Element, selectedCPs: 
     // Draw Bezier handles for selected path control points
     let handleCircleRadius: CGFloat = 3.0
     if case .path(let v) = elem, !selectedCPs.isEmpty {
-        let anchors = controlPoints(elem)
+        let anchors = elem.controlPointPositions
         for cpIdx in selectedCPs {
             guard cpIdx < anchors.count else { continue }
             let (ax, ay) = anchors[cpIdx]
@@ -343,7 +319,7 @@ private func drawElementOverlay(_ ctx: CGContext, _ elem: Element, selectedCPs: 
 
     // Draw handles
     let half = handleSize / 2
-    for (i, (px, py)) in controlPoints(elem).enumerated() {
+    for (i, (px, py)) in elem.controlPointPositions.enumerated() {
         let r = CGRect(x: px - half, y: py - half, width: handleSize, height: handleSize)
         if selectedCPs.contains(i) {
             ctx.setFillColor(selectionColor)
@@ -401,67 +377,54 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: JasDocument) {
     }
 }
 
-// MARK: - Shift-constrain helper
-
-private func constrainAngle(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> (Double, Double) {
-    let dx = ex - sx, dy = ey - sy
-    let dist = hypot(dx, dy)
-    guard dist > 0 else { return (ex, ey) }
-    let angle = atan2(dy, dx)
-    let snapped = (angle / (.pi / 4)).rounded() * (.pi / 4)
-    return (sx + dist * cos(snapped), sy + dist * sin(snapped))
-}
-
-// MARK: - Regular polygon helper
-
-private let polygonSides = 5
-
-private func regularPolygonPoints(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, _ n: Int) -> [(Double, Double)] {
-    let ex = x2 - x1, ey = y2 - y1
-    let s = hypot(ex, ey)
-    guard s > 0 else { return Array(repeating: (x1, y1), count: n) }
-    let mx = (x1 + x2) / 2, my = (y1 + y2) / 2
-    let px = -ey / s, py = ex / s
-    let d = s / (2 * tan(.pi / Double(n)))
-    let cx = mx + d * px, cy = my + d * py
-    let r = s / (2 * sin(.pi / Double(n)))
-    let theta0 = atan2(y1 - cy, x1 - cx)
-    return (0..<n).map { k in
-        let angle = theta0 + 2 * .pi * Double(k) / Double(n)
-        return (cx + r * cos(angle), cy + r * sin(angle))
-    }
-}
-
 // MARK: - Canvas NSView for CoreGraphics drawing
 
 /// An NSView that draws the document's elements using CoreGraphics.
+/// Dispatches mouse/key events through the CanvasTool protocol.
 class CanvasNSView: NSView {
     var document: JasDocument = JasDocument()
     var controller: Controller?
-    var currentTool: Tool = .selection
+    var currentTool: Tool = .selection {
+        didSet {
+            if oldValue != currentTool, let ctx = toolContext {
+                tools[oldValue]?.deactivate(ctx)
+                tools[currentTool]?.activate(ctx)
+            }
+        }
+    }
     var onToolRead: (() -> Tool)?
 
-    // Drag state for drawing tools
-    private var dragStart: NSPoint?
-    private var dragEnd: NSPoint?
-    // Move-drag state
-    private var moving: Bool = false
-    private let hitRadius: CGFloat = 6.0
-    // Inline text editing state
+    // Tool system
+    let tools: [Tool: CanvasTool] = createTools()
+
+    // Inline text editing state (managed by canvas, exposed via context)
     private var textEditor: NSTextField?
     private var editingPath: ElementPath?
-    // Handle drag state (for Bezier control handles)
-    private var handleDrag: (path: ElementPath, anchorIdx: Int, handleType: String)?
-    private var handleDragStart: NSPoint?
-    private var handleDragEnd: NSPoint?
-    // Pen tool state
-    private var penPoints: [PenPoint] = []
-    private var penDragging: Bool = false
-    private var penMouseX: Double = 0
-    private var penMouseY: Double = 0
+
+    private let hitRadius: CGFloat = 6.0
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+
+    var activeTool: CanvasTool {
+        let tool = onToolRead?() ?? currentTool
+        return tools[tool]!
+    }
+
+    var toolContext: ToolContext? {
+        guard let controller = controller else { return nil }
+        return ToolContext(
+            model: controller.model,
+            controller: controller,
+            hitTestSelection: { [weak self] pos in self?.hitTestSelection(pos) ?? false },
+            hitTestHandle: { [weak self] pos in self?.hitTestHandle(pos) },
+            hitTestText: { [weak self] pos in self?.hitTestText(pos) },
+            requestUpdate: { [weak self] in self?.needsDisplay = true },
+            startTextEdit: { [weak self] path, textElem in self?.startTextEdit(path: path, textElem: textElem) },
+            commitTextEdit: { [weak self] in self?.commitTextEdit() },
+            drawElementOverlay: { ctx, elem, cps in drawElementOverlay(ctx, elem, selectedCPs: cps) }
+        )
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -484,68 +447,13 @@ class CanvasNSView: NSView {
         }
         // Draw selection overlays
         drawSelectionOverlays(ctx, document)
-        // Draw handle drag preview
-        if let hd = handleDrag, let start = handleDragStart, let end = handleDragEnd {
-            let dx = end.x - start.x
-            let dy = end.y - start.y
-            let elem = document.getElement(hd.path)
-            if case .path(let v) = elem {
-                let newD = movePathHandle(v.d, anchorIdx: hd.anchorIdx, handleType: hd.handleType, dx: dx, dy: dy)
-                let moved = Element.path(JasPath(d: newD, fill: v.fill, stroke: v.stroke,
-                                                  opacity: v.opacity, transform: v.transform))
-                if let es = document.selection.first(where: { $0.path == hd.path }) {
-                    ctx.setStrokeColor(selectionColor)
-                    ctx.setLineWidth(1.0)
-                    ctx.setLineDash(phase: 0, lengths: [4, 4])
-                    drawElementOverlay(ctx, moved, selectedCPs: es.controlPoints)
-                    ctx.setLineDash(phase: 0, lengths: [])
-                }
-            }
-        }
-        // Draw drag preview
-        if let start = dragStart, let end = dragEnd {
-            if moving {
-                let dx = end.x - start.x
-                let dy = end.y - start.y
-                for es in document.selection {
-                    let elem = document.getElement(es.path)
-                    let moved = elem.moveControlPoints(es.controlPoints, dx: dx, dy: dy)
-                    ctx.setStrokeColor(selectionColor)
-                    ctx.setLineWidth(1.0)
-                    ctx.setLineDash(phase: 0, lengths: [4, 4])
-                    drawElementOverlay(ctx, moved, selectedCPs: es.controlPoints)
-                }
-            } else {
-                let tool = onToolRead?() ?? currentTool
-                ctx.setStrokeColor(CGColor(gray: 0.4, alpha: 1.0))
-                ctx.setLineWidth(1.0)
-                ctx.setLineDash(phase: 0, lengths: [4, 4])
-                if tool == .line {
-                    ctx.move(to: start)
-                    ctx.addLine(to: end)
-                } else if tool == .polygon {
-                    let pts = regularPolygonPoints(start.x, start.y, end.x, end.y, polygonSides)
-                    if let first = pts.first {
-                        ctx.move(to: CGPoint(x: first.0, y: first.1))
-                        for i in 1..<pts.count {
-                            ctx.addLine(to: CGPoint(x: pts[i].0, y: pts[i].1))
-                        }
-                        ctx.closePath()
-                    }
-                } else if tool == .text || tool == .rect || tool == .selection || tool == .directSelection || tool == .groupSelection {
-                    let r = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
-                                   width: abs(end.x - start.x), height: abs(end.y - start.y))
-                    ctx.addRect(r)
-                }
-                ctx.strokePath()
-            }
-        }
-        // Draw pen tool overlay
-        let tool = onToolRead?() ?? currentTool
-        if tool == .pen {
-            drawPenOverlay(ctx)
+        // Draw active tool overlay
+        if let toolCtx = toolContext {
+            activeTool.drawOverlay(toolCtx, ctx)
         }
     }
+
+    // MARK: - Hit tests
 
     private func hitTestSelection(_ pos: NSPoint) -> Bool {
         for es in document.selection {
@@ -596,6 +504,8 @@ class CanvasNSView: NSView {
         }
         return nil
     }
+
+    // MARK: - Text editing
 
     private func startTextEdit(path: ElementPath, textElem: JasText) {
         commitTextEdit()
@@ -652,379 +562,70 @@ class CanvasNSView: NSView {
         editingPath = nil
     }
 
-    // -- Pen tool methods --
-
-    private let penCloseRadius: Double = 6.0
+    // MARK: - Pen tool backward-compatibility
 
     func penFinish(forceClose: Bool = false) {
-        guard penPoints.count >= 2 else {
-            penPoints.removeAll()
-            penDragging = false
-            needsDisplay = true
-            return
-        }
-        let p0 = penPoints[0]
-        let pn = penPoints.last!
-        let dist = hypot(pn.x - p0.x, pn.y - p0.y)
-        let close = forceClose || (penPoints.count >= 3 && dist <= penCloseRadius)
-        // Only skip last point if it actually coincides with start
-        let skipLast = close && penPoints.count >= 3 && dist <= penCloseRadius
-        var cmds: [PathCommand] = []
-        cmds.append(.moveTo(p0.x, p0.y))
-        let n = skipLast ? penPoints.count - 1 : penPoints.count
-        for i in 1..<n {
-            let prev = penPoints[i - 1]
-            let curr = penPoints[i]
-            cmds.append(.curveTo(x1: prev.hxOut, y1: prev.hyOut,
-                                 x2: curr.hxIn, y2: curr.hyIn,
-                                 x: curr.x, y: curr.y))
-        }
-        if close {
-            let last = penPoints[n - 1]
-            cmds.append(.curveTo(x1: last.hxOut, y1: last.hyOut,
-                                 x2: p0.hxIn, y2: p0.hyIn,
-                                 x: p0.x, y: p0.y))
-            cmds.append(.closePath)
-        }
-        let elem = Element.path(JasPath(
-            d: cmds,
-            stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)
-        ))
-        controller?.addElement(elem)
-        penPoints.removeAll()
-        penDragging = false
-        needsDisplay = true
+        guard let ctx = toolContext, let penTool = tools[.pen] as? PenTool else { return }
+        penTool.finish(ctx, close: forceClose)
     }
 
     func penCancel() {
-        penPoints.removeAll()
-        penDragging = false
+        guard let penTool = tools[.pen] as? PenTool else { return }
+        penTool.points.removeAll()
+        penTool.penDragging = false
         needsDisplay = true
     }
 
-    private func drawPenOverlay(_ ctx: CGContext) {
-        guard !penPoints.isEmpty else { return }
-
-        // Draw committed curve segments
-        if penPoints.count >= 2 {
-            ctx.setStrokeColor(CGColor(gray: 0, alpha: 1))
-            ctx.setLineWidth(1.0)
-            ctx.setLineDash(phase: 0, lengths: [])
-            ctx.move(to: CGPoint(x: penPoints[0].x, y: penPoints[0].y))
-            for i in 1..<penPoints.count {
-                let prev = penPoints[i - 1]
-                let curr = penPoints[i]
-                ctx.addCurve(to: CGPoint(x: curr.x, y: curr.y),
-                             control1: CGPoint(x: prev.hxOut, y: prev.hyOut),
-                             control2: CGPoint(x: curr.hxIn, y: curr.hyIn))
-            }
-            ctx.strokePath()
-        }
-
-        // Draw preview curve from last point to mouse
-        if !penDragging {
-            let last = penPoints.last!
-            let p0 = penPoints[0]
-            let nearStart = penPoints.count >= 2 && hypot(penMouseX - p0.x, penMouseY - p0.y) <= penCloseRadius
-            ctx.setStrokeColor(CGColor(gray: 0.4, alpha: 1))
-            ctx.setLineWidth(1.0)
-            ctx.setLineDash(phase: 0, lengths: [4, 4])
-            ctx.move(to: CGPoint(x: last.x, y: last.y))
-            if nearStart {
-                ctx.addCurve(to: CGPoint(x: p0.x, y: p0.y),
-                             control1: CGPoint(x: last.hxOut, y: last.hyOut),
-                             control2: CGPoint(x: p0.hxIn, y: p0.hyIn))
-            } else {
-                ctx.addCurve(to: CGPoint(x: penMouseX, y: penMouseY),
-                             control1: CGPoint(x: last.hxOut, y: last.hyOut),
-                             control2: CGPoint(x: penMouseX, y: penMouseY))
-            }
-            ctx.strokePath()
-            ctx.setLineDash(phase: 0, lengths: [])
-        }
-
-        // Draw handle lines and anchor points
-        let half = handleSize / 2
-        for pt in penPoints {
-            if pt.smooth {
-                ctx.setStrokeColor(selectionColor)
-                ctx.setLineWidth(1.0)
-                ctx.move(to: CGPoint(x: pt.hxIn, y: pt.hyIn))
-                ctx.addLine(to: CGPoint(x: pt.hxOut, y: pt.hyOut))
-                ctx.strokePath()
-                // Handle circles
-                let r: CGFloat = 3.0
-                for (hx, hy) in [(pt.hxIn, pt.hyIn), (pt.hxOut, pt.hyOut)] {
-                    let rect = CGRect(x: hx - r, y: hy - r, width: r * 2, height: r * 2)
-                    ctx.setFillColor(.white)
-                    ctx.fillEllipse(in: rect)
-                    ctx.setStrokeColor(selectionColor)
-                    ctx.strokeEllipse(in: rect)
-                }
-            }
-            // Anchor square
-            let rect = CGRect(x: pt.x - half, y: pt.y - half, width: handleSize, height: handleSize)
-            ctx.setFillColor(selectionColor)
-            ctx.fill(rect)
-            ctx.setStrokeColor(selectionColor)
-            ctx.stroke(rect)
-        }
-    }
+    // MARK: - Event dispatch
 
     override func keyDown(with event: NSEvent) {
-        let tool = onToolRead?() ?? currentTool
-        if tool == .pen && !penPoints.isEmpty {
-            if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 { // Escape / Return / Enter
-                penFinish()
-                return
-            }
+        if let ctx = toolContext, activeTool.onKey(ctx, keyCode: event.keyCode) {
+            return
         }
         super.keyDown(with: event)
     }
 
     override func mouseDown(with event: NSEvent) {
-        let tool = onToolRead?() ?? currentTool
-        if tool == .pen {
-            if event.clickCount >= 2 {
-                // Remove the point added by the first click of the double-click
-                if !penPoints.isEmpty { penPoints.removeLast() }
-                penFinish()
-                return
-            }
-            let pt = convert(event.locationInWindow, from: nil)
-            // If clicking near the start point with 2+ points, close the path
-            if penPoints.count >= 2 {
-                let p0 = penPoints[0]
-                if hypot(pt.x - p0.x, pt.y - p0.y) <= penCloseRadius {
-                    penFinish(forceClose: true)
-                    return
-                }
-            }
-            penDragging = true
-            penPoints.append(PenPoint(x: pt.x, y: pt.y))
-            needsDisplay = true
+        guard let ctx = toolContext else { return }
+        let pt = convert(event.locationInWindow, from: nil)
+        if event.clickCount >= 2 {
+            activeTool.onDoubleClick(ctx, x: pt.x, y: pt.y)
             return
         }
-        if tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .text || tool == .line || tool == .rect || tool == .polygon {
-            let pt = convert(event.locationInWindow, from: nil)
-            // Check if clicking on a Bezier handle → handle drag mode
-            if tool == .directSelection, let hit = hitTestHandle(pt) {
-                handleDrag = hit
-                handleDragStart = pt
-                handleDragEnd = pt
-                return
-            }
-            if (tool == .selection || tool == .directSelection || tool == .groupSelection) && hitTestSelection(pt) {
-                dragStart = pt
-                dragEnd = pt
-                moving = true
-                return
-            }
-            dragStart = pt
-            dragEnd = pt
-            moving = false
-        }
+        let shift = event.modifierFlags.contains(.shift)
+        let alt = event.modifierFlags.contains(.option)
+        activeTool.onPress(ctx, x: pt.x, y: pt.y, shift: shift, alt: alt)
     }
 
     override func mouseMoved(with event: NSEvent) {
-        let tool = onToolRead?() ?? currentTool
-        if tool == .pen {
-            let pt = convert(event.locationInWindow, from: nil)
-            penMouseX = pt.x
-            penMouseY = pt.y
-            needsDisplay = true
-        }
+        guard let ctx = toolContext else { return }
+        let pt = convert(event.locationInWindow, from: nil)
+        activeTool.onMove(ctx, x: pt.x, y: pt.y, shift: false, dragging: false)
     }
 
     override func mouseDragged(with event: NSEvent) {
-        if handleDrag != nil {
-            handleDragEnd = convert(event.locationInWindow, from: nil)
-            needsDisplay = true
-            return
-        }
-        let tool = onToolRead?() ?? currentTool
-        if tool == .pen {
-            let pt = convert(event.locationInWindow, from: nil)
-            penMouseX = pt.x
-            penMouseY = pt.y
-            if penDragging, let last = penPoints.last {
-                last.hxOut = pt.x
-                last.hyOut = pt.y
-                last.hxIn = 2 * last.x - pt.x
-                last.hyIn = 2 * last.y - pt.y
-                last.smooth = true
-            }
-            needsDisplay = true
-            return
-        }
-        if let start = dragStart {
-            var pt = convert(event.locationInWindow, from: nil)
-            if event.modifierFlags.contains(.shift) {
-                let (cx, cy) = constrainAngle(start.x, start.y, pt.x, pt.y)
-                pt = NSPoint(x: cx, y: cy)
-            }
-            dragEnd = pt
-            needsDisplay = true
-        }
+        guard let ctx = toolContext else { return }
+        let pt = convert(event.locationInWindow, from: nil)
+        let shift = event.modifierFlags.contains(.shift)
+        activeTool.onMove(ctx, x: pt.x, y: pt.y, shift: shift, dragging: true)
     }
 
     override func mouseUp(with event: NSEvent) {
-        if let hd = handleDrag, let start = handleDragStart {
-            let end = convert(event.locationInWindow, from: nil)
-            let dx = end.x - start.x
-            let dy = end.y - start.y
-            handleDrag = nil
-            handleDragStart = nil
-            handleDragEnd = nil
-            if dx != 0 || dy != 0 {
-                controller?.movePathHandle(hd.path, anchorIdx: hd.anchorIdx,
-                                           handleType: hd.handleType, dx: dx, dy: dy)
-            }
-            needsDisplay = true
-            return
-        }
-        let tool = onToolRead?() ?? currentTool
-        if tool == .pen {
-            penDragging = false
-            needsDisplay = true
-            return
-        }
-        guard dragStart != nil else { return }
-        let end = convert(event.locationInWindow, from: nil)
+        guard let ctx = toolContext else { return }
+        let pt = convert(event.locationInWindow, from: nil)
         let shift = event.modifierFlags.contains(.shift)
-        let option = event.modifierFlags.contains(.option)
-        commitDrag(to: end, shift: shift, option: option)
+        let alt = event.modifierFlags.contains(.option)
+        activeTool.onRelease(ctx, x: pt.x, y: pt.y, shift: shift, alt: alt)
     }
+
+    // MARK: - Test helper
 
     /// Test helper: simulate a complete drag from start to end point.
     func simulateDrag(from start: NSPoint, to end: NSPoint, extend: Bool = false) {
-        let tool = onToolRead?() ?? currentTool
-        guard tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .pen || tool == .text || tool == .line || tool == .rect || tool == .polygon else { return }
-        dragStart = start
-        dragEnd = end
-        commitDrag(to: end, shift: extend)
-    }
-
-    private func commitDrag(to rawEnd: NSPoint, shift: Bool = false, option: Bool = false) {
-        guard let start = dragStart, let controller = controller else {
-            dragStart = nil
-            dragEnd = nil
-            moving = false
-            return
-        }
-        let tool = onToolRead?() ?? currentTool
-        let wasMoving = moving
-        dragStart = nil
-        dragEnd = nil
-        moving = false
-
-        if wasMoving {
-            var end = rawEnd
-            if shift {
-                let (cx, cy) = constrainAngle(start.x, start.y, end.x, end.y)
-                end = NSPoint(x: cx, y: cy)
-            }
-            let dx = end.x - start.x
-            let dy = end.y - start.y
-            if dx != 0 || dy != 0 {
-                if option {
-                    controller.copySelection(dx: dx, dy: dy)
-                } else {
-                    controller.moveSelection(dx: dx, dy: dy)
-                }
-            }
-            needsDisplay = true
-            return
-        }
-
-        // Selection tools: shift means extend
-        let extend = shift
-        if tool == .selection {
-            let x = min(start.x, rawEnd.x)
-            let y = min(start.y, rawEnd.y)
-            let w = abs(rawEnd.x - start.x)
-            let h = abs(rawEnd.y - start.y)
-            controller.selectRect(x: x, y: y, width: w, height: h, extend: extend)
-            return
-        }
-
-        if tool == .groupSelection {
-            let x = min(start.x, rawEnd.x)
-            let y = min(start.y, rawEnd.y)
-            let w = abs(rawEnd.x - start.x)
-            let h = abs(rawEnd.y - start.y)
-            controller.groupSelectRect(x: x, y: y, width: w, height: h, extend: extend)
-            return
-        }
-
-        if tool == .directSelection {
-            let x = min(start.x, rawEnd.x)
-            let y = min(start.y, rawEnd.y)
-            let w = abs(rawEnd.x - start.x)
-            let h = abs(rawEnd.y - start.y)
-            controller.directSelectRect(x: x, y: y, width: w, height: h, extend: extend)
-            return
-        }
-
-        // Text tool: edit existing, place point text, or drag area text
-        if tool == .text {
-            let w = abs(rawEnd.x - start.x)
-            let h = abs(rawEnd.y - start.y)
-            if w > 4 || h > 4 {
-                // Dragged a marquee: create area text
-                let tx = min(start.x, rawEnd.x)
-                let ty = min(start.y, rawEnd.y)
-                let elem = Element.text(JasText(
-                    x: tx, y: ty,
-                    content: "Lorem Ipsum",
-                    width: w, height: h,
-                    fill: JasFill(color: JasColor(r: 0, g: 0, b: 0))
-                ))
-                controller.addElement(elem)
-            } else {
-                // Click: edit existing or place point text
-                if let (path, textElem) = hitTestText(start) {
-                    startTextEdit(path: path, textElem: textElem)
-                } else {
-                    let elem = Element.text(JasText(
-                        x: start.x, y: start.y,
-                        content: "Lorem Ipsum",
-                        fill: JasFill(color: JasColor(r: 0, g: 0, b: 0))
-                    ))
-                    controller.addElement(elem)
-                }
-            }
-            return
-        }
-
-        // Drawing tools: shift means constrain angle
-        var end = rawEnd
-        if shift {
-            let (cx, cy) = constrainAngle(start.x, start.y, end.x, end.y)
-            end = NSPoint(x: cx, y: cy)
-        }
-        let elem: Element
-        if tool == .line {
-            elem = .line(JasLine(
-                x1: start.x, y1: start.y, x2: end.x, y2: end.y,
-                stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)
-            ))
-        } else if tool == .rect {
-            elem = .rect(JasRect(
-                x: min(start.x, end.x), y: min(start.y, end.y),
-                width: abs(end.x - start.x), height: abs(end.y - start.y),
-                stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)
-            ))
-        } else if tool == .polygon {
-            let pts = regularPolygonPoints(start.x, start.y, end.x, end.y, polygonSides)
-            elem = .polygon(JasPolygon(
-                points: pts,
-                stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)
-            ))
-        } else {
-            return
-        }
-        controller.addElement(elem)
+        guard let ctx = toolContext else { return }
+        activeTool.onPress(ctx, x: start.x, y: start.y, shift: extend, alt: false)
+        activeTool.onMove(ctx, x: end.x, y: end.y, shift: extend, dragging: true)
+        activeTool.onRelease(ctx, x: end.x, y: end.y, shift: extend, alt: false)
     }
 }
 

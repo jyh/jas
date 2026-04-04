@@ -173,22 +173,22 @@ private func insertAfterInGroup(_ node: Element, _ rest: [Int], _ newElem: Eleme
     return withChildren(node, children)
 }
 
-private func removeFromGroup(_ node: Element, _ rest: [Int]) -> Element {
-    var children = childrenOf(node)
-    if rest.count == 1 {
-        children.remove(at: rest[0])
-    } else {
-        children[rest[0]] = removeFromGroup(children[rest[0]], Array(rest.dropFirst()))
-    }
-    return withChildren(node, children)
-}
-
 private func replaceInGroup(_ node: Element, _ rest: [Int], _ newElem: Element) -> Element {
     var children = childrenOf(node)
     if rest.count == 1 {
         children[rest[0]] = newElem
     } else {
         children[rest[0]] = replaceInGroup(children[rest[0]], Array(rest.dropFirst()), newElem)
+    }
+    return withChildren(node, children)
+}
+
+private func removeFromGroup(_ node: Element, _ rest: [Int]) -> Element {
+    var children = childrenOf(node)
+    if rest.count == 1 {
+        children.remove(at: rest[0])
+    } else {
+        children[rest[0]] = removeFromGroup(children[rest[0]], Array(rest.dropFirst()))
     }
     return withChildren(node, children)
 }
