@@ -10,24 +10,32 @@ from element import (
     SmoothQuadTo, Stroke, Text, Transform,
 )
 from model import Model
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
 
 class ToolbarTest(absltest.TestCase):
 
-    def test_tool_enum_has_three_values(self):
+    def test_tool_enum_values(self):
         tools = list(Tool)
-        self.assertEqual(len(tools), 3)
+        self.assertEqual(len(tools), 4)
         self.assertIn(Tool.SELECTION, tools)
         self.assertIn(Tool.DIRECT_SELECTION, tools)
         self.assertIn(Tool.LINE, tools)
+        self.assertIn(Tool.RECT, tools)
 
     def test_tool_selection_value(self):
         self.assertEqual(Tool.SELECTION.value, 1)
 
     def test_tool_direct_selection_value(self):
         self.assertEqual(Tool.DIRECT_SELECTION.value, 2)
+
+    def test_tool_line_value(self):
+        self.assertEqual(Tool.LINE.value, 3)
+
+    def test_tool_rect_value(self):
+        self.assertEqual(Tool.RECT.value, 4)
 
 
 class BoundingBoxTest(absltest.TestCase):
@@ -89,6 +97,103 @@ class CanvasWidgetTest(absltest.TestCase):
         canvas = self._make_canvas(model)
         model.document = Document(title="New Title")
         self.assertEqual(model.document.title, "New Title")
+
+    def test_set_tool(self):
+        canvas = self._make_canvas()
+        canvas.set_tool(Tool.LINE)
+        self.assertEqual(canvas._current_tool, Tool.LINE)
+        canvas.set_tool(Tool.RECT)
+        self.assertEqual(canvas._current_tool, Tool.RECT)
+
+    def test_line_tool_creates_line_element(self):
+        """Simulate mouse press/release with the line tool."""
+        model = Model()
+        ctrl = Controller(model=model)
+        canvas = CanvasWidget(model=model, controller=ctrl)
+        canvas.set_tool(Tool.LINE)
+        # Simulate drag from (10,20) to (50,60)
+        from unittest.mock import MagicMock
+        press_event = MagicMock()
+        press_event.button.return_value = Qt.LeftButton
+        press_event.position.return_value = QPointF(10, 20)
+        canvas.mousePressEvent(press_event)
+        release_event = MagicMock()
+        release_event.button.return_value = Qt.LeftButton
+        release_event.position.return_value = QPointF(50, 60)
+        canvas.mouseReleaseEvent(release_event)
+        # Should have created a layer with a Line element
+        doc = model.document
+        self.assertEqual(len(doc.layers), 1)
+        child = doc.layers[0].children[0]
+        self.assertIsInstance(child, Line)
+        self.assertEqual(child.x1, 10)
+        self.assertEqual(child.y1, 20)
+        self.assertEqual(child.x2, 50)
+        self.assertEqual(child.y2, 60)
+
+    def test_rect_tool_creates_rect_element(self):
+        """Simulate mouse press/release with the rect tool."""
+        model = Model()
+        ctrl = Controller(model=model)
+        canvas = CanvasWidget(model=model, controller=ctrl)
+        canvas.set_tool(Tool.RECT)
+        from unittest.mock import MagicMock
+        press_event = MagicMock()
+        press_event.button.return_value = Qt.LeftButton
+        press_event.position.return_value = QPointF(50, 60)
+        canvas.mousePressEvent(press_event)
+        release_event = MagicMock()
+        release_event.button.return_value = Qt.LeftButton
+        release_event.position.return_value = QPointF(10, 20)
+        canvas.mouseReleaseEvent(release_event)
+        doc = model.document
+        self.assertEqual(len(doc.layers), 1)
+        child = doc.layers[0].children[0]
+        self.assertIsInstance(child, Rect)
+        # Should normalize: min corner is (10,20), size is (40,40)
+        self.assertEqual(child.x, 10)
+        self.assertEqual(child.y, 20)
+        self.assertEqual(child.width, 40)
+        self.assertEqual(child.height, 40)
+
+    def test_drawing_adds_to_existing_layer(self):
+        """Drawing when a layer already exists appends to it."""
+        model = Model()
+        ctrl = Controller(model=model)
+        model.document = Document(
+            layers=(Layer(name="L1", children=(
+                Line(x1=0, y1=0, x2=1, y2=1, stroke=Stroke(color=Color(0, 0, 0))),
+            )),),
+        )
+        canvas = CanvasWidget(model=model, controller=ctrl)
+        canvas.set_tool(Tool.LINE)
+        from unittest.mock import MagicMock
+        press_event = MagicMock()
+        press_event.button.return_value = Qt.LeftButton
+        press_event.position.return_value = QPointF(0, 0)
+        canvas.mousePressEvent(press_event)
+        release_event = MagicMock()
+        release_event.button.return_value = Qt.LeftButton
+        release_event.position.return_value = QPointF(99, 99)
+        canvas.mouseReleaseEvent(release_event)
+        doc = model.document
+        self.assertEqual(len(doc.layers), 1)
+        self.assertEqual(len(doc.layers[0].children), 2)
+
+    def test_selection_tool_ignores_mouse(self):
+        """Selection tool should not create elements on click-drag."""
+        model = Model()
+        ctrl = Controller(model=model)
+        canvas = CanvasWidget(model=model, controller=ctrl)
+        canvas.set_tool(Tool.SELECTION)
+        from unittest.mock import MagicMock
+        press_event = MagicMock()
+        press_event.button.return_value = Qt.LeftButton
+        press_event.position.return_value = QPointF(10, 10)
+        canvas.mousePressEvent(press_event)
+        self.assertIsNone(canvas._drag_start)
+        # Default layer should still have no children
+        self.assertEqual(len(model.document.layers[0].children), 0)
 
 
 class DrawElementTest(absltest.TestCase):

@@ -3,7 +3,7 @@
     Views register callbacks via on_document_changed to be notified
     whenever the document is replaced. *)
 
-class model ?(document = Document.make_document []) () =
+class model ?(document = Document.default_document ()) () =
   object (_self)
     val mutable doc = document
     val mutable listeners : (Document.document -> unit) list = []

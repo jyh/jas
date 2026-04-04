@@ -4,7 +4,7 @@ let () =
   (* Test default document *)
   let ctrl = Jas.Controller.create () in
   assert (ctrl#document.Jas.Document.title = "Untitled");
-  assert (ctrl#document.Jas.Document.layers = []);
+  assert (List.length ctrl#document.Jas.Document.layers = 1);
 
   (* Test initial document *)
   let doc = Jas.Document.make_document ~title:"Test" [] in
@@ -21,7 +21,7 @@ let () =
   let ctrl4 = Jas.Controller.create () in
   let layer = make_layer ~name:"L1" [make_rect 0.0 0.0 10.0 10.0] in
   ctrl4#add_layer layer;
-  assert (List.length ctrl4#document.Jas.Document.layers = 1);
+  assert (List.length ctrl4#document.Jas.Document.layers = 2);
 
   (* Test remove_layer *)
   let l1 = make_layer ~name:"A" [] in

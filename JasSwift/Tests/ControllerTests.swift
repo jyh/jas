@@ -4,7 +4,7 @@ import Testing
 @Test func controllerDefaultDocument() {
     let ctrl = Controller()
     #expect(ctrl.document.title == "Untitled")
-    #expect(ctrl.document.layers.isEmpty)
+    #expect(ctrl.document.layers.count == 1)
 }
 
 @Test func controllerInitialDocument() {
@@ -23,8 +23,8 @@ import Testing
     let ctrl = Controller()
     let layer = JasLayer(name: "L1", children: [.rect(JasRect(x: 0, y: 0, width: 10, height: 10))])
     ctrl.addLayer(layer)
-    #expect(ctrl.document.layers.count == 1)
-    #expect(ctrl.document.layers[0].name == "L1")
+    #expect(ctrl.document.layers.count == 2)
+    #expect(ctrl.document.layers[1].name == "L1")
 }
 
 @Test func controllerRemoveLayer() {

@@ -2,7 +2,7 @@ let () =
   (* Test default document *)
   let model = Jas.Model.create () in
   assert (model#document.Jas.Document.title = "Untitled");
-  assert (model#document.Jas.Document.layers = []);
+  assert (List.length model#document.Jas.Document.layers = 1);
 
   (* Test initial document *)
   let doc = Jas.Document.make_document ~title:"Test" [] in

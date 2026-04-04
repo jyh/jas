@@ -202,7 +202,7 @@ class CanvasWidget(QWidget):
         self._controller = controller
         self._bbox = bbox
         self._current_tool = Tool.SELECTION
-        # Drag state for line tool
+        # Drag state for drawing tools
         self._drag_start: QPointF | None = None
         self._drag_end: QPointF | None = None
         self.setMinimumSize(320, 240)
@@ -223,7 +223,7 @@ class CanvasWidget(QWidget):
         return QSize(int(self._bbox.width), int(self._bbox.height))
 
     def mousePressEvent(self, event):
-        if self._current_tool == Tool.LINE and event.button() == Qt.LeftButton:
+        if self._current_tool in (Tool.LINE, Tool.RECT) and event.button() == Qt.LeftButton:
             self._drag_start = event.position()
             self._drag_end = event.position()
 
@@ -236,29 +236,41 @@ class CanvasWidget(QWidget):
         if self._drag_start is not None and event.button() == Qt.LeftButton:
             end = event.position()
             start = self._drag_start
+            tool = self._current_tool
             self._drag_start = None
             self._drag_end = None
-            # Create a Line element with a default black stroke
-            line = Line(
-                x1=start.x(), y1=start.y(),
-                x2=end.x(), y2=end.y(),
-                stroke=Stroke(color=Color(0, 0, 0), width=1.0),
-            )
-            # Add to the first layer, creating one if needed
-            doc = self._model.document
-            if doc.layers:
-                layer = doc.layers[0]
-                new_layer = Layer(
-                    name=layer.name,
-                    children=layer.children + (line,),
-                    opacity=layer.opacity,
-                    transform=layer.transform,
+            # Create the element based on current tool
+            if tool == Tool.LINE:
+                elem = Line(
+                    x1=start.x(), y1=start.y(),
+                    x2=end.x(), y2=end.y(),
+                    stroke=Stroke(color=Color(0, 0, 0), width=1.0),
                 )
-                new_layers = (new_layer,) + doc.layers[1:]
+            elif tool == Tool.RECT:
+                x = min(start.x(), end.x())
+                y = min(start.y(), end.y())
+                w = abs(end.x() - start.x())
+                h = abs(end.y() - start.y())
+                elem = Rect(
+                    x=x, y=y, width=w, height=h,
+                    stroke=Stroke(color=Color(0, 0, 0), width=1.0),
+                )
             else:
-                new_layers = (Layer(name="Layer 1", children=(line,)),)
+                return
+            # Add to the selected layer
+            doc = self._model.document
+            idx = doc.selected_layer
+            layer = doc.layers[idx]
+            new_layer = Layer(
+                name=layer.name,
+                children=layer.children + (elem,),
+                opacity=layer.opacity,
+                transform=layer.transform,
+            )
+            new_layers = doc.layers[:idx] + (new_layer,) + doc.layers[idx + 1:]
             self._controller.set_document(
-                Document(title=doc.title, layers=new_layers),
+                Document(title=doc.title, layers=new_layers,
+                         selected_layer=idx),
             )
 
     def paintEvent(self, event):
@@ -268,9 +280,13 @@ class CanvasWidget(QWidget):
         doc = self._model.document
         for layer in doc.layers:
             _draw_element(painter, layer)
-        # Draw drag preview for line tool
+        # Draw drag preview
         if self._drag_start is not None and self._drag_end is not None:
             pen = QPen(QColor(100, 100, 100), 1.0, Qt.DashLine)
             painter.setPen(pen)
-            painter.drawLine(self._drag_start, self._drag_end)
+            painter.setBrush(QBrush())
+            if self._current_tool == Tool.LINE:
+                painter.drawLine(self._drag_start, self._drag_end)
+            elif self._current_tool == Tool.RECT:
+                painter.drawRect(QRectF(self._drag_start, self._drag_end).normalized())
         painter.end()

@@ -9,6 +9,7 @@ class Tool(Enum):
     SELECTION = auto()
     DIRECT_SELECTION = auto()
     LINE = auto()
+    RECT = auto()
 
 
 class ToolButton(QToolButton):
@@ -45,6 +46,8 @@ class ToolButton(QToolButton):
             self._draw_direct_selection_arrow(painter)
         elif self.tool == Tool.LINE:
             self._draw_line_icon(painter)
+        elif self.tool == Tool.RECT:
+            self._draw_rect_icon(painter)
 
     def _draw_selection_arrow(self, painter):
         """Filled arrow pointing upper-right."""
@@ -82,6 +85,12 @@ class ToolButton(QToolButton):
         painter.setPen(QPen(QColor("#cccccc"), 2.0))
         painter.drawLine(4, 24, 24, 4)
 
+    def _draw_rect_icon(self, painter):
+        """Rectangle outline."""
+        painter.setPen(QPen(QColor("#cccccc"), 1.5))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(4, 6, 20, 16)
+
 
 class Toolbar(QWidget):
     """Vertical toolbar with tool icons in a 2-column grid."""
@@ -109,6 +118,7 @@ class Toolbar(QWidget):
             (Tool.SELECTION, 0, 0),
             (Tool.DIRECT_SELECTION, 0, 1),
             (Tool.LINE, 1, 0),
+            (Tool.RECT, 1, 1),
         ]
         for tool, row, col in tools:
             btn = ToolButton(tool)

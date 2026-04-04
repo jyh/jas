@@ -11,7 +11,7 @@ class ControllerTest(absltest.TestCase):
     def test_default_document(self):
         ctrl = Controller()
         self.assertEqual(ctrl.document.title, "Untitled")
-        self.assertEqual(ctrl.document.layers, ())
+        self.assertEqual(len(ctrl.document.layers), 1)
 
     def test_initial_document(self):
         doc = Document(title="Test")
@@ -28,8 +28,8 @@ class ControllerTest(absltest.TestCase):
         ctrl = Controller()
         layer = Layer(children=(Rect(x=0, y=0, width=10, height=10),), name="L1")
         ctrl.add_layer(layer)
-        self.assertEqual(len(ctrl.document.layers), 1)
-        self.assertEqual(ctrl.document.layers[0].name, "L1")
+        self.assertEqual(len(ctrl.document.layers), 2)
+        self.assertEqual(ctrl.document.layers[1].name, "L1")
 
     def test_remove_layer(self):
         l1 = Layer(children=(), name="A")

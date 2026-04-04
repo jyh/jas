@@ -10,7 +10,7 @@ class ModelTest(absltest.TestCase):
     def test_default_document(self):
         model = Model()
         self.assertEqual(model.document.title, "Untitled")
-        self.assertEqual(model.document.layers, ())
+        self.assertEqual(len(model.document.layers), 1)
 
     def test_initial_document(self):
         doc = Document(title="Test")
