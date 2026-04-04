@@ -21,6 +21,20 @@ from model import Model
 from toolbar import Tool
 
 
+class PenPoint:
+    """A control point in the pen tool's in-progress path."""
+    __slots__ = ('x', 'y', 'hx_in', 'hy_in', 'hx_out', 'hy_out', 'smooth')
+
+    def __init__(self, x: float, y: float):
+        self.x = x
+        self.y = y
+        self.hx_in = x
+        self.hy_in = y
+        self.hx_out = x
+        self.hy_out = y
+        self.smooth = False
+
+
 def _constrain_angle(sx: float, sy: float, ex: float, ey: float) -> tuple[float, float]:
     """Constrain (ex, ey) relative to (sx, sy) to the nearest 45-degree axis."""
     dx = ex - sx
@@ -337,6 +351,10 @@ class CanvasWidget(QWidget):
         # Inline text editing state
         self._text_editor: QLineEdit | None = None
         self._editing_path: tuple[int, ...] | None = None
+        # Pen tool state
+        self._pen_points: list[PenPoint] = []
+        self._pen_dragging: bool = False
+        self._pen_mouse: QPointF = QPointF(0, 0)
         self.setMinimumSize(320, 240)
         self.setMouseTracking(True)
         model.on_document_changed(self._on_document_changed)
@@ -347,6 +365,8 @@ class CanvasWidget(QWidget):
 
     def set_tool(self, tool: Tool) -> None:
         self._commit_text_edit()
+        if self._current_tool == Tool.PEN and tool != Tool.PEN:
+            self._pen_finish()
         self._current_tool = tool
 
     def _on_document_changed(self, document: Document) -> None:
@@ -425,8 +445,149 @@ class CanvasWidget(QWidget):
         self._text_editor = None
         self._editing_path = None
 
+    # -- Pen tool methods --
+
+    def _pen_finish(self, close: bool = False):
+        """Commit the pen path as a Path element."""
+        if len(self._pen_points) < 2:
+            self._pen_points.clear()
+            self._pen_dragging = False
+            self.update()
+            return
+        # Check if last point coincides with first
+        p0 = self._pen_points[0]
+        if not close and len(self._pen_points) >= 3:
+            pn = self._pen_points[-1]
+            if math.hypot(pn.x - p0.x, pn.y - p0.y) <= self._PEN_CLOSE_RADIUS:
+                close = True
+        cmds: list[PathCommand] = []
+        cmds.append(MoveTo(p0.x, p0.y))
+        n = len(self._pen_points)
+        # Only skip last point if it actually coincides with start
+        if close and n >= 3:
+            pn = self._pen_points[-1]
+            if math.hypot(pn.x - p0.x, pn.y - p0.y) <= self._PEN_CLOSE_RADIUS:
+                n -= 1
+        for i in range(1, n):
+            prev = self._pen_points[i - 1]
+            curr = self._pen_points[i]
+            cmds.append(CurveTo(
+                prev.hx_out, prev.hy_out,
+                curr.hx_in, curr.hy_in,
+                curr.x, curr.y,
+            ))
+        if close:
+            last = self._pen_points[n - 1]
+            cmds.append(CurveTo(
+                last.hx_out, last.hy_out,
+                p0.hx_in, p0.hy_in,
+                p0.x, p0.y,
+            ))
+            cmds.append(ClosePath())
+        elem = Path(
+            d=tuple(cmds),
+            stroke=Stroke(color=Color(0, 0, 0), width=1.0),
+        )
+        self._controller.add_element(elem)
+        self._pen_points.clear()
+        self._pen_dragging = False
+        self.update()
+
+    def _pen_cancel(self):
+        """Cancel the in-progress pen path."""
+        self._pen_points.clear()
+        self._pen_dragging = False
+        self.update()
+
+    def _draw_pen_overlay(self, painter: QPainter):
+        """Draw the in-progress pen path with handles."""
+        if not self._pen_points:
+            return
+        # Draw committed curve segments
+        if len(self._pen_points) >= 2:
+            painter.setPen(QPen(QColor(0, 0, 0), 1.0))
+            painter.setBrush(QBrush())
+            path = QPainterPath()
+            p0 = self._pen_points[0]
+            path.moveTo(p0.x, p0.y)
+            for i in range(1, len(self._pen_points)):
+                prev = self._pen_points[i - 1]
+                curr = self._pen_points[i]
+                path.cubicTo(prev.hx_out, prev.hy_out,
+                             curr.hx_in, curr.hy_in,
+                             curr.x, curr.y)
+            painter.drawPath(path)
+        # Draw preview curve from last point to mouse
+        if not self._pen_dragging:
+            last = self._pen_points[-1]
+            mx, my = self._pen_mouse.x(), self._pen_mouse.y()
+            p0 = self._pen_points[0]
+            near_start = (len(self._pen_points) >= 2
+                          and math.hypot(mx - p0.x, my - p0.y) <= self._PEN_CLOSE_RADIUS)
+            painter.setPen(QPen(QColor(100, 100, 100), 1.0, Qt.PenStyle.DashLine))
+            if near_start:
+                # Preview the closing segment back to start
+                preview = QPainterPath()
+                preview.moveTo(last.x, last.y)
+                preview.cubicTo(last.hx_out, last.hy_out,
+                                p0.hx_in, p0.hy_in, p0.x, p0.y)
+                painter.drawPath(preview)
+            else:
+                preview = QPainterPath()
+                preview.moveTo(last.x, last.y)
+                preview.cubicTo(last.hx_out, last.hy_out, mx, my, mx, my)
+                painter.drawPath(preview)
+        # Draw handle lines and endpoints
+        for pt in self._pen_points:
+            if pt.smooth:
+                painter.setPen(QPen(_SELECTION_COLOR, 1.0))
+                painter.setBrush(QBrush())
+                painter.drawLine(QPointF(pt.hx_in, pt.hy_in),
+                                 QPointF(pt.hx_out, pt.hy_out))
+                # Handle circles
+                r = 3.0
+                painter.setBrush(QBrush(QColor("white")))
+                painter.drawEllipse(QPointF(pt.hx_in, pt.hy_in), r, r)
+                painter.drawEllipse(QPointF(pt.hx_out, pt.hy_out), r, r)
+            # Anchor square
+            half = _HANDLE_SIZE / 2
+            painter.setPen(QPen(_SELECTION_COLOR, 1.0))
+            painter.setBrush(QBrush(_SELECTION_COLOR))
+            painter.drawRect(QRectF(pt.x - half, pt.y - half,
+                                    _HANDLE_SIZE, _HANDLE_SIZE))
+
+    def keyPressEvent(self, event):
+        if self._current_tool == Tool.PEN and self._pen_points:
+            if event.key() in (Qt.Key.Key_Escape, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self._pen_finish()
+                return
+        super().keyPressEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        if self._current_tool == Tool.PEN and event.button() == Qt.MouseButton.LeftButton:
+            # Remove the point added by the preceding mousePress
+            if self._pen_points:
+                self._pen_points.pop()
+            self._pen_finish()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    _PEN_CLOSE_RADIUS = 6.0
+
     def mousePressEvent(self, event: QMouseEvent):
-        if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION, Tool.TEXT, Tool.LINE, Tool.RECT, Tool.POLYGON) and event.button() == Qt.MouseButton.LeftButton:
+        if self._current_tool == Tool.PEN and event.button() == Qt.MouseButton.LeftButton:
+            pos = event.position()
+            # If clicking near the start point with 2+ points, close the path
+            if len(self._pen_points) >= 2:
+                p0 = self._pen_points[0]
+                if math.hypot(pos.x() - p0.x, pos.y() - p0.y) <= self._PEN_CLOSE_RADIUS:
+                    self._pen_finish(close=True)
+                    return
+            self._pen_dragging = True
+            self._pen_points.append(PenPoint(pos.x(), pos.y()))
+            self.update()
+            return
+        if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION, Tool.PEN, Tool.TEXT, Tool.LINE, Tool.RECT, Tool.POLYGON) and event.button() == Qt.MouseButton.LeftButton:
             pos = event.position()
             # Check if clicking on a selected CP → move mode
             if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION):
@@ -440,6 +601,18 @@ class CanvasWidget(QWidget):
             self._moving = False
 
     def mouseMoveEvent(self, event: QMouseEvent):
+        if self._current_tool == Tool.PEN:
+            pos = event.position()
+            self._pen_mouse = pos
+            if self._pen_dragging and self._pen_points:
+                pt = self._pen_points[-1]
+                pt.hx_out = pos.x()
+                pt.hy_out = pos.y()
+                pt.hx_in = 2 * pt.x - pos.x()
+                pt.hy_in = 2 * pt.y - pos.y()
+                pt.smooth = True
+            self.update()
+            return
         if self._drag_start is not None:
             pos = event.position()
             if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
@@ -451,6 +624,10 @@ class CanvasWidget(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._current_tool == Tool.PEN and event.button() == Qt.MouseButton.LeftButton:
+            self._pen_dragging = False
+            self.update()
+            return
         if self._drag_start is not None and event.button() == Qt.MouseButton.LeftButton:
             end = event.position()
             start = self._drag_start
@@ -596,4 +773,7 @@ class CanvasWidget(QWidget):
                         painter.drawPolygon(qpts)
                 elif self._current_tool in (Tool.TEXT, Tool.RECT, Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION):
                     painter.drawRect(QRectF(self._drag_start, self._drag_end).normalized())
+        # Draw pen tool overlay
+        if self._current_tool == Tool.PEN:
+            self._draw_pen_overlay(painter)
         painter.end()

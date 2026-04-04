@@ -249,10 +249,21 @@ let make_group ?(opacity = 1.0) ?(transform = None) children =
 let make_layer ?(name = "Layer") ?(opacity = 1.0) ?(transform = None) children =
   Layer { name; children; opacity; transform }
 
+let path_anchor_points d =
+  List.fold_left (fun acc cmd ->
+    match cmd with
+    | MoveTo (x, y) | LineTo (x, y) | SmoothQuadTo (x, y) -> (x, y) :: acc
+    | CurveTo (_, _, _, _, x, y) | SmoothCurveTo (_, _, x, y) -> (x, y) :: acc
+    | QuadTo (_, _, x, y) -> (x, y) :: acc
+    | ArcTo (_, _, _, _, _, x, y) -> (x, y) :: acc
+    | ClosePath -> acc
+  ) [] d |> List.rev
+
 let control_point_count = function
   | Line _ -> 2
   | Rect _ | Circle _ | Ellipse _ -> 4
   | Polygon { points; _ } -> List.length points
+  | Path { d; _ } -> List.length (path_anchor_points d)
   | _ -> 4
 
 let control_points = function
@@ -264,6 +275,7 @@ let control_points = function
   | Ellipse { cx; cy; rx; ry; _ } ->
     [(cx, cy -. ry); (cx +. rx, cy); (cx, cy +. ry); (cx -. rx, cy)]
   | Polygon { points; _ } -> points
+  | Path { d; _ } -> path_anchor_points d
   | elem ->
     let (bx, by, bw, bh) = bounds elem in
     [(bx, by); (bx +. bw, by); (bx +. bw, by +. bh); (bx, by +. bh)]
@@ -328,4 +340,35 @@ let move_control_points elem indices dx dy =
       if mem i then (px +. dx, py +. dy) else (px, py)
     ) r.points in
     Polygon { r with points = new_points }
+  | Path r ->
+    let cmds = Array.of_list r.d in
+    let n = Array.length cmds in
+    let anchor_idx = ref 0 in
+    for ci = 0 to n - 1 do
+      match cmds.(ci) with
+      | ClosePath -> ()
+      | _ ->
+        if mem !anchor_idx then begin
+          (match cmds.(ci) with
+           | MoveTo (x, y) ->
+             cmds.(ci) <- MoveTo (x +. dx, y +. dy);
+             if ci + 1 < n then
+               (match cmds.(ci + 1) with
+                | CurveTo (x1, y1, x2, y2, x, y) ->
+                  cmds.(ci + 1) <- CurveTo (x1 +. dx, y1 +. dy, x2, y2, x, y)
+                | _ -> ())
+           | CurveTo (x1, y1, x2, y2, x, y) ->
+             cmds.(ci) <- CurveTo (x1, y1, x2 +. dx, y2 +. dy, x +. dx, y +. dy);
+             if ci + 1 < n then
+               (match cmds.(ci + 1) with
+                | CurveTo (nx1, ny1, nx2, ny2, nx, ny) ->
+                  cmds.(ci + 1) <- CurveTo (nx1 +. dx, ny1 +. dy, nx2, ny2, nx, ny)
+                | _ -> ())
+           | LineTo (x, y) ->
+             cmds.(ci) <- LineTo (x +. dx, y +. dy)
+           | _ -> ())
+        end;
+        incr anchor_idx
+    done;
+    Path { r with d = Array.to_list cmds }
   | _ -> elem

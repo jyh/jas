@@ -414,8 +414,63 @@ def move_control_points(elem: Element, indices: frozenset[int],
                 if i in indices:
                     new_pts[i] = (new_pts[i][0] + dx, new_pts[i][1] + dy)
             return replace(elem, points=tuple(new_pts))
+        case Path(d=d):
+            # Map each anchor index to its command index
+            new_cmds = list(d)
+            anchor_idx = 0
+            for ci, cmd in enumerate(d):
+                if isinstance(cmd, ClosePath):
+                    continue
+                if anchor_idx in indices:
+                    match cmd:
+                        case MoveTo(x, y):
+                            new_cmds[ci] = MoveTo(x + dx, y + dy)
+                            # Move outgoing handle (x1,y1 of next CurveTo)
+                            if ci + 1 < len(d) and isinstance(d[ci + 1], CurveTo):
+                                nc = d[ci + 1]
+                                new_cmds[ci + 1] = CurveTo(nc.x1 + dx, nc.y1 + dy,
+                                                            nc.x2, nc.y2, nc.x, nc.y)
+                        case CurveTo(x1, y1, x2, y2, x, y):
+                            # Move anchor and incoming handle together
+                            new_cmds[ci] = CurveTo(x1, y1, x2 + dx, y2 + dy,
+                                                    x + dx, y + dy)
+                            # Move outgoing handle (x1,y1 of next CurveTo)
+                            if ci + 1 < len(d) and isinstance(d[ci + 1], CurveTo):
+                                nc = d[ci + 1]
+                                new_cmds[ci + 1] = CurveTo(nc.x1 + dx, nc.y1 + dy,
+                                                            nc.x2, nc.y2, nc.x, nc.y)
+                        case LineTo(x, y):
+                            new_cmds[ci] = LineTo(x + dx, y + dy)
+                        case _:
+                            pass
+                anchor_idx += 1
+            return replace(elem, d=tuple(new_cmds))
         case _:
             return elem
+
+
+def _path_anchor_points(d: tuple[PathCommand, ...]) -> list[tuple[float, float]]:
+    """Extract anchor points from path commands."""
+    pts: list[tuple[float, float]] = []
+    for cmd in d:
+        match cmd:
+            case MoveTo(x, y):
+                pts.append((x, y))
+            case LineTo(x, y):
+                pts.append((x, y))
+            case CurveTo(_, _, _, _, x, y):
+                pts.append((x, y))
+            case SmoothCurveTo(_, _, x, y):
+                pts.append((x, y))
+            case QuadTo(_, _, x, y):
+                pts.append((x, y))
+            case SmoothQuadTo(x, y):
+                pts.append((x, y))
+            case ArcTo(_, _, _, _, _, x, y):
+                pts.append((x, y))
+            case ClosePath():
+                pass
+    return pts
 
 
 def control_point_count(elem: Element) -> int:
@@ -426,6 +481,8 @@ def control_point_count(elem: Element) -> int:
         return 4
     if isinstance(elem, Polygon):
         return len(elem.points)
+    if isinstance(elem, Path):
+        return len(_path_anchor_points(elem.d))
     return 4  # bounding box corners
 
 
@@ -442,6 +499,8 @@ def control_points(elem: Element) -> list[tuple[float, float]]:
             return [(cx, cy - ry), (cx + rx, cy), (cx, cy + ry), (cx - rx, cy)]
         case Polygon(points=pts):
             return list(pts)
+        case Path(d=d):
+            return _path_anchor_points(d)
         case _:
             bx, by, bw, bh = elem.bounds()
             return [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)]

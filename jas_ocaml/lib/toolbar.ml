@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Text_tool | Line | Rect | Polygon
+type tool = Selection | Direct_selection | Group_selection | Pen | Text_tool | Line | Rect | Polygon
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -21,18 +21,21 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
     ~packing:(vbox#pack ~expand:false) () in
   let selection_btn = GMisc.drawing_area () in
   let direct_btn = GMisc.drawing_area () in
+  let pen_btn = GMisc.drawing_area () in
   let text_btn = GMisc.drawing_area () in
   let line_btn = GMisc.drawing_area () in
   let shape_btn = GMisc.drawing_area () in
   let () =
     selection_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     direct_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
+    pen_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     text_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     line_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     shape_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     grid#attach ~left:0 ~top:0 selection_btn#coerce;
     grid#attach ~left:1 ~top:0 direct_btn#coerce;
-    grid#attach ~left:0 ~top:1 text_btn#coerce;
+    grid#attach ~left:0 ~top:1 pen_btn#coerce;
+    grid#attach ~left:1 ~top:1 text_btn#coerce;
     grid#attach ~left:0 ~top:2 line_btn#coerce;
     grid#attach ~left:1 ~top:2 shape_btn#coerce
   in
@@ -66,6 +69,8 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
     method private redraw_all =
       selection_btn#misc#queue_draw ();
       direct_btn#misc#queue_draw ();
+      pen_btn#misc#queue_draw ();
+      text_btn#misc#queue_draw ();
       line_btn#misc#queue_draw ();
       shape_btn#misc#queue_draw ()
 
@@ -236,6 +241,30 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.show_text cr "T"
       in
 
+      let draw_pen_icon cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.set_line_width cr 1.5;
+        (* Fountain pen nib shape *)
+        Cairo.move_to cr (ox +. 8.0) (oy +. 24.0);
+        Cairo.line_to cr (ox +. 10.0) (oy +. 18.0);
+        Cairo.line_to cr (ox +. 14.0) (oy +. 4.0);
+        Cairo.line_to cr (ox +. 18.0) (oy +. 4.0);
+        Cairo.line_to cr (ox +. 22.0) (oy +. 18.0);
+        Cairo.line_to cr (ox +. 24.0) (oy +. 24.0);
+        Cairo.line_to cr (ox +. 16.0) (oy +. 20.0);
+        Cairo.Path.close cr;
+        Cairo.stroke cr;
+        (* Center line (nib slit) *)
+        Cairo.move_to cr (ox +. 16.0) (oy +. 10.0);
+        Cairo.line_to cr (ox +. 16.0) (oy +. 20.0);
+        Cairo.stroke cr
+      in
+
+      draw_tool_button pen_btn Pen draw_pen_icon;
       draw_tool_button text_btn Text_tool draw_text_icon;
       draw_tool_button selection_btn Selection (draw_arrow ~filled:true);
       (* Arrow slot uses custom draw that checks arrow_slot_tool *)
@@ -288,6 +317,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         ) |> ignore
       in
       connect_click selection_btn Selection;
+      connect_click pen_btn Pen;
       connect_click text_btn Text_tool;
       connect_click line_btn Line;
 
