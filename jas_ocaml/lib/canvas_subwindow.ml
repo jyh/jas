@@ -382,6 +382,9 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
     (* Move-drag state *)
     val mutable moving = false
     val hit_radius = 6.0
+    (* Inline text editing state *)
+    val mutable text_editor : GEdit.entry option = None
+    val mutable editing_path : int list option = None
 
     method widget = frame#coerce
     method canvas = canvas_area
@@ -390,6 +393,68 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
     method x = pos_x
     method y = pos_y
     method bbox = bbox
+
+    method private hit_test_text px py =
+      let doc = current_doc in
+      let result = ref None in
+      List.iteri (fun li layer ->
+        let children = match layer with
+          | Element.Layer { children; _ } -> children
+          | _ -> []
+        in
+        List.iteri (fun ci child ->
+          if !result = None then
+            match child with
+            | Element.Text { x; y; content; font_size; _ } ->
+              let bx = x in
+              let by = y -. font_size in
+              let bw = float_of_int (String.length content) *. font_size *. 0.6 in
+              let bh = font_size in
+              if px >= bx && px <= bx +. bw && py >= by && py <= by +. bh then
+                result := Some ([li; ci], child)
+            | _ -> ()
+        ) children
+      ) doc.Document.layers;
+      !result
+
+    method private commit_text_edit =
+      match text_editor, editing_path with
+      | Some entry, Some path ->
+        let new_text = entry#text in
+        let doc = current_doc in
+        (try
+          let old_elem = Document.get_element doc path in
+          (match old_elem with
+           | Element.Text t when t.content <> new_text ->
+             let new_elem = Element.Text { t with content = new_text } in
+             model#set_document (Document.replace_element doc path new_elem)
+           | _ -> ())
+        with _ -> ());
+        entry#misc#hide ();
+        entry#destroy ();
+        text_editor <- None;
+        editing_path <- None
+      | _ -> ()
+
+    method private start_text_edit path text_elem =
+      _self#commit_text_edit;
+      editing_path <- Some path;
+      match text_elem with
+      | Element.Text { x = tx; y = ty; content; font_size; font_family; _ } ->
+        let entry = GEdit.entry ~packing:(fun w ->
+          fixed#put w ~x:(pos_x + int_of_float tx) ~y:(pos_y + int_of_float (ty -. font_size))
+        ) () in
+        entry#set_text content;
+        let font_desc = GPango.font_description_from_string (Printf.sprintf "%s %d" font_family (int_of_float font_size)) in
+        entry#misc#modify_font font_desc;
+        let bw = max (int_of_float (float_of_int (String.length content) *. font_size *. 0.6) + 20) 100 in
+        entry#misc#set_size_request ~width:bw ~height:(int_of_float font_size + 4) ();
+        entry#connect#activate ~callback:(fun () -> _self#commit_text_edit) |> ignore;
+        entry#misc#show ();
+        entry#misc#grab_focus ();
+        entry#select_region ~start:0 ~stop:(String.length content);
+        text_editor <- Some entry
+      | _ -> ()
 
     initializer
       fixed#put frame#coerce ~x:pos_x ~y:pos_y;
@@ -568,13 +633,18 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
             controller#direct_select_rect ~extend x y w h;
             true
           end else
-          (* Text tool: place text at click point *)
+          (* Text tool: edit existing text or place new text *)
           if toolbar#current_tool = Toolbar.Text_tool then begin
-            let elem = Element.make_text ~fill:(Some Element.{
-              fill_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }
-            }) sx sy "Lorem Ipsum" in
-            controller#add_element elem;
-            true
+            match _self#hit_test_text sx sy with
+            | Some (path, text_elem) ->
+              _self#start_text_edit path text_elem;
+              true
+            | None ->
+              let elem = Element.make_text ~fill:(Some Element.{
+                fill_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }
+              }) sx sy "Lorem Ipsum" in
+              controller#add_element elem;
+              true
           end else
           (* Drawing tools: shift means constrain angle *)
           let (ex, ey) = if shift then constrain_angle sx sy raw_ex raw_ey else (raw_ex, raw_ey) in
