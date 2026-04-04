@@ -6,6 +6,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
+import math
+
 from controller import Controller
 from document import Document, ElementSelection
 from element import (
@@ -17,6 +19,18 @@ from element import (
 )
 from model import Model
 from toolbar import Tool
+
+
+def _constrain_angle(sx: float, sy: float, ex: float, ey: float) -> tuple[float, float]:
+    """Constrain (ex, ey) relative to (sx, sy) to the nearest 45-degree axis."""
+    dx = ex - sx
+    dy = ey - sy
+    dist = math.hypot(dx, dy)
+    if dist == 0:
+        return (ex, ey)
+    angle = math.atan2(dy, dx)
+    snapped = round(angle / (math.pi / 4)) * (math.pi / 4)
+    return (sx + dist * math.cos(snapped), sy + dist * math.sin(snapped))
 
 
 @dataclass(frozen=True)
@@ -199,6 +213,27 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
     painter.restore()
 
 
+_POLYGON_SIDES = 5
+
+
+def _regular_polygon_points(x1: float, y1: float, x2: float, y2: float,
+                            n: int) -> list[tuple[float, float]]:
+    """Compute vertices of a regular n-gon with (x1,y1) and (x2,y2) as adjacent vertices."""
+    ex, ey = x2 - x1, y2 - y1
+    s = math.hypot(ex, ey)
+    if s == 0:
+        return [(x1, y1)] * n
+    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+    px, py = -ey / s, ex / s
+    d = s / (2 * math.tan(math.pi / n))
+    cx, cy = mx + d * px, my + d * py
+    r = s / (2 * math.sin(math.pi / n))
+    theta0 = math.atan2(y1 - cy, x1 - cx)
+    return [(cx + r * math.cos(theta0 + 2 * math.pi * k / n),
+             cy + r * math.sin(theta0 + 2 * math.pi * k / n))
+            for k in range(n)]
+
+
 _SELECTION_COLOR = QColor(0, 120, 255)
 _HANDLE_SIZE = 6.0
 
@@ -325,7 +360,7 @@ class CanvasWidget(QWidget):
         return False
 
     def mousePressEvent(self, event: QMouseEvent):
-        if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION, Tool.LINE, Tool.RECT) and event.button() == Qt.MouseButton.LeftButton:
+        if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION, Tool.LINE, Tool.RECT, Tool.POLYGON) and event.button() == Qt.MouseButton.LeftButton:
             pos = event.position()
             # Check if clicking on a selected CP → move mode
             if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION):
@@ -340,7 +375,13 @@ class CanvasWidget(QWidget):
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._drag_start is not None:
-            self._drag_end = event.position()
+            pos = event.position()
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                cx, cy = _constrain_angle(
+                    self._drag_start.x(), self._drag_start.y(), pos.x(), pos.y())
+                self._drag_end = QPointF(cx, cy)
+            else:
+                self._drag_end = pos
             self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent):
@@ -349,19 +390,23 @@ class CanvasWidget(QWidget):
             start = self._drag_start
             tool = self._current_tool
             moving = self._moving
+            shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
             self._drag_start = None
             self._drag_end = None
             self._moving = False
             # Move mode: apply delta
             if moving:
+                if shift:
+                    cx, cy = _constrain_angle(start.x(), start.y(), end.x(), end.y())
+                    end = QPointF(cx, cy)
                 dx = end.x() - start.x()
                 dy = end.y() - start.y()
                 if dx != 0 or dy != 0:
                     self._controller.move_selection(dx, dy)
                 self.update()
                 return
-            extend = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-            # Selection tool: marquee select
+            # Selection tools: shift means extend
+            extend = shift
             if tool == Tool.SELECTION:
                 x = min(start.x(), end.x())
                 y = min(start.y(), end.y())
@@ -385,7 +430,10 @@ class CanvasWidget(QWidget):
                 h = abs(end.y() - start.y())
                 self._controller.direct_select_rect(x, y, w, h, extend=extend)
                 return
-            # Create the element based on current tool
+            # Drawing tools: shift means constrain angle
+            if shift:
+                cx, cy = _constrain_angle(start.x(), start.y(), end.x(), end.y())
+                end = QPointF(cx, cy)
             if tool == Tool.LINE:
                 elem = Line(
                     x1=start.x(), y1=start.y(),
@@ -399,6 +447,13 @@ class CanvasWidget(QWidget):
                 h = abs(end.y() - start.y())
                 elem = Rect(
                     x=x, y=y, width=w, height=h,
+                    stroke=Stroke(color=Color(0, 0, 0), width=1.0),
+                )
+            elif tool == Tool.POLYGON:
+                pts = _regular_polygon_points(
+                    start.x(), start.y(), end.x(), end.y(), _POLYGON_SIDES)
+                elem = Polygon(
+                    points=tuple(pts),
                     stroke=Stroke(color=Color(0, 0, 0), width=1.0),
                 )
             else:
@@ -433,6 +488,13 @@ class CanvasWidget(QWidget):
                 painter.setBrush(QBrush())
                 if self._current_tool == Tool.LINE:
                     painter.drawLine(self._drag_start, self._drag_end)
+                elif self._current_tool == Tool.POLYGON:
+                    pts = _regular_polygon_points(
+                        self._drag_start.x(), self._drag_start.y(),
+                        self._drag_end.x(), self._drag_end.y(), _POLYGON_SIDES)
+                    if pts:
+                        qpts = [QPointF(x, y) for x, y in pts]
+                        painter.drawPolygon(qpts)
                 elif self._current_tool in (Tool.RECT, Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION):
                     painter.drawRect(QRectF(self._drag_start, self._drag_end).normalized())
         painter.end()

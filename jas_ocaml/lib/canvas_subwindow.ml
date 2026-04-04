@@ -225,6 +225,32 @@ and rounded_rect cr x y w h rx ry =
   Cairo.line_to cr x (y +. ry);
   Cairo.curve_to cr x y (x +. rx) y (x +. rx) y
 
+let constrain_angle sx sy ex ey =
+  let dx = ex -. sx and dy = ey -. sy in
+  let dist = sqrt (dx *. dx +. dy *. dy) in
+  if dist = 0.0 then (ex, ey)
+  else
+    let angle = atan2 dy dx in
+    let snapped = Float.round (angle /. (Float.pi /. 4.0)) *. (Float.pi /. 4.0) in
+    (sx +. dist *. cos snapped, sy +. dist *. sin snapped)
+
+let polygon_sides = 5
+
+let regular_polygon_points x1 y1 x2 y2 n =
+  let ex = x2 -. x1 and ey = y2 -. y1 in
+  let s = sqrt (ex *. ex +. ey *. ey) in
+  if s = 0.0 then List.init n (fun _ -> (x1, y1))
+  else
+    let mx = (x1 +. x2) /. 2.0 and my = (y1 +. y2) /. 2.0 in
+    let px = -. ey /. s and py = ex /. s in
+    let d = s /. (2.0 *. tan (Float.pi /. float_of_int n)) in
+    let cx = mx +. d *. px and cy = my +. d *. py in
+    let r = s /. (2.0 *. sin (Float.pi /. float_of_int n)) in
+    let theta0 = atan2 (y1 -. cy) (x1 -. cx) in
+    List.init n (fun k ->
+      let angle = theta0 +. 2.0 *. Float.pi *. float_of_int k /. float_of_int n in
+      (cx +. r *. cos angle, cy +. r *. sin angle))
+
 let handle_size = 6.0
 
 let control_points (elem : Element.element) =
@@ -424,7 +450,15 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
             Cairo.set_source_rgba cr 0.4 0.4 0.4 1.0;
             Cairo.set_line_width cr 1.0;
             Cairo.set_dash cr [| 4.0; 4.0 |];
-            if toolbar#current_tool = Toolbar.Rect || toolbar#current_tool = Toolbar.Selection || toolbar#current_tool = Toolbar.Direct_selection || toolbar#current_tool = Toolbar.Group_selection then begin
+            if toolbar#current_tool = Toolbar.Polygon then begin
+              let pts = regular_polygon_points sx sy ex ey polygon_sides in
+              (match pts with
+               | (fx, fy) :: rest ->
+                 Cairo.move_to cr fx fy;
+                 List.iter (fun (px, py) -> Cairo.line_to cr px py) rest;
+                 Cairo.Path.close cr
+               | [] -> ())
+            end else if toolbar#current_tool = Toolbar.Rect || toolbar#current_tool = Toolbar.Selection || toolbar#current_tool = Toolbar.Direct_selection || toolbar#current_tool = Toolbar.Group_selection then begin
               let x = min sx ex in
               let y = min sy ey in
               let w = abs_float (ex -. sx) in
@@ -449,7 +483,8 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
             || toolbar#current_tool = Toolbar.Direct_selection
             || toolbar#current_tool = Toolbar.Group_selection
             || toolbar#current_tool = Toolbar.Line
-            || toolbar#current_tool = Toolbar.Rect)
+            || toolbar#current_tool = Toolbar.Rect
+            || toolbar#current_tool = Toolbar.Polygon)
            && GdkEvent.Button.button ev = 1 then begin
           let x = GdkEvent.Button.x ev in
           let y = GdkEvent.Button.y ev in
@@ -473,10 +508,12 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       ) |> ignore;
       canvas_area#event#connect#motion_notify ~callback:(fun ev ->
         begin match line_drag_start with
-        | Some _ ->
+        | Some (sx, sy) ->
           let x = GdkEvent.Motion.x ev in
           let y = GdkEvent.Motion.y ev in
-          line_drag_end <- Some (x, y);
+          let shift = Gdk.Convert.test_modifier `SHIFT (GdkEvent.Motion.state ev) in
+          let (cx, cy) = if shift then constrain_angle sx sy x y else (x, y) in
+          line_drag_end <- Some (cx, cy);
           canvas_area#misc#queue_draw ();
           true
         | None -> false
@@ -485,13 +522,15 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       canvas_area#event#connect#button_release ~callback:(fun ev ->
         begin match line_drag_start with
         | Some (sx, sy) when GdkEvent.Button.button ev = 1 ->
-          let ex = GdkEvent.Button.x ev in
-          let ey = GdkEvent.Button.y ev in
+          let raw_ex = GdkEvent.Button.x ev in
+          let raw_ey = GdkEvent.Button.y ev in
+          let shift = Gdk.Convert.test_modifier `SHIFT (GdkEvent.Button.state ev) in
           let was_moving = moving in
           line_drag_start <- None;
           line_drag_end <- None;
           moving <- false;
           if was_moving then begin
+            let (ex, ey) = if shift then constrain_angle sx sy raw_ex raw_ey else (raw_ex, raw_ey) in
             let dx = ex -. sx in
             let dy = ey -. sy in
             if dx <> 0.0 || dy <> 0.0 then
@@ -499,29 +538,32 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
             canvas_area#misc#queue_draw ();
             true
           end else
-          let extend = Gdk.Convert.test_modifier `SHIFT (GdkEvent.Button.state ev) in
+          (* Selection tools: shift means extend *)
+          let extend = shift in
           if toolbar#current_tool = Toolbar.Selection then begin
-            let x = min sx ex in
-            let y = min sy ey in
-            let w = abs_float (ex -. sx) in
-            let h = abs_float (ey -. sy) in
+            let x = min sx raw_ex in
+            let y = min sy raw_ey in
+            let w = abs_float (raw_ex -. sx) in
+            let h = abs_float (raw_ey -. sy) in
             controller#select_rect ~extend x y w h;
             true
           end else if toolbar#current_tool = Toolbar.Group_selection then begin
-            let x = min sx ex in
-            let y = min sy ey in
-            let w = abs_float (ex -. sx) in
-            let h = abs_float (ey -. sy) in
+            let x = min sx raw_ex in
+            let y = min sy raw_ey in
+            let w = abs_float (raw_ex -. sx) in
+            let h = abs_float (raw_ey -. sy) in
             controller#group_select_rect ~extend x y w h;
             true
           end else if toolbar#current_tool = Toolbar.Direct_selection then begin
-            let x = min sx ex in
-            let y = min sy ey in
-            let w = abs_float (ex -. sx) in
-            let h = abs_float (ey -. sy) in
+            let x = min sx raw_ex in
+            let y = min sy raw_ey in
+            let w = abs_float (raw_ex -. sx) in
+            let h = abs_float (raw_ey -. sy) in
             controller#direct_select_rect ~extend x y w h;
             true
           end else
+          (* Drawing tools: shift means constrain angle *)
+          let (ex, ey) = if shift then constrain_angle sx sy raw_ex raw_ey else (raw_ex, raw_ey) in
           let default_stroke = Some Element.{
             stroke_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
             stroke_width = 1.0;
@@ -536,6 +578,13 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
               fill = None; stroke = default_stroke;
               opacity = 1.0; transform = None;
             }
+          else if toolbar#current_tool = Toolbar.Polygon then
+            let pts = regular_polygon_points sx sy ex ey polygon_sides in
+            Element.Polygon {
+              points = pts;
+              fill = None; stroke = default_stroke;
+              opacity = 1.0; transform = None;
+            }
           else
             Element.Line {
               x1 = sx; y1 = sy; x2 = ex; y2 = ey;
@@ -543,8 +592,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
               opacity = 1.0; transform = None;
             }
           in
-          let line = elem in
-          controller#add_element line;
+          controller#add_element elem;
           true
         | _ ->
           line_drag_start <- None;
