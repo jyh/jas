@@ -1,9 +1,10 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Line | Rect
+type tool = Selection | Direct_selection | Group_selection | Line | Rect
 
 let tool_button_size = 32
 let title_bar_height = 24
+let long_press_ms = 500
 
 class toolbar ~title ~x ~y (fixed : GPack.fixed) =
   let frame = GBin.frame ~shadow_type:`ETCHED_IN () in
@@ -32,13 +33,15 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
     grid#attach ~left:0 ~top:1 line_btn#coerce;
     grid#attach ~left:1 ~top:1 rect_btn#coerce
   in
-  object
+  object (self)
     val mutable pos_x = x
     val mutable pos_y = y
     val mutable current_tool = Selection
+    val mutable arrow_slot_tool = Direct_selection
     val mutable dragging = false
     val mutable drag_offset_x = 0.0
     val mutable drag_offset_y = 0.0
+    val mutable long_press_timer : GMain.Timeout.id option = None
 
     method current_tool = current_tool
     method widget = frame#coerce
@@ -47,6 +50,13 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
 
     method select_tool t =
       current_tool <- t;
+      (match t with
+       | Direct_selection | Group_selection ->
+         arrow_slot_tool <- t
+       | _ -> ());
+      self#redraw_all
+
+    method private redraw_all =
       selection_btn#misc#queue_draw ();
       direct_btn#misc#queue_draw ();
       line_btn#misc#queue_draw ();
@@ -98,6 +108,23 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         end
       in
 
+      let draw_arrow_plus cr ~alloc =
+        draw_arrow cr ~filled:false ~alloc;
+        (* Draw '+' badge in lower-right *)
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.set_line_width cr 1.5;
+        Cairo.move_to cr (ox +. 20.0) (oy +. 20.0);
+        Cairo.line_to cr (ox +. 27.0) (oy +. 20.0);
+        Cairo.stroke cr;
+        Cairo.move_to cr (ox +. 23.5) (oy +. 16.5);
+        Cairo.line_to cr (ox +. 23.5) (oy +. 23.5);
+        Cairo.stroke cr
+      in
+
       let draw_line_icon cr ~alloc =
         let bw = float_of_int alloc.Gtk.width in
         let bh = float_of_int alloc.Gtk.height in
@@ -139,8 +166,43 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.stroke cr
       in
 
+      (* The arrow slot draws whichever tool is currently in the slot *)
+      let draw_arrow_slot cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        (* Highlight if current tool matches the slot tool *)
+        if current_tool = arrow_slot_tool then begin
+          Cairo.set_source_rgb cr 0.4 0.4 0.4;
+          Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
+          Cairo.fill cr
+        end else begin
+          Cairo.set_source_rgb cr 0.27 0.27 0.27;
+          Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
+          Cairo.fill cr
+        end;
+        (match arrow_slot_tool with
+        | Direct_selection -> draw_arrow cr ~filled:false ~alloc
+        | Group_selection -> draw_arrow_plus cr ~alloc
+        | _ -> ());
+        (* Small triangle in lower-right indicating alternates *)
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let s = 5.0 in
+        Cairo.move_to cr (ox +. 28.0) (oy +. 28.0);
+        Cairo.line_to cr (ox +. 28.0 -. s) (oy +. 28.0);
+        Cairo.line_to cr (ox +. 28.0) (oy +. 28.0 -. s);
+        Cairo.Path.close cr;
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.fill cr
+      in
+
       draw_tool_button selection_btn Selection (draw_arrow ~filled:true);
-      draw_tool_button direct_btn Direct_selection (draw_arrow ~filled:false);
+      (* Arrow slot uses custom draw that checks arrow_slot_tool *)
+      direct_btn#misc#connect#draw ~callback:(fun cr ->
+        let alloc = direct_btn#misc#allocation in
+        draw_arrow_slot cr ~alloc;
+        true
+      ) |> ignore;
       draw_tool_button line_btn Line draw_line_icon;
       draw_tool_button rect_btn Rect draw_rect_icon;
 
@@ -150,18 +212,39 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         area#event#connect#button_press ~callback:(fun ev ->
           if GdkEvent.Button.button ev = 1 then begin
             current_tool <- tool_id;
-            selection_btn#misc#queue_draw ();
-            direct_btn#misc#queue_draw ();
-            line_btn#misc#queue_draw ();
-            rect_btn#misc#queue_draw ();
+            self#redraw_all;
             true
           end else false
         ) |> ignore
       in
       connect_click selection_btn Selection;
-      connect_click direct_btn Direct_selection;
       connect_click line_btn Line;
       connect_click rect_btn Rect;
+
+      (* Arrow slot: click selects, long press shows menu *)
+      direct_btn#event#add [`BUTTON_PRESS; `BUTTON_RELEASE];
+      direct_btn#event#connect#button_press ~callback:(fun ev ->
+        if GdkEvent.Button.button ev = 1 then begin
+          (* Start long press timer *)
+          long_press_timer <- Some (GMain.Timeout.add ~ms:long_press_ms ~callback:(fun () ->
+            long_press_timer <- None;
+            self#show_arrow_slot_menu;
+            false
+          ));
+          true
+        end else false
+      ) |> ignore;
+      direct_btn#event#connect#button_release ~callback:(fun ev ->
+        if GdkEvent.Button.button ev = 1 then begin
+          (* Cancel long press — treat as normal click *)
+          (match long_press_timer with
+           | Some id -> GMain.Timeout.remove id; long_press_timer <- None
+           | None -> ());
+          current_tool <- arrow_slot_tool;
+          self#redraw_all;
+          true
+        end else false
+      ) |> ignore;
 
       (* Title bar drag *)
       title_bar#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION];
@@ -191,6 +274,21 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
           true
         end else false
       ) |> ignore
+
+    method private show_arrow_slot_menu =
+      let menu = GMenu.menu () in
+      let add_item label tool =
+        let item = GMenu.check_menu_item ~label ~packing:menu#append () in
+        item#set_active (arrow_slot_tool = tool);
+        item#connect#activate ~callback:(fun () ->
+          arrow_slot_tool <- tool;
+          current_tool <- tool;
+          self#redraw_all
+        ) |> ignore
+      in
+      add_item "Direct Selection" Direct_selection;
+      add_item "Group Selection" Group_selection;
+      menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
   end
 
 let create ~title ~x ~y fixed =

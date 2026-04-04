@@ -274,6 +274,29 @@ class Controller:
                             control_points=_all_cps(child)))
         self._model.document = replace(doc, selection=frozenset(entries))
 
+    def group_select_rect(self, x: float, y: float, width: float, height: float) -> None:
+        """Group selection marquee: selects individual elements with all
+        control points.  Groups are traversed (not expanded) so elements
+        inside groups can be individually selected.
+        """
+        doc = self._model.document
+        entries: list[ElementSelection] = []
+
+        def _check(path: ElementPath, elem: Element) -> None:
+            if isinstance(elem, (Group, Layer)):
+                for i, child in enumerate(elem.children):
+                    _check(path + (i,), child)
+                return
+            if _element_intersects_rect(elem, x, y, width, height):
+                entries.append(ElementSelection(
+                    path=path,
+                    control_points=_all_cps(elem)))
+
+        for li, layer in enumerate(doc.layers):
+            _check((li,), layer)
+
+        self._model.document = replace(doc, selection=frozenset(entries))
+
     def direct_select_rect(self, x: float, y: float, width: float, height: float) -> None:
         """Direct selection marquee: select individual elements and only the
         control points that fall within the rectangle.  Groups are not

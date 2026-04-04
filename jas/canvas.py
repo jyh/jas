@@ -308,7 +308,7 @@ class CanvasWidget(QWidget):
         return QSize(int(self._bbox.width), int(self._bbox.height))
 
     def mousePressEvent(self, event: QMouseEvent):
-        if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.LINE, Tool.RECT) and event.button() == Qt.MouseButton.LeftButton:
+        if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION, Tool.LINE, Tool.RECT) and event.button() == Qt.MouseButton.LeftButton:
             self._drag_start = event.position()
             self._drag_end = event.position()
 
@@ -331,6 +331,14 @@ class CanvasWidget(QWidget):
                 w = abs(end.x() - start.x())
                 h = abs(end.y() - start.y())
                 self._controller.select_rect(x, y, w, h)
+                return
+            # Group selection tool: marquee without group expansion
+            if tool == Tool.GROUP_SELECTION:
+                x = min(start.x(), end.x())
+                y = min(start.y(), end.y())
+                w = abs(end.x() - start.x())
+                h = abs(end.y() - start.y())
+                self._controller.group_select_rect(x, y, w, h)
                 return
             # Direct selection tool: marquee with individual CP selection
             if tool == Tool.DIRECT_SELECTION:
@@ -376,6 +384,6 @@ class CanvasWidget(QWidget):
             painter.setBrush(QBrush())
             if self._current_tool == Tool.LINE:
                 painter.drawLine(self._drag_start, self._drag_end)
-            elif self._current_tool in (Tool.RECT, Tool.SELECTION, Tool.DIRECT_SELECTION):
+            elif self._current_tool in (Tool.RECT, Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION):
                 painter.drawRect(QRectF(self._drag_start, self._drag_end).normalized())
         painter.end()
