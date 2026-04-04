@@ -536,8 +536,17 @@ class CanvasNSView: NSView {
     var currentTool: Tool = .selection {
         didSet {
             if oldValue != currentTool, let ctx = toolContext {
+                let savedSelection = document.selection
                 tools[oldValue]?.deactivate(ctx)
                 tools[currentTool]?.activate(ctx)
+                // Preserve selection across tool changes
+                if document.selection != savedSelection {
+                    var doc = document
+                    doc = JasDocument(title: doc.title, layers: doc.layers,
+                                      selectedLayer: doc.selectedLayer,
+                                      selection: savedSelection)
+                    controller?.model.document = doc
+                }
             }
         }
     }
