@@ -23,12 +23,11 @@ _G = TypeVar("_G", bound=Group)
 # (0, 2, 1) -> layers[0].children[2].children[1]  (inside a group)
 ElementPath = tuple[int, ...]
 
-# Per-element selection state: which element, whether it is selected,
-# and which of its control points are selected.
+# Per-element selection state: which element and which of its control points
+# are selected.
 @dataclass(frozen=True)
 class ElementSelection:
     path: ElementPath
-    selected: bool = True
     control_points: frozenset[int] = frozenset()
 
 # A selection is an immutable set of ElementSelection entries (unique by path).

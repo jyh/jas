@@ -219,7 +219,6 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(ctrl.document.selection.count == 1)
     let es = ctrl.document.selection.first!
     #expect(es.path == [0, 0])
-    #expect(es.selected == true)
     #expect(es.controlPoints == [1])
 }
 
@@ -227,7 +226,6 @@ private func makeMarqueeCtrl() -> Controller {
     let ctrl = makeSelectionCtrl()
     ctrl.selectElement([0, 0])
     let es = ctrl.document.selection.first!
-    #expect(es.selected == true)
     // Rect has 4 control points
     #expect(es.controlPoints == [0, 1, 2, 3])
 }
@@ -410,4 +408,120 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(cps[1] == (70, 50))
     #expect(cps[2] == (50, 60))
     #expect(cps[3] == (30, 50))
+}
+
+// MARK: - Move control points tests
+
+@Test func moveLineBothCPs() {
+    let line = Element.line(JasLine(x1: 10, y1: 20, x2: 30, y2: 40))
+    let moved = line.moveControlPoints([0, 1], dx: 5, dy: -3)
+    if case .line(let v) = moved {
+        #expect(v.x1 == 15); #expect(v.y1 == 17)
+        #expect(v.x2 == 35); #expect(v.y2 == 37)
+    } else { Issue.record("Expected line") }
+}
+
+@Test func moveLineOneCP() {
+    let line = Element.line(JasLine(x1: 0, y1: 0, x2: 10, y2: 10))
+    let moved = line.moveControlPoints([1], dx: 5, dy: 5)
+    if case .line(let v) = moved {
+        #expect(v.x1 == 0); #expect(v.y1 == 0)
+        #expect(v.x2 == 15); #expect(v.y2 == 15)
+    } else { Issue.record("Expected line") }
+}
+
+@Test func moveRectAllCPs() {
+    let rect = Element.rect(JasRect(x: 10, y: 20, width: 30, height: 40))
+    let moved = rect.moveControlPoints([0, 1, 2, 3], dx: 5, dy: -5)
+    if case .rect(let v) = moved {
+        #expect(v.x == 15); #expect(v.y == 15)
+        #expect(v.width == 30); #expect(v.height == 40)
+    } else { Issue.record("Expected rect") }
+}
+
+@Test func moveRectOneCorner() {
+    let rect = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
+    let moved = rect.moveControlPoints([2], dx: 5, dy: 5)
+    if case .rect(let v) = moved {
+        #expect(v.x == 0); #expect(v.y == 0)
+        #expect(v.width == 15); #expect(v.height == 15)
+    } else { Issue.record("Expected rect") }
+}
+
+@Test func moveCircleAllCPs() {
+    let circle = Element.circle(JasCircle(cx: 50, cy: 50, r: 10))
+    let moved = circle.moveControlPoints([0, 1, 2, 3], dx: 10, dy: -10)
+    if case .circle(let v) = moved {
+        #expect(v.cx == 60); #expect(v.cy == 40); #expect(v.r == 10)
+    } else { Issue.record("Expected circle") }
+}
+
+@Test func moveEllipseAllCPs() {
+    let ellipse = Element.ellipse(JasEllipse(cx: 50, cy: 50, rx: 20, ry: 10))
+    let moved = ellipse.moveControlPoints([0, 1, 2, 3], dx: -5, dy: 5)
+    if case .ellipse(let v) = moved {
+        #expect(v.cx == 45); #expect(v.cy == 55)
+        #expect(v.rx == 20); #expect(v.ry == 10)
+    } else { Issue.record("Expected ellipse") }
+}
+
+// MARK: - Move selection tests
+
+@Test func moveSelectedLine() {
+    let line = Element.line(JasLine(x1: 10, y1: 20, x2: 30, y2: 40))
+    let layer = JasLayer(children: [line])
+    let doc = JasDocument(layers: [layer],
+                          selection: [ElementSelection(path: [0, 0], controlPoints: [0, 1])])
+    let ctrl = Controller(model: JasModel(document: doc))
+    ctrl.moveSelection(dx: 5, dy: -3)
+    if case .line(let v) = ctrl.document.layers[0].children[0] {
+        #expect(v.x1 == 15); #expect(v.y1 == 17)
+        #expect(v.x2 == 35); #expect(v.y2 == 37)
+    } else { Issue.record("Expected line") }
+}
+
+@Test func moveSelectedRect() {
+    let rect = Element.rect(JasRect(x: 0, y: 0, width: 20, height: 10))
+    let layer = JasLayer(children: [rect])
+    let doc = JasDocument(layers: [layer],
+                          selection: [ElementSelection(path: [0, 0], controlPoints: [0, 1, 2, 3])])
+    let ctrl = Controller(model: JasModel(document: doc))
+    ctrl.moveSelection(dx: 10, dy: 10)
+    if case .rect(let v) = ctrl.document.layers[0].children[0] {
+        #expect(v.x == 10); #expect(v.y == 10)
+        #expect(v.width == 20); #expect(v.height == 10)
+    } else { Issue.record("Expected rect") }
+}
+
+@Test func movePartialCPs() {
+    let line = Element.line(JasLine(x1: 0, y1: 0, x2: 10, y2: 10))
+    let layer = JasLayer(children: [line])
+    let doc = JasDocument(layers: [layer],
+                          selection: [ElementSelection(path: [0, 0], controlPoints: [0])])
+    let ctrl = Controller(model: JasModel(document: doc))
+    ctrl.moveSelection(dx: 5, dy: 5)
+    if case .line(let v) = ctrl.document.layers[0].children[0] {
+        #expect(v.x1 == 5); #expect(v.y1 == 5)
+        #expect(v.x2 == 10); #expect(v.y2 == 10)
+    } else { Issue.record("Expected line") }
+}
+
+@Test func moveMultipleElements() {
+    let line = Element.line(JasLine(x1: 0, y1: 0, x2: 10, y2: 10))
+    let rect = Element.rect(JasRect(x: 20, y: 20, width: 10, height: 10))
+    let layer = JasLayer(children: [line, rect])
+    let doc = JasDocument(layers: [layer],
+                          selection: [
+                              ElementSelection(path: [0, 0], controlPoints: [0, 1]),
+                              ElementSelection(path: [0, 1], controlPoints: [0, 1, 2, 3]),
+                          ])
+    let ctrl = Controller(model: JasModel(document: doc))
+    ctrl.moveSelection(dx: 3, dy: 4)
+    if case .line(let v) = ctrl.document.layers[0].children[0] {
+        #expect(v.x1 == 3); #expect(v.y1 == 4)
+        #expect(v.x2 == 13); #expect(v.y2 == 14)
+    } else { Issue.record("Expected line") }
+    if case .rect(let v) = ctrl.document.layers[0].children[1] {
+        #expect(v.x == 23); #expect(v.y == 24)
+    } else { Issue.record("Expected rect") }
 }

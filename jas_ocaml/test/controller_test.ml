@@ -190,13 +190,11 @@ let () =
 
   cp_ctrl#select_control_point [0; 0] 1;
   let cp_es = Jas.Document.PathMap.find [0; 0] cp_ctrl#document.Jas.Document.selection in
-  assert (cp_es.Jas.Document.es_selected = true);
   assert (cp_es.Jas.Document.es_control_points = [1]);
 
-  (* Default element selection has selected=true and all control points *)
+  (* Default element selection has all control points *)
   cp_ctrl#select_element [0; 0];
   let def_es = Jas.Document.PathMap.find [0; 0] cp_ctrl#document.Jas.Document.selection in
-  assert (def_es.Jas.Document.es_selected = true);
   (* Line has 2 control points *)
   assert (def_es.Jas.Document.es_control_points = [0; 1]);
 
@@ -313,5 +311,76 @@ let () =
 
   let cp_ellipse = make_ellipse 50.0 50.0 20.0 10.0 in
   assert (Jas.Element.control_points cp_ellipse = [(50.0, 40.0); (70.0, 50.0); (50.0, 60.0); (30.0, 50.0)]);
+
+  (* === Move control points tests === *)
+
+  (* Move line both CPs *)
+  let mv_line = make_line 10.0 20.0 30.0 40.0 in
+  let mv_line2 = Jas.Element.move_control_points mv_line [0; 1] 5.0 (-3.0) in
+  (match mv_line2 with
+   | Line { x1; y1; x2; y2; _ } ->
+     assert (x1 = 15.0); assert (y1 = 17.0);
+     assert (x2 = 35.0); assert (y2 = 37.0)
+   | _ -> assert false);
+
+  (* Move line one CP *)
+  let mv_line3 = make_line 0.0 0.0 10.0 10.0 in
+  let mv_line4 = Jas.Element.move_control_points mv_line3 [1] 5.0 5.0 in
+  (match mv_line4 with
+   | Line { x1; y1; x2; y2; _ } ->
+     assert (x1 = 0.0); assert (y1 = 0.0);
+     assert (x2 = 15.0); assert (y2 = 15.0)
+   | _ -> assert false);
+
+  (* Move rect all CPs — translate *)
+  let mv_rect = make_rect 10.0 20.0 30.0 40.0 in
+  let mv_rect2 = Jas.Element.move_control_points mv_rect [0; 1; 2; 3] 5.0 (-5.0) in
+  (match mv_rect2 with
+   | Rect { x; y; width; height; _ } ->
+     assert (x = 15.0); assert (y = 15.0);
+     assert (width = 30.0); assert (height = 40.0)
+   | _ -> assert false);
+
+  (* Move circle all CPs — translate *)
+  let mv_circle = make_circle 50.0 50.0 10.0 in
+  let mv_circle2 = Jas.Element.move_control_points mv_circle [0; 1; 2; 3] 10.0 (-10.0) in
+  (match mv_circle2 with
+   | Circle { cx; cy; r; _ } ->
+     assert (cx = 60.0); assert (cy = 40.0); assert (r = 10.0)
+   | _ -> assert false);
+
+  (* === Move selection tests === *)
+
+  (* Move selected line *)
+  let ms_line = make_line 10.0 20.0 30.0 40.0 in
+  let ms_layer = make_layer [ms_line] in
+  let ms_sel = Jas.Document.PathMap.singleton [0; 0]
+    (Jas.Document.make_element_selection ~control_points:[0; 1] [0; 0]) in
+  let ms_doc = Jas.Document.make_document ~selection:ms_sel [ms_layer] in
+  let ms_model = Jas.Model.create ~document:ms_doc () in
+  let ms_ctrl = Jas.Controller.create ~model:ms_model () in
+  ms_ctrl#move_selection 5.0 (-3.0);
+  let ms_moved = Jas.Document.get_element ms_ctrl#document [0; 0] in
+  (match ms_moved with
+   | Line { x1; y1; x2; y2; _ } ->
+     assert (x1 = 15.0); assert (y1 = 17.0);
+     assert (x2 = 35.0); assert (y2 = 37.0)
+   | _ -> assert false);
+
+  (* Move partial CPs *)
+  let ms_line2 = make_line 0.0 0.0 10.0 10.0 in
+  let ms_layer2 = make_layer [ms_line2] in
+  let ms_sel2 = Jas.Document.PathMap.singleton [0; 0]
+    (Jas.Document.make_element_selection ~control_points:[0] [0; 0]) in
+  let ms_doc2 = Jas.Document.make_document ~selection:ms_sel2 [ms_layer2] in
+  let ms_model2 = Jas.Model.create ~document:ms_doc2 () in
+  let ms_ctrl2 = Jas.Controller.create ~model:ms_model2 () in
+  ms_ctrl2#move_selection 5.0 5.0;
+  let ms_moved2 = Jas.Document.get_element ms_ctrl2#document [0; 0] in
+  (match ms_moved2 with
+   | Line { x1; y1; x2; y2; _ } ->
+     assert (x1 = 5.0); assert (y1 = 5.0);
+     assert (x2 = 10.0); assert (y2 = 10.0)
+   | _ -> assert false);
 
   Printf.printf "All controller tests passed.\n"

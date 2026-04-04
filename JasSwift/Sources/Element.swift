@@ -182,6 +182,65 @@ public enum Element: Equatable {
                     (b.x + b.width, b.y + b.height), (b.x, b.y + b.height)]
         }
     }
+
+    public func moveControlPoints(_ indices: Set<Int>, dx: Double, dy: Double) -> Element {
+        switch self {
+        case .line(let v):
+            return .line(JasLine(
+                x1: v.x1 + (indices.contains(0) ? dx : 0),
+                y1: v.y1 + (indices.contains(0) ? dy : 0),
+                x2: v.x2 + (indices.contains(1) ? dx : 0),
+                y2: v.y2 + (indices.contains(1) ? dy : 0),
+                stroke: v.stroke, opacity: v.opacity, transform: v.transform))
+        case .rect(let v):
+            var pts = [(v.x, v.y), (v.x + v.width, v.y),
+                       (v.x + v.width, v.y + v.height), (v.x, v.y + v.height)]
+            for i in 0..<4 where indices.contains(i) {
+                pts[i] = (pts[i].0 + dx, pts[i].1 + dy)
+            }
+            let nx = pts.map(\.0).min()!, ny = pts.map(\.1).min()!
+            let mx = pts.map(\.0).max()!, my = pts.map(\.1).max()!
+            return .rect(JasRect(x: nx, y: ny, width: mx - nx, height: my - ny,
+                                 rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
+                                 opacity: v.opacity, transform: v.transform))
+        case .circle(let v):
+            if indices.count >= 4 {
+                return .circle(JasCircle(cx: v.cx + dx, cy: v.cy + dy, r: v.r,
+                                         fill: v.fill, stroke: v.stroke,
+                                         opacity: v.opacity, transform: v.transform))
+            }
+            var cps = [(v.cx, v.cy - v.r), (v.cx + v.r, v.cy),
+                       (v.cx, v.cy + v.r), (v.cx - v.r, v.cy)]
+            for i in 0..<4 where indices.contains(i) {
+                cps[i] = (cps[i].0 + dx, cps[i].1 + dy)
+            }
+            let ncx = (cps[1].0 + cps[3].0) / 2
+            let ncy = (cps[0].1 + cps[2].1) / 2
+            let nr = max(abs(cps[1].0 - ncx), abs(cps[0].1 - ncy))
+            return .circle(JasCircle(cx: ncx, cy: ncy, r: nr,
+                                     fill: v.fill, stroke: v.stroke,
+                                     opacity: v.opacity, transform: v.transform))
+        case .ellipse(let v):
+            if indices.count >= 4 {
+                return .ellipse(JasEllipse(cx: v.cx + dx, cy: v.cy + dy, rx: v.rx, ry: v.ry,
+                                           fill: v.fill, stroke: v.stroke,
+                                           opacity: v.opacity, transform: v.transform))
+            }
+            var cps = [(v.cx, v.cy - v.ry), (v.cx + v.rx, v.cy),
+                       (v.cx, v.cy + v.ry), (v.cx - v.rx, v.cy)]
+            for i in 0..<4 where indices.contains(i) {
+                cps[i] = (cps[i].0 + dx, cps[i].1 + dy)
+            }
+            let ncx = (cps[1].0 + cps[3].0) / 2
+            let ncy = (cps[0].1 + cps[2].1) / 2
+            return .ellipse(JasEllipse(cx: ncx, cy: ncy,
+                                       rx: abs(cps[1].0 - ncx), ry: abs(cps[0].1 - ncy),
+                                       fill: v.fill, stroke: v.stroke,
+                                       opacity: v.opacity, transform: v.transform))
+        default:
+            return self
+        }
+    }
 }
 
 /// SVG \<line\> element.

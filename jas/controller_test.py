@@ -2,7 +2,7 @@ from absl.testing import absltest
 
 from controller import Controller
 from document import Document, ElementSelection
-from element import Circle, Ellipse, Group, Layer, Line, Rect, control_points
+from element import Circle, Ellipse, Group, Layer, Line, Rect, control_points, move_control_points
 from model import Model
 
 
@@ -214,14 +214,12 @@ class SelectionControllerTest(absltest.TestCase):
         self.assertEqual(len(sel), 1)
         es = next(iter(sel))
         self.assertEqual(es.path, (0, 0))
-        self.assertTrue(es.selected)
         self.assertEqual(es.control_points, frozenset({1}))
 
     def test_default_element_selection_flags(self):
-        """select_element produces entries with selected=True, all control points."""
+        """select_element produces entries with all control points."""
         self.ctrl.select_element((0, 0))
         es = next(iter(self.ctrl.document.selection))
-        self.assertTrue(es.selected)
         # Rect has 4 control points
         self.assertEqual(es.control_points, frozenset({0, 1, 2, 3}))
 
@@ -429,6 +427,102 @@ class ControlPointPositionsTest(absltest.TestCase):
         ellipse = Ellipse(cx=50, cy=50, rx=20, ry=10)
         self.assertEqual(control_points(ellipse),
                          [(50, 40), (70, 50), (50, 60), (30, 50)])
+
+
+class MoveControlPointsTest(absltest.TestCase):
+
+    def test_move_line_both_cps(self):
+        line = Line(x1=10, y1=20, x2=30, y2=40)
+        moved = move_control_points(line, frozenset({0, 1}), 5.0, -3.0)
+        self.assertEqual((moved.x1, moved.y1), (15.0, 17.0))
+        self.assertEqual((moved.x2, moved.y2), (35.0, 37.0))
+
+    def test_move_line_one_cp(self):
+        line = Line(x1=0, y1=0, x2=10, y2=10)
+        moved = move_control_points(line, frozenset({1}), 5.0, 5.0)
+        self.assertEqual((moved.x1, moved.y1), (0, 0))
+        self.assertEqual((moved.x2, moved.y2), (15.0, 15.0))
+
+    def test_move_rect_all_cps(self):
+        rect = Rect(x=10, y=20, width=30, height=40)
+        moved = move_control_points(rect, frozenset({0, 1, 2, 3}), 5.0, -5.0)
+        self.assertEqual((moved.x, moved.y, moved.width, moved.height),
+                         (15.0, 15.0, 30.0, 40.0))
+
+    def test_move_rect_one_corner(self):
+        rect = Rect(x=0, y=0, width=10, height=10)
+        moved = move_control_points(rect, frozenset({2}), 5.0, 5.0)
+        # CP2 is bottom-right (10,10) → (15,15)
+        self.assertEqual((moved.x, moved.y, moved.width, moved.height),
+                         (0.0, 0.0, 15.0, 15.0))
+
+    def test_move_circle_all_cps(self):
+        circle = Circle(cx=50, cy=50, r=10)
+        moved = move_control_points(circle, frozenset({0, 1, 2, 3}), 10.0, -10.0)
+        self.assertEqual((moved.cx, moved.cy, moved.r), (60.0, 40.0, 10.0))
+
+    def test_move_ellipse_all_cps(self):
+        ellipse = Ellipse(cx=50, cy=50, rx=20, ry=10)
+        moved = move_control_points(ellipse, frozenset({0, 1, 2, 3}), -5.0, 5.0)
+        self.assertEqual((moved.cx, moved.cy, moved.rx, moved.ry),
+                         (45.0, 55.0, 20.0, 10.0))
+
+
+class MoveSelectionTest(absltest.TestCase):
+
+    def test_move_selected_line(self):
+        line = Line(x1=10, y1=20, x2=30, y2=40)
+        layer = Layer(children=(line,))
+        doc = Document(layers=(layer,),
+                       selection=frozenset({ElementSelection(
+                           path=(0, 0), control_points=frozenset({0, 1}))}))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.move_selection(5.0, -3.0)
+        moved = ctrl.document.layers[0].children[0]
+        self.assertEqual((moved.x1, moved.y1, moved.x2, moved.y2),
+                         (15.0, 17.0, 35.0, 37.0))
+
+    def test_move_selected_rect(self):
+        rect = Rect(x=0, y=0, width=20, height=10)
+        layer = Layer(children=(rect,))
+        doc = Document(layers=(layer,),
+                       selection=frozenset({ElementSelection(
+                           path=(0, 0), control_points=frozenset({0, 1, 2, 3}))}))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.move_selection(10.0, 10.0)
+        moved = ctrl.document.layers[0].children[0]
+        self.assertEqual((moved.x, moved.y, moved.width, moved.height),
+                         (10.0, 10.0, 20.0, 10.0))
+
+    def test_move_partial_cps(self):
+        """Moving only one endpoint of a line."""
+        line = Line(x1=0, y1=0, x2=10, y2=10)
+        layer = Layer(children=(line,))
+        doc = Document(layers=(layer,),
+                       selection=frozenset({ElementSelection(
+                           path=(0, 0), control_points=frozenset({0}))}))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.move_selection(5.0, 5.0)
+        moved = ctrl.document.layers[0].children[0]
+        self.assertEqual((moved.x1, moved.y1), (5.0, 5.0))
+        self.assertEqual((moved.x2, moved.y2), (10.0, 10.0))
+
+    def test_move_multiple_elements(self):
+        line = Line(x1=0, y1=0, x2=10, y2=10)
+        rect = Rect(x=20, y=20, width=10, height=10)
+        layer = Layer(children=(line, rect))
+        doc = Document(layers=(layer,),
+                       selection=frozenset({
+                           ElementSelection(path=(0, 0), control_points=frozenset({0, 1})),
+                           ElementSelection(path=(0, 1), control_points=frozenset({0, 1, 2, 3})),
+                       }))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.move_selection(3.0, 4.0)
+        moved_line = ctrl.document.layers[0].children[0]
+        moved_rect = ctrl.document.layers[0].children[1]
+        self.assertEqual((moved_line.x1, moved_line.y1, moved_line.x2, moved_line.y2),
+                         (3.0, 4.0, 13.0, 14.0))
+        self.assertEqual((moved_rect.x, moved_rect.y), (23.0, 24.0))
 
 
 if __name__ == "__main__":

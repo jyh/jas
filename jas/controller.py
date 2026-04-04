@@ -13,7 +13,7 @@ from element import (
     Rect, Text,
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo,
     ClosePath,
-    control_point_count, control_points,
+    control_point_count, control_points, move_control_points,
 )
 from model import Model
 
@@ -400,15 +400,24 @@ class Controller:
     def select_control_point(self, path: ElementPath, index: int) -> None:
         """Select a single control point on an element.
 
-        The element is included in the selection (selected=True) and the
-        given control-point index is marked as selected.
+        The given control-point index is marked as selected.
         """
         if not path:
             raise ValueError("Path must be non-empty")
         self._model.document = replace(
             self._model.document,
             selection=frozenset({
-                ElementSelection(path=path, selected=True,
+                ElementSelection(path=path,
                                  control_points=frozenset({index}))
             }),
         )
+
+    def move_selection(self, dx: float, dy: float) -> None:
+        """Move all selected control points by (dx, dy)."""
+        doc = self._model.document
+        new_doc = doc
+        for es in doc.selection:
+            elem = doc.get_element(es.path)
+            new_elem = move_control_points(elem, es.control_points, dx, dy)
+            new_doc = new_doc.replace_element(es.path, new_elem)
+        self._model.document = new_doc

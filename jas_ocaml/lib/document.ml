@@ -21,7 +21,6 @@ end)
 (** Per-element selection state. *)
 type element_selection = {
   es_path : element_path;
-  es_selected : bool;
   es_control_points : int list;
 }
 
@@ -44,8 +43,8 @@ type document = {
 let make_document ?(title = "Untitled") ?(selected_layer = 0) ?(selection = PathMap.empty) layers =
   { title; layers; selected_layer; selection }
 
-let make_element_selection ?(selected = true) ?(control_points = []) path =
-  { es_path = path; es_selected = selected; es_control_points = control_points }
+let make_element_selection ?(control_points = []) path =
+  { es_path = path; es_control_points = control_points }
 
 (** Return the set of all element paths in the selection. *)
 let selected_paths sel =
