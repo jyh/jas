@@ -422,6 +422,8 @@ public struct JasText: Equatable {
     public let content: String
     public let fontFamily: String
     public let fontSize: Double
+    public let width: Double
+    public let height: Double
     public let fill: JasFill?
     public let stroke: JasStroke?
     public let opacity: Double
@@ -429,14 +431,21 @@ public struct JasText: Equatable {
 
     public init(x: Double, y: Double, content: String,
                 fontFamily: String = "sans-serif", fontSize: Double = 16.0,
+                width: Double = 0, height: Double = 0,
                 fill: JasFill? = nil, stroke: JasStroke? = nil,
                 opacity: Double = 1.0, transform: JasTransform? = nil) {
         self.x = x; self.y = y; self.content = content
         self.fontFamily = fontFamily; self.fontSize = fontSize
+        self.width = width; self.height = height
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
     }
 
+    public var isAreaText: Bool { width > 0 && height > 0 }
+
     public var bounds: BBox {
+        if isAreaText {
+            return (x, y, width, height)
+        }
         let approxWidth = Double(content.count) * fontSize * 0.6
         return (x, y - fontSize, approxWidth, fontSize)
     }

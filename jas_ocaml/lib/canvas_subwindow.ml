@@ -85,17 +85,29 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Text { x; y; content; font_family; font_size; fill; opacity; transform; _ } ->
+  | Text { x; y; content; font_family; font_size; text_width; text_height; fill; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     begin match fill with
     | Some { fill_color = c } -> Cairo.set_source_rgba cr c.r c.g c.b c.a
     | None -> Cairo.set_source_rgb cr 0.0 0.0 0.0
     end;
-    Cairo.select_font_face cr font_family;
-    Cairo.set_font_size cr font_size;
-    Cairo.move_to cr x y;
-    Cairo.show_text cr content;
+    if text_width > 0.0 && text_height > 0.0 then begin
+      (* Area text: use Pango for word wrapping *)
+      let layout = Pango.Layout.create (Cairo_pango.Font_map.create_context (Cairo_pango.Font_map.get_default ())) in
+      let font_desc = Pango.Font.from_string (Printf.sprintf "%s %d" font_family (int_of_float font_size)) in
+      Pango.Layout.set_font_description layout font_desc;
+      Pango.Layout.set_text layout content;
+      Pango.Layout.set_width layout (int_of_float (text_width *. float_of_int Pango.scale));
+      Pango.Layout.set_wrap layout `WORD;
+      Cairo.move_to cr x y;
+      Cairo_pango.show_layout cr layout
+    end else begin
+      Cairo.select_font_face cr font_family;
+      Cairo.set_font_size cr font_size;
+      Cairo.move_to cr x y;
+      Cairo.show_text cr content
+    end;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
@@ -405,11 +417,8 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         List.iteri (fun ci child ->
           if !result = None then
             match child with
-            | Element.Text { x; y; content; font_size; _ } ->
-              let bx = x in
-              let by = y -. font_size in
-              let bw = float_of_int (String.length content) *. font_size *. 0.6 in
-              let bh = font_size in
+            | Element.Text _ ->
+              let (bx, by, bw, bh) = Element.bounds child in
               if px >= bx && px <= bx +. bw && py >= by && py <= by +. bh then
                 result := Some ([li; ci], child)
             | _ -> ()
@@ -525,7 +534,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
                  List.iter (fun (px, py) -> Cairo.line_to cr px py) rest;
                  Cairo.Path.close cr
                | [] -> ())
-            end else if toolbar#current_tool = Toolbar.Rect || toolbar#current_tool = Toolbar.Selection || toolbar#current_tool = Toolbar.Direct_selection || toolbar#current_tool = Toolbar.Group_selection then begin
+            end else if toolbar#current_tool = Toolbar.Text_tool || toolbar#current_tool = Toolbar.Rect || toolbar#current_tool = Toolbar.Selection || toolbar#current_tool = Toolbar.Direct_selection || toolbar#current_tool = Toolbar.Group_selection then begin
               let x = min sx ex in
               let y = min sy ey in
               let w = abs_float (ex -. sx) in
@@ -633,18 +642,32 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
             controller#direct_select_rect ~extend x y w h;
             true
           end else
-          (* Text tool: edit existing text or place new text *)
+          (* Text tool: edit existing, place point text, or drag area text *)
           if toolbar#current_tool = Toolbar.Text_tool then begin
-            match _self#hit_test_text sx sy with
-            | Some (path, text_elem) ->
-              _self#start_text_edit path text_elem;
-              true
-            | None ->
-              let elem = Element.make_text ~fill:(Some Element.{
-                fill_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }
-              }) sx sy "Lorem Ipsum" in
+            let w = abs_float (raw_ex -. sx) in
+            let h = abs_float (raw_ey -. sy) in
+            if w > 4.0 || h > 4.0 then begin
+              (* Dragged a marquee: create area text *)
+              let tx = min sx raw_ex in
+              let ty = min sy raw_ey in
+              let elem = Element.make_text ~text_width:w ~text_height:h
+                ~fill:(Some Element.{
+                  fill_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }
+                }) tx ty "Lorem Ipsum" in
               controller#add_element elem;
               true
+            end else begin
+              match _self#hit_test_text sx sy with
+              | Some (path, text_elem) ->
+                _self#start_text_edit path text_elem;
+                true
+              | None ->
+                let elem = Element.make_text ~fill:(Some Element.{
+                  fill_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }
+                }) sx sy "Lorem Ipsum" in
+                controller#add_element elem;
+                true
+            end
           end else
           (* Drawing tools: shift means constrain angle *)
           let (ex, ey) = if shift then constrain_angle sx sy raw_ex raw_ey else (raw_ex, raw_ey) in

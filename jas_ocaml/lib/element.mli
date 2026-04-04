@@ -101,6 +101,8 @@ type element =
       content : string;
       font_family : string;
       font_size : float;
+      text_width : float;
+      text_height : float;
       fill : fill option;
       stroke : stroke option;
       opacity : float;
@@ -137,7 +139,7 @@ val make_ellipse : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float 
 val make_polyline : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> (float * float) list -> element
 val make_polygon : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> (float * float) list -> element
 val make_path : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> path_command list -> element
-val make_text : ?font_family:string -> ?font_size:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> float -> float -> string -> element
+val make_text : ?font_family:string -> ?font_size:float -> ?text_width:float -> ?text_height:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> float -> float -> string -> element
 val make_group : ?opacity:float -> ?transform:transform option -> element list -> element
 val make_layer : ?name:string -> ?opacity:float -> ?transform:transform option -> element list -> element
 

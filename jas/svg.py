@@ -161,9 +161,15 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}/>')
 
         case Text(x=x, y=y, content=content, font_family=ff, font_size=fs,
+                  width=tw, height=th,
                   fill=fill, stroke=stroke, opacity=opacity, transform=transform):
+            area_attrs = ""
+            if tw > 0 and th > 0:
+                area_attrs = (f' width="{_fmt(_px(tw))}"'
+                              f' height="{_fmt(_px(th))}"')
             return (f'{indent}<text x="{_fmt(_px(x))}" y="{_fmt(_px(y))}"'
                     f' font-family="{escape(ff)}" font-size="{_fmt(_px(fs))}"'
+                    f'{area_attrs}'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}>'
                     f'{escape(content)}</text>')
@@ -429,10 +435,15 @@ def _parse_element(node: ET.Element) -> Element | None:
         content = node.text or ""
         ff = node.get("font-family", "sans-serif")
         fs = _pt(float(node.get("font-size", "16")))
+        tw_str = node.get("width")
+        th_str = node.get("height")
+        tw = _pt(float(tw_str)) if tw_str else 0.0
+        th = _pt(float(th_str)) if th_str else 0.0
         return Text(
             x=_pt(float(node.get("x", "0"))),
             y=_pt(float(node.get("y", "0"))),
             content=content, font_family=ff, font_size=fs,
+            width=tw, height=th,
             fill=fill, stroke=stroke, opacity=opacity, transform=transform)
 
     if tag == "g":
