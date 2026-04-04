@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Pen | Text_tool | Line | Rect | Polygon
+type tool = Selection | Direct_selection | Group_selection | Pen | Text_tool | Text_path | Line | Rect | Polygon
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -44,11 +44,13 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
     val mutable pos_y = y
     val mutable current_tool = Selection
     val mutable arrow_slot_tool = Direct_selection
+    val mutable text_slot_tool = Text_tool
     val mutable shape_slot_tool = Rect
     val mutable dragging = false
     val mutable drag_offset_x = 0.0
     val mutable drag_offset_y = 0.0
     val mutable long_press_timer : GMain.Timeout.id option = None
+    val mutable text_long_press_timer : GMain.Timeout.id option = None
     val mutable shape_long_press_timer : GMain.Timeout.id option = None
 
     method current_tool = current_tool
@@ -61,6 +63,8 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       (match t with
        | Direct_selection | Group_selection ->
          arrow_slot_tool <- t
+       | Text_tool | Text_path ->
+         text_slot_tool <- t
        | Rect | Polygon ->
          shape_slot_tool <- t
        | _ -> ());
@@ -241,6 +245,25 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.show_text cr "T"
       in
 
+      let draw_text_path_icon cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.select_font_face cr "Sans" ~weight:Cairo.Bold;
+        Cairo.set_font_size cr 16.0;
+        Cairo.move_to cr (ox +. 2.0) (oy +. 18.0);
+        Cairo.show_text cr "T";
+        (* Wavy path *)
+        Cairo.set_line_width cr 1.0;
+        Cairo.move_to cr (ox +. 12.0) (oy +. 20.0);
+        Cairo.curve_to cr (ox +. 16.0) (oy +. 8.0)
+                          (ox +. 22.0) (oy +. 24.0)
+                          (ox +. 26.0) (oy +. 12.0);
+        Cairo.stroke cr
+      in
+
       let draw_pen_icon cr ~alloc =
         let bw = float_of_int alloc.Gtk.width in
         let bh = float_of_int alloc.Gtk.height in
@@ -265,7 +288,36 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       in
 
       draw_tool_button pen_btn Pen draw_pen_icon;
-      draw_tool_button text_btn Text_tool draw_text_icon;
+      (* Text slot: draws text or text-path depending on text_slot_tool *)
+      text_btn#misc#connect#draw ~callback:(fun cr ->
+        let alloc = text_btn#misc#allocation in
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        if current_tool = text_slot_tool then begin
+          Cairo.set_source_rgb cr 0.4 0.4 0.4;
+          Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
+          Cairo.fill cr
+        end else begin
+          Cairo.set_source_rgb cr 0.27 0.27 0.27;
+          Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
+          Cairo.fill cr
+        end;
+        (match text_slot_tool with
+         | Text_tool -> draw_text_icon cr ~alloc
+         | Text_path -> draw_text_path_icon cr ~alloc
+         | _ -> ());
+        (* Alternate triangle *)
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let s = 5.0 in
+        Cairo.move_to cr (ox +. 28.0) (oy +. 28.0);
+        Cairo.line_to cr (ox +. 28.0 -. s) (oy +. 28.0);
+        Cairo.line_to cr (ox +. 28.0) (oy +. 28.0 -. s);
+        Cairo.Path.close cr;
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.fill cr;
+        true
+      ) |> ignore;
       draw_tool_button selection_btn Selection (draw_arrow ~filled:true);
       (* Arrow slot uses custom draw that checks arrow_slot_tool *)
       direct_btn#misc#connect#draw ~callback:(fun cr ->
@@ -318,7 +370,28 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       in
       connect_click selection_btn Selection;
       connect_click pen_btn Pen;
-      connect_click text_btn Text_tool;
+      (* Text slot: click selects, long press shows menu *)
+      text_btn#event#add [`BUTTON_PRESS; `BUTTON_RELEASE];
+      text_btn#event#connect#button_press ~callback:(fun ev ->
+        if GdkEvent.Button.button ev = 1 then begin
+          text_long_press_timer <- Some (GMain.Timeout.add ~ms:long_press_ms ~callback:(fun () ->
+            text_long_press_timer <- None;
+            self#show_text_slot_menu;
+            false
+          ));
+          true
+        end else false
+      ) |> ignore;
+      text_btn#event#connect#button_release ~callback:(fun ev ->
+        if GdkEvent.Button.button ev = 1 then begin
+          (match text_long_press_timer with
+           | Some id -> GMain.Timeout.remove id; text_long_press_timer <- None
+           | None -> ());
+          current_tool <- text_slot_tool;
+          self#redraw_all;
+          true
+        end else false
+      ) |> ignore;
       connect_click line_btn Line;
 
       (* Arrow slot: click selects, long press shows menu *)
@@ -411,6 +484,21 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       in
       add_item "Direct Selection" Direct_selection;
       add_item "Group Selection" Group_selection;
+      menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
+
+    method private show_text_slot_menu =
+      let menu = GMenu.menu () in
+      let add_item label tool =
+        let item = GMenu.check_menu_item ~label ~packing:menu#append () in
+        item#set_active (text_slot_tool = tool);
+        item#connect#activate ~callback:(fun () ->
+          text_slot_tool <- tool;
+          current_tool <- tool;
+          self#redraw_all
+        ) |> ignore
+      in
+      add_item "Text" Text_tool;
+      add_item "Text on Path" Text_path;
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
 
     method private show_shape_slot_menu =

@@ -147,6 +147,15 @@ private func elementSvg(_ elem: Element, indent: String) -> String {
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))>" +
             "\(escapeXml(v.content))</text>"
 
+    case .textPath(let v):
+        let d = pathData(v.d)
+        return "\(indent)<text\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
+            " font-family=\"\(escapeXml(v.fontFamily))\" font-size=\"\(fmt(px(v.fontSize)))\"" +
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))>" +
+            "<textPath path=\"\(d)\"" +
+            (v.startOffset > 0 ? " startOffset=\"\(fmt(v.startOffset * 100))%\"" : "") +
+            ">\(escapeXml(v.content))</textPath></text>"
+
     case .group(let v):
         var lines = ["\(indent)<g\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
         for child in v.children {

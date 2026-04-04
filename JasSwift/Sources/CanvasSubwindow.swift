@@ -102,6 +102,58 @@ private func buildPath(_ ctx: CGContext, _ cmds: [PathCommand]) {
     }
 }
 
+/// Build path commands into a CGMutablePath (for text-on-path flattening).
+private func buildCGPath(_ path: CGMutablePath, _ cmds: [PathCommand]) {
+    var lastControl: CGPoint? = nil
+    for cmd in cmds {
+        switch cmd {
+        case .moveTo(let x, let y):
+            path.move(to: CGPoint(x: x, y: y))
+            lastControl = nil
+        case .lineTo(let x, let y):
+            path.addLine(to: CGPoint(x: x, y: y))
+            lastControl = nil
+        case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
+            path.addCurve(to: CGPoint(x: x, y: y),
+                          control1: CGPoint(x: x1, y: y1),
+                          control2: CGPoint(x: x2, y: y2))
+            lastControl = CGPoint(x: x2, y: y2)
+        case .smoothCurveTo(let x2, let y2, let x, let y):
+            let cur = path.currentPoint
+            let c1: CGPoint
+            if let lc = lastControl {
+                c1 = CGPoint(x: 2 * cur.x - lc.x, y: 2 * cur.y - lc.y)
+            } else {
+                c1 = cur
+            }
+            path.addCurve(to: CGPoint(x: x, y: y),
+                          control1: c1,
+                          control2: CGPoint(x: x2, y: y2))
+            lastControl = CGPoint(x: x2, y: y2)
+        case .quadTo(let x1, let y1, let x, let y):
+            path.addQuadCurve(to: CGPoint(x: x, y: y),
+                              control: CGPoint(x: x1, y: y1))
+            lastControl = CGPoint(x: x1, y: y1)
+        case .smoothQuadTo(let x, let y):
+            let cur = path.currentPoint
+            let c1: CGPoint
+            if let lc = lastControl {
+                c1 = CGPoint(x: 2 * cur.x - lc.x, y: 2 * cur.y - lc.y)
+            } else {
+                c1 = cur
+            }
+            path.addQuadCurve(to: CGPoint(x: x, y: y), control: c1)
+            lastControl = c1
+        case .arcTo(_, _, _, _, _, let x, let y):
+            path.addLine(to: CGPoint(x: x, y: y))
+            lastControl = nil
+        case .closePath:
+            path.closeSubpath()
+            lastControl = nil
+        }
+    }
+}
+
 private func fillAndStroke(_ ctx: CGContext, _ fill: JasFill?, _ stroke: JasStroke?) {
     let hasFill = fill != nil
     let hasStroke = stroke != nil
@@ -210,6 +262,93 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
             let line = CTLineCreateWithAttributedString(str)
             ctx.textPosition = CGPoint(x: v.x, y: v.y)
             CTLineDraw(line, ctx)
+        }
+        ctx.restoreGState()
+
+    case .textPath(let v):
+        ctx.setAlpha(CGFloat(v.opacity))
+        applyTransform(ctx, v.transform)
+        let font = NSFont(name: v.fontFamily, size: v.fontSize) ?? NSFont.systemFont(ofSize: v.fontSize)
+        let color: NSColor
+        if let fill = v.fill {
+            color = nsColor(fill.color)
+        } else {
+            color = .black
+        }
+        // Flatten path to polyline
+        let cgPath = CGMutablePath()
+        buildCGPath(cgPath, v.d)
+        var points: [(Double, Double)] = []
+        cgPath.applyWithBlock { elementPtr in
+            let el = elementPtr.pointee
+            switch el.type {
+            case .moveToPoint, .addLineToPoint:
+                points.append((el.points[0].x, el.points[0].y))
+            case .addCurveToPoint:
+                // Flatten cubic bezier
+                let n = points.isEmpty ? 0 : points.count - 1
+                let (sx, sy) = points.isEmpty ? (0.0, 0.0) : points[n]
+                let steps = 20
+                for i in 1...steps {
+                    let t = Double(i) / Double(steps)
+                    let mt = 1.0 - t
+                    let px = mt*mt*mt*sx + 3*mt*mt*t*el.points[0].x + 3*mt*t*t*el.points[1].x + t*t*t*el.points[2].x
+                    let py = mt*mt*mt*sy + 3*mt*mt*t*el.points[0].y + 3*mt*t*t*el.points[1].y + t*t*t*el.points[2].y
+                    points.append((px, py))
+                }
+            case .addQuadCurveToPoint:
+                let n = points.isEmpty ? 0 : points.count - 1
+                let (sx, sy) = points.isEmpty ? (0.0, 0.0) : points[n]
+                let steps = 20
+                for i in 1...steps {
+                    let t = Double(i) / Double(steps)
+                    let mt = 1.0 - t
+                    let px = mt*mt*sx + 2*mt*t*el.points[0].x + t*t*el.points[1].x
+                    let py = mt*mt*sy + 2*mt*t*el.points[0].y + t*t*el.points[1].y
+                    points.append((px, py))
+                }
+            case .closeSubpath:
+                break
+            @unknown default:
+                break
+            }
+        }
+        guard points.count >= 2 else { break }
+        // Compute cumulative distances
+        var dists = [0.0]
+        for i in 1..<points.count {
+            let dx = points[i].0 - points[i-1].0
+            let dy = points[i].1 - points[i-1].1
+            dists.append(dists[i-1] + hypot(dx, dy))
+        }
+        let totalLen = dists.last!
+        guard totalLen > 0 else { break }
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        var offset = v.startOffset * totalLen
+        ctx.saveGState()
+        ctx.textMatrix = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
+        for ch in v.content {
+            let chStr = NSAttributedString(string: String(ch), attributes: attrs)
+            let line = CTLineCreateWithAttributedString(chStr)
+            let cw = CTLineGetTypographicBounds(line, nil, nil, nil)
+            let mid = offset + cw / 2
+            if mid > totalLen { break }
+            // Find segment containing mid
+            var seg = 1
+            while seg < points.count - 1 && dists[seg] < mid { seg += 1 }
+            let d0 = dists[seg - 1], d1 = dists[seg]
+            let frac = d1 > d0 ? (mid - d0) / (d1 - d0) : 0
+            let (ax, ay) = points[seg - 1], (bx, by) = points[seg]
+            let px = ax + frac * (bx - ax)
+            let py = ay + frac * (by - ay)
+            let angle = atan2(by - ay, bx - ax)
+            ctx.saveGState()
+            ctx.translateBy(x: px, y: py)
+            ctx.rotate(by: angle)
+            ctx.textPosition = CGPoint(x: -cw / 2, y: v.fontSize / 3)
+            CTLineDraw(line, ctx)
+            ctx.restoreGState()
+            offset += cw
         }
         ctx.restoreGState()
 
@@ -369,6 +508,7 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: JasDocument) {
         case .polygon(let v): applyTransform(ctx, v.transform)
         case .path(let v): applyTransform(ctx, v.transform)
         case .text(let v): applyTransform(ctx, v.transform)
+        case .textPath(let v): applyTransform(ctx, v.transform)
         case .group(let v): applyTransform(ctx, v.transform)
         case .layer(let v): applyTransform(ctx, v.transform)
         }

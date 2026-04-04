@@ -10,3 +10,4 @@ let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
   | Toolbar.Polygon -> (new Drawing_tool.polygon_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Pen -> (new Pen_tool.pen_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Text_tool -> (new Text_tool.text_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Text_path -> (new Text_path_tool.text_path_tool :> Canvas_tool.canvas_tool)

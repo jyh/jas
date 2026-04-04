@@ -13,7 +13,7 @@ from document import Document, ElementSelection
 from element import (
     ArcTo, Circle, ClosePath, CurveTo, Element, Ellipse, Group, Layer, Line,
     LineTo, MoveTo, Path, PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
-    SmoothQuadTo, Text,
+    SmoothQuadTo, Text, TextPath,
     Color, Fill, LineCap, LineJoin, Stroke, Transform,
     control_points as element_control_points,
     path_handle_positions,
@@ -199,10 +199,42 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
             else:
                 painter.drawText(QPointF(x, y), content)
 
+        case TextPath(d=d, content=content, start_offset=start_offset,
+                      font_family=ff, font_size=fs,
+                      fill=fill, stroke=stroke):
+            from PySide6.QtGui import QFont, QFontMetricsF
+            font = QFont(ff, int(fs))
+            painter.setFont(font)
+            if fill is not None:
+                painter.setPen(_qcolor(fill.color))
+            elif stroke is not None:
+                _apply_stroke(painter, stroke)
+            else:
+                painter.setPen(QColor("black"))
+            path = _build_path(d)
+            total_len = path.length()
+            if total_len > 0:
+                fm = QFontMetricsF(font)
+                offset = start_offset * total_len
+                for ch in content:
+                    cw = fm.horizontalAdvance(ch)
+                    mid = offset + cw / 2
+                    if mid > total_len:
+                        break
+                    pct = mid / total_len
+                    pt = path.pointAtPercent(pct)
+                    angle = path.angleAtPercent(pct)
+                    painter.save()
+                    painter.translate(pt)
+                    painter.rotate(-angle)
+                    painter.drawText(QPointF(-cw / 2, fs / 3), ch)
+                    painter.restore()
+                    offset += cw
+
         case Group(children=children) | Layer(children=children):
             for child in children:
                 _draw_element(painter, child)
-        
+
         case Element():
             raise ValueError(f"Unknown element type: {elem}")
 

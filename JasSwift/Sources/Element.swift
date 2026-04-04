@@ -135,6 +135,8 @@ public enum Element: Equatable {
     case path(JasPath)
     /// SVG \<text\>
     case text(JasText)
+    /// SVG \<text\>\<textPath\>
+    case textPath(JasTextPath)
     /// SVG \<g\>
     case group(JasGroup)
     /// Named layer
@@ -150,6 +152,7 @@ public enum Element: Equatable {
         case .polygon(let v): return v.bounds
         case .path(let v): return v.bounds
         case .text(let v): return v.bounds
+        case .textPath(let v): return v.bounds
         case .group(let v): return v.bounds
         case .layer(let v): return v.bounds
         }
@@ -550,6 +553,15 @@ public struct JasPolygon: Equatable {
 }
 
 /// SVG \<path\> element.
+/// Approximate bounds from path command endpoints.
+func pathBounds(_ d: [PathCommand]) -> BBox {
+    let endpoints = d.compactMap(\.endpoint)
+    guard !endpoints.isEmpty else { return (0, 0, 0, 0) }
+    let xs = endpoints.map(\.0), ys = endpoints.map(\.1)
+    let minX = xs.min()!, minY = ys.min()!
+    return (minX, minY, xs.max()! - minX, ys.max()! - minY)
+}
+
 public struct JasPath: Equatable {
     public let d: [PathCommand]
     public let fill: JasFill?
@@ -565,11 +577,7 @@ public struct JasPath: Equatable {
     }
 
     public var bounds: BBox {
-        let endpoints = d.compactMap(\.endpoint)
-        guard !endpoints.isEmpty else { return (0, 0, 0, 0) }
-        let xs = endpoints.map(\.0), ys = endpoints.map(\.1)
-        let minX = xs.min()!, minY = ys.min()!
-        return (minX, minY, xs.max()! - minX, ys.max()! - minY)
+        return pathBounds(d)
     }
 }
 
@@ -605,6 +613,33 @@ public struct JasText: Equatable {
         }
         let approxWidth = Double(content.count) * fontSize * 0.6
         return (x, y - fontSize, approxWidth, fontSize)
+    }
+}
+
+/// SVG \<text\>\<textPath\> — text rendered along a path.
+public struct JasTextPath: Equatable {
+    public let d: [PathCommand]
+    public let content: String
+    public let startOffset: Double
+    public let fontFamily: String
+    public let fontSize: Double
+    public let fill: JasFill?
+    public let stroke: JasStroke?
+    public let opacity: Double
+    public let transform: JasTransform?
+
+    public init(d: [PathCommand], content: String = "Lorem Ipsum",
+                startOffset: Double = 0.0,
+                fontFamily: String = "sans-serif", fontSize: Double = 16.0,
+                fill: JasFill? = nil, stroke: JasStroke? = nil,
+                opacity: Double = 1.0, transform: JasTransform? = nil) {
+        self.d = d; self.content = content; self.startOffset = startOffset
+        self.fontFamily = fontFamily; self.fontSize = fontSize
+        self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
+    }
+
+    public var bounds: BBox {
+        return pathBounds(d)
     }
 }
 

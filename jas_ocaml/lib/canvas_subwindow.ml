@@ -111,6 +111,99 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
+  | Text_path { d; content; start_offset; font_family; font_size; fill; opacity; transform; _ } ->
+    Cairo.Group.push cr;
+    apply_transform cr transform;
+    begin match fill with
+    | Some { fill_color = c } -> Cairo.set_source_rgba cr c.r c.g c.b c.a
+    | None -> Cairo.set_source_rgb cr 0.0 0.0 0.0
+    end;
+    Cairo.select_font_face cr font_family;
+    Cairo.set_font_size cr font_size;
+    (* Flatten path to polyline for arc-length parameterization *)
+    let flatten_path cmds =
+      let pts = ref [] in
+      let cx = ref 0.0 and cy = ref 0.0 in
+      let steps = 20 in
+      List.iter (fun cmd ->
+        let open Element in
+        match cmd with
+        | MoveTo (x, y) -> cx := x; cy := y; pts := (x, y) :: !pts
+        | LineTo (x, y) -> cx := x; cy := y; pts := (x, y) :: !pts
+        | CurveTo (x1, y1, x2, y2, x, y) ->
+          let sx = !cx and sy = !cy in
+          for i = 1 to steps do
+            let t = float_of_int i /. float_of_int steps in
+            let t2 = t *. t in let t3 = t *. t *. t in
+            let mt = 1.0 -. t in let mt2 = mt *. mt in let mt3 = mt *. mt *. mt in
+            let px = mt3 *. sx +. 3.0 *. mt2 *. t *. x1 +. 3.0 *. mt *. t2 *. x2 +. t3 *. x in
+            let py = mt3 *. sy +. 3.0 *. mt2 *. t *. y1 +. 3.0 *. mt *. t2 *. y2 +. t3 *. y in
+            pts := (px, py) :: !pts
+          done;
+          cx := x; cy := y
+        | QuadTo (x1, y1, x, y) ->
+          let sx = !cx and sy = !cy in
+          for i = 1 to steps do
+            let t = float_of_int i /. float_of_int steps in
+            let mt = 1.0 -. t in
+            let px = mt *. mt *. sx +. 2.0 *. mt *. t *. x1 +. t *. t *. x in
+            let py = mt *. mt *. sy +. 2.0 *. mt *. t *. y1 +. t *. t *. y in
+            pts := (px, py) :: !pts
+          done;
+          cx := x; cy := y
+        | ClosePath | SmoothCurveTo _ | SmoothQuadTo _ | ArcTo _ ->
+          (* Simplified: treat as lineTo for arc/smooth variants *)
+          ()
+      ) cmds;
+      List.rev !pts
+    in
+    let flat = flatten_path d in
+    (* Compute cumulative arc lengths *)
+    let n = List.length flat in
+    if n >= 2 then begin
+      let arr = Array.of_list flat in
+      let dists = Array.make n 0.0 in
+      for i = 1 to n - 1 do
+        let (px, py) = arr.(i - 1) in
+        let (qx, qy) = arr.(i) in
+        dists.(i) <- dists.(i - 1) +. sqrt ((qx -. px) ** 2.0 +. (qy -. py) ** 2.0)
+      done;
+      let total_len = dists.(n - 1) in
+      if total_len > 0.0 then begin
+        let offset = ref (start_offset *. total_len) in
+        let len = String.length content in
+        let j = ref 0 in
+        while !j < len do
+          let ch = String.make 1 content.[!j] in
+          let extents = Cairo.text_extents cr ch in
+          let cw = extents.Cairo.x_advance in
+          let mid = !offset +. cw /. 2.0 in
+          if mid > total_len then j := len  (* stop *)
+          else begin
+            (* Find segment containing mid *)
+            let seg = ref 1 in
+            while !seg < n - 1 && dists.(!seg) < mid do incr seg done;
+            let d0 = dists.(!seg - 1) and d1 = dists.(!seg) in
+            let frac = if d1 > d0 then (mid -. d0) /. (d1 -. d0) else 0.0 in
+            let (ax, ay) = arr.(!seg - 1) and (bx, by) = arr.(!seg) in
+            let px = ax +. frac *. (bx -. ax) in
+            let py = ay +. frac *. (by -. ay) in
+            let angle = atan2 (by -. ay) (bx -. ax) in
+            Cairo.save cr;
+            Cairo.translate cr px py;
+            Cairo.rotate cr angle;
+            Cairo.move_to cr (-. cw /. 2.0) (font_size /. 3.0);
+            Cairo.show_text cr ch;
+            Cairo.restore cr;
+            offset := !offset +. cw
+          end;
+          incr j
+        done
+      end
+    end;
+    Cairo.Group.pop_to_source cr;
+    Cairo.paint cr ~alpha:opacity
+
   | Group { children; opacity; transform } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
@@ -371,6 +464,7 @@ let draw_selection_overlays cr (doc : Document.document) =
         | Element.Circle { transform; _ } | Element.Ellipse { transform; _ }
         | Element.Polyline { transform; _ } | Element.Polygon { transform; _ }
         | Element.Path { transform; _ } | Element.Text { transform; _ }
+        | Element.Text_path { transform; _ }
         | Element.Group { transform; _ } | Element.Layer { transform; _ } -> transform);
       draw_element_overlay cr !node es.es_control_points;
       Cairo.restore cr

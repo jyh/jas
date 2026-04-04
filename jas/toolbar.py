@@ -13,6 +13,7 @@ class Tool(Enum):
     GROUP_SELECTION = auto()
     PEN = auto()
     TEXT = auto()
+    TEXT_PATH = auto()
     LINE = auto()
     RECT = auto()
     POLYGON = auto()
@@ -75,6 +76,8 @@ class ToolButton(QToolButton):
             self._draw_pen_tool(painter)
         elif self.tool == Tool.TEXT:
             self._draw_text_tool(painter)
+        elif self.tool == Tool.TEXT_PATH:
+            self._draw_text_path_tool(painter)
         elif self.tool == Tool.POLYGON:
             self._draw_polygon_tool(painter)
 
@@ -139,6 +142,19 @@ class ToolButton(QToolButton):
         painter.setFont(font)
         painter.drawText(4, 22, "T")
 
+    def _draw_text_path_tool(self, painter):
+        painter.setPen(QPen(QColor("#cccccc"), 1.5))
+        font = QFont("sans-serif", 14, QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.drawText(2, 18, "T")
+        # Draw a small wavy path
+        path = QPainterPath()
+        path.moveTo(12, 20)
+        path.cubicTo(16, 8, 22, 24, 26, 12)
+        painter.setPen(QPen(QColor("#cccccc"), 1.0))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+
     def _draw_polygon_tool(self, painter):
         import math
         painter.setPen(QPen(QColor("#cccccc"), 1.5))
@@ -172,6 +188,8 @@ class ToolButton(QToolButton):
 
 # Tools that share the direct/group selection slot
 _ARROW_SLOT_TOOLS = {Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION}
+# Tools that share the text/text-path slot
+_TEXT_SLOT_TOOLS = {Tool.TEXT, Tool.TEXT_PATH}
 # Tools that share the rect/polygon slot
 _SHAPE_SLOT_TOOLS = {Tool.RECT, Tool.POLYGON}
 _LONG_PRESS_MS = 500
@@ -187,6 +205,8 @@ class Toolbar(QWidget):
         self.current_tool = Tool.SELECTION
         # Which tool is visible in the shared arrow slot
         self._arrow_slot_tool = Tool.DIRECT_SELECTION
+        # Which tool is visible in the shared text slot
+        self._text_slot_tool = Tool.TEXT
         # Which tool is visible in the shared shape slot
         self._shape_slot_tool = Tool.RECT
 
@@ -214,7 +234,7 @@ class Toolbar(QWidget):
             (Tool.RECT, 2, 1),
         ]
         for tool, row, col in tools:
-            has_alt = tool in _ARROW_SLOT_TOOLS or tool in _SHAPE_SLOT_TOOLS
+            has_alt = tool in _ARROW_SLOT_TOOLS or tool in _TEXT_SLOT_TOOLS or tool in _SHAPE_SLOT_TOOLS
             btn = ToolButton(tool, has_alternates=has_alt)
             self.buttons[tool] = btn
             self.button_group.addButton(btn)
@@ -223,6 +243,8 @@ class Toolbar(QWidget):
         # Create hidden alternate buttons (not in grid, share slots)
         self.buttons[Tool.GROUP_SELECTION] = ToolButton(Tool.GROUP_SELECTION, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.GROUP_SELECTION])
+        self.buttons[Tool.TEXT_PATH] = ToolButton(Tool.TEXT_PATH, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.TEXT_PATH])
         self.buttons[Tool.POLYGON] = ToolButton(Tool.POLYGON, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.POLYGON])
 
@@ -235,6 +257,12 @@ class Toolbar(QWidget):
         self._long_press_timer.setInterval(_LONG_PRESS_MS)
         self._long_press_timer.timeout.connect(self._show_arrow_slot_menu)
 
+        # Long-press timer for the text slot
+        self._text_long_press_timer = QTimer(self)
+        self._text_long_press_timer.setSingleShot(True)
+        self._text_long_press_timer.setInterval(_LONG_PRESS_MS)
+        self._text_long_press_timer.timeout.connect(self._show_text_slot_menu)
+
         # Long-press timer for the shape slot
         self._shape_long_press_timer = QTimer(self)
         self._shape_long_press_timer.setSingleShot(True)
@@ -245,6 +273,11 @@ class Toolbar(QWidget):
         arrow_btn = self.buttons[Tool.DIRECT_SELECTION]
         arrow_btn.pressed.connect(self._on_arrow_slot_pressed)
         arrow_btn.released.connect(self._on_arrow_slot_released)
+
+        # Install press/release handling on the text slot button
+        text_btn = self.buttons[Tool.TEXT]
+        text_btn.pressed.connect(self._on_text_slot_pressed)
+        text_btn.released.connect(self._on_text_slot_released)
 
         # Install press/release handling on the shape slot button
         shape_btn = self.buttons[Tool.RECT]
@@ -262,6 +295,13 @@ class Toolbar(QWidget):
         if self._long_press_timer.isActive():
             self._long_press_timer.stop()
 
+    def _on_text_slot_pressed(self):
+        self._text_long_press_timer.start()
+
+    def _on_text_slot_released(self):
+        if self._text_long_press_timer.isActive():
+            self._text_long_press_timer.stop()
+
     def _on_shape_slot_pressed(self):
         self._shape_long_press_timer.start()
 
@@ -278,6 +318,17 @@ class Toolbar(QWidget):
             action.setChecked(tool == self._arrow_slot_tool)
             action.triggered.connect(lambda checked, t=tool: self._switch_arrow_slot(t))
         btn = self.buttons[self._arrow_slot_tool]
+        menu.exec(btn.mapToGlobal(QPoint(0, btn.height())))
+
+    def _show_text_slot_menu(self):
+        menu = QMenu(self)
+        for tool in (Tool.TEXT, Tool.TEXT_PATH):
+            label = "Text" if tool == Tool.TEXT else "Text on Path"
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(tool == self._text_slot_tool)
+            action.triggered.connect(lambda checked, t=tool: self._switch_text_slot(t))
+        btn = self.buttons[Tool.TEXT]
         menu.exec(btn.mapToGlobal(QPoint(0, btn.height())))
 
     def _show_shape_slot_menu(self):
@@ -301,6 +352,16 @@ class Toolbar(QWidget):
         arrow_btn.update()
         self.select_tool(tool)
 
+    def _switch_text_slot(self, tool: Tool):
+        """Switch the text slot to show a different tool."""
+        if tool == self._text_slot_tool:
+            return
+        self._text_slot_tool = tool
+        text_btn = self.buttons[Tool.TEXT]
+        text_btn.tool = tool
+        text_btn.update()
+        self.select_tool(tool)
+
     def _switch_shape_slot(self, tool: Tool):
         """Switch the shape slot to show a different tool."""
         if tool == self._shape_slot_tool:
@@ -318,6 +379,12 @@ class Toolbar(QWidget):
             arrow_btn.setChecked(True)
             arrow_btn.update()
             self._arrow_slot_tool = tool
+        elif tool in _TEXT_SLOT_TOOLS:
+            text_btn = self.buttons[Tool.TEXT]
+            text_btn.tool = tool
+            text_btn.setChecked(True)
+            text_btn.update()
+            self._text_slot_tool = tool
         elif tool in _SHAPE_SLOT_TOOLS:
             shape_btn = self.buttons[Tool.RECT]
             shape_btn.tool = tool

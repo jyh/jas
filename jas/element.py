@@ -290,25 +290,29 @@ class Path(Element):
     transform: Transform | None = None
 
     def bounds(self) -> Tuple[float, float, float, float]:
-        """Approximate bounds from command endpoints (ignores control points)."""
-        xs: list[float] = []
-        ys: list[float] = []
-        for cmd in self.d:
-            match cmd:
-                case MoveTo(x, y) | LineTo(x, y) | SmoothQuadTo(x, y):
-                    xs.append(x); ys.append(y)
-                case CurveTo(_, _, _, _, x, y) | SmoothCurveTo(_, _, x, y):
-                    xs.append(x); ys.append(y)
-                case QuadTo(_, _, x, y):
-                    xs.append(x); ys.append(y)
-                case ArcTo(_, _, _, _, _, x, y):
-                    xs.append(x); ys.append(y)
-                case ClosePath():
-                    pass
-        if not xs:
-            return (0, 0, 0, 0)
-        min_x, min_y = min(xs), min(ys)
-        return (min_x, min_y, max(xs) - min_x, max(ys) - min_y)
+        return _path_bounds(self.d)
+
+
+def _path_bounds(d) -> Tuple[float, float, float, float]:
+    """Approximate bounds from path command endpoints."""
+    xs: list[float] = []
+    ys: list[float] = []
+    for cmd in d:
+        match cmd:
+            case MoveTo(x, y) | LineTo(x, y) | SmoothQuadTo(x, y):
+                xs.append(x); ys.append(y)
+            case CurveTo(_, _, _, _, x, y) | SmoothCurveTo(_, _, x, y):
+                xs.append(x); ys.append(y)
+            case QuadTo(_, _, x, y):
+                xs.append(x); ys.append(y)
+            case ArcTo(_, _, _, _, _, x, y):
+                xs.append(x); ys.append(y)
+            case ClosePath():
+                pass
+    if not xs:
+        return (0, 0, 0, 0)
+    min_x, min_y = min(xs), min(ys)
+    return (min_x, min_y, max(xs) - min_x, max(ys) - min_y)
 
 
 @dataclass(frozen=True)
@@ -339,6 +343,25 @@ class Text(Element):
             return (self.x, self.y, self.width, self.height)
         approx_width = len(self.content) * self.font_size * 0.6
         return (self.x, self.y - self.font_size, approx_width, self.font_size)
+
+
+@dataclass(frozen=True)
+class TextPath(Element):
+    """SVG <text><textPath> element — text rendered along a path."""
+    d: tuple[MoveTo | LineTo | CurveTo | QuadTo | SmoothCurveTo
+             | SmoothQuadTo | ArcTo | ClosePath, ...] = ()
+    content: str = "Lorem Ipsum"
+    start_offset: float = 0.0
+    font_family: str = "sans-serif"
+    font_size: float = 16.0
+    fill: Fill | None = None
+    stroke: Stroke | None = None
+    opacity: float = 1.0
+    transform: Transform | None = None
+
+    def bounds(self) -> Tuple[float, float, float, float]:
+        # Approximate from path bounds
+        return _path_bounds(self.d)
 
 
 @dataclass(frozen=True)

@@ -139,6 +139,15 @@ let rec element_svg indent (elem : Element.element) =
       indent (fmt (px x)) (fmt (px y)) (escape_xml font_family) (fmt (px font_size))
       area_attrs (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
       (transform_attr transform) (escape_xml content)
+  | Text_path { d; content; start_offset; font_family; font_size; fill; stroke; opacity; transform } ->
+    let offset_attr = if start_offset > 0.0 then
+      Printf.sprintf " startOffset=\"%s%%\"" (fmt (start_offset *. 100.0))
+    else "" in
+    Printf.sprintf "%s<text%s%s font-family=\"%s\" font-size=\"%s\"%s%s><textPath path=\"%s\"%s>%s</textPath></text>"
+      indent (fill_attrs fill) (stroke_attrs stroke)
+      (escape_xml font_family) (fmt (px font_size))
+      (opacity_attr opacity) (transform_attr transform)
+      (path_data d) offset_attr (escape_xml content)
   | Group { children; opacity; transform } ->
     let header = Printf.sprintf "%s<g%s%s>"
       indent (opacity_attr opacity) (transform_attr transform) in

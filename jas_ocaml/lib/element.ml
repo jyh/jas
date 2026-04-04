@@ -123,6 +123,17 @@ type element =
       opacity : float;
       transform : transform option;
     }
+  | Text_path of {
+      d : path_command list;
+      content : string;
+      start_offset : float;
+      font_family : string;
+      font_size : float;
+      fill : fill option;
+      stroke : stroke option;
+      opacity : float;
+      transform : transform option;
+    }
   | Group of {
       children : element list;
       opacity : float;
@@ -159,6 +170,30 @@ let rec bounds = function
       (min_x, min_y, max_f xs -. min_x, max_f ys -. min_y)
     end
   | Path { d; _ } ->
+    let collect_endpoints cmds =
+      List.fold_left (fun (xs, ys) cmd ->
+        match cmd with
+        | MoveTo (x, y) | LineTo (x, y) | SmoothQuadTo (x, y) ->
+          (x :: xs, y :: ys)
+        | CurveTo (_, _, _, _, x, y) | SmoothCurveTo (_, _, x, y) ->
+          (x :: xs, y :: ys)
+        | QuadTo (_, _, x, y) ->
+          (x :: xs, y :: ys)
+        | ArcTo (_, _, _, _, _, x, y) ->
+          (x :: xs, y :: ys)
+        | ClosePath -> (xs, ys)
+      ) ([], []) cmds
+    in
+    let (xs, ys) = collect_endpoints d in
+    begin match xs, ys with
+    | [], [] -> (0.0, 0.0, 0.0, 0.0)
+    | _ ->
+      let min_f = List.fold_left min infinity in
+      let max_f = List.fold_left max neg_infinity in
+      let min_x = min_f xs and min_y = min_f ys in
+      (min_x, min_y, max_f xs -. min_x, max_f ys -. min_y)
+    end
+  | Text_path { d; _ } ->
     let collect_endpoints cmds =
       List.fold_left (fun (xs, ys) cmd ->
         match cmd with
@@ -242,6 +277,9 @@ let make_path ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = Non
 
 let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(text_width = 0.0) ?(text_height = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) x y content =
   Text { x; y; content; font_family; font_size; text_width; text_height; fill; stroke; opacity; transform }
+
+let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_size = 16.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) d content =
+  Text_path { d; content; start_offset; font_family; font_size; fill; stroke; opacity; transform }
 
 let make_group ?(opacity = 1.0) ?(transform = None) children =
   Group { children; opacity; transform }
