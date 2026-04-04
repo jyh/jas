@@ -23,8 +23,16 @@ _G = TypeVar("_G", bound=Group)
 # (0, 2, 1) -> layers[0].children[2].children[1]  (inside a group)
 ElementPath = tuple[int, ...]
 
-# A selection is an immutable set of element paths.
-Selection = frozenset[ElementPath]
+# Per-element selection state: which element, whether it is selected,
+# and which of its control points are selected.
+@dataclass(frozen=True)
+class ElementSelection:
+    path: ElementPath
+    selected: bool = True
+    control_points: frozenset[int] = frozenset()
+
+# A selection is an immutable set of ElementSelection entries (unique by path).
+Selection = frozenset[ElementSelection]
 
 
 @dataclass(frozen=True)
@@ -34,6 +42,17 @@ class Document:
     layers: tuple[Layer, ...] = (Layer(),)
     selected_layer: int = 0
     selection: Selection = frozenset()
+
+    def get_element_selection(self, path: ElementPath) -> ElementSelection | None:
+        """Return the ElementSelection for the given path, or None."""
+        for es in self.selection:
+            if es.path == path:
+                return es
+        return None
+
+    def selected_paths(self) -> frozenset[ElementPath]:
+        """Return the set of all element paths in the selection."""
+        return frozenset(es.path for es in self.selection)
 
     def bounds(self) -> Tuple[float, float, float, float]:
         """Return the bounding box of all layers combined."""

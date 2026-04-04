@@ -218,8 +218,13 @@ def _control_points(elem: Element) -> list[tuple[float, float]]:
             return [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)]
 
 
-def _draw_element_overlay(painter: QPainter, elem: Element) -> None:
-    """Draw the selection overlay (blue outline + handles) for one element."""
+def _draw_element_overlay(painter: QPainter, elem: Element,
+                          selected_cps: frozenset[int] = frozenset()) -> None:
+    """Draw the selection overlay (blue outline + handles) for one element.
+
+    selected_cps is the set of control-point indices that should be
+    filled blue; the rest are filled white.
+    """
     pen = QPen(_SELECTION_COLOR, 1.0)
     painter.setPen(pen)
     painter.setBrush(QBrush())
@@ -251,14 +256,18 @@ def _draw_element_overlay(painter: QPainter, elem: Element) -> None:
     # Draw handles
     half = _HANDLE_SIZE / 2
     painter.setPen(QPen(_SELECTION_COLOR, 1.0))
-    painter.setBrush(QBrush(QColor("white")))
-    for px, py in _control_points(elem):
+    for i, (px, py) in enumerate(_control_points(elem)):
+        if i in selected_cps:
+            painter.setBrush(QBrush(_SELECTION_COLOR))
+        else:
+            painter.setBrush(QBrush(QColor("white")))
         painter.drawRect(QRectF(px - half, py - half, _HANDLE_SIZE, _HANDLE_SIZE))
 
 
 def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:
     """Draw selection overlays for all selected elements."""
-    for path in doc.selection:
+    for es in doc.selection:
+        path = es.path
         if not path:
             continue
         painter.save()
@@ -274,7 +283,7 @@ def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:
             node = node.children[path[-1]]
         # Apply the selected element's own transform
         _apply_transform(painter, getattr(node, 'transform', None))
-        _draw_element_overlay(painter, node)
+        _draw_element_overlay(painter, node, es.control_points)
         painter.restore()
 
 

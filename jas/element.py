@@ -352,3 +352,12 @@ class Group(Element):
 class Layer(Group):
     """A named group (layer) of elements."""
     name: str = "Layer"
+
+
+def control_point_count(elem: Element) -> int:
+    """Return the number of control points for an element."""
+    if isinstance(elem, Line):
+        return 2
+    if isinstance(elem, (Rect, Circle, Ellipse)):
+        return 4
+    return 4  # bounding box corners

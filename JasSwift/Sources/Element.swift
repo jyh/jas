@@ -154,6 +154,14 @@ public enum Element: Equatable {
         case .layer(let v): return v.bounds
         }
     }
+
+    public var controlPointCount: Int {
+        switch self {
+        case .line: return 2
+        case .rect, .circle, .ellipse: return 4
+        default: return 4
+        }
+    }
 }
 
 /// SVG \<line\> element.

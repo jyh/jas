@@ -7,8 +7,34 @@ import Foundation
 /// `[0, 2, 1]` → layers[0].children[2] (a group), child 1.
 public typealias ElementPath = [Int]
 
-/// A selection is a set of element paths.
-public typealias Selection = Set<ElementPath>
+/// Per-element selection state: which element, whether it is selected,
+/// and which of its control points are selected.
+public struct ElementSelection: Equatable, Hashable {
+    public let path: ElementPath
+    public let selected: Bool
+    public let controlPoints: Set<Int>
+
+    public init(path: ElementPath, selected: Bool = true, controlPoints: Set<Int> = []) {
+        self.path = path; self.selected = selected; self.controlPoints = controlPoints
+    }
+
+    // Hash/equality by path only so Selection behaves as a path-keyed collection
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(path)
+    }
+
+    public static func == (lhs: ElementSelection, rhs: ElementSelection) -> Bool {
+        lhs.path == rhs.path
+    }
+
+    /// Full equality including flags (for tests).
+    public func exactlyEquals(_ other: ElementSelection) -> Bool {
+        path == other.path && selected == other.selected && controlPoints == other.controlPoints
+    }
+}
+
+/// A selection is a set of ElementSelection entries (unique by path).
+public typealias Selection = Set<ElementSelection>
 
 /// A document consisting of a title, an ordered list of layers, and a selection.
 public struct JasDocument: Equatable {
@@ -27,6 +53,16 @@ public struct JasDocument: Equatable {
         self.layers = layers
         self.selectedLayer = selectedLayer
         self.selection = selection
+    }
+
+    /// Return the ElementSelection for the given path, or nil.
+    public func getElementSelection(_ path: ElementPath) -> ElementSelection? {
+        selection.first { $0.path == path }
+    }
+
+    /// Return the set of all element paths in the selection.
+    public var selectedPaths: Set<ElementPath> {
+        Set(selection.map(\.path))
     }
 
     public var bounds: BBox {

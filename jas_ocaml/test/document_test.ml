@@ -47,14 +47,16 @@ let () =
   let doc = make_document [layer0; layer1] in
 
   (* Test default selection is empty *)
-  assert (PathSet.is_empty doc.selection);
+  assert (PathMap.is_empty doc.selection);
 
   (* Test selection with paths *)
-  let sel = PathSet.of_list [[0; 0]; [0; 1]] in
+  let sel = List.fold_left (fun acc p ->
+    PathMap.add p (make_element_selection p) acc
+  ) PathMap.empty [[0; 0]; [0; 1]] in
   let doc_sel = make_document ~selection:sel [layer0; layer1] in
-  assert (PathSet.cardinal doc_sel.selection = 2);
-  assert (PathSet.mem [0; 0] doc_sel.selection);
-  assert (PathSet.mem [0; 1] doc_sel.selection);
+  assert (PathMap.cardinal doc_sel.selection = 2);
+  assert (PathMap.mem [0; 0] doc_sel.selection);
+  assert (PathMap.mem [0; 1] doc_sel.selection);
 
   (* Test get_element: layer *)
   let elem = get_element doc [0] in
@@ -96,10 +98,10 @@ let () =
   assert (List.nth doc5.layers 1 = layer1);
 
   (* Test replace_element: preserves selection *)
-  let sel = PathSet.of_list [[0; 1]] in
-  let doc_with_sel = make_document ~selection:sel [layer0; layer1] in
+  let sel_map = PathMap.singleton [0; 1] (make_element_selection [0; 1]) in
+  let doc_with_sel = make_document ~selection:sel_map [layer0; layer1] in
   let doc6 = replace_element doc_with_sel [0; 0] new_rect in
-  assert (PathSet.equal doc6.selection sel);
+  assert (PathMap.mem [0; 1] doc6.selection);
 
   (* Test replace_element: empty path raises *)
   (try

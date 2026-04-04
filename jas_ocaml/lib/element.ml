@@ -243,3 +243,8 @@ let make_group ?(opacity = 1.0) ?(transform = None) children =
 
 let make_layer ?(name = "Layer") ?(opacity = 1.0) ?(transform = None) children =
   Layer { name; children; opacity; transform }
+
+let control_point_count = function
+  | Line _ -> 2
+  | Rect _ | Circle _ | Ellipse _ -> 4
+  | _ -> 4

@@ -68,32 +68,40 @@ let () =
   let model_s = Jas.Model.create ~document:doc_s () in
   let ctrl_s = Jas.Controller.create ~model:model_s () in
 
+  (* Helper: extract paths from selection *)
+  let sel_paths sel =
+    Jas.Document.PathMap.fold (fun p _ acc -> Jas.Document.PathSet.add p acc)
+      sel Jas.Document.PathSet.empty
+  in
+
   (* Test set_selection *)
-  let sel = Jas.Document.PathSet.singleton [0; 0] in
+  let sel = Jas.Document.PathMap.singleton [0; 0]
+    (Jas.Document.make_element_selection [0; 0]) in
   ctrl_s#set_selection sel;
-  assert (Jas.Document.PathSet.equal ctrl_s#document.Jas.Document.selection sel);
+  assert (Jas.Document.PathSet.equal (sel_paths ctrl_s#document.Jas.Document.selection)
+    (Jas.Document.PathSet.singleton [0; 0]));
 
   (* Test set_selection clears *)
-  ctrl_s#set_selection Jas.Document.PathSet.empty;
-  assert (Jas.Document.PathSet.is_empty ctrl_s#document.Jas.Document.selection);
+  ctrl_s#set_selection Jas.Document.PathMap.empty;
+  assert (Jas.Document.PathMap.is_empty ctrl_s#document.Jas.Document.selection);
 
   (* Test select_element: direct child of layer *)
   ctrl_s#select_element [0; 0];
-  assert (Jas.Document.PathSet.equal ctrl_s#document.Jas.Document.selection
+  assert (Jas.Document.PathSet.equal (sel_paths ctrl_s#document.Jas.Document.selection)
     (Jas.Document.PathSet.singleton [0; 0]));
 
   (* Test select_element: child inside a group selects all group children *)
   ctrl_s#select_element [0; 1; 0];
   let expected = Jas.Document.PathSet.of_list [[0; 1; 0]; [0; 1; 1]] in
-  assert (Jas.Document.PathSet.equal ctrl_s#document.Jas.Document.selection expected);
+  assert (Jas.Document.PathSet.equal (sel_paths ctrl_s#document.Jas.Document.selection) expected);
 
   (* Test select_element: other child of same group *)
   ctrl_s#select_element [0; 1; 1];
-  assert (Jas.Document.PathSet.equal ctrl_s#document.Jas.Document.selection expected);
+  assert (Jas.Document.PathSet.equal (sel_paths ctrl_s#document.Jas.Document.selection) expected);
 
   (* Test select_element: layer path *)
   ctrl_s#select_element [0];
-  assert (Jas.Document.PathSet.equal ctrl_s#document.Jas.Document.selection
+  assert (Jas.Document.PathSet.equal (sel_paths ctrl_s#document.Jas.Document.selection)
     (Jas.Document.PathSet.singleton [0]));
 
   (* Test select_element notifies model *)
@@ -117,27 +125,28 @@ let () =
 
   (* select_rect hits element *)
   sctrl#select_rect 99.0 99.0 12.0 12.0;
-  assert (Jas.Document.PathSet.mem [0; 0] sctrl#document.Jas.Document.selection);
+  assert (Jas.Document.PathMap.mem [0; 0] sctrl#document.Jas.Document.selection);
 
   (* select_rect misses all *)
   sctrl#select_rect 200.0 200.0 10.0 10.0;
-  assert (Jas.Document.PathSet.is_empty sctrl#document.Jas.Document.selection);
+  assert (Jas.Document.PathMap.is_empty sctrl#document.Jas.Document.selection);
 
   (* select_rect group expansion *)
   sctrl#select_rect (-1.0) (-1.0) 7.0 7.0;
   let expected_sr = Jas.Document.PathSet.of_list [[0; 1; 0]; [0; 1; 1]] in
-  assert (Jas.Document.PathSet.equal sctrl#document.Jas.Document.selection expected_sr);
+  assert (Jas.Document.PathSet.equal (sel_paths sctrl#document.Jas.Document.selection) expected_sr);
 
   (* select_rect replaces previous *)
-  sctrl#set_selection (Jas.Document.PathSet.singleton [0; 0]);
+  sctrl#set_selection (Jas.Document.PathMap.singleton [0; 0]
+    (Jas.Document.make_element_selection [0; 0]));
   sctrl#select_rect 200.0 200.0 10.0 10.0;
-  assert (Jas.Document.PathSet.is_empty sctrl#document.Jas.Document.selection);
+  assert (Jas.Document.PathMap.is_empty sctrl#document.Jas.Document.selection);
 
   (* select_rect multiple elements *)
   sctrl#select_rect (-1.0) (-1.0) 120.0 120.0;
-  assert (Jas.Document.PathSet.mem [0; 0] sctrl#document.Jas.Document.selection);
-  assert (Jas.Document.PathSet.mem [0; 1; 0] sctrl#document.Jas.Document.selection);
-  assert (Jas.Document.PathSet.mem [0; 1; 1] sctrl#document.Jas.Document.selection);
+  assert (Jas.Document.PathMap.mem [0; 0] sctrl#document.Jas.Document.selection);
+  assert (Jas.Document.PathMap.mem [0; 1; 0] sctrl#document.Jas.Document.selection);
+  assert (Jas.Document.PathMap.mem [0; 1; 1] sctrl#document.Jas.Document.selection);
 
   (* === Precise geometric hit-testing tests === *)
 
@@ -147,11 +156,11 @@ let () =
   let diag_doc = Jas.Document.make_document [diag_layer] in
   let diag_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:diag_doc ()) () in
   diag_ctrl#select_rect 80.0 0.0 20.0 20.0;
-  assert (Jas.Document.PathSet.is_empty diag_ctrl#document.Jas.Document.selection);
+  assert (Jas.Document.PathMap.is_empty diag_ctrl#document.Jas.Document.selection);
 
   (* Diagonal line: marquee crossing the line hits *)
   diag_ctrl#select_rect 40.0 40.0 20.0 20.0;
-  assert (Jas.Document.PathSet.mem [0; 0] diag_ctrl#document.Jas.Document.selection);
+  assert (Jas.Document.PathMap.mem [0; 0] diag_ctrl#document.Jas.Document.selection);
 
   (* Stroke-only rect: marquee inside interior misses *)
   let stroke_rect = make_rect 0.0 0.0 100.0 100.0 in
@@ -159,7 +168,7 @@ let () =
   let sr_doc = Jas.Document.make_document [sr_layer] in
   let sr_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:sr_doc ()) () in
   sr_ctrl#select_rect 30.0 30.0 10.0 10.0;
-  assert (Jas.Document.PathSet.is_empty sr_ctrl#document.Jas.Document.selection);
+  assert (Jas.Document.PathMap.is_empty sr_ctrl#document.Jas.Document.selection);
 
   (* Filled rect: marquee inside interior hits *)
   let fill = Some { fill_color = { r = 1.0; g = 0.0; b = 0.0; a = 1.0 } } in
@@ -170,6 +179,25 @@ let () =
   let fr_doc = Jas.Document.make_document [fr_layer] in
   let fr_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:fr_doc ()) () in
   fr_ctrl#select_rect 30.0 30.0 10.0 10.0;
-  assert (Jas.Document.PathSet.mem [0; 0] fr_ctrl#document.Jas.Document.selection);
+  assert (Jas.Document.PathMap.mem [0; 0] fr_ctrl#document.Jas.Document.selection);
+
+  (* === Control point selection tests === *)
+
+  let cp_line = make_line 10.0 20.0 50.0 60.0 in
+  let cp_layer = make_layer ~name:"L0" [cp_line] in
+  let cp_doc = Jas.Document.make_document [cp_layer] in
+  let cp_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:cp_doc ()) () in
+
+  cp_ctrl#select_control_point [0; 0] 1;
+  let cp_es = Jas.Document.PathMap.find [0; 0] cp_ctrl#document.Jas.Document.selection in
+  assert (cp_es.Jas.Document.es_selected = true);
+  assert (cp_es.Jas.Document.es_control_points = [1]);
+
+  (* Default element selection has selected=true and all control points *)
+  cp_ctrl#select_element [0; 0];
+  let def_es = Jas.Document.PathMap.find [0; 0] cp_ctrl#document.Jas.Document.selection in
+  assert (def_es.Jas.Document.es_selected = true);
+  (* Line has 2 control points *)
+  assert (def_es.Jas.Document.es_control_points = [0; 1]);
 
   Printf.printf "All controller tests passed.\n"
