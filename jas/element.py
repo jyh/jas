@@ -366,15 +366,15 @@ def move_control_points(elem: Element, indices: frozenset[int],
                 x2=x2 + dx if 1 in indices else x2,
                 y2=y2 + dy if 1 in indices else y2)
         case Rect(x=x, y=y, width=w, height=h):
+            if indices >= frozenset({0, 1, 2, 3}):
+                return replace(elem, x=x + dx, y=y + dy)
             pts = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
             for i in range(4):
                 if i in indices:
                     pts[i] = (pts[i][0] + dx, pts[i][1] + dy)
-            nx = min(p[0] for p in pts)
-            ny = min(p[1] for p in pts)
-            return replace(elem, x=nx, y=ny,
-                           width=max(p[0] for p in pts) - nx,
-                           height=max(p[1] for p in pts) - ny)
+            return Polygon(points=tuple(pts),
+                           fill=elem.fill, stroke=elem.stroke,
+                           opacity=elem.opacity, transform=elem.transform)
         case Circle(cx=cx, cy=cy, r=r):
             if indices >= frozenset({0, 1, 2, 3}):
                 return replace(elem, cx=cx + dx, cy=cy + dy)
@@ -397,6 +397,12 @@ def move_control_points(elem: Element, indices: frozenset[int],
             ncy = (cps[0][1] + cps[2][1]) / 2
             return replace(elem, cx=ncx, cy=ncy,
                            rx=abs(cps[1][0] - ncx), ry=abs(cps[0][1] - ncy))
+        case Polygon(points=pts):
+            new_pts = list(pts)
+            for i in range(len(new_pts)):
+                if i in indices:
+                    new_pts[i] = (new_pts[i][0] + dx, new_pts[i][1] + dy)
+            return replace(elem, points=tuple(new_pts))
         case _:
             return elem
 
@@ -407,6 +413,8 @@ def control_point_count(elem: Element) -> int:
         return 2
     if isinstance(elem, (Rect, Circle, Ellipse)):
         return 4
+    if isinstance(elem, Polygon):
+        return len(elem.points)
     return 4  # bounding box corners
 
 
@@ -421,6 +429,8 @@ def control_points(elem: Element) -> list[tuple[float, float]]:
             return [(cx, cy - r), (cx + r, cy), (cx, cy + r), (cx - r, cy)]
         case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry):
             return [(cx, cy - ry), (cx + rx, cy), (cx, cy + ry), (cx - rx, cy)]
+        case Polygon(points=pts):
+            return list(pts)
         case _:
             bx, by, bw, bh = elem.bounds()
             return [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)]

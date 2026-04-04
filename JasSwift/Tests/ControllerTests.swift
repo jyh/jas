@@ -442,10 +442,13 @@ private func makeMarqueeCtrl() -> Controller {
 @Test func moveRectOneCorner() {
     let rect = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
     let moved = rect.moveControlPoints([2], dx: 5, dy: 5)
-    if case .rect(let v) = moved {
-        #expect(v.x == 0); #expect(v.y == 0)
-        #expect(v.width == 15); #expect(v.height == 15)
-    } else { Issue.record("Expected rect") }
+    if case .polygon(let v) = moved {
+        #expect(v.points.count == 4)
+        #expect(v.points[0] == (0, 0))
+        #expect(v.points[1] == (10, 0))
+        #expect(v.points[2] == (15, 15))
+        #expect(v.points[3] == (0, 10))
+    } else { Issue.record("Expected polygon") }
 }
 
 @Test func moveCircleAllCPs() {

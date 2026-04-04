@@ -247,6 +247,7 @@ let make_layer ?(name = "Layer") ?(opacity = 1.0) ?(transform = None) children =
 let control_point_count = function
   | Line _ -> 2
   | Rect _ | Circle _ | Ellipse _ -> 4
+  | Polygon { points; _ } -> List.length points
   | _ -> 4
 
 let control_points = function
@@ -257,6 +258,7 @@ let control_points = function
     [(cx, cy -. r); (cx +. r, cy); (cx, cy +. r); (cx -. r, cy)]
   | Ellipse { cx; cy; rx; ry; _ } ->
     [(cx, cy -. ry); (cx +. rx, cy); (cx, cy +. ry); (cx -. rx, cy)]
+  | Polygon { points; _ } -> points
   | elem ->
     let (bx, by, bw, bh) = bounds elem in
     [(bx, by); (bx +. bw, by); (bx +. bw, by +. bh); (bx, by +. bh)]
@@ -272,20 +274,19 @@ let move_control_points elem indices dx dy =
       y2 = r.y2 +. (if mem 1 then dy else 0.0);
     }
   | Rect r ->
-    let pts = [| (r.x, r.y); (r.x +. r.width, r.y);
-                 (r.x +. r.width, r.y +. r.height); (r.x, r.y +. r.height) |] in
-    for i = 0 to 3 do
-      if mem i then
-        let (px, py) = pts.(i) in
-        pts.(i) <- (px +. dx, py +. dy)
-    done;
-    let xs = Array.map fst pts in
-    let ys = Array.map snd pts in
-    let nx = Array.fold_left min infinity xs in
-    let ny = Array.fold_left min infinity ys in
-    let mx = Array.fold_left max neg_infinity xs in
-    let my = Array.fold_left max neg_infinity ys in
-    Rect { r with x = nx; y = ny; width = mx -. nx; height = my -. ny }
+    if List.length indices >= 4 then
+      Rect { r with x = r.x +. dx; y = r.y +. dy }
+    else
+      let pts = [| (r.x, r.y); (r.x +. r.width, r.y);
+                   (r.x +. r.width, r.y +. r.height); (r.x, r.y +. r.height) |] in
+      for i = 0 to 3 do
+        if mem i then
+          let (px, py) = pts.(i) in
+          pts.(i) <- (px +. dx, py +. dy)
+      done;
+      Polygon { points = Array.to_list pts;
+                fill = r.fill; stroke = r.stroke;
+                opacity = r.opacity; transform = r.transform }
   | Circle r ->
     if List.length indices >= 4 then
       Circle { r with cx = r.cx +. dx; cy = r.cy +. dy }
@@ -317,4 +318,9 @@ let move_control_points elem indices dx dy =
       Ellipse { r with cx = ncx; cy = ncy;
                 rx = abs_float (fst cps.(1) -. ncx);
                 ry = abs_float (snd cps.(0) -. ncy) }
+  | Polygon r ->
+    let new_points = List.mapi (fun i (px, py) ->
+      if mem i then (px +. dx, py +. dy) else (px, py)
+    ) r.points in
+    Polygon { r with points = new_points }
   | _ -> elem
