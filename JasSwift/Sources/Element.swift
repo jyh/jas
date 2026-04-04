@@ -159,6 +159,7 @@ public enum Element: Equatable {
         switch self {
         case .line: return 2
         case .rect, .circle, .ellipse: return 4
+        case .polygon(let v): return v.points.count
         default: return 4
         }
     }
@@ -176,6 +177,8 @@ public enum Element: Equatable {
         case .ellipse(let v):
             return [(v.cx, v.cy - v.ry), (v.cx + v.rx, v.cy),
                     (v.cx, v.cy + v.ry), (v.cx - v.rx, v.cy)]
+        case .polygon(let v):
+            return v.points
         default:
             let b = self.bounds
             return [(b.x, b.y), (b.x + b.width, b.y),
@@ -193,16 +196,19 @@ public enum Element: Equatable {
                 y2: v.y2 + (indices.contains(1) ? dy : 0),
                 stroke: v.stroke, opacity: v.opacity, transform: v.transform))
         case .rect(let v):
+            if indices.count >= 4 {
+                return .rect(JasRect(x: v.x + dx, y: v.y + dy, width: v.width, height: v.height,
+                                     rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
+                                     opacity: v.opacity, transform: v.transform))
+            }
             var pts = [(v.x, v.y), (v.x + v.width, v.y),
                        (v.x + v.width, v.y + v.height), (v.x, v.y + v.height)]
             for i in 0..<4 where indices.contains(i) {
                 pts[i] = (pts[i].0 + dx, pts[i].1 + dy)
             }
-            let nx = pts.map(\.0).min()!, ny = pts.map(\.1).min()!
-            let mx = pts.map(\.0).max()!, my = pts.map(\.1).max()!
-            return .rect(JasRect(x: nx, y: ny, width: mx - nx, height: my - ny,
-                                 rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-                                 opacity: v.opacity, transform: v.transform))
+            return .polygon(JasPolygon(points: pts,
+                                       fill: v.fill, stroke: v.stroke,
+                                       opacity: v.opacity, transform: v.transform))
         case .circle(let v):
             if indices.count >= 4 {
                 return .circle(JasCircle(cx: v.cx + dx, cy: v.cy + dy, r: v.r,
@@ -235,6 +241,13 @@ public enum Element: Equatable {
             let ncy = (cps[0].1 + cps[2].1) / 2
             return .ellipse(JasEllipse(cx: ncx, cy: ncy,
                                        rx: abs(cps[1].0 - ncx), ry: abs(cps[0].1 - ncy),
+                                       fill: v.fill, stroke: v.stroke,
+                                       opacity: v.opacity, transform: v.transform))
+        case .polygon(let v):
+            let newPoints = v.points.enumerated().map { (i, pt) in
+                indices.contains(i) ? (pt.0 + dx, pt.1 + dy) : pt
+            }
+            return .polygon(JasPolygon(points: newPoints,
                                        fill: v.fill, stroke: v.stroke,
                                        opacity: v.opacity, transform: v.transform))
         default:
