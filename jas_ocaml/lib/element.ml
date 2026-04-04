@@ -116,6 +116,8 @@ type element =
       content : string;
       font_family : string;
       font_size : float;
+      text_width : float;
+      text_height : float;
       fill : fill option;
       stroke : stroke option;
       opacity : float;
@@ -180,9 +182,12 @@ let rec bounds = function
       let min_x = min_f xs and min_y = min_f ys in
       (min_x, min_y, max_f xs -. min_x, max_f ys -. min_y)
     end
-  | Text { x; y; content; font_size; _ } ->
-    let approx_width = float_of_int (String.length content) *. font_size *. 0.6 in
-    (x, y -. font_size, approx_width, font_size)
+  | Text { x; y; content; font_size; text_width; text_height; _ } ->
+    if text_width > 0.0 && text_height > 0.0 then
+      (x, y, text_width, text_height)
+    else
+      let approx_width = float_of_int (String.length content) *. font_size *. 0.6 in
+      (x, y -. font_size, approx_width, font_size)
   | Group { children; _ } | Layer { children; _ } ->
     begin match children with
     | [] -> (0.0, 0.0, 0.0, 0.0)
@@ -235,8 +240,8 @@ let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = 
 let make_path ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) d =
   Path { d; fill; stroke; opacity; transform }
 
-let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) x y content =
-  Text { x; y; content; font_family; font_size; fill; stroke; opacity; transform }
+let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(text_width = 0.0) ?(text_height = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) x y content =
+  Text { x; y; content; font_family; font_size; text_width; text_height; fill; stroke; opacity; transform }
 
 let make_group ?(opacity = 1.0) ?(transform = None) children =
   Group { children; opacity; transform }

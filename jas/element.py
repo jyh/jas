@@ -313,19 +313,30 @@ class Path(Element):
 
 @dataclass(frozen=True)
 class Text(Element):
-    """SVG <text> element."""
+    """SVG <text> element.
+
+    When width and height are set (> 0), the text wraps within that area
+    (area text). Otherwise it is point text (single line).
+    """
     x: float
     y: float
     content: str
     font_family: str = "sans-serif"
     font_size: float = 16.0
+    width: float = 0.0
+    height: float = 0.0
     fill: Fill | None = None
     stroke: Stroke | None = None
     opacity: float = 1.0
     transform: Transform | None = None
 
+    @property
+    def is_area_text(self) -> bool:
+        return self.width > 0 and self.height > 0
+
     def bounds(self) -> Tuple[float, float, float, float]:
-        # Approximate: actual bounds require font metrics
+        if self.is_area_text:
+            return (self.x, self.y, self.width, self.height)
         approx_width = len(self.content) * self.font_size * 0.6
         return (self.x, self.y - self.font_size, approx_width, self.font_size)
 

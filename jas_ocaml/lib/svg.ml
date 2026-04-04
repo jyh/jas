@@ -131,10 +131,13 @@ let rec element_svg indent (elem : Element.element) =
     Printf.sprintf "%s<path d=\"%s\"%s%s%s%s/>"
       indent (path_data d) (fill_attrs fill) (stroke_attrs stroke)
       (opacity_attr opacity) (transform_attr transform)
-  | Text { x; y; content; font_family; font_size; fill; stroke; opacity; transform } ->
-    Printf.sprintf "%s<text x=\"%s\" y=\"%s\" font-family=\"%s\" font-size=\"%s\"%s%s%s%s>%s</text>"
+  | Text { x; y; content; font_family; font_size; text_width; text_height; fill; stroke; opacity; transform } ->
+    let area_attrs = if text_width > 0.0 && text_height > 0.0 then
+      Printf.sprintf " width=\"%s\" height=\"%s\"" (fmt (px text_width)) (fmt (px text_height))
+    else "" in
+    Printf.sprintf "%s<text x=\"%s\" y=\"%s\" font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s>%s</text>"
       indent (fmt (px x)) (fmt (px y)) (escape_xml font_family) (fmt (px font_size))
-      (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
+      area_attrs (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
       (transform_attr transform) (escape_xml content)
   | Group { children; opacity; transform } ->
     let header = Printf.sprintf "%s<g%s%s>"
@@ -362,7 +365,9 @@ let rec parse_element i =
         let content = collect_text i in
         let ff = match get_attr attrs "font-family" with Some s -> s | None -> "sans-serif" in
         let fs = pt (get_attr_f attrs "font-size" 16.0) in
-        Some (Element.make_text ~font_family:ff ~font_size:fs ~fill ~stroke ~opacity ~transform
+        let tw = let v = get_attr_f attrs "width" 0.0 in if v > 0.0 then pt v else 0.0 in
+        let th = let v = get_attr_f attrs "height" 0.0 in if v > 0.0 then pt v else 0.0 in
+        Some (Element.make_text ~font_family:ff ~font_size:fs ~text_width:tw ~text_height:th ~fill ~stroke ~opacity ~transform
           (pt (get_attr_f attrs "x" 0.0))
           (pt (get_attr_f attrs "y" 0.0))
           content)

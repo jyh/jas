@@ -4,7 +4,7 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QBrush, QColor, QPainter, QPainterPath, QPen, QTransform, QMouseEvent, QPaintEvent,
 )
-from PySide6.QtWidgets import QLineEdit, QWidget
+from PySide6.QtWidgets import QLineEdit, QTextEdit, QWidget
 
 import math
 
@@ -191,7 +191,8 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
             painter.drawPath(_build_path(d))
 
         case Text(x=x, y=y, content=content, font_family=ff,
-                  font_size=fs, fill=fill, stroke=stroke):
+                  font_size=fs, width=tw, height=th,
+                  fill=fill, stroke=stroke):
             from PySide6.QtGui import QFont
             font = QFont(ff, int(fs))
             painter.setFont(font)
@@ -201,7 +202,11 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
                 _apply_stroke(painter, stroke)
             else:
                 painter.setPen(QColor("black"))
-            painter.drawText(QPointF(x, y), content)
+            if tw > 0 and th > 0:
+                flags = Qt.TextFlag.TextWordWrap
+                painter.drawText(QRectF(x, y, tw, th), flags, content)
+            else:
+                painter.drawText(QPointF(x, y), content)
 
         case Group(children=children) | Layer(children=children):
             for child in children:
@@ -379,17 +384,23 @@ class CanvasWidget(QWidget):
         self._commit_text_edit()
         self._editing_path = path
         from PySide6.QtGui import QFont
-        editor = QLineEdit(self)
-        editor.setText(text_elem.content)
         font = QFont(text_elem.font_family, int(text_elem.font_size))
-        editor.setFont(font)
-        # Position the editor at the text element's location
         bx, by, bw, bh = text_elem.bounds()
-        editor.setGeometry(int(bx), int(by), max(int(bw) + 20, 100), int(bh) + 4)
-        editor.setStyleSheet(
-            "background: white; border: 1px solid #4a90d9; padding: 0px;"
-        )
-        editor.returnPressed.connect(self._commit_text_edit)
+        style = "background: white; border: 1px solid #4a90d9; padding: 0px;"
+        if text_elem.is_area_text:
+            editor = QTextEdit(self)
+            editor.setPlainText(text_elem.content)
+            editor.setFont(font)
+            editor.setGeometry(int(bx), int(by), int(bw), int(bh))
+            editor.setStyleSheet(style)
+            editor.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        else:
+            editor = QLineEdit(self)
+            editor.setText(text_elem.content)
+            editor.setFont(font)
+            editor.setGeometry(int(bx), int(by), max(int(bw) + 20, 100), int(bh) + 4)
+            editor.setStyleSheet(style)
+            editor.returnPressed.connect(self._commit_text_edit)
         editor.show()
         editor.setFocus()
         editor.selectAll()
@@ -399,7 +410,10 @@ class CanvasWidget(QWidget):
         """Apply the edited text to the document and remove the editor."""
         if self._text_editor is None or self._editing_path is None:
             return
-        new_text = self._text_editor.text()
+        if isinstance(self._text_editor, QTextEdit):
+            new_text = self._text_editor.toPlainText()
+        else:
+            new_text = self._text_editor.text()
         path = self._editing_path
         doc = self._model.document
         old_elem = doc.get_element(path)
@@ -486,19 +500,34 @@ class CanvasWidget(QWidget):
                 h = abs(end.y() - start.y())
                 self._controller.direct_select_rect(x, y, w, h, extend=extend)
                 return
-            # Text tool: edit existing text or place new text
+            # Text tool: edit existing, place point text, or drag area text
             if tool == Tool.TEXT:
-                hit = self._hit_test_text(start)
-                if hit is not None:
-                    path, text_elem = hit
-                    self._start_text_edit(path, text_elem)
-                else:
+                w = abs(end.x() - start.x())
+                h = abs(end.y() - start.y())
+                if w > 4 or h > 4:
+                    # Dragged a marquee: create area text
+                    x = min(start.x(), end.x())
+                    y = min(start.y(), end.y())
                     elem = Text(
-                        x=start.x(), y=start.y(),
+                        x=x, y=y,
                         content="Lorem Ipsum",
+                        width=w, height=h,
                         fill=Fill(color=Color(0, 0, 0)),
                     )
                     self._controller.add_element(elem)
+                else:
+                    # Click: edit existing or place point text
+                    hit = self._hit_test_text(start)
+                    if hit is not None:
+                        path, text_elem = hit
+                        self._start_text_edit(path, text_elem)
+                    else:
+                        elem = Text(
+                            x=start.x(), y=start.y(),
+                            content="Lorem Ipsum",
+                            fill=Fill(color=Color(0, 0, 0)),
+                        )
+                        self._controller.add_element(elem)
                 return
             # Drawing tools: shift means constrain angle
             if shift:
@@ -565,6 +594,6 @@ class CanvasWidget(QWidget):
                     if pts:
                         qpts = [QPointF(x, y) for x, y in pts]
                         painter.drawPolygon(qpts)
-                elif self._current_tool in (Tool.RECT, Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION):
+                elif self._current_tool in (Tool.TEXT, Tool.RECT, Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION):
                     painter.drawRect(QRectF(self._drag_start, self._drag_end).normalized())
         painter.end()

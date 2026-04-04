@@ -197,12 +197,22 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
             .foregroundColor: color,
         ]
         let str = NSAttributedString(string: v.content, attributes: attrs)
-        // Flip coordinate system for text drawing
         ctx.saveGState()
-        ctx.textMatrix = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
-        let line = CTLineCreateWithAttributedString(str)
-        ctx.textPosition = CGPoint(x: v.x, y: v.y)
-        CTLineDraw(line, ctx)
+        if v.isAreaText {
+            // Area text: CTFrameDraw expects unflipped coordinates, so flip around the rect center
+            ctx.translateBy(x: 0, y: v.y + v.height)
+            ctx.scaleBy(x: 1, y: -1)
+            let framesetter = CTFramesetterCreateWithAttributedString(str)
+            let path = CGPath(rect: CGRect(x: v.x, y: 0, width: v.width, height: v.height), transform: nil)
+            let frame = CTFramesetterCreateFrame(framesetter, CFRangeMake(0, 0), path, nil)
+            CTFrameDraw(frame, ctx)
+        } else {
+            // Point text: single line
+            ctx.textMatrix = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
+            let line = CTLineCreateWithAttributedString(str)
+            ctx.textPosition = CGPoint(x: v.x, y: v.y)
+            CTLineDraw(line, ctx)
+        }
         ctx.restoreGState()
 
     case .group(let v):
@@ -426,7 +436,7 @@ class CanvasNSView: NSView {
                         }
                         ctx.closePath()
                     }
-                } else if tool == .rect || tool == .selection || tool == .directSelection || tool == .groupSelection {
+                } else if tool == .text || tool == .rect || tool == .selection || tool == .directSelection || tool == .groupSelection {
                     let r = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
                                    width: abs(end.x - start.x), height: abs(end.y - start.y))
                     ctx.addRect(r)
@@ -455,10 +465,7 @@ class CanvasNSView: NSView {
         for (li, layer) in document.layers.enumerated() {
             for (ci, child) in layer.children.enumerated() {
                 if case .text(let v) = child {
-                    let bx = v.x
-                    let by = v.y - v.fontSize
-                    let bw = Double(v.content.count) * v.fontSize * 0.6
-                    let bh = v.fontSize
+                    let (bx, by, bw, bh) = v.bounds
                     if pos.x >= bx && pos.x <= bx + bw && pos.y >= by && pos.y <= by + bh {
                         return ([li, ci], v)
                     }
@@ -471,18 +478,27 @@ class CanvasNSView: NSView {
     private func startTextEdit(path: ElementPath, textElem: JasText) {
         commitTextEdit()
         editingPath = path
-        let editor = NSTextField(frame: NSRect(
-            x: textElem.x,
-            y: textElem.y - textElem.fontSize,
-            width: max(Double(textElem.content.count) * textElem.fontSize * 0.6 + 20, 100),
-            height: textElem.fontSize + 4
-        ))
+        let bx, by, bw, bh: Double
+        if textElem.isAreaText {
+            bx = textElem.x; by = textElem.y
+            bw = textElem.width; bh = textElem.height
+        } else {
+            bx = textElem.x; by = textElem.y - textElem.fontSize
+            bw = max(Double(textElem.content.count) * textElem.fontSize * 0.6 + 20, 100)
+            bh = textElem.fontSize + 4
+        }
+        let editor = NSTextField(frame: NSRect(x: bx, y: by, width: bw, height: bh))
         editor.stringValue = textElem.content
         editor.font = NSFont(name: textElem.fontFamily, size: textElem.fontSize)
             ?? NSFont.systemFont(ofSize: textElem.fontSize)
         editor.isBordered = true
         editor.backgroundColor = .white
         editor.focusRingType = .exterior
+        if textElem.isAreaText {
+            editor.usesSingleLineMode = false
+            editor.cell?.wraps = true
+            editor.cell?.isScrollable = false
+        }
         editor.target = self
         editor.action = #selector(textEditorAction(_:))
         addSubview(editor)
@@ -503,6 +519,7 @@ class CanvasNSView: NSView {
             let newElem = Element.text(JasText(
                 x: v.x, y: v.y, content: newText,
                 fontFamily: v.fontFamily, fontSize: v.fontSize,
+                width: v.width, height: v.height,
                 fill: v.fill, stroke: v.stroke,
                 opacity: v.opacity, transform: v.transform
             ))
@@ -619,17 +636,33 @@ class CanvasNSView: NSView {
             return
         }
 
-        // Text tool: edit existing text or place new text
+        // Text tool: edit existing, place point text, or drag area text
         if tool == .text {
-            if let (path, textElem) = hitTestText(start) {
-                startTextEdit(path: path, textElem: textElem)
-            } else {
+            let w = abs(rawEnd.x - start.x)
+            let h = abs(rawEnd.y - start.y)
+            if w > 4 || h > 4 {
+                // Dragged a marquee: create area text
+                let tx = min(start.x, rawEnd.x)
+                let ty = min(start.y, rawEnd.y)
                 let elem = Element.text(JasText(
-                    x: start.x, y: start.y,
+                    x: tx, y: ty,
                     content: "Lorem Ipsum",
+                    width: w, height: h,
                     fill: JasFill(color: JasColor(r: 0, g: 0, b: 0))
                 ))
                 controller.addElement(elem)
+            } else {
+                // Click: edit existing or place point text
+                if let (path, textElem) = hitTestText(start) {
+                    startTextEdit(path: path, textElem: textElem)
+                } else {
+                    let elem = Element.text(JasText(
+                        x: start.x, y: start.y,
+                        content: "Lorem Ipsum",
+                        fill: JasFill(color: JasColor(r: 0, g: 0, b: 0))
+                    ))
+                    controller.addElement(elem)
+                }
             }
             return
         }

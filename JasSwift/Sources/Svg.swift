@@ -137,8 +137,12 @@ private func elementSvg(_ elem: Element, indent: String) -> String {
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))/>"
 
     case .text(let v):
+        let areaAttrs = v.isAreaText
+            ? " width=\"\(fmt(px(v.width)))\" height=\"\(fmt(px(v.height)))\""
+            : ""
         return "\(indent)<text x=\"\(fmt(px(v.x)))\" y=\"\(fmt(px(v.y)))\"" +
             " font-family=\"\(escapeXml(v.fontFamily))\" font-size=\"\(fmt(px(v.fontSize)))\"" +
+            "\(areaAttrs)" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))>" +
             "\(escapeXml(v.content))</text>"
@@ -384,9 +388,14 @@ private func parseElement(_ node: XMLNode) -> Element? {
         let content = elem.stringValue ?? ""
         let ff = elem.attribute(forName: "font-family")?.stringValue ?? "sans-serif"
         let fs = toPt(attrF(elem, "font-size", 16.0))
+        let twRaw = attrF(elem, "width", 0.0)
+        let thRaw = attrF(elem, "height", 0.0)
+        let tw = twRaw > 0 ? toPt(twRaw) : 0.0
+        let th = thRaw > 0 ? toPt(thRaw) : 0.0
         return .text(JasText(
             x: toPt(attrF(elem, "x")), y: toPt(attrF(elem, "y")),
             content: content, fontFamily: ff, fontSize: fs,
+            width: tw, height: th,
             fill: fill, stroke: stroke, opacity: opacity, transform: transform))
 
     case "g":
