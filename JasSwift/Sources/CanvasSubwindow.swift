@@ -223,24 +223,8 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
 private let selectionColor = CGColor(red: 0, green: 0.47, blue: 1.0, alpha: 1.0)
 private let handleSize: CGFloat = 6.0
 
-private func controlPoints(_ elem: Element) -> [(CGFloat, CGFloat)] {
-    switch elem {
-    case .line(let v):
-        return [(v.x1, v.y1), (v.x2, v.y2)]
-    case .rect(let v):
-        return [(v.x, v.y), (v.x + v.width, v.y),
-                (v.x + v.width, v.y + v.height), (v.x, v.y + v.height)]
-    case .circle(let v):
-        return [(v.cx, v.cy - v.r), (v.cx + v.r, v.cy),
-                (v.cx, v.cy + v.r), (v.cx - v.r, v.cy)]
-    case .ellipse(let v):
-        return [(v.cx, v.cy - v.ry), (v.cx + v.rx, v.cy),
-                (v.cx, v.cy + v.ry), (v.cx - v.rx, v.cy)]
-    default:
-        let b = elem.bounds
-        return [(b.x, b.y), (b.x + b.width, b.y),
-                (b.x + b.width, b.y + b.height), (b.x, b.y + b.height)]
-    }
+private func controlPoints(_ elem: Element) -> [(Double, Double)] {
+    elem.controlPointPositions
 }
 
 private func drawElementOverlay(_ ctx: CGContext, _ elem: Element, selectedCPs: Set<Int> = []) {
@@ -384,7 +368,7 @@ class CanvasNSView: NSView {
             if tool == .line {
                 ctx.move(to: start)
                 ctx.addLine(to: end)
-            } else if tool == .rect || tool == .selection {
+            } else if tool == .rect || tool == .selection || tool == .directSelection {
                 let r = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
                                width: abs(end.x - start.x), height: abs(end.y - start.y))
                 ctx.addRect(r)
@@ -395,7 +379,7 @@ class CanvasNSView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let tool = onToolRead?() ?? currentTool
-        if tool == .selection || tool == .line || tool == .rect {
+        if tool == .selection || tool == .directSelection || tool == .line || tool == .rect {
             let pt = convert(event.locationInWindow, from: nil)
             dragStart = pt
             dragEnd = pt
@@ -418,7 +402,7 @@ class CanvasNSView: NSView {
     /// Test helper: simulate a complete drag from start to end point.
     func simulateDrag(from start: NSPoint, to end: NSPoint) {
         let tool = onToolRead?() ?? currentTool
-        guard tool == .selection || tool == .line || tool == .rect else { return }
+        guard tool == .selection || tool == .directSelection || tool == .line || tool == .rect else { return }
         dragStart = start
         dragEnd = end
         commitDrag(to: end)
@@ -440,6 +424,15 @@ class CanvasNSView: NSView {
             let w = abs(end.x - start.x)
             let h = abs(end.y - start.y)
             controller.selectRect(x: x, y: y, width: w, height: h)
+            return
+        }
+
+        if tool == .directSelection {
+            let x = min(start.x, end.x)
+            let y = min(start.y, end.y)
+            let w = abs(end.x - start.x)
+            let h = abs(end.y - start.y)
+            controller.directSelectRect(x: x, y: y, width: w, height: h)
             return
         }
 

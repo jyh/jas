@@ -200,4 +200,39 @@ let () =
   (* Line has 2 control points *)
   assert (def_es.Jas.Document.es_control_points = [0; 1]);
 
+  (* === Direct selection tests === *)
+
+  (* direct_select_rect: no group expansion *)
+  let ds_line1 = make_line 0.0 0.0 5.0 5.0 in
+  let ds_line2 = make_line 50.0 50.0 55.0 55.0 in
+  let ds_group = make_group [ds_line1; ds_line2] in
+  let ds_layer = make_layer ~name:"L0" [ds_group] in
+  let ds_doc = Jas.Document.make_document [ds_layer] in
+  let ds_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:ds_doc ()) () in
+  ds_ctrl#direct_select_rect (-1.0) (-1.0) 7.0 7.0;
+  assert (Jas.Document.PathMap.mem [0; 0; 0] ds_ctrl#document.Jas.Document.selection);
+  assert (not (Jas.Document.PathMap.mem [0; 0; 1] ds_ctrl#document.Jas.Document.selection));
+
+  (* direct_select_rect: selects only hit control points *)
+  let ds_rect = make_rect 0.0 0.0 100.0 100.0 in
+  let ds_rlayer = make_layer ~name:"L0" [ds_rect] in
+  let ds_rdoc = Jas.Document.make_document [ds_rlayer] in
+  let ds_rctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:ds_rdoc ()) () in
+  ds_rctrl#direct_select_rect (-5.0) (-5.0) 10.0 10.0;
+  let ds_res = Jas.Document.PathMap.find [0; 0] ds_rctrl#document.Jas.Document.selection in
+  assert (ds_res.Jas.Document.es_control_points = [0]);
+
+  (* direct_select_rect: no CPs when none in rect *)
+  let ds_dline = make_line 0.0 0.0 100.0 100.0 in
+  let ds_dlayer = make_layer ~name:"L0" [ds_dline] in
+  let ds_ddoc = Jas.Document.make_document [ds_dlayer] in
+  let ds_dctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:ds_ddoc ()) () in
+  ds_dctrl#direct_select_rect 40.0 40.0 20.0 20.0;
+  let ds_dres = Jas.Document.PathMap.find [0; 0] ds_dctrl#document.Jas.Document.selection in
+  assert (ds_dres.Jas.Document.es_control_points = []);
+
+  (* direct_select_rect: misses element *)
+  ds_dctrl#direct_select_rect 200.0 200.0 10.0 10.0;
+  assert (Jas.Document.PathMap.is_empty ds_dctrl#document.Jas.Document.selection);
+
   Printf.printf "All controller tests passed.\n"

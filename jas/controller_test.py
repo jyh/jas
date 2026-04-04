@@ -226,5 +226,69 @@ class SelectionControllerTest(absltest.TestCase):
         self.assertEqual(es.control_points, frozenset({0, 1, 2, 3}))
 
 
+class DirectSelectionControllerTest(absltest.TestCase):
+
+    def test_direct_select_rect_no_group_expansion(self):
+        """Direct selection does NOT expand groups — only the hit child is selected."""
+        line1 = Line(x1=0, y1=0, x2=5, y2=5)
+        line2 = Line(x1=50, y1=50, x2=55, y2=55)
+        group = Group(children=(line1, line2))
+        layer = Layer(children=(group,), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        ctrl.direct_select_rect(-1, -1, 7, 7)
+        paths = _sel_paths(ctrl.document.selection)
+        self.assertIn((0, 0, 0), paths)
+        self.assertNotIn((0, 0, 1), paths)
+
+    def test_direct_select_rect_selects_only_hit_cps(self):
+        """Only control points inside the marquee are selected."""
+        # Rect at (0,0) 100x100 — CPs are corners: (0,0), (100,0), (100,100), (0,100)
+        rect = Rect(x=0, y=0, width=100, height=100)
+        layer = Layer(children=(rect,), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        # Marquee covers only the top-left corner
+        ctrl.direct_select_rect(-5, -5, 10, 10)
+        sel = ctrl.document.selection
+        self.assertEqual(len(sel), 1)
+        es = next(iter(sel))
+        self.assertEqual(es.path, (0, 0))
+        # Only CP 0 (top-left at 0,0) should be selected
+        self.assertEqual(es.control_points, frozenset({0}))
+
+    def test_direct_select_rect_no_cps_when_none_in_rect(self):
+        """If the element intersects but no CPs are in the rect, no CPs are selected."""
+        # Line from (0,0) to (100,100) — CPs at endpoints
+        line = Line(x1=0, y1=0, x2=100, y2=100)
+        layer = Layer(children=(line,), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        # Marquee in the middle of the line — no endpoints inside
+        ctrl.direct_select_rect(40, 40, 20, 20)
+        sel = ctrl.document.selection
+        self.assertEqual(len(sel), 1)
+        es = next(iter(sel))
+        self.assertEqual(es.control_points, frozenset())
+
+    def test_direct_select_rect_misses_element(self):
+        """Direct selection marquee outside all elements selects nothing."""
+        rect = Rect(x=0, y=0, width=10, height=10)
+        layer = Layer(children=(rect,), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        ctrl.direct_select_rect(200, 200, 10, 10)
+        self.assertEqual(ctrl.document.selection, frozenset())
+
+    def test_direct_select_rect_individual_in_group(self):
+        """Direct selection can select individual elements inside a group."""
+        rect1 = Rect(x=0, y=0, width=10, height=10)
+        rect2 = Rect(x=50, y=50, width=10, height=10)
+        group = Group(children=(rect1, rect2))
+        layer = Layer(children=(group,), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        # Marquee covers both group items
+        ctrl.direct_select_rect(-5, -5, 70, 70)
+        paths = _sel_paths(ctrl.document.selection)
+        self.assertIn((0, 0, 0), paths)
+        self.assertIn((0, 0, 1), paths)
+
+
 if __name__ == "__main__":
     absltest.main()

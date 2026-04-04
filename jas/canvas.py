@@ -13,6 +13,7 @@ from element import (
     LineTo, MoveTo, Path, PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
     SmoothQuadTo, Text,
     Color, Fill, LineCap, LineJoin, Stroke, Transform,
+    control_points as element_control_points,
 )
 from model import Model
 from toolbar import Tool
@@ -204,18 +205,7 @@ _HANDLE_SIZE = 6.0
 
 def _control_points(elem: Element) -> list[tuple[float, float]]:
     """Return the control-point positions for selection handles."""
-    match elem:
-        case Line(x1=x1, y1=y1, x2=x2, y2=y2):
-            return [(x1, y1), (x2, y2)]
-        case Rect(x=x, y=y, width=w, height=h):
-            return [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
-        case Circle(cx=cx, cy=cy, r=r):
-            return [(cx, cy - r), (cx + r, cy), (cx, cy + r), (cx - r, cy)]
-        case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry):
-            return [(cx, cy - ry), (cx + rx, cy), (cx, cy + ry), (cx - rx, cy)]
-        case _:
-            bx, by, bw, bh = elem.bounds()
-            return [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)]
+    return element_control_points(elem)
 
 
 def _draw_element_overlay(painter: QPainter, elem: Element,
@@ -318,7 +308,7 @@ class CanvasWidget(QWidget):
         return QSize(int(self._bbox.width), int(self._bbox.height))
 
     def mousePressEvent(self, event: QMouseEvent):
-        if self._current_tool in (Tool.SELECTION, Tool.LINE, Tool.RECT) and event.button() == Qt.MouseButton.LeftButton:
+        if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.LINE, Tool.RECT) and event.button() == Qt.MouseButton.LeftButton:
             self._drag_start = event.position()
             self._drag_end = event.position()
 
@@ -341,6 +331,14 @@ class CanvasWidget(QWidget):
                 w = abs(end.x() - start.x())
                 h = abs(end.y() - start.y())
                 self._controller.select_rect(x, y, w, h)
+                return
+            # Direct selection tool: marquee with individual CP selection
+            if tool == Tool.DIRECT_SELECTION:
+                x = min(start.x(), end.x())
+                y = min(start.y(), end.y())
+                w = abs(end.x() - start.x())
+                h = abs(end.y() - start.y())
+                self._controller.direct_select_rect(x, y, w, h)
                 return
             # Create the element based on current tool
             if tool == Tool.LINE:
@@ -378,6 +376,6 @@ class CanvasWidget(QWidget):
             painter.setBrush(QBrush())
             if self._current_tool == Tool.LINE:
                 painter.drawLine(self._drag_start, self._drag_end)
-            elif self._current_tool in (Tool.RECT, Tool.SELECTION):
+            elif self._current_tool in (Tool.RECT, Tool.SELECTION, Tool.DIRECT_SELECTION):
                 painter.drawRect(QRectF(self._drag_start, self._drag_end).normalized())
         painter.end()

@@ -361,3 +361,19 @@ def control_point_count(elem: Element) -> int:
     if isinstance(elem, (Rect, Circle, Ellipse)):
         return 4
     return 4  # bounding box corners
+
+
+def control_points(elem: Element) -> list[tuple[float, float]]:
+    """Return the (x, y) positions of each control point for an element."""
+    match elem:
+        case Line(x1=x1, y1=y1, x2=x2, y2=y2):
+            return [(x1, y1), (x2, y2)]
+        case Rect(x=x, y=y, width=w, height=h):
+            return [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
+        case Circle(cx=cx, cy=cy, r=r):
+            return [(cx, cy - r), (cx + r, cy), (cx, cy + r), (cx - r, cy)]
+        case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry):
+            return [(cx, cy - ry), (cx + rx, cy), (cx, cy + ry), (cx - rx, cy)]
+        case _:
+            bx, by, bw, bh = elem.bounds()
+            return [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)]
