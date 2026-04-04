@@ -1,8 +1,8 @@
 let () =
   ignore (GMain.init ());
-  let main_window, fixed = Jas.Canvas.create_main_window () in
-  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:10 ~y:10 fixed in
   let model = Jas.Model.create () in
+  let main_window, fixed = Jas.Canvas.create_main_window ~model () in
+  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:10 ~y:10 fixed in
   let controller = Jas.Controller.create ~model () in
   let _canvas = Jas.Canvas_subwindow.create
     ~model ~controller ~toolbar ~x:100 ~y:50 ~width:820 ~height:640 fixed in

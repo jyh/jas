@@ -1,6 +1,25 @@
 (** Menubar for the main window. *)
 
-let create (vbox : GPack.box) =
+let copy_selection (model : Model.model) () =
+  let doc = model#document in
+  let sel = doc.Document.selection in
+  if Document.PathMap.is_empty sel then ()
+  else begin
+    let elements = Document.PathMap.fold (fun path _ acc ->
+      try Document.get_element doc path :: acc
+      with _ -> acc
+    ) sel [] in
+    match elements with
+    | [] -> ()
+    | elems ->
+      let temp_doc = Document.make_document
+        [Element.make_layer (List.rev elems)] in
+      let svg = Svg.document_to_svg temp_doc in
+      let clipboard = GtkBase.Clipboard.get Gdk.Atom.clipboard in
+      GtkBase.Clipboard.set_text clipboard svg
+  end
+
+let create (model : Model.model) (vbox : GPack.box) =
   (* Menubar *)
   let menubar = GMenu.menu_bar ~packing:(fun w -> vbox#pack w) () in
   let factory = new GMenu.factory menubar in
@@ -22,7 +41,7 @@ let create (vbox : GPack.box) =
   ignore (edit_factory#add_item "Redo" ~key:GdkKeysyms._y ~callback:(fun () -> print_endline "Redo"));
   ignore (edit_factory#add_separator ());
   ignore (edit_factory#add_item "Cut" ~key:GdkKeysyms._x ~callback:(fun () -> print_endline "Cut"));
-  ignore (edit_factory#add_item "Copy" ~key:GdkKeysyms._c ~callback:(fun () -> print_endline "Copy"));
+  ignore (edit_factory#add_item "Copy" ~key:GdkKeysyms._c ~callback:(copy_selection model));
   ignore (edit_factory#add_item "Paste" ~key:GdkKeysyms._v ~callback:(fun () -> print_endline "Paste"));
   ignore (edit_factory#add_item "Select All" ~key:GdkKeysyms._a ~callback:(fun () -> print_endline "Select All"));
 
