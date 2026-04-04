@@ -18,8 +18,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Jas")
 
+        # Model and Controller
+        self.model = Model()
+        self.controller = Controller(model=self.model)
+
         # Menubar
-        create_menus(self)
+        create_menus(self, self.model)
 
         # Workspace
         self.mdi_area = QMdiArea()
@@ -35,10 +39,6 @@ class MainWindow(QMainWindow):
         self.toolbar_window.resize(80, 100)
         self.toolbar_window.move(10, 10)
         self.toolbar_window.show()
-
-        # Model and Controller
-        self.model = Model()
-        self.controller = Controller(model=self.model)
 
         # Canvas subwindow (view)
         self.canvas = CanvasWidget(model=self.model, controller=self.controller)

@@ -46,6 +46,7 @@ public struct ContentView: View {
         }
         .frame(minWidth: 640, minHeight: 480)
         .clipped()
+        .focusedSceneValue(\.jasModel, model)
         .background(
             KeyboardShortcutHandler(currentTool: $currentTool)
         )

@@ -1,14 +1,17 @@
 """Menubar for Jas application."""
 
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QMainWindow
+from PySide6.QtWidgets import QApplication, QMainWindow
+
+from model import Model
 
 
-def create_menus(window: QMainWindow) -> None:
+def create_menus(window: QMainWindow, model: Model) -> None:
     """Create File, Edit, and View menus for the main window.
 
     Args:
         window: The QMainWindow to add menus to.
+        model: The document model.
     """
     menubar = window.menuBar()
 
@@ -56,7 +59,7 @@ def create_menus(window: QMainWindow) -> None:
 
     copy_action = edit_menu.addAction("&Copy")
     copy_action.setShortcut(QKeySequence.Copy)
-    copy_action.triggered.connect(lambda: print("Copy"))
+    copy_action.triggered.connect(lambda: _copy_selection(model))
 
     paste_action = edit_menu.addAction("&Paste")
     paste_action.setShortcut(QKeySequence.Paste)
@@ -80,3 +83,29 @@ def create_menus(window: QMainWindow) -> None:
     fit_action = view_menu.addAction("&Fit in Window")
     fit_action.setShortcut(QKeySequence("Ctrl+0"))
     fit_action.triggered.connect(lambda: print("Fit in window"))
+
+
+def _copy_selection(model: Model) -> None:
+    """Copy selected elements to the system clipboard as SVG."""
+    from document import Document
+    from element import Layer
+    from svg import document_to_svg
+
+    doc = model.document
+    if not doc.selection:
+        return
+    # Gather selected elements
+    elements = []
+    for es in doc.selection:
+        try:
+            elem = doc.get_element(es.path)
+            elements.append(elem)
+        except (IndexError, ValueError):
+            pass
+    if not elements:
+        return
+    # Wrap in a minimal document and export as SVG
+    temp_doc = Document(layers=(Layer(children=tuple(elements)),))
+    svg = document_to_svg(temp_doc)
+    clipboard = QApplication.clipboard()
+    clipboard.setText(svg)

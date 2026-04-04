@@ -2,7 +2,8 @@ let () =
   ignore (GMain.init ());
 
   (* Test main window creation *)
-  let main_window, fixed = Jas.Canvas.create_main_window () in
+  let model = Jas.Model.create () in
+  let main_window, fixed = Jas.Canvas.create_main_window ~model () in
   assert (main_window#title = "Jas");
 
   (* Test toolbar creation *)

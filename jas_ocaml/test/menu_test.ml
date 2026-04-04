@@ -6,6 +6,7 @@ let () =
      without rendering, so menu structure is verified by visual/interactive
      testing. This test ensures the menubar module is linkable and that
      the main window with vbox layout can be created. *)
-  let _main_window, _fixed = Jas.Canvas.create_main_window () in
+  let model = Jas.Model.create () in
+  let _main_window, _fixed = Jas.Canvas.create_main_window ~model () in
 
   Printf.printf "All menu tests passed.\n"
