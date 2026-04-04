@@ -22,6 +22,19 @@ class controller ?(model = Model.create ()) () =
     method remove_layer (index : int) =
       let layers = List.filteri (fun i _ -> i <> index) model#document.Document.layers in
       model#set_document { model#document with Document.layers = layers }
+
+    method add_element (elem : Element.element) =
+      let doc = model#document in
+      let idx = doc.Document.selected_layer in
+      let new_layers = List.mapi (fun i l ->
+        if i = idx then
+          match l with
+          | Element.Layer layer ->
+            Element.Layer { layer with children = layer.children @ [elem] }
+          | _ -> l
+        else l
+      ) doc.Document.layers in
+      model#set_document { doc with Document.layers = new_layers }
   end
 
 let create ?model () = new controller ?model ()

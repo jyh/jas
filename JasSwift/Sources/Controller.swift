@@ -33,4 +33,15 @@ public class Controller {
         layers.remove(at: index)
         model.document = JasDocument(title: model.document.title, layers: layers)
     }
+
+    public func addElement(_ element: Element) {
+        let doc = model.document
+        let idx = doc.selectedLayer
+        let target = doc.layers[idx]
+        let newLayer = JasLayer(name: target.name, children: target.children + [element],
+                                opacity: target.opacity, transform: target.transform)
+        var layers = doc.layers
+        layers[idx] = newLayer
+        model.document = JasDocument(title: doc.title, layers: layers, selectedLayer: idx)
+    }
 }

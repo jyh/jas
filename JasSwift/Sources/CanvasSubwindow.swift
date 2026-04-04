@@ -317,17 +317,7 @@ class CanvasNSView: NSView {
         } else {
             return
         }
-        // Add to the selected layer
-        let doc = controller.document
-        let idx = doc.selectedLayer
-        let target = doc.layers[idx]
-        let newChildren = target.children + [elem]
-        let newLayer = JasLayer(name: target.name, children: newChildren,
-                                opacity: target.opacity, transform: target.transform)
-        var layers = doc.layers
-        layers[idx] = newLayer
-        controller.setDocument(JasDocument(title: doc.title, layers: layers,
-                                           selectedLayer: idx))
+        controller.addElement(elem)
     }
 }
 

@@ -8,7 +8,7 @@ that replaces the old one in the Model.
 from dataclasses import replace
 
 from document import Document
-from element import Layer
+from element import Element, Layer
 from model import Model
 
 
@@ -48,3 +48,12 @@ class Controller:
         self._model.document = replace(
             self._model.document, layers=tuple(layers),
         )
+
+    def add_element(self, element: Element) -> None:
+        """Append an element to the selected layer."""
+        doc = self._model.document
+        idx = doc.selected_layer
+        layer = doc.layers[idx]
+        new_layer = replace(layer, children=layer.children + (element,))
+        new_layers = doc.layers[:idx] + (new_layer,) + doc.layers[idx + 1:]
+        self._model.document = replace(doc, layers=new_layers)
