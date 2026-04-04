@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(swift test:*)",
-      "Bash(python jas_test.py)"
+      "Bash(python jas_test.py)",
+      "Bash(git push:*)",
+      "Bash(git add:*)",
+      "Bash(python canvas_test.py)",
+      "Bash(python jas_app.py)"
     ]
   }
 }

@@ -26,7 +26,7 @@ class ToolButton(QToolButton):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Background on checked
         if self.isChecked():
@@ -45,9 +45,9 @@ class ToolButton(QToolButton):
         elif self.tool == Tool.DIRECT_SELECTION:
             self._draw_direct_selection_arrow(painter)
         elif self.tool == Tool.LINE:
-            self._draw_line_icon(painter)
+            self._draw_line_tool(painter)
         elif self.tool == Tool.RECT:
-            self._draw_rect_icon(painter)
+            self._draw_rect_tool(painter)
 
     def _draw_selection_arrow(self, painter):
         """Filled arrow pointing upper-right."""
@@ -65,7 +65,7 @@ class ToolButton(QToolButton):
         painter.drawPath(path)
 
     def _draw_direct_selection_arrow(self, painter):
-        """Outline arrow pointing upper-right."""
+        """Outline arrow pointing upper-left."""
         path = QPainterPath()
         path.moveTo(5, 2)
         path.lineTo(5, 24)
@@ -75,21 +75,19 @@ class ToolButton(QToolButton):
         path.lineTo(13, 16)
         path.lineTo(20, 16)
         path.closeSubpath()
-        painter.setPen(QPen(QColor("#cccccc"), 1.5))
-        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor("#cccccc"), 1.0))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(path)
 
-
-    def _draw_line_icon(self, painter):
-        """Diagonal line from bottom-left to upper-right."""
-        painter.setPen(QPen(QColor("#cccccc"), 2.0))
-        painter.drawLine(4, 24, 24, 4)
-
-    def _draw_rect_icon(self, painter):
-        """Rectangle outline."""
+    def _draw_line_tool(self, painter):
         painter.setPen(QPen(QColor("#cccccc"), 1.5))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(4, 6, 20, 16)
+        painter.drawLine(4, self.ICON_SIZE - 4, self.ICON_SIZE - 4, 4)
+        painter.drawEllipse(1, self.ICON_SIZE - 6, 6, 6)
+        painter.drawEllipse(self.ICON_SIZE - 7, 1, 6, 6)
+
+    def _draw_rect_tool(self, painter):
+        painter.setPen(QPen(QColor("#cccccc"), 1.5))
+        painter.drawRect(4, 4, self.ICON_SIZE - 8, self.ICON_SIZE - 8)
 
 
 class Toolbar(QWidget):
