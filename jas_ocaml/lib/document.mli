@@ -43,3 +43,4 @@ val bounds : document -> float * float * float * float
 val get_element : document -> element_path -> Element.element
 val replace_element : document -> element_path -> Element.element -> document
 val insert_element_after : document -> element_path -> Element.element -> document
+val children_of : Element.element -> Element.element list

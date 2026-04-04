@@ -6,7 +6,7 @@ from element import (
     Line, LineCap, LineJoin, LineTo, MoveTo, Path, Polygon, Polyline,
     QuadTo, Rect, SmoothCurveTo, SmoothQuadTo, Stroke, Text, Transform,
 )
-from svg import document_to_svg
+from svg import document_to_svg, svg_to_document
 
 
 # 1 pt = 96/72 px = 4/3 px
@@ -229,6 +229,196 @@ class SvgTest(absltest.TestCase):
         svg = document_to_svg(Document(layers=(layer1, layer2)))
         self.assertIn('inkscape:label="L1"', svg)
         self.assertIn('inkscape:label="L2"', svg)
+
+
+class SvgImportTest(absltest.TestCase):
+
+    def _roundtrip(self, doc):
+        """Export to SVG, re-import, compare."""
+        svg = document_to_svg(doc)
+        return svg_to_document(svg)
+
+    def test_roundtrip_empty(self):
+        doc = Document(layers=(Layer(),))
+        doc2 = self._roundtrip(doc)
+        self.assertEqual(len(doc2.layers), 1)
+
+    def test_roundtrip_line(self):
+        layer = Layer(children=(
+            Line(x1=0, y1=0, x2=72, y2=36,
+                 stroke=Stroke(color=Color(0, 0, 0))),
+        ))
+        doc2 = self._roundtrip(Document(layers=(layer,)))
+        elem = doc2.layers[0].children[0]
+        self.assertIsInstance(elem, Line)
+        self.assertAlmostEqual(elem.x2, 72, places=2)
+        self.assertAlmostEqual(elem.y2, 36, places=2)
+
+    def test_roundtrip_rect(self):
+        layer = Layer(children=(
+            Rect(x=10, y=20, width=72, height=36,
+                 fill=Fill(color=Color(1, 0, 0)),
+                 stroke=Stroke(color=Color(0, 0, 0))),
+        ))
+        doc2 = self._roundtrip(Document(layers=(layer,)))
+        elem = doc2.layers[0].children[0]
+        self.assertIsInstance(elem, Rect)
+        self.assertAlmostEqual(elem.width, 72, places=2)
+        self.assertAlmostEqual(elem.height, 36, places=2)
+        self.assertIsNotNone(elem.fill)
+        self.assertAlmostEqual(elem.fill.color.r, 1.0, places=1)
+
+    def test_roundtrip_circle(self):
+        layer = Layer(children=(
+            Circle(cx=36, cy=36, r=18,
+                   fill=Fill(color=Color(0, 0, 1))),
+        ))
+        doc2 = self._roundtrip(Document(layers=(layer,)))
+        elem = doc2.layers[0].children[0]
+        self.assertIsInstance(elem, Circle)
+        self.assertAlmostEqual(elem.r, 18, places=2)
+
+    def test_roundtrip_ellipse(self):
+        layer = Layer(children=(
+            Ellipse(cx=36, cy=36, rx=24, ry=12),
+        ))
+        doc2 = self._roundtrip(Document(layers=(layer,)))
+        elem = doc2.layers[0].children[0]
+        self.assertIsInstance(elem, Ellipse)
+        self.assertAlmostEqual(elem.rx, 24, places=2)
+        self.assertAlmostEqual(elem.ry, 12, places=2)
+
+    def test_roundtrip_polygon(self):
+        layer = Layer(children=(
+            Polygon(points=((0, 0), (72, 0), (36, 72)),
+                    stroke=Stroke(color=Color(0, 0, 0))),
+        ))
+        doc2 = self._roundtrip(Document(layers=(layer,)))
+        elem = doc2.layers[0].children[0]
+        self.assertIsInstance(elem, Polygon)
+        self.assertEqual(len(elem.points), 3)
+        self.assertAlmostEqual(elem.points[1][0], 72, places=2)
+
+    def test_roundtrip_path(self):
+        layer = Layer(children=(
+            Path(d=(MoveTo(0, 0), LineTo(72, 72), ClosePath()),
+                 stroke=Stroke(color=Color(0, 0, 0))),
+        ))
+        doc2 = self._roundtrip(Document(layers=(layer,)))
+        elem = doc2.layers[0].children[0]
+        self.assertIsInstance(elem, Path)
+        self.assertEqual(len(elem.d), 3)
+        self.assertIsInstance(elem.d[0], MoveTo)
+        self.assertIsInstance(elem.d[1], LineTo)
+        self.assertAlmostEqual(elem.d[1].x, 72, places=2)
+
+    def test_roundtrip_path_curves(self):
+        layer = Layer(children=(
+            Path(d=(
+                MoveTo(0, 0),
+                CurveTo(0, 36, 36, 72, 72, 72),
+                SmoothCurveTo(108, 72, 144, 0),
+                QuadTo(36, 36, 72, 0),
+                SmoothQuadTo(144, 0),
+                ArcTo(36, 36, 0, True, False, 72, 72),
+            ), stroke=Stroke(color=Color(0, 0, 0))),
+        ))
+        doc2 = self._roundtrip(Document(layers=(layer,)))
+        elem = doc2.layers[0].children[0]
+        self.assertIsInstance(elem, Path)
+        self.assertEqual(len(elem.d), 6)
+        self.assertIsInstance(elem.d[1], CurveTo)
+        self.assertIsInstance(elem.d[4], SmoothQuadTo)
+        self.assertIsInstance(elem.d[5], ArcTo)
+        self.assertTrue(elem.d[5].large_arc)
+        self.assertFalse(elem.d[5].sweep)
+
+    def test_roundtrip_text(self):
+        layer = Layer(children=(
+            Text(x=10, y=20, content="Hello", font_family="Arial",
+                 font_size=12, fill=Fill(color=Color(0, 0, 0))),
+        ))
+        doc2 = self._roundtrip(Document(layers=(layer,)))
+        elem = doc2.layers[0].children[0]
+        self.assertIsInstance(elem, Text)
+        self.assertEqual(elem.content, "Hello")
+        self.assertEqual(elem.font_family, "Arial")
+
+    def test_roundtrip_opacity(self):
+        layer = Layer(children=(
+            Rect(x=0, y=0, width=72, height=72, opacity=0.5),
+        ))
+        doc2 = self._roundtrip(Document(layers=(layer,)))
+        elem = doc2.layers[0].children[0]
+        self.assertAlmostEqual(elem.opacity, 0.5, places=2)
+
+    def test_roundtrip_transform(self):
+        layer = Layer(children=(
+            Rect(x=0, y=0, width=72, height=72,
+                 transform=Transform.translate(36, 18)),
+        ))
+        doc2 = self._roundtrip(Document(layers=(layer,)))
+        elem = doc2.layers[0].children[0]
+        self.assertIsNotNone(elem.transform)
+        self.assertAlmostEqual(elem.transform.e, 36, places=2)
+        self.assertAlmostEqual(elem.transform.f, 18, places=2)
+
+    def test_roundtrip_layer_name(self):
+        doc = Document(layers=(
+            Layer(name="Background", children=(
+                Rect(x=0, y=0, width=72, height=72),
+            )),
+        ))
+        doc2 = self._roundtrip(doc)
+        self.assertEqual(doc2.layers[0].name, "Background")
+
+    def test_roundtrip_multiple_layers(self):
+        doc = Document(layers=(
+            Layer(name="L1", children=(
+                Line(x1=0, y1=0, x2=72, y2=72,
+                     stroke=Stroke(color=Color(0, 0, 0))),
+            )),
+            Layer(name="L2", children=(
+                Circle(cx=36, cy=36, r=18),
+            )),
+        ))
+        doc2 = self._roundtrip(doc)
+        self.assertEqual(len(doc2.layers), 2)
+        self.assertEqual(doc2.layers[0].name, "L1")
+        self.assertEqual(doc2.layers[1].name, "L2")
+
+    def test_roundtrip_color_alpha(self):
+        layer = Layer(children=(
+            Rect(x=0, y=0, width=72, height=72,
+                 fill=Fill(color=Color(1, 0, 0, 0.5))),
+        ))
+        doc2 = self._roundtrip(Document(layers=(layer,)))
+        elem = doc2.layers[0].children[0]
+        self.assertAlmostEqual(elem.fill.color.a, 0.5, places=2)
+
+    def test_roundtrip_group(self):
+        layer = Layer(children=(
+            Group(children=(
+                Rect(x=0, y=0, width=72, height=72),
+                Circle(cx=36, cy=36, r=18),
+            )),
+        ))
+        doc2 = self._roundtrip(Document(layers=(layer,)))
+        elem = doc2.layers[0].children[0]
+        self.assertIsInstance(elem, Group)
+        self.assertEqual(len(elem.children), 2)
+
+    def test_roundtrip_stroke_linecap_linejoin(self):
+        layer = Layer(children=(
+            Line(x1=0, y1=0, x2=72, y2=72,
+                 stroke=Stroke(color=Color(0, 0, 0),
+                               linecap=LineCap.ROUND,
+                               linejoin=LineJoin.BEVEL)),
+        ))
+        doc2 = self._roundtrip(Document(layers=(layer,)))
+        elem = doc2.layers[0].children[0]
+        self.assertEqual(elem.stroke.linecap, LineCap.ROUND)
+        self.assertEqual(elem.stroke.linejoin, LineJoin.BEVEL)
 
 
 if __name__ == "__main__":
