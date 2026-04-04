@@ -115,6 +115,31 @@ public struct JasDocument: Equatable {
         }
         return JasDocument(title: title, layers: newLayers, selectedLayer: selectedLayer, selection: selection)
     }
+
+    /// Return a new document with the element at path removed.
+    public func deleteElement(_ path: ElementPath) -> JasDocument {
+        precondition(!path.isEmpty, "Path must be non-empty")
+        var newLayers = layers
+        if path.count == 1 {
+            newLayers.remove(at: path[0])
+        } else {
+            let layerElem = removeFromGroup(.layer(layers[path[0]]), Array(path.dropFirst()))
+            guard case .layer(let l) = layerElem else { fatalError("unreachable") }
+            newLayers[path[0]] = l
+        }
+        return JasDocument(title: title, layers: newLayers, selectedLayer: selectedLayer, selection: selection)
+    }
+
+    /// Return a new document with all selected elements removed and selection cleared.
+    public func deleteSelection() -> JasDocument {
+        let sortedPaths = selection.map(\.path).sorted { $0.lexicographicallyPrecedes($1) }.reversed()
+        var doc = self
+        for path in sortedPaths {
+            doc = doc.deleteElement(path)
+        }
+        return JasDocument(title: doc.title, layers: doc.layers,
+                           selectedLayer: doc.selectedLayer, selection: [])
+    }
 }
 
 // MARK: - Private helpers
@@ -144,6 +169,16 @@ private func insertAfterInGroup(_ node: Element, _ rest: [Int], _ newElem: Eleme
         children.insert(newElem, at: rest[0] + 1)
     } else {
         children[rest[0]] = insertAfterInGroup(children[rest[0]], Array(rest.dropFirst()), newElem)
+    }
+    return withChildren(node, children)
+}
+
+private func removeFromGroup(_ node: Element, _ rest: [Int]) -> Element {
+    var children = childrenOf(node)
+    if rest.count == 1 {
+        children.remove(at: rest[0])
+    } else {
+        children[rest[0]] = removeFromGroup(children[rest[0]], Array(rest.dropFirst()))
     }
     return withChildren(node, children)
 }

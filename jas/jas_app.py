@@ -61,6 +61,13 @@ class MainWindow(QMainWindow):
                   lambda: self.toolbar.select_tool(Tool.LINE))
         QShortcut(QKeySequence("M"), self,
                   lambda: self.toolbar.select_tool(Tool.RECT))
+        QShortcut(QKeySequence(Qt.Key_Delete), self, self._delete_selection)
+        QShortcut(QKeySequence(Qt.Key_Backspace), self, self._delete_selection)
+
+    def _delete_selection(self):
+        doc = self.model.document
+        if doc.selection:
+            self.model.document = doc.delete_selection()
 
 
 def main():

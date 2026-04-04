@@ -102,6 +102,39 @@ class Document:
         return dataclasses.replace(self, layers=tuple(new_layers))
 
 
+    def delete_element(self, path: ElementPath) -> "Document":
+        """Return a new Document with the element at path removed."""
+        if not path:
+            raise ValueError("Path must be non-empty")
+        new_layers = list(self.layers)
+        if len(path) == 1:
+            del new_layers[path[0]]
+        else:
+            new_layers[path[0]] = _remove_from_group(self.layers[path[0]], path[1:])
+        return dataclasses.replace(self, layers=tuple(new_layers))
+
+    def delete_selection(self) -> "Document":
+        """Return a new Document with all selected elements removed and selection cleared."""
+        doc = self
+        # Sort paths in reverse so deletions don't shift earlier paths
+        paths = sorted((es.path for es in self.selection), reverse=True)
+        for path in paths:
+            doc = doc.delete_element(path)
+        return dataclasses.replace(doc, selection=frozenset())
+
+
+def _remove_from_group(node: _G, rest: ElementPath) -> _G:
+    """Remove the element at rest within a group."""
+    new_children = list(node.children)
+    if len(rest) == 1:
+        del new_children[rest[0]]
+    else:
+        child = node.children[rest[0]]
+        assert isinstance(child, Group)
+        new_children[rest[0]] = _remove_from_group(child, rest[1:])
+    return dataclasses.replace(node, children=tuple(new_children))
+
+
 def _insert_after_in_group(node: _G, rest: ElementPath, new_elem: Element) -> _G:
     """Insert new_elem after the position indicated by rest within a group."""
     new_children = list(node.children)

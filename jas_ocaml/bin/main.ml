@@ -18,6 +18,11 @@ let () =
       toolbar#select_tool Jas.Toolbar.Line; true
     end else if key = GdkKeysyms._m || key = GdkKeysyms._M then begin
       toolbar#select_tool Jas.Toolbar.Rect; true
+    end else if key = GdkKeysyms._Delete || key = GdkKeysyms._BackSpace then begin
+      let doc = model#document in
+      if not (Jas.Document.PathMap.is_empty doc.Jas.Document.selection) then
+        model#set_document (Jas.Document.delete_selection doc);
+      true
     end else false
   ) |> ignore;
 

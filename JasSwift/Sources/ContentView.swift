@@ -47,8 +47,9 @@ public struct ContentView: View {
         .frame(minWidth: 640, minHeight: 480)
         .clipped()
         .focusedSceneValue(\.jasModel, model)
+        .focusedSceneValue(\.hasSelection, !model.document.selection.isEmpty)
         .background(
-            KeyboardShortcutHandler(currentTool: $currentTool)
+            KeyboardShortcutHandler(currentTool: $currentTool, model: model)
         )
     }
 }
@@ -118,16 +119,24 @@ struct FloatingToolbar: View {
 
 struct KeyboardShortcutHandler: NSViewRepresentable {
     @Binding var currentTool: Tool
+    var model: JasModel
 
     func makeNSView(context: Context) -> KeyCaptureView {
         let view = KeyCaptureView()
         view.onKey = { key in
-            switch key.lowercased() {
-            case "v": currentTool = .selection
-            case "a": currentTool = .directSelection
-            case "\\": currentTool = .line
-            case "m": currentTool = .rect
-            default: break
+            switch key {
+            case "\u{7F}", "\u{F728}":  // Backspace, Forward Delete
+                if !model.document.selection.isEmpty {
+                    model.document = model.document.deleteSelection()
+                }
+            default:
+                switch key.lowercased() {
+                case "v": currentTool = .selection
+                case "a": currentTool = .directSelection
+                case "\\": currentTool = .line
+                case "m": currentTool = .rect
+                default: break
+                }
             }
         }
         DispatchQueue.main.async {

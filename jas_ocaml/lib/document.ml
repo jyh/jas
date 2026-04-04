@@ -159,3 +159,40 @@ let replace_element doc path new_elem =
     let layer = List.nth doc.layers i in
     let new_layer = replace_in_group layer rest new_elem in
     { doc with layers = list_replace_nth doc.layers i new_layer }
+
+(** Remove the nth element from a list. *)
+let list_remove_nth lst n =
+  List.filteri (fun i _ -> i <> n) lst
+
+(** Recursively remove the element at [rest] inside a group/layer node. *)
+let rec remove_from_group node rest =
+  let with_children cs = match node with
+    | Group { opacity; transform; _ } -> Group { children = cs; opacity; transform }
+    | Layer { name; opacity; transform; _ } -> Layer { name; children = cs; opacity; transform }
+    | _ -> failwith "element has no children"
+  in
+  match rest with
+  | [] -> failwith "rest must be non-empty"
+  | [i] -> with_children (list_remove_nth (children_of node) i)
+  | i :: rest ->
+    let cs = children_of node in
+    let child = List.nth cs i in
+    let new_child = remove_from_group child rest in
+    with_children (list_replace_nth cs i new_child)
+
+(** Return a new document with the element at [path] removed. *)
+let delete_element doc path =
+  match path with
+  | [] -> failwith "path must be non-empty"
+  | [i] -> { doc with layers = list_remove_nth doc.layers i }
+  | i :: rest ->
+    let layer = List.nth doc.layers i in
+    let new_layer = remove_from_group layer rest in
+    { doc with layers = list_replace_nth doc.layers i new_layer }
+
+(** Return a new document with all selected elements removed and selection cleared. *)
+let delete_selection doc =
+  let paths = PathMap.fold (fun _ es acc -> es.es_path :: acc) doc.selection [] in
+  let sorted_paths = List.sort (fun a b -> compare b a) paths in
+  let doc' = List.fold_left (fun d p -> delete_element d p) doc sorted_paths in
+  { doc' with selection = PathMap.empty }
