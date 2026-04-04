@@ -19,6 +19,108 @@ let copy_selection (model : Model.model) () =
       GtkBase.Clipboard.set_text clipboard svg
   end
 
+let cut_selection (model : Model.model) () =
+  copy_selection model ();
+  model#set_document (Document.delete_selection model#document)
+
+let translate_element elem dx dy =
+  if dx = 0.0 && dy = 0.0 then elem
+  else
+    let n = Element.control_point_count elem in
+    let indices = List.init n Fun.id in
+    Element.move_control_points elem indices dx dy
+
+let is_svg text =
+  let s = String.trim text in
+  let starts_with prefix =
+    String.length s >= String.length prefix &&
+    String.sub s 0 (String.length prefix) = prefix
+  in
+  starts_with "<?xml" || starts_with "<svg"
+
+let paste_clipboard (model : Model.model) offset () =
+  let clipboard = GtkBase.Clipboard.get Gdk.Atom.clipboard in
+  GtkBase.Clipboard.request_text clipboard ~callback:(fun text_opt ->
+    match text_opt with
+    | None -> ()
+    | Some text when String.length text = 0 -> ()
+    | Some text ->
+      let doc = model#document in
+      let new_sel = ref Document.PathMap.empty in
+      if is_svg text then begin
+        let pasted_doc = Svg.svg_to_document text in
+        let new_layers = Array.of_list doc.Document.layers in
+        List.iter (fun pasted_layer ->
+          let children = match pasted_layer with
+            | Element.Layer { children; _ } ->
+              List.map (fun c -> translate_element c offset offset) children
+            | _ -> []
+          in
+          if children = [] then ()
+          else begin
+            let name = match pasted_layer with
+              | Element.Layer { name; _ } -> name
+              | _ -> ""
+            in
+            (* Find matching layer by name *)
+            let target_idx = ref (-1) in
+            if name <> "" then
+              Array.iteri (fun i existing ->
+                if !target_idx < 0 then
+                  match existing with
+                  | Element.Layer { name = n; _ } when n = name ->
+                    target_idx := i
+                  | _ -> ()
+              ) new_layers;
+            if !target_idx < 0 then
+              target_idx := doc.Document.selected_layer;
+            let idx = !target_idx in
+            (* Record paths for pasted elements *)
+            let base = match new_layers.(idx) with
+              | Element.Layer { children = ec; _ } -> List.length ec
+              | _ -> 0
+            in
+            List.iteri (fun j child ->
+              let path = [idx; base + j] in
+              let n = Element.control_point_count child in
+              new_sel := Document.PathMap.add path
+                (Document.make_element_selection ~control_points:(List.init n Fun.id) path)
+                !new_sel
+            ) children;
+            match new_layers.(idx) with
+            | Element.Layer { name = n; children = ec; opacity; transform } ->
+              new_layers.(idx) <- Element.Layer { name = n; children = ec @ children; opacity; transform }
+            | _ -> ()
+          end
+        ) pasted_doc.Document.layers;
+        model#set_document { doc with layers = Array.to_list new_layers;
+                                      selection = !new_sel }
+      end else begin
+        (* Plain text: create a Text element *)
+        let elem = Element.make_text (offset) (offset +. 16.0) text in
+        let idx = doc.Document.selected_layer in
+        let base = match List.nth doc.Document.layers idx with
+          | Element.Layer { children; _ } -> List.length children
+          | _ -> 0
+        in
+        let path = [idx; base] in
+        let n = Element.control_point_count elem in
+        new_sel := Document.PathMap.add path
+          (Document.make_element_selection ~control_points:(List.init n Fun.id) path)
+          !new_sel;
+        let new_layers = List.mapi (fun i l ->
+          if i = idx then
+            match l with
+            | Element.Layer layer ->
+              Element.Layer { layer with children = layer.children @ [elem] }
+            | _ -> l
+          else l
+        ) doc.Document.layers in
+        model#set_document { doc with layers = new_layers;
+                                      selection = !new_sel }
+      end
+  )
+
 let create (model : Model.model) (vbox : GPack.box) =
   (* Menubar *)
   let menubar = GMenu.menu_bar ~packing:(fun w -> vbox#pack w) () in
@@ -40,9 +142,11 @@ let create (model : Model.model) (vbox : GPack.box) =
   ignore (edit_factory#add_item "Undo" ~key:GdkKeysyms._z ~callback:(fun () -> print_endline "Undo"));
   ignore (edit_factory#add_item "Redo" ~key:GdkKeysyms._y ~callback:(fun () -> print_endline "Redo"));
   ignore (edit_factory#add_separator ());
-  ignore (edit_factory#add_item "Cut" ~key:GdkKeysyms._x ~callback:(fun () -> print_endline "Cut"));
+  ignore (edit_factory#add_item "Cut" ~key:GdkKeysyms._x ~callback:(cut_selection model));
   ignore (edit_factory#add_item "Copy" ~key:GdkKeysyms._c ~callback:(copy_selection model));
-  ignore (edit_factory#add_item "Paste" ~key:GdkKeysyms._v ~callback:(fun () -> print_endline "Paste"));
+  ignore (edit_factory#add_item "Paste" ~key:GdkKeysyms._v ~callback:(paste_clipboard model 24.0));
+  ignore (edit_factory#add_item "Paste in Place" ~callback:(paste_clipboard model 0.0));
+  ignore (edit_factory#add_separator ());
   ignore (edit_factory#add_item "Select All" ~key:GdkKeysyms._a ~callback:(fun () -> print_endline "Select All"));
 
   (* View menu *)

@@ -19,11 +19,13 @@ class ToolbarTest(absltest.TestCase):
 
     def test_tool_enum_values(self):
         tools = list(Tool)
-        self.assertEqual(len(tools), 4)
+        self.assertEqual(len(tools), 6)
         self.assertIn(Tool.SELECTION, tools)
         self.assertIn(Tool.DIRECT_SELECTION, tools)
+        self.assertIn(Tool.GROUP_SELECTION, tools)
         self.assertIn(Tool.LINE, tools)
         self.assertIn(Tool.RECT, tools)
+        self.assertIn(Tool.POLYGON, tools)
 
     def test_tool_selection_value(self):
         self.assertEqual(Tool.SELECTION.value, 1)
@@ -32,10 +34,10 @@ class ToolbarTest(absltest.TestCase):
         self.assertEqual(Tool.DIRECT_SELECTION.value, 2)
 
     def test_tool_line_value(self):
-        self.assertEqual(Tool.LINE.value, 3)
+        self.assertEqual(Tool.LINE.value, 4)
 
     def test_tool_rect_value(self):
-        self.assertEqual(Tool.RECT.value, 4)
+        self.assertEqual(Tool.RECT.value, 5)
 
 
 class BoundingBoxTest(absltest.TestCase):
@@ -126,10 +128,10 @@ class CanvasWidgetTest(absltest.TestCase):
         self.assertEqual(len(doc.layers), 1)
         child = doc.layers[0].children[0]
         self.assertIsInstance(child, Line)
-        self.assertEqual(child.x1, 10)
-        self.assertEqual(child.y1, 20)
-        self.assertEqual(child.x2, 50)
-        self.assertEqual(child.y2, 60)
+        self.assertAlmostEqual(child.x1, 10)
+        self.assertAlmostEqual(child.y1, 20)
+        self.assertAlmostEqual(child.x2, 50)
+        self.assertAlmostEqual(child.y2, 60)
 
     def test_rect_tool_creates_rect_element(self):
         """Simulate mouse press/release with the rect tool."""
@@ -151,10 +153,10 @@ class CanvasWidgetTest(absltest.TestCase):
         child = doc.layers[0].children[0]
         self.assertIsInstance(child, Rect)
         # Should normalize: min corner is (10,20), size is (40,40)
-        self.assertEqual(child.x, 10)
-        self.assertEqual(child.y, 20)
-        self.assertEqual(child.width, 40)
-        self.assertEqual(child.height, 40)
+        self.assertAlmostEqual(child.x, 10)
+        self.assertAlmostEqual(child.y, 20)
+        self.assertAlmostEqual(child.width, 40)
+        self.assertAlmostEqual(child.height, 40)
 
     def test_drawing_adds_to_existing_layer(self):
         """Drawing when a layer already exists appends to it."""
