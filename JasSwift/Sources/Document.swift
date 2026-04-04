@@ -7,15 +7,14 @@ import Foundation
 /// `[0, 2, 1]` → layers[0].children[2] (a group), child 1.
 public typealias ElementPath = [Int]
 
-/// Per-element selection state: which element, whether it is selected,
-/// and which of its control points are selected.
+/// Per-element selection state: which element and which of its control points
+/// are selected.
 public struct ElementSelection: Equatable, Hashable {
     public let path: ElementPath
-    public let selected: Bool
     public let controlPoints: Set<Int>
 
-    public init(path: ElementPath, selected: Bool = true, controlPoints: Set<Int> = []) {
-        self.path = path; self.selected = selected; self.controlPoints = controlPoints
+    public init(path: ElementPath, controlPoints: Set<Int> = []) {
+        self.path = path; self.controlPoints = controlPoints
     }
 
     // Hash/equality by path only so Selection behaves as a path-keyed collection
@@ -27,9 +26,9 @@ public struct ElementSelection: Equatable, Hashable {
         lhs.path == rhs.path
     }
 
-    /// Full equality including flags (for tests).
+    /// Full equality including control points (for tests).
     public func exactlyEquals(_ other: ElementSelection) -> Bool {
-        path == other.path && selected == other.selected && controlPoints == other.controlPoints
+        path == other.path && controlPoints == other.controlPoints
     }
 }
 

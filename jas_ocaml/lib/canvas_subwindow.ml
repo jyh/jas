@@ -351,6 +351,9 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
     (* Line tool drag state *)
     val mutable line_drag_start : (float * float) option = None
     val mutable line_drag_end : (float * float) option = None
+    (* Move-drag state *)
+    val mutable moving = false
+    val hit_radius = 6.0
 
     method widget = frame#coerce
     method canvas = canvas_area
@@ -405,21 +408,35 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         (* Draw drag preview *)
         begin match line_drag_start, line_drag_end with
         | Some (sx, sy), Some (ex, ey) ->
-          Cairo.set_source_rgba cr 0.4 0.4 0.4 1.0;
-          Cairo.set_line_width cr 1.0;
-          Cairo.set_dash cr [| 4.0; 4.0 |];
-          if toolbar#current_tool = Toolbar.Rect || toolbar#current_tool = Toolbar.Selection || toolbar#current_tool = Toolbar.Direct_selection || toolbar#current_tool = Toolbar.Group_selection then begin
-            let x = min sx ex in
-            let y = min sy ey in
-            let w = abs_float (ex -. sx) in
-            let h = abs_float (ey -. sy) in
-            Cairo.rectangle cr x y ~w ~h
+          if moving then begin
+            let dx = ex -. sx in
+            let dy = ey -. sy in
+            Document.PathMap.iter (fun _path (es : Document.element_selection) ->
+              let elem = Document.get_element current_doc es.es_path in
+              let moved = Element.move_control_points elem es.es_control_points dx dy in
+              Cairo.set_source_rgb cr 0.0 0.47 1.0;
+              Cairo.set_line_width cr 1.0;
+              Cairo.set_dash cr [| 4.0; 4.0 |];
+              draw_element_overlay cr moved es.es_control_points;
+              Cairo.set_dash cr [||]
+            ) current_doc.Document.selection
           end else begin
-            Cairo.move_to cr sx sy;
-            Cairo.line_to cr ex ey
-          end;
-          Cairo.stroke cr;
-          Cairo.set_dash cr [||]
+            Cairo.set_source_rgba cr 0.4 0.4 0.4 1.0;
+            Cairo.set_line_width cr 1.0;
+            Cairo.set_dash cr [| 4.0; 4.0 |];
+            if toolbar#current_tool = Toolbar.Rect || toolbar#current_tool = Toolbar.Selection || toolbar#current_tool = Toolbar.Direct_selection || toolbar#current_tool = Toolbar.Group_selection then begin
+              let x = min sx ex in
+              let y = min sy ey in
+              let w = abs_float (ex -. sx) in
+              let h = abs_float (ey -. sy) in
+              Cairo.rectangle cr x y ~w ~h
+            end else begin
+              Cairo.move_to cr sx sy;
+              Cairo.line_to cr ex ey
+            end;
+            Cairo.stroke cr;
+            Cairo.set_dash cr [||]
+          end
         | _ -> ()
         end;
         true
@@ -436,8 +453,21 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
            && GdkEvent.Button.button ev = 1 then begin
           let x = GdkEvent.Button.x ev in
           let y = GdkEvent.Button.y ev in
+          (* Check if clicking on a selected CP → move mode *)
+          let is_sel_tool = toolbar#current_tool = Toolbar.Selection
+            || toolbar#current_tool = Toolbar.Direct_selection
+            || toolbar#current_tool = Toolbar.Group_selection in
+          let hit = is_sel_tool && Document.PathMap.exists (fun _path (es : Document.element_selection) ->
+            let elem = Document.get_element current_doc es.es_path in
+            let cps = Element.control_points elem in
+            List.exists (fun i ->
+              let (px, py) = List.nth cps i in
+              abs_float (x -. px) <= hit_radius && abs_float (y -. py) <= hit_radius
+            ) es.es_control_points
+          ) current_doc.Document.selection in
           line_drag_start <- Some (x, y);
           line_drag_end <- Some (x, y);
+          moving <- hit;
           true
         end else false
       ) |> ignore;
@@ -457,8 +487,18 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         | Some (sx, sy) when GdkEvent.Button.button ev = 1 ->
           let ex = GdkEvent.Button.x ev in
           let ey = GdkEvent.Button.y ev in
+          let was_moving = moving in
           line_drag_start <- None;
           line_drag_end <- None;
+          moving <- false;
+          if was_moving then begin
+            let dx = ex -. sx in
+            let dy = ey -. sy in
+            if dx <> 0.0 || dy <> 0.0 then
+              controller#move_selection dx dy;
+            canvas_area#misc#queue_draw ();
+            true
+          end else
           let extend = Gdk.Convert.test_modifier `SHIFT (GdkEvent.Button.state ev) in
           if toolbar#current_tool = Toolbar.Selection then begin
             let x = min sx ex in

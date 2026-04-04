@@ -369,8 +369,18 @@ public class Controller {
     public func selectControlPoint(path: ElementPath, index: Int) {
         precondition(!path.isEmpty, "Path must be non-empty")
         let doc = model.document
-        let es = ElementSelection(path: path, selected: true, controlPoints: [index])
+        let es = ElementSelection(path: path, controlPoints: [index])
         model.document = JasDocument(title: doc.title, layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: [es])
+    }
+
+    public func moveSelection(dx: Double, dy: Double) {
+        var doc = model.document
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let newElem = elem.moveControlPoints(es.controlPoints, dx: dx, dy: dy)
+            doc = doc.replaceElement(es.path, with: newElem)
+        }
+        model.document = doc
     }
 }

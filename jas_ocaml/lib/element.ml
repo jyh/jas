@@ -260,3 +260,61 @@ let control_points = function
   | elem ->
     let (bx, by, bw, bh) = bounds elem in
     [(bx, by); (bx +. bw, by); (bx +. bw, by +. bh); (bx, by +. bh)]
+
+let move_control_points elem indices dx dy =
+  let mem i = List.mem i indices in
+  match elem with
+  | Line r ->
+    Line { r with
+      x1 = r.x1 +. (if mem 0 then dx else 0.0);
+      y1 = r.y1 +. (if mem 0 then dy else 0.0);
+      x2 = r.x2 +. (if mem 1 then dx else 0.0);
+      y2 = r.y2 +. (if mem 1 then dy else 0.0);
+    }
+  | Rect r ->
+    let pts = [| (r.x, r.y); (r.x +. r.width, r.y);
+                 (r.x +. r.width, r.y +. r.height); (r.x, r.y +. r.height) |] in
+    for i = 0 to 3 do
+      if mem i then
+        let (px, py) = pts.(i) in
+        pts.(i) <- (px +. dx, py +. dy)
+    done;
+    let xs = Array.map fst pts in
+    let ys = Array.map snd pts in
+    let nx = Array.fold_left min infinity xs in
+    let ny = Array.fold_left min infinity ys in
+    let mx = Array.fold_left max neg_infinity xs in
+    let my = Array.fold_left max neg_infinity ys in
+    Rect { r with x = nx; y = ny; width = mx -. nx; height = my -. ny }
+  | Circle r ->
+    if List.length indices >= 4 then
+      Circle { r with cx = r.cx +. dx; cy = r.cy +. dy }
+    else
+      let cps = [| (r.cx, r.cy -. r.r); (r.cx +. r.r, r.cy);
+                    (r.cx, r.cy +. r.r); (r.cx -. r.r, r.cy) |] in
+      for i = 0 to 3 do
+        if mem i then
+          let (px, py) = cps.(i) in
+          cps.(i) <- (px +. dx, py +. dy)
+      done;
+      let ncx = (fst cps.(1) +. fst cps.(3)) /. 2.0 in
+      let ncy = (snd cps.(0) +. snd cps.(2)) /. 2.0 in
+      let nr = max (abs_float (fst cps.(1) -. ncx)) (abs_float (snd cps.(0) -. ncy)) in
+      Circle { r with cx = ncx; cy = ncy; r = nr }
+  | Ellipse r ->
+    if List.length indices >= 4 then
+      Ellipse { r with cx = r.cx +. dx; cy = r.cy +. dy }
+    else
+      let cps = [| (r.cx, r.cy -. r.ry); (r.cx +. r.rx, r.cy);
+                    (r.cx, r.cy +. r.ry); (r.cx -. r.rx, r.cy) |] in
+      for i = 0 to 3 do
+        if mem i then
+          let (px, py) = cps.(i) in
+          cps.(i) <- (px +. dx, py +. dy)
+      done;
+      let ncx = (fst cps.(1) +. fst cps.(3)) /. 2.0 in
+      let ncy = (snd cps.(0) +. snd cps.(2)) /. 2.0 in
+      Ellipse { r with cx = ncx; cy = ncy;
+                rx = abs_float (fst cps.(1) -. ncx);
+                ry = abs_float (snd cps.(0) -. ncy) }
+  | _ -> elem

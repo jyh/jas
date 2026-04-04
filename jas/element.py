@@ -354,6 +354,53 @@ class Layer(Group):
     name: str = "Layer"
 
 
+def move_control_points(elem: Element, indices: frozenset[int],
+                        dx: float, dy: float) -> Element:
+    """Return a new element with the specified control points moved by (dx, dy)."""
+    from dataclasses import replace
+    match elem:
+        case Line(x1=x1, y1=y1, x2=x2, y2=y2):
+            return replace(elem,
+                x1=x1 + dx if 0 in indices else x1,
+                y1=y1 + dy if 0 in indices else y1,
+                x2=x2 + dx if 1 in indices else x2,
+                y2=y2 + dy if 1 in indices else y2)
+        case Rect(x=x, y=y, width=w, height=h):
+            pts = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
+            for i in range(4):
+                if i in indices:
+                    pts[i] = (pts[i][0] + dx, pts[i][1] + dy)
+            nx = min(p[0] for p in pts)
+            ny = min(p[1] for p in pts)
+            return replace(elem, x=nx, y=ny,
+                           width=max(p[0] for p in pts) - nx,
+                           height=max(p[1] for p in pts) - ny)
+        case Circle(cx=cx, cy=cy, r=r):
+            if indices >= frozenset({0, 1, 2, 3}):
+                return replace(elem, cx=cx + dx, cy=cy + dy)
+            cps = [(cx, cy - r), (cx + r, cy), (cx, cy + r), (cx - r, cy)]
+            for i in range(4):
+                if i in indices:
+                    cps[i] = (cps[i][0] + dx, cps[i][1] + dy)
+            ncx = (cps[1][0] + cps[3][0]) / 2
+            ncy = (cps[0][1] + cps[2][1]) / 2
+            nr = max(abs(cps[1][0] - ncx), abs(cps[0][1] - ncy))
+            return replace(elem, cx=ncx, cy=ncy, r=nr)
+        case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry):
+            if indices >= frozenset({0, 1, 2, 3}):
+                return replace(elem, cx=cx + dx, cy=cy + dy)
+            cps = [(cx, cy - ry), (cx + rx, cy), (cx, cy + ry), (cx - rx, cy)]
+            for i in range(4):
+                if i in indices:
+                    cps[i] = (cps[i][0] + dx, cps[i][1] + dy)
+            ncx = (cps[1][0] + cps[3][0]) / 2
+            ncy = (cps[0][1] + cps[2][1]) / 2
+            return replace(elem, cx=ncx, cy=ncy,
+                           rx=abs(cps[1][0] - ncx), ry=abs(cps[0][1] - ncy))
+        case _:
+            return elem
+
+
 def control_point_count(elem: Element) -> int:
     """Return the number of control points for an element."""
     if isinstance(elem, Line):

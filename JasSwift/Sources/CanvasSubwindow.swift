@@ -344,6 +344,9 @@ class CanvasNSView: NSView {
     // Drag state for drawing tools
     private var dragStart: NSPoint?
     private var dragEnd: NSPoint?
+    // Move-drag state
+    private var moving: Bool = false
+    private let hitRadius: CGFloat = 6.0
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -361,28 +364,63 @@ class CanvasNSView: NSView {
         drawSelectionOverlays(ctx, document)
         // Draw drag preview
         if let start = dragStart, let end = dragEnd {
-            let tool = onToolRead?() ?? currentTool
-            ctx.setStrokeColor(CGColor(gray: 0.4, alpha: 1.0))
-            ctx.setLineWidth(1.0)
-            ctx.setLineDash(phase: 0, lengths: [4, 4])
-            if tool == .line {
-                ctx.move(to: start)
-                ctx.addLine(to: end)
-            } else if tool == .rect || tool == .selection || tool == .directSelection || tool == .groupSelection {
-                let r = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
-                               width: abs(end.x - start.x), height: abs(end.y - start.y))
-                ctx.addRect(r)
+            if moving {
+                let dx = end.x - start.x
+                let dy = end.y - start.y
+                for es in document.selection {
+                    let elem = document.getElement(es.path)
+                    let moved = elem.moveControlPoints(es.controlPoints, dx: dx, dy: dy)
+                    ctx.setStrokeColor(selectionColor)
+                    ctx.setLineWidth(1.0)
+                    ctx.setLineDash(phase: 0, lengths: [4, 4])
+                    drawElementOverlay(ctx, moved, selectedCPs: es.controlPoints)
+                }
+            } else {
+                let tool = onToolRead?() ?? currentTool
+                ctx.setStrokeColor(CGColor(gray: 0.4, alpha: 1.0))
+                ctx.setLineWidth(1.0)
+                ctx.setLineDash(phase: 0, lengths: [4, 4])
+                if tool == .line {
+                    ctx.move(to: start)
+                    ctx.addLine(to: end)
+                } else if tool == .rect || tool == .selection || tool == .directSelection || tool == .groupSelection {
+                    let r = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
+                                   width: abs(end.x - start.x), height: abs(end.y - start.y))
+                    ctx.addRect(r)
+                }
+                ctx.strokePath()
             }
-            ctx.strokePath()
         }
+    }
+
+    private func hitTestSelection(_ pos: NSPoint) -> Bool {
+        for es in document.selection {
+            let elem = document.getElement(es.path)
+            let cps = elem.controlPointPositions
+            for (i, (px, py)) in cps.enumerated() {
+                if es.controlPoints.contains(i) {
+                    if abs(pos.x - px) <= hitRadius && abs(pos.y - py) <= hitRadius {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
     }
 
     override func mouseDown(with event: NSEvent) {
         let tool = onToolRead?() ?? currentTool
         if tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .line || tool == .rect {
             let pt = convert(event.locationInWindow, from: nil)
+            if (tool == .selection || tool == .directSelection || tool == .groupSelection) && hitTestSelection(pt) {
+                dragStart = pt
+                dragEnd = pt
+                moving = true
+                return
+            }
             dragStart = pt
             dragEnd = pt
+            moving = false
         }
     }
 
@@ -413,11 +451,24 @@ class CanvasNSView: NSView {
         guard let start = dragStart, let controller = controller else {
             dragStart = nil
             dragEnd = nil
+            moving = false
             return
         }
         let tool = onToolRead?() ?? currentTool
+        let wasMoving = moving
         dragStart = nil
         dragEnd = nil
+        moving = false
+
+        if wasMoving {
+            let dx = end.x - start.x
+            let dy = end.y - start.y
+            if dx != 0 || dy != 0 {
+                controller.moveSelection(dx: dx, dy: dy)
+            }
+            needsDisplay = true
+            return
+        }
 
         if tool == .selection {
             let x = min(start.x, end.x)

@@ -325,6 +325,15 @@ class controller ?(model = Model.create ()) () =
         let es = Document.make_element_selection ~control_points:[index] path in
         model#set_document { model#document with Document.selection =
           Document.PathMap.singleton path es }
+
+    method move_selection (dx : float) (dy : float) =
+      let doc = model#document in
+      let new_doc = Document.PathMap.fold (fun path es acc ->
+        let elem = Document.get_element acc path in
+        let new_elem = Element.move_control_points elem es.Document.es_control_points dx dy in
+        Document.replace_element acc path new_elem
+      ) doc.Document.selection doc in
+      model#set_document new_doc
   end
 
 let create ?model () = new controller ?model ()

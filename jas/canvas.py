@@ -7,13 +7,13 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget
 
 from controller import Controller
-from document import Document
+from document import Document, ElementSelection
 from element import (
     ArcTo, Circle, ClosePath, CurveTo, Element, Ellipse, Group, Layer, Line,
     LineTo, MoveTo, Path, PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
     SmoothQuadTo, Text,
     Color, Fill, LineCap, LineJoin, Stroke, Transform,
-    control_points as element_control_points,
+    control_points as element_control_points, move_control_points,
 )
 from model import Model
 from toolbar import Tool
@@ -280,6 +280,8 @@ def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:
 class CanvasWidget(QWidget):
     """The canvas view. Receives document updates from the Model."""
 
+    _HIT_RADIUS = 6.0  # pixels to detect a click on a control point
+
     def __init__(self, model: Model, controller: Controller,
                  bbox: BoundingBox = BoundingBox(0, 0, 800, 600)):
         super().__init__()
@@ -290,6 +292,8 @@ class CanvasWidget(QWidget):
         # Drag state for drawing tools
         self._drag_start: QPointF | None = None
         self._drag_end: QPointF | None = None
+        # Move-drag state
+        self._moving: bool = False
         self.setMinimumSize(320, 240)
         self.setMouseTracking(True)
         model.on_document_changed(self._on_document_changed)
@@ -307,10 +311,32 @@ class CanvasWidget(QWidget):
     def sizeHint(self):
         return QSize(int(self._bbox.width), int(self._bbox.height))
 
+    def _hit_test_selection(self, pos: QPointF) -> bool:
+        """Return True if pos is near any selected control point."""
+        doc = self._model.document
+        r = self._HIT_RADIUS
+        for es in doc.selection:
+            elem = doc.get_element(es.path)
+            cps = element_control_points(elem)
+            for i, (px, py) in enumerate(cps):
+                if i in es.control_points:
+                    if abs(pos.x() - px) <= r and abs(pos.y() - py) <= r:
+                        return True
+        return False
+
     def mousePressEvent(self, event: QMouseEvent):
         if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION, Tool.LINE, Tool.RECT) and event.button() == Qt.MouseButton.LeftButton:
-            self._drag_start = event.position()
-            self._drag_end = event.position()
+            pos = event.position()
+            # Check if clicking on a selected CP → move mode
+            if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION):
+                if self._hit_test_selection(pos):
+                    self._drag_start = pos
+                    self._drag_end = pos
+                    self._moving = True
+                    return
+            self._drag_start = pos
+            self._drag_end = pos
+            self._moving = False
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._drag_start is not None:
@@ -322,8 +348,18 @@ class CanvasWidget(QWidget):
             end = event.position()
             start = self._drag_start
             tool = self._current_tool
+            moving = self._moving
             self._drag_start = None
             self._drag_end = None
+            self._moving = False
+            # Move mode: apply delta
+            if moving:
+                dx = end.x() - start.x()
+                dy = end.y() - start.y()
+                if dx != 0 or dy != 0:
+                    self._controller.move_selection(dx, dy)
+                self.update()
+                return
             extend = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
             # Selection tool: marquee select
             if tool == Tool.SELECTION:
@@ -380,11 +416,23 @@ class CanvasWidget(QWidget):
         _draw_selection_overlays(painter, doc)
         # Draw drag preview
         if self._drag_start is not None and self._drag_end is not None:
-            pen = QPen(QColor(100, 100, 100), 1.0, Qt.PenStyle.DashLine)
-            painter.setPen(pen)
-            painter.setBrush(QBrush())
-            if self._current_tool == Tool.LINE:
-                painter.drawLine(self._drag_start, self._drag_end)
-            elif self._current_tool in (Tool.RECT, Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION):
-                painter.drawRect(QRectF(self._drag_start, self._drag_end).normalized())
+            if self._moving:
+                # Draw trace of elements being moved
+                dx = self._drag_end.x() - self._drag_start.x()
+                dy = self._drag_end.y() - self._drag_start.y()
+                for es in doc.selection:
+                    elem = doc.get_element(es.path)
+                    moved = move_control_points(elem, es.control_points, dx, dy)
+                    pen = QPen(_SELECTION_COLOR, 1.0, Qt.PenStyle.DashLine)
+                    painter.setPen(pen)
+                    painter.setBrush(QBrush())
+                    _draw_element_overlay(painter, moved, es.control_points)
+            else:
+                pen = QPen(QColor(100, 100, 100), 1.0, Qt.PenStyle.DashLine)
+                painter.setPen(pen)
+                painter.setBrush(QBrush())
+                if self._current_tool == Tool.LINE:
+                    painter.drawLine(self._drag_start, self._drag_end)
+                elif self._current_tool in (Tool.RECT, Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION):
+                    painter.drawRect(QRectF(self._drag_start, self._drag_end).normalized())
         painter.end()
