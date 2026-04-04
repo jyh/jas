@@ -76,6 +76,20 @@ public struct ToolbarView {
                     at: CGPoint(x: size.width / 2, y: size.height / 2)
                 )
 
+            case .textPath:
+                // "T" with a wavy path
+                context.draw(
+                    Text("T").font(.system(size: 14, weight: .bold))
+                        .foregroundColor(Color(nsColor: NSColor(white: 0.8, alpha: 1.0))),
+                    at: CGPoint(x: ox + 7, y: size.height / 2)
+                )
+                var wavePath = Path()
+                wavePath.move(to: CGPoint(x: ox + 12, y: oy + 20))
+                wavePath.addCurve(to: CGPoint(x: ox + 26, y: oy + 12),
+                                  control1: CGPoint(x: ox + 16, y: oy + 8),
+                                  control2: CGPoint(x: ox + 22, y: oy + 24))
+                context.stroke(wavePath, with: .color(color), lineWidth: 1.0)
+
             case .line:
                 var path = Path()
                 path.move(to: CGPoint(x: ox + 4, y: oy + 24))
@@ -190,6 +204,8 @@ private struct ArrowSlotButton: View {
         switch tool {
         case .directSelection: return "Direct Selection"
         case .groupSelection: return "Group Selection"
+        case .text: return "Text"
+        case .textPath: return "Text on Path"
         case .rect: return "Rectangle"
         case .polygon: return "Polygon"
         default: return tool.rawValue

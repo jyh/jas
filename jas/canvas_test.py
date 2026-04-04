@@ -7,7 +7,7 @@ from document import Document
 from element import (
     Circle, Color, CurveTo, ClosePath, Ellipse, Fill, Group, Layer, Line,
     LineTo, MoveTo, Path, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
-    SmoothQuadTo, Stroke, Text, Transform,
+    SmoothQuadTo, Stroke, Text, TextPath, Transform,
 )
 from model import Model
 from PySide6.QtCore import QPointF, Qt
@@ -19,7 +19,7 @@ class ToolbarTest(absltest.TestCase):
 
     def test_tool_enum_values(self):
         tools = list(Tool)
-        self.assertEqual(len(tools), 8)
+        self.assertEqual(len(tools), 9)
         self.assertIn(Tool.SELECTION, tools)
         self.assertIn(Tool.DIRECT_SELECTION, tools)
         self.assertIn(Tool.GROUP_SELECTION, tools)
@@ -42,10 +42,10 @@ class ToolbarTest(absltest.TestCase):
         self.assertEqual(Tool.TEXT.value, 5)
 
     def test_tool_line_value(self):
-        self.assertEqual(Tool.LINE.value, 6)
+        self.assertEqual(Tool.LINE.value, 7)
 
     def test_tool_rect_value(self):
-        self.assertEqual(Tool.RECT.value, 7)
+        self.assertEqual(Tool.RECT.value, 8)
 
 
 class BoundingBoxTest(absltest.TestCase):
