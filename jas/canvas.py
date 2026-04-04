@@ -198,6 +198,86 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
     painter.restore()
 
 
+_SELECTION_COLOR = QColor(0, 120, 255)
+_HANDLE_SIZE = 6.0
+
+
+def _control_points(elem: Element) -> list[tuple[float, float]]:
+    """Return the control-point positions for selection handles."""
+    match elem:
+        case Line(x1=x1, y1=y1, x2=x2, y2=y2):
+            return [(x1, y1), (x2, y2)]
+        case Rect(x=x, y=y, width=w, height=h):
+            return [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
+        case Circle(cx=cx, cy=cy, r=r):
+            return [(cx, cy - r), (cx + r, cy), (cx, cy + r), (cx - r, cy)]
+        case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry):
+            return [(cx, cy - ry), (cx + rx, cy), (cx, cy + ry), (cx - rx, cy)]
+        case _:
+            bx, by, bw, bh = elem.bounds()
+            return [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)]
+
+
+def _draw_element_overlay(painter: QPainter, elem: Element) -> None:
+    """Draw the selection overlay (blue outline + handles) for one element."""
+    pen = QPen(_SELECTION_COLOR, 1.0)
+    painter.setPen(pen)
+    painter.setBrush(QBrush())
+
+    match elem:
+        case Line(x1=x1, y1=y1, x2=x2, y2=y2):
+            painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+        case Rect(x=x, y=y, width=w, height=h, rx=rx, ry=ry):
+            if rx > 0 or ry > 0:
+                painter.drawRoundedRect(QRectF(x, y, w, h), rx, ry)
+            else:
+                painter.drawRect(QRectF(x, y, w, h))
+        case Circle(cx=cx, cy=cy, r=r):
+            painter.drawEllipse(QPointF(cx, cy), r, r)
+        case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry):
+            painter.drawEllipse(QPointF(cx, cy), rx, ry)
+        case Polygon(points=points):
+            if points:
+                painter.drawPolygon([QPointF(x, y) for x, y in points])
+        case Polyline(points=points):
+            if points:
+                painter.drawPolyline([QPointF(x, y) for x, y in points])
+        case Path(d=d):
+            painter.drawPath(_build_path(d))
+        case _:
+            bx, by, bw, bh = elem.bounds()
+            painter.drawRect(QRectF(bx, by, bw, bh))
+
+    # Draw handles
+    half = _HANDLE_SIZE / 2
+    painter.setPen(QPen(_SELECTION_COLOR, 1.0))
+    painter.setBrush(QBrush(QColor("white")))
+    for px, py in _control_points(elem):
+        painter.drawRect(QRectF(px - half, py - half, _HANDLE_SIZE, _HANDLE_SIZE))
+
+
+def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:
+    """Draw selection overlays for all selected elements."""
+    for path in doc.selection:
+        if not path:
+            continue
+        painter.save()
+        # Walk the path, applying transforms from each ancestor
+        node: Element = doc.layers[path[0]]
+        if len(path) > 1:
+            _apply_transform(painter, getattr(node, 'transform', None))
+            for idx in path[1:-1]:
+                assert isinstance(node, Group)
+                node = node.children[idx]
+                _apply_transform(painter, getattr(node, 'transform', None))
+            assert isinstance(node, Group)
+            node = node.children[path[-1]]
+        # Apply the selected element's own transform
+        _apply_transform(painter, getattr(node, 'transform', None))
+        _draw_element_overlay(painter, node)
+        painter.restore()
+
+
 class CanvasWidget(QWidget):
     """The canvas view. Receives document updates from the Model."""
 
@@ -229,7 +309,7 @@ class CanvasWidget(QWidget):
         return QSize(int(self._bbox.width), int(self._bbox.height))
 
     def mousePressEvent(self, event: QMouseEvent):
-        if self._current_tool in (Tool.LINE, Tool.RECT) and event.button() == Qt.MouseButton.LeftButton:
+        if self._current_tool in (Tool.SELECTION, Tool.LINE, Tool.RECT) and event.button() == Qt.MouseButton.LeftButton:
             self._drag_start = event.position()
             self._drag_end = event.position()
 
@@ -245,6 +325,14 @@ class CanvasWidget(QWidget):
             tool = self._current_tool
             self._drag_start = None
             self._drag_end = None
+            # Selection tool: marquee select
+            if tool == Tool.SELECTION:
+                x = min(start.x(), end.x())
+                y = min(start.y(), end.y())
+                w = abs(end.x() - start.x())
+                h = abs(end.y() - start.y())
+                self._controller.select_rect(x, y, w, h)
+                return
             # Create the element based on current tool
             if tool == Tool.LINE:
                 elem = Line(
@@ -272,6 +360,8 @@ class CanvasWidget(QWidget):
         doc = self._model.document
         for layer in doc.layers:
             _draw_element(painter, layer)
+        # Draw selection overlays
+        _draw_selection_overlays(painter, doc)
         # Draw drag preview
         if self._drag_start is not None and self._drag_end is not None:
             pen = QPen(QColor(100, 100, 100), 1.0, Qt.PenStyle.DashLine)
@@ -279,6 +369,6 @@ class CanvasWidget(QWidget):
             painter.setBrush(QBrush())
             if self._current_tool == Tool.LINE:
                 painter.drawLine(self._drag_start, self._drag_end)
-            elif self._current_tool == Tool.RECT:
+            elif self._current_tool in (Tool.RECT, Tool.SELECTION):
                 painter.drawRect(QRectF(self._drag_start, self._drag_end).normalized())
         painter.end()

@@ -6,7 +6,11 @@
       "Bash(git push:*)",
       "Bash(git add:*)",
       "Bash(python canvas_test.py)",
-      "Bash(python jas_app.py)"
+      "Bash(python jas_app.py)",
+      "Bash(python3 -m pytest document_test.py -v)",
+      "Bash(opam exec:*)",
+      "Bash(python3 -m pytest controller_test.py -v)",
+      "Bash(python3 -m pytest *_test.py -q)"
     ]
   }
 }

@@ -1,20 +1,39 @@
 """Immutable document model.
 
 A Document is an ordered list of Layers.
+
+Elements within the document are identified by their path: a tuple of integer
+indices tracing the route from the document's layer list to the element.
+For example, path (0, 2) means layer 0, child 2.  Path (1,) means layer 1
+itself.  This allows selections and updates without requiring element identity.
 """
 
+import dataclasses
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, TypeVar
 
-from element import Layer
+from element import Element, Group, Layer
+
+_G = TypeVar("_G", bound=Group)
+
+# A path identifies an element by its position in the document tree.
+# Each integer is a child index at that level of the tree.
+# (0,) -> layers[0]  (a Layer)
+# (0, 2) -> layers[0].children[2]
+# (0, 2, 1) -> layers[0].children[2].children[1]  (inside a group)
+ElementPath = tuple[int, ...]
+
+# A selection is an immutable set of element paths.
+Selection = frozenset[ElementPath]
 
 
 @dataclass(frozen=True)
 class Document:
-    """A document consisting of a title and an ordered list of layers."""
+    """A document consisting of a title, an ordered list of layers, and a selection."""
     title: str = "Untitled"
     layers: tuple[Layer, ...] = (Layer(),)
     selected_layer: int = 0
+    selection: Selection = frozenset()
 
     def bounds(self) -> Tuple[float, float, float, float]:
         """Return the bounding box of all layers combined."""
@@ -26,3 +45,37 @@ class Document:
         max_x = max(b[0] + b[2] for b in all_bounds)
         max_y = max(b[1] + b[3] for b in all_bounds)
         return (min_x, min_y, max_x - min_x, max_y - min_y)
+
+    def get_element(self, path: ElementPath) -> Element:
+        """Return the element at the given path."""
+        if not path:
+            raise ValueError("Path must be non-empty")
+        node: Element = self.layers[path[0]]
+        for idx in path[1:]:
+            assert isinstance(node, Group)
+            node = node.children[idx]
+        return node
+
+    def replace_element(self, path: ElementPath, new_elem: Element) -> "Document":
+        """Return a new Document with the element at path replaced by new_elem."""
+        if not path:
+            raise ValueError("Path must be non-empty")
+        new_layers = list(self.layers)
+        if len(path) == 1:
+            assert isinstance(new_elem, Layer)
+            new_layers[path[0]] = new_elem
+        else:
+            new_layers[path[0]] = _replace_in_group(self.layers[path[0]], path[1:], new_elem)
+        return dataclasses.replace(self, layers=tuple(new_layers))
+
+
+def _replace_in_group(node: _G, rest: ElementPath, new_elem: Element) -> _G:
+    """Recursively replace the element at rest within a group, returning the same Group subtype."""
+    new_children = list(node.children)
+    if len(rest) == 1:
+        new_children[rest[0]] = new_elem
+    else:
+        child = node.children[rest[0]]
+        assert isinstance(child, Group)
+        new_children[rest[0]] = _replace_in_group(child, rest[1:], new_elem)
+    return dataclasses.replace(node, children=tuple(new_children))

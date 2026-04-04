@@ -218,6 +218,131 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
     ctx.restoreGState()
 }
 
+// MARK: - Selection overlay drawing
+
+private let selectionColor = CGColor(red: 0, green: 0.47, blue: 1.0, alpha: 1.0)
+private let handleSize: CGFloat = 6.0
+
+private func controlPoints(_ elem: Element) -> [(CGFloat, CGFloat)] {
+    switch elem {
+    case .line(let v):
+        return [(v.x1, v.y1), (v.x2, v.y2)]
+    case .rect(let v):
+        return [(v.x, v.y), (v.x + v.width, v.y),
+                (v.x + v.width, v.y + v.height), (v.x, v.y + v.height)]
+    case .circle(let v):
+        return [(v.cx, v.cy - v.r), (v.cx + v.r, v.cy),
+                (v.cx, v.cy + v.r), (v.cx - v.r, v.cy)]
+    case .ellipse(let v):
+        return [(v.cx, v.cy - v.ry), (v.cx + v.rx, v.cy),
+                (v.cx, v.cy + v.ry), (v.cx - v.rx, v.cy)]
+    default:
+        let b = elem.bounds
+        return [(b.x, b.y), (b.x + b.width, b.y),
+                (b.x + b.width, b.y + b.height), (b.x, b.y + b.height)]
+    }
+}
+
+private func drawElementOverlay(_ ctx: CGContext, _ elem: Element) {
+    ctx.setStrokeColor(selectionColor)
+    ctx.setLineWidth(1.0)
+    ctx.setLineDash(phase: 0, lengths: [])
+
+    switch elem {
+    case .line(let v):
+        ctx.move(to: CGPoint(x: v.x1, y: v.y1))
+        ctx.addLine(to: CGPoint(x: v.x2, y: v.y2))
+        ctx.strokePath()
+    case .rect(let v):
+        if v.rx > 0 || v.ry > 0 {
+            let path = CGPath(roundedRect: CGRect(x: v.x, y: v.y, width: v.width, height: v.height),
+                              cornerWidth: v.rx, cornerHeight: v.ry, transform: nil)
+            ctx.addPath(path)
+        } else {
+            ctx.addRect(CGRect(x: v.x, y: v.y, width: v.width, height: v.height))
+        }
+        ctx.strokePath()
+    case .circle(let v):
+        ctx.addEllipse(in: CGRect(x: v.cx - v.r, y: v.cy - v.r, width: v.r * 2, height: v.r * 2))
+        ctx.strokePath()
+    case .ellipse(let v):
+        ctx.addEllipse(in: CGRect(x: v.cx - v.rx, y: v.cy - v.ry, width: v.rx * 2, height: v.ry * 2))
+        ctx.strokePath()
+    case .polyline(let v):
+        guard !v.points.isEmpty else { break }
+        ctx.move(to: CGPoint(x: v.points[0].0, y: v.points[0].1))
+        for i in 1..<v.points.count { ctx.addLine(to: CGPoint(x: v.points[i].0, y: v.points[i].1)) }
+        ctx.strokePath()
+    case .polygon(let v):
+        guard !v.points.isEmpty else { break }
+        ctx.move(to: CGPoint(x: v.points[0].0, y: v.points[0].1))
+        for i in 1..<v.points.count { ctx.addLine(to: CGPoint(x: v.points[i].0, y: v.points[i].1)) }
+        ctx.closePath()
+        ctx.strokePath()
+    case .path(let v):
+        buildPath(ctx, v.d)
+        ctx.strokePath()
+    default:
+        let b = elem.bounds
+        ctx.addRect(CGRect(x: b.x, y: b.y, width: b.width, height: b.height))
+        ctx.strokePath()
+    }
+
+    // Draw handles
+    let half = handleSize / 2
+    for (px, py) in controlPoints(elem) {
+        let r = CGRect(x: px - half, y: py - half, width: handleSize, height: handleSize)
+        ctx.setFillColor(.white)
+        ctx.fill(r)
+        ctx.setStrokeColor(selectionColor)
+        ctx.stroke(r)
+    }
+}
+
+private func elemChildren(_ e: Element) -> [Element] {
+    switch e {
+    case .group(let g): return g.children
+    case .layer(let l): return l.children
+    default: return []
+    }
+}
+
+private func drawSelectionOverlays(_ ctx: CGContext, _ doc: JasDocument) {
+    for path in doc.selection {
+        guard !path.isEmpty else { continue }
+        ctx.saveGState()
+        var node: Element = .layer(doc.layers[path[0]])
+        if path.count > 1 {
+            applyTransform(ctx, doc.layers[path[0]].transform)
+            for idx in path[1..<path.count - 1] {
+                let children = elemChildren(node)
+                node = children[idx]
+                switch node {
+                case .group(let g): applyTransform(ctx, g.transform)
+                case .layer(let l): applyTransform(ctx, l.transform)
+                default: break
+                }
+            }
+            node = elemChildren(node)[path.last!]
+        }
+        // Apply the selected element's own transform
+        switch node {
+        case .line(let v): applyTransform(ctx, v.transform)
+        case .rect(let v): applyTransform(ctx, v.transform)
+        case .circle(let v): applyTransform(ctx, v.transform)
+        case .ellipse(let v): applyTransform(ctx, v.transform)
+        case .polyline(let v): applyTransform(ctx, v.transform)
+        case .polygon(let v): applyTransform(ctx, v.transform)
+        case .path(let v): applyTransform(ctx, v.transform)
+        case .text(let v): applyTransform(ctx, v.transform)
+        case .group(let v): applyTransform(ctx, v.transform)
+        case .layer(let v): applyTransform(ctx, v.transform)
+        }
+        drawElementOverlay(ctx, node)
+        ctx.restoreGState()
+    }
+}
+
 // MARK: - Canvas NSView for CoreGraphics drawing
 
 /// An NSView that draws the document's elements using CoreGraphics.
@@ -243,6 +368,8 @@ class CanvasNSView: NSView {
         for layer in document.layers {
             drawElement(ctx, .layer(layer))
         }
+        // Draw selection overlays
+        drawSelectionOverlays(ctx, document)
         // Draw drag preview
         if let start = dragStart, let end = dragEnd {
             let tool = onToolRead?() ?? currentTool
@@ -252,7 +379,7 @@ class CanvasNSView: NSView {
             if tool == .line {
                 ctx.move(to: start)
                 ctx.addLine(to: end)
-            } else if tool == .rect {
+            } else if tool == .rect || tool == .selection {
                 let r = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
                                width: abs(end.x - start.x), height: abs(end.y - start.y))
                 ctx.addRect(r)
@@ -263,7 +390,7 @@ class CanvasNSView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let tool = onToolRead?() ?? currentTool
-        if tool == .line || tool == .rect {
+        if tool == .selection || tool == .line || tool == .rect {
             let pt = convert(event.locationInWindow, from: nil)
             dragStart = pt
             dragEnd = pt
@@ -286,7 +413,7 @@ class CanvasNSView: NSView {
     /// Test helper: simulate a complete drag from start to end point.
     func simulateDrag(from start: NSPoint, to end: NSPoint) {
         let tool = onToolRead?() ?? currentTool
-        guard tool == .line || tool == .rect else { return }
+        guard tool == .selection || tool == .line || tool == .rect else { return }
         dragStart = start
         dragEnd = end
         commitDrag(to: end)
@@ -301,6 +428,15 @@ class CanvasNSView: NSView {
         let tool = onToolRead?() ?? currentTool
         dragStart = nil
         dragEnd = nil
+
+        if tool == .selection {
+            let x = min(start.x, end.x)
+            let y = min(start.y, end.y)
+            let w = abs(end.x - start.x)
+            let h = abs(end.y - start.y)
+            controller.selectRect(x: x, y: y, width: w, height: h)
+            return
+        }
 
         let elem: Element
         if tool == .line {

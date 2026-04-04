@@ -180,19 +180,22 @@ class CanvasWidgetTest(absltest.TestCase):
         self.assertEqual(len(doc.layers), 1)
         self.assertEqual(len(doc.layers[0].children), 2)
 
-    def test_selection_tool_ignores_mouse(self):
-        """Selection tool should not create elements on click-drag."""
+    def test_selection_tool_does_not_create_elements(self):
+        """Selection tool drag should not create elements, only select."""
         model = Model()
         ctrl = Controller(model=model)
         canvas = CanvasWidget(model=model, controller=ctrl)
         canvas.set_tool(Tool.SELECTION)
         from unittest.mock import MagicMock
         press_event = MagicMock()
-        press_event.button.return_value = Qt.LeftButton
+        press_event.button.return_value = Qt.MouseButton.LeftButton
         press_event.position.return_value = QPointF(10, 10)
         canvas.mousePressEvent(press_event)
-        self.assertIsNone(canvas._drag_start)
-        # Default layer should still have no children
+        release_event = MagicMock()
+        release_event.button.return_value = Qt.MouseButton.LeftButton
+        release_event.position.return_value = QPointF(50, 50)
+        canvas.mouseReleaseEvent(release_event)
+        # No elements should be created
         self.assertEqual(len(model.document.layers[0].children), 0)
 
 
