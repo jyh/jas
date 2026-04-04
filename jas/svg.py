@@ -1,9 +1,11 @@
-"""Convert a Document to SVG format.
+"""Convert between Document and SVG format.
 
 Internal coordinates are in points (pt). SVG coordinates are in pixels (px).
 The conversion factor is 96/72 (CSS px per pt at 96 DPI).
 """
 
+import re
+import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
 from document import Document
@@ -192,6 +194,7 @@ def document_to_svg(doc: Document) -> str:
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         f'<svg xmlns="http://www.w3.org/2000/svg"'
+        f' xmlns:inkscape="{_INKSCAPE_NS}"'
         f' viewBox="{vb}"'
         f' width="{_fmt(_px(bw))}" height="{_fmt(_px(bh))}">',
     ]
@@ -199,3 +202,279 @@ def document_to_svg(doc: Document) -> str:
         lines.append(_element_svg(layer, "  "))
     lines.append("</svg>")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# SVG Import: parse SVG XML string back to a Document
+# ---------------------------------------------------------------------------
+
+_PX_TO_PT = 72.0 / 96.0
+
+
+def _pt(v: float) -> float:
+    """Convert a px value to pt."""
+    return v * _PX_TO_PT
+
+
+def _parse_color(s: str) -> Color | None:
+    """Parse rgb(r,g,b) or rgba(r,g,b,a) or 'none'."""
+    s = s.strip()
+    if s == "none":
+        return None
+    m = re.match(r"rgba?\(([^)]+)\)", s)
+    if m:
+        parts = m.group(1).split(",")
+        r = int(parts[0].strip()) / 255.0
+        g = int(parts[1].strip()) / 255.0
+        b = int(parts[2].strip()) / 255.0
+        a = float(parts[3].strip()) if len(parts) > 3 else 1.0
+        return Color(r, g, b, a)
+    return None
+
+
+def _parse_fill(node: ET.Element) -> Fill | None:
+    val = node.get("fill")
+    if val is None or val == "none":
+        return None
+    c = _parse_color(val)
+    return Fill(c) if c else None
+
+
+def _parse_stroke(node: ET.Element) -> Stroke | None:
+    val = node.get("stroke")
+    if val is None or val == "none":
+        return None
+    c = _parse_color(val)
+    if c is None:
+        return None
+    width = float(node.get("stroke-width", "1")) * _PX_TO_PT
+    lc_str = node.get("stroke-linecap", "butt")
+    lj_str = node.get("stroke-linejoin", "miter")
+    lc = {"butt": LineCap.BUTT, "round": LineCap.ROUND, "square": LineCap.SQUARE}.get(lc_str, LineCap.BUTT)
+    lj = {"miter": LineJoin.MITER, "round": LineJoin.ROUND, "bevel": LineJoin.BEVEL}.get(lj_str, LineJoin.MITER)
+    return Stroke(c, width, lc, lj)
+
+
+def _parse_transform(node: ET.Element) -> Transform | None:
+    val = node.get("transform")
+    if val is None:
+        return None
+    m = re.match(r"matrix\(([^)]+)\)", val)
+    if m:
+        parts = [float(x) for x in m.group(1).split(",")]
+        return Transform(a=parts[0], b=parts[1], c=parts[2],
+                         d=parts[3], e=_pt(parts[4]), f=_pt(parts[5]))
+    m = re.match(r"translate\(([^)]+)\)", val)
+    if m:
+        parts = [float(x) for x in m.group(1).split(",")]
+        ty = parts[1] if len(parts) > 1 else 0.0
+        return Transform.translate(_pt(parts[0]), _pt(ty))
+    m = re.match(r"rotate\(([^)]+)\)", val)
+    if m:
+        return Transform.rotate(float(m.group(1)))
+    m = re.match(r"scale\(([^)]+)\)", val)
+    if m:
+        parts = [float(x) for x in m.group(1).split(",")]
+        sy = parts[1] if len(parts) > 1 else parts[0]
+        return Transform.scale(parts[0], sy)
+    return None
+
+
+def _parse_opacity(node: ET.Element) -> float:
+    return float(node.get("opacity", "1"))
+
+
+def _parse_points(s: str) -> tuple[tuple[float, float], ...]:
+    """Parse a points attribute like '0,0 96,0 48,96'."""
+    result = []
+    for pair in s.strip().split():
+        parts = pair.split(",")
+        result.append((_pt(float(parts[0])), _pt(float(parts[1]))))
+    return tuple(result)
+
+
+# Path d-attribute tokenizer
+_PATH_CMD_RE = re.compile(r"([MmLlHhVvCcSsQqTtAaZz])|([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)")
+
+
+def _parse_path_d(d: str) -> tuple[PathCommand, ...]:
+    """Parse an SVG path d attribute into PathCommands (absolute only)."""
+    tokens = _PATH_CMD_RE.findall(d)
+    commands: list[PathCommand] = []
+    i = 0
+
+    def _next_num() -> float:
+        nonlocal i
+        while i < len(tokens) and tokens[i][0]:
+            i += 1
+        if i >= len(tokens):
+            raise ValueError("unexpected end of path data")
+        v = float(tokens[i][1])
+        i += 1
+        return v
+
+    while i < len(tokens):
+        cmd_str, num_str = tokens[i]
+        if cmd_str:
+            cmd = cmd_str
+            i += 1
+        elif num_str:
+            pass  # implicit repeat of previous command
+        else:
+            i += 1
+            continue
+
+        if cmd in ("Z", "z"):
+            commands.append(ClosePath())
+        elif cmd == "M":
+            commands.append(MoveTo(_pt(_next_num()), _pt(_next_num())))
+        elif cmd == "L":
+            commands.append(LineTo(_pt(_next_num()), _pt(_next_num())))
+        elif cmd == "C":
+            x1, y1 = _pt(_next_num()), _pt(_next_num())
+            x2, y2 = _pt(_next_num()), _pt(_next_num())
+            x, y = _pt(_next_num()), _pt(_next_num())
+            commands.append(CurveTo(x1, y1, x2, y2, x, y))
+        elif cmd == "S":
+            x2, y2 = _pt(_next_num()), _pt(_next_num())
+            x, y = _pt(_next_num()), _pt(_next_num())
+            commands.append(SmoothCurveTo(x2, y2, x, y))
+        elif cmd == "Q":
+            x1, y1 = _pt(_next_num()), _pt(_next_num())
+            x, y = _pt(_next_num()), _pt(_next_num())
+            commands.append(QuadTo(x1, y1, x, y))
+        elif cmd == "T":
+            commands.append(SmoothQuadTo(_pt(_next_num()), _pt(_next_num())))
+        elif cmd == "A":
+            rx, ry = _pt(_next_num()), _pt(_next_num())
+            rotation = _next_num()
+            large_arc = _next_num() != 0
+            sweep = _next_num() != 0
+            x, y = _pt(_next_num()), _pt(_next_num())
+            commands.append(ArcTo(rx, ry, rotation, large_arc, sweep, x, y))
+        else:
+            i += 1  # skip unsupported commands
+
+    return tuple(commands)
+
+
+_SVG_NS = "http://www.w3.org/2000/svg"
+_INKSCAPE_NS = "http://www.inkscape.org/namespaces/inkscape"
+
+
+def _strip_ns(tag: str) -> str:
+    """Strip namespace from an XML tag."""
+    if tag.startswith("{"):
+        return tag.split("}", 1)[1]
+    return tag
+
+
+def _parse_element(node: ET.Element) -> Element | None:
+    """Parse an SVG XML element into a document Element."""
+    tag = _strip_ns(node.tag)
+    fill = _parse_fill(node)
+    stroke = _parse_stroke(node)
+    opacity = _parse_opacity(node)
+    transform = _parse_transform(node)
+
+    if tag == "line":
+        return Line(
+            x1=_pt(float(node.get("x1", "0"))),
+            y1=_pt(float(node.get("y1", "0"))),
+            x2=_pt(float(node.get("x2", "0"))),
+            y2=_pt(float(node.get("y2", "0"))),
+            stroke=stroke, opacity=opacity, transform=transform)
+
+    if tag == "rect":
+        return Rect(
+            x=_pt(float(node.get("x", "0"))),
+            y=_pt(float(node.get("y", "0"))),
+            width=_pt(float(node.get("width", "0"))),
+            height=_pt(float(node.get("height", "0"))),
+            rx=_pt(float(node.get("rx", "0"))),
+            ry=_pt(float(node.get("ry", "0"))),
+            fill=fill, stroke=stroke, opacity=opacity, transform=transform)
+
+    if tag == "circle":
+        return Circle(
+            cx=_pt(float(node.get("cx", "0"))),
+            cy=_pt(float(node.get("cy", "0"))),
+            r=_pt(float(node.get("r", "0"))),
+            fill=fill, stroke=stroke, opacity=opacity, transform=transform)
+
+    if tag == "ellipse":
+        return Ellipse(
+            cx=_pt(float(node.get("cx", "0"))),
+            cy=_pt(float(node.get("cy", "0"))),
+            rx=_pt(float(node.get("rx", "0"))),
+            ry=_pt(float(node.get("ry", "0"))),
+            fill=fill, stroke=stroke, opacity=opacity, transform=transform)
+
+    if tag == "polyline":
+        pts = _parse_points(node.get("points", ""))
+        return Polyline(points=pts, fill=fill, stroke=stroke,
+                        opacity=opacity, transform=transform)
+
+    if tag == "polygon":
+        pts = _parse_points(node.get("points", ""))
+        return Polygon(points=pts, fill=fill, stroke=stroke,
+                       opacity=opacity, transform=transform)
+
+    if tag == "path":
+        d = _parse_path_d(node.get("d", ""))
+        return Path(d=d, fill=fill, stroke=stroke,
+                    opacity=opacity, transform=transform)
+
+    if tag == "text":
+        content = node.text or ""
+        ff = node.get("font-family", "sans-serif")
+        fs = _pt(float(node.get("font-size", "16")))
+        return Text(
+            x=_pt(float(node.get("x", "0"))),
+            y=_pt(float(node.get("y", "0"))),
+            content=content, font_family=ff, font_size=fs,
+            fill=fill, stroke=stroke, opacity=opacity, transform=transform)
+
+    if tag == "g":
+        children = []
+        for child in node:
+            elem = _parse_element(child)
+            if elem is not None:
+                children.append(elem)
+        # Check for inkscape:label to determine Layer vs Group
+        label = node.get(f"{{{_INKSCAPE_NS}}}label") or node.get("inkscape:label")
+        if label:
+            return Layer(children=tuple(children), name=label,
+                         opacity=opacity, transform=transform)
+        return Group(children=tuple(children),
+                     opacity=opacity, transform=transform)
+
+    return None
+
+
+def svg_to_document(svg: str) -> Document:
+    """Parse an SVG string and return a Document."""
+    root = ET.fromstring(svg)
+    layers: list[Layer] = []
+    for child in root:
+        elem = _parse_element(child)
+        if elem is None:
+            continue
+        if isinstance(elem, Layer):
+            layers.append(elem)
+        elif isinstance(elem, Group):
+            # Promote top-level groups to layers
+            layers.append(Layer(children=elem.children, name="",
+                                opacity=elem.opacity, transform=elem.transform))
+        else:
+            # Wrap standalone elements in a default layer
+            if not layers or layers[-1].name:
+                layers.append(Layer(children=(elem,), name=""))
+            else:
+                layers[-1] = Layer(
+                    children=layers[-1].children + (elem,),
+                    name="", opacity=layers[-1].opacity,
+                    transform=layers[-1].transform)
+    if not layers:
+        layers = [Layer(children=())]
+    return Document(layers=tuple(layers))
