@@ -324,6 +324,42 @@ let draw_element_overlay cr (elem : Element.element) (selected_cps : int list) =
     Cairo.rectangle cr bx by ~w:bw ~h:bh;
     Cairo.stroke cr
   end;
+  (* Draw Bezier handles for selected path control points *)
+  let handle_circle_radius = 3.0 in
+  (match elem with
+   | Path { d; _ } when selected_cps <> [] ->
+     let anchors = control_points elem in
+     List.iter (fun cp_idx ->
+       let ax, ay = try List.nth anchors cp_idx with _ -> (0.0, 0.0) in
+       if cp_idx < List.length anchors then begin
+         let (h_in, h_out) = Element.path_handle_positions d cp_idx in
+         Cairo.set_source_rgb cr 0.0 0.47 1.0;
+         Cairo.set_line_width cr 1.0;
+         (match h_in with
+          | Some (hx, hy) ->
+            Cairo.move_to cr ax ay;
+            Cairo.line_to cr hx hy;
+            Cairo.stroke cr;
+            Cairo.arc cr hx hy ~r:handle_circle_radius ~a1:0.0 ~a2:(2.0 *. Float.pi);
+            Cairo.set_source_rgb cr 1.0 1.0 1.0;
+            Cairo.fill_preserve cr;
+            Cairo.set_source_rgb cr 0.0 0.47 1.0;
+            Cairo.stroke cr
+          | None -> ());
+         (match h_out with
+          | Some (hx, hy) ->
+            Cairo.move_to cr ax ay;
+            Cairo.line_to cr hx hy;
+            Cairo.stroke cr;
+            Cairo.arc cr hx hy ~r:handle_circle_radius ~a1:0.0 ~a2:(2.0 *. Float.pi);
+            Cairo.set_source_rgb cr 1.0 1.0 1.0;
+            Cairo.fill_preserve cr;
+            Cairo.set_source_rgb cr 0.0 0.47 1.0;
+            Cairo.stroke cr
+          | None -> ())
+       end
+     ) selected_cps
+   | _ -> ());
   (* Draw handles *)
   let half = handle_size /. 2.0 in
   List.iteri (fun i (px, py) ->
@@ -411,6 +447,10 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
     (* Inline text editing state *)
     val mutable text_editor : GEdit.entry option = None
     val mutable editing_path : int list option = None
+    (* Handle drag state (for Bezier control handles) *)
+    val mutable handle_drag : (int list * int * string) option = None  (* path, anchor_idx, "in"|"out" *)
+    val mutable handle_drag_start : (float * float) option = None
+    val mutable handle_drag_end : (float * float) option = None
     (* Pen tool state *)
     val mutable pen_points : pen_point list = []
     val mutable pen_dragging = false
@@ -642,6 +682,27 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         List.iter (draw_element cr) current_doc.Document.layers;
         (* Draw selection overlays *)
         draw_selection_overlays cr current_doc;
+        (* Draw handle drag preview *)
+        (match handle_drag, handle_drag_start, handle_drag_end with
+         | Some (path, anchor_idx, ht), Some (sx, sy), Some (ex, ey) ->
+           let dx = ex -. sx in
+           let dy = ey -. sy in
+           let elem = Document.get_element current_doc path in
+           (match elem with
+            | Element.Path ({ d; _ } as r) ->
+              let new_d = Element.move_path_handle d anchor_idx ht dx dy in
+              let moved = Element.Path { r with d = new_d } in
+              let es_opt = Document.PathMap.find_opt path current_doc.Document.selection in
+              (match es_opt with
+               | Some es ->
+                 Cairo.set_source_rgb cr 0.0 0.47 1.0;
+                 Cairo.set_line_width cr 1.0;
+                 Cairo.set_dash cr [| 4.0; 4.0 |];
+                 draw_element_overlay cr moved es.es_control_points;
+                 Cairo.set_dash cr [||]
+               | None -> ())
+            | _ -> ())
+         | _ -> ());
         (* Draw drag preview *)
         begin match line_drag_start, line_drag_end with
         | Some (sx, sy), Some (ex, ey) ->
@@ -736,6 +797,40 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
            && GdkEvent.Button.button ev = 1 then begin
           let x = GdkEvent.Button.x ev in
           let y = GdkEvent.Button.y ev in
+          (* Check if clicking on a Bezier handle → handle drag mode *)
+          let handle_hit = if toolbar#current_tool = Toolbar.Direct_selection then
+            Document.PathMap.fold (fun _path (es : Document.element_selection) acc ->
+              match acc with
+              | Some _ -> acc
+              | None ->
+                let elem = Document.get_element current_doc es.es_path in
+                (match elem with
+                 | Element.Path { d; _ } ->
+                   List.fold_left (fun acc2 cp_idx ->
+                     match acc2 with
+                     | Some _ -> acc2
+                     | None ->
+                       let (h_in, h_out) = Element.path_handle_positions d cp_idx in
+                       (match h_in with
+                        | Some (hx, hy) when abs_float (x -. hx) <= hit_radius
+                          && abs_float (y -. hy) <= hit_radius ->
+                          Some (es.es_path, cp_idx, "in")
+                        | _ ->
+                          match h_out with
+                          | Some (hx, hy) when abs_float (x -. hx) <= hit_radius
+                            && abs_float (y -. hy) <= hit_radius ->
+                            Some (es.es_path, cp_idx, "out")
+                          | _ -> None)
+                   ) None es.es_control_points
+                 | _ -> None)
+            ) current_doc.Document.selection None
+          else None in
+          (match handle_hit with
+           | Some (path, anchor_idx, ht) ->
+             handle_drag <- Some (path, anchor_idx, ht);
+             handle_drag_start <- Some (x, y);
+             handle_drag_end <- Some (x, y)
+           | None ->
           (* Check if clicking on a selected CP → move mode *)
           let is_sel_tool = toolbar#current_tool = Toolbar.Selection
             || toolbar#current_tool = Toolbar.Direct_selection
@@ -750,11 +845,18 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
           ) current_doc.Document.selection in
           line_drag_start <- Some (x, y);
           line_drag_end <- Some (x, y);
-          moving <- hit;
+          moving <- hit);
           true
         end else false
       ) |> ignore;
       canvas_area#event#connect#motion_notify ~callback:(fun ev ->
+        if handle_drag <> None then begin
+          let x = GdkEvent.Motion.x ev in
+          let y = GdkEvent.Motion.y ev in
+          handle_drag_end <- Some (x, y);
+          canvas_area#misc#queue_draw ();
+          true
+        end else
         if toolbar#current_tool = Toolbar.Pen then begin
           let x = GdkEvent.Motion.x ev in
           let y = GdkEvent.Motion.y ev in
@@ -786,6 +888,22 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         end
       ) |> ignore;
       canvas_area#event#connect#button_release ~callback:(fun ev ->
+        if handle_drag <> None && GdkEvent.Button.button ev = 1 then begin
+          let ex = GdkEvent.Button.x ev in
+          let ey = GdkEvent.Button.y ev in
+          (match handle_drag, handle_drag_start with
+           | Some (path, anchor_idx, ht), Some (sx, sy) ->
+             let dx = ex -. sx in
+             let dy = ey -. sy in
+             if dx <> 0.0 || dy <> 0.0 then
+               controller#move_path_handle path anchor_idx ht dx dy
+           | _ -> ());
+          handle_drag <- None;
+          handle_drag_start <- None;
+          handle_drag_end <- None;
+          canvas_area#misc#queue_draw ();
+          true
+        end else
         if toolbar#current_tool = Toolbar.Pen && GdkEvent.Button.button ev = 1 then begin
           pen_dragging <- false;
           canvas_area#misc#queue_draw ();

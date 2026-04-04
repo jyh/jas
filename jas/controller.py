@@ -14,6 +14,7 @@ from element import (
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo,
     ClosePath,
     control_point_count, control_points, move_control_points,
+    move_path_handle as _move_path_handle,
 )
 from model import Model
 
@@ -440,3 +441,12 @@ class Controller:
                                                control_points=all_cps))
         self._model.document = replace(
             new_doc, selection=frozenset(new_selection))
+
+    def move_path_handle(self, path: ElementPath, anchor_idx: int,
+                         handle_type: str, dx: float, dy: float) -> None:
+        """Move a Bezier handle of a path element."""
+        doc = self._model.document
+        elem = doc.get_element(path)
+        if isinstance(elem, Path):
+            new_elem = _move_path_handle(elem, anchor_idx, handle_type, dx, dy)
+            self._model.document = doc.replace_element(path, new_elem)

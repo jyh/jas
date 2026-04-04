@@ -473,6 +473,108 @@ def _path_anchor_points(d: tuple[PathCommand, ...]) -> list[tuple[float, float]]
     return pts
 
 
+def path_handle_positions(d: tuple[PathCommand, ...],
+                          anchor_idx: int
+                          ) -> tuple[tuple[float, float] | None,
+                                     tuple[float, float] | None]:
+    """Return (incoming_handle, outgoing_handle) for a path anchor.
+
+    Returns None for a handle that doesn't exist or coincides with its anchor.
+    """
+    # Map anchor indices to command indices (skip ClosePath)
+    cmd_indices: list[int] = []
+    for ci, cmd in enumerate(d):
+        if not isinstance(cmd, ClosePath):
+            cmd_indices.append(ci)
+    if anchor_idx < 0 or anchor_idx >= len(cmd_indices):
+        return (None, None)
+    ci = cmd_indices[anchor_idx]
+    cmd = d[ci]
+    # Anchor position
+    match cmd:
+        case MoveTo(x, y) | LineTo(x, y):
+            ax, ay = x, y
+        case CurveTo(_, _, _, _, x, y):
+            ax, ay = x, y
+        case _:
+            return (None, None)
+    # Incoming handle: (x2, y2) of this CurveTo
+    h_in = None
+    if isinstance(cmd, CurveTo):
+        if abs(cmd.x2 - ax) > 0.01 or abs(cmd.y2 - ay) > 0.01:
+            h_in = (cmd.x2, cmd.y2)
+    # Outgoing handle: (x1, y1) of next CurveTo
+    h_out = None
+    if ci + 1 < len(d) and isinstance(d[ci + 1], CurveTo):
+        nc = d[ci + 1]
+        if abs(nc.x1 - ax) > 0.01 or abs(nc.y1 - ay) > 0.01:
+            h_out = (nc.x1, nc.y1)
+    return (h_in, h_out)
+
+
+def _reflect_handle_keep_distance(ax: float, ay: float,
+                                  new_hx: float, new_hy: float,
+                                  opp_hx: float, opp_hy: float
+                                  ) -> tuple[float, float]:
+    """Rotate the opposite handle to be collinear with (ax,ay)→(new_hx,new_hy),
+    but preserve the opposite handle's original distance from the anchor."""
+    import math
+    dist_new = math.hypot(new_hx - ax, new_hy - ay)
+    dist_opp = math.hypot(opp_hx - ax, opp_hy - ay)
+    if dist_new < 1e-6:
+        return (opp_hx, opp_hy)
+    # Direction from anchor toward moved handle, then negate for opposite
+    scale = -dist_opp / dist_new
+    return (ax + (new_hx - ax) * scale, ay + (new_hy - ay) * scale)
+
+
+def move_path_handle(elem: Path, anchor_idx: int, handle_type: str,
+                     dx: float, dy: float) -> Path:
+    """Move a specific handle ('in' or 'out') of a path anchor by (dx, dy)."""
+    d = elem.d
+    cmd_indices: list[int] = []
+    for ci, cmd in enumerate(d):
+        if not isinstance(cmd, ClosePath):
+            cmd_indices.append(ci)
+    if anchor_idx < 0 or anchor_idx >= len(cmd_indices):
+        return elem
+    ci = cmd_indices[anchor_idx]
+    cmd = d[ci]
+    # Get anchor position
+    match cmd:
+        case MoveTo(x, y) | LineTo(x, y):
+            ax, ay = x, y
+        case CurveTo(_, _, _, _, x, y):
+            ax, ay = x, y
+        case _:
+            return elem
+    new_cmds = list(d)
+    if handle_type == 'in':
+        if isinstance(cmd, CurveTo):
+            new_hx = cmd.x2 + dx
+            new_hy = cmd.y2 + dy
+            new_cmds[ci] = CurveTo(cmd.x1, cmd.y1,
+                                   new_hx, new_hy, cmd.x, cmd.y)
+            # Rotate opposite (out) handle to stay collinear, keep its distance
+            if ci + 1 < len(d) and isinstance(d[ci + 1], CurveTo):
+                nc = d[ci + 1]
+                new_cmds[ci + 1] = CurveTo(
+                    *_reflect_handle_keep_distance(ax, ay, new_hx, new_hy, nc.x1, nc.y1),
+                    nc.x2, nc.y2, nc.x, nc.y)
+    elif handle_type == 'out':
+        if ci + 1 < len(d) and isinstance(d[ci + 1], CurveTo):
+            nc = d[ci + 1]
+            new_hx = nc.x1 + dx
+            new_hy = nc.y1 + dy
+            new_cmds[ci + 1] = CurveTo(new_hx, new_hy,
+                                       nc.x2, nc.y2, nc.x, nc.y)
+            # Rotate opposite (in) handle to stay collinear, keep its distance
+            if isinstance(cmd, CurveTo):
+                rx, ry = _reflect_handle_keep_distance(ax, ay, new_hx, new_hy, cmd.x2, cmd.y2)
+                new_cmds[ci] = CurveTo(cmd.x1, cmd.y1, rx, ry, cmd.x, cmd.y)
+    return replace(elem, d=tuple(new_cmds))
+
+
 def control_point_count(elem: Element) -> int:
     """Return the number of control points for an element."""
     if isinstance(elem, Line):

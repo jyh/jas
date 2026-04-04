@@ -145,6 +145,10 @@ val make_layer : ?name:string -> ?opacity:float -> ?transform:transform option -
 
 (** {2 Control points} *)
 
+val path_handle_positions : path_command list -> int ->
+  (float * float) option * (float * float) option
+val move_path_handle : path_command list -> int -> string -> float -> float ->
+  path_command list
 val control_point_count : element -> int
 val control_points : element -> (float * float) list
 val move_control_points : element -> int list -> float -> float -> element

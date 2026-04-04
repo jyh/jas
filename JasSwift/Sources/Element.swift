@@ -313,6 +313,106 @@ private func pathAnchorPoints(_ d: [PathCommand]) -> [(Double, Double)] {
     return pts
 }
 
+/// Return (incoming_handle, outgoing_handle) for a path anchor.
+/// Returns nil for a handle that doesn't exist or coincides with its anchor.
+public func pathHandlePositions(_ d: [PathCommand], anchorIdx: Int)
+    -> ((Double, Double)?, (Double, Double)?) {
+    // Map anchor indices to command indices (skip closePath)
+    var cmdIndices: [Int] = []
+    for (ci, cmd) in d.enumerated() {
+        if case .closePath = cmd { continue }
+        cmdIndices.append(ci)
+    }
+    guard anchorIdx >= 0, anchorIdx < cmdIndices.count else { return (nil, nil) }
+    let ci = cmdIndices[anchorIdx]
+    let cmd = d[ci]
+    // Anchor position
+    let ax: Double, ay: Double
+    switch cmd {
+    case .moveTo(let x, let y), .lineTo(let x, let y):
+        ax = x; ay = y
+    case .curveTo(_, _, _, _, let x, let y):
+        ax = x; ay = y
+    default:
+        return (nil, nil)
+    }
+    // Incoming handle: (x2, y2) of this CurveTo
+    var hIn: (Double, Double)? = nil
+    if case .curveTo(_, _, let x2, let y2, _, _) = cmd {
+        if abs(x2 - ax) > 0.01 || abs(y2 - ay) > 0.01 {
+            hIn = (x2, y2)
+        }
+    }
+    // Outgoing handle: (x1, y1) of next CurveTo
+    var hOut: (Double, Double)? = nil
+    if ci + 1 < d.count, case .curveTo(let x1, let y1, _, _, _, _) = d[ci + 1] {
+        if abs(x1 - ax) > 0.01 || abs(y1 - ay) > 0.01 {
+            hOut = (x1, y1)
+        }
+    }
+    return (hIn, hOut)
+}
+
+/// Rotate the opposite handle to be collinear, preserving its distance from the anchor.
+private func reflectHandleKeepDistance(ax: Double, ay: Double,
+                                       nhx: Double, nhy: Double,
+                                       oppHx: Double, oppHy: Double) -> (Double, Double) {
+    let dnx = nhx - ax, dny = nhy - ay
+    let distNew = hypot(dnx, dny)
+    let distOpp = hypot(oppHx - ax, oppHy - ay)
+    guard distNew >= 1e-6 else { return (oppHx, oppHy) }
+    let scale = -distOpp / distNew
+    return (ax + dnx * scale, ay + dny * scale)
+}
+
+/// Move a specific handle ('in' or 'out') of a path anchor by (dx, dy).
+public func movePathHandle(_ d: [PathCommand], anchorIdx: Int, handleType: String,
+                           dx: Double, dy: Double) -> [PathCommand] {
+    var cmdIndices: [Int] = []
+    for (ci, cmd) in d.enumerated() {
+        if case .closePath = cmd { continue }
+        cmdIndices.append(ci)
+    }
+    guard anchorIdx >= 0, anchorIdx < cmdIndices.count else { return d }
+    let ci = cmdIndices[anchorIdx]
+    let cmd = d[ci]
+    // Get anchor position
+    let ax: Double, ay: Double
+    switch cmd {
+    case .moveTo(let x, let y), .lineTo(let x, let y):
+        ax = x; ay = y
+    case .curveTo(_, _, _, _, let x, let y):
+        ax = x; ay = y
+    default:
+        return d
+    }
+    var cmds = d
+    if handleType == "in" {
+        if case .curveTo(let x1, let y1, let x2, let y2, let x, let y) = cmds[ci] {
+            let nhx = x2 + dx, nhy = y2 + dy
+            cmds[ci] = .curveTo(x1: x1, y1: y1, x2: nhx, y2: nhy, x: x, y: y)
+            // Rotate opposite (out) handle to stay collinear, keep its distance
+            if ci + 1 < cmds.count,
+               case .curveTo(let ox1, let oy1, let nx2, let ny2, let nx, let ny) = cmds[ci + 1] {
+                let (rx, ry) = reflectHandleKeepDistance(ax: ax, ay: ay, nhx: nhx, nhy: nhy, oppHx: ox1, oppHy: oy1)
+                cmds[ci + 1] = .curveTo(x1: rx, y1: ry, x2: nx2, y2: ny2, x: nx, y: ny)
+            }
+        }
+    } else if handleType == "out" {
+        if ci + 1 < cmds.count,
+           case .curveTo(let x1, let y1, let x2, let y2, let x, let y) = cmds[ci + 1] {
+            let nhx = x1 + dx, nhy = y1 + dy
+            cmds[ci + 1] = .curveTo(x1: nhx, y1: nhy, x2: x2, y2: y2, x: x, y: y)
+            // Rotate opposite (in) handle to stay collinear, keep its distance
+            if case .curveTo(let cx1, let cy1, let cx2, let cy2, let cx, let cy) = cmds[ci] {
+                let (rx, ry) = reflectHandleKeepDistance(ax: ax, ay: ay, nhx: nhx, nhy: nhy, oppHx: cx2, oppHy: cy2)
+                cmds[ci] = .curveTo(x1: cx1, y1: cy1, x2: rx, y2: ry, x: cx, y: cy)
+            }
+        }
+    }
+    return cmds
+}
+
 /// SVG \<line\> element.
 public struct JasLine: Equatable {
     public let x1: Double, y1: Double, x2: Double, y2: Double

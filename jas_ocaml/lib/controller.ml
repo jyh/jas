@@ -326,6 +326,17 @@ class controller ?(model = Model.create ()) () =
         model#set_document { model#document with Document.selection =
           Document.PathMap.singleton path es }
 
+    method move_path_handle (path : int list) (anchor_idx : int)
+        (handle_type : string) (dx : float) (dy : float) =
+      let doc = model#document in
+      let elem = Document.get_element doc path in
+      (match elem with
+       | Element.Path ({ d; _ } as r) ->
+         let new_d = Element.move_path_handle d anchor_idx handle_type dx dy in
+         let new_elem = Element.Path { r with d = new_d } in
+         model#set_document (Document.replace_element doc path new_elem)
+       | _ -> ())
+
     method move_selection (dx : float) (dy : float) =
       let doc = model#document in
       let new_doc = Document.PathMap.fold (fun path es acc ->
