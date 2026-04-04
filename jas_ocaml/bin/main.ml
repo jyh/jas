@@ -14,6 +14,8 @@ let () =
       toolbar#select_tool Jas.Toolbar.Selection; true
     end else if key = GdkKeysyms._a || key = GdkKeysyms._A then begin
       toolbar#select_tool Jas.Toolbar.Direct_selection; true
+    end else if key = GdkKeysyms._t || key = GdkKeysyms._T then begin
+      toolbar#select_tool Jas.Toolbar.Text_tool; true
     end else if key = GdkKeysyms._backslash then begin
       toolbar#select_tool Jas.Toolbar.Line; true
     end else if key = GdkKeysyms._m || key = GdkKeysyms._M then begin

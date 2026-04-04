@@ -51,6 +51,13 @@ public struct ToolbarView {
                 plus.addLine(to: CGPoint(x: ox + 23.5, y: oy + 23.5))
                 context.stroke(plus, with: .color(color), lineWidth: 1.5)
 
+            case .text:
+                context.draw(
+                    Text("T").font(.system(size: 18, weight: .bold))
+                        .foregroundColor(Color(nsColor: NSColor(white: 0.8, alpha: 1.0))),
+                    at: CGPoint(x: size.width / 2, y: size.height / 2)
+                )
+
             case .line:
                 var path = Path()
                 path.move(to: CGPoint(x: ox + 4, y: oy + 24))

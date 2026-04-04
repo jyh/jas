@@ -360,7 +360,7 @@ class CanvasWidget(QWidget):
         return False
 
     def mousePressEvent(self, event: QMouseEvent):
-        if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION, Tool.LINE, Tool.RECT, Tool.POLYGON) and event.button() == Qt.MouseButton.LeftButton:
+        if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION, Tool.TEXT, Tool.LINE, Tool.RECT, Tool.POLYGON) and event.button() == Qt.MouseButton.LeftButton:
             pos = event.position()
             # Check if clicking on a selected CP → move mode
             if self._current_tool in (Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION):
@@ -433,6 +433,15 @@ class CanvasWidget(QWidget):
                 w = abs(end.x() - start.x())
                 h = abs(end.y() - start.y())
                 self._controller.direct_select_rect(x, y, w, h, extend=extend)
+                return
+            # Text tool: place text at click point
+            if tool == Tool.TEXT:
+                elem = Text(
+                    x=start.x(), y=start.y(),
+                    content="Lorem Ipsum",
+                    fill=Fill(color=Color(0, 0, 0)),
+                )
+                self._controller.add_element(elem)
                 return
             # Drawing tools: shift means constrain angle
             if shift:

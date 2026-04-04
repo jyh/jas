@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Line | Rect | Polygon
+type tool = Selection | Direct_selection | Group_selection | Text_tool | Line | Rect | Polygon
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -16,22 +16,25 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
   let () = title_bar#misc#set_size_request ~height:title_bar_height () in
 
   (* Toolbar grid *)
-  let grid = GPack.table ~rows:2 ~columns:2
+  let grid = GPack.table ~rows:3 ~columns:2
     ~row_spacings:2 ~col_spacings:2
     ~packing:(vbox#pack ~expand:false) () in
   let selection_btn = GMisc.drawing_area () in
   let direct_btn = GMisc.drawing_area () in
+  let text_btn = GMisc.drawing_area () in
   let line_btn = GMisc.drawing_area () in
   let shape_btn = GMisc.drawing_area () in
   let () =
     selection_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     direct_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
+    text_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     line_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     shape_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     grid#attach ~left:0 ~top:0 selection_btn#coerce;
     grid#attach ~left:1 ~top:0 direct_btn#coerce;
-    grid#attach ~left:0 ~top:1 line_btn#coerce;
-    grid#attach ~left:1 ~top:1 shape_btn#coerce
+    grid#attach ~left:0 ~top:1 text_btn#coerce;
+    grid#attach ~left:0 ~top:2 line_btn#coerce;
+    grid#attach ~left:1 ~top:2 shape_btn#coerce
   in
   object (self)
     val mutable pos_x = x
@@ -68,7 +71,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
 
     initializer
       fixed#put frame#coerce ~x:pos_x ~y:pos_y;
-      frame#misc#set_size_request ~width:80 ~height:(title_bar_height + tool_button_size * 2 + 14) ();
+      frame#misc#set_size_request ~width:80 ~height:(title_bar_height + tool_button_size * 3 + 18) ();
 
       (* Draw title bar *)
       title_bar#misc#connect#draw ~callback:(fun cr ->
@@ -221,6 +224,19 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.fill cr
       in
 
+      let draw_text_icon cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.select_font_face cr "Sans" ~weight:Cairo.Bold;
+        Cairo.set_font_size cr 20.0;
+        Cairo.move_to cr (ox +. 7.0) (oy +. 22.0);
+        Cairo.show_text cr "T"
+      in
+
+      draw_tool_button text_btn Text_tool draw_text_icon;
       draw_tool_button selection_btn Selection (draw_arrow ~filled:true);
       (* Arrow slot uses custom draw that checks arrow_slot_tool *)
       direct_btn#misc#connect#draw ~callback:(fun cr ->
@@ -272,6 +288,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         ) |> ignore
       in
       connect_click selection_btn Selection;
+      connect_click text_btn Text_tool;
       connect_click line_btn Line;
 
       (* Arrow slot: click selects, long press shows menu *)

@@ -7,6 +7,7 @@ public enum Tool: String, CaseIterable {
     case selection
     case directSelection
     case groupSelection
+    case text
     case line
     case rect
     case polygon
@@ -97,6 +98,9 @@ struct FloatingToolbar: View {
                     )
                 }
                 HStack(spacing: 2) {
+                    ToolbarView.toolButton(currentTool: $currentTool, tool: .text)
+                }
+                HStack(spacing: 2) {
                     ToolbarView.toolButton(currentTool: $currentTool, tool: .line)
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
@@ -133,6 +137,7 @@ struct KeyboardShortcutHandler: NSViewRepresentable {
                 switch key.lowercased() {
                 case "v": currentTool = .selection
                 case "a": currentTool = .directSelection
+                case "t": currentTool = .text
                 case "\\": currentTool = .line
                 case "m": currentTool = .rect
                 default: break
