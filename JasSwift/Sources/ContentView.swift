@@ -9,6 +9,7 @@ public enum Tool: String, CaseIterable {
     case groupSelection
     case line
     case rect
+    case polygon
 }
 
 // MARK: - Content View
@@ -57,6 +58,7 @@ struct FloatingToolbar: View {
     @Binding var currentTool: Tool
     @Binding var position: CGPoint
     @State private var arrowSlotTool: Tool = .directSelection
+    @State private var shapeSlotTool: Tool = .rect
 
     private let titleBarHeight: CGFloat = 24
     private let toolbarWidth: CGFloat = 80
@@ -94,7 +96,11 @@ struct FloatingToolbar: View {
                 }
                 HStack(spacing: 2) {
                     ToolbarView.toolButton(currentTool: $currentTool, tool: .line)
-                    ToolbarView.toolButton(currentTool: $currentTool, tool: .rect)
+                    ToolbarView.toolButtonWithAlternates(
+                        currentTool: $currentTool,
+                        visibleTool: $shapeSlotTool,
+                        alternates: [.rect, .polygon]
+                    )
                 }
             }
             .padding(4)

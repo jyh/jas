@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Line | Rect
+type tool = Selection | Direct_selection | Group_selection | Line | Rect | Polygon
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -22,26 +22,28 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
   let selection_btn = GMisc.drawing_area () in
   let direct_btn = GMisc.drawing_area () in
   let line_btn = GMisc.drawing_area () in
-  let rect_btn = GMisc.drawing_area () in
+  let shape_btn = GMisc.drawing_area () in
   let () =
     selection_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     direct_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     line_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
-    rect_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
+    shape_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     grid#attach ~left:0 ~top:0 selection_btn#coerce;
     grid#attach ~left:1 ~top:0 direct_btn#coerce;
     grid#attach ~left:0 ~top:1 line_btn#coerce;
-    grid#attach ~left:1 ~top:1 rect_btn#coerce
+    grid#attach ~left:1 ~top:1 shape_btn#coerce
   in
   object (self)
     val mutable pos_x = x
     val mutable pos_y = y
     val mutable current_tool = Selection
     val mutable arrow_slot_tool = Direct_selection
+    val mutable shape_slot_tool = Rect
     val mutable dragging = false
     val mutable drag_offset_x = 0.0
     val mutable drag_offset_y = 0.0
     val mutable long_press_timer : GMain.Timeout.id option = None
+    val mutable shape_long_press_timer : GMain.Timeout.id option = None
 
     method current_tool = current_tool
     method widget = frame#coerce
@@ -53,6 +55,8 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       (match t with
        | Direct_selection | Group_selection ->
          arrow_slot_tool <- t
+       | Rect | Polygon ->
+         shape_slot_tool <- t
        | _ -> ());
       self#redraw_all
 
@@ -60,7 +64,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       selection_btn#misc#queue_draw ();
       direct_btn#misc#queue_draw ();
       line_btn#misc#queue_draw ();
-      rect_btn#misc#queue_draw ()
+      shape_btn#misc#queue_draw ()
 
     initializer
       fixed#put frame#coerce ~x:pos_x ~y:pos_y;
@@ -166,6 +170,27 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.stroke cr
       in
 
+      let draw_polygon_icon cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let cx = ox +. 14.0 and cy = oy +. 14.0 in
+        let r = 11.0 in
+        let n = 6 in
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.set_line_width cr 1.5;
+        for i = 0 to n - 1 do
+          let angle = -. Float.pi /. 2.0 +. 2.0 *. Float.pi *. float_of_int i /. float_of_int n in
+          let px = cx +. r *. cos angle in
+          let py = cy +. r *. sin angle in
+          if i = 0 then Cairo.move_to cr px py
+          else Cairo.line_to cr px py
+        done;
+        Cairo.Path.close cr;
+        Cairo.stroke cr
+      in
+
       (* The arrow slot draws whichever tool is currently in the slot *)
       let draw_arrow_slot cr ~alloc =
         let bw = float_of_int alloc.Gtk.width in
@@ -204,7 +229,36 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         true
       ) |> ignore;
       draw_tool_button line_btn Line draw_line_icon;
-      draw_tool_button rect_btn Rect draw_rect_icon;
+      (* Shape slot: draws rect or polygon depending on shape_slot_tool *)
+      shape_btn#misc#connect#draw ~callback:(fun cr ->
+        let alloc = shape_btn#misc#allocation in
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        if current_tool = shape_slot_tool then begin
+          Cairo.set_source_rgb cr 0.4 0.4 0.4;
+          Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
+          Cairo.fill cr
+        end else begin
+          Cairo.set_source_rgb cr 0.27 0.27 0.27;
+          Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
+          Cairo.fill cr
+        end;
+        (match shape_slot_tool with
+         | Rect -> draw_rect_icon cr ~alloc
+         | Polygon -> draw_polygon_icon cr ~alloc
+         | _ -> ());
+        (* Alternate triangle *)
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let s = 5.0 in
+        Cairo.move_to cr (ox +. 28.0) (oy +. 28.0);
+        Cairo.line_to cr (ox +. 28.0 -. s) (oy +. 28.0);
+        Cairo.line_to cr (ox +. 28.0) (oy +. 28.0 -. s);
+        Cairo.Path.close cr;
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.fill cr;
+        true
+      ) |> ignore;
 
       (* Click events *)
       let connect_click area tool_id =
@@ -219,7 +273,6 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       in
       connect_click selection_btn Selection;
       connect_click line_btn Line;
-      connect_click rect_btn Rect;
 
       (* Arrow slot: click selects, long press shows menu *)
       direct_btn#event#add [`BUTTON_PRESS; `BUTTON_RELEASE];
@@ -241,6 +294,29 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
            | Some id -> GMain.Timeout.remove id; long_press_timer <- None
            | None -> ());
           current_tool <- arrow_slot_tool;
+          self#redraw_all;
+          true
+        end else false
+      ) |> ignore;
+
+      (* Shape slot: click selects, long press shows menu *)
+      shape_btn#event#add [`BUTTON_PRESS; `BUTTON_RELEASE];
+      shape_btn#event#connect#button_press ~callback:(fun ev ->
+        if GdkEvent.Button.button ev = 1 then begin
+          shape_long_press_timer <- Some (GMain.Timeout.add ~ms:long_press_ms ~callback:(fun () ->
+            shape_long_press_timer <- None;
+            self#show_shape_slot_menu;
+            false
+          ));
+          true
+        end else false
+      ) |> ignore;
+      shape_btn#event#connect#button_release ~callback:(fun ev ->
+        if GdkEvent.Button.button ev = 1 then begin
+          (match shape_long_press_timer with
+           | Some id -> GMain.Timeout.remove id; shape_long_press_timer <- None
+           | None -> ());
+          current_tool <- shape_slot_tool;
           self#redraw_all;
           true
         end else false
@@ -288,6 +364,21 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       in
       add_item "Direct Selection" Direct_selection;
       add_item "Group Selection" Group_selection;
+      menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
+
+    method private show_shape_slot_menu =
+      let menu = GMenu.menu () in
+      let add_item label tool =
+        let item = GMenu.check_menu_item ~label ~packing:menu#append () in
+        item#set_active (shape_slot_tool = tool);
+        item#connect#activate ~callback:(fun () ->
+          shape_slot_tool <- tool;
+          current_tool <- tool;
+          self#redraw_all
+        ) |> ignore
+      in
+      add_item "Rectangle" Rect;
+      add_item "Polygon" Polygon;
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
   end
 

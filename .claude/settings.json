@@ -10,7 +10,12 @@
       "Bash(python3 -m pytest document_test.py -v)",
       "Bash(opam exec:*)",
       "Bash(python3 -m pytest controller_test.py -v)",
-      "Bash(python3 -m pytest *_test.py -q)"
+      "Bash(python3 -m pytest *_test.py -q)",
+      "Bash(python -m pytest controller_test.py -v)",
+      "Bash(python main.py)",
+      "Bash(python -m pytest controller_test.py -v -k extend)",
+      "Bash(dune test:*)",
+      "Bash(python -m pytest svg_test.py -x -q)"
     ]
   }
 }
