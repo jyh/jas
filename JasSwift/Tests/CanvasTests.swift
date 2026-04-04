@@ -8,9 +8,10 @@ import Testing
 
 @Test func toolEnumCases() {
     let tools = Tool.allCases
-    #expect(tools.count == 2)
+    #expect(tools.count == 3)
     #expect(tools.contains(.selection))
     #expect(tools.contains(.directSelection))
+    #expect(tools.contains(.line))
 }
 
 @Test func contentViewInitializes() {
@@ -20,9 +21,10 @@ import Testing
 
 @Test func toolEnumCasesExist() {
     let tools = Tool.allCases
-    #expect(tools.count == 2)
+    #expect(tools.count == 3)
     #expect(tools.contains(.selection))
     #expect(tools.contains(.directSelection))
+    #expect(tools.contains(.line))
 }
 
 @Test func contentViewWithKeyboardHandlerInitializes() {

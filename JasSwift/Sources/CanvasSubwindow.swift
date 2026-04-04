@@ -223,8 +223,16 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
 /// An NSView that draws the document's elements using CoreGraphics.
 class CanvasNSView: NSView {
     var document: JasDocument = JasDocument()
+    var controller: Controller?
+    var currentTool: Tool = .selection
+    var onToolRead: (() -> Tool)?
+
+    // Drag state for line tool
+    private var dragStart: NSPoint?
+    private var dragEnd: NSPoint?
 
     override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
@@ -235,6 +243,59 @@ class CanvasNSView: NSView {
         for layer in document.layers {
             drawElement(ctx, .layer(layer))
         }
+        // Draw drag preview for line tool
+        if let start = dragStart, let end = dragEnd {
+            ctx.setStrokeColor(CGColor(gray: 0.4, alpha: 1.0))
+            ctx.setLineWidth(1.0)
+            ctx.setLineDash(phase: 0, lengths: [4, 4])
+            ctx.move(to: start)
+            ctx.addLine(to: end)
+            ctx.strokePath()
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let tool = onToolRead?() ?? currentTool
+        if tool == .line {
+            let pt = convert(event.locationInWindow, from: nil)
+            dragStart = pt
+            dragEnd = pt
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        if dragStart != nil {
+            dragEnd = convert(event.locationInWindow, from: nil)
+            needsDisplay = true
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let start = dragStart, let controller = controller else {
+            dragStart = nil
+            dragEnd = nil
+            return
+        }
+        let end = convert(event.locationInWindow, from: nil)
+        dragStart = nil
+        dragEnd = nil
+
+        let line = JasLine(
+            x1: start.x, y1: start.y, x2: end.x, y2: end.y,
+            stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)
+        )
+        let doc = controller.document
+        if let firstLayer = doc.layers.first {
+            let newChildren = firstLayer.children + [.line(line)]
+            let newLayer = JasLayer(name: firstLayer.name, children: newChildren,
+                                    opacity: firstLayer.opacity, transform: firstLayer.transform)
+            var layers = doc.layers
+            layers[0] = newLayer
+            controller.setDocument(JasDocument(title: doc.title, layers: layers))
+        } else {
+            let layer = JasLayer(name: "Layer 1", children: [.line(line)])
+            controller.setDocument(JasDocument(title: doc.title, layers: [layer]))
+        }
     }
 }
 
@@ -244,6 +305,8 @@ class CanvasNSView: NSView {
 /// The view observes the model's document for its title.
 public struct CanvasSubwindow: View {
     @ObservedObject var model: JasModel
+    var controller: Controller
+    @Binding var currentTool: Tool
     @Binding var position: CGPoint
     public let bbox: CanvasBoundingBox
 
@@ -273,7 +336,7 @@ public struct CanvasSubwindow: View {
                 )
 
                 // Canvas drawing area
-                CanvasRepresentable(document: model.document)
+                CanvasRepresentable(document: model.document, controller: controller, currentTool: $currentTool)
                     .frame(width: totalWidth, height: canvasSize.height)
             }
             .border(Color(nsColor: NSColor(white: 0.4, alpha: 1.0)), width: 1)
@@ -286,15 +349,23 @@ public struct CanvasSubwindow: View {
 /// Bridges the CoreGraphics-based CanvasNSView into SwiftUI.
 struct CanvasRepresentable: NSViewRepresentable {
     let document: JasDocument
+    let controller: Controller
+    @Binding var currentTool: Tool
 
     func makeNSView(context: Context) -> CanvasNSView {
         let view = CanvasNSView()
         view.document = document
+        view.controller = controller
+        view.currentTool = currentTool
+        view.onToolRead = { [self] in self.currentTool }
         return view
     }
 
     func updateNSView(_ nsView: CanvasNSView, context: Context) {
         nsView.document = document
+        nsView.controller = controller
+        nsView.currentTool = currentTool
+        nsView.onToolRead = { [self] in self.currentTool }
         nsView.needsDisplay = true
     }
 }

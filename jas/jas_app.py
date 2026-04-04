@@ -41,7 +41,7 @@ class MainWindow(QMainWindow):
         self.controller = Controller(model=self.model)
 
         # Canvas subwindow (view)
-        self.canvas = CanvasWidget(model=self.model)
+        self.canvas = CanvasWidget(model=self.model, controller=self.controller)
         self.sub_window = QMdiSubWindow()
         self.sub_window.setWidget(self.canvas)
         self.mdi_area.addSubWindow(self.sub_window)
@@ -49,11 +49,16 @@ class MainWindow(QMainWindow):
         self.sub_window.show()
         self.sub_window.setWindowTitle(self.model.document.title)
 
+        # Connect toolbar to canvas
+        self.toolbar.tool_changed.connect(self.canvas.set_tool)
+
         # Keyboard shortcuts
         QShortcut(QKeySequence("V"), self,
                   lambda: self.toolbar.select_tool(Tool.SELECTION))
         QShortcut(QKeySequence("A"), self,
                   lambda: self.toolbar.select_tool(Tool.DIRECT_SELECTION))
+        QShortcut(QKeySequence("\\"), self,
+                  lambda: self.toolbar.select_tool(Tool.LINE))
 
 
 def main():

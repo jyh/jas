@@ -2,6 +2,7 @@ from absl.testing import absltest
 
 from toolbar import Tool
 from canvas import BoundingBox, CanvasWidget, _draw_element, _build_path
+from controller import Controller
 from document import Document
 from element import (
     Circle, Color, CurveTo, ClosePath, Ellipse, Fill, Group, Layer, Line,
@@ -15,11 +16,12 @@ from PySide6.QtWidgets import QApplication
 
 class ToolbarTest(absltest.TestCase):
 
-    def test_tool_enum_has_two_values(self):
+    def test_tool_enum_has_three_values(self):
         tools = list(Tool)
-        self.assertEqual(len(tools), 2)
+        self.assertEqual(len(tools), 3)
         self.assertIn(Tool.SELECTION, tools)
         self.assertIn(Tool.DIRECT_SELECTION, tools)
+        self.assertIn(Tool.LINE, tools)
 
     def test_tool_selection_value(self):
         self.assertEqual(Tool.SELECTION.value, 1)
@@ -59,26 +61,32 @@ class CanvasWidgetTest(absltest.TestCase):
         else:
             cls.app = QApplication.instance()
 
+    def _make_canvas(self, model=None):
+        model = model or Model()
+        ctrl = Controller(model=model)
+        return CanvasWidget(model=model, controller=ctrl)
+
     def test_default_bbox(self):
-        model = Model()
-        canvas = CanvasWidget(model=model)
+        canvas = self._make_canvas()
         self.assertEqual(canvas.bbox.width, 800)
         self.assertEqual(canvas.bbox.height, 600)
 
     def test_custom_bbox(self):
         model = Model()
-        canvas = CanvasWidget(model=model, bbox=BoundingBox(0, 0, 1024, 768))
+        ctrl = Controller(model=model)
+        canvas = CanvasWidget(model=model, controller=ctrl,
+                              bbox=BoundingBox(0, 0, 1024, 768))
         self.assertEqual(canvas.bbox.width, 1024)
         self.assertEqual(canvas.bbox.height, 768)
 
     def test_registers_with_model(self):
         model = Model()
-        canvas = CanvasWidget(model=model)
+        canvas = self._make_canvas(model)
         model.document = Document(title="Test")
 
     def test_title_updates_via_model(self):
         model = Model()
-        canvas = CanvasWidget(model=model)
+        canvas = self._make_canvas(model)
         model.document = Document(title="New Title")
         self.assertEqual(model.document.title, "New Title")
 

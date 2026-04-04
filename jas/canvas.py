@@ -1,4 +1,3 @@
-import math
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
@@ -7,6 +6,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
+from controller import Controller
 from document import Document
 from element import (
     ArcTo, Circle, ClosePath, CurveTo, Element, Ellipse, Group, Layer, Line,
@@ -15,6 +15,7 @@ from element import (
     Color, Fill, LineCap, LineJoin, Stroke, Transform,
 )
 from model import Model
+from toolbar import Tool
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,7 @@ def _build_path(cmds) -> QPainterPath:
             case SmoothCurveTo(x2, y2, x, y):
                 cur = path.currentPosition()
                 if last_control is not None:
-                    x1 = 2 * cur.x() - last_control[0]
+                    x1 : float = 2 * cur.x() - last_control[0]
                     y1 = 2 * cur.y() - last_control[1]
                 else:
                     x1, y1 = cur.x(), cur.y()
@@ -100,10 +101,11 @@ def _build_path(cmds) -> QPainterPath:
             case SmoothQuadTo(x, y):
                 cur = path.currentPosition()
                 if last_control is not None:
-                    x1 = 2 * cur.x() - last_control[0]
-                    y1 = 2 * cur.y() - last_control[1]
+                    x1 : float = 2 * cur.x() - last_control[0]
+                    y1 : float = 2 * cur.y() - last_control[1]
                 else:
-                    x1, y1 = cur.x(), cur.y()
+                    x1 : float = cur.x()
+                    y1 : float = cur.y()
                 path.quadTo(x1, y1, x, y)
                 last_control = (x1, y1)
             case ArcTo():
@@ -193,10 +195,16 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
 class CanvasWidget(QWidget):
     """The canvas view. Receives document updates from the Model."""
 
-    def __init__(self, model: Model, bbox: BoundingBox = BoundingBox(0, 0, 800, 600)):
+    def __init__(self, model: Model, controller: Controller,
+                 bbox: BoundingBox = BoundingBox(0, 0, 800, 600)):
         super().__init__()
         self._model = model
+        self._controller = controller
         self._bbox = bbox
+        self._current_tool = Tool.SELECTION
+        # Drag state for line tool
+        self._drag_start: QPointF | None = None
+        self._drag_end: QPointF | None = None
         self.setMinimumSize(320, 240)
         self.setMouseTracking(True)
         model.on_document_changed(self._on_document_changed)
@@ -205,11 +213,53 @@ class CanvasWidget(QWidget):
     def bbox(self) -> BoundingBox:
         return self._bbox
 
+    def set_tool(self, tool: Tool) -> None:
+        self._current_tool = tool
+
     def _on_document_changed(self, document: Document) -> None:
         self.update()
 
     def sizeHint(self):
         return QSize(int(self._bbox.width), int(self._bbox.height))
+
+    def mousePressEvent(self, event):
+        if self._current_tool == Tool.LINE and event.button() == Qt.LeftButton:
+            self._drag_start = event.position()
+            self._drag_end = event.position()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_start is not None:
+            self._drag_end = event.position()
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        if self._drag_start is not None and event.button() == Qt.LeftButton:
+            end = event.position()
+            start = self._drag_start
+            self._drag_start = None
+            self._drag_end = None
+            # Create a Line element with a default black stroke
+            line = Line(
+                x1=start.x(), y1=start.y(),
+                x2=end.x(), y2=end.y(),
+                stroke=Stroke(color=Color(0, 0, 0), width=1.0),
+            )
+            # Add to the first layer, creating one if needed
+            doc = self._model.document
+            if doc.layers:
+                layer = doc.layers[0]
+                new_layer = Layer(
+                    name=layer.name,
+                    children=layer.children + (line,),
+                    opacity=layer.opacity,
+                    transform=layer.transform,
+                )
+                new_layers = (new_layer,) + doc.layers[1:]
+            else:
+                new_layers = (Layer(name="Layer 1", children=(line,)),)
+            self._controller.set_document(
+                Document(title=doc.title, layers=new_layers),
+            )
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -218,4 +268,9 @@ class CanvasWidget(QWidget):
         doc = self._model.document
         for layer in doc.layers:
             _draw_element(painter, layer)
+        # Draw drag preview for line tool
+        if self._drag_start is not None and self._drag_end is not None:
+            pen = QPen(QColor(100, 100, 100), 1.0, Qt.DashLine)
+            painter.setPen(pen)
+            painter.drawLine(self._drag_start, self._drag_end)
         painter.end()

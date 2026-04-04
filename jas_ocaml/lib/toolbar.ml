@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection
+type tool = Selection | Direct_selection | Line
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -15,16 +15,19 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
   let () = title_bar#misc#set_size_request ~height:title_bar_height () in
 
   (* Toolbar grid *)
-  let grid = GPack.table ~rows:1 ~columns:2
+  let grid = GPack.table ~rows:2 ~columns:2
     ~row_spacings:2 ~col_spacings:2
     ~packing:(vbox#pack ~expand:false) () in
   let selection_btn = GMisc.drawing_area () in
   let direct_btn = GMisc.drawing_area () in
+  let line_btn = GMisc.drawing_area () in
   let () =
     selection_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     direct_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
+    line_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     grid#attach ~left:0 ~top:0 selection_btn#coerce;
-    grid#attach ~left:1 ~top:0 direct_btn#coerce
+    grid#attach ~left:1 ~top:0 direct_btn#coerce;
+    grid#attach ~left:0 ~top:1 line_btn#coerce
   in
   object
     val mutable pos_x = x
@@ -42,11 +45,12 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
     method select_tool t =
       current_tool <- t;
       selection_btn#misc#queue_draw ();
-      direct_btn#misc#queue_draw ()
+      direct_btn#misc#queue_draw ();
+      line_btn#misc#queue_draw ()
 
     initializer
       fixed#put frame#coerce ~x:pos_x ~y:pos_y;
-      frame#misc#set_size_request ~width:80 ~height:(title_bar_height + tool_button_size + 10) ();
+      frame#misc#set_size_request ~width:80 ~height:(title_bar_height + tool_button_size * 2 + 14) ();
 
       (* Draw title bar *)
       title_bar#misc#connect#draw ~callback:(fun cr ->
@@ -90,7 +94,19 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         end
       in
 
-      let draw_tool_button area tool_id =
+      let draw_line_icon cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.set_line_width cr 2.0;
+        Cairo.move_to cr (ox +. 4.0) (oy +. 24.0);
+        Cairo.line_to cr (ox +. 24.0) (oy +. 4.0);
+        Cairo.stroke cr
+      in
+
+      let draw_tool_button area tool_id draw_icon =
         area#misc#connect#draw ~callback:(fun cr ->
           let alloc = area#misc#allocation in
           let bw = float_of_int alloc.Gtk.width in
@@ -104,13 +120,13 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
             Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
             Cairo.fill cr
           end;
-          let filled = (tool_id = Selection) in
-          draw_arrow cr ~filled ~alloc;
+          draw_icon cr ~alloc;
           true
         ) |> ignore
       in
-      draw_tool_button selection_btn Selection;
-      draw_tool_button direct_btn Direct_selection;
+      draw_tool_button selection_btn Selection (draw_arrow ~filled:true);
+      draw_tool_button direct_btn Direct_selection (draw_arrow ~filled:false);
+      draw_tool_button line_btn Line draw_line_icon;
 
       (* Click events *)
       let connect_click area tool_id =
@@ -120,12 +136,14 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
             current_tool <- tool_id;
             selection_btn#misc#queue_draw ();
             direct_btn#misc#queue_draw ();
+            line_btn#misc#queue_draw ();
             true
           end else false
         ) |> ignore
       in
       connect_click selection_btn Selection;
       connect_click direct_btn Direct_selection;
+      connect_click line_btn Line;
 
       (* Title bar drag *)
       title_bar#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION];
