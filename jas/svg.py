@@ -165,8 +165,8 @@ def _element_svg(elem: Element, indent: str) -> str:
                   fill=fill, stroke=stroke, opacity=opacity, transform=transform):
             area_attrs = ""
             if tw > 0 and th > 0:
-                area_attrs = (f' width="{_fmt(_px(tw))}"'
-                              f' height="{_fmt(_px(th))}"')
+                area_attrs = (f' style="inline-size: {_fmt(_px(tw))}px;'
+                              f' white-space: pre-wrap;"')
             return (f'{indent}<text x="{_fmt(_px(x))}" y="{_fmt(_px(y))}"'
                     f' font-family="{escape(ff)}" font-size="{_fmt(_px(fs))}"'
                     f'{area_attrs}'
@@ -435,10 +435,18 @@ def _parse_element(node: ET.Element) -> Element | None:
         content = node.text or ""
         ff = node.get("font-family", "sans-serif")
         fs = _pt(float(node.get("font-size", "16")))
-        tw_str = node.get("width")
-        th_str = node.get("height")
-        tw = _pt(float(tw_str)) if tw_str else 0.0
-        th = _pt(float(th_str)) if th_str else 0.0
+        tw = 0.0
+        style = node.get("style", "")
+        if style:
+            import re
+            m = re.search(r'inline-size:\s*([\d.]+)px', style)
+            if m:
+                tw = _pt(float(m.group(1)))
+        # Estimate height from inline-size and content length
+        th = 0.0
+        if tw > 0:
+            lines = max(1, int(len(content) * fs * 0.6 / tw) + 1)
+            th = lines * fs * 1.2
         return Text(
             x=_pt(float(node.get("x", "0"))),
             y=_pt(float(node.get("y", "0"))),
