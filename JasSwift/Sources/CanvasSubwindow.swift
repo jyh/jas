@@ -396,19 +396,20 @@ class CanvasNSView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard dragStart != nil else { return }
         let end = convert(event.locationInWindow, from: nil)
-        commitDrag(to: end)
+        let extend = event.modifierFlags.contains(.shift)
+        commitDrag(to: end, extend: extend)
     }
 
     /// Test helper: simulate a complete drag from start to end point.
-    func simulateDrag(from start: NSPoint, to end: NSPoint) {
+    func simulateDrag(from start: NSPoint, to end: NSPoint, extend: Bool = false) {
         let tool = onToolRead?() ?? currentTool
         guard tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .line || tool == .rect else { return }
         dragStart = start
         dragEnd = end
-        commitDrag(to: end)
+        commitDrag(to: end, extend: extend)
     }
 
-    private func commitDrag(to end: NSPoint) {
+    private func commitDrag(to end: NSPoint, extend: Bool = false) {
         guard let start = dragStart, let controller = controller else {
             dragStart = nil
             dragEnd = nil
@@ -423,7 +424,7 @@ class CanvasNSView: NSView {
             let y = min(start.y, end.y)
             let w = abs(end.x - start.x)
             let h = abs(end.y - start.y)
-            controller.selectRect(x: x, y: y, width: w, height: h)
+            controller.selectRect(x: x, y: y, width: w, height: h, extend: extend)
             return
         }
 
@@ -432,7 +433,7 @@ class CanvasNSView: NSView {
             let y = min(start.y, end.y)
             let w = abs(end.x - start.x)
             let h = abs(end.y - start.y)
-            controller.groupSelectRect(x: x, y: y, width: w, height: h)
+            controller.groupSelectRect(x: x, y: y, width: w, height: h, extend: extend)
             return
         }
 
@@ -441,7 +442,7 @@ class CanvasNSView: NSView {
             let y = min(start.y, end.y)
             let w = abs(end.x - start.x)
             let h = abs(end.y - start.y)
-            controller.directSelectRect(x: x, y: y, width: w, height: h)
+            controller.directSelectRect(x: x, y: y, width: w, height: h, extend: extend)
             return
         }
 

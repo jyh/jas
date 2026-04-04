@@ -250,7 +250,17 @@ class Controller:
         new_layers = doc.layers[:idx] + (new_layer,) + doc.layers[idx + 1:]
         self._model.document = replace(doc, layers=new_layers)
 
-    def select_rect(self, x: float, y: float, width: float, height: float) -> None:
+    @staticmethod
+    def _toggle_selection(current: Selection, new: Selection) -> Selection:
+        """Toggle: add elements not in current, remove elements already in current."""
+        current_paths = {es.path for es in current}
+        new_paths = {es.path for es in new}
+        result = {es for es in current if es.path not in new_paths}
+        result |= {es for es in new if es.path not in current_paths}
+        return frozenset(result)
+
+    def select_rect(self, x: float, y: float, width: float, height: float,
+                    *, extend: bool = False) -> None:
         """Select all elements whose bounds intersect the given rectangle.
 
         Group expansion: if any child of a Group intersects, all children
@@ -272,9 +282,13 @@ class Controller:
                         entries.append(ElementSelection(
                             path=(li, ci),
                             control_points=_all_cps(child)))
-        self._model.document = replace(doc, selection=frozenset(entries))
+        new_sel = frozenset(entries)
+        if extend:
+            new_sel = self._toggle_selection(doc.selection, new_sel)
+        self._model.document = replace(doc, selection=new_sel)
 
-    def group_select_rect(self, x: float, y: float, width: float, height: float) -> None:
+    def group_select_rect(self, x: float, y: float, width: float, height: float,
+                          *, extend: bool = False) -> None:
         """Group selection marquee: selects individual elements with all
         control points.  Groups are traversed (not expanded) so elements
         inside groups can be individually selected.
@@ -295,9 +309,13 @@ class Controller:
         for li, layer in enumerate(doc.layers):
             _check((li,), layer)
 
-        self._model.document = replace(doc, selection=frozenset(entries))
+        new_sel = frozenset(entries)
+        if extend:
+            new_sel = self._toggle_selection(doc.selection, new_sel)
+        self._model.document = replace(doc, selection=new_sel)
 
-    def direct_select_rect(self, x: float, y: float, width: float, height: float) -> None:
+    def direct_select_rect(self, x: float, y: float, width: float, height: float,
+                           *, extend: bool = False) -> None:
         """Direct selection marquee: select individual elements and only the
         control points that fall within the rectangle.  Groups are not
         expanded — elements inside groups can be individually selected.
@@ -324,7 +342,10 @@ class Controller:
         for li, layer in enumerate(doc.layers):
             _check((li,), layer)
 
-        self._model.document = replace(doc, selection=frozenset(entries))
+        new_sel = frozenset(entries)
+        if extend:
+            new_sel = self._toggle_selection(doc.selection, new_sel)
+        self._model.document = replace(doc, selection=new_sel)
 
     def set_selection(self, selection: Selection) -> None:
         """Set the document selection directly."""

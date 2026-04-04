@@ -307,6 +307,52 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(ctrl.document.selection.isEmpty)
 }
 
+// MARK: - Extend (shift-toggle) selection tests
+
+@Test func extendAddsNewElement() {
+    let r1 = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
+    let r2 = Element.rect(JasRect(x: 50, y: 50, width: 10, height: 10))
+    let layer = JasLayer(name: "L0", children: [r1, r2])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.selectRect(x: -1, y: -1, width: 12, height: 12)
+    #expect(selPaths(ctrl.document.selection) == [[0, 0]])
+    ctrl.selectRect(x: 49, y: 49, width: 12, height: 12, extend: true)
+    #expect(selPaths(ctrl.document.selection) == [[0, 0], [0, 1]])
+}
+
+@Test func extendRemovesExistingElement() {
+    let r1 = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
+    let r2 = Element.rect(JasRect(x: 50, y: 50, width: 10, height: 10))
+    let layer = JasLayer(name: "L0", children: [r1, r2])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.selectRect(x: -1, y: -1, width: 70, height: 70)
+    #expect(selPaths(ctrl.document.selection) == [[0, 0], [0, 1]])
+    ctrl.selectRect(x: -1, y: -1, width: 12, height: 12, extend: true)
+    #expect(selPaths(ctrl.document.selection) == [[0, 1]])
+}
+
+@Test func extendDirectSelect() {
+    let l1 = Element.line(JasLine(x1: 0, y1: 0, x2: 5, y2: 5))
+    let l2 = Element.line(JasLine(x1: 50, y1: 50, x2: 55, y2: 55))
+    let layer = JasLayer(name: "L0", children: [l1, l2])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.directSelectRect(x: -1, y: -1, width: 7, height: 7)
+    #expect(selPaths(ctrl.document.selection) == [[0, 0]])
+    ctrl.directSelectRect(x: 49, y: 49, width: 7, height: 7, extend: true)
+    #expect(selPaths(ctrl.document.selection) == [[0, 0], [0, 1]])
+}
+
+@Test func extendGroupSelect() {
+    let r1 = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
+    let r2 = Element.rect(JasRect(x: 50, y: 50, width: 10, height: 10))
+    let layer = JasLayer(name: "L0", children: [r1, r2])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.groupSelectRect(x: -1, y: -1, width: 12, height: 12)
+    #expect(selPaths(ctrl.document.selection) == [[0, 0]])
+    ctrl.groupSelectRect(x: 49, y: 49, width: 12, height: 12, extend: true)
+    #expect(selPaths(ctrl.document.selection) == [[0, 0], [0, 1]])
+}
+
 // MARK: - Control point positions tests
 
 @Test func lineControlPointPositions() {

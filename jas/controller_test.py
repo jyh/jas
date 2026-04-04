@@ -336,6 +336,57 @@ class GroupSelectionControllerTest(absltest.TestCase):
         self.assertIn((0, 0, 1), paths)
 
 
+class ExtendSelectionTest(absltest.TestCase):
+
+    def test_extend_adds_new_element(self):
+        """Shift-marquee adds a new element to the existing selection."""
+        rect1 = Rect(x=0, y=0, width=10, height=10)
+        rect2 = Rect(x=50, y=50, width=10, height=10)
+        layer = Layer(children=(rect1, rect2), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        # Select rect1
+        ctrl.select_rect(-1, -1, 12, 12)
+        self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 0)}))
+        # Shift-select rect2 — should add to selection
+        ctrl.select_rect(49, 49, 12, 12, extend=True)
+        self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 0), (0, 1)}))
+
+    def test_extend_removes_existing_element(self):
+        """Shift-marquee removes an already-selected element."""
+        rect1 = Rect(x=0, y=0, width=10, height=10)
+        rect2 = Rect(x=50, y=50, width=10, height=10)
+        layer = Layer(children=(rect1, rect2), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        # Select both
+        ctrl.select_rect(-1, -1, 70, 70)
+        self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 0), (0, 1)}))
+        # Shift-select rect1 again — should remove it
+        ctrl.select_rect(-1, -1, 12, 12, extend=True)
+        self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 1)}))
+
+    def test_extend_direct_select(self):
+        """Shift works with direct_select_rect too."""
+        line1 = Line(x1=0, y1=0, x2=5, y2=5)
+        line2 = Line(x1=50, y1=50, x2=55, y2=55)
+        layer = Layer(children=(line1, line2), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        ctrl.direct_select_rect(-1, -1, 7, 7)
+        self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 0)}))
+        ctrl.direct_select_rect(49, 49, 7, 7, extend=True)
+        self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 0), (0, 1)}))
+
+    def test_extend_group_select(self):
+        """Shift works with group_select_rect too."""
+        rect1 = Rect(x=0, y=0, width=10, height=10)
+        rect2 = Rect(x=50, y=50, width=10, height=10)
+        layer = Layer(children=(rect1, rect2), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        ctrl.group_select_rect(-1, -1, 12, 12)
+        self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 0)}))
+        ctrl.group_select_rect(49, 49, 12, 12, extend=True)
+        self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 0), (0, 1)}))
+
+
 class ControlPointPositionsTest(absltest.TestCase):
 
     def test_line_control_points(self):

@@ -261,6 +261,27 @@ let () =
   gs_rctrl#group_select_rect 200.0 200.0 10.0 10.0;
   assert (Jas.Document.PathMap.is_empty gs_rctrl#document.Jas.Document.selection);
 
+  (* === Extend (shift-toggle) selection tests === *)
+
+  let ext_rect1 = make_rect 0.0 0.0 10.0 10.0 in
+  let ext_rect2 = make_rect 50.0 50.0 10.0 10.0 in
+  let ext_layer = make_layer ~name:"L0" [ext_rect1; ext_rect2] in
+  let ext_doc = Jas.Document.make_document [ext_layer] in
+  let ext_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:ext_doc ()) () in
+
+  (* extend adds new element *)
+  ext_ctrl#select_rect (-1.0) (-1.0) 12.0 12.0;
+  assert (Jas.Document.PathMap.mem [0; 0] ext_ctrl#document.Jas.Document.selection);
+  assert (not (Jas.Document.PathMap.mem [0; 1] ext_ctrl#document.Jas.Document.selection));
+  ext_ctrl#select_rect ~extend:true 49.0 49.0 12.0 12.0;
+  assert (Jas.Document.PathMap.mem [0; 0] ext_ctrl#document.Jas.Document.selection);
+  assert (Jas.Document.PathMap.mem [0; 1] ext_ctrl#document.Jas.Document.selection);
+
+  (* extend removes existing element *)
+  ext_ctrl#select_rect ~extend:true (-1.0) (-1.0) 12.0 12.0;
+  assert (not (Jas.Document.PathMap.mem [0; 0] ext_ctrl#document.Jas.Document.selection));
+  assert (Jas.Document.PathMap.mem [0; 1] ext_ctrl#document.Jas.Document.selection);
+
   (* === Control point positions tests === *)
 
   let cp_line2 = make_line 10.0 20.0 30.0 40.0 in

@@ -233,7 +233,15 @@ public class Controller {
                                      selection: doc.selection)
     }
 
-    public func selectRect(x: Double, y: Double, width: Double, height: Double) {
+    private func toggleSelection(_ current: Selection, _ newSel: Selection) -> Selection {
+        let currentPaths = Set(current.map(\.path))
+        let newPaths = Set(newSel.map(\.path))
+        var result = current.filter { !newPaths.contains($0.path) }
+        result.formUnion(newSel.filter { !currentPaths.contains($0.path) })
+        return result
+    }
+
+    public func selectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
         let doc = model.document
         var selection: Selection = []
         for (li, layer) in doc.layers.enumerated() {
@@ -254,11 +262,12 @@ public class Controller {
                 }
             }
         }
+        let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
         model.document = JasDocument(title: doc.title, layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer, selection: selection)
+                                     selectedLayer: doc.selectedLayer, selection: finalSel)
     }
 
-    public func groupSelectRect(x: Double, y: Double, width: Double, height: Double) {
+    public func groupSelectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
         let doc = model.document
         var selection: Selection = []
 
@@ -278,11 +287,12 @@ public class Controller {
         for (li, layer) in doc.layers.enumerated() {
             check([li], .layer(layer))
         }
+        let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
         model.document = JasDocument(title: doc.title, layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer, selection: selection)
+                                     selectedLayer: doc.selectedLayer, selection: finalSel)
     }
 
-    public func directSelectRect(x: Double, y: Double, width: Double, height: Double) {
+    public func directSelectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
         let doc = model.document
         var selection: Selection = []
 
@@ -307,8 +317,9 @@ public class Controller {
         for (li, layer) in doc.layers.enumerated() {
             check([li], .layer(layer))
         }
+        let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
         model.document = JasDocument(title: doc.title, layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer, selection: selection)
+                                     selectedLayer: doc.selectedLayer, selection: finalSel)
     }
 
     public func setSelection(_ selection: Selection) {

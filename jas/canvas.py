@@ -324,13 +324,14 @@ class CanvasWidget(QWidget):
             tool = self._current_tool
             self._drag_start = None
             self._drag_end = None
+            extend = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
             # Selection tool: marquee select
             if tool == Tool.SELECTION:
                 x = min(start.x(), end.x())
                 y = min(start.y(), end.y())
                 w = abs(end.x() - start.x())
                 h = abs(end.y() - start.y())
-                self._controller.select_rect(x, y, w, h)
+                self._controller.select_rect(x, y, w, h, extend=extend)
                 return
             # Group selection tool: marquee without group expansion
             if tool == Tool.GROUP_SELECTION:
@@ -338,7 +339,7 @@ class CanvasWidget(QWidget):
                 y = min(start.y(), end.y())
                 w = abs(end.x() - start.x())
                 h = abs(end.y() - start.y())
-                self._controller.group_select_rect(x, y, w, h)
+                self._controller.group_select_rect(x, y, w, h, extend=extend)
                 return
             # Direct selection tool: marquee with individual CP selection
             if tool == Tool.DIRECT_SELECTION:
@@ -346,7 +347,7 @@ class CanvasWidget(QWidget):
                 y = min(start.y(), end.y())
                 w = abs(end.x() - start.x())
                 h = abs(end.y() - start.y())
-                self._controller.direct_select_rect(x, y, w, h)
+                self._controller.direct_select_rect(x, y, w, h, extend=extend)
                 return
             # Create the element based on current tool
             if tool == Tool.LINE:

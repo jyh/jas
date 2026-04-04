@@ -459,26 +459,27 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
           let ey = GdkEvent.Button.y ev in
           line_drag_start <- None;
           line_drag_end <- None;
+          let extend = Gdk.Convert.test_modifier `SHIFT (GdkEvent.Button.state ev) in
           if toolbar#current_tool = Toolbar.Selection then begin
             let x = min sx ex in
             let y = min sy ey in
             let w = abs_float (ex -. sx) in
             let h = abs_float (ey -. sy) in
-            controller#select_rect x y w h;
+            controller#select_rect ~extend x y w h;
             true
           end else if toolbar#current_tool = Toolbar.Group_selection then begin
             let x = min sx ex in
             let y = min sy ey in
             let w = abs_float (ex -. sx) in
             let h = abs_float (ey -. sy) in
-            controller#group_select_rect x y w h;
+            controller#group_select_rect ~extend x y w h;
             true
           end else if toolbar#current_tool = Toolbar.Direct_selection then begin
             let x = min sx ex in
             let y = min sy ey in
             let w = abs_float (ex -. sx) in
             let h = abs_float (ey -. sy) in
-            controller#direct_select_rect x y w h;
+            controller#direct_select_rect ~extend x y w h;
             true
           end else
           let default_stroke = Some Element.{
