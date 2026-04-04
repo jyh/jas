@@ -529,12 +529,15 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
           line_drag_start <- None;
           line_drag_end <- None;
           moving <- false;
+          let option = Gdk.Convert.test_modifier `MOD1 (GdkEvent.Button.state ev) in
           if was_moving then begin
             let (ex, ey) = if shift then constrain_angle sx sy raw_ex raw_ey else (raw_ex, raw_ey) in
             let dx = ex -. sx in
             let dy = ey -. sy in
-            if dx <> 0.0 || dy <> 0.0 then
-              controller#move_selection dx dy;
+            if dx <> 0.0 || dy <> 0.0 then begin
+              if option then controller#copy_selection dx dy
+              else controller#move_selection dx dy
+            end;
             canvas_area#misc#queue_draw ();
             true
           end else

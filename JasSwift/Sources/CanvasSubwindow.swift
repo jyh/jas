@@ -480,7 +480,8 @@ class CanvasNSView: NSView {
         guard dragStart != nil else { return }
         let end = convert(event.locationInWindow, from: nil)
         let shift = event.modifierFlags.contains(.shift)
-        commitDrag(to: end, shift: shift)
+        let option = event.modifierFlags.contains(.option)
+        commitDrag(to: end, shift: shift, option: option)
     }
 
     /// Test helper: simulate a complete drag from start to end point.
@@ -492,7 +493,7 @@ class CanvasNSView: NSView {
         commitDrag(to: end, shift: extend)
     }
 
-    private func commitDrag(to rawEnd: NSPoint, shift: Bool = false) {
+    private func commitDrag(to rawEnd: NSPoint, shift: Bool = false, option: Bool = false) {
         guard let start = dragStart, let controller = controller else {
             dragStart = nil
             dragEnd = nil
@@ -514,7 +515,11 @@ class CanvasNSView: NSView {
             let dx = end.x - start.x
             let dy = end.y - start.y
             if dx != 0 || dy != 0 {
-                controller.moveSelection(dx: dx, dy: dy)
+                if option {
+                    controller.copySelection(dx: dx, dy: dy)
+                } else {
+                    controller.moveSelection(dx: dx, dy: dy)
+                }
             }
             needsDisplay = true
             return

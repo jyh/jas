@@ -334,6 +334,26 @@ class controller ?(model = Model.create ()) () =
         Document.replace_element acc path new_elem
       ) doc.Document.selection doc in
       model#set_document new_doc
+
+    method copy_selection (dx : float) (dy : float) =
+      let doc = model#document in
+      (* Sort paths in reverse so insertions don't shift earlier paths *)
+      let sorted_sels = Document.PathMap.bindings doc.Document.selection
+        |> List.sort (fun (a, _) (b, _) -> compare b a) in
+      let (new_doc, new_sel) = List.fold_left (fun (acc_doc, acc_sel) (_path, es) ->
+        let elem = Document.get_element acc_doc es.Document.es_path in
+        let copied = Element.move_control_points elem es.Document.es_control_points dx dy in
+        let doc' = Document.insert_element_after acc_doc es.Document.es_path copied in
+        let copy_path = match List.rev es.Document.es_path with
+          | last :: rest -> List.rev ((last + 1) :: rest)
+          | [] -> failwith "empty path"
+        in
+        let all_cps = List.init (Element.control_point_count copied) Fun.id in
+        let copy_es = Document.make_element_selection
+          ~control_points:all_cps copy_path in
+        (doc', Document.PathMap.add copy_path copy_es acc_sel)
+      ) (doc, Document.PathMap.empty) sorted_sels in
+      model#set_document { new_doc with Document.selection = new_sel }
   end
 
 let create ?model () = new controller ?model ()
