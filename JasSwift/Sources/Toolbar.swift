@@ -60,6 +60,20 @@ public struct ToolbarView {
             case .rect:
                 let rect = CGRect(x: ox + 4, y: oy + 6, width: 20, height: 16)
                 context.stroke(Path(rect), with: .color(color), lineWidth: 1.5)
+
+            case .polygon:
+                let cx = ox + 14.0, cy = oy + 14.0, r = 11.0
+                let n = 6
+                var path = Path()
+                for i in 0..<n {
+                    let angle = -.pi / 2 + 2 * .pi * Double(i) / Double(n)
+                    let px = cx + r * cos(angle)
+                    let py = cy + r * sin(angle)
+                    if i == 0 { path.move(to: CGPoint(x: px, y: py)) }
+                    else { path.addLine(to: CGPoint(x: px, y: py)) }
+                }
+                path.closeSubpath()
+                context.stroke(path, with: .color(color), lineWidth: 1.5)
             }
         }
     }
@@ -151,6 +165,8 @@ private struct ArrowSlotButton: View {
         switch tool {
         case .directSelection: return "Direct Selection"
         case .groupSelection: return "Group Selection"
+        case .rect: return "Rectangle"
+        case .polygon: return "Polygon"
         default: return tool.rawValue
         }
     }
