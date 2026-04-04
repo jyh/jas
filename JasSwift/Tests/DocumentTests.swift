@@ -59,11 +59,11 @@ private func makeTestDoc() -> JasDocument {
 }
 
 @Test func selectionWithPaths() {
-    let sel: Selection = [[0, 0], [0, 1]]
+    let sel: Selection = [ElementSelection(path: [0, 0]), ElementSelection(path: [0, 1])]
     let doc = JasDocument(layers: makeTestDoc().layers, selection: sel)
     #expect(doc.selection.count == 2)
-    #expect(doc.selection.contains([0, 0]))
-    #expect(doc.selection.contains([0, 1]))
+    #expect(doc.selectedPaths.contains([0, 0]))
+    #expect(doc.selectedPaths.contains([0, 1]))
 }
 
 @Test func getElementLayer() {
@@ -128,10 +128,10 @@ private func makeTestDoc() -> JasDocument {
 }
 
 @Test func replaceElementPreservesSelection() {
-    let sel: Selection = [[0, 1]]
+    let sel: Selection = [ElementSelection(path: [0, 1])]
     let doc = JasDocument(layers: makeTestDoc().layers, selection: sel)
     let doc2 = doc.replaceElement([0, 0], with: .rect(JasRect(x: 1, y: 1, width: 2, height: 2)))
-    #expect(doc2.selection == sel)
+    #expect(doc2.selectedPaths == doc.selectedPaths)
 }
 
 @Test func replaceElementReturnsLayerType() {

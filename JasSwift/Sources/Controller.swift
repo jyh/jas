@@ -188,6 +188,10 @@ private func elementIntersectsRect(_ elem: Element,
     }
 }
 
+private func allCPs(_ elem: Element) -> Set<Int> {
+    Set(0..<elem.controlPointCount)
+}
+
 public class Controller {
     public let model: JasModel
 
@@ -238,12 +242,14 @@ public class Controller {
                     let anyHit = g.children.contains { elementIntersectsRect($0, x, y, width, height) }
                     if anyHit {
                         for gi in 0..<g.children.count {
-                            selection.insert([li, ci, gi])
+                            selection.insert(ElementSelection(path: [li, ci, gi],
+                                                              controlPoints: allCPs(g.children[gi])))
                         }
                     }
                 } else {
                     if elementIntersectsRect(child, x, y, width, height) {
-                        selection.insert([li, ci])
+                        selection.insert(ElementSelection(path: [li, ci],
+                                                          controlPoints: allCPs(child)))
                     }
                 }
             }
@@ -265,13 +271,27 @@ public class Controller {
             let parentPath = Array(path.dropLast())
             let parent = doc.getElement(parentPath)
             if case .group(let g) = parent {
-                let selection: Selection = Set((0..<g.children.count).map { parentPath + [$0] })
+                let selection: Selection = Set((0..<g.children.count).map {
+                    ElementSelection(path: parentPath + [$0],
+                                     controlPoints: allCPs(g.children[$0]))
+                })
                 model.document = JasDocument(title: doc.title, layers: doc.layers,
                                              selectedLayer: doc.selectedLayer, selection: selection)
                 return
             }
         }
+        let elem = doc.getElement(path)
         model.document = JasDocument(title: doc.title, layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer, selection: [path])
+                                     selectedLayer: doc.selectedLayer,
+                                     selection: [ElementSelection(path: path,
+                                                                   controlPoints: allCPs(elem))])
+    }
+
+    public func selectControlPoint(path: ElementPath, index: Int) {
+        precondition(!path.isEmpty, "Path must be non-empty")
+        let doc = model.document
+        let es = ElementSelection(path: path, selected: true, controlPoints: [index])
+        model.document = JasDocument(title: doc.title, layers: doc.layers,
+                                     selectedLayer: doc.selectedLayer, selection: [es])
     }
 }

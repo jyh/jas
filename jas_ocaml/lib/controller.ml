@@ -167,6 +167,8 @@ let element_intersects_rect (elem : Element.element) rx ry rw rh =
     let (bx, by, bw, bh) = Element.bounds elem in
     rects_intersect bx by bw bh rx ry rw rh
 
+let all_cps elem = List.init (Element.control_point_count elem) Fun.id
+
 class controller ?(model = Model.create ()) () =
   object (_self)
     method model = model
@@ -201,7 +203,7 @@ class controller ?(model = Model.create ()) () =
 
     method select_rect x y w h =
       let doc = model#document in
-      let selection = ref Document.PathSet.empty in
+      let selection = ref Document.PathMap.empty in
       List.iteri (fun li layer ->
         match layer with
         | Element.Layer { children; _ } ->
@@ -212,12 +214,16 @@ class controller ?(model = Model.create ()) () =
                 element_intersects_rect c x y w h
               ) gc in
               if any_hit then
-                List.iteri (fun gi _ ->
-                  selection := Document.PathSet.add [li; ci; gi] !selection
+                List.iteri (fun gi gc_elem ->
+                  let path = [li; ci; gi] in
+                  selection := Document.PathMap.add path
+                    (Document.make_element_selection ~control_points:(all_cps gc_elem) path) !selection
                 ) gc
             | _ ->
               if element_intersects_rect child x y w h then
-                selection := Document.PathSet.add [li; ci] !selection
+                let path = [li; ci] in
+                selection := Document.PathMap.add path
+                  (Document.make_element_selection ~control_points:(all_cps child) path) !selection
           ) children
         | _ -> ()
       ) doc.Document.layers;
@@ -236,13 +242,31 @@ class controller ?(model = Model.create ()) () =
           let parent = Document.get_element doc parent_path in
           match parent with
           | Element.Group { children; _ } ->
-            let selection = List.init (List.length children) (fun i -> parent_path @ [i]) in
-            let selection = Document.PathSet.of_list selection in
+            let selection = List.fold_left (fun acc i ->
+              let p = parent_path @ [i] in
+              let elem = List.nth children i in
+              Document.PathMap.add p
+                (Document.make_element_selection ~control_points:(all_cps elem) p) acc
+            ) Document.PathMap.empty (List.init (List.length children) Fun.id) in
             model#set_document { doc with Document.selection = selection }
           | _ ->
-            model#set_document { doc with Document.selection = Document.PathSet.singleton path }
+            let elem = Document.get_element doc path in
+            model#set_document { doc with Document.selection =
+              Document.PathMap.singleton path
+                (Document.make_element_selection ~control_points:(all_cps elem) path) }
         else
-          model#set_document { doc with Document.selection = Document.PathSet.singleton path }
+          let elem = Document.get_element doc path in
+          model#set_document { doc with Document.selection =
+            Document.PathMap.singleton path
+              (Document.make_element_selection ~control_points:(all_cps elem) path) }
+
+    method select_control_point (path : Document.element_path) (index : int) =
+      match path with
+      | [] -> failwith "path must be non-empty"
+      | _ ->
+        let es = Document.make_element_selection ~control_points:[index] path in
+        model#set_document { model#document with Document.selection =
+          Document.PathMap.singleton path es }
   end
 
 let create ?model () = new controller ?model ()

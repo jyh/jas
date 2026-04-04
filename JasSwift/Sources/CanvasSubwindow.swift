@@ -243,7 +243,7 @@ private func controlPoints(_ elem: Element) -> [(CGFloat, CGFloat)] {
     }
 }
 
-private func drawElementOverlay(_ ctx: CGContext, _ elem: Element) {
+private func drawElementOverlay(_ ctx: CGContext, _ elem: Element, selectedCPs: Set<Int> = []) {
     ctx.setStrokeColor(selectionColor)
     ctx.setLineWidth(1.0)
     ctx.setLineDash(phase: 0, lengths: [])
@@ -290,9 +290,13 @@ private func drawElementOverlay(_ ctx: CGContext, _ elem: Element) {
 
     // Draw handles
     let half = handleSize / 2
-    for (px, py) in controlPoints(elem) {
+    for (i, (px, py)) in controlPoints(elem).enumerated() {
         let r = CGRect(x: px - half, y: py - half, width: handleSize, height: handleSize)
-        ctx.setFillColor(.white)
+        if selectedCPs.contains(i) {
+            ctx.setFillColor(selectionColor)
+        } else {
+            ctx.setFillColor(.white)
+        }
         ctx.fill(r)
         ctx.setStrokeColor(selectionColor)
         ctx.stroke(r)
@@ -308,7 +312,8 @@ private func elemChildren(_ e: Element) -> [Element] {
 }
 
 private func drawSelectionOverlays(_ ctx: CGContext, _ doc: JasDocument) {
-    for path in doc.selection {
+    for es in doc.selection {
+        let path = es.path
         guard !path.isEmpty else { continue }
         ctx.saveGState()
         var node: Element = .layer(doc.layers[path[0]])
@@ -338,7 +343,7 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: JasDocument) {
         case .group(let v): applyTransform(ctx, v.transform)
         case .layer(let v): applyTransform(ctx, v.transform)
         }
-        drawElementOverlay(ctx, node)
+        drawElementOverlay(ctx, node, selectedCPs: es.controlPoints)
         ctx.restoreGState()
     }
 }

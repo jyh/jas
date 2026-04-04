@@ -7,12 +7,13 @@ that replaces the old one in the Model.
 
 from dataclasses import replace
 
-from document import Document, ElementPath, Selection
+from document import Document, ElementPath, ElementSelection, Selection
 from element import (
     Circle, Element, Ellipse, Group, Layer, Line, Path, Polygon, Polyline,
     Rect, Text,
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo,
     ClosePath,
+    control_point_count,
 )
 from model import Model
 
@@ -142,6 +143,11 @@ def _segments_of_element(elem: Element) -> list[tuple[float, float, float, float
             return []
 
 
+def _all_cps(elem: Element) -> frozenset[int]:
+    """Return a frozenset of all control point indices for an element."""
+    return frozenset(range(control_point_count(elem)))
+
+
 def _element_intersects_rect(elem: Element,
                              rx: float, ry: float, rw: float, rh: float) -> bool:
     """Test whether the visible drawn portion of elem intersects the selection rect."""
@@ -251,18 +257,22 @@ class Controller:
         of that Group are selected.
         """
         doc = self._model.document
-        selection: set[ElementPath] = set()
+        entries: list[ElementSelection] = []
         for li, layer in enumerate(doc.layers):
             for ci, child in enumerate(layer.children):
                 if isinstance(child, Group) and not isinstance(child, Layer):
                     if any(_element_intersects_rect(gc, x, y, width, height)
                            for gc in child.children):
-                        for gi in range(len(child.children)):
-                            selection.add((li, ci, gi))
+                        for gi, gc in enumerate(child.children):
+                            entries.append(ElementSelection(
+                                path=(li, ci, gi),
+                                control_points=_all_cps(gc)))
                 else:
                     if _element_intersects_rect(child, x, y, width, height):
-                        selection.add((li, ci))
-        self._model.document = replace(doc, selection=frozenset(selection))
+                        entries.append(ElementSelection(
+                            path=(li, ci),
+                            control_points=_all_cps(child)))
+        self._model.document = replace(doc, selection=frozenset(entries))
 
     def set_selection(self, selection: Selection) -> None:
         """Set the document selection directly."""
@@ -283,8 +293,30 @@ class Controller:
             parent = doc.get_element(parent_path)
             if isinstance(parent, Group) and not isinstance(parent, Layer):
                 selection: Selection = frozenset(
-                    parent_path + (i,) for i in range(len(parent.children))
+                    ElementSelection(path=parent_path + (i,),
+                                     control_points=_all_cps(parent.children[i]))
+                    for i in range(len(parent.children))
                 )
                 self._model.document = replace(doc, selection=selection)
                 return
-        self._model.document = replace(doc, selection=frozenset({path}))
+        elem = doc.get_element(path)
+        self._model.document = replace(
+            doc, selection=frozenset({ElementSelection(path=path,
+                                                       control_points=_all_cps(elem))})
+        )
+
+    def select_control_point(self, path: ElementPath, index: int) -> None:
+        """Select a single control point on an element.
+
+        The element is included in the selection (selected=True) and the
+        given control-point index is marked as selected.
+        """
+        if not path:
+            raise ValueError("Path must be non-empty")
+        self._model.document = replace(
+            self._model.document,
+            selection=frozenset({
+                ElementSelection(path=path, selected=True,
+                                 control_points=frozenset({index}))
+            }),
+        )

@@ -241,7 +241,7 @@ let control_points (elem : Element.element) =
     let (bx, by, bw, bh) = Element.bounds elem in
     [(bx, by); (bx +. bw, by); (bx +. bw, by +. bh); (bx, by +. bh)]
 
-let draw_element_overlay cr (elem : Element.element) =
+let draw_element_overlay cr (elem : Element.element) (selected_cps : int list) =
   let open Element in
   Cairo.set_source_rgb cr 0.0 0.47 1.0;
   Cairo.set_line_width cr 1.0;
@@ -283,9 +283,12 @@ let draw_element_overlay cr (elem : Element.element) =
   end;
   (* Draw handles *)
   let half = handle_size /. 2.0 in
-  List.iter (fun (px, py) ->
+  List.iteri (fun i (px, py) ->
     Cairo.rectangle cr (px -. half) (py -. half) ~w:handle_size ~h:handle_size;
-    Cairo.set_source_rgb cr 1.0 1.0 1.0;
+    if List.mem i selected_cps then
+      Cairo.set_source_rgb cr 0.0 0.47 1.0
+    else
+      Cairo.set_source_rgb cr 1.0 1.0 1.0;
     Cairo.fill_preserve cr;
     Cairo.set_source_rgb cr 0.0 0.47 1.0;
     Cairo.stroke cr
@@ -293,7 +296,7 @@ let draw_element_overlay cr (elem : Element.element) =
 
 let draw_selection_overlays cr (doc : Document.document) =
   let open Document in
-  PathSet.iter (fun path ->
+  PathMap.iter (fun path (es : element_selection) ->
     match path with
     | [] -> ()
     | _ ->
@@ -330,7 +333,7 @@ let draw_selection_overlays cr (doc : Document.document) =
         | Element.Polyline { transform; _ } | Element.Polygon { transform; _ }
         | Element.Path { transform; _ } | Element.Text { transform; _ }
         | Element.Group { transform; _ } | Element.Layer { transform; _ } -> transform);
-      draw_element_overlay cr !node;
+      draw_element_overlay cr !node es.es_control_points;
       Cairo.restore cr
   ) doc.selection
 

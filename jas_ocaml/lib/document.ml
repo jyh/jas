@@ -18,7 +18,20 @@ module PathSet = Set.Make(struct
   let compare = compare
 end)
 
-type selection = PathSet.t
+(** Per-element selection state. *)
+type element_selection = {
+  es_path : element_path;
+  es_selected : bool;
+  es_control_points : int list;
+}
+
+(** A selection is a map from element path to its selection state. *)
+module PathMap = Map.Make(struct
+  type t = element_path
+  let compare = compare
+end)
+
+type selection = element_selection PathMap.t
 
 (** A document consisting of a title and an ordered list of layers. *)
 type document = {
@@ -28,10 +41,22 @@ type document = {
   selection : selection;
 }
 
-let make_document ?(title = "Untitled") ?(selected_layer = 0) ?(selection = PathSet.empty) layers =
+let make_document ?(title = "Untitled") ?(selected_layer = 0) ?(selection = PathMap.empty) layers =
   { title; layers; selected_layer; selection }
 
-let default_document () = make_document ~title:"Untitled" [Element.make_layer []]
+let make_element_selection ?(selected = true) ?(control_points = []) path =
+  { es_path = path; es_selected = selected; es_control_points = control_points }
+
+(** Return the set of all element paths in the selection. *)
+let selected_paths sel =
+  PathMap.fold (fun path _ acc -> PathSet.add path acc) sel PathSet.empty
+
+(** Return the element_selection for the given path, or None. *)
+let get_element_selection sel path =
+  PathMap.find_opt path sel
+
+let default_document () = make_document ~title:"Untitled"
+  ~selection:PathMap.empty [Element.make_layer []]
 
 let bounds doc =
   match doc.layers with

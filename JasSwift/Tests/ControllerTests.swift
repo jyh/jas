@@ -1,6 +1,16 @@
 import Testing
 @testable import JasLib
 
+/// Helper: create a Selection from element paths.
+private func sel(_ paths: ElementPath...) -> Selection {
+    Set(paths.map { ElementSelection(path: $0) })
+}
+
+/// Helper: extract the set of paths from a Selection.
+private func selPaths(_ selection: Selection) -> Set<ElementPath> {
+    Set(selection.map(\.path))
+}
+
 @Test func controllerDefaultDocument() {
     let ctrl = Controller()
     #expect(ctrl.document.title == "Untitled")
@@ -75,14 +85,14 @@ private func makeSelectionCtrl() -> Controller {
 
 @Test func controllerSetSelection() {
     let ctrl = makeSelectionCtrl()
-    let sel: Selection = [[0, 0]]
-    ctrl.setSelection(sel)
-    #expect(ctrl.document.selection == sel)
+    let s = sel([0, 0])
+    ctrl.setSelection(s)
+    #expect(selPaths(ctrl.document.selection) == [[0, 0]])
 }
 
 @Test func controllerSetSelectionClears() {
     let ctrl = makeSelectionCtrl()
-    ctrl.setSelection([[0, 0]])
+    ctrl.setSelection(sel([0, 0]))
     ctrl.setSelection([])
     #expect(ctrl.document.selection.isEmpty)
 }
@@ -90,19 +100,19 @@ private func makeSelectionCtrl() -> Controller {
 @Test func controllerSelectElementDirectChild() {
     let ctrl = makeSelectionCtrl()
     ctrl.selectElement([0, 0])
-    #expect(ctrl.document.selection == [[0, 0]])
+    #expect(selPaths(ctrl.document.selection) == [[0, 0]])
 }
 
 @Test func controllerSelectElementInGroup() {
     let ctrl = makeSelectionCtrl()
     ctrl.selectElement([0, 1, 0])
-    #expect(ctrl.document.selection == [[0, 1, 0], [0, 1, 1]])
+    #expect(selPaths(ctrl.document.selection) == [[0, 1, 0], [0, 1, 1]])
 }
 
 @Test func controllerSelectElementInGroupOtherChild() {
     let ctrl = makeSelectionCtrl()
     ctrl.selectElement([0, 1, 1])
-    #expect(ctrl.document.selection == [[0, 1, 0], [0, 1, 1]])
+    #expect(selPaths(ctrl.document.selection) == [[0, 1, 0], [0, 1, 1]])
 }
 
 @Test func controllerSelectElementNotifies() {
@@ -116,7 +126,7 @@ private func makeSelectionCtrl() -> Controller {
 @Test func controllerSelectElementLayerPath() {
     let ctrl = makeSelectionCtrl()
     ctrl.selectElement([0])
-    #expect(ctrl.document.selection == [[0]])
+    #expect(selPaths(ctrl.document.selection) == [[0]])
 }
 
 // MARK: - Marquee selection tests
@@ -133,7 +143,7 @@ private func makeMarqueeCtrl() -> Controller {
 @Test func selectRectHitsElement() {
     let ctrl = makeMarqueeCtrl()
     ctrl.selectRect(x: 99, y: 99, width: 12, height: 12)
-    #expect(ctrl.document.selection.contains([0, 0]))
+    #expect(selPaths(ctrl.document.selection).contains([0, 0]))
 }
 
 @Test func selectRectMissesAll() {
@@ -145,12 +155,12 @@ private func makeMarqueeCtrl() -> Controller {
 @Test func selectRectGroupExpansion() {
     let ctrl = makeMarqueeCtrl()
     ctrl.selectRect(x: -1, y: -1, width: 7, height: 7)
-    #expect(ctrl.document.selection == [[0, 1, 0], [0, 1, 1]])
+    #expect(selPaths(ctrl.document.selection) == [[0, 1, 0], [0, 1, 1]])
 }
 
 @Test func selectRectReplacesPrevious() {
     let ctrl = makeMarqueeCtrl()
-    ctrl.setSelection([[0, 0]])
+    ctrl.setSelection(sel([0, 0]))
     ctrl.selectRect(x: 200, y: 200, width: 10, height: 10)
     #expect(ctrl.document.selection.isEmpty)
 }
@@ -158,9 +168,10 @@ private func makeMarqueeCtrl() -> Controller {
 @Test func selectRectMultipleElements() {
     let ctrl = makeMarqueeCtrl()
     ctrl.selectRect(x: -1, y: -1, width: 120, height: 120)
-    #expect(ctrl.document.selection.contains([0, 0]))
-    #expect(ctrl.document.selection.contains([0, 1, 0]))
-    #expect(ctrl.document.selection.contains([0, 1, 1]))
+    let paths = selPaths(ctrl.document.selection)
+    #expect(paths.contains([0, 0]))
+    #expect(paths.contains([0, 1, 0]))
+    #expect(paths.contains([0, 1, 1]))
 }
 
 // MARK: - Precise geometric hit-testing tests
@@ -169,7 +180,6 @@ private func makeMarqueeCtrl() -> Controller {
     let line = Element.line(JasLine(x1: 0, y1: 0, x2: 100, y2: 100))
     let layer = JasLayer(name: "L0", children: [line])
     let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
-    // Box in upper-right corner of bbox — far from the diagonal
     ctrl.selectRect(x: 80, y: 0, width: 20, height: 20)
     #expect(ctrl.document.selection.isEmpty)
 }
@@ -179,7 +189,7 @@ private func makeMarqueeCtrl() -> Controller {
     let layer = JasLayer(name: "L0", children: [line])
     let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
     ctrl.selectRect(x: 40, y: 40, width: 20, height: 20)
-    #expect(ctrl.document.selection.contains([0, 0]))
+    #expect(selPaths(ctrl.document.selection).contains([0, 0]))
 }
 
 @Test func selectRectStrokeOnlyRectInteriorMisses() {
@@ -196,5 +206,28 @@ private func makeMarqueeCtrl() -> Controller {
     let layer = JasLayer(name: "L0", children: [r])
     let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
     ctrl.selectRect(x: 30, y: 30, width: 10, height: 10)
-    #expect(ctrl.document.selection.contains([0, 0]))
+    #expect(selPaths(ctrl.document.selection).contains([0, 0]))
+}
+
+// MARK: - Control point selection tests
+
+@Test func selectControlPoint() {
+    let line = Element.line(JasLine(x1: 10, y1: 20, x2: 50, y2: 60))
+    let layer = JasLayer(name: "L0", children: [line])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.selectControlPoint(path: [0, 0], index: 1)
+    #expect(ctrl.document.selection.count == 1)
+    let es = ctrl.document.selection.first!
+    #expect(es.path == [0, 0])
+    #expect(es.selected == true)
+    #expect(es.controlPoints == [1])
+}
+
+@Test func defaultElementSelectionFlags() {
+    let ctrl = makeSelectionCtrl()
+    ctrl.selectElement([0, 0])
+    let es = ctrl.document.selection.first!
+    #expect(es.selected == true)
+    // Rect has 4 control points
+    #expect(es.controlPoints == [0, 1, 2, 3])
 }
