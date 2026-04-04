@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QGridLayout, QToolButton, QB
 class Tool(Enum):
     SELECTION = auto()
     DIRECT_SELECTION = auto()
+    LINE = auto()
 
 
 class ToolButton(QToolButton):
@@ -42,6 +43,8 @@ class ToolButton(QToolButton):
             self._draw_selection_arrow(painter)
         elif self.tool == Tool.DIRECT_SELECTION:
             self._draw_direct_selection_arrow(painter)
+        elif self.tool == Tool.LINE:
+            self._draw_line_icon(painter)
 
     def _draw_selection_arrow(self, painter):
         """Filled arrow pointing upper-right."""
@@ -74,6 +77,12 @@ class ToolButton(QToolButton):
         painter.drawPath(path)
 
 
+    def _draw_line_icon(self, painter):
+        """Diagonal line from bottom-left to upper-right."""
+        painter.setPen(QPen(QColor("#cccccc"), 2.0))
+        painter.drawLine(4, 24, 24, 4)
+
+
 class Toolbar(QWidget):
     """Vertical toolbar with tool icons in a 2-column grid."""
 
@@ -99,6 +108,7 @@ class Toolbar(QWidget):
         tools = [
             (Tool.SELECTION, 0, 0),
             (Tool.DIRECT_SELECTION, 0, 1),
+            (Tool.LINE, 1, 0),
         ]
         for tool, row, col in tools:
             btn = ToolButton(tool)

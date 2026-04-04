@@ -13,15 +13,17 @@ let () =
 
   (* Test canvas subwindow with default model *)
   let model = Jas.Model.create () in
+  let controller = Jas.Controller.create ~model () in
   let canvas = Jas.Canvas_subwindow.create
-    ~model ~x:100 ~y:50 ~width:820 ~height:640 fixed in
+    ~model ~controller ~toolbar ~x:100 ~y:50 ~width:820 ~height:640 fixed in
   assert (canvas#title = "Untitled");
 
   (* Test canvas with named document via model *)
   let doc = Jas.Document.make_document ~title:"My Drawing" [] in
   let model2 = Jas.Model.create ~document:doc () in
+  let controller2 = Jas.Controller.create ~model:model2 () in
   let canvas2 = Jas.Canvas_subwindow.create
-    ~model:model2 ~x:100 ~y:50 ~width:820 ~height:640 fixed in
+    ~model:model2 ~controller:controller2 ~toolbar ~x:100 ~y:50 ~width:820 ~height:640 fixed in
   assert (canvas2#title = "My Drawing");
 
   (* Test title updates when model changes document *)
@@ -45,5 +47,7 @@ let () =
   assert (toolbar#current_tool = Jas.Toolbar.Selection);
   toolbar#select_tool Jas.Toolbar.Direct_selection;
   assert (toolbar#current_tool = Jas.Toolbar.Direct_selection);
+  toolbar#select_tool Jas.Toolbar.Line;
+  assert (toolbar#current_tool = Jas.Toolbar.Line);
 
   Printf.printf "All canvas tests passed.\n"

@@ -6,6 +6,7 @@ import AppKit
 public enum Tool: String, CaseIterable {
     case selection
     case directSelection
+    case line
 }
 
 // MARK: - Content View
@@ -18,6 +19,8 @@ public struct ContentView: View {
 
     public init() {}
 
+    private var controller: Controller { Controller(model: model) }
+
     public var body: some View {
         ZStack(alignment: .topLeading) {
             // Workspace background
@@ -26,6 +29,8 @@ public struct ContentView: View {
             // Embedded canvas subwindow (view observes model)
             CanvasSubwindow(
                 model: model,
+                controller: controller,
+                currentTool: $currentTool,
                 position: $canvasPosition,
                 bbox: CanvasBoundingBox()
             )
@@ -54,7 +59,7 @@ struct FloatingToolbar: View {
     private let toolbarWidth: CGFloat = 80
 
     var body: some View {
-        let contentHeight: CGFloat = 40
+        let contentHeight: CGFloat = 76
         let totalHeight = titleBarHeight + contentHeight
 
         VStack(spacing: 0) {
@@ -75,12 +80,18 @@ struct FloatingToolbar: View {
             )
 
             // Tool buttons
-            HStack(spacing: 2) {
-                ToolbarView.toolButton(currentTool: $currentTool, tool: .selection)
-                ToolbarView.toolButton(currentTool: $currentTool, tool: .directSelection)
+            VStack(spacing: 2) {
+                HStack(spacing: 2) {
+                    ToolbarView.toolButton(currentTool: $currentTool, tool: .selection)
+                    ToolbarView.toolButton(currentTool: $currentTool, tool: .directSelection)
+                }
+                HStack(spacing: 2) {
+                    ToolbarView.toolButton(currentTool: $currentTool, tool: .line)
+                    Spacer().frame(width: 32, height: 32)
+                }
             }
             .padding(4)
-            .frame(width: toolbarWidth, height: contentHeight)
+            .frame(width: toolbarWidth)
             .background(Color(nsColor: NSColor(white: 0.30, alpha: 1.0)))
         }
         .border(Color(nsColor: NSColor(white: 0.4, alpha: 1.0)), width: 1)
@@ -100,6 +111,7 @@ struct KeyboardShortcutHandler: NSViewRepresentable {
             switch key.lowercased() {
             case "v": currentTool = .selection
             case "a": currentTool = .directSelection
+            case "\\": currentTool = .line
             default: break
             }
         }
