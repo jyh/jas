@@ -1,5 +1,7 @@
 (** A floating canvas subwindow embedded inside the main workspace. *)
 
+[@@@warning "-32"]
+
 (** Axis-aligned bounding box for the canvas coordinate space. *)
 type bounding_box = {
   bbox_x : float;
