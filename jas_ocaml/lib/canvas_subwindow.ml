@@ -374,17 +374,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
             }
           in
           let line = elem in
-          let doc = controller#document in
-          let idx = doc.Document.selected_layer in
-          let new_layers = List.mapi (fun i l ->
-            if i = idx then
-              match l with
-              | Element.Layer layer ->
-                Element.Layer { layer with children = layer.children @ [line] }
-              | _ -> l
-            else l
-          ) doc.Document.layers in
-          controller#set_document { doc with Document.layers = new_layers };
+          controller#add_element line;
           true
         | _ ->
           line_drag_start <- None;

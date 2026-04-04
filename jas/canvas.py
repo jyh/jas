@@ -257,21 +257,7 @@ class CanvasWidget(QWidget):
                 )
             else:
                 return
-            # Add to the selected layer
-            doc = self._model.document
-            idx = doc.selected_layer
-            layer = doc.layers[idx]
-            new_layer = Layer(
-                name=layer.name,
-                children=layer.children + (elem,),
-                opacity=layer.opacity,
-                transform=layer.transform,
-            )
-            new_layers = doc.layers[:idx] + (new_layer,) + doc.layers[idx + 1:]
-            self._controller.set_document(
-                Document(title=doc.title, layers=new_layers,
-                         selected_layer=idx),
-            )
+            self._controller.add_element(elem)
 
     def paintEvent(self, event):
         painter = QPainter(self)
