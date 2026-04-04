@@ -5,8 +5,187 @@ import Foundation
 /// The Controller provides mutation operations on the Model's document.
 /// Since Document is immutable (a struct), mutations produce a new
 /// Document that replaces the old one in the Model.
-private func boundsIntersect(_ a: BBox, _ b: (Double, Double, Double, Double)) -> Bool {
-    a.x < b.0 + b.2 && a.x + a.width > b.0 && a.y < b.1 + b.3 && a.y + a.height > b.1
+
+// MARK: - Geometry helpers for precise hit-testing
+
+private func pointInRect(_ px: Double, _ py: Double,
+                         _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double) -> Bool {
+    rx <= px && px <= rx + rw && ry <= py && py <= ry + rh
+}
+
+private func cross(_ ox: Double, _ oy: Double, _ ax: Double, _ ay: Double,
+                   _ bx: Double, _ by: Double) -> Double {
+    (ax - ox) * (by - oy) - (ay - oy) * (bx - ox)
+}
+
+private func onSegment(_ px1: Double, _ py1: Double, _ px2: Double, _ py2: Double,
+                       _ qx: Double, _ qy: Double) -> Bool {
+    min(px1, px2) <= qx && qx <= max(px1, px2) &&
+    min(py1, py2) <= qy && qy <= max(py1, py2)
+}
+
+private func segmentsIntersect(_ ax1: Double, _ ay1: Double, _ ax2: Double, _ ay2: Double,
+                               _ bx1: Double, _ by1: Double, _ bx2: Double, _ by2: Double) -> Bool {
+    let d1 = cross(bx1, by1, bx2, by2, ax1, ay1)
+    let d2 = cross(bx1, by1, bx2, by2, ax2, ay2)
+    let d3 = cross(ax1, ay1, ax2, ay2, bx1, by1)
+    let d4 = cross(ax1, ay1, ax2, ay2, bx2, by2)
+    if ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+       ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)) { return true }
+    if d1 == 0 && onSegment(bx1, by1, bx2, by2, ax1, ay1) { return true }
+    if d2 == 0 && onSegment(bx1, by1, bx2, by2, ax2, ay2) { return true }
+    if d3 == 0 && onSegment(ax1, ay1, ax2, ay2, bx1, by1) { return true }
+    if d4 == 0 && onSegment(ax1, ay1, ax2, ay2, bx2, by2) { return true }
+    return false
+}
+
+private func segmentIntersectsRect(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double,
+                                   _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double) -> Bool {
+    if pointInRect(x1, y1, rx, ry, rw, rh) { return true }
+    if pointInRect(x2, y2, rx, ry, rw, rh) { return true }
+    let edges: [(Double, Double, Double, Double)] = [
+        (rx, ry, rx + rw, ry),
+        (rx + rw, ry, rx + rw, ry + rh),
+        (rx + rw, ry + rh, rx, ry + rh),
+        (rx, ry + rh, rx, ry),
+    ]
+    return edges.contains { e in
+        segmentsIntersect(x1, y1, x2, y2, e.0, e.1, e.2, e.3)
+    }
+}
+
+private func rectsIntersect(_ ax: Double, _ ay: Double, _ aw: Double, _ ah: Double,
+                            _ bx: Double, _ by: Double, _ bw: Double, _ bh: Double) -> Bool {
+    ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by
+}
+
+private func circleIntersectsRect(_ cx: Double, _ cy: Double, _ r: Double,
+                                  _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double,
+                                  filled: Bool) -> Bool {
+    let closestX = max(rx, min(cx, rx + rw))
+    let closestY = max(ry, min(cy, ry + rh))
+    let distSq = pow(cx - closestX, 2) + pow(cy - closestY, 2)
+    if !filled {
+        let corners = [(rx, ry), (rx + rw, ry), (rx + rw, ry + rh), (rx, ry + rh)]
+        let maxDistSq = corners.map { pow(cx - $0.0, 2) + pow(cy - $0.1, 2) }.max()!
+        return distSq <= r * r && r * r <= maxDistSq
+    }
+    return distSq <= r * r
+}
+
+private func ellipseIntersectsRect(_ cx: Double, _ cy: Double, _ erx: Double, _ ery: Double,
+                                   _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double,
+                                   filled: Bool) -> Bool {
+    if erx == 0 || ery == 0 { return false }
+    return circleIntersectsRect(cx / erx, cy / ery, 1.0,
+                                rx / erx, ry / ery, rw / erx, rh / ery,
+                                filled: filled)
+}
+
+private func segmentsOfElement(_ elem: Element) -> [(Double, Double, Double, Double)] {
+    switch elem {
+    case .line(let v):
+        return [(v.x1, v.y1, v.x2, v.y2)]
+    case .rect(let v):
+        let x = v.x, y = v.y, w = v.width, h = v.height
+        return [(x, y, x+w, y), (x+w, y, x+w, y+h),
+                (x+w, y+h, x, y+h), (x, y+h, x, y)]
+    case .polyline(let v):
+        guard v.points.count >= 2 else { return [] }
+        return (0..<v.points.count-1).map { i in
+            (v.points[i].0, v.points[i].1, v.points[i+1].0, v.points[i+1].1)
+        }
+    case .polygon(let v):
+        guard v.points.count >= 2 else { return [] }
+        var segs = (0..<v.points.count-1).map { i in
+            (v.points[i].0, v.points[i].1, v.points[i+1].0, v.points[i+1].1)
+        }
+        let last = v.points.last!, first = v.points.first!
+        segs.append((last.0, last.1, first.0, first.1))
+        return segs
+    case .path(let v):
+        var segs: [(Double, Double, Double, Double)] = []
+        var curX = 0.0, curY = 0.0
+        for cmd in v.d {
+            switch cmd {
+            case .moveTo(let x, let y):
+                curX = x; curY = y
+            case .lineTo(let x, let y):
+                segs.append((curX, curY, x, y)); curX = x; curY = y
+            case .curveTo(_, _, _, _, let x, let y),
+                 .smoothCurveTo(_, _, let x, let y),
+                 .quadTo(_, _, let x, let y),
+                 .smoothQuadTo(let x, let y):
+                segs.append((curX, curY, x, y)); curX = x; curY = y
+            case .arcTo(_, _, _, _, _, let x, let y):
+                segs.append((curX, curY, x, y)); curX = x; curY = y
+            case .closePath:
+                break
+            }
+        }
+        return segs
+    default:
+        return []
+    }
+}
+
+private func elementIntersectsRect(_ elem: Element,
+                                   _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double) -> Bool {
+    switch elem {
+    case .line(let v):
+        return segmentIntersectsRect(v.x1, v.y1, v.x2, v.y2, rx, ry, rw, rh)
+    case .rect(let v):
+        if v.fill != nil {
+            return rectsIntersect(v.x, v.y, v.width, v.height, rx, ry, rw, rh)
+        }
+        return segmentsOfElement(elem).contains { s in
+            segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
+        }
+    case .circle(let v):
+        return circleIntersectsRect(v.cx, v.cy, v.r, rx, ry, rw, rh, filled: v.fill != nil)
+    case .ellipse(let v):
+        return ellipseIntersectsRect(v.cx, v.cy, v.rx, v.ry, rx, ry, rw, rh, filled: v.fill != nil)
+    case .polyline(let v):
+        if v.fill != nil {
+            let b = elem.bounds
+            return rectsIntersect(b.x, b.y, b.width, b.height, rx, ry, rw, rh)
+        }
+        return segmentsOfElement(elem).contains { s in
+            segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
+        }
+    case .polygon(let v):
+        if v.fill != nil {
+            if v.points.contains(where: { pointInRect($0.0, $0.1, rx, ry, rw, rh) }) {
+                return true
+            }
+            return segmentsOfElement(elem).contains { s in
+                segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
+            }
+        }
+        return segmentsOfElement(elem).contains { s in
+            segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
+        }
+    case .path(let v):
+        let segs = segmentsOfElement(elem)
+        if v.fill != nil {
+            let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
+            if endpoints.contains(where: { pointInRect($0.s, $0.t, rx, ry, rw, rh) }) {
+                return true
+            }
+            return segs.contains { s in
+                segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
+            }
+        }
+        return segs.contains { s in
+            segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
+        }
+    case .text:
+        let b = elem.bounds
+        return rectsIntersect(b.x, b.y, b.width, b.height, rx, ry, rw, rh)
+    default:
+        let b = elem.bounds
+        return rectsIntersect(b.x, b.y, b.width, b.height, rx, ry, rw, rh)
+    }
 }
 
 public class Controller {
@@ -52,19 +231,18 @@ public class Controller {
 
     public func selectRect(x: Double, y: Double, width: Double, height: Double) {
         let doc = model.document
-        let selRect = (x, y, width, height)
         var selection: Selection = []
         for (li, layer) in doc.layers.enumerated() {
             for (ci, child) in layer.children.enumerated() {
                 if case .group(let g) = child {
-                    let anyHit = g.children.contains { boundsIntersect($0.bounds, selRect) }
+                    let anyHit = g.children.contains { elementIntersectsRect($0, x, y, width, height) }
                     if anyHit {
                         for gi in 0..<g.children.count {
                             selection.insert([li, ci, gi])
                         }
                     }
                 } else {
-                    if boundsIntersect(child.bounds, selRect) {
+                    if elementIntersectsRect(child, x, y, width, height) {
                         selection.insert([li, ci])
                     }
                 }

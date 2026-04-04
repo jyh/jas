@@ -162,3 +162,39 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(ctrl.document.selection.contains([0, 1, 0]))
     #expect(ctrl.document.selection.contains([0, 1, 1]))
 }
+
+// MARK: - Precise geometric hit-testing tests
+
+@Test func selectRectMissesDiagonalLineCorner() {
+    let line = Element.line(JasLine(x1: 0, y1: 0, x2: 100, y2: 100))
+    let layer = JasLayer(name: "L0", children: [line])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    // Box in upper-right corner of bbox — far from the diagonal
+    ctrl.selectRect(x: 80, y: 0, width: 20, height: 20)
+    #expect(ctrl.document.selection.isEmpty)
+}
+
+@Test func selectRectHitsDiagonalLine() {
+    let line = Element.line(JasLine(x1: 0, y1: 0, x2: 100, y2: 100))
+    let layer = JasLayer(name: "L0", children: [line])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.selectRect(x: 40, y: 40, width: 20, height: 20)
+    #expect(ctrl.document.selection.contains([0, 0]))
+}
+
+@Test func selectRectStrokeOnlyRectInteriorMisses() {
+    let r = Element.rect(JasRect(x: 0, y: 0, width: 100, height: 100))
+    let layer = JasLayer(name: "L0", children: [r])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.selectRect(x: 30, y: 30, width: 10, height: 10)
+    #expect(ctrl.document.selection.isEmpty)
+}
+
+@Test func selectRectFilledRectInteriorHits() {
+    let r = Element.rect(JasRect(x: 0, y: 0, width: 100, height: 100,
+                                  fill: JasFill(color: JasColor(r: 1, g: 0, b: 0))))
+    let layer = JasLayer(name: "L0", children: [r])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.selectRect(x: 30, y: 30, width: 10, height: 10)
+    #expect(ctrl.document.selection.contains([0, 0]))
+}

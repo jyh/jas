@@ -139,4 +139,37 @@ let () =
   assert (Jas.Document.PathSet.mem [0; 1; 0] sctrl#document.Jas.Document.selection);
   assert (Jas.Document.PathSet.mem [0; 1; 1] sctrl#document.Jas.Document.selection);
 
+  (* === Precise geometric hit-testing tests === *)
+
+  (* Diagonal line: marquee in bbox corner misses *)
+  let diag_line = make_line 0.0 0.0 100.0 100.0 in
+  let diag_layer = make_layer ~name:"L0" [diag_line] in
+  let diag_doc = Jas.Document.make_document [diag_layer] in
+  let diag_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:diag_doc ()) () in
+  diag_ctrl#select_rect 80.0 0.0 20.0 20.0;
+  assert (Jas.Document.PathSet.is_empty diag_ctrl#document.Jas.Document.selection);
+
+  (* Diagonal line: marquee crossing the line hits *)
+  diag_ctrl#select_rect 40.0 40.0 20.0 20.0;
+  assert (Jas.Document.PathSet.mem [0; 0] diag_ctrl#document.Jas.Document.selection);
+
+  (* Stroke-only rect: marquee inside interior misses *)
+  let stroke_rect = make_rect 0.0 0.0 100.0 100.0 in
+  let sr_layer = make_layer ~name:"L0" [stroke_rect] in
+  let sr_doc = Jas.Document.make_document [sr_layer] in
+  let sr_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:sr_doc ()) () in
+  sr_ctrl#select_rect 30.0 30.0 10.0 10.0;
+  assert (Jas.Document.PathSet.is_empty sr_ctrl#document.Jas.Document.selection);
+
+  (* Filled rect: marquee inside interior hits *)
+  let fill = Some { fill_color = { r = 1.0; g = 0.0; b = 0.0; a = 1.0 } } in
+  let filled_rect = Rect { x = 0.0; y = 0.0; width = 100.0; height = 100.0;
+                            rx = 0.0; ry = 0.0; fill;
+                            stroke = None; opacity = 1.0; transform = None } in
+  let fr_layer = make_layer ~name:"L0" [filled_rect] in
+  let fr_doc = Jas.Document.make_document [fr_layer] in
+  let fr_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:fr_doc ()) () in
+  fr_ctrl#select_rect 30.0 30.0 10.0 10.0;
+  assert (Jas.Document.PathSet.mem [0; 0] fr_ctrl#document.Jas.Document.selection);
+
   Printf.printf "All controller tests passed.\n"
