@@ -131,9 +131,9 @@ let rec element_svg indent (elem : Element.element) =
     Printf.sprintf "%s<path d=\"%s\"%s%s%s%s/>"
       indent (path_data d) (fill_attrs fill) (stroke_attrs stroke)
       (opacity_attr opacity) (transform_attr transform)
-  | Text { x; y; content; font_family; font_size; text_width; text_height; fill; stroke; opacity; transform } ->
-    let area_attrs = if text_width > 0.0 && text_height > 0.0 then
-      Printf.sprintf " width=\"%s\" height=\"%s\"" (fmt (px text_width)) (fmt (px text_height))
+  | Text { x; y; content; font_family; font_size; text_width; text_height = _; fill; stroke; opacity; transform } ->
+    let area_attrs = if text_width > 0.0 then
+      Printf.sprintf " style=\"inline-size: %spx; white-space: pre-wrap;\"" (fmt (px text_width))
     else "" in
     Printf.sprintf "%s<text x=\"%s\" y=\"%s\" font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s>%s</text>"
       indent (fmt (px x)) (fmt (px y)) (escape_xml font_family) (fmt (px font_size))
@@ -365,8 +365,19 @@ let rec parse_element i =
         let content = collect_text i in
         let ff = match get_attr attrs "font-family" with Some s -> s | None -> "sans-serif" in
         let fs = pt (get_attr_f attrs "font-size" 16.0) in
-        let tw = let v = get_attr_f attrs "width" 0.0 in if v > 0.0 then pt v else 0.0 in
-        let th = let v = get_attr_f attrs "height" 0.0 in if v > 0.0 then pt v else 0.0 in
+        let tw = match get_attr attrs "style" with
+          | Some style ->
+            (try
+              let re = Str.regexp {|inline-size:[ ]*\([0-9.]+\)px|} in
+              ignore (Str.search_forward re style 0);
+              pt (float_of_string (Str.matched_group 1 style))
+            with Not_found -> 0.0)
+          | None -> 0.0
+        in
+        let th = if tw > 0.0 then
+          let lines = max 1 (int_of_float (float_of_int (String.length content) *. fs *. 0.6 /. tw) + 1) in
+          float_of_int lines *. fs *. 1.2
+        else 0.0 in
         Some (Element.make_text ~font_family:ff ~font_size:fs ~text_width:tw ~text_height:th ~fill ~stroke ~opacity ~transform
           (pt (get_attr_f attrs "x" 0.0))
           (pt (get_attr_f attrs "y" 0.0))

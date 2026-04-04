@@ -138,7 +138,7 @@ private func elementSvg(_ elem: Element, indent: String) -> String {
 
     case .text(let v):
         let areaAttrs = v.isAreaText
-            ? " width=\"\(fmt(px(v.width)))\" height=\"\(fmt(px(v.height)))\""
+            ? " style=\"inline-size: \(fmt(px(v.width)))px; white-space: pre-wrap;\""
             : ""
         return "\(indent)<text x=\"\(fmt(px(v.x)))\" y=\"\(fmt(px(v.y)))\"" +
             " font-family=\"\(escapeXml(v.fontFamily))\" font-size=\"\(fmt(px(v.fontSize)))\"" +
@@ -388,10 +388,20 @@ private func parseElement(_ node: XMLNode) -> Element? {
         let content = elem.stringValue ?? ""
         let ff = elem.attribute(forName: "font-family")?.stringValue ?? "sans-serif"
         let fs = toPt(attrF(elem, "font-size", 16.0))
-        let twRaw = attrF(elem, "width", 0.0)
-        let thRaw = attrF(elem, "height", 0.0)
-        let tw = twRaw > 0 ? toPt(twRaw) : 0.0
-        let th = thRaw > 0 ? toPt(thRaw) : 0.0
+        var tw = 0.0
+        if let style = elem.attribute(forName: "style")?.stringValue {
+            if let range = style.range(of: #"inline-size:\s*([\d.]+)px"#, options: .regularExpression) {
+                let match = style[range]
+                if let numRange = match.range(of: #"[\d.]+"#, options: .regularExpression) {
+                    tw = toPt(Double(match[numRange]) ?? 0)
+                }
+            }
+        }
+        var th = 0.0
+        if tw > 0 {
+            let lines = max(1, Int(Double(content.count) * fs * 0.6 / tw) + 1)
+            th = Double(lines) * fs * 1.2
+        }
         return .text(JasText(
             x: toPt(attrF(elem, "x")), y: toPt(attrF(elem, "y")),
             content: content, fontFamily: ff, fontSize: fs,
