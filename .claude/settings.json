@@ -15,7 +15,8 @@
       "Bash(python main.py)",
       "Bash(python -m pytest controller_test.py -v -k extend)",
       "Bash(dune test:*)",
-      "Bash(python -m pytest svg_test.py -x -q)"
+      "Bash(python -m pytest svg_test.py -x -q)",
+      "Bash(python -m pytest canvas_test.py -x -q)"
     ]
   }
 }
