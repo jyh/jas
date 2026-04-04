@@ -234,10 +234,25 @@ public class Controller {
     }
 
     private func toggleSelection(_ current: Selection, _ newSel: Selection) -> Selection {
-        let currentPaths = Set(current.map(\.path))
-        let newPaths = Set(newSel.map(\.path))
-        var result = current.filter { !newPaths.contains($0.path) }
-        result.formUnion(newSel.filter { !currentPaths.contains($0.path) })
+        let currentByPath = Dictionary(current.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
+        let newByPath = Dictionary(newSel.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
+        var result: Selection = []
+        // Elements only in current
+        for (path, es) in currentByPath where newByPath[path] == nil {
+            result.insert(es)
+        }
+        // Elements only in new
+        for (path, es) in newByPath where currentByPath[path] == nil {
+            result.insert(es)
+        }
+        // Elements in both: toggle CPs (symmetric difference)
+        for (path, curEs) in currentByPath {
+            guard let newEs = newByPath[path] else { continue }
+            let toggledCPs = curEs.controlPoints.symmetricDifference(newEs.controlPoints)
+            if !toggledCPs.isEmpty {
+                result.insert(ElementSelection(path: path, controlPoints: toggledCPs))
+            }
+        }
         return result
     }
 

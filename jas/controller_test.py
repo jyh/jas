@@ -375,6 +375,28 @@ class ExtendSelectionTest(absltest.TestCase):
         ctrl.direct_select_rect(49, 49, 7, 7, extend=True)
         self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 0), (0, 1)}))
 
+    def test_extend_direct_select_toggles_cps(self):
+        """Shift-direct-select toggles control points, not entire elements."""
+        # Rect at (0,0) size 10x10 — CPs at (0,0), (10,0), (10,10), (0,10)
+        rect = Rect(x=0, y=0, width=10, height=10)
+        layer = Layer(children=(rect,), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        # Direct select top-left corner CP 0 at (0,0)
+        ctrl.direct_select_rect(-1, -1, 2, 2)
+        sel = list(ctrl.document.selection)
+        self.assertEqual(len(sel), 1)
+        self.assertEqual(sel[0].control_points, frozenset({0}))
+        # Shift-direct-select top-right corner CP 1 at (10,0) — should add CP
+        ctrl.direct_select_rect(9, -1, 2, 2, extend=True)
+        sel = list(ctrl.document.selection)
+        self.assertEqual(len(sel), 1)
+        self.assertEqual(sel[0].control_points, frozenset({0, 1}))
+        # Shift-direct-select top-left again — should remove CP 0, keep CP 1
+        ctrl.direct_select_rect(-1, -1, 2, 2, extend=True)
+        sel = list(ctrl.document.selection)
+        self.assertEqual(len(sel), 1)
+        self.assertEqual(sel[0].control_points, frozenset({1}))
+
     def test_extend_group_select(self):
         """Shift works with group_select_rect too."""
         rect1 = Rect(x=0, y=0, width=10, height=10)

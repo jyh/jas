@@ -342,6 +342,25 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(selPaths(ctrl.document.selection) == [[0, 0], [0, 1]])
 }
 
+@Test func extendDirectSelectTogglesCPs() {
+    // Rect at (0,0) size 10x10 — CPs at (0,0), (10,0), (10,10), (0,10)
+    let r = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
+    let layer = JasLayer(name: "L0", children: [r])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    // Direct select top-left corner CP 0 at (0,0)
+    ctrl.directSelectRect(x: -1, y: -1, width: 2, height: 2)
+    let sel0 = ctrl.document.selection.first { $0.path == [0, 0] }!
+    #expect(sel0.controlPoints == [0])
+    // Shift-direct-select top-right corner CP 1 at (10,0) — should add CP
+    ctrl.directSelectRect(x: 9, y: -1, width: 2, height: 2, extend: true)
+    let sel1 = ctrl.document.selection.first { $0.path == [0, 0] }!
+    #expect(sel1.controlPoints == [0, 1])
+    // Shift-direct-select top-left again — should remove CP 0, keep CP 1
+    ctrl.directSelectRect(x: -1, y: -1, width: 2, height: 2, extend: true)
+    let sel2 = ctrl.document.selection.first { $0.path == [0, 0] }!
+    #expect(sel2.controlPoints == [1])
+}
+
 @Test func extendGroupSelect() {
     let r1 = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
     let r2 = Element.rect(JasRect(x: 50, y: 50, width: 10, height: 10))

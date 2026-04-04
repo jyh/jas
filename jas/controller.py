@@ -252,11 +252,30 @@ class Controller:
 
     @staticmethod
     def _toggle_selection(current: Selection, new: Selection) -> Selection:
-        """Toggle: add elements not in current, remove elements already in current."""
-        current_paths = {es.path for es in current}
-        new_paths = {es.path for es in new}
-        result = {es for es in current if es.path not in new_paths}
-        result |= {es for es in new if es.path not in current_paths}
+        """Toggle at the control-point level.
+
+        For elements only in one set, keep them as-is.
+        For elements in both sets, toggle individual control points
+        (symmetric difference).  If no CPs remain, remove the element.
+        """
+        current_by_path = {es.path: es for es in current}
+        new_by_path = {es.path: es for es in new}
+        result: set[ElementSelection] = set()
+        # Elements only in current
+        for path, es in current_by_path.items():
+            if path not in new_by_path:
+                result.add(es)
+        # Elements only in new
+        for path, es in new_by_path.items():
+            if path not in current_by_path:
+                result.add(es)
+        # Elements in both: toggle CPs
+        for path in current_by_path.keys() & new_by_path.keys():
+            cur = current_by_path[path]
+            nw = new_by_path[path]
+            toggled_cps = cur.control_points ^ nw.control_points
+            if toggled_cps:
+                result.add(ElementSelection(path=path, control_points=toggled_cps))
         return frozenset(result)
 
     def select_rect(self, x: float, y: float, width: float, height: float,
