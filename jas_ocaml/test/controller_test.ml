@@ -282,6 +282,24 @@ let () =
   assert (not (Jas.Document.PathMap.mem [0; 0] ext_ctrl#document.Jas.Document.selection));
   assert (Jas.Document.PathMap.mem [0; 1] ext_ctrl#document.Jas.Document.selection);
 
+  (* extend direct select toggles CPs, not entire elements *)
+  let cp_rect = make_rect 0.0 0.0 10.0 10.0 in
+  let cp_layer = make_layer ~name:"L0" [cp_rect] in
+  let cp_doc = Jas.Document.make_document [cp_layer] in
+  let cp_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:cp_doc ()) () in
+  (* Direct select top-left corner CP 0 at (0,0) *)
+  cp_ctrl#direct_select_rect (-1.0) (-1.0) 2.0 2.0;
+  let es0 = Jas.Document.PathMap.find [0; 0] cp_ctrl#document.Jas.Document.selection in
+  assert (List.sort compare es0.Jas.Document.es_control_points = [0]);
+  (* Shift-direct-select top-right corner CP 1 at (10,0) — should add CP *)
+  cp_ctrl#direct_select_rect ~extend:true 9.0 (-1.0) 2.0 2.0;
+  let es1 = Jas.Document.PathMap.find [0; 0] cp_ctrl#document.Jas.Document.selection in
+  assert (List.sort compare es1.Jas.Document.es_control_points = [0; 1]);
+  (* Shift-direct-select top-left again — should remove CP 0, keep CP 1 *)
+  cp_ctrl#direct_select_rect ~extend:true (-1.0) (-1.0) 2.0 2.0;
+  let es2 = Jas.Document.PathMap.find [0; 0] cp_ctrl#document.Jas.Document.selection in
+  assert (List.sort compare es2.Jas.Document.es_control_points = [1]);
+
   (* === Control point positions tests === *)
 
   let cp_line2 = make_line 10.0 20.0 30.0 40.0 in

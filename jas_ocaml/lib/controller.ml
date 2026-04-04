@@ -202,12 +202,20 @@ class controller ?(model = Model.create ()) () =
       model#set_document { doc with Document.layers = new_layers }
 
     method private toggle_selection current new_sel =
-      (* Add elements not in current, remove elements already in current *)
+      (* Toggle at the control-point level.
+         For elements in both sets, toggle individual CPs (symmetric difference).
+         If no CPs remain, remove the element. *)
       let merged = Document.PathMap.merge (fun _path cur nw ->
         match cur, nw with
-        | Some _, Some _ -> None        (* in both: remove *)
-        | None, Some v -> Some v        (* only in new: add *)
-        | Some v, None -> Some v        (* only in current: keep *)
+        | Some cur_es, Some new_es ->
+          let cur_set = List.sort_uniq compare cur_es.Document.es_control_points in
+          let new_set = List.sort_uniq compare new_es.Document.es_control_points in
+          let toggled = List.filter (fun cp -> not (List.mem cp new_set)) cur_set
+                      @ List.filter (fun cp -> not (List.mem cp cur_set)) new_set in
+          if toggled = [] then None
+          else Some { cur_es with Document.es_control_points = toggled }
+        | None, Some v -> Some v
+        | Some v, None -> Some v
         | None, None -> None
       ) current new_sel in
       merged
