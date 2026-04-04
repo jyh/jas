@@ -25,5 +25,15 @@ class type canvas_tool = object
   method deactivate : tool_context -> unit
 end
 
-(** Create a tool instance for the given toolbar tool type. *)
-val create_tool : Toolbar.tool -> canvas_tool
+(** Constrain an angle to 45-degree increments. *)
+val constrain_angle : float -> float -> float -> float -> float * float
+
+(** Number of sides for the polygon tool. *)
+val polygon_sides : int
+
+(** Compute regular polygon vertices. *)
+val regular_polygon_points : float -> float -> float -> float -> int -> (float * float) list
+
+(** Default stroke used by drawing and pen tools. *)
+val default_stroke : Element.stroke option
+

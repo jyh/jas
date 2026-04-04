@@ -403,7 +403,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
     val mutable text_editor : GEdit.entry option = None
     val mutable editing_path : int list option = None
     (* Active tool and tool instances *)
-    val mutable active_tool : Canvas_tool.canvas_tool = Canvas_tool.create_tool Toolbar.Selection
+    val mutable active_tool : Canvas_tool.canvas_tool = Tool_factory.create_tool Toolbar.Selection
     val mutable current_tool_type : Toolbar.tool = Toolbar.Selection
 
     method widget = frame#coerce
@@ -528,7 +528,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         let ctx = _self#tool_context in
         active_tool#deactivate ctx;
         current_tool_type <- new_tool_type;
-        active_tool <- Canvas_tool.create_tool new_tool_type;
+        active_tool <- Tool_factory.create_tool new_tool_type;
         active_tool#activate ctx
       end
 
@@ -536,14 +536,14 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       (* For backward compatibility: deactivate pen tool to finish *)
       let ctx = _self#tool_context in
       active_tool#deactivate ctx;
-      active_tool <- Canvas_tool.create_tool Toolbar.Pen
+      active_tool <- Tool_factory.create_tool Toolbar.Pen
 
     method pen_finish_close =
       _self#pen_finish
 
     method pen_cancel =
       (* Reset pen tool by creating a fresh instance *)
-      active_tool <- Canvas_tool.create_tool Toolbar.Pen;
+      active_tool <- Tool_factory.create_tool Toolbar.Pen;
       canvas_area#misc#queue_draw ()
 
     initializer

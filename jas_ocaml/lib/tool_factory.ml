@@ -1,0 +1,12 @@
+(** Factory for creating tool instances from toolbar enum values. *)
+
+let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
+  match tool with
+  | Toolbar.Selection -> (new Selection_tool.selection_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Direct_selection -> (new Selection_tool.direct_selection_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Group_selection -> (new Selection_tool.group_selection_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Line -> (new Drawing_tool.line_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Rect -> (new Drawing_tool.rect_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Polygon -> (new Drawing_tool.polygon_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Pen -> (new Pen_tool.pen_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Text_tool -> (new Text_tool.text_tool :> Canvas_tool.canvas_tool)
