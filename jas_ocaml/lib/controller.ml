@@ -229,6 +229,27 @@ class controller ?(model = Model.create ()) () =
       ) doc.Document.layers;
       model#set_document { doc with Document.selection = !selection }
 
+    method direct_select_rect x y w h =
+      let doc = model#document in
+      let selection = ref Document.PathMap.empty in
+      let rec check path (elem : Element.element) =
+        match elem with
+        | Element.Layer { children; _ } | Element.Group { children; _ } ->
+          List.iteri (fun i child -> check (path @ [i]) child) children
+        | _ ->
+          let cps = Element.control_points elem in
+          let hit_cps =
+            List.mapi (fun i (px, py) -> (i, px, py)) cps
+            |> List.filter (fun (_i, px, py) -> point_in_rect px py x y w h)
+            |> List.map (fun (i, _, _) -> i) in
+          let hit = hit_cps <> [] || element_intersects_rect elem x y w h in
+          if hit then
+            selection := Document.PathMap.add path
+              (Document.make_element_selection ~control_points:hit_cps path) !selection
+      in
+      List.iteri (fun li layer -> check [li] layer) doc.Document.layers;
+      model#set_document { doc with Document.selection = !selection }
+
     method set_selection (selection : Document.selection) =
       model#set_document { model#document with Document.selection }
 

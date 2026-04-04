@@ -228,18 +228,7 @@ and rounded_rect cr x y w h rx ry =
 let handle_size = 6.0
 
 let control_points (elem : Element.element) =
-  let open Element in
-  match elem with
-  | Line { x1; y1; x2; y2; _ } -> [(x1, y1); (x2, y2)]
-  | Rect { x; y; width; height; _ } ->
-    [(x, y); (x +. width, y); (x +. width, y +. height); (x, y +. height)]
-  | Circle { cx; cy; r; _ } ->
-    [(cx, cy -. r); (cx +. r, cy); (cx, cy +. r); (cx -. r, cy)]
-  | Ellipse { cx; cy; rx; ry; _ } ->
-    [(cx, cy -. ry); (cx +. rx, cy); (cx, cy +. ry); (cx -. rx, cy)]
-  | _ ->
-    let (bx, by, bw, bh) = Element.bounds elem in
-    [(bx, by); (bx +. bw, by); (bx +. bw, by +. bh); (bx, by +. bh)]
+  Element.control_points elem
 
 let draw_element_overlay cr (elem : Element.element) (selected_cps : int list) =
   let open Element in
@@ -419,7 +408,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
           Cairo.set_source_rgba cr 0.4 0.4 0.4 1.0;
           Cairo.set_line_width cr 1.0;
           Cairo.set_dash cr [| 4.0; 4.0 |];
-          if toolbar#current_tool = Toolbar.Rect || toolbar#current_tool = Toolbar.Selection then begin
+          if toolbar#current_tool = Toolbar.Rect || toolbar#current_tool = Toolbar.Selection || toolbar#current_tool = Toolbar.Direct_selection then begin
             let x = min sx ex in
             let y = min sy ey in
             let w = abs_float (ex -. sx) in
@@ -440,6 +429,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       canvas_area#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION];
       canvas_area#event#connect#button_press ~callback:(fun ev ->
         if (toolbar#current_tool = Toolbar.Selection
+            || toolbar#current_tool = Toolbar.Direct_selection
             || toolbar#current_tool = Toolbar.Line
             || toolbar#current_tool = Toolbar.Rect)
            && GdkEvent.Button.button ev = 1 then begin
@@ -474,6 +464,13 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
             let w = abs_float (ex -. sx) in
             let h = abs_float (ey -. sy) in
             controller#select_rect x y w h;
+            true
+          end else if toolbar#current_tool = Toolbar.Direct_selection then begin
+            let x = min sx ex in
+            let y = min sy ey in
+            let w = abs_float (ex -. sx) in
+            let h = abs_float (ey -. sy) in
+            controller#direct_select_rect x y w h;
             true
           end else
           let default_stroke = Some Element.{

@@ -258,6 +258,35 @@ public class Controller {
                                      selectedLayer: doc.selectedLayer, selection: selection)
     }
 
+    public func directSelectRect(x: Double, y: Double, width: Double, height: Double) {
+        let doc = model.document
+        var selection: Selection = []
+
+        func check(_ path: [Int], _ elem: Element) {
+            switch elem {
+            case .layer(let v):
+                for (i, child) in v.children.enumerated() { check(path + [i], child) }
+            case .group(let v):
+                for (i, child) in v.children.enumerated() { check(path + [i], child) }
+            default:
+                let cps = elem.controlPointPositions
+                let hitCPs: Set<Int> = Set(cps.enumerated().compactMap { (i, pt) in
+                    pointInRect(pt.0, pt.1, x, y, width, height) ? i : nil
+                })
+                let hit = !hitCPs.isEmpty || elementIntersectsRect(elem, x, y, width, height)
+                if hit {
+                    selection.insert(ElementSelection(path: path, controlPoints: hitCPs))
+                }
+            }
+        }
+
+        for (li, layer) in doc.layers.enumerated() {
+            check([li], .layer(layer))
+        }
+        model.document = JasDocument(title: doc.title, layers: doc.layers,
+                                     selectedLayer: doc.selectedLayer, selection: selection)
+    }
+
     public func setSelection(_ selection: Selection) {
         let doc = model.document
         model.document = JasDocument(title: doc.title, layers: doc.layers,

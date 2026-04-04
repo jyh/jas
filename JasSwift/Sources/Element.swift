@@ -162,6 +162,26 @@ public enum Element: Equatable {
         default: return 4
         }
     }
+
+    public var controlPointPositions: [(Double, Double)] {
+        switch self {
+        case .line(let v):
+            return [(v.x1, v.y1), (v.x2, v.y2)]
+        case .rect(let v):
+            return [(v.x, v.y), (v.x + v.width, v.y),
+                    (v.x + v.width, v.y + v.height), (v.x, v.y + v.height)]
+        case .circle(let v):
+            return [(v.cx, v.cy - v.r), (v.cx + v.r, v.cy),
+                    (v.cx, v.cy + v.r), (v.cx - v.r, v.cy)]
+        case .ellipse(let v):
+            return [(v.cx, v.cy - v.ry), (v.cx + v.rx, v.cy),
+                    (v.cx, v.cy + v.ry), (v.cx - v.rx, v.cy)]
+        default:
+            let b = self.bounds
+            return [(b.x, b.y), (b.x + b.width, b.y),
+                    (b.x + b.width, b.y + b.height), (b.x, b.y + b.height)]
+        }
+    }
 }
 
 /// SVG \<line\> element.

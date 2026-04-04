@@ -13,7 +13,7 @@ from element import (
     Rect, Text,
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo,
     ClosePath,
-    control_point_count,
+    control_point_count, control_points,
 )
 from model import Model
 
@@ -272,6 +272,35 @@ class Controller:
                         entries.append(ElementSelection(
                             path=(li, ci),
                             control_points=_all_cps(child)))
+        self._model.document = replace(doc, selection=frozenset(entries))
+
+    def direct_select_rect(self, x: float, y: float, width: float, height: float) -> None:
+        """Direct selection marquee: select individual elements and only the
+        control points that fall within the rectangle.  Groups are not
+        expanded — elements inside groups can be individually selected.
+        """
+        doc = self._model.document
+        entries: list[ElementSelection] = []
+
+        def _check(path: ElementPath, elem: Element) -> None:
+            if isinstance(elem, (Group, Layer)):
+                for i, child in enumerate(elem.children):
+                    _check(path + (i,), child)
+                return
+            # Find which control points are inside the rect
+            cps = control_points(elem)
+            hit_cps = frozenset(
+                i for i, (px, py) in enumerate(cps)
+                if _point_in_rect(px, py, x, y, width, height)
+            )
+            if hit_cps or _element_intersects_rect(elem, x, y, width, height):
+                entries.append(ElementSelection(
+                    path=path,
+                    control_points=hit_cps))
+
+        for li, layer in enumerate(doc.layers):
+            _check((li,), layer)
+
         self._model.document = replace(doc, selection=frozenset(entries))
 
     def set_selection(self, selection: Selection) -> None:

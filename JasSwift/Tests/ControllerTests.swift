@@ -231,3 +231,46 @@ private func makeMarqueeCtrl() -> Controller {
     // Rect has 4 control points
     #expect(es.controlPoints == [0, 1, 2, 3])
 }
+
+// MARK: - Direct selection tests
+
+@Test func directSelectRectNoGroupExpansion() {
+    let line1 = Element.line(JasLine(x1: 0, y1: 0, x2: 5, y2: 5))
+    let line2 = Element.line(JasLine(x1: 50, y1: 50, x2: 55, y2: 55))
+    let group = Element.group(JasGroup(children: [line1, line2]))
+    let layer = JasLayer(name: "L0", children: [group])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.directSelectRect(x: -1, y: -1, width: 7, height: 7)
+    let paths = selPaths(ctrl.document.selection)
+    #expect(paths.contains([0, 0, 0]))
+    #expect(!paths.contains([0, 0, 1]))
+}
+
+@Test func directSelectRectSelectsOnlyHitCPs() {
+    let r = Element.rect(JasRect(x: 0, y: 0, width: 100, height: 100))
+    let layer = JasLayer(name: "L0", children: [r])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.directSelectRect(x: -5, y: -5, width: 10, height: 10)
+    #expect(ctrl.document.selection.count == 1)
+    let es = ctrl.document.selection.first!
+    #expect(es.path == [0, 0])
+    #expect(es.controlPoints == [0])
+}
+
+@Test func directSelectRectNoCPsWhenNoneInRect() {
+    let line = Element.line(JasLine(x1: 0, y1: 0, x2: 100, y2: 100))
+    let layer = JasLayer(name: "L0", children: [line])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.directSelectRect(x: 40, y: 40, width: 20, height: 20)
+    #expect(ctrl.document.selection.count == 1)
+    let es = ctrl.document.selection.first!
+    #expect(es.controlPoints.isEmpty)
+}
+
+@Test func directSelectRectMissesElement() {
+    let r = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
+    let layer = JasLayer(name: "L0", children: [r])
+    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    ctrl.directSelectRect(x: 200, y: 200, width: 10, height: 10)
+    #expect(ctrl.document.selection.isEmpty)
+}

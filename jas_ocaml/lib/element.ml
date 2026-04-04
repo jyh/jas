@@ -248,3 +248,15 @@ let control_point_count = function
   | Line _ -> 2
   | Rect _ | Circle _ | Ellipse _ -> 4
   | _ -> 4
+
+let control_points = function
+  | Line { x1; y1; x2; y2; _ } -> [(x1, y1); (x2, y2)]
+  | Rect { x; y; width; height; _ } ->
+    [(x, y); (x +. width, y); (x +. width, y +. height); (x, y +. height)]
+  | Circle { cx; cy; r; _ } ->
+    [(cx, cy -. r); (cx +. r, cy); (cx, cy +. r); (cx -. r, cy)]
+  | Ellipse { cx; cy; rx; ry; _ } ->
+    [(cx, cy -. ry); (cx +. rx, cy); (cx, cy +. ry); (cx -. rx, cy)]
+  | elem ->
+    let (bx, by, bw, bh) = bounds elem in
+    [(bx, by); (bx +. bw, by); (bx +. bw, by +. bh); (bx, by +. bh)]
