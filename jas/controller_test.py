@@ -156,6 +156,46 @@ class SelectionControllerTest(absltest.TestCase):
         self.ctrl.select_rect(100, 100, 10, 10)
         self.assertEqual(self.ctrl.document.selection, frozenset())
 
+    def test_select_rect_misses_diagonal_line_corner(self):
+        """Marquee in the bounding box corner of a diagonal line should miss."""
+        line = Line(x1=0, y1=0, x2=100, y2=100)
+        layer = Layer(children=(line,), name="L0")
+        doc = Document(layers=(layer,))
+        ctrl = Controller(model=Model(document=doc))
+        # Box in upper-right corner of bbox — far from the diagonal
+        ctrl.select_rect(80, 0, 20, 20)
+        self.assertEqual(ctrl.document.selection, frozenset())
+
+    def test_select_rect_hits_diagonal_line(self):
+        """Marquee crossing a diagonal line should select it."""
+        line = Line(x1=0, y1=0, x2=100, y2=100)
+        layer = Layer(children=(line,), name="L0")
+        doc = Document(layers=(layer,))
+        ctrl = Controller(model=Model(document=doc))
+        # Box crossing the diagonal
+        ctrl.select_rect(40, 40, 20, 20)
+        self.assertIn((0, 0), ctrl.document.selection)
+
+    def test_select_rect_stroke_only_rect_interior_misses(self):
+        """Marquee inside a stroke-only rect should miss."""
+        rect = Rect(x=0, y=0, width=100, height=100)
+        layer = Layer(children=(rect,), name="L0")
+        doc = Document(layers=(layer,))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.select_rect(30, 30, 10, 10)
+        self.assertEqual(ctrl.document.selection, frozenset())
+
+    def test_select_rect_filled_rect_interior_hits(self):
+        """Marquee inside a filled rect should select it."""
+        from element import Fill, Color
+        rect = Rect(x=0, y=0, width=100, height=100,
+                    fill=Fill(color=Color(1, 0, 0)))
+        layer = Layer(children=(rect,), name="L0")
+        doc = Document(layers=(layer,))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.select_rect(30, 30, 10, 10)
+        self.assertIn((0, 0), ctrl.document.selection)
+
     def test_select_rect_multiple_elements(self):
         """Marquee covering both the rect and the group selects all."""
         self.ctrl.select_rect(-1, -1, 20, 20)
