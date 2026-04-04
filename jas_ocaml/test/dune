@@ -25,3 +25,7 @@
 (test
  (name controller_test)
  (libraries jas))
+
+(test
+ (name svg_test)
+ (libraries jas str))
