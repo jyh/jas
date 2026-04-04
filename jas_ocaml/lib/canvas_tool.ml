@@ -16,6 +16,7 @@ type tool_context = {
   hit_test_selection : float -> float -> bool;
   hit_test_handle : float -> float -> (int list * int * string) option;
   hit_test_text : float -> float -> (int list * Element.element) option;
+  hit_test_path_curve : float -> float -> (int list * Element.element) option;
   request_update : unit -> unit;
   start_text_edit : int list -> Element.element -> unit;
   commit_text_edit : unit -> unit;

@@ -164,6 +164,7 @@ public enum Element: Equatable {
         case .rect, .circle, .ellipse: return 4
         case .polygon(let v): return v.points.count
         case .path(let v): return pathAnchorPoints(v.d).count
+        case .textPath(let v): return pathAnchorPoints(v.d).count
         default: return 4
         }
     }
@@ -184,6 +185,8 @@ public enum Element: Equatable {
         case .polygon(let v):
             return v.points
         case .path(let v):
+            return pathAnchorPoints(v.d)
+        case .textPath(let v):
             return pathAnchorPoints(v.d)
         default:
             let b = self.bounds
@@ -290,6 +293,43 @@ public enum Element: Equatable {
             }
             return .path(JasPath(d: cmds, fill: v.fill, stroke: v.stroke,
                                  opacity: v.opacity, transform: v.transform))
+        case .textPath(let v):
+            var cmds = v.d
+            var anchorIdx = 0
+            for ci in 0..<cmds.count {
+                switch cmds[ci] {
+                case .closePath:
+                    continue
+                default:
+                    break
+                }
+                if indices.contains(anchorIdx) {
+                    switch cmds[ci] {
+                    case .moveTo(let x, let y):
+                        cmds[ci] = .moveTo(x + dx, y + dy)
+                        if ci + 1 < cmds.count,
+                           case .curveTo(let x1, let y1, let x2, let y2, let ex, let ey) = cmds[ci + 1] {
+                            cmds[ci + 1] = .curveTo(x1: x1 + dx, y1: y1 + dy, x2: x2, y2: y2, x: ex, y: ey)
+                        }
+                    case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
+                        cmds[ci] = .curveTo(x1: x1, y1: y1, x2: x2 + dx, y2: y2 + dy, x: x + dx, y: y + dy)
+                        if ci + 1 < cmds.count,
+                           case .curveTo(let nx1, let ny1, let nx2, let ny2, let nx, let ny) = cmds[ci + 1] {
+                            cmds[ci + 1] = .curveTo(x1: nx1 + dx, y1: ny1 + dy, x2: nx2, y2: ny2, x: nx, y: ny)
+                        }
+                    case .lineTo(let x, let y):
+                        cmds[ci] = .lineTo(x + dx, y + dy)
+                    default:
+                        break
+                    }
+                }
+                anchorIdx += 1
+            }
+            return .textPath(JasTextPath(d: cmds, content: v.content,
+                                          startOffset: v.startOffset,
+                                          fontFamily: v.fontFamily, fontSize: v.fontSize,
+                                          fill: v.fill, stroke: v.stroke,
+                                          opacity: v.opacity, transform: v.transform))
         default:
             return self
         }
@@ -685,4 +725,131 @@ public struct JasLayer: Equatable {
         let maxY = all.map { $0.y + $0.height }.max()!
         return (minX, minY, maxX - minX, maxY - minY)
     }
+}
+
+// MARK: - Path geometry utilities
+
+/// Flatten path commands into a polyline by evaluating Bezier curves.
+public func flattenPathCommands(_ d: [PathCommand]) -> [(Double, Double)] {
+    var pts: [(Double, Double)] = []
+    var cx = 0.0, cy = 0.0
+    let steps = 20
+    var firstPt = (0.0, 0.0)
+    for cmd in d {
+        switch cmd {
+        case .moveTo(let x, let y):
+            pts.append((x, y))
+            cx = x; cy = y; firstPt = (x, y)
+        case .lineTo(let x, let y):
+            pts.append((x, y))
+            cx = x; cy = y
+        case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
+            for i in 1...steps {
+                let t = Double(i) / Double(steps)
+                let mt = 1.0 - t
+                let px = mt*mt*mt*cx + 3*mt*mt*t*x1 + 3*mt*t*t*x2 + t*t*t*x
+                let py = mt*mt*mt*cy + 3*mt*mt*t*y1 + 3*mt*t*t*y2 + t*t*t*y
+                pts.append((px, py))
+            }
+            cx = x; cy = y
+        case .quadTo(let x1, let y1, let x, let y):
+            for i in 1...steps {
+                let t = Double(i) / Double(steps)
+                let mt = 1.0 - t
+                let px = mt*mt*cx + 2*mt*t*x1 + t*t*x
+                let py = mt*mt*cy + 2*mt*t*y1 + t*t*y
+                pts.append((px, py))
+            }
+            cx = x; cy = y
+        case .closePath:
+            pts.append(firstPt)
+        default:
+            if let ep = cmd.endpoint {
+                pts.append(ep)
+                cx = ep.0; cy = ep.1
+            }
+        }
+    }
+    return pts
+}
+
+/// Compute cumulative arc lengths for a polyline.
+private func arcLengths(_ pts: [(Double, Double)]) -> [Double] {
+    var lengths = [0.0]
+    for i in 1..<pts.count {
+        let dx = pts[i].0 - pts[i-1].0
+        let dy = pts[i].1 - pts[i-1].1
+        lengths.append(lengths.last! + (dx*dx + dy*dy).squareRoot())
+    }
+    return lengths
+}
+
+/// Return the (x, y) point at fraction t (0..1) along the path.
+public func pathPointAtOffset(_ d: [PathCommand], t: Double) -> (Double, Double) {
+    let pts = flattenPathCommands(d)
+    guard pts.count >= 2 else { return pts.first ?? (0, 0) }
+    let lengths = arcLengths(pts)
+    let total = lengths.last!
+    guard total > 0 else { return pts[0] }
+    let target = max(0, min(1, t)) * total
+    for i in 1..<lengths.count {
+        if lengths[i] >= target {
+            let segLen = lengths[i] - lengths[i-1]
+            if segLen == 0 { return pts[i] }
+            let frac = (target - lengths[i-1]) / segLen
+            return (pts[i-1].0 + frac * (pts[i].0 - pts[i-1].0),
+                    pts[i-1].1 + frac * (pts[i].1 - pts[i-1].1))
+        }
+    }
+    return pts.last!
+}
+
+/// Return the offset (0..1) of the closest point on the path to (px, py).
+public func pathClosestOffset(_ d: [PathCommand], px: Double, py: Double) -> Double {
+    let pts = flattenPathCommands(d)
+    guard pts.count >= 2 else { return 0 }
+    let lengths = arcLengths(pts)
+    let total = lengths.last!
+    guard total > 0 else { return 0 }
+    var bestDist = Double.infinity
+    var bestOffset = 0.0
+    for i in 1..<pts.count {
+        let (ax, ay) = pts[i-1]
+        let (bx, by) = pts[i]
+        let dx = bx - ax, dy = by - ay
+        let segLenSq = dx*dx + dy*dy
+        guard segLenSq > 0 else { continue }
+        let t = max(0, min(1, ((px - ax) * dx + (py - ay) * dy) / segLenSq))
+        let qx = ax + t * dx, qy = ay + t * dy
+        let dist = ((px - qx) * (px - qx) + (py - qy) * (py - qy)).squareRoot()
+        if dist < bestDist {
+            bestDist = dist
+            bestOffset = (lengths[i-1] + t * (lengths[i] - lengths[i-1])) / total
+        }
+    }
+    return bestOffset
+}
+
+/// Return the minimum distance from point (px, py) to the path curve.
+public func pathDistanceToPoint(_ d: [PathCommand], px: Double, py: Double) -> Double {
+    let pts = flattenPathCommands(d)
+    guard pts.count >= 2 else {
+        if let p = pts.first {
+            return ((px - p.0) * (px - p.0) + (py - p.1) * (py - p.1)).squareRoot()
+        }
+        return .infinity
+    }
+    var bestDist = Double.infinity
+    for i in 1..<pts.count {
+        let (ax, ay) = pts[i-1]
+        let (bx, by) = pts[i]
+        let dx = bx - ax, dy = by - ay
+        let segLenSq = dx*dx + dy*dy
+        guard segLenSq > 0 else { continue }
+        let t = max(0, min(1, ((px - ax) * dx + (py - ay) * dy) / segLenSq))
+        let qx = ax + t * dx, qy = ay + t * dy
+        let dist = ((px - qx) * (px - qx) + (py - qy) * (py - qy)).squareRoot()
+        if dist < bestDist { bestDist = dist }
+    }
+    return bestDist
 }

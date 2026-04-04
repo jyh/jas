@@ -411,6 +411,9 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, selectedCPs: Set<Int>
     case .path(let v):
         buildPath(ctx, v.d)
         ctx.strokePath()
+    case .textPath(let v):
+        buildPath(ctx, v.d)
+        ctx.strokePath()
     default:
         let b = elem.bounds
         ctx.addRect(CGRect(x: b.x, y: b.y, width: b.width, height: b.height))
@@ -419,12 +422,18 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, selectedCPs: Set<Int>
 
     // Draw Bezier handles for selected path control points
     let handleCircleRadius: CGFloat = 3.0
-    if case .path(let v) = elem, !selectedCPs.isEmpty {
+    let pathD: [PathCommand]?
+    switch elem {
+    case .path(let v): pathD = v.d
+    case .textPath(let v): pathD = v.d
+    default: pathD = nil
+    }
+    if let d = pathD, !selectedCPs.isEmpty {
         let anchors = elem.controlPointPositions
         for cpIdx in selectedCPs {
             guard cpIdx < anchors.count else { continue }
             let (ax, ay) = anchors[cpIdx]
-            let (hIn, hOut) = pathHandlePositions(v.d, anchorIdx: cpIdx)
+            let (hIn, hOut) = pathHandlePositions(d, anchorIdx: cpIdx)
             ctx.setStrokeColor(selectionColor)
             ctx.setLineWidth(1.0)
             if let (hx, hy) = hIn {
@@ -559,8 +568,9 @@ class CanvasNSView: NSView {
             hitTestSelection: { [weak self] pos in self?.hitTestSelection(pos) ?? false },
             hitTestHandle: { [weak self] pos in self?.hitTestHandle(pos) },
             hitTestText: { [weak self] pos in self?.hitTestText(pos) },
+            hitTestPathCurve: { [weak self] x, y in self?.hitTestPathCurve(x, y) },
             requestUpdate: { [weak self] in self?.needsDisplay = true },
-            startTextEdit: { [weak self] path, textElem in self?.startTextEdit(path: path, textElem: textElem) },
+            startTextEdit: { [weak self] path, elem in self?.startTextEdit(path: path, elem: elem) },
             commitTextEdit: { [weak self] in self?.commitTextEdit() },
             drawElementOverlay: { ctx, elem, cps in drawElementOverlay(ctx, elem, selectedCPs: cps) }
         )
@@ -645,28 +655,83 @@ class CanvasNSView: NSView {
         return nil
     }
 
+    private func hitTestPathCurve(_ x: Double, _ y: Double) -> (ElementPath, Element)? {
+        let threshold = hitRadius + 2
+        for (li, layer) in document.layers.enumerated() {
+            for (ci, child) in layer.children.enumerated() {
+                switch child {
+                case .path(let v):
+                    if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
+                        return ([li, ci], child)
+                    }
+                case .textPath(let v):
+                    if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
+                        return ([li, ci], child)
+                    }
+                case .group(let g):
+                    for (gi, gc) in g.children.enumerated() {
+                        switch gc {
+                        case .path(let v):
+                            if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
+                                return ([li, ci, gi], gc)
+                            }
+                        case .textPath(let v):
+                            if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
+                                return ([li, ci, gi], gc)
+                            }
+                        default: break
+                        }
+                    }
+                default: break
+                }
+            }
+        }
+        return nil
+    }
+
     // MARK: - Text editing
 
-    private func startTextEdit(path: ElementPath, textElem: JasText) {
+    private func startTextEdit(path: ElementPath, elem: Element) {
         commitTextEdit()
         editingPath = path
         let bx, by, bw, bh: Double
-        if textElem.isAreaText {
-            bx = textElem.x; by = textElem.y
-            bw = textElem.width; bh = textElem.height
-        } else {
-            bx = textElem.x; by = textElem.y - textElem.fontSize
-            bw = max(Double(textElem.content.count) * textElem.fontSize * 0.6 + 20, 100)
-            bh = textElem.fontSize + 4
+        let content: String
+        let fontFamily: String
+        let fontSize: Double
+        var isArea = false
+        switch elem {
+        case .text(let textElem):
+            content = textElem.content
+            fontFamily = textElem.fontFamily
+            fontSize = textElem.fontSize
+            if textElem.isAreaText {
+                isArea = true
+                bx = textElem.x; by = textElem.y
+                bw = textElem.width; bh = textElem.height
+            } else {
+                bx = textElem.x; by = textElem.y - textElem.fontSize
+                bw = max(Double(textElem.content.count) * textElem.fontSize * 0.6 + 20, 100)
+                bh = textElem.fontSize + 4
+            }
+        case .textPath(let tp):
+            content = tp.content
+            fontFamily = tp.fontFamily
+            fontSize = tp.fontSize
+            let (px, py) = pathPointAtOffset(tp.d, t: tp.startOffset)
+            bx = px; by = py - tp.fontSize - 4
+            bw = max(200, Double(tp.content.count) * tp.fontSize * 0.7)
+            bh = tp.fontSize + 8
+        default:
+            return
         }
         let editor = NSTextField(frame: NSRect(x: bx, y: by, width: bw, height: bh))
-        editor.stringValue = textElem.content
-        editor.font = NSFont(name: textElem.fontFamily, size: textElem.fontSize)
-            ?? NSFont.systemFont(ofSize: textElem.fontSize)
+        editor.stringValue = content
+        editor.font = NSFont(name: fontFamily, size: fontSize)
+            ?? NSFont.systemFont(ofSize: fontSize)
         editor.isBordered = true
         editor.backgroundColor = .white
         editor.focusRingType = .exterior
-        if textElem.isAreaText {
+        if isArea {
             editor.usesSingleLineMode = false
             editor.cell?.wraps = true
             editor.cell?.isScrollable = false
@@ -687,7 +752,8 @@ class CanvasNSView: NSView {
         guard let editor = textEditor, let path = editingPath else { return }
         let newText = editor.stringValue
         let elem = document.getElement(path)
-        if case .text(let v) = elem, v.content != newText {
+        switch elem {
+        case .text(let v) where v.content != newText:
             let newElem = Element.text(JasText(
                 x: v.x, y: v.y, content: newText,
                 fontFamily: v.fontFamily, fontSize: v.fontSize,
@@ -696,6 +762,15 @@ class CanvasNSView: NSView {
                 opacity: v.opacity, transform: v.transform
             ))
             controller?.model.document = document.replaceElement(path, with: newElem)
+        case .textPath(let v) where v.content != newText:
+            let newElem = Element.textPath(JasTextPath(
+                d: v.d, content: newText, startOffset: v.startOffset,
+                fontFamily: v.fontFamily, fontSize: v.fontSize,
+                fill: v.fill, stroke: v.stroke,
+                opacity: v.opacity, transform: v.transform
+            ))
+            controller?.model.document = document.replaceElement(path, with: newElem)
+        default: break
         }
         editor.removeFromSuperview()
         textEditor = nil

@@ -407,7 +407,7 @@ let control_point_count = function
   | Line _ -> 2
   | Rect _ | Circle _ | Ellipse _ -> 4
   | Polygon { points; _ } -> List.length points
-  | Path { d; _ } -> List.length (path_anchor_points d)
+  | Path { d; _ } | Text_path { d; _ } -> List.length (path_anchor_points d)
   | _ -> 4
 
 let control_points = function
@@ -419,7 +419,7 @@ let control_points = function
   | Ellipse { cx; cy; rx; ry; _ } ->
     [(cx, cy -. ry); (cx +. rx, cy); (cx, cy +. ry); (cx -. rx, cy)]
   | Polygon { points; _ } -> points
-  | Path { d; _ } -> path_anchor_points d
+  | Path { d; _ } | Text_path { d; _ } -> path_anchor_points d
   | elem ->
     let (bx, by, bw, bh) = bounds elem in
     [(bx, by); (bx +. bw, by); (bx +. bw, by +. bh); (bx, by +. bh)]
@@ -515,4 +515,194 @@ let move_control_points elem indices dx dy =
         incr anchor_idx
     done;
     Path { r with d = Array.to_list cmds }
+  | Text_path r ->
+    let cmds = Array.of_list r.d in
+    let n = Array.length cmds in
+    let anchor_idx = ref 0 in
+    for ci = 0 to n - 1 do
+      match cmds.(ci) with
+      | ClosePath -> ()
+      | _ ->
+        if mem !anchor_idx then begin
+          (match cmds.(ci) with
+           | MoveTo (x, y) ->
+             cmds.(ci) <- MoveTo (x +. dx, y +. dy);
+             if ci + 1 < n then
+               (match cmds.(ci + 1) with
+                | CurveTo (x1, y1, x2, y2, x, y) ->
+                  cmds.(ci + 1) <- CurveTo (x1 +. dx, y1 +. dy, x2, y2, x, y)
+                | _ -> ())
+           | CurveTo (x1, y1, x2, y2, x, y) ->
+             cmds.(ci) <- CurveTo (x1, y1, x2 +. dx, y2 +. dy, x +. dx, y +. dy);
+             if ci + 1 < n then
+               (match cmds.(ci + 1) with
+                | CurveTo (nx1, ny1, nx2, ny2, nx, ny) ->
+                  cmds.(ci + 1) <- CurveTo (nx1 +. dx, ny1 +. dy, nx2, ny2, nx, ny)
+                | _ -> ())
+           | LineTo (x, y) ->
+             cmds.(ci) <- LineTo (x +. dx, y +. dy)
+           | _ -> ())
+        end;
+        incr anchor_idx
+    done;
+    Text_path { r with d = Array.to_list cmds }
   | _ -> elem
+
+
+(* ----------------------------------------------------------------- *)
+(* Path geometry utilities                                           *)
+(* ----------------------------------------------------------------- *)
+
+let flatten_path_commands d =
+  let pts = ref [] in
+  let cx = ref 0.0 in
+  let cy = ref 0.0 in
+  let steps = 20 in
+  let first = ref (0.0, 0.0) in
+  List.iter (fun cmd ->
+    match cmd with
+    | MoveTo (x, y) ->
+      pts := (x, y) :: !pts;
+      cx := x; cy := y; first := (x, y)
+    | LineTo (x, y) ->
+      pts := (x, y) :: !pts;
+      cx := x; cy := y
+    | CurveTo (x1, y1, x2, y2, x, y) ->
+      for i = 1 to steps do
+        let t = float_of_int i /. float_of_int steps in
+        let mt = 1.0 -. t in
+        let mt2 = mt *. mt in
+        let mt3 = mt2 *. mt in
+        let t2 = t *. t in
+        let t3 = t2 *. t in
+        let px = mt3 *. !cx +. 3.0 *. mt2 *. t *. x1 +. 3.0 *. mt *. t2 *. x2 +. t3 *. x in
+        let py = mt3 *. !cy +. 3.0 *. mt2 *. t *. y1 +. 3.0 *. mt *. t2 *. y2 +. t3 *. y in
+        pts := (px, py) :: !pts
+      done;
+      cx := x; cy := y
+    | QuadTo (x1, y1, x, y) ->
+      for i = 1 to steps do
+        let t = float_of_int i /. float_of_int steps in
+        let mt = 1.0 -. t in
+        let px = mt *. mt *. !cx +. 2.0 *. mt *. t *. x1 +. t *. t *. x in
+        let py = mt *. mt *. !cy +. 2.0 *. mt *. t *. y1 +. t *. t *. y in
+        pts := (px, py) :: !pts
+      done;
+      cx := x; cy := y
+    | ClosePath ->
+      let (fx, fy) = !first in
+      pts := (fx, fy) :: !pts
+    | _ ->
+      (* SmoothCurveTo, SmoothQuadTo, ArcTo: approximate as line *)
+      let (x, y) = match cmd with
+        | SmoothCurveTo (_, _, x, y) | SmoothQuadTo (x, y) | ArcTo (_, _, _, _, _, x, y) -> (x, y)
+        | _ -> (!cx, !cy)
+      in
+      pts := (x, y) :: !pts;
+      cx := x; cy := y
+  ) d;
+  List.rev !pts
+
+let arc_lengths pts =
+  let rec go acc prev = function
+    | [] -> List.rev acc
+    | (x, y) :: rest ->
+      let (px, py) = prev in
+      let dx = x -. px in
+      let dy = y -. py in
+      let len = (List.hd acc) +. sqrt (dx *. dx +. dy *. dy) in
+      go (len :: acc) (x, y) rest
+  in
+  match pts with
+  | [] -> [0.0]
+  | first :: rest -> go [0.0] first rest
+
+let path_point_at_offset d t =
+  let pts = flatten_path_commands d in
+  match pts with
+  | [] -> (0.0, 0.0)
+  | [p] -> p
+  | _ ->
+    let lengths = arc_lengths pts in
+    let total = List.nth lengths (List.length lengths - 1) in
+    if total = 0.0 then List.hd pts
+    else
+      let target = (max 0.0 (min 1.0 t)) *. total in
+      let pts_arr = Array.of_list pts in
+      let len_arr = Array.of_list lengths in
+      let n = Array.length len_arr in
+      let result = ref pts_arr.(n - 1) in
+      (try
+        for i = 1 to n - 1 do
+          if len_arr.(i) >= target then begin
+            let seg_len = len_arr.(i) -. len_arr.(i - 1) in
+            if seg_len = 0.0 then result := pts_arr.(i)
+            else begin
+              let frac = (target -. len_arr.(i - 1)) /. seg_len in
+              let (ax, ay) = pts_arr.(i - 1) in
+              let (bx, by) = pts_arr.(i) in
+              result := (ax +. frac *. (bx -. ax), ay +. frac *. (by -. ay))
+            end;
+            raise Exit
+          end
+        done
+      with Exit -> ());
+      !result
+
+let path_closest_offset d px py =
+  let pts = flatten_path_commands d in
+  match pts with
+  | [] | [_] -> 0.0
+  | _ ->
+    let lengths = arc_lengths pts in
+    let total = List.nth lengths (List.length lengths - 1) in
+    if total = 0.0 then 0.0
+    else
+      let pts_arr = Array.of_list pts in
+      let len_arr = Array.of_list lengths in
+      let n = Array.length pts_arr in
+      let best_dist = ref infinity in
+      let best_offset = ref 0.0 in
+      for i = 1 to n - 1 do
+        let (ax, ay) = pts_arr.(i - 1) in
+        let (bx, by) = pts_arr.(i) in
+        let dx = bx -. ax in
+        let dy = by -. ay in
+        let seg_len_sq = dx *. dx +. dy *. dy in
+        if seg_len_sq > 0.0 then begin
+          let t = max 0.0 (min 1.0 (((px -. ax) *. dx +. (py -. ay) *. dy) /. seg_len_sq)) in
+          let qx = ax +. t *. dx in
+          let qy = ay +. t *. dy in
+          let dist = sqrt ((px -. qx) *. (px -. qx) +. (py -. qy) *. (py -. qy)) in
+          if dist < !best_dist then begin
+            best_dist := dist;
+            best_offset := (len_arr.(i - 1) +. t *. (len_arr.(i) -. len_arr.(i - 1))) /. total
+          end
+        end
+      done;
+      !best_offset
+
+let path_distance_to_point d px py =
+  let pts = flatten_path_commands d in
+  match pts with
+  | [] -> infinity
+  | [p] -> let (x, y) = p in sqrt ((px -. x) *. (px -. x) +. (py -. y) *. (py -. y))
+  | _ ->
+    let pts_arr = Array.of_list pts in
+    let n = Array.length pts_arr in
+    let best_dist = ref infinity in
+    for i = 1 to n - 1 do
+      let (ax, ay) = pts_arr.(i - 1) in
+      let (bx, by) = pts_arr.(i) in
+      let dx = bx -. ax in
+      let dy = by -. ay in
+      let seg_len_sq = dx *. dx +. dy *. dy in
+      if seg_len_sq > 0.0 then begin
+        let t = max 0.0 (min 1.0 (((px -. ax) *. dx +. (py -. ay) *. dy) /. seg_len_sq)) in
+        let qx = ax +. t *. dx in
+        let qy = ay +. t *. dy in
+        let dist = sqrt ((px -. qx) *. (px -. qx) +. (py -. qy) *. (py -. qy)) in
+        if dist < !best_dist then best_dist := dist
+      end
+    done;
+    !best_dist

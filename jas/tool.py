@@ -24,12 +24,14 @@ class ToolContext:
 
     def __init__(self, model: Model, controller: Controller,
                  hit_test_selection, hit_test_handle, hit_test_text,
+                 hit_test_path_curve,
                  request_update, start_text_edit, commit_text_edit):
         self.model = model
         self.controller = controller
         self.hit_test_selection = hit_test_selection  # (x, y) -> bool
         self.hit_test_handle = hit_test_handle        # (x, y) -> tuple | None
         self.hit_test_text = hit_test_text            # (x, y) -> tuple | None
+        self.hit_test_path_curve = hit_test_path_curve  # (x, y) -> tuple | None
         self.request_update = request_update           # () -> None
         self.start_text_edit = start_text_edit         # (path, text_elem) -> None
         self.commit_text_edit = commit_text_edit       # () -> None
