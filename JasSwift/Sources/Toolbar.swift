@@ -51,6 +51,24 @@ public struct ToolbarView {
                 plus.addLine(to: CGPoint(x: ox + 23.5, y: oy + 23.5))
                 context.stroke(plus, with: .color(color), lineWidth: 1.5)
 
+            case .pen:
+                var path = Path()
+                // Fountain pen nib shape
+                path.move(to: CGPoint(x: ox + 8, y: oy + 24))
+                path.addLine(to: CGPoint(x: ox + 10, y: oy + 18))
+                path.addLine(to: CGPoint(x: ox + 14, y: oy + 4))
+                path.addLine(to: CGPoint(x: ox + 18, y: oy + 4))
+                path.addLine(to: CGPoint(x: ox + 22, y: oy + 18))
+                path.addLine(to: CGPoint(x: ox + 24, y: oy + 24))
+                path.addLine(to: CGPoint(x: ox + 16, y: oy + 20))
+                path.closeSubpath()
+                context.stroke(path, with: .color(color), lineWidth: 1.5)
+                // Center line (nib slit)
+                var slit = Path()
+                slit.move(to: CGPoint(x: ox + 16, y: oy + 10))
+                slit.addLine(to: CGPoint(x: ox + 16, y: oy + 20))
+                context.stroke(slit, with: .color(color), lineWidth: 1.5)
+
             case .text:
                 context.draw(
                     Text("T").font(.system(size: 18, weight: .bold))

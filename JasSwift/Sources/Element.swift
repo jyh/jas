@@ -160,6 +160,7 @@ public enum Element: Equatable {
         case .line: return 2
         case .rect, .circle, .ellipse: return 4
         case .polygon(let v): return v.points.count
+        case .path(let v): return pathAnchorPoints(v.d).count
         default: return 4
         }
     }
@@ -179,6 +180,8 @@ public enum Element: Equatable {
                     (v.cx, v.cy + v.ry), (v.cx - v.rx, v.cy)]
         case .polygon(let v):
             return v.points
+        case .path(let v):
+            return pathAnchorPoints(v.d)
         default:
             let b = self.bounds
             return [(b.x, b.y), (b.x + b.width, b.y),
@@ -250,10 +253,64 @@ public enum Element: Equatable {
             return .polygon(JasPolygon(points: newPoints,
                                        fill: v.fill, stroke: v.stroke,
                                        opacity: v.opacity, transform: v.transform))
+        case .path(let v):
+            var cmds = v.d
+            var anchorIdx = 0
+            for ci in 0..<cmds.count {
+                switch cmds[ci] {
+                case .closePath:
+                    continue
+                default:
+                    break
+                }
+                if indices.contains(anchorIdx) {
+                    switch cmds[ci] {
+                    case .moveTo(let x, let y):
+                        cmds[ci] = .moveTo(x + dx, y + dy)
+                        if ci + 1 < cmds.count,
+                           case .curveTo(let x1, let y1, let x2, let y2, let ex, let ey) = cmds[ci + 1] {
+                            cmds[ci + 1] = .curveTo(x1: x1 + dx, y1: y1 + dy, x2: x2, y2: y2, x: ex, y: ey)
+                        }
+                    case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
+                        cmds[ci] = .curveTo(x1: x1, y1: y1, x2: x2 + dx, y2: y2 + dy, x: x + dx, y: y + dy)
+                        if ci + 1 < cmds.count,
+                           case .curveTo(let nx1, let ny1, let nx2, let ny2, let nx, let ny) = cmds[ci + 1] {
+                            cmds[ci + 1] = .curveTo(x1: nx1 + dx, y1: ny1 + dy, x2: nx2, y2: ny2, x: nx, y: ny)
+                        }
+                    case .lineTo(let x, let y):
+                        cmds[ci] = .lineTo(x + dx, y + dy)
+                    default:
+                        break
+                    }
+                }
+                anchorIdx += 1
+            }
+            return .path(JasPath(d: cmds, fill: v.fill, stroke: v.stroke,
+                                 opacity: v.opacity, transform: v.transform))
         default:
             return self
         }
     }
+}
+
+/// Extract anchor points from path commands.
+private func pathAnchorPoints(_ d: [PathCommand]) -> [(Double, Double)] {
+    var pts: [(Double, Double)] = []
+    for cmd in d {
+        switch cmd {
+        case .moveTo(let x, let y), .lineTo(let x, let y), .smoothQuadTo(let x, let y):
+            pts.append((x, y))
+        case .curveTo(_, _, _, _, let x, let y), .smoothCurveTo(_, _, let x, let y):
+            pts.append((x, y))
+        case .quadTo(_, _, let x, let y):
+            pts.append((x, y))
+        case .arcTo(_, _, _, _, _, let x, let y):
+            pts.append((x, y))
+        case .closePath:
+            break
+        }
+    }
+    return pts
 }
 
 /// SVG \<line\> element.

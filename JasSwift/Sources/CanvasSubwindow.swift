@@ -228,6 +228,26 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
     ctx.restoreGState()
 }
 
+// MARK: - Pen tool support
+
+/// A control point in the pen tool's in-progress path.
+class PenPoint {
+    var x: Double
+    var y: Double
+    var hxIn: Double
+    var hyIn: Double
+    var hxOut: Double
+    var hyOut: Double
+    var smooth: Bool
+
+    init(x: Double, y: Double) {
+        self.x = x; self.y = y
+        self.hxIn = x; self.hyIn = y
+        self.hxOut = x; self.hyOut = y
+        self.smooth = false
+    }
+}
+
 // MARK: - Selection overlay drawing
 
 private let selectionColor = CGColor(red: 0, green: 0.47, blue: 1.0, alpha: 1.0)
@@ -391,9 +411,24 @@ class CanvasNSView: NSView {
     // Inline text editing state
     private var textEditor: NSTextField?
     private var editingPath: ElementPath?
+    // Pen tool state
+    private var penPoints: [PenPoint] = []
+    private var penDragging: Bool = false
+    private var penMouseX: Double = 0
+    private var penMouseY: Double = 0
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self, userInfo: nil
+        ))
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
@@ -443,6 +478,11 @@ class CanvasNSView: NSView {
                 }
                 ctx.strokePath()
             }
+        }
+        // Draw pen tool overlay
+        let tool = onToolRead?() ?? currentTool
+        if tool == .pen {
+            drawPenOverlay(ctx)
         }
     }
 
@@ -530,8 +570,159 @@ class CanvasNSView: NSView {
         editingPath = nil
     }
 
+    // -- Pen tool methods --
+
+    private let penCloseRadius: Double = 6.0
+
+    func penFinish(forceClose: Bool = false) {
+        guard penPoints.count >= 2 else {
+            penPoints.removeAll()
+            penDragging = false
+            needsDisplay = true
+            return
+        }
+        let p0 = penPoints[0]
+        let pn = penPoints.last!
+        let dist = hypot(pn.x - p0.x, pn.y - p0.y)
+        let close = forceClose || (penPoints.count >= 3 && dist <= penCloseRadius)
+        // Only skip last point if it actually coincides with start
+        let skipLast = close && penPoints.count >= 3 && dist <= penCloseRadius
+        var cmds: [PathCommand] = []
+        cmds.append(.moveTo(p0.x, p0.y))
+        let n = skipLast ? penPoints.count - 1 : penPoints.count
+        for i in 1..<n {
+            let prev = penPoints[i - 1]
+            let curr = penPoints[i]
+            cmds.append(.curveTo(x1: prev.hxOut, y1: prev.hyOut,
+                                 x2: curr.hxIn, y2: curr.hyIn,
+                                 x: curr.x, y: curr.y))
+        }
+        if close {
+            let last = penPoints[n - 1]
+            cmds.append(.curveTo(x1: last.hxOut, y1: last.hyOut,
+                                 x2: p0.hxIn, y2: p0.hyIn,
+                                 x: p0.x, y: p0.y))
+            cmds.append(.closePath)
+        }
+        let elem = Element.path(JasPath(
+            d: cmds,
+            stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)
+        ))
+        controller?.addElement(elem)
+        penPoints.removeAll()
+        penDragging = false
+        needsDisplay = true
+    }
+
+    func penCancel() {
+        penPoints.removeAll()
+        penDragging = false
+        needsDisplay = true
+    }
+
+    private func drawPenOverlay(_ ctx: CGContext) {
+        guard !penPoints.isEmpty else { return }
+
+        // Draw committed curve segments
+        if penPoints.count >= 2 {
+            ctx.setStrokeColor(CGColor(gray: 0, alpha: 1))
+            ctx.setLineWidth(1.0)
+            ctx.setLineDash(phase: 0, lengths: [])
+            ctx.move(to: CGPoint(x: penPoints[0].x, y: penPoints[0].y))
+            for i in 1..<penPoints.count {
+                let prev = penPoints[i - 1]
+                let curr = penPoints[i]
+                ctx.addCurve(to: CGPoint(x: curr.x, y: curr.y),
+                             control1: CGPoint(x: prev.hxOut, y: prev.hyOut),
+                             control2: CGPoint(x: curr.hxIn, y: curr.hyIn))
+            }
+            ctx.strokePath()
+        }
+
+        // Draw preview curve from last point to mouse
+        if !penDragging {
+            let last = penPoints.last!
+            let p0 = penPoints[0]
+            let nearStart = penPoints.count >= 2 && hypot(penMouseX - p0.x, penMouseY - p0.y) <= penCloseRadius
+            ctx.setStrokeColor(CGColor(gray: 0.4, alpha: 1))
+            ctx.setLineWidth(1.0)
+            ctx.setLineDash(phase: 0, lengths: [4, 4])
+            ctx.move(to: CGPoint(x: last.x, y: last.y))
+            if nearStart {
+                ctx.addCurve(to: CGPoint(x: p0.x, y: p0.y),
+                             control1: CGPoint(x: last.hxOut, y: last.hyOut),
+                             control2: CGPoint(x: p0.hxIn, y: p0.hyIn))
+            } else {
+                ctx.addCurve(to: CGPoint(x: penMouseX, y: penMouseY),
+                             control1: CGPoint(x: last.hxOut, y: last.hyOut),
+                             control2: CGPoint(x: penMouseX, y: penMouseY))
+            }
+            ctx.strokePath()
+            ctx.setLineDash(phase: 0, lengths: [])
+        }
+
+        // Draw handle lines and anchor points
+        let half = handleSize / 2
+        for pt in penPoints {
+            if pt.smooth {
+                ctx.setStrokeColor(selectionColor)
+                ctx.setLineWidth(1.0)
+                ctx.move(to: CGPoint(x: pt.hxIn, y: pt.hyIn))
+                ctx.addLine(to: CGPoint(x: pt.hxOut, y: pt.hyOut))
+                ctx.strokePath()
+                // Handle circles
+                let r: CGFloat = 3.0
+                for (hx, hy) in [(pt.hxIn, pt.hyIn), (pt.hxOut, pt.hyOut)] {
+                    let rect = CGRect(x: hx - r, y: hy - r, width: r * 2, height: r * 2)
+                    ctx.setFillColor(.white)
+                    ctx.fillEllipse(in: rect)
+                    ctx.setStrokeColor(selectionColor)
+                    ctx.strokeEllipse(in: rect)
+                }
+            }
+            // Anchor square
+            let rect = CGRect(x: pt.x - half, y: pt.y - half, width: handleSize, height: handleSize)
+            ctx.setFillColor(selectionColor)
+            ctx.fill(rect)
+            ctx.setStrokeColor(selectionColor)
+            ctx.stroke(rect)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let tool = onToolRead?() ?? currentTool
+        if tool == .pen && !penPoints.isEmpty {
+            if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 { // Escape / Return / Enter
+                penFinish()
+                return
+            }
+        }
+        super.keyDown(with: event)
+    }
+
     override func mouseDown(with event: NSEvent) {
         let tool = onToolRead?() ?? currentTool
+        if tool == .pen {
+            if event.clickCount >= 2 {
+                // Remove the point added by the first click of the double-click
+                if !penPoints.isEmpty { penPoints.removeLast() }
+                penFinish()
+                return
+            }
+            let pt = convert(event.locationInWindow, from: nil)
+            // If clicking near the start point with 2+ points, close the path
+            if penPoints.count >= 2 {
+                let p0 = penPoints[0]
+                if hypot(pt.x - p0.x, pt.y - p0.y) <= penCloseRadius {
+                    penFinish(forceClose: true)
+                    return
+                }
+            }
+            penDragging = true
+            penPoints.append(PenPoint(x: pt.x, y: pt.y))
+            needsDisplay = true
+            return
+        }
         if tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .text || tool == .line || tool == .rect || tool == .polygon {
             let pt = convert(event.locationInWindow, from: nil)
             if (tool == .selection || tool == .directSelection || tool == .groupSelection) && hitTestSelection(pt) {
@@ -546,7 +737,32 @@ class CanvasNSView: NSView {
         }
     }
 
+    override func mouseMoved(with event: NSEvent) {
+        let tool = onToolRead?() ?? currentTool
+        if tool == .pen {
+            let pt = convert(event.locationInWindow, from: nil)
+            penMouseX = pt.x
+            penMouseY = pt.y
+            needsDisplay = true
+        }
+    }
+
     override func mouseDragged(with event: NSEvent) {
+        let tool = onToolRead?() ?? currentTool
+        if tool == .pen {
+            let pt = convert(event.locationInWindow, from: nil)
+            penMouseX = pt.x
+            penMouseY = pt.y
+            if penDragging, let last = penPoints.last {
+                last.hxOut = pt.x
+                last.hyOut = pt.y
+                last.hxIn = 2 * last.x - pt.x
+                last.hyIn = 2 * last.y - pt.y
+                last.smooth = true
+            }
+            needsDisplay = true
+            return
+        }
         if let start = dragStart {
             var pt = convert(event.locationInWindow, from: nil)
             if event.modifierFlags.contains(.shift) {
@@ -559,6 +775,12 @@ class CanvasNSView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        let tool = onToolRead?() ?? currentTool
+        if tool == .pen {
+            penDragging = false
+            needsDisplay = true
+            return
+        }
         guard dragStart != nil else { return }
         let end = convert(event.locationInWindow, from: nil)
         let shift = event.modifierFlags.contains(.shift)
@@ -569,7 +791,7 @@ class CanvasNSView: NSView {
     /// Test helper: simulate a complete drag from start to end point.
     func simulateDrag(from start: NSPoint, to end: NSPoint, extend: Bool = false) {
         let tool = onToolRead?() ?? currentTool
-        guard tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .text || tool == .line || tool == .rect || tool == .polygon else { return }
+        guard tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .pen || tool == .text || tool == .line || tool == .rect || tool == .polygon else { return }
         dragStart = start
         dragEnd = end
         commitDrag(to: end, shift: extend)

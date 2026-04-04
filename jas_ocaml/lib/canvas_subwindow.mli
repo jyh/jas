@@ -25,6 +25,9 @@ class canvas_subwindow :
   method x : int
   method y : int
   method bbox : bounding_box
+  method pen_finish : unit
+  method pen_finish_close : unit
+  method pen_cancel : unit
 end
 
 val create :

@@ -267,6 +267,20 @@ let regular_polygon_points x1 y1 x2 y2 n =
 
 let handle_size = 6.0
 
+(** A control point in the pen tool's in-progress path. *)
+type pen_point = {
+  mutable px : float;
+  mutable py : float;
+  mutable hx_in : float;
+  mutable hy_in : float;
+  mutable hx_out : float;
+  mutable hy_out : float;
+  mutable smooth : bool;
+}
+
+let make_pen_point x y =
+  { px = x; py = y; hx_in = x; hy_in = y; hx_out = x; hy_out = y; smooth = false }
+
 let control_points (elem : Element.element) =
   Element.control_points elem
 
@@ -397,6 +411,11 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
     (* Inline text editing state *)
     val mutable text_editor : GEdit.entry option = None
     val mutable editing_path : int list option = None
+    (* Pen tool state *)
+    val mutable pen_points : pen_point list = []
+    val mutable pen_dragging = false
+    val mutable pen_mouse_x = 0.0
+    val mutable pen_mouse_y = 0.0
 
     method widget = frame#coerce
     method canvas = canvas_area
@@ -464,6 +483,122 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         entry#select_region ~start:0 ~stop:(String.length content);
         text_editor <- Some entry
       | _ -> ()
+
+    val pen_close_radius = 6.0
+
+    method pen_finish_close = _self#pen_finish_impl true
+    method pen_finish = _self#pen_finish_impl false
+
+    method private pen_finish_impl force_close =
+      let pts = List.rev pen_points in
+      let n = List.length pts in
+      if n >= 2 then begin
+        let p0 = List.hd pts in
+        let pn = List.nth pts (n - 1) in
+        let dist = sqrt ((pn.px -. p0.px) ** 2.0 +. (pn.py -. p0.py) ** 2.0) in
+        let close = force_close || (n >= 3 && dist <= pen_close_radius) in
+        (* Only skip last point if it actually coincides with start *)
+        let skip_last = close && n >= 3 && dist <= pen_close_radius in
+        let use_pts = if skip_last then List.filteri (fun i _ -> i < n - 1) pts else pts in
+        let rest = List.tl use_pts in
+        let cmds = ref [Element.MoveTo (p0.px, p0.py)] in
+        let prev = ref p0 in
+        List.iter (fun curr ->
+          cmds := Element.CurveTo (!prev.hx_out, !prev.hy_out,
+                                   curr.hx_in, curr.hy_in,
+                                   curr.px, curr.py) :: !cmds;
+          prev := curr
+        ) rest;
+        if close then begin
+          let last = !prev in
+          cmds := Element.ClosePath :: Element.CurveTo (last.hx_out, last.hy_out,
+                                   p0.hx_in, p0.hy_in,
+                                   p0.px, p0.py) :: !cmds
+        end;
+        let default_stroke = Some Element.{
+          stroke_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
+          stroke_width = 1.0;
+          stroke_linecap = Butt;
+          stroke_linejoin = Miter;
+        } in
+        let elem = Element.make_path ~stroke:default_stroke (List.rev !cmds) in
+        controller#add_element elem
+      end;
+      pen_points <- [];
+      pen_dragging <- false;
+      canvas_area#misc#queue_draw ()
+
+    method pen_cancel =
+      pen_points <- [];
+      pen_dragging <- false;
+      canvas_area#misc#queue_draw ()
+
+    method private draw_pen_overlay cr =
+      let pts = List.rev pen_points in
+      if pts = [] then ()
+      else begin
+        (* Draw committed curve segments *)
+        if List.length pts >= 2 then begin
+          Cairo.set_source_rgb cr 0.0 0.0 0.0;
+          Cairo.set_line_width cr 1.0;
+          let p0 = List.hd pts in
+          Cairo.move_to cr p0.px p0.py;
+          let prev = ref p0 in
+          List.iter (fun curr ->
+            Cairo.curve_to cr !prev.hx_out !prev.hy_out
+              curr.hx_in curr.hy_in curr.px curr.py;
+            prev := curr
+          ) (List.tl pts);
+          Cairo.stroke cr
+        end;
+        (* Draw preview curve from last point to mouse *)
+        if not pen_dragging then begin
+          let last = List.hd pen_points in (* pen_points is reversed, head is last *)
+          let p0 = List.nth pts 0 in
+          let n = List.length pts in
+          let dist = sqrt ((pen_mouse_x -. p0.px) ** 2.0 +. (pen_mouse_y -. p0.py) ** 2.0) in
+          let near_start = n >= 2 && dist <= pen_close_radius in
+          Cairo.set_source_rgba cr 0.4 0.4 0.4 1.0;
+          Cairo.set_line_width cr 1.0;
+          Cairo.set_dash cr [| 4.0; 4.0 |];
+          Cairo.move_to cr last.px last.py;
+          if near_start then
+            Cairo.curve_to cr last.hx_out last.hy_out
+              p0.hx_in p0.hy_in p0.px p0.py
+          else
+            Cairo.curve_to cr last.hx_out last.hy_out
+              pen_mouse_x pen_mouse_y pen_mouse_x pen_mouse_y;
+          Cairo.stroke cr;
+          Cairo.set_dash cr [||]
+        end;
+        (* Draw handle lines and anchor points *)
+        let half = handle_size /. 2.0 in
+        List.iter (fun pt ->
+          if pt.smooth then begin
+            Cairo.set_source_rgb cr 0.0 0.47 1.0;
+            Cairo.set_line_width cr 1.0;
+            Cairo.move_to cr pt.hx_in pt.hy_in;
+            Cairo.line_to cr pt.hx_out pt.hy_out;
+            Cairo.stroke cr;
+            (* Handle circles *)
+            Cairo.arc cr pt.hx_in pt.hy_in ~r:3.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
+            Cairo.set_source_rgb cr 1.0 1.0 1.0;
+            Cairo.fill_preserve cr;
+            Cairo.set_source_rgb cr 0.0 0.47 1.0;
+            Cairo.stroke cr;
+            Cairo.arc cr pt.hx_out pt.hy_out ~r:3.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
+            Cairo.set_source_rgb cr 1.0 1.0 1.0;
+            Cairo.fill_preserve cr;
+            Cairo.set_source_rgb cr 0.0 0.47 1.0;
+            Cairo.stroke cr
+          end;
+          (* Anchor square *)
+          Cairo.rectangle cr (pt.px -. half) (pt.py -. half) ~w:handle_size ~h:handle_size;
+          Cairo.set_source_rgb cr 0.0 0.47 1.0;
+          Cairo.fill_preserve cr;
+          Cairo.stroke cr
+        ) pts
+      end
 
     initializer
       fixed#put frame#coerce ~x:pos_x ~y:pos_y;
@@ -549,12 +684,48 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
           end
         | _ -> ()
         end;
+        (* Draw pen tool overlay *)
+        if toolbar#current_tool = Toolbar.Pen then
+          _self#draw_pen_overlay cr;
         true
       ) |> ignore;
 
       (* Canvas mouse events for line tool *)
       canvas_area#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION];
       canvas_area#event#connect#button_press ~callback:(fun ev ->
+        if toolbar#current_tool = Toolbar.Pen && GdkEvent.Button.button ev = 1 then begin
+          let event_type = GdkEvent.get_type ev in
+          if event_type = `TWO_BUTTON_PRESS then begin
+            (* Double click: remove extra point from first click, finish *)
+            (match pen_points with _ :: rest -> pen_points <- rest | [] -> ());
+            _self#pen_finish;
+            true
+          end else begin
+            let x = GdkEvent.Button.x ev in
+            let y = GdkEvent.Button.y ev in
+            (* Check if clicking near the start point to close *)
+            let pts = List.rev pen_points in
+            let n = List.length pts in
+            if n >= 2 then begin
+              let p0 = List.hd pts in
+              let dist = sqrt ((x -. p0.px) ** 2.0 +. (y -. p0.py) ** 2.0) in
+              if dist <= pen_close_radius then begin
+                _self#pen_finish_close;
+                true
+              end else begin
+                pen_dragging <- true;
+                pen_points <- (make_pen_point x y) :: pen_points;
+                canvas_area#misc#queue_draw ();
+                true
+              end
+            end else begin
+              pen_dragging <- true;
+              pen_points <- (make_pen_point x y) :: pen_points;
+              canvas_area#misc#queue_draw ();
+              true
+            end
+          end
+        end else
         if (toolbar#current_tool = Toolbar.Selection
             || toolbar#current_tool = Toolbar.Direct_selection
             || toolbar#current_tool = Toolbar.Group_selection
@@ -584,6 +755,24 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         end else false
       ) |> ignore;
       canvas_area#event#connect#motion_notify ~callback:(fun ev ->
+        if toolbar#current_tool = Toolbar.Pen then begin
+          let x = GdkEvent.Motion.x ev in
+          let y = GdkEvent.Motion.y ev in
+          pen_mouse_x <- x;
+          pen_mouse_y <- y;
+          if pen_dragging then begin
+            match pen_points with
+            | pt :: _ ->
+              pt.hx_out <- x;
+              pt.hy_out <- y;
+              pt.hx_in <- 2.0 *. pt.px -. x;
+              pt.hy_in <- 2.0 *. pt.py -. y;
+              pt.smooth <- true
+            | [] -> ()
+          end;
+          canvas_area#misc#queue_draw ();
+          true
+        end else
         begin match line_drag_start with
         | Some (sx, sy) ->
           let x = GdkEvent.Motion.x ev in
@@ -597,6 +786,11 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         end
       ) |> ignore;
       canvas_area#event#connect#button_release ~callback:(fun ev ->
+        if toolbar#current_tool = Toolbar.Pen && GdkEvent.Button.button ev = 1 then begin
+          pen_dragging <- false;
+          canvas_area#misc#queue_draw ();
+          true
+        end else
         begin match line_drag_start with
         | Some (sx, sy) when GdkEvent.Button.button ev = 1 ->
           let raw_ex = GdkEvent.Button.x ev in

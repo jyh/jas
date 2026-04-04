@@ -11,6 +11,7 @@ class Tool(Enum):
     SELECTION = auto()
     DIRECT_SELECTION = auto()
     GROUP_SELECTION = auto()
+    PEN = auto()
     TEXT = auto()
     LINE = auto()
     RECT = auto()
@@ -70,6 +71,8 @@ class ToolButton(QToolButton):
             self._draw_line_tool(painter)
         elif self.tool == Tool.RECT:
             self._draw_rect_tool(painter)
+        elif self.tool == Tool.PEN:
+            self._draw_pen_tool(painter)
         elif self.tool == Tool.TEXT:
             self._draw_text_tool(painter)
         elif self.tool == Tool.POLYGON:
@@ -112,6 +115,23 @@ class ToolButton(QToolButton):
     def _draw_rect_tool(self, painter):
         painter.setPen(QPen(QColor("#cccccc"), 1.5))
         painter.drawRect(4, 4, self.ICON_SIZE - 8, self.ICON_SIZE - 8)
+
+    def _draw_pen_tool(self, painter):
+        painter.setPen(QPen(QColor("#cccccc"), 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        path = QPainterPath()
+        # Fountain pen nib shape
+        path.moveTo(8, 24)
+        path.lineTo(10, 18)
+        path.lineTo(14, 4)
+        path.lineTo(18, 4)
+        path.lineTo(22, 18)
+        path.lineTo(24, 24)
+        path.lineTo(16, 20)
+        path.closeSubpath()
+        painter.drawPath(path)
+        # Center line (nib slit)
+        painter.drawLine(16, 10, 16, 20)
 
     def _draw_text_tool(self, painter):
         painter.setPen(QPen(QColor("#cccccc"), 1.5))
@@ -188,7 +208,8 @@ class Toolbar(QWidget):
         tools = [
             (Tool.SELECTION, 0, 0),
             (Tool.DIRECT_SELECTION, 0, 1),
-            (Tool.TEXT, 1, 0),
+            (Tool.PEN, 1, 0),
+            (Tool.TEXT, 1, 1),
             (Tool.LINE, 2, 0),
             (Tool.RECT, 2, 1),
         ]
