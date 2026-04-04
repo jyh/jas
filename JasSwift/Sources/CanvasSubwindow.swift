@@ -332,6 +332,37 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: JasDocument) {
     }
 }
 
+// MARK: - Shift-constrain helper
+
+private func constrainAngle(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> (Double, Double) {
+    let dx = ex - sx, dy = ey - sy
+    let dist = hypot(dx, dy)
+    guard dist > 0 else { return (ex, ey) }
+    let angle = atan2(dy, dx)
+    let snapped = (angle / (.pi / 4)).rounded() * (.pi / 4)
+    return (sx + dist * cos(snapped), sy + dist * sin(snapped))
+}
+
+// MARK: - Regular polygon helper
+
+private let polygonSides = 5
+
+private func regularPolygonPoints(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, _ n: Int) -> [(Double, Double)] {
+    let ex = x2 - x1, ey = y2 - y1
+    let s = hypot(ex, ey)
+    guard s > 0 else { return Array(repeating: (x1, y1), count: n) }
+    let mx = (x1 + x2) / 2, my = (y1 + y2) / 2
+    let px = -ey / s, py = ex / s
+    let d = s / (2 * tan(.pi / Double(n)))
+    let cx = mx + d * px, cy = my + d * py
+    let r = s / (2 * sin(.pi / Double(n)))
+    let theta0 = atan2(y1 - cy, x1 - cx)
+    return (0..<n).map { k in
+        let angle = theta0 + 2 * .pi * Double(k) / Double(n)
+        return (cx + r * cos(angle), cy + r * sin(angle))
+    }
+}
+
 // MARK: - Canvas NSView for CoreGraphics drawing
 
 /// An NSView that draws the document's elements using CoreGraphics.
@@ -383,6 +414,15 @@ class CanvasNSView: NSView {
                 if tool == .line {
                     ctx.move(to: start)
                     ctx.addLine(to: end)
+                } else if tool == .polygon {
+                    let pts = regularPolygonPoints(start.x, start.y, end.x, end.y, polygonSides)
+                    if let first = pts.first {
+                        ctx.move(to: CGPoint(x: first.0, y: first.1))
+                        for i in 1..<pts.count {
+                            ctx.addLine(to: CGPoint(x: pts[i].0, y: pts[i].1))
+                        }
+                        ctx.closePath()
+                    }
                 } else if tool == .rect || tool == .selection || tool == .directSelection || tool == .groupSelection {
                     let r = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
                                    width: abs(end.x - start.x), height: abs(end.y - start.y))
@@ -410,7 +450,7 @@ class CanvasNSView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let tool = onToolRead?() ?? currentTool
-        if tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .line || tool == .rect {
+        if tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .line || tool == .rect || tool == .polygon {
             let pt = convert(event.locationInWindow, from: nil)
             if (tool == .selection || tool == .directSelection || tool == .groupSelection) && hitTestSelection(pt) {
                 dragStart = pt
@@ -425,8 +465,13 @@ class CanvasNSView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        if dragStart != nil {
-            dragEnd = convert(event.locationInWindow, from: nil)
+        if let start = dragStart {
+            var pt = convert(event.locationInWindow, from: nil)
+            if event.modifierFlags.contains(.shift) {
+                let (cx, cy) = constrainAngle(start.x, start.y, pt.x, pt.y)
+                pt = NSPoint(x: cx, y: cy)
+            }
+            dragEnd = pt
             needsDisplay = true
         }
     }
@@ -434,20 +479,20 @@ class CanvasNSView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard dragStart != nil else { return }
         let end = convert(event.locationInWindow, from: nil)
-        let extend = event.modifierFlags.contains(.shift)
-        commitDrag(to: end, extend: extend)
+        let shift = event.modifierFlags.contains(.shift)
+        commitDrag(to: end, shift: shift)
     }
 
     /// Test helper: simulate a complete drag from start to end point.
     func simulateDrag(from start: NSPoint, to end: NSPoint, extend: Bool = false) {
         let tool = onToolRead?() ?? currentTool
-        guard tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .line || tool == .rect else { return }
+        guard tool == .selection || tool == .directSelection || tool == .groupSelection || tool == .line || tool == .rect || tool == .polygon else { return }
         dragStart = start
         dragEnd = end
-        commitDrag(to: end, extend: extend)
+        commitDrag(to: end, shift: extend)
     }
 
-    private func commitDrag(to end: NSPoint, extend: Bool = false) {
+    private func commitDrag(to rawEnd: NSPoint, shift: Bool = false) {
         guard let start = dragStart, let controller = controller else {
             dragStart = nil
             dragEnd = nil
@@ -461,6 +506,11 @@ class CanvasNSView: NSView {
         moving = false
 
         if wasMoving {
+            var end = rawEnd
+            if shift {
+                let (cx, cy) = constrainAngle(start.x, start.y, end.x, end.y)
+                end = NSPoint(x: cx, y: cy)
+            }
             let dx = end.x - start.x
             let dy = end.y - start.y
             if dx != 0 || dy != 0 {
@@ -470,33 +520,41 @@ class CanvasNSView: NSView {
             return
         }
 
+        // Selection tools: shift means extend
+        let extend = shift
         if tool == .selection {
-            let x = min(start.x, end.x)
-            let y = min(start.y, end.y)
-            let w = abs(end.x - start.x)
-            let h = abs(end.y - start.y)
+            let x = min(start.x, rawEnd.x)
+            let y = min(start.y, rawEnd.y)
+            let w = abs(rawEnd.x - start.x)
+            let h = abs(rawEnd.y - start.y)
             controller.selectRect(x: x, y: y, width: w, height: h, extend: extend)
             return
         }
 
         if tool == .groupSelection {
-            let x = min(start.x, end.x)
-            let y = min(start.y, end.y)
-            let w = abs(end.x - start.x)
-            let h = abs(end.y - start.y)
+            let x = min(start.x, rawEnd.x)
+            let y = min(start.y, rawEnd.y)
+            let w = abs(rawEnd.x - start.x)
+            let h = abs(rawEnd.y - start.y)
             controller.groupSelectRect(x: x, y: y, width: w, height: h, extend: extend)
             return
         }
 
         if tool == .directSelection {
-            let x = min(start.x, end.x)
-            let y = min(start.y, end.y)
-            let w = abs(end.x - start.x)
-            let h = abs(end.y - start.y)
+            let x = min(start.x, rawEnd.x)
+            let y = min(start.y, rawEnd.y)
+            let w = abs(rawEnd.x - start.x)
+            let h = abs(rawEnd.y - start.y)
             controller.directSelectRect(x: x, y: y, width: w, height: h, extend: extend)
             return
         }
 
+        // Drawing tools: shift means constrain angle
+        var end = rawEnd
+        if shift {
+            let (cx, cy) = constrainAngle(start.x, start.y, end.x, end.y)
+            end = NSPoint(x: cx, y: cy)
+        }
         let elem: Element
         if tool == .line {
             elem = .line(JasLine(
@@ -507,6 +565,12 @@ class CanvasNSView: NSView {
             elem = .rect(JasRect(
                 x: min(start.x, end.x), y: min(start.y, end.y),
                 width: abs(end.x - start.x), height: abs(end.y - start.y),
+                stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)
+            ))
+        } else if tool == .polygon {
+            let pts = regularPolygonPoints(start.x, start.y, end.x, end.y, polygonSides)
+            elem = .polygon(JasPolygon(
+                points: pts,
                 stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)
             ))
         } else {
