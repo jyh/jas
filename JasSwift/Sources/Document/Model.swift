@@ -34,6 +34,7 @@ public class JasModel: ObservableObject {
 
     public func markSaved() {
         savedDocument = document
+        objectWillChange.send()
     }
 
     public func onDocumentChanged(_ callback: @escaping (JasDocument) -> Void) {

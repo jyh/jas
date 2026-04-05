@@ -123,7 +123,7 @@ let paste_clipboard (model : Model.model) offset () =
       end
   )
 
-let open_file (model : Model.model) (parent : GWindow.window) () =
+let open_file on_open (parent : GWindow.window) () =
   let dialog = GWindow.file_chooser_dialog
     ~action:`OPEN
     ~title:"Open"
@@ -142,14 +142,14 @@ let open_file (model : Model.model) (parent : GWindow.window) () =
       let n = in_channel_length ic in
       let svg = really_input_string ic n in
       close_in ic;
-      model#set_document (Svg.svg_to_document svg);
-      model#mark_saved;
-      model#set_filename path
-    | None -> ()
+      let new_model = Model.create
+        ~document:(Svg.svg_to_document svg) ~filename:path () in
+      dialog#destroy ();
+      on_open new_model
+    | None -> dialog#destroy ()
     end
-  | _ -> ()
-  end;
-  dialog#destroy ()
+  | _ -> dialog#destroy ()
+  end
 
 let save_as (model : Model.model) (parent : GWindow.window) () =
   let dialog = GWindow.file_chooser_dialog
@@ -180,7 +180,22 @@ let save_as (model : Model.model) (parent : GWindow.window) () =
   end;
   dialog#destroy ()
 
-let create (model : Model.model) (parent : GWindow.window) (vbox : GPack.box) =
+let is_untitled filename =
+  String.length filename >= 9 && String.sub filename 0 9 = "Untitled-"
+
+let save (model : Model.model) (parent : GWindow.window) () =
+  if is_untitled model#filename then
+    save_as model parent ()
+  else begin
+    let svg = Svg.document_to_svg model#document in
+    let oc = open_out model#filename in
+    output_string oc svg;
+    close_out oc;
+    model#mark_saved
+  end
+
+let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open (vbox : GPack.box) =
+  let m () = get_model () in
   (* Menubar *)
   let menubar = GMenu.menu_bar ~packing:(fun w -> vbox#pack w) () in
   let factory = new GMenu.factory menubar in
@@ -188,29 +203,23 @@ let create (model : Model.model) (parent : GWindow.window) (vbox : GPack.box) =
   (* File menu *)
   let _file_menu = factory#add_submenu "File" in
   let file_factory = new GMenu.factory _file_menu in
-  ignore (file_factory#add_item "New" ~key:GdkKeysyms._n ~callback:(fun () -> print_endline "New"));
-  ignore (file_factory#add_item "Open..." ~key:GdkKeysyms._o ~callback:(open_file model parent));
-  ignore (file_factory#add_item "Save" ~key:GdkKeysyms._s ~callback:(fun () -> print_endline "Save"));
-  ignore (file_factory#add_item "Save As..." ~key:GdkKeysyms._s ~callback:(save_as model parent));
+  ignore (file_factory#add_item "New" ~key:GdkKeysyms._n ~callback:(fun () -> on_open (Model.create ())));
+  ignore (file_factory#add_item "Open..." ~key:GdkKeysyms._o ~callback:(open_file on_open parent));
+  ignore (file_factory#add_item "Save" ~key:GdkKeysyms._s ~callback:(fun () -> save (m ()) parent ()));
+  ignore (file_factory#add_item "Save As..." ~key:GdkKeysyms._s ~callback:(fun () -> save_as (m ()) parent ()));
   ignore (file_factory#add_separator ());
   ignore (file_factory#add_item "Quit" ~key:GdkKeysyms._q ~callback:(fun () -> GMain.quit ()));
 
   (* Edit menu *)
   let _edit_menu = factory#add_submenu "Edit" in
   let edit_factory = new GMenu.factory _edit_menu in
-  let undo_item = edit_factory#add_item "Undo" ~key:GdkKeysyms._z ~callback:(fun () -> model#undo) in
-  let redo_item = edit_factory#add_item "Redo" ~key:GdkKeysyms._y ~callback:(fun () -> model#redo) in
-  undo_item#misc#set_sensitive model#can_undo;
-  redo_item#misc#set_sensitive model#can_redo;
-  model#on_document_changed (fun _doc ->
-    undo_item#misc#set_sensitive model#can_undo;
-    redo_item#misc#set_sensitive model#can_redo
-  );
+  ignore (edit_factory#add_item "Undo" ~key:GdkKeysyms._z ~callback:(fun () -> (m ())#undo));
+  ignore (edit_factory#add_item "Redo" ~key:GdkKeysyms._y ~callback:(fun () -> (m ())#redo));
   ignore (edit_factory#add_separator ());
-  ignore (edit_factory#add_item "Cut" ~key:GdkKeysyms._x ~callback:(cut_selection model));
-  ignore (edit_factory#add_item "Copy" ~key:GdkKeysyms._c ~callback:(copy_selection model));
-  ignore (edit_factory#add_item "Paste" ~key:GdkKeysyms._v ~callback:(paste_clipboard model 24.0));
-  ignore (edit_factory#add_item "Paste in Place" ~callback:(paste_clipboard model 0.0));
+  ignore (edit_factory#add_item "Cut" ~key:GdkKeysyms._x ~callback:(fun () -> cut_selection (m ()) ()));
+  ignore (edit_factory#add_item "Copy" ~key:GdkKeysyms._c ~callback:(fun () -> copy_selection (m ()) ()));
+  ignore (edit_factory#add_item "Paste" ~key:GdkKeysyms._v ~callback:(fun () -> paste_clipboard (m ()) 24.0 ()));
+  ignore (edit_factory#add_item "Paste in Place" ~callback:(fun () -> paste_clipboard (m ()) 0.0 ()));
   ignore (edit_factory#add_separator ());
   ignore (edit_factory#add_item "Select All" ~key:GdkKeysyms._a ~callback:(fun () -> print_endline "Select All"));
 

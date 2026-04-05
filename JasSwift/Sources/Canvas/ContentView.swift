@@ -15,31 +15,44 @@ public enum Tool: String, CaseIterable {
     case polygon
 }
 
+// MARK: - Canvas entry for multi-canvas workspace
+
+struct CanvasEntry: Identifiable {
+    let id = UUID()
+    let model: JasModel
+    var position: CGPoint
+}
+
 // MARK: - Content View
 
 public struct ContentView: View {
     @State private var currentTool: Tool = .selection
-    @State private var canvasPosition: CGPoint = CGPoint(x: 84, y: 0)
     @State private var toolbarPosition: CGPoint = CGPoint(x: 0, y: 0)
-    @StateObject private var model = JasModel()
+    @State private var canvases: [CanvasEntry] = [
+        CanvasEntry(model: JasModel(), position: CGPoint(x: 84, y: 0))
+    ]
+    @State private var activeIndex: Int = 0
 
     public init() {}
 
-    private var controller: Controller { Controller(model: model) }
+    private var activeModel: JasModel { canvases[activeIndex].model }
 
     public var body: some View {
         ZStack(alignment: .topLeading) {
             // Workspace background
             Color(nsColor: NSColor(white: 0.235, alpha: 1.0))
 
-            // Embedded canvas subwindow (view observes model)
-            CanvasSubwindow(
-                model: model,
-                controller: controller,
-                currentTool: $currentTool,
-                position: $canvasPosition,
-                bbox: CanvasBoundingBox()
-            )
+            // Canvas subwindows
+            ForEach(Array(canvases.enumerated()), id: \.element.id) { index, entry in
+                CanvasSubwindow(
+                    model: entry.model,
+                    controller: Controller(model: entry.model),
+                    currentTool: $currentTool,
+                    position: $canvases[index].position,
+                    bbox: CanvasBoundingBox()
+                )
+                .onTapGesture { activeIndex = index }
+            }
 
             // Floating toolbar
             FloatingToolbar(
@@ -49,13 +62,23 @@ public struct ContentView: View {
         }
         .frame(minWidth: 640, minHeight: 480)
         .clipped()
-        .focusedSceneValue(\.jasModel, model)
-        .focusedSceneValue(\.hasSelection, !model.document.selection.isEmpty)
-        .focusedSceneValue(\.canUndo, model.canUndo)
-        .focusedSceneValue(\.canRedo, model.canRedo)
+        .focusedSceneValue(\.jasModel, activeModel)
+        .focusedSceneValue(\.hasSelection, !activeModel.document.selection.isEmpty)
+        .focusedSceneValue(\.canUndo, activeModel.canUndo)
+        .focusedSceneValue(\.canRedo, activeModel.canRedo)
+        .focusedSceneValue(\.addCanvas, { newModel in
+            addCanvas(newModel)
+        })
         .background(
-            KeyboardShortcutHandler(currentTool: $currentTool, model: model)
+            KeyboardShortcutHandler(currentTool: $currentTool, model: activeModel)
         )
+    }
+
+    private func addCanvas(_ model: JasModel) {
+        let offset = CGFloat(canvases.count) * 30.0
+        let position = CGPoint(x: 84 + offset, y: offset)
+        canvases.append(CanvasEntry(model: model, position: position))
+        activeIndex = canvases.count - 1
     }
 }
 

@@ -6,13 +6,15 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
 from document.model import Model
 
 
-def create_menus(window: QMainWindow, model: Model) -> None:
+def create_menus(window: QMainWindow) -> None:
     """Create File, Edit, and View menus for the main window.
 
     Args:
-        window: The QMainWindow to add menus to.
-        model: The document model.
+        window: The QMainWindow to add menus to (must have active_model()).
     """
+    def _model() -> Model | None:
+        return window.active_model()
+
     menubar = window.menuBar()
 
     # File menu
@@ -20,19 +22,19 @@ def create_menus(window: QMainWindow, model: Model) -> None:
 
     new_action = file_menu.addAction("&New")
     new_action.setShortcut(QKeySequence.New)
-    new_action.triggered.connect(lambda: print("New file"))
+    new_action.triggered.connect(lambda: window.add_canvas(Model()))
 
     open_action = file_menu.addAction("&Open...")
     open_action.setShortcut(QKeySequence.Open)
-    open_action.triggered.connect(lambda: _open_file(window, model))
+    open_action.triggered.connect(lambda: _open_file(window))
 
     save_action = file_menu.addAction("&Save")
     save_action.setShortcut(QKeySequence.Save)
-    save_action.triggered.connect(lambda: print("Save file"))
+    save_action.triggered.connect(lambda: _save(window, _model()))
 
     save_as_action = file_menu.addAction("Save &As...")
     save_as_action.setShortcut(QKeySequence.SaveAs)
-    save_as_action.triggered.connect(lambda: _save_as(window, model))
+    save_as_action.triggered.connect(lambda: _save_as(window, _model()))
 
     file_menu.addSeparator()
 
@@ -45,36 +47,30 @@ def create_menus(window: QMainWindow, model: Model) -> None:
 
     undo_action = edit_menu.addAction("&Undo")
     undo_action.setShortcut(QKeySequence.Undo)
-    undo_action.triggered.connect(lambda: model.undo())
-    undo_action.setEnabled(False)
+    undo_action.triggered.connect(lambda: _model() and _model().undo())
 
     redo_action = edit_menu.addAction("&Redo")
     redo_action.setShortcut(QKeySequence.Redo)
-    redo_action.triggered.connect(lambda: model.redo())
-    redo_action.setEnabled(False)
-
-    def _update_undo_redo(_doc):
-        undo_action.setEnabled(model.can_undo)
-        redo_action.setEnabled(model.can_redo)
-    model.on_document_changed(_update_undo_redo)
+    redo_action.triggered.connect(lambda: _model() and _model().redo())
 
     edit_menu.addSeparator()
 
     cut_action = edit_menu.addAction("Cu&t")
     cut_action.setShortcut(QKeySequence.Cut)
-    cut_action.triggered.connect(lambda: _cut_selection(model))
+    cut_action.triggered.connect(lambda: _model() and _cut_selection(_model()))
 
     copy_action = edit_menu.addAction("&Copy")
     copy_action.setShortcut(QKeySequence.Copy)
-    copy_action.triggered.connect(lambda: _copy_selection(model))
+    copy_action.triggered.connect(lambda: _model() and _copy_selection(_model()))
 
     paste_action = edit_menu.addAction("&Paste")
     paste_action.setShortcut(QKeySequence.Paste)
-    paste_action.triggered.connect(lambda: _paste_clipboard(model, 24.0))
+    paste_action.triggered.connect(lambda: _model() and _paste_clipboard(_model(), 24.0))
 
     paste_in_place_action = edit_menu.addAction("Paste in &Place")
     paste_in_place_action.setShortcut(QKeySequence("Ctrl+Shift+V"))
-    paste_in_place_action.triggered.connect(lambda: _paste_clipboard(model, 0.0))
+    paste_in_place_action.triggered.connect(
+        lambda: _model() and _paste_clipboard(_model(), 0.0))
 
     edit_menu.addSeparator()
 
@@ -98,8 +94,8 @@ def create_menus(window: QMainWindow, model: Model) -> None:
     fit_action.triggered.connect(lambda: print("Fit in window"))
 
 
-def _open_file(window: QMainWindow, model: Model) -> None:
-    """Show Open dialog and load an SVG file."""
+def _open_file(window: QMainWindow) -> None:
+    """Show Open dialog and load an SVG file into a new canvas."""
     from geometry.svg import svg_to_document
 
     path, _ = QFileDialog.getOpenFileName(
@@ -108,9 +104,22 @@ def _open_file(window: QMainWindow, model: Model) -> None:
         return
     with open(path, "r", encoding="utf-8") as f:
         svg = f.read()
-    model.document = svg_to_document(svg)
+    new_model = Model(document=svg_to_document(svg), filename=path)
+    window.add_canvas(new_model)
+
+
+def _save(window: QMainWindow, model: Model | None) -> None:
+    """Save the document. If no path yet, fall back to Save As."""
+    if not model:
+        return
+    if model.filename.startswith("Untitled-"):
+        _save_as(window, model)
+        return
+    from geometry.svg import document_to_svg
+    svg = document_to_svg(model.document)
+    with open(model.filename, "w", encoding="utf-8") as f:
+        f.write(svg)
     model.mark_saved()
-    model.filename = path
 
 
 def _save_as(window: QMainWindow, model: Model) -> None:

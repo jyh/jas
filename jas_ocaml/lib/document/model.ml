@@ -67,7 +67,9 @@ class model ?(document = Document.default_document ()) ?filename () =
 
     method is_modified = doc != saved_doc
 
-    method mark_saved = saved_doc <- doc
+    method mark_saved =
+      saved_doc <- doc;
+      List.iter (fun f -> f doc) listeners
 
     method can_undo = undo_stack <> []
     method can_redo = redo_stack <> []
