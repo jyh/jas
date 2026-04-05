@@ -1,8 +1,8 @@
 """Tests for toolbar and tool definitions."""
 
 import sys
-import unittest
 
+from absl.testing import absltest
 from PySide6.QtWidgets import QApplication
 
 # A QApplication must exist before any QWidget is created.
@@ -19,7 +19,7 @@ from tools.tool import (
 )
 
 
-class ToolEnumTest(unittest.TestCase):
+class ToolEnumTest(absltest.TestCase):
     """Tests for the Tool enum."""
 
     def test_tool_count(self):
@@ -39,7 +39,7 @@ class ToolEnumTest(unittest.TestCase):
         self.assertEqual(len(values), len(set(values)))
 
 
-class ToolConstantsTest(unittest.TestCase):
+class ToolConstantsTest(absltest.TestCase):
     """Tests for shared tool constants."""
 
     def test_hit_radius(self):
@@ -61,7 +61,7 @@ class ToolConstantsTest(unittest.TestCase):
         self.assertEqual(POLYGON_SIDES, 5)
 
 
-class ToolProtocolTest(unittest.TestCase):
+class ToolProtocolTest(absltest.TestCase):
     """Tests for the CanvasTool ABC."""
 
     def test_canvas_tool_is_abstract(self):
@@ -74,7 +74,7 @@ class ToolProtocolTest(unittest.TestCase):
         self.assertEqual(abstract_methods, expected)
 
 
-class SharedSlotsTest(unittest.TestCase):
+class SharedSlotsTest(absltest.TestCase):
     """Tests for shared toolbar slot definitions."""
 
     def test_arrow_slot_tools(self):
@@ -97,7 +97,7 @@ class SharedSlotsTest(unittest.TestCase):
             self.assertIsInstance(tool, Tool)
 
 
-class ToolButtonTest(unittest.TestCase):
+class ToolButtonTest(absltest.TestCase):
     """Tests for the ToolButton widget."""
 
     def test_button_creation(self):
@@ -122,7 +122,7 @@ class ToolButtonTest(unittest.TestCase):
         self.assertEqual(ToolButton.BUTTON_SIZE, 32)
 
 
-class ToolbarLayoutTest(unittest.TestCase):
+class ToolbarLayoutTest(absltest.TestCase):
     """Tests for toolbar grid layout."""
 
     def test_toolbar_default_tool(self):
@@ -169,4 +169,4 @@ class ToolbarLayoutTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    absltest.main()
