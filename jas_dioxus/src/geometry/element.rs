@@ -881,6 +881,138 @@ pub fn move_control_points(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Path handle positions and manipulation
+// ---------------------------------------------------------------------------
+
+/// Map anchor indices to command indices (skipping ClosePath).
+fn cmd_indices_for_path(d: &[PathCommand]) -> Vec<usize> {
+    d.iter()
+        .enumerate()
+        .filter(|(_, cmd)| !matches!(cmd, PathCommand::ClosePath))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Return (incoming_handle, outgoing_handle) for a path anchor.
+/// Returns None for a handle that doesn't exist or coincides with its anchor.
+pub fn path_handle_positions(
+    d: &[PathCommand],
+    anchor_idx: usize,
+) -> (Option<(f64, f64)>, Option<(f64, f64)>) {
+    let indices = cmd_indices_for_path(d);
+    if anchor_idx >= indices.len() {
+        return (None, None);
+    }
+    let ci = indices[anchor_idx];
+    let cmd = &d[ci];
+
+    // Get anchor position
+    let (ax, ay) = match cmd {
+        PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => (*x, *y),
+        PathCommand::CurveTo { x, y, .. } => (*x, *y),
+        _ => return (None, None),
+    };
+
+    // Incoming handle: (x2, y2) of this CurveTo
+    let h_in = if let PathCommand::CurveTo { x2, y2, .. } = cmd {
+        if (*x2 - ax).abs() > 0.01 || (*y2 - ay).abs() > 0.01 {
+            Some((*x2, *y2))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Outgoing handle: (x1, y1) of next CurveTo
+    let h_out = if ci + 1 < d.len() {
+        if let PathCommand::CurveTo { x1, y1, .. } = &d[ci + 1] {
+            if (*x1 - ax).abs() > 0.01 || (*y1 - ay).abs() > 0.01 {
+                Some((*x1, *y1))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    (h_in, h_out)
+}
+
+/// Rotate the opposite handle to be collinear, preserving its distance.
+fn reflect_handle_keep_distance(
+    ax: f64, ay: f64,
+    new_hx: f64, new_hy: f64,
+    opp_hx: f64, opp_hy: f64,
+) -> (f64, f64) {
+    let dist_new = ((new_hx - ax).powi(2) + (new_hy - ay).powi(2)).sqrt();
+    let dist_opp = ((opp_hx - ax).powi(2) + (opp_hy - ay).powi(2)).sqrt();
+    if dist_new < 1e-6 {
+        return (opp_hx, opp_hy);
+    }
+    let scale = -dist_opp / dist_new;
+    (ax + (new_hx - ax) * scale, ay + (new_hy - ay) * scale)
+}
+
+/// Move a specific handle ('in' or 'out') of a path anchor by (dx, dy).
+pub fn move_path_handle(
+    elem: &PathElem,
+    anchor_idx: usize,
+    handle_type: &str,
+    dx: f64,
+    dy: f64,
+) -> PathElem {
+    let d = &elem.d;
+    let indices = cmd_indices_for_path(d);
+    if anchor_idx >= indices.len() {
+        return elem.clone();
+    }
+    let ci = indices[anchor_idx];
+    let cmd = &d[ci];
+
+    let (ax, ay) = match cmd {
+        PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => (*x, *y),
+        PathCommand::CurveTo { x, y, .. } => (*x, *y),
+        _ => return elem.clone(),
+    };
+
+    let mut new_cmds = d.clone();
+
+    if handle_type == "in" {
+        if let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[ci] {
+            let new_hx = x2 + dx;
+            let new_hy = y2 + dy;
+            new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: new_hx, y2: new_hy, x, y };
+            // Rotate opposite (out) handle
+            if ci + 1 < d.len() {
+                if let PathCommand::CurveTo { x1: nx1, y1: ny1, x2: nx2, y2: ny2, x: nx, y: ny } = d[ci + 1] {
+                    let (rx, ry) = reflect_handle_keep_distance(ax, ay, new_hx, new_hy, nx1, ny1);
+                    new_cmds[ci + 1] = PathCommand::CurveTo { x1: rx, y1: ry, x2: nx2, y2: ny2, x: nx, y: ny };
+                }
+            }
+        }
+    } else if handle_type == "out" {
+        if ci + 1 < d.len() {
+            if let PathCommand::CurveTo { x1: nx1, y1: ny1, x2: nx2, y2: ny2, x: nx, y: ny } = d[ci + 1] {
+                let new_hx = nx1 + dx;
+                let new_hy = ny1 + dy;
+                new_cmds[ci + 1] = PathCommand::CurveTo { x1: new_hx, y1: new_hy, x2: nx2, y2: ny2, x: nx, y: ny };
+                // Rotate opposite (in) handle
+                if let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[ci] {
+                    let (rx, ry) = reflect_handle_keep_distance(ax, ay, new_hx, new_hy, x2, y2);
+                    new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: rx, y2: ry, x, y };
+                }
+            }
+        }
+    }
+
+    PathElem { d: new_cmds, ..elem.clone() }
+}
+
 fn move_path_command_points(
     d: &[PathCommand],
     indices: &HashSet<usize>,

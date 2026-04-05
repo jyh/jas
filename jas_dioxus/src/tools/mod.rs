@@ -1,5 +1,7 @@
 pub mod tool;
 pub mod selection;
+pub mod direct_selection;
+pub mod group_selection;
 pub mod rect;
 pub mod line;
 pub mod pen;
