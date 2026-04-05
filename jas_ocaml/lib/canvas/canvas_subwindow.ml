@@ -822,5 +822,10 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       ) |> ignore
   end
 
-let create ?(model = Model.create ()) ~controller ~toolbar ~x ~y ~width ~height ?(bbox = make_bounding_box ()) fixed =
-  new canvas_subwindow ~model ~controller ~toolbar ~x ~y ~width ~height ~bbox fixed
+let create ?(model = Model.create ()) ~controller ~toolbar ?(on_focus = fun () -> ()) ~x ~y ~width ~height ?(bbox = make_bounding_box ()) fixed =
+  let sub = new canvas_subwindow ~model ~controller ~toolbar ~x ~y ~width ~height ~bbox fixed in
+  (* Fire on_focus when canvas or title bar is clicked *)
+  sub#canvas#event#connect#button_press ~callback:(fun _ev ->
+    on_focus (); false  (* false = don't consume, let normal handler run *)
+  ) |> ignore;
+  sub
