@@ -964,7 +964,8 @@ pub fn App() -> Element {
                     let mut open_menu_sig2 = open_menu_sig.clone();
                     rsx! {
                         div {
-                            style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; display:flex; justify-content:space-between; white-space:nowrap;",
+                            class: "jas-menu-item",
+                            style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
                             onmousedown: move |evt: Event<MouseData>| {
                                 evt.stop_propagation();
                                 dispatch(&cmd);
@@ -989,7 +990,8 @@ pub fn App() -> Element {
                 key: "menu-{mi}",
                 style: "position:relative; display:inline-block;",
                 div {
-                    style: "padding:3px 8px; cursor:pointer; font-size:13px; user-select:none; background:{bg};",
+                    class: "jas-menu-title",
+                    style: "padding:3px 8px; cursor:pointer; font-size:13px; user-select:none; border-radius:3px; background:{bg};",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
                         let name = menu_name_str2.clone();
@@ -1022,6 +1024,10 @@ pub fn App() -> Element {
     };
 
     rsx! {
+        style { r#"
+            .jas-menu-title:hover {{ background: #d0d0d0; }}
+            .jas-menu-item:hover {{ background: #e8e8e8; }}
+        "#  }
         div {
             tabindex: "0",
             onkeydown: on_keydown,
