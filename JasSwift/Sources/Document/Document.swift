@@ -152,9 +152,9 @@ private func childrenOf(_ elem: Element) -> [Element] {
 private func withChildren(_ elem: Element, _ newChildren: [Element]) -> Element {
     switch elem {
     case .group(let g):
-        return .group(Group(children: newChildren, opacity: g.opacity, transform: g.transform))
+        return .group(Group(children: newChildren, opacity: g.opacity, transform: g.transform, locked: g.locked))
     case .layer(let l):
-        return .layer(Layer(name: l.name, children: newChildren, opacity: l.opacity, transform: l.transform))
+        return .layer(Layer(name: l.name, children: newChildren, opacity: l.opacity, transform: l.transform, locked: l.locked))
     default:
         fatalError("Element has no children")
     }

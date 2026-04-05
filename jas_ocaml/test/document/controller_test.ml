@@ -81,9 +81,9 @@ let () =
   assert (Jas.Document.PathSet.equal (sel_paths ctrl_s#document.Jas.Document.selection)
     (Jas.Document.PathSet.singleton [0; 0]));
 
-  (* Test select_element: child inside a group selects all group children *)
+  (* Test select_element: child inside a group selects group and all children *)
   ctrl_s#select_element [0; 1; 0];
-  let expected = Jas.Document.PathSet.of_list [[0; 1; 0]; [0; 1; 1]] in
+  let expected = Jas.Document.PathSet.of_list [[0; 1]; [0; 1; 0]; [0; 1; 1]] in
   assert (Jas.Document.PathSet.equal (sel_paths ctrl_s#document.Jas.Document.selection) expected);
 
   (* Test select_element: other child of same group *)
@@ -124,7 +124,7 @@ let () =
 
   (* select_rect group expansion *)
   sctrl#select_rect (-1.0) (-1.0) 7.0 7.0;
-  let expected_sr = Jas.Document.PathSet.of_list [[0; 1; 0]; [0; 1; 1]] in
+  let expected_sr = Jas.Document.PathSet.of_list [[0; 1]; [0; 1; 0]; [0; 1; 1]] in
   assert (Jas.Document.PathSet.equal (sel_paths sctrl#document.Jas.Document.selection) expected_sr);
 
   (* select_rect replaces previous *)
