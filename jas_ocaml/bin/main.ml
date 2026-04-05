@@ -1,8 +1,25 @@
 let () =
   ignore (GMain.init ());
   let model = Jas.Model.create () in
-  let main_window, fixed = Jas.Canvas.create_main_window ~model () in
+  let active_model = ref model in
+  let fixed_ref = ref None in
+  let toolbar_ref = ref None in
+
+  let add_canvas new_model =
+    match !fixed_ref, !toolbar_ref with
+    | Some fixed, Some toolbar ->
+      active_model := new_model;
+      let controller = Jas.Controller.create ~model:new_model () in
+      ignore (Jas.Canvas_subwindow.create
+        ~model:new_model ~controller ~toolbar ~x:184 ~y:0 ~width:820 ~height:640 fixed)
+    | _ -> ()
+  in
+
+  let get_model () = !active_model in
+  let main_window, fixed = Jas.Canvas.create_main_window ~get_model ~on_open:add_canvas () in
+  fixed_ref := Some fixed;
   let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 fixed in
+  toolbar_ref := Some toolbar;
   let controller = Jas.Controller.create ~model () in
   let canvas = Jas.Canvas_subwindow.create
     ~model ~controller ~toolbar ~x:84 ~y:0 ~width:820 ~height:640 fixed in
@@ -26,10 +43,11 @@ let () =
              || key = GdkKeysyms._Return || key = GdkKeysyms._KP_Enter then begin
       canvas#pen_finish; true
     end else if key = GdkKeysyms._Delete || key = GdkKeysyms._BackSpace then begin
-      let doc = model#document in
+      let m = !active_model in
+      let doc = m#document in
       if not (Jas.Document.PathMap.is_empty doc.Jas.Document.selection) then begin
-        model#snapshot;
-        model#set_document (Jas.Document.delete_selection doc)
+        m#snapshot;
+        m#set_document (Jas.Document.delete_selection doc)
       end;
       true
     end else begin
@@ -37,9 +55,9 @@ let () =
       let has_ctrl = List.mem `CONTROL state in
       let has_shift = List.mem `SHIFT state in
       if has_ctrl && key = GdkKeysyms._z then begin
-        model#undo; true
+        (!active_model)#undo; true
       end else if has_ctrl && has_shift && key = GdkKeysyms._Z then begin
-        model#redo; true
+        (!active_model)#redo; true
       end else false
     end
   ) |> ignore;

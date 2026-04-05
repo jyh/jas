@@ -20,6 +20,10 @@ public struct FocusedCanRedoKey: FocusedValueKey {
     public typealias Value = Bool
 }
 
+public struct FocusedAddCanvasKey: FocusedValueKey {
+    public typealias Value = (JasModel) -> Void
+}
+
 public extension FocusedValues {
     var jasModel: JasModel? {
         get { self[FocusedModelKey.self] }
@@ -37,6 +41,10 @@ public extension FocusedValues {
         get { self[FocusedCanRedoKey.self] }
         set { self[FocusedCanRedoKey.self] = newValue }
     }
+    var addCanvas: ((JasModel) -> Void)? {
+        get { self[FocusedAddCanvasKey.self] }
+        set { self[FocusedAddCanvasKey.self] = newValue }
+    }
 }
 
 /// Custom menu commands for Jas app (File, Edit, View menus).
@@ -45,13 +53,14 @@ public struct JasCommands: Commands {
     @FocusedValue(\.hasSelection) private var hasSelection
     @FocusedValue(\.canUndo) private var canUndo
     @FocusedValue(\.canRedo) private var canRedo
+    @FocusedValue(\.addCanvas) private var addCanvas
 
     public init() {}
 
     public var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New") {
-                print("New document")
+                addCanvas?(JasModel())
             }
             .keyboardShortcut("n", modifiers: .command)
 
@@ -63,7 +72,7 @@ public struct JasCommands: Commands {
 
         CommandGroup(replacing: .saveItem) {
             Button("Save") {
-                print("Save document")
+                save()
             }
             .keyboardShortcut("s", modifiers: .command)
 
@@ -129,8 +138,23 @@ public struct JasCommands: Commands {
         }
     }
 
-    private func openFile() {
+    private func save() {
         guard let model = model else { return }
+        if model.filename.hasPrefix("Untitled-") {
+            saveAs()
+            return
+        }
+        let svg = documentToSvg(model.document)
+        do {
+            try svg.write(toFile: model.filename, atomically: true, encoding: .utf8)
+            model.markSaved()
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.runModal()
+        }
+    }
+
+    private func openFile() {
         let panel = NSOpenPanel()
         panel.title = "Open"
         panel.allowedContentTypes = [.svg]
@@ -138,9 +162,8 @@ public struct JasCommands: Commands {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             let svg = try String(contentsOf: url, encoding: .utf8)
-            model.document = svgToDocument(svg)
-            model.markSaved()
-            model.filename = url.path
+            let newModel = JasModel(document: svgToDocument(svg), filename: url.path)
+            addCanvas?(newModel)
         } catch {
             let alert = NSAlert(error: error)
             alert.runModal()

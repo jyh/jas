@@ -1,6 +1,6 @@
 (** Main window with dark workspace and menubar. *)
 
-let create_main_window ~model () =
+let create_main_window ~get_model ~on_open () =
   let window = GWindow.window
     ~title:"Jas"
     ~width:1200 ~height:900
@@ -11,7 +11,7 @@ let create_main_window ~model () =
   let vbox = GPack.vbox ~packing:window#add () in
 
   (* Create menubar *)
-  Menubar.create model window vbox;
+  Menubar.create get_model window ~on_open vbox;
 
   (* Dark workspace background *)
   let fixed = GPack.fixed ~packing:vbox#add () in

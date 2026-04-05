@@ -3,7 +3,7 @@ let () =
 
   (* Test main window creation *)
   let model = Jas.Model.create () in
-  let main_window, fixed = Jas.Canvas.create_main_window ~model () in
+  let main_window, fixed = Jas.Canvas.create_main_window ~get_model:(fun () -> model) ~on_open:(fun _ -> ()) () in
   assert (main_window#title = "Jas");
 
   (* Test toolbar creation *)

@@ -83,6 +83,7 @@ class Model:
     def mark_saved(self) -> None:
         """Mark the current document as the saved version."""
         self._saved_document = self._document
+        self._notify()
 
     @property
     def can_undo(self) -> bool:
