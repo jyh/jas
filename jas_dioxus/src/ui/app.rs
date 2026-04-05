@@ -345,32 +345,56 @@ fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
     input.click();
 }
 
-const TOOLBAR_TOOLS: &[ToolKind] = &[
-    ToolKind::Selection,
-    ToolKind::DirectSelection,
-    ToolKind::GroupSelection,
-    ToolKind::Pen,
-    ToolKind::Pencil,
-    ToolKind::Text,
-    ToolKind::TextOnPath,
-    ToolKind::Line,
-    ToolKind::Rect,
-    ToolKind::Polygon,
+/// Toolbar layout: 2-column grid matching the Python/Qt version.
+/// Each entry is (row, col, tool_kind).
+const TOOLBAR_GRID: &[(usize, usize, ToolKind)] = &[
+    (0, 0, ToolKind::Selection),
+    (0, 1, ToolKind::DirectSelection),
+    (1, 0, ToolKind::Pen),
+    (1, 1, ToolKind::Pencil),
+    (2, 0, ToolKind::Text),
+    (2, 1, ToolKind::Line),
+    (3, 0, ToolKind::Rect),
+    (3, 1, ToolKind::Polygon),
 ];
 
-fn toolbar_icon(kind: ToolKind) -> &'static str {
+/// SVG path data for each tool icon (28x28 viewBox, matching Python toolbar.py).
+/// Uses rgb(204,204,204) instead of #ccc to avoid Rust 2021 literal prefix issues.
+const IC: &str = "rgb(204,204,204)";
+
+fn toolbar_svg_icon(kind: ToolKind) -> String {
+    let c = IC;
     match kind {
-        ToolKind::Selection => "\u{25b3}",      // triangle (arrow-like)
-        ToolKind::DirectSelection => "\u{25ef}", // hollow circle
-        ToolKind::GroupSelection => "\u{29c9}",  // two joined squares
-        ToolKind::Line => "\u{2571}",            // diagonal
-        ToolKind::Rect => "\u{25a1}",            // square
-        ToolKind::Pen => "\u{270e}",             // pen
-        ToolKind::Pencil => "\u{270f}",          // pencil
-        ToolKind::Polygon => "\u{2b53}",          // pentagon
-        ToolKind::Text => "T",
-        ToolKind::TextOnPath => "\u{2923}", // ↗ curved arrow
-        _ => "?",
+        // Filled arrow cursor
+        ToolKind::Selection => format!(
+            r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="{c}" stroke="{c}" stroke-width="1"/>"#),
+        // Outline arrow cursor
+        ToolKind::DirectSelection => format!(
+            r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="none" stroke="{c}" stroke-width="1"/>"#),
+        // Outline arrow + plus badge
+        ToolKind::GroupSelection => format!(
+            r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="none" stroke="{c}" stroke-width="1"/><line x1="20" y1="20" x2="27" y2="20" stroke="{c}" stroke-width="1.5"/><line x1="23.5" y1="16.5" x2="23.5" y2="23.5" stroke="{c}" stroke-width="1.5"/>"#),
+        // Pen nib
+        ToolKind::Pen => format!(
+            r#"<path d="M8,24 L10,18 L14,4 L18,4 L22,18 L24,24 L16,20 Z" fill="none" stroke="{c}" stroke-width="1.5"/><line x1="16" y1="10" x2="16" y2="20" stroke="{c}" stroke-width="1.5"/>"#),
+        // Pencil
+        ToolKind::Pencil => format!(
+            r#"<path d="M6,22 L20,8 L24,4 L26,6 L22,10 L8,24 Z" fill="none" stroke="{c}" stroke-width="1.5"/><line x1="6" y1="22" x2="4" y2="26" stroke="{c}" stroke-width="1.5"/><line x1="4" y1="26" x2="8" y2="24" stroke="{c}" stroke-width="1.5"/>"#),
+        // T letter
+        ToolKind::Text => format!(
+            r#"<text x="4" y="22" font-family="sans-serif" font-size="18" font-weight="bold" fill="{c}">T</text>"#),
+        // T + wavy path
+        ToolKind::TextOnPath => format!(
+            r#"<text x="2" y="18" font-family="sans-serif" font-size="14" font-weight="bold" fill="{c}">T</text><path d="M12,20 C16,8 22,24 26,12" fill="none" stroke="{c}" stroke-width="1"/>"#),
+        // Diagonal line with endpoint dots
+        ToolKind::Line => format!(
+            r#"<line x1="4" y1="24" x2="24" y2="4" stroke="{c}" stroke-width="1.5"/><circle cx="4" cy="24" r="3" fill="none" stroke="{c}" stroke-width="1.5"/><circle cx="24" cy="4" r="3" fill="none" stroke="{c}" stroke-width="1.5"/>"#),
+        // Rectangle
+        ToolKind::Rect => format!(
+            r#"<rect x="4" y="4" width="20" height="20" fill="none" stroke="{c}" stroke-width="1.5"/>"#),
+        // Hexagon (cx=14, cy=14, r=11, 6 sides, -90° start)
+        ToolKind::Polygon => format!(
+            r#"<path d="M14,3 L23.5,8.5 L23.5,19.5 L14,25 L4.5,19.5 L4.5,8.5 Z" fill="none" stroke="{c}" stroke-width="1.5"/>"#),
     }
 }
 
@@ -673,23 +697,27 @@ pub fn App() -> Element {
 
     // --- Tool buttons ---
     let active_tool = app.borrow().active_tool;
-    let tool_buttons: Vec<Result<VNode, RenderError>> = TOOLBAR_TOOLS
+    let tool_buttons: Vec<Result<VNode, RenderError>> = TOOLBAR_GRID
         .iter()
-        .map(|&kind| {
+        .map(|&(row, col, kind)| {
             let act = act.clone();
             let is_active = active_tool == kind;
-            let bg = if is_active { "#d0d0d0" } else { "#f0f0f0" };
+            let bg = if is_active { "#505050" } else { "transparent" };
+            let svg_inner = toolbar_svg_icon(kind);
+            let svg_html = format!(r#"<svg viewBox="0 0 28 28" width="28" height="28" xmlns="http://www.w3.org/2000/svg">{svg_inner}</svg>"#);
+            let grid_col = col + 1; // CSS grid is 1-based
+            let grid_row = row + 1;
             rsx! {
-                button {
+                div {
                     key: "{kind:?}",
-                    style: "display:block; width:36px; height:36px; margin:2px; border:1px solid #999; background:{bg}; cursor:pointer; font-size:18px;",
+                    style: "grid-column:{grid_col}; grid-row:{grid_row}; width:32px; height:32px; background:{bg}; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:2px;",
                     title: "{kind.label()}",
                     onclick: move |_| {
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                             st.active_tool = kind;
                         }));
                     },
-                    "{toolbar_icon(kind)}"
+                    dangerous_inner_html: "{svg_html}",
                 }
             }
         })
@@ -1001,7 +1029,7 @@ pub fn App() -> Element {
 
             // Toolbar
             div {
-                style: "width:42px; background:#e8e8e8; border-right:1px solid #ccc; padding:4px 2px; display:flex; flex-direction:column; align-items:center;",
+                style: "width:72px; background:#3c3c3c; border-right:1px solid #555; padding:4px 2px; display:grid; grid-template-columns:32px 32px; grid-auto-rows:32px; gap:2px; justify-content:center; align-content:start;",
                 for btn in tool_buttons {
                     {btn}
                 }
