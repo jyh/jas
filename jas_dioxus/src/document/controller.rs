@@ -697,3 +697,201 @@ fn toggle_selection(current: &Selection, new: &Selection) -> Selection {
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::document::Document;
+    use crate::geometry::element::*;
+
+    fn make_rect(x: f64, y: f64, w: f64, h: f64) -> Element {
+        Element::Rect(RectElem {
+            x, y, width: w, height: h, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+        })
+    }
+
+    fn make_line(x1: f64, y1: f64, x2: f64, y2: f64) -> Element {
+        Element::Line(LineElem {
+            x1, y1, x2, y2,
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            common: CommonProps::default(),
+        })
+    }
+
+    fn make_group(children: Vec<Element>) -> Element {
+        Element::Group(GroupElem { children, common: CommonProps::default() })
+    }
+
+    fn sel_paths(model: &Model) -> Vec<Vec<usize>> {
+        let mut paths: Vec<Vec<usize>> = model.document().selection.iter()
+            .map(|es| es.path.clone()).collect();
+        paths.sort();
+        paths
+    }
+
+    fn setup_model() -> Model {
+        let rect = make_rect(0.0, 0.0, 10.0, 10.0);
+        let line = make_line(0.0, 0.0, 5.0, 5.0);
+        let group = make_group(vec![make_line(1.0, 1.0, 2.0, 2.0), make_line(3.0, 3.0, 4.0, 4.0)]);
+        let layer = Element::Layer(LayerElem {
+            name: "L0".to_string(),
+            children: vec![rect, group, line],
+            common: CommonProps::default(),
+        });
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        Model::new(doc, None)
+    }
+
+    #[test]
+    fn add_element_to_empty() {
+        let mut model = Model::default();
+        let rect = make_rect(10.0, 20.0, 30.0, 40.0);
+        Controller::add_element(&mut model, rect);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        assert!(matches!(&children[0], Element::Rect(_)));
+    }
+
+    #[test]
+    fn add_element_appends() {
+        let mut model = setup_model();
+        let original_count = model.document().layers[0].children().unwrap().len();
+        Controller::add_element(&mut model, make_rect(50.0, 50.0, 5.0, 5.0));
+        assert_eq!(model.document().layers[0].children().unwrap().len(), original_count + 1);
+    }
+
+    #[test]
+    fn select_rect_hits_element() {
+        let mut model = setup_model();
+        Controller::select_rect(&mut model, -1.0, -1.0, 12.0, 12.0, false);
+        let paths = sel_paths(&model);
+        assert!(paths.contains(&vec![0, 0])); // rect at (0,0) 10x10
+    }
+
+    #[test]
+    fn select_rect_misses_element() {
+        let mut model = setup_model();
+        Controller::select_rect(&mut model, 100.0, 100.0, 10.0, 10.0, false);
+        assert!(model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn select_element_direct_child() {
+        let mut model = setup_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let paths = sel_paths(&model);
+        assert_eq!(paths, vec![vec![0, 0]]);
+    }
+
+    #[test]
+    fn select_element_in_group_selects_group_and_children() {
+        let mut model = setup_model();
+        // Element at (0,1,0) is inside a group at (0,1)
+        Controller::select_element(&mut model, &vec![0, 1, 0]);
+        let paths = sel_paths(&model);
+        assert!(paths.contains(&vec![0, 1]));
+        assert!(paths.contains(&vec![0, 1, 0]));
+        assert!(paths.contains(&vec![0, 1, 1]));
+    }
+
+    #[test]
+    fn select_all() {
+        let mut model = setup_model();
+        Controller::select_all(&mut model);
+        assert!(!model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn set_selection() {
+        let mut model = setup_model();
+        let sel = vec![ElementSelection { path: vec![0, 0], control_points: HashSet::new() }];
+        Controller::set_selection(&mut model, sel);
+        assert_eq!(sel_paths(&model), vec![vec![0, 0]]);
+    }
+
+    #[test]
+    fn move_selection() {
+        let mut model = setup_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        Controller::move_selection(&mut model, 10.0, 20.0);
+        if let Element::Rect(r) = model.document().get_element(&vec![0, 0]).unwrap() {
+            assert_eq!(r.x, 10.0);
+            assert_eq!(r.y, 20.0);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn group_selection() {
+        let mut model = setup_model();
+        // Select rect and line (indices 0 and 2)
+        let sel = vec![
+            ElementSelection { path: vec![0, 0], control_points: HashSet::new() },
+            ElementSelection { path: vec![0, 2], control_points: HashSet::new() },
+        ];
+        Controller::set_selection(&mut model, sel);
+        Controller::group_selection(&mut model);
+        // The two elements should now be inside a Group
+        let children = model.document().layers[0].children().unwrap();
+        let has_group = children.iter().any(|c| matches!(c, Element::Group(_)));
+        assert!(has_group);
+    }
+
+    #[test]
+    fn ungroup_selection() {
+        let mut model = setup_model();
+        // Select the group at (0,1)
+        Controller::select_element(&mut model, &vec![0, 1, 0]);
+        Controller::ungroup_selection(&mut model);
+        // Group's children should be inlined
+        let children = model.document().layers[0].children().unwrap();
+        // No more groups (the original group should be ungrouped)
+        let group_count = children.iter().filter(|c| matches!(c, Element::Group(_))).count();
+        assert_eq!(group_count, 0);
+    }
+
+    #[test]
+    fn lock_selection() {
+        let mut model = setup_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        Controller::lock_selection(&mut model);
+        assert!(model.document().selection.is_empty());
+        let elem = model.document().get_element(&vec![0, 0]).unwrap();
+        assert!(elem.common().locked);
+    }
+
+    #[test]
+    fn locked_element_not_selectable() {
+        let mut model = setup_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        Controller::lock_selection(&mut model);
+        // Try to select again via rect
+        Controller::select_rect(&mut model, -1.0, -1.0, 12.0, 12.0, false);
+        // Should not select locked element
+        let paths = sel_paths(&model);
+        assert!(!paths.contains(&vec![0, 0]));
+    }
+
+    #[test]
+    fn unlock_all() {
+        let mut model = setup_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        Controller::lock_selection(&mut model);
+        Controller::unlock_all(&mut model);
+        let elem = model.document().get_element(&vec![0, 0]).unwrap();
+        assert!(!elem.common().locked);
+    }
+
+    #[test]
+    fn copy_selection() {
+        let mut model = setup_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        let orig_count = model.document().layers[0].children().unwrap().len();
+        Controller::copy_selection(&mut model, 10.0, 10.0);
+        let new_count = model.document().layers[0].children().unwrap().len();
+        assert_eq!(new_count, orig_count + 1);
+    }
+}
