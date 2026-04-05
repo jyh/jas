@@ -1,0 +1,31 @@
+[package]
+name = "jas_dioxus"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dioxus = { version = "0.6", features = ["web"] }
+web-sys = { version = "0.3", features = [
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "MouseEvent",
+    "KeyboardEvent",
+    "DomRect",
+    "Window",
+    "Document",
+    "Element",
+    "Blob",
+    "BlobPropertyBag",
+    "Url",
+    "HtmlAnchorElement",
+    "HtmlInputElement",
+    "FileReader",
+    "FileList",
+    "File",
+    "Event",
+    "InputEvent",
+] }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+log = "0.4"
+dioxus-logger = "0.6"
