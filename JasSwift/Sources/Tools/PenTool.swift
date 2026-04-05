@@ -24,8 +24,8 @@ class PenPoint {
 // MARK: - Pen tool
 
 class PenTool: CanvasTool {
-    private let penCloseRadius: Double = 6.0
-    private let handleSize: CGFloat = 6.0
+    private let penCloseRadius: Double = 8.0
+    private let handleSize: CGFloat = 10.0
     var points: [PenPoint] = []
     var penDragging: Bool = false
     var mouseX: Double = 0

@@ -2,10 +2,10 @@ let () =
   ignore (GMain.init ());
   let model = Jas.Model.create () in
   let main_window, fixed = Jas.Canvas.create_main_window ~model () in
-  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:10 ~y:10 fixed in
+  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 fixed in
   let controller = Jas.Controller.create ~model () in
   let canvas = Jas.Canvas_subwindow.create
-    ~model ~controller ~toolbar ~x:100 ~y:50 ~width:820 ~height:640 fixed in
+    ~model ~controller ~toolbar ~x:84 ~y:0 ~width:820 ~height:640 fixed in
 
   (* Keyboard shortcuts: V = Selection, A = Direct Selection, \ = Line *)
   main_window#event#connect#key_press ~callback:(fun ev ->

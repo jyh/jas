@@ -14,8 +14,8 @@ if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
 
 
-_PEN_CLOSE_RADIUS = 6.0
-_HANDLE_SIZE = 6.0
+_PEN_CLOSE_RADIUS = 8.0
+_HANDLE_SIZE = 10.0
 
 
 class PenPoint:

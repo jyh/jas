@@ -245,8 +245,8 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
 
 
 _SELECTION_COLOR = QColor(0, 120, 255)
-_HANDLE_SIZE = 6.0
-_HANDLE_CIRCLE_RADIUS = 3.0
+_HANDLE_SIZE = 10.0
+_HANDLE_CIRCLE_RADIUS = 5.0
 
 
 def _control_points(elem: Element) -> list[tuple[float, float]]:
@@ -347,7 +347,7 @@ def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:
 class CanvasWidget(QWidget):
     """The canvas view. Receives document updates from the Model."""
 
-    _HIT_RADIUS = 6.0  # pixels to detect a click on a control point
+    _HIT_RADIUS = 8.0  # pixels to detect a click on a control point
 
     def __init__(self, model: Model, controller: Controller,
                  bbox: BoundingBox = BoundingBox(0, 0, 800, 600)):
