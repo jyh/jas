@@ -9,16 +9,40 @@ from typing import Callable
 from document.document import Document
 
 _MAX_UNDO = 100
+_next_untitled = 1
+
+
+def _fresh_filename() -> str:
+    global _next_untitled
+    name = f"Untitled-{_next_untitled}"
+    _next_untitled += 1
+    return name
 
 
 class Model:
     """Holds an immutable Document and notifies listeners on change."""
 
-    def __init__(self, document: Document = Document()):
+    def __init__(self, document: Document = Document(),
+                 filename: str | None = None):
+        if filename is None:
+            filename = _fresh_filename()
         self._document = document
+        self._saved_document = document
+        self._filename = filename
         self._listeners: list[Callable[[Document], None]] = []
+        self._filename_listeners: list[Callable[[str], None]] = []
         self._undo_stack: list[Document] = []
         self._redo_stack: list[Document] = []
+
+    @property
+    def filename(self) -> str:
+        return self._filename
+
+    @filename.setter
+    def filename(self, filename: str) -> None:
+        self._filename = filename
+        for listener in self._filename_listeners:
+            listener(filename)
 
     @property
     def document(self) -> Document:
@@ -53,6 +77,14 @@ class Model:
         self._notify()
 
     @property
+    def is_modified(self) -> bool:
+        return self._document is not self._saved_document
+
+    def mark_saved(self) -> None:
+        """Mark the current document as the saved version."""
+        self._saved_document = self._document
+
+    @property
     def can_undo(self) -> bool:
         return len(self._undo_stack) > 0
 
@@ -63,6 +95,10 @@ class Model:
     def on_document_changed(self, callback: Callable[[Document], None]) -> None:
         """Register a callback invoked whenever the document changes."""
         self._listeners.append(callback)
+
+    def on_filename_changed(self, callback: Callable[[str], None]) -> None:
+        """Register a callback invoked whenever the filename changes."""
+        self._filename_listeners.append(callback)
 
     def _notify(self) -> None:
         for listener in self._listeners:

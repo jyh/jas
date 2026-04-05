@@ -35,20 +35,17 @@ public struct ElementSelection: Equatable, Hashable {
 /// A selection is a set of ElementSelection entries (unique by path).
 public typealias Selection = Set<ElementSelection>
 
-/// A document consisting of a title, an ordered list of layers, and a selection.
+/// A document consisting of an ordered list of layers and a selection.
 public struct JasDocument: Equatable {
-    public let title: String
     public let layers: [JasLayer]
     public let selectedLayer: Int
     public let selection: Selection
 
     public init(
-        title: String = "Untitled",
         layers: [JasLayer] = [JasLayer(children: [])],
         selectedLayer: Int = 0,
         selection: Selection = []
     ) {
-        self.title = title
         self.layers = layers
         self.selectedLayer = selectedLayer
         self.selection = selection
@@ -97,7 +94,7 @@ public struct JasDocument: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return JasDocument(title: title, layers: newLayers, selectedLayer: selectedLayer, selection: selection)
+        return JasDocument(layers: newLayers, selectedLayer: selectedLayer, selection: selection)
     }
     /// Return a new document with newElem inserted immediately after path.
     public func insertElementAfter(_ path: ElementPath, element newElem: Element) -> JasDocument {
@@ -113,7 +110,7 @@ public struct JasDocument: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return JasDocument(title: title, layers: newLayers, selectedLayer: selectedLayer, selection: selection)
+        return JasDocument(layers: newLayers, selectedLayer: selectedLayer, selection: selection)
     }
 
     /// Return a new document with the element at path removed.
@@ -127,7 +124,7 @@ public struct JasDocument: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return JasDocument(title: title, layers: newLayers, selectedLayer: selectedLayer, selection: selection)
+        return JasDocument(layers: newLayers, selectedLayer: selectedLayer, selection: selection)
     }
 
     /// Return a new document with all selected elements removed and selection cleared.
@@ -137,7 +134,7 @@ public struct JasDocument: Equatable {
         for path in sortedPaths {
             doc = doc.deleteElement(path)
         }
-        return JasDocument(title: doc.title, layers: doc.layers,
+        return JasDocument(layers: doc.layers,
                            selectedLayer: doc.selectedLayer, selection: [])
     }
 }

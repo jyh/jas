@@ -207,18 +207,18 @@ public class Controller {
         model.document = document
     }
 
-    public func setTitle(_ title: String) {
-        model.document = JasDocument(title: title, layers: model.document.layers)
+    public func setFilename(_ filename: String) {
+        model.filename = filename
     }
 
     public func addLayer(_ layer: JasLayer) {
-        model.document = JasDocument(title: model.document.title, layers: model.document.layers + [layer])
+        model.document = JasDocument(layers: model.document.layers + [layer])
     }
 
     public func removeLayer(at index: Int) {
         var layers = model.document.layers
         layers.remove(at: index)
-        model.document = JasDocument(title: model.document.title, layers: layers)
+        model.document = JasDocument(layers: layers)
     }
 
     public func addElement(_ element: Element) {
@@ -229,7 +229,7 @@ public class Controller {
                                 opacity: target.opacity, transform: target.transform)
         var layers = doc.layers
         layers[idx] = newLayer
-        model.document = JasDocument(title: doc.title, layers: layers, selectedLayer: idx,
+        model.document = JasDocument(layers: layers, selectedLayer: idx,
                                      selection: doc.selection)
     }
 
@@ -278,7 +278,7 @@ public class Controller {
             }
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
-        model.document = JasDocument(title: doc.title, layers: doc.layers,
+        model.document = JasDocument(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: finalSel)
     }
 
@@ -303,7 +303,7 @@ public class Controller {
             check([li], .layer(layer))
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
-        model.document = JasDocument(title: doc.title, layers: doc.layers,
+        model.document = JasDocument(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: finalSel)
     }
 
@@ -333,13 +333,13 @@ public class Controller {
             check([li], .layer(layer))
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
-        model.document = JasDocument(title: doc.title, layers: doc.layers,
+        model.document = JasDocument(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: finalSel)
     }
 
     public func setSelection(_ selection: Selection) {
         let doc = model.document
-        model.document = JasDocument(title: doc.title, layers: doc.layers,
+        model.document = JasDocument(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: selection)
     }
 
@@ -354,13 +354,13 @@ public class Controller {
                     ElementSelection(path: parentPath + [$0],
                                      controlPoints: allCPs(g.children[$0]))
                 })
-                model.document = JasDocument(title: doc.title, layers: doc.layers,
+                model.document = JasDocument(layers: doc.layers,
                                              selectedLayer: doc.selectedLayer, selection: selection)
                 return
             }
         }
         let elem = doc.getElement(path)
-        model.document = JasDocument(title: doc.title, layers: doc.layers,
+        model.document = JasDocument(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer,
                                      selection: [ElementSelection(path: path,
                                                                    controlPoints: allCPs(elem))])
@@ -370,7 +370,7 @@ public class Controller {
         precondition(!path.isEmpty, "Path must be non-empty")
         let doc = model.document
         let es = ElementSelection(path: path, controlPoints: [index])
-        model.document = JasDocument(title: doc.title, layers: doc.layers,
+        model.document = JasDocument(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: [es])
     }
 
@@ -411,7 +411,7 @@ public class Controller {
             let allCPs = Set(0..<copied.controlPointCount)
             newSelection.insert(ElementSelection(path: copyPath, controlPoints: allCPs))
         }
-        model.document = JasDocument(title: doc.title, layers: doc.layers,
+        model.document = JasDocument(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: newSelection)
     }
 }

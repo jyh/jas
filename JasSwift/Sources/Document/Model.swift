@@ -1,6 +1,14 @@
 import Foundation
 import Combine
 
+private var nextUntitled = 1
+
+private func freshFilename() -> String {
+    let name = "Untitled-\(nextUntitled)"
+    nextUntitled += 1
+    return name
+}
+
 /// Observable model that holds the current document.
 ///
 /// Views register callbacks via onDocumentChanged to be notified
@@ -9,13 +17,23 @@ public class JasModel: ObservableObject {
     @Published public var document: JasDocument {
         didSet { notify() }
     }
+    @Published public var filename: String
+    public private(set) var savedDocument: JasDocument
     private var listeners: [(JasDocument) -> Void] = []
     private var undoStack: [JasDocument] = []
     private var redoStack: [JasDocument] = []
     private let maxUndo = 100
 
-    public init(document: JasDocument = JasDocument()) {
+    public var isModified: Bool { document != savedDocument }
+
+    public init(document: JasDocument = JasDocument(), filename: String? = nil) {
         self.document = document
+        self.savedDocument = document
+        self.filename = filename ?? freshFilename()
+    }
+
+    public func markSaved() {
+        savedDocument = document
     }
 
     public func onDocumentChanged(_ callback: @escaping (JasDocument) -> Void) {

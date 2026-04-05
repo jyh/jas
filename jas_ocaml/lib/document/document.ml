@@ -32,16 +32,15 @@ end)
 
 type selection = element_selection PathMap.t
 
-(** A document consisting of a title and an ordered list of layers. *)
+(** A document consisting of an ordered list of layers. *)
 type document = {
-  title : string;
   layers : element list;
   selected_layer : int;
   selection : selection;
 }
 
-let make_document ?(title = "Untitled") ?(selected_layer = 0) ?(selection = PathMap.empty) layers =
-  { title; layers; selected_layer; selection }
+let make_document ?(selected_layer = 0) ?(selection = PathMap.empty) layers =
+  { layers; selected_layer; selection }
 
 let make_element_selection ?(control_points = []) path =
   { es_path = path; es_control_points = control_points }
@@ -54,7 +53,7 @@ let selected_paths sel =
 let get_element_selection sel path =
   PathMap.find_opt path sel
 
-let default_document () = make_document ~title:"Untitled"
+let default_document () = make_document
   ~selection:PathMap.empty [Element.make_layer []]
 
 let bounds doc =

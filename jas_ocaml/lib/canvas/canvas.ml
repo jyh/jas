@@ -11,7 +11,7 @@ let create_main_window ~model () =
   let vbox = GPack.vbox ~packing:window#add () in
 
   (* Create menubar *)
-  Menubar.create model vbox;
+  Menubar.create model window vbox;
 
   (* Dark workspace background *)
   let fixed = GPack.fixed ~packing:vbox#add () in

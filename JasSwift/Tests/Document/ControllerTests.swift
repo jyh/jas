@@ -13,20 +13,20 @@ private func selPaths(_ selection: Selection) -> Set<ElementPath> {
 
 @Test func controllerDefaultDocument() {
     let ctrl = Controller()
-    #expect(ctrl.document.title == "Untitled")
+    #expect(ctrl.model.filename.hasPrefix("Untitled-"))
     #expect(ctrl.document.layers.count == 1)
 }
 
-@Test func controllerInitialDocument() {
-    let model = JasModel(document: JasDocument(title: "Test"))
+@Test func controllerInitialFilename() {
+    let model = JasModel(filename: "Test")
     let ctrl = Controller(model: model)
-    #expect(ctrl.document.title == "Test")
+    #expect(ctrl.model.filename == "Test")
 }
 
-@Test func controllerSetTitle() {
+@Test func controllerSetFilename() {
     let ctrl = Controller()
-    ctrl.setTitle("New Title")
-    #expect(ctrl.document.title == "New Title")
+    ctrl.setFilename("New Name")
+    #expect(ctrl.model.filename == "New Name")
 }
 
 @Test func controllerAddLayer() {
@@ -49,26 +49,17 @@ private func selPaths(_ selection: Selection) -> Set<ElementPath> {
 
 @Test func controllerSetDocument() {
     let ctrl = Controller()
-    ctrl.setDocument(JasDocument(title: "Replaced"))
-    #expect(ctrl.document.title == "Replaced")
+    ctrl.setDocument(JasDocument(layers: []))
+    #expect(ctrl.document.layers.count == 0)
 }
 
-@Test func controllerMutationsNotifyModel() {
+@Test func controllerSetDocumentNotifiesModel() {
     let model = JasModel()
     let ctrl = Controller(model: model)
-    var received: [String] = []
-    model.onDocumentChanged { doc in received.append(doc.title) }
-    ctrl.setTitle("Changed")
-    #expect(received == ["Changed"])
-}
-
-@Test func controllerModelImmutability() {
-    let ctrl = Controller()
-    let before = ctrl.document
-    ctrl.setTitle("New")
-    let after = ctrl.document
-    #expect(before.title == "Untitled")
-    #expect(after.title == "New")
+    var received: [Int] = []
+    model.onDocumentChanged { doc in received.append(doc.layers.count) }
+    ctrl.setDocument(JasDocument(layers: []))
+    #expect(received == [0])
 }
 
 // MARK: - Selection controller tests

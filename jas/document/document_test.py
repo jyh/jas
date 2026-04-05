@@ -6,13 +6,9 @@ from document.document import Document
 
 class DocumentTest(absltest.TestCase):
 
-    def test_default_title(self):
+    def test_default_document(self):
         doc = Document()
-        self.assertEqual(doc.title, "Untitled")
-
-    def test_custom_title(self):
-        doc = Document(title="My Drawing")
-        self.assertEqual(doc.title, "My Drawing")
+        self.assertEqual(len(doc.layers), 1)
 
     def test_empty_document(self):
         doc = Document()

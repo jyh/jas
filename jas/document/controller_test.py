@@ -20,19 +20,18 @@ class ControllerTest(absltest.TestCase):
 
     def test_default_document(self):
         ctrl = Controller()
-        self.assertEqual(ctrl.document.title, "Untitled")
+        self.assertTrue(ctrl.model.filename.startswith("Untitled-"))
         self.assertEqual(len(ctrl.document.layers), 1)
 
-    def test_initial_document(self):
-        doc = Document(title="Test")
-        model = Model(document=doc)
+    def test_initial_filename(self):
+        model = Model(filename="Test")
         ctrl = Controller(model=model)
-        self.assertEqual(ctrl.document.title, "Test")
+        self.assertEqual(ctrl.model.filename, "Test")
 
-    def test_set_title(self):
+    def test_set_filename(self):
         ctrl = Controller()
-        ctrl.set_title("New Title")
-        self.assertEqual(ctrl.document.title, "New Title")
+        ctrl.set_filename("New Name")
+        self.assertEqual(ctrl.model.filename, "New Name")
 
     def test_add_layer(self):
         ctrl = Controller()
@@ -52,25 +51,26 @@ class ControllerTest(absltest.TestCase):
 
     def test_set_document(self):
         ctrl = Controller()
-        new_doc = Document(title="Replaced")
+        new_doc = Document(layers=())
         ctrl.set_document(new_doc)
-        self.assertEqual(ctrl.document.title, "Replaced")
+        self.assertEqual(len(ctrl.document.layers), 0)
 
     def test_mutations_notify_model(self):
         model = Model()
         ctrl = Controller(model=model)
         received = []
-        model.on_document_changed(lambda doc: received.append(doc.title))
-        ctrl.set_title("Changed")
-        self.assertEqual(received, ["Changed"])
+        model.on_document_changed(lambda doc: received.append(len(doc.layers)))
+        ctrl.set_filename("Changed")
+        # set_filename doesn't change document, so no notification
+        self.assertEqual(received, [])
 
-    def test_model_immutability(self):
-        ctrl = Controller()
-        doc_before = ctrl.document
-        ctrl.set_title("New")
-        doc_after = ctrl.document
-        self.assertEqual(doc_before.title, "Untitled")
-        self.assertEqual(doc_after.title, "New")
+    def test_set_document_notifies_model(self):
+        model = Model()
+        ctrl = Controller(model=model)
+        received = []
+        model.on_document_changed(lambda doc: received.append(len(doc.layers)))
+        ctrl.set_document(Document(layers=()))
+        self.assertEqual(received, [0])
 
 
 class SelectionControllerTest(absltest.TestCase):

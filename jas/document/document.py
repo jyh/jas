@@ -36,8 +36,7 @@ Selection = frozenset[ElementSelection]
 
 @dataclass(frozen=True)
 class Document:
-    """A document consisting of a title, an ordered list of layers, and a selection."""
-    title: str = "Untitled"
+    """A document consisting of an ordered list of layers and a selection."""
     layers: tuple[Layer, ...] = (Layer(),)
     selected_layer: int = 0
     selection: Selection = frozenset()

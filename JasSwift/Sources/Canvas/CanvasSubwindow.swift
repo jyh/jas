@@ -542,7 +542,7 @@ class CanvasNSView: NSView {
                 // Preserve selection across tool changes
                 if document.selection != savedSelection {
                     var doc = document
-                    doc = JasDocument(title: doc.title, layers: doc.layers,
+                    doc = JasDocument(layers: doc.layers,
                                       selectedLayer: doc.selectedLayer,
                                       selection: savedSelection)
                     controller?.model.document = doc
@@ -876,7 +876,7 @@ public struct CanvasSubwindow: View {
                 // Title bar
                 ZStack {
                     Color(nsColor: NSColor(white: 0.6, alpha: 1.0))
-                    Text(model.document.title)
+                    Text(model.isModified ? "\(model.filename) *" : model.filename)
                         .font(.system(size: 12))
                         .foregroundColor(.black)
                 }

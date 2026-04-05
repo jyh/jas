@@ -21,16 +21,15 @@ module PathMap : Map.S with type key = element_path
 (** A selection is a map from element path to element_selection. *)
 type selection = element_selection PathMap.t
 
-(** A document consisting of a title and an ordered list of layers. *)
+(** A document consisting of an ordered list of layers. *)
 type document = {
-  title : string;
   layers : Element.element list;
   selected_layer : int;
   selection : selection;
 }
 
 val make_document :
-  ?title:string -> ?selected_layer:int -> ?selection:selection ->
+  ?selected_layer:int -> ?selection:selection ->
   Element.element list -> document
 
 val make_element_selection :

@@ -100,13 +100,13 @@ class CanvasWidgetTest(absltest.TestCase):
     def test_registers_with_model(self):
         model = Model()
         canvas = self._make_canvas(model)
-        model.document = Document(title="Test")
+        model.document = Document(layers=())
 
-    def test_title_updates_via_model(self):
+    def test_filename_on_model(self):
         model = Model()
         canvas = self._make_canvas(model)
-        model.document = Document(title="New Title")
-        self.assertEqual(model.document.title, "New Title")
+        model.filename = "New Name"
+        self.assertEqual(model.filename, "New Name")
 
     def test_set_tool(self):
         canvas = self._make_canvas()
