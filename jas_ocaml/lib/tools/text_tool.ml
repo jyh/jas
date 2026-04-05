@@ -25,7 +25,7 @@ class text_tool = object (_self)
       drag_start <- None;
       drag_end <- None;
       let w = abs_float (x -. sx) and h = abs_float (y -. sy) in
-      if w > 4.0 || h > 4.0 then begin
+      if w > Canvas_tool.drag_threshold || h > Canvas_tool.drag_threshold then begin
         let tx = min sx x and ty = min sy y in
         let elem = Element.make_text ~text_width:w ~text_height:h
           ~fill:(Some Element.{

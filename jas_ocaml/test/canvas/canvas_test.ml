@@ -63,13 +63,13 @@ let () =
                     stroke_linejoin = Miter };
     opacity = 1.0; transform = None;
   } in
-  let layer = Jas.Element.make_layer ~name:"Layer 1" [line] in
-  ctrl3#set_document (Jas.Document.make_document [layer]);
-  assert (List.length ctrl3#document.Jas.Document.layers = 1);
-  begin match List.hd ctrl3#document.Jas.Document.layers with
+  let layer = Jas.Element.make_layer ~name:"Layer 1" [|line|] in
+  ctrl3#set_document (Jas.Document.make_document [|layer|]);
+  assert (Array.length ctrl3#document.Jas.Document.layers = 1);
+  begin match ctrl3#document.Jas.Document.layers.(0) with
   | Jas.Element.Layer { children; _ } ->
-    assert (List.length children = 1);
-    begin match List.hd children with
+    assert (Array.length children = 1);
+    begin match children.(0) with
     | Jas.Element.Line { x1; y1; x2; y2; _ } ->
       assert (x1 = 10.0); assert (y1 = 20.0);
       assert (x2 = 50.0); assert (y2 = 60.0)
@@ -89,11 +89,11 @@ let () =
                     stroke_linejoin = Miter };
     opacity = 1.0; transform = None;
   } in
-  let layer_r = Jas.Element.make_layer ~name:"Layer 1" [rect] in
-  ctrl3#set_document (Jas.Document.make_document [layer_r]);
-  begin match List.hd ctrl3#document.Jas.Document.layers with
+  let layer_r = Jas.Element.make_layer ~name:"Layer 1" [|rect|] in
+  ctrl3#set_document (Jas.Document.make_document [|layer_r|]);
+  begin match ctrl3#document.Jas.Document.layers.(0) with
   | Jas.Element.Layer { children; _ } ->
-    begin match List.hd children with
+    begin match children.(0) with
     | Jas.Element.Rect { x; y; width; height; _ } ->
       assert (x = 10.0); assert (y = 20.0);
       assert (width = 40.0); assert (height = 40.0)

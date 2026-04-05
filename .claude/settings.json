@@ -26,7 +26,10 @@
       "Bash(python -m pytest document/model_test.py -x -q)",
       "Bash(python -m pytest jas/ -x -q)",
       "Bash(.build/debug/Jas)",
-      "Bash(python -m jas.jas_app)"
+      "Bash(python -m jas.jas_app)",
+      "Bash(python -m pytest jas/ -q)",
+      "Bash(python -m pytest -x -q)",
+      "Bash(python -m jas.main)"
     ]
   }
 }

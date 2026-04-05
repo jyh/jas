@@ -11,10 +11,9 @@ from document.document import Document, ElementPath, ElementSelection, Selection
 from geometry.element import (
     Circle, Element, Ellipse, Group, Layer, Line, Path, Polygon, Polyline,
     Rect, Text,
-    MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo,
-    ClosePath,
     control_point_count, control_points, move_control_points,
     move_path_handle as _move_path_handle,
+    _flatten_path_commands,
 )
 from document.model import Model
 
@@ -121,25 +120,10 @@ def _segments_of_element(elem: Element) -> list[tuple[float, float, float, float
             segs.append((pts[-1][0], pts[-1][1], pts[0][0], pts[0][1]))
             return segs
         case Path(d=cmds):
-            segs: list[tuple[float, float, float, float]] = []
-            cur_x, cur_y = 0.0, 0.0
-            for cmd in cmds:
-                match cmd:
-                    case MoveTo(x=x, y=y):
-                        cur_x, cur_y = x, y
-                    case LineTo(x=x, y=y):
-                        segs.append((cur_x, cur_y, x, y))
-                        cur_x, cur_y = x, y
-                    case CurveTo(x=x, y=y) | SmoothCurveTo(x=x, y=y) | \
-                         QuadTo(x=x, y=y) | SmoothQuadTo(x=x, y=y):
-                        segs.append((cur_x, cur_y, x, y))
-                        cur_x, cur_y = x, y
-                    case ArcTo(x=x, y=y):
-                        segs.append((cur_x, cur_y, x, y))
-                        cur_x, cur_y = x, y
-                    case ClosePath():
-                        pass
-            return segs
+            # Flatten Bezier curves into a polyline for accurate hit-testing
+            pts = _flatten_path_commands(cmds)
+            return [(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1])
+                    for i in range(len(pts) - 1)] if len(pts) >= 2 else []
         case _:
             return []
 
@@ -151,7 +135,13 @@ def _all_cps(elem: Element) -> frozenset[int]:
 
 def _element_intersects_rect(elem: Element,
                              rx: float, ry: float, rw: float, rh: float) -> bool:
-    """Test whether the visible drawn portion of elem intersects the selection rect."""
+    """Test whether the visible drawn portion of elem intersects the selection rect.
+
+    TODO: This ignores the element's transform. If an element has a non-identity
+    transform, its visual position differs from its raw coordinates. To fix,
+    inverse-transform the selection rect into the element's local coordinate
+    space before testing (inheriting transforms from parent groups).
+    """
     match elem:
         case Line():
             return _segment_intersects_rect(elem.x1, elem.y1, elem.x2, elem.y2,
@@ -173,6 +163,9 @@ def _element_intersects_rect(elem: Element,
                                             elem.fill is not None)
         case Polyline():
             if elem.fill is not None:
+                # TODO: Uses bounding-box approximation. For concave shapes,
+                # this over-selects in the concave region. Should use
+                # point-in-polygon (ray casting) to test rect corners.
                 return _rects_intersect(*elem.bounds(), rx, ry, rw, rh)
             return any(_segment_intersects_rect(*seg, rx, ry, rw, rh)
                        for seg in _segments_of_element(elem))

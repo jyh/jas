@@ -131,34 +131,42 @@ let rec element_svg indent (elem : Element.element) =
     Printf.sprintf "%s<path d=\"%s\"%s%s%s%s/>"
       indent (path_data d) (fill_attrs fill) (stroke_attrs stroke)
       (opacity_attr opacity) (transform_attr transform)
-  | Text { x; y; content; font_family; font_size; text_width; text_height = _; fill; stroke; opacity; transform } ->
+  | Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration; text_width; text_height = _; fill; stroke; opacity; transform } ->
     let area_attrs = if text_width > 0.0 then
       Printf.sprintf " style=\"inline-size: %spx; white-space: pre-wrap;\"" (fmt (px text_width))
     else "" in
-    Printf.sprintf "%s<text x=\"%s\" y=\"%s\" font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s>%s</text>"
+    let fw_attr = if font_weight <> "normal" then Printf.sprintf " font-weight=\"%s\"" font_weight else "" in
+    let fs_attr = if font_style <> "normal" then Printf.sprintf " font-style=\"%s\"" font_style else "" in
+    let td_attr = if text_decoration <> "none" then Printf.sprintf " text-decoration=\"%s\"" text_decoration else "" in
+    Printf.sprintf "%s<text x=\"%s\" y=\"%s\" font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s%s%s%s>%s</text>"
       indent (fmt (px x)) (fmt (px y)) (escape_xml font_family) (fmt (px font_size))
+      fw_attr fs_attr td_attr
       area_attrs (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
       (transform_attr transform) (escape_xml content)
-  | Text_path { d; content; start_offset; font_family; font_size; fill; stroke; opacity; transform } ->
+  | Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration; fill; stroke; opacity; transform } ->
     let offset_attr = if start_offset > 0.0 then
       Printf.sprintf " startOffset=\"%s%%\"" (fmt (start_offset *. 100.0))
     else "" in
-    Printf.sprintf "%s<text%s%s font-family=\"%s\" font-size=\"%s\"%s%s><textPath path=\"%s\"%s>%s</textPath></text>"
+    let fw_attr = if font_weight <> "normal" then Printf.sprintf " font-weight=\"%s\"" font_weight else "" in
+    let fs_attr = if font_style <> "normal" then Printf.sprintf " font-style=\"%s\"" font_style else "" in
+    let td_attr = if text_decoration <> "none" then Printf.sprintf " text-decoration=\"%s\"" text_decoration else "" in
+    Printf.sprintf "%s<text%s%s font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s><textPath path=\"%s\"%s>%s</textPath></text>"
       indent (fill_attrs fill) (stroke_attrs stroke)
       (escape_xml font_family) (fmt (px font_size))
+      fw_attr fs_attr td_attr
       (opacity_attr opacity) (transform_attr transform)
       (path_data d) offset_attr (escape_xml content)
   | Group { children; opacity; transform } ->
     let header = Printf.sprintf "%s<g%s%s>"
       indent (opacity_attr opacity) (transform_attr transform) in
-    let child_lines = List.map (element_svg (indent ^ "  ")) children in
+    let child_lines = Array.to_list (Array.map (element_svg (indent ^ "  ")) children) in
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
   | Layer { name; children; opacity; transform } ->
     let label = if name <> "" then Printf.sprintf " inkscape:label=\"%s\"" (escape_xml name) else "" in
     let header = Printf.sprintf "%s<g%s%s%s>"
       indent label (opacity_attr opacity) (transform_attr transform) in
-    let child_lines = List.map (element_svg (indent ^ "  ")) children in
+    let child_lines = Array.to_list (Array.map (element_svg (indent ^ "  ")) children) in
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
 
@@ -171,7 +179,7 @@ let document_to_svg doc =
     Printf.sprintf "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\" viewBox=\"%s\" width=\"%s\" height=\"%s\">"
       vb (fmt (px bw)) (fmt (px bh));
   ] in
-  let layer_lines = List.map (element_svg "  ") doc.Document.layers in
+  let layer_lines = Array.to_list (Array.map (element_svg "  ") doc.Document.layers) in
   String.concat "\n" (lines @ layer_lines @ ["</svg>"])
 
 (* ----------------------------------------------------------------------- *)
@@ -374,6 +382,9 @@ let rec parse_element i =
         let content = collect_text i in
         let ff = match get_attr attrs "font-family" with Some s -> s | None -> "sans-serif" in
         let fs = pt (get_attr_f attrs "font-size" 16.0) in
+        let fw = match get_attr attrs "font-weight" with Some s -> s | None -> "normal" in
+        let fst = match get_attr attrs "font-style" with Some s -> s | None -> "normal" in
+        let td = match get_attr attrs "text-decoration" with Some s -> s | None -> "none" in
         let tw = match get_attr attrs "style" with
           | Some style ->
             (try
@@ -387,7 +398,7 @@ let rec parse_element i =
           let lines = max 1 (int_of_float (float_of_int (String.length content) *. fs *. 0.6 /. tw) + 1) in
           float_of_int lines *. fs *. 1.2
         else 0.0 in
-        Some (Element.make_text ~font_family:ff ~font_size:fs ~text_width:tw ~text_height:th ~fill ~stroke ~opacity ~transform
+        Some (Element.make_text ~font_family:ff ~font_size:fs ~font_weight:fw ~font_style:fst ~text_decoration:td ~text_width:tw ~text_height:th ~fill ~stroke ~opacity ~transform
           (pt (get_attr_f attrs "x" 0.0))
           (pt (get_attr_f attrs "y" 0.0))
           content)
@@ -436,7 +447,7 @@ and parse_children i =
     | `Dtd _ -> let _ = Xmlm.input i in loop ()
   in
   loop ();
-  List.rev !children
+  Array.of_list (List.rev !children)
 
 and skip_element i =
   (* skip all children until end tag *)
@@ -461,13 +472,13 @@ let svg_to_document svg =
   (* expect <svg> start *)
   (match Xmlm.input i with `El_start _ -> () | _ -> failwith "expected <svg> element");
   let children = parse_children i in
-  let layers = List.filter_map (fun elem ->
+  let layers = Array.to_list (Array.map (fun elem ->
     match elem with
-    | Element.Layer _ -> Some elem
+    | Element.Layer _ -> elem
     | Element.Group { children; opacity; transform } ->
-      Some (Element.make_layer ~name:"" ~opacity ~transform children)
+      Element.make_layer ~name:"" ~opacity ~transform children
     | _ ->
-      Some (Element.make_layer ~name:"" [elem])
-  ) children in
-  let layers = if layers = [] then [Element.make_layer []] else layers in
-  Document.make_document layers
+      Element.make_layer ~name:"" [|elem|]
+  ) children) in
+  let layers = if layers = [] then [Element.make_layer [||]] else layers in
+  Document.make_document (Array.of_list layers)

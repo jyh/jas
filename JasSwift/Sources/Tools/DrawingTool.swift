@@ -58,8 +58,8 @@ class DrawingToolBase: CanvasTool {
 
 class LineTool: DrawingToolBase {
     override func createElement(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
-        .line(JasLine(x1: sx, y1: sy, x2: ex, y2: ey,
-                      stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)))
+        .line(Line(x1: sx, y1: sy, x2: ex, y2: ey,
+                      stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)))
     }
 
     override func drawPreview(_ cgCtx: CGContext, _ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) {
@@ -73,9 +73,9 @@ class LineTool: DrawingToolBase {
 
 class RectTool: DrawingToolBase {
     override func createElement(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
-        .rect(JasRect(x: min(sx, ex), y: min(sy, ey),
+        .rect(Rect(x: min(sx, ex), y: min(sy, ey),
                       width: abs(ex - sx), height: abs(ey - sy),
-                      stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)))
+                      stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)))
     }
 
     override func drawPreview(_ cgCtx: CGContext, _ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) {
@@ -91,8 +91,8 @@ class RectTool: DrawingToolBase {
 class PolygonTool: DrawingToolBase {
     override func createElement(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
         let pts = regularPolygonPoints(sx, sy, ex, ey, polygonSides)
-        return .polygon(JasPolygon(points: pts,
-                                    stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)))
+        return .polygon(Polygon(points: pts,
+                                    stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)))
     }
 
     override func drawPreview(_ cgCtx: CGContext, _ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) {

@@ -8,8 +8,8 @@ public struct ToolbarView {
             toolIcon(tool)
                 .frame(width: 32, height: 32)
                 .background(currentTool.wrappedValue == tool
-                    ? Color(nsColor: NSColor(white: 0.38, alpha: 1.0))
-                    : Color.clear)
+                    ? SwiftUI.Color(nsColor: NSColor(white: 0.38, alpha: 1.0))
+                    : SwiftUI.Color.clear)
                 .cornerRadius(3)
         }
         .buttonStyle(.plain)
@@ -32,7 +32,7 @@ public struct ToolbarView {
         Canvas { context, size in
             let ox = (size.width - 28) / 2
             let oy = (size.height - 28) / 2
-            let color = Color(nsColor: NSColor(white: 0.8, alpha: 1.0))
+            let color = SwiftUI.Color(nsColor: NSColor(white: 0.8, alpha: 1.0))
 
             switch tool {
             case .selection:
@@ -44,7 +44,7 @@ public struct ToolbarView {
             case .groupSelection:
                 context.stroke(arrowPath(ox: ox, oy: oy), with: .color(color), lineWidth: 1.5)
                 // Draw '+' badge in lower-right
-                var plus = Path()
+                var plus = SwiftUI.Path()
                 plus.move(to: CGPoint(x: ox + 20, y: oy + 20))
                 plus.addLine(to: CGPoint(x: ox + 27, y: oy + 20))
                 plus.move(to: CGPoint(x: ox + 23.5, y: oy + 16.5))
@@ -52,7 +52,7 @@ public struct ToolbarView {
                 context.stroke(plus, with: .color(color), lineWidth: 1.5)
 
             case .pen:
-                var path = Path()
+                var path = SwiftUI.Path()
                 // Fountain pen nib shape
                 path.move(to: CGPoint(x: ox + 8, y: oy + 24))
                 path.addLine(to: CGPoint(x: ox + 10, y: oy + 18))
@@ -64,26 +64,26 @@ public struct ToolbarView {
                 path.closeSubpath()
                 context.stroke(path, with: .color(color), lineWidth: 1.5)
                 // Center line (nib slit)
-                var slit = Path()
+                var slit = SwiftUI.Path()
                 slit.move(to: CGPoint(x: ox + 16, y: oy + 10))
                 slit.addLine(to: CGPoint(x: ox + 16, y: oy + 20))
                 context.stroke(slit, with: .color(color), lineWidth: 1.5)
 
             case .text:
                 context.draw(
-                    Text("T").font(.system(size: 18, weight: .bold))
-                        .foregroundColor(Color(nsColor: NSColor(white: 0.8, alpha: 1.0))),
+                    SwiftUI.Text("T").font(.system(size: 18, weight: .bold))
+                        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.8, alpha: 1.0))),
                     at: CGPoint(x: size.width / 2, y: size.height / 2)
                 )
 
             case .textPath:
                 // "T" with a wavy path
                 context.draw(
-                    Text("T").font(.system(size: 14, weight: .bold))
-                        .foregroundColor(Color(nsColor: NSColor(white: 0.8, alpha: 1.0))),
+                    SwiftUI.Text("T").font(.system(size: 14, weight: .bold))
+                        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.8, alpha: 1.0))),
                     at: CGPoint(x: ox + 7, y: size.height / 2)
                 )
-                var wavePath = Path()
+                var wavePath = SwiftUI.Path()
                 wavePath.move(to: CGPoint(x: ox + 12, y: oy + 20))
                 wavePath.addCurve(to: CGPoint(x: ox + 26, y: oy + 12),
                                   control1: CGPoint(x: ox + 16, y: oy + 8),
@@ -91,19 +91,19 @@ public struct ToolbarView {
                 context.stroke(wavePath, with: .color(color), lineWidth: 1.0)
 
             case .line:
-                var path = Path()
+                var path = SwiftUI.Path()
                 path.move(to: CGPoint(x: ox + 4, y: oy + 24))
                 path.addLine(to: CGPoint(x: ox + 24, y: oy + 4))
                 context.stroke(path, with: .color(color), lineWidth: 2.0)
 
             case .rect:
                 let rect = CGRect(x: ox + 4, y: oy + 6, width: 20, height: 16)
-                context.stroke(Path(rect), with: .color(color), lineWidth: 1.5)
+                context.stroke(SwiftUI.Path(rect), with: .color(color), lineWidth: 1.5)
 
             case .polygon:
                 let cx = ox + 14.0, cy = oy + 14.0, r = 11.0
                 let n = 6
-                var path = Path()
+                var path = SwiftUI.Path()
                 for i in 0..<n {
                     let angle = -.pi / 2 + 2 * .pi * Double(i) / Double(n)
                     let px = cx + r * cos(angle)
@@ -117,8 +117,8 @@ public struct ToolbarView {
         }
     }
 
-    private static func arrowPath(ox: CGFloat, oy: CGFloat) -> Path {
-        var path = Path()
+    private static func arrowPath(ox: CGFloat, oy: CGFloat) -> SwiftUI.Path {
+        var path = SwiftUI.Path()
         path.move(to: CGPoint(x: ox + 5, y: oy + 2))
         path.addLine(to: CGPoint(x: ox + 5, y: oy + 24))
         path.addLine(to: CGPoint(x: ox + 10, y: oy + 18))
@@ -148,13 +148,13 @@ private struct ArrowSlotButton: View {
                 .padding(2)
         }
             .background(currentTool == visibleTool
-                ? Color(nsColor: NSColor(white: 0.38, alpha: 1.0))
-                : Color.clear)
+                ? SwiftUI.Color(nsColor: NSColor(white: 0.38, alpha: 1.0))
+                : SwiftUI.Color.clear)
             .cornerRadius(3)
             .onTapGesture {
                 currentTool = visibleTool
             }
-            .onLongPressGesture(minimumDuration: 0.5) {
+            .onLongPressGesture(minimumDuration: longPressDuration) {
                 showingMenu = true
             }
             .popover(isPresented: $showingMenu) {
@@ -168,7 +168,7 @@ private struct ArrowSlotButton: View {
                             HStack {
                                 ToolbarView.toolIcon(tool)
                                     .frame(width: 24, height: 24)
-                                Text(toolDisplayName(tool))
+                                SwiftUI.Text(toolDisplayName(tool))
                                     .font(.system(size: 12))
                                 Spacer()
                                 if tool == visibleTool {
@@ -188,13 +188,13 @@ private struct ArrowSlotButton: View {
 
     private func alternateTriangle() -> some View {
         Canvas { context, size in
-            var path = Path()
+            var path = SwiftUI.Path()
             let s: CGFloat = 5
             path.move(to: CGPoint(x: size.width, y: size.height))
             path.addLine(to: CGPoint(x: size.width - s, y: size.height))
             path.addLine(to: CGPoint(x: size.width, y: size.height - s))
             path.closeSubpath()
-            context.fill(path, with: .color(Color(nsColor: NSColor(white: 0.8, alpha: 1.0))))
+            context.fill(path, with: .color(SwiftUI.Color(nsColor: NSColor(white: 0.8, alpha: 1.0))))
         }
         .frame(width: 7, height: 7)
         .allowsHitTesting(false)

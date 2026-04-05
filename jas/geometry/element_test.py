@@ -3,7 +3,8 @@ from absl.testing import absltest
 from geometry.element import (
     Color, Fill, Stroke, LineCap, LineJoin, Transform,
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo, ClosePath,
-    Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, Group, Layer,
+    Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, TextPath, Group, Layer,
+    path_point_at_offset, path_closest_offset, path_distance_to_point,
 )
 
 
@@ -238,6 +239,132 @@ class ElementTest(absltest.TestCase):
     def test_layer_is_group(self):
         layer = Layer(children=(), name="Test")
         self.assertIsInstance(layer, Group)
+
+
+class PathOffsetTest(absltest.TestCase):
+    """Tests for text-on-path offset calculation functions."""
+
+    def _straight_path(self):
+        """A straight horizontal path from (0,0) to (100,0)."""
+        return (MoveTo(0, 0), LineTo(100, 0))
+
+    def test_point_at_offset_start(self):
+        x, y = path_point_at_offset(self._straight_path(), 0.0)
+        self.assertAlmostEqual(x, 0.0)
+        self.assertAlmostEqual(y, 0.0)
+
+    def test_point_at_offset_end(self):
+        x, y = path_point_at_offset(self._straight_path(), 1.0)
+        self.assertAlmostEqual(x, 100.0)
+        self.assertAlmostEqual(y, 0.0)
+
+    def test_point_at_offset_midpoint(self):
+        x, y = path_point_at_offset(self._straight_path(), 0.5)
+        self.assertAlmostEqual(x, 50.0)
+        self.assertAlmostEqual(y, 0.0)
+
+    def test_point_at_offset_clamped_below(self):
+        x, y = path_point_at_offset(self._straight_path(), -1.0)
+        self.assertAlmostEqual(x, 0.0)
+        self.assertAlmostEqual(y, 0.0)
+
+    def test_point_at_offset_clamped_above(self):
+        x, y = path_point_at_offset(self._straight_path(), 2.0)
+        self.assertAlmostEqual(x, 100.0)
+        self.assertAlmostEqual(y, 0.0)
+
+    def test_point_at_offset_multi_segment(self):
+        """L-shaped path: (0,0)->(100,0)->(100,100), midpoint at corner."""
+        d = (MoveTo(0, 0), LineTo(100, 0), LineTo(100, 100))
+        x, y = path_point_at_offset(d, 0.5)
+        self.assertAlmostEqual(x, 100.0, places=1)
+        self.assertAlmostEqual(y, 0.0, places=1)
+
+    def test_closest_offset_on_line(self):
+        """Point directly on the path should return the correct offset."""
+        offset = path_closest_offset(self._straight_path(), 50.0, 0.0)
+        self.assertAlmostEqual(offset, 0.5, places=2)
+
+    def test_closest_offset_start(self):
+        offset = path_closest_offset(self._straight_path(), -10.0, 0.0)
+        self.assertAlmostEqual(offset, 0.0, places=2)
+
+    def test_closest_offset_end(self):
+        offset = path_closest_offset(self._straight_path(), 200.0, 0.0)
+        self.assertAlmostEqual(offset, 1.0, places=2)
+
+    def test_closest_offset_perpendicular(self):
+        """Point perpendicular to midpoint projects to offset 0.5."""
+        offset = path_closest_offset(self._straight_path(), 50.0, 30.0)
+        self.assertAlmostEqual(offset, 0.5, places=2)
+
+    def test_distance_to_point_on_path(self):
+        dist = path_distance_to_point(self._straight_path(), 50.0, 0.0)
+        self.assertAlmostEqual(dist, 0.0, places=5)
+
+    def test_distance_to_point_perpendicular(self):
+        dist = path_distance_to_point(self._straight_path(), 50.0, 30.0)
+        self.assertAlmostEqual(dist, 30.0, places=5)
+
+    def test_distance_to_point_beyond_end(self):
+        """Distance to a point beyond the endpoint."""
+        dist = path_distance_to_point(self._straight_path(), 100.0, 10.0)
+        self.assertAlmostEqual(dist, 10.0, places=5)
+
+
+class PenToolPathTest(absltest.TestCase):
+    """Tests for pen tool path construction logic.
+
+    These test the path command generation without requiring a GUI context.
+    """
+
+    def test_straight_line_two_points(self):
+        """Two points with no handle drag produces CurveTo with control points at anchors."""
+        from tools.pen import PenPoint
+        p0 = PenPoint(0, 0)
+        p1 = PenPoint(100, 0)
+        cmds = [MoveTo(p0.x, p0.y)]
+        cmds.append(CurveTo(p0.hx_out, p0.hy_out, p1.hx_in, p1.hy_in, p1.x, p1.y))
+        self.assertEqual(len(cmds), 2)
+        self.assertIsInstance(cmds[0], MoveTo)
+        self.assertIsInstance(cmds[1], CurveTo)
+        self.assertEqual((cmds[1].x, cmds[1].y), (100, 0))
+
+    def test_handle_drag_creates_smooth_curve(self):
+        """Dragging a handle sets symmetric handles on the point."""
+        from tools.pen import PenPoint
+        p = PenPoint(50, 50)
+        # Simulate drag to (70, 50) — sets hx_out=70, hy_out=50, hx_in=30, hy_in=50
+        p.hx_out = 70
+        p.hy_out = 50
+        p.hx_in = 2 * p.x - 70
+        p.hy_in = 2 * p.y - 50
+        self.assertEqual(p.hx_in, 30)
+        self.assertEqual(p.hy_in, 50)
+
+    def test_closed_path_has_close_command(self):
+        """A closed pen path ends with CurveTo back to start and ClosePath."""
+        from tools.pen import PenPoint
+        pts = [PenPoint(0, 0), PenPoint(100, 0), PenPoint(50, 50)]
+        cmds = [MoveTo(pts[0].x, pts[0].y)]
+        for i in range(1, len(pts)):
+            prev, curr = pts[i - 1], pts[i]
+            cmds.append(CurveTo(prev.hx_out, prev.hy_out,
+                                curr.hx_in, curr.hy_in, curr.x, curr.y))
+        last = pts[-1]
+        cmds.append(CurveTo(last.hx_out, last.hy_out,
+                            pts[0].hx_in, pts[0].hy_in, pts[0].x, pts[0].y))
+        cmds.append(ClosePath())
+        self.assertIsInstance(cmds[-1], ClosePath)
+        self.assertEqual(len(cmds), 5)  # MoveTo + 2 CurveTo + CurveTo(close) + ClosePath
+
+    def test_pen_point_default_handles_at_anchor(self):
+        """New PenPoint has all handles at the anchor position."""
+        from tools.pen import PenPoint
+        p = PenPoint(42, 99)
+        self.assertEqual((p.hx_in, p.hy_in), (42, 99))
+        self.assertEqual((p.hx_out, p.hy_out), (42, 99))
+        self.assertFalse(p.smooth)
 
 
 if __name__ == "__main__":

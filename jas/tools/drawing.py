@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING
 from geometry.element import (
     Color, Line, Polygon, Rect, Stroke,
 )
-from tools.tool import CanvasTool, ToolContext
+from tools.tool import CanvasTool, ToolContext, POLYGON_SIDES
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
 
 
-_POLYGON_SIDES = 5
+_POLYGON_SIDES = POLYGON_SIDES
 
 
 def _constrain_angle(sx: float, sy: float, ex: float, ey: float) -> tuple[float, float]:

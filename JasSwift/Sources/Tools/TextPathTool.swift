@@ -16,7 +16,7 @@ class TextPathTool: CanvasTool {
 
     // Find if (x,y) is near the start-offset handle of a selected TextPath.
     private func findSelectedTextPathHandle(_ ctx: ToolContext, x: Double, y: Double)
-        -> (ElementPath, JasTextPath)? {
+        -> (ElementPath, TextPath)? {
         let r = offsetHandleRadius + 2
         for es in ctx.document.selection {
             let elem = ctx.document.getElement(es.path)
@@ -60,7 +60,7 @@ class TextPathTool: CanvasTool {
         dragEnd = (x, y)
         let dx = x - sx, dy = y - sy
         let dist = hypot(dx, dy)
-        if dist > 4 {
+        if dist > dragThreshold {
             let nx = -dy / dist, ny = dx / dist
             let mx = (sx + x) / 2, my = (sy + y) / 2
             controlPt = (mx + nx * dist * 0.3, my + ny * dist * 0.3)
@@ -74,7 +74,7 @@ class TextPathTool: CanvasTool {
             if let newOffset = offsetPreview {
                 let elem = ctx.document.getElement(path)
                 if case .textPath(let tp) = elem {
-                    let newElem = Element.textPath(JasTextPath(
+                    let newElem = Element.textPath(TextPath(
                         d: tp.d, content: tp.content, startOffset: newOffset,
                         fontFamily: tp.fontFamily, fontSize: tp.fontSize,
                         fill: tp.fill, stroke: tp.stroke,
@@ -96,16 +96,16 @@ class TextPathTool: CanvasTool {
         dragEnd = nil
         let w = abs(x - sx), h = abs(y - sy)
 
-        if w <= 4 && h <= 4 {
+        if w <= dragThreshold && h <= dragThreshold {
             // Click (not drag): check if we hit a Path to convert
             if let (path, elem) = ctx.hitTestPathCurve(x, y) {
                 switch elem {
                 case .path(let v):
                     let startOff = pathClosestOffset(v.d, px: x, py: y)
-                    let tp = JasTextPath(
+                    let tp = TextPath(
                         d: v.d, content: "", startOffset: startOff,
                         fontSize: 16.0,
-                        fill: JasFill(color: JasColor(r: 0, g: 0, b: 0))
+                        fill: Fill(color: Color(r: 0, g: 0, b: 0))
                     )
                     let newDoc = ctx.document.replaceElement(path, with: .textPath(tp))
                     ctx.controller.setDocument(newDoc)
@@ -127,9 +127,9 @@ class TextPathTool: CanvasTool {
             } else {
                 d = [.moveTo(sx, sy), .lineTo(x, y)]
             }
-            let tp = JasTextPath(
+            let tp = TextPath(
                 d: d, content: "Lorem Ipsum",
-                fill: JasFill(color: JasColor(r: 0, g: 0, b: 0))
+                fill: Fill(color: Color(r: 0, g: 0, b: 0))
             )
             let elem = Element.textPath(tp)
             ctx.controller.addElement(elem)

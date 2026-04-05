@@ -17,7 +17,6 @@ class SelectionToolBase: CanvasTool {
     }
 
     func onPress(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
-        ctx.snapshot()
         if checkHandleHit(ctx, x: x, y: y) { return }
         let pt = NSPoint(x: x, y: y)
         if ctx.hitTestSelection(pt) {
@@ -54,6 +53,7 @@ class SelectionToolBase: CanvasTool {
         if wasMoving {
             let dx = fx - sx, dy = fy - sy
             if dx != 0 || dy != 0 {
+                ctx.snapshot()
                 if alt {
                     ctx.controller.copySelection(dx: dx, dy: dy)
                 } else {
@@ -63,6 +63,7 @@ class SelectionToolBase: CanvasTool {
             ctx.requestUpdate()
             return
         }
+        ctx.snapshot()
         selectRect(ctx,
                    x: min(sx, fx), y: min(sy, fy),
                    w: abs(fx - sx), h: abs(fy - sy),
@@ -149,6 +150,7 @@ class DirectSelectionTool: SelectionToolBase {
             handleDragStart = nil
             handleDragEnd = nil
             if dx != 0 || dy != 0 {
+                ctx.snapshot()
                 ctx.controller.movePathHandle(hd.path, anchorIdx: hd.anchorIdx,
                                               handleType: hd.handleType, dx: dx, dy: dy)
             }
@@ -164,7 +166,7 @@ class DirectSelectionTool: SelectionToolBase {
             let elem = ctx.document.getElement(hd.path)
             if case .path(let v) = elem {
                 let newD = movePathHandle(v.d, anchorIdx: hd.anchorIdx, handleType: hd.handleType, dx: dx, dy: dy)
-                let moved = Element.path(JasPath(d: newD, fill: v.fill, stroke: v.stroke,
+                let moved = Element.path(Path(d: newD, fill: v.fill, stroke: v.stroke,
                                                   opacity: v.opacity, transform: v.transform))
                 if let es = ctx.document.selection.first(where: { $0.path == hd.path }) {
                     cgCtx.setStrokeColor(toolSelectionColor)

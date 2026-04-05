@@ -68,7 +68,7 @@ class text_path_tool = object (_self)
         let mx = (sx +. x) /. 2.0 and my = (sy +. y) /. 2.0 in
         let dx = x -. sx and dy = y -. sy in
         let dist = sqrt (dx *. dx +. dy *. dy) in
-        if dist > 4.0 then begin
+        if dist > Canvas_tool.drag_threshold then begin
           let nx = -. dy /. dist and ny = dx /. dist in
           control_pt <- Some (mx +. nx *. dist *. 0.3, my +. ny *. dist *. 0.3)
         end;
@@ -102,7 +102,7 @@ class text_path_tool = object (_self)
         drag_start <- None;
         drag_end <- None;
         let w = abs_float (x -. sx) and h = abs_float (y -. sy) in
-        if w <= 4.0 && h <= 4.0 then begin
+        if w <= Canvas_tool.drag_threshold && h <= Canvas_tool.drag_threshold then begin
           (* Click (not drag): check if we hit a Path to convert *)
           (match ctx.hit_test_path_curve x y with
            | Some (path, elem) ->
@@ -139,9 +139,9 @@ class text_path_tool = object (_self)
           (* Select newly created element and start editing *)
           let doc = ctx.model#document in
           let li = doc.Document.selected_layer in
-          let layer = List.nth doc.Document.layers li in
+          let layer = doc.Document.layers.(li) in
           let ci = (match layer with
-            | Element.Layer { children; _ } -> List.length children - 1
+            | Element.Layer { children; _ } -> Array.length children - 1
             | _ -> 0) in
           let path = [li; ci] in
           ctx.controller#select_element path;

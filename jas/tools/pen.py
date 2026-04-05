@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING
 from geometry.element import (
     ClosePath, Color, CurveTo, MoveTo, Path, PathCommand, Stroke,
 )
-from tools.tool import CanvasTool, ToolContext
+from tools.tool import CanvasTool, ToolContext, HIT_RADIUS, HANDLE_DRAW_SIZE
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
 
 
-_PEN_CLOSE_RADIUS = 8.0
-_HANDLE_SIZE = 10.0
+_PEN_CLOSE_RADIUS = HIT_RADIUS
+_HANDLE_SIZE = HANDLE_DRAW_SIZE
 
 
 class PenPoint:

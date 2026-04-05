@@ -4,7 +4,7 @@ let () =
   (* Test default document *)
   let ctrl = Jas.Controller.create () in
   assert (String.sub ctrl#model#filename 0 9 = "Untitled-");
-  assert (List.length ctrl#document.Jas.Document.layers = 1);
+  assert (Array.length ctrl#document.Jas.Document.layers = 1);
 
   (* Test initial filename *)
   let model2 = Jas.Model.create ~filename:"Test" () in
@@ -18,34 +18,34 @@ let () =
 
   (* Test add_layer *)
   let ctrl4 = Jas.Controller.create () in
-  let layer = make_layer ~name:"L1" [make_rect 0.0 0.0 10.0 10.0] in
+  let layer = make_layer ~name:"L1" [|make_rect 0.0 0.0 10.0 10.0|] in
   ctrl4#add_layer layer;
-  assert (List.length ctrl4#document.Jas.Document.layers = 2);
+  assert (Array.length ctrl4#document.Jas.Document.layers = 2);
 
   (* Test remove_layer *)
-  let l1 = make_layer ~name:"A" [] in
-  let l2 = make_layer ~name:"B" [] in
-  let doc5 = Jas.Document.make_document [l1; l2] in
+  let l1 = make_layer ~name:"A" [||] in
+  let l2 = make_layer ~name:"B" [||] in
+  let doc5 = Jas.Document.make_document [|l1; l2|] in
   let model5 = Jas.Model.create ~document:doc5 () in
   let ctrl5 = Jas.Controller.create ~model:model5 () in
   ctrl5#remove_layer 0;
-  assert (List.length ctrl5#document.Jas.Document.layers = 1);
-  (match List.hd ctrl5#document.Jas.Document.layers with
+  assert (Array.length ctrl5#document.Jas.Document.layers = 1);
+  (match ctrl5#document.Jas.Document.layers.(0) with
    | Layer { name; _ } -> assert (name = "B")
    | _ -> assert false);
 
   (* Test set_document *)
   let ctrl6 = Jas.Controller.create () in
-  let new_doc = Jas.Document.make_document [] in
+  let new_doc = Jas.Document.make_document [||] in
   ctrl6#set_document new_doc;
-  assert (List.length ctrl6#document.Jas.Document.layers = 0);
+  assert (Array.length ctrl6#document.Jas.Document.layers = 0);
 
   (* Test set_document notifies model *)
   let model7 = Jas.Model.create () in
   let ctrl7 = Jas.Controller.create ~model:model7 () in
   let received = ref [] in
-  model7#on_document_changed (fun doc -> received := List.length doc.Jas.Document.layers :: !received);
-  ctrl7#set_document (Jas.Document.make_document []);
+  model7#on_document_changed (fun doc -> received := Array.length doc.Jas.Document.layers :: !received);
+  ctrl7#set_document (Jas.Document.make_document [||]);
   assert (!received = [0]);
 
   (* === Selection controller tests === *)
@@ -53,9 +53,9 @@ let () =
   let rect = make_rect 0.0 0.0 10.0 10.0 in
   let line1 = make_line 0.0 0.0 5.0 5.0 in
   let line2 = make_line 1.0 1.0 2.0 2.0 in
-  let group = make_group [line1; line2] in
-  let layer = make_layer ~name:"L0" [rect; group] in
-  let doc_s = Jas.Document.make_document [layer] in
+  let group = make_group [|line1; line2|] in
+  let layer = make_layer ~name:"L0" [|rect; group|] in
+  let doc_s = Jas.Document.make_document [|layer|] in
   let model_s = Jas.Model.create ~document:doc_s () in
   let ctrl_s = Jas.Controller.create ~model:model_s () in
 
@@ -108,9 +108,9 @@ let () =
   let rect_far = make_rect 100.0 100.0 10.0 10.0 in
   let sline1 = make_line 0.0 0.0 5.0 5.0 in
   let sline2 = make_line 1.0 1.0 2.0 2.0 in
-  let sgroup = make_group [sline1; sline2] in
-  let slayer = make_layer ~name:"L0" [rect_far; sgroup] in
-  let sdoc = Jas.Document.make_document [slayer] in
+  let sgroup = make_group [|sline1; sline2|] in
+  let slayer = make_layer ~name:"L0" [|rect_far; sgroup|] in
+  let sdoc = Jas.Document.make_document [|slayer|] in
   let smodel = Jas.Model.create ~document:sdoc () in
   let sctrl = Jas.Controller.create ~model:smodel () in
 
@@ -143,8 +143,8 @@ let () =
 
   (* Diagonal line: marquee in bbox corner misses *)
   let diag_line = make_line 0.0 0.0 100.0 100.0 in
-  let diag_layer = make_layer ~name:"L0" [diag_line] in
-  let diag_doc = Jas.Document.make_document [diag_layer] in
+  let diag_layer = make_layer ~name:"L0" [|diag_line|] in
+  let diag_doc = Jas.Document.make_document [|diag_layer|] in
   let diag_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:diag_doc ()) () in
   diag_ctrl#select_rect 80.0 0.0 20.0 20.0;
   assert (Jas.Document.PathMap.is_empty diag_ctrl#document.Jas.Document.selection);
@@ -155,8 +155,8 @@ let () =
 
   (* Stroke-only rect: marquee inside interior misses *)
   let stroke_rect = make_rect 0.0 0.0 100.0 100.0 in
-  let sr_layer = make_layer ~name:"L0" [stroke_rect] in
-  let sr_doc = Jas.Document.make_document [sr_layer] in
+  let sr_layer = make_layer ~name:"L0" [|stroke_rect|] in
+  let sr_doc = Jas.Document.make_document [|sr_layer|] in
   let sr_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:sr_doc ()) () in
   sr_ctrl#select_rect 30.0 30.0 10.0 10.0;
   assert (Jas.Document.PathMap.is_empty sr_ctrl#document.Jas.Document.selection);
@@ -166,8 +166,8 @@ let () =
   let filled_rect = Rect { x = 0.0; y = 0.0; width = 100.0; height = 100.0;
                             rx = 0.0; ry = 0.0; fill;
                             stroke = None; opacity = 1.0; transform = None } in
-  let fr_layer = make_layer ~name:"L0" [filled_rect] in
-  let fr_doc = Jas.Document.make_document [fr_layer] in
+  let fr_layer = make_layer ~name:"L0" [|filled_rect|] in
+  let fr_doc = Jas.Document.make_document [|fr_layer|] in
   let fr_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:fr_doc ()) () in
   fr_ctrl#select_rect 30.0 30.0 10.0 10.0;
   assert (Jas.Document.PathMap.mem [0; 0] fr_ctrl#document.Jas.Document.selection);
@@ -175,8 +175,8 @@ let () =
   (* === Control point selection tests === *)
 
   let cp_line = make_line 10.0 20.0 50.0 60.0 in
-  let cp_layer = make_layer ~name:"L0" [cp_line] in
-  let cp_doc = Jas.Document.make_document [cp_layer] in
+  let cp_layer = make_layer ~name:"L0" [|cp_line|] in
+  let cp_doc = Jas.Document.make_document [|cp_layer|] in
   let cp_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:cp_doc ()) () in
 
   cp_ctrl#select_control_point [0; 0] 1;
@@ -194,9 +194,9 @@ let () =
   (* direct_select_rect: no group expansion *)
   let ds_line1 = make_line 0.0 0.0 5.0 5.0 in
   let ds_line2 = make_line 50.0 50.0 55.0 55.0 in
-  let ds_group = make_group [ds_line1; ds_line2] in
-  let ds_layer = make_layer ~name:"L0" [ds_group] in
-  let ds_doc = Jas.Document.make_document [ds_layer] in
+  let ds_group = make_group [|ds_line1; ds_line2|] in
+  let ds_layer = make_layer ~name:"L0" [|ds_group|] in
+  let ds_doc = Jas.Document.make_document [|ds_layer|] in
   let ds_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:ds_doc ()) () in
   ds_ctrl#direct_select_rect (-1.0) (-1.0) 7.0 7.0;
   assert (Jas.Document.PathMap.mem [0; 0; 0] ds_ctrl#document.Jas.Document.selection);
@@ -204,8 +204,8 @@ let () =
 
   (* direct_select_rect: selects only hit control points *)
   let ds_rect = make_rect 0.0 0.0 100.0 100.0 in
-  let ds_rlayer = make_layer ~name:"L0" [ds_rect] in
-  let ds_rdoc = Jas.Document.make_document [ds_rlayer] in
+  let ds_rlayer = make_layer ~name:"L0" [|ds_rect|] in
+  let ds_rdoc = Jas.Document.make_document [|ds_rlayer|] in
   let ds_rctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:ds_rdoc ()) () in
   ds_rctrl#direct_select_rect (-5.0) (-5.0) 10.0 10.0;
   let ds_res = Jas.Document.PathMap.find [0; 0] ds_rctrl#document.Jas.Document.selection in
@@ -213,8 +213,8 @@ let () =
 
   (* direct_select_rect: no CPs when none in rect *)
   let ds_dline = make_line 0.0 0.0 100.0 100.0 in
-  let ds_dlayer = make_layer ~name:"L0" [ds_dline] in
-  let ds_ddoc = Jas.Document.make_document [ds_dlayer] in
+  let ds_dlayer = make_layer ~name:"L0" [|ds_dline|] in
+  let ds_ddoc = Jas.Document.make_document [|ds_dlayer|] in
   let ds_dctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:ds_ddoc ()) () in
   ds_dctrl#direct_select_rect 40.0 40.0 20.0 20.0;
   let ds_dres = Jas.Document.PathMap.find [0; 0] ds_dctrl#document.Jas.Document.selection in
@@ -229,9 +229,9 @@ let () =
   (* group_select_rect: no group expansion *)
   let gs_line1 = make_line 0.0 0.0 5.0 5.0 in
   let gs_line2 = make_line 50.0 50.0 55.0 55.0 in
-  let gs_group = make_group [gs_line1; gs_line2] in
-  let gs_layer = make_layer ~name:"L0" [gs_group] in
-  let gs_doc = Jas.Document.make_document [gs_layer] in
+  let gs_group = make_group [|gs_line1; gs_line2|] in
+  let gs_layer = make_layer ~name:"L0" [|gs_group|] in
+  let gs_doc = Jas.Document.make_document [|gs_layer|] in
   let gs_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:gs_doc ()) () in
   gs_ctrl#group_select_rect (-1.0) (-1.0) 7.0 7.0;
   assert (Jas.Document.PathMap.mem [0; 0; 0] gs_ctrl#document.Jas.Document.selection);
@@ -239,8 +239,8 @@ let () =
 
   (* group_select_rect: selects all control points *)
   let gs_rect = make_rect 0.0 0.0 100.0 100.0 in
-  let gs_rlayer = make_layer ~name:"L0" [gs_rect] in
-  let gs_rdoc = Jas.Document.make_document [gs_rlayer] in
+  let gs_rlayer = make_layer ~name:"L0" [|gs_rect|] in
+  let gs_rdoc = Jas.Document.make_document [|gs_rlayer|] in
   let gs_rctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:gs_rdoc ()) () in
   gs_rctrl#group_select_rect (-5.0) (-5.0) 10.0 10.0;
   let gs_res = Jas.Document.PathMap.find [0; 0] gs_rctrl#document.Jas.Document.selection in
@@ -254,8 +254,8 @@ let () =
 
   let ext_rect1 = make_rect 0.0 0.0 10.0 10.0 in
   let ext_rect2 = make_rect 50.0 50.0 10.0 10.0 in
-  let ext_layer = make_layer ~name:"L0" [ext_rect1; ext_rect2] in
-  let ext_doc = Jas.Document.make_document [ext_layer] in
+  let ext_layer = make_layer ~name:"L0" [|ext_rect1; ext_rect2|] in
+  let ext_doc = Jas.Document.make_document [|ext_layer|] in
   let ext_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:ext_doc ()) () in
 
   (* extend adds new element *)
@@ -273,8 +273,8 @@ let () =
 
   (* extend direct select toggles CPs, not entire elements *)
   let cp_rect = make_rect 0.0 0.0 10.0 10.0 in
-  let cp_layer = make_layer ~name:"L0" [cp_rect] in
-  let cp_doc = Jas.Document.make_document [cp_layer] in
+  let cp_layer = make_layer ~name:"L0" [|cp_rect|] in
+  let cp_doc = Jas.Document.make_document [|cp_layer|] in
   let cp_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:cp_doc ()) () in
   (* Direct select top-left corner CP 0 at (0,0) *)
   cp_ctrl#direct_select_rect (-1.0) (-1.0) 2.0 2.0;
@@ -344,10 +344,10 @@ let () =
 
   (* Move selected line *)
   let ms_line = make_line 10.0 20.0 30.0 40.0 in
-  let ms_layer = make_layer [ms_line] in
+  let ms_layer = make_layer [|ms_line|] in
   let ms_sel = Jas.Document.PathMap.singleton [0; 0]
     (Jas.Document.make_element_selection ~control_points:[0; 1] [0; 0]) in
-  let ms_doc = Jas.Document.make_document ~selection:ms_sel [ms_layer] in
+  let ms_doc = Jas.Document.make_document ~selection:ms_sel [|ms_layer|] in
   let ms_model = Jas.Model.create ~document:ms_doc () in
   let ms_ctrl = Jas.Controller.create ~model:ms_model () in
   ms_ctrl#move_selection 5.0 (-3.0);
@@ -360,10 +360,10 @@ let () =
 
   (* Move partial CPs *)
   let ms_line2 = make_line 0.0 0.0 10.0 10.0 in
-  let ms_layer2 = make_layer [ms_line2] in
+  let ms_layer2 = make_layer [|ms_line2|] in
   let ms_sel2 = Jas.Document.PathMap.singleton [0; 0]
     (Jas.Document.make_element_selection ~control_points:[0] [0; 0]) in
-  let ms_doc2 = Jas.Document.make_document ~selection:ms_sel2 [ms_layer2] in
+  let ms_doc2 = Jas.Document.make_document ~selection:ms_sel2 [|ms_layer2|] in
   let ms_model2 = Jas.Model.create ~document:ms_doc2 () in
   let ms_ctrl2 = Jas.Controller.create ~model:ms_model2 () in
   ms_ctrl2#move_selection 5.0 5.0;
@@ -373,5 +373,73 @@ let () =
      assert (x1 = 5.0); assert (y1 = 5.0);
      assert (x2 = 10.0); assert (y2 = 10.0)
    | _ -> assert false);
+
+  (* === Copy selection tests === *)
+
+  let cp_rect = make_rect 10.0 20.0 30.0 40.0 in
+  let cp_layer = make_layer ~name:"L0" [|cp_rect|] in
+  let cp_sel = Jas.Document.PathMap.singleton [0; 0]
+    (Jas.Document.make_element_selection ~control_points:[0; 1; 2; 3] [0; 0]) in
+  let cp_doc = Jas.Document.make_document ~selection:cp_sel [|cp_layer|] in
+  let cp_model = Jas.Model.create ~document:cp_doc () in
+  let cp_ctrl = Jas.Controller.create ~model:cp_model () in
+  cp_ctrl#copy_selection 5.0 5.0;
+  assert (Array.length (Jas.Document.children_of cp_ctrl#document.Jas.Document.layers.(0)) = 2);
+  let cp_orig = (Jas.Document.children_of cp_ctrl#document.Jas.Document.layers.(0)).(0) in
+  let cp_copy = (Jas.Document.children_of cp_ctrl#document.Jas.Document.layers.(0)).(1) in
+  (match cp_orig with Rect { x; y; _ } -> assert (x = 10.0 && y = 20.0) | _ -> assert false);
+  (match cp_copy with Rect { x; y; _ } -> assert (x = 15.0 && y = 25.0) | _ -> assert false);
+
+  (* Copy selection updates selection to point to the copy *)
+  let cp_paths = sel_paths cp_ctrl#document.Jas.Document.selection in
+  assert (Jas.Document.PathSet.mem [0; 1] cp_paths);
+  assert (not (Jas.Document.PathSet.mem [0; 0] cp_paths));
+
+  (* === Delete selection with nested groups === *)
+
+  (* Delete element from inside a group *)
+  let ds_l1 = make_line 0.0 0.0 1.0 1.0 in
+  let ds_l2 = make_line 2.0 2.0 3.0 3.0 in
+  let ds_grp = make_group [|ds_l1; ds_l2|] in
+  let ds_layer = make_layer ~name:"L0" [|ds_grp|] in
+  let ds_sel = Jas.Document.PathMap.singleton [0; 0; 0]
+    (Jas.Document.make_element_selection [0; 0; 0]) in
+  let ds_doc = Jas.Document.make_document ~selection:ds_sel [|ds_layer|] in
+  let ds_doc2 = Jas.Document.delete_selection ds_doc in
+  let ds_inner = ds_doc2.Jas.Document.layers.(0) in
+  assert (Array.length (Jas.Document.children_of ds_inner) = 1);
+  let ds_grp2 = (Jas.Document.children_of ds_inner).(0) in
+  assert (Array.length (Jas.Document.children_of ds_grp2) = 1);
+  assert ((Jas.Document.children_of ds_grp2).(0) = ds_l2);
+  assert (Jas.Document.PathMap.is_empty ds_doc2.Jas.Document.selection);
+
+  (* Delete from nested group (two levels deep) *)
+  let dn_line = make_line 0.0 0.0 1.0 1.0 in
+  let dn_rect = make_rect 0.0 0.0 5.0 5.0 in
+  let dn_inner = make_group [|dn_line; dn_rect|] in
+  let dn_outer = make_group [|dn_inner|] in
+  let dn_layer = make_layer ~name:"L0" [|dn_outer|] in
+  let dn_sel = Jas.Document.PathMap.singleton [0; 0; 0; 1]
+    (Jas.Document.make_element_selection [0; 0; 0; 1]) in
+  let dn_doc = Jas.Document.make_document ~selection:dn_sel [|dn_layer|] in
+  let dn_doc2 = Jas.Document.delete_selection dn_doc in
+  let dn_inner2 = (Jas.Document.children_of (Jas.Document.children_of dn_doc2.Jas.Document.layers.(0)).(0)).(0) in
+  assert (Array.length (Jas.Document.children_of dn_inner2) = 1);
+  assert ((Jas.Document.children_of dn_inner2).(0) = dn_line);
+
+  (* Delete multiple elements from same group *)
+  let dm_l1 = make_line 0.0 0.0 1.0 1.0 in
+  let dm_l2 = make_line 2.0 2.0 3.0 3.0 in
+  let dm_l3 = make_line 4.0 4.0 5.0 5.0 in
+  let dm_grp = make_group [|dm_l1; dm_l2; dm_l3|] in
+  let dm_layer = make_layer ~name:"L0" [|dm_grp|] in
+  let dm_sel = List.fold_left (fun acc p ->
+    Jas.Document.PathMap.add p (Jas.Document.make_element_selection p) acc
+  ) Jas.Document.PathMap.empty [[0; 0; 0]; [0; 0; 2]] in
+  let dm_doc = Jas.Document.make_document ~selection:dm_sel [|dm_layer|] in
+  let dm_doc2 = Jas.Document.delete_selection dm_doc in
+  let dm_grp2 = (Jas.Document.children_of dm_doc2.Jas.Document.layers.(0)).(0) in
+  assert (Array.length (Jas.Document.children_of dm_grp2) = 1);
+  assert ((Jas.Document.children_of dm_grp2).(0) = dm_l2);
 
   Printf.printf "All controller tests passed.\n"

@@ -25,12 +25,12 @@ class TextTool: CanvasTool {
         dragEnd = nil
         let w = abs(x - sx)
         let h = abs(y - sy)
-        if w > 4 || h > 4 {
+        if w > dragThreshold || h > dragThreshold {
             let bx = min(sx, x), by = min(sy, y)
-            let elem = Element.text(JasText(
+            let elem = Element.text(Text(
                 x: bx, y: by, content: "Lorem Ipsum",
                 width: w, height: h,
-                fill: JasFill(color: JasColor(r: 0, g: 0, b: 0))
+                fill: Fill(color: Color(r: 0, g: 0, b: 0))
             ))
             ctx.controller.addElement(elem)
         } else {
@@ -38,9 +38,9 @@ class TextTool: CanvasTool {
             if let (path, textElem) = ctx.hitTestText(pt) {
                 ctx.startTextEdit(path, .text(textElem))
             } else {
-                let elem = Element.text(JasText(
+                let elem = Element.text(Text(
                     x: sx, y: sy, content: "Lorem Ipsum",
-                    fill: JasFill(color: JasColor(r: 0, g: 0, b: 0))
+                    fill: Fill(color: Color(r: 0, g: 0, b: 0))
                 ))
                 ctx.controller.addElement(elem)
             }

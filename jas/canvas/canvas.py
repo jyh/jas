@@ -21,7 +21,7 @@ from geometry.element import (
     path_point_at_offset,
 )
 from document.model import Model
-from tools.tool import CanvasTool, ToolContext
+from tools.tool import CanvasTool, ToolContext, HIT_RADIUS, HANDLE_DRAW_SIZE
 from tools.toolbar import Tool
 from tools import create_tools
 
@@ -77,6 +77,124 @@ def _apply_transform(painter: QPainter, transform: Transform | None) -> None:
         )
 
 
+def _arc_to_beziers(
+    cx0: float, cy0: float,
+    rx: float, ry: float, x_rotation: float,
+    large_arc: bool, sweep: bool,
+    x: float, y: float,
+) -> list[tuple[float, float, float, float, float, float]]:
+    """Convert an SVG arc to a list of cubic Bezier curves (x1,y1,x2,y2,x,y).
+
+    Implements the W3C SVG endpoint-to-center parameterization (F.6).
+    """
+    # F.6.2 — degenerate cases
+    if (cx0 == x and cy0 == y) or (rx == 0 and ry == 0):
+        return []
+
+    rx = abs(rx)
+    ry = abs(ry)
+    phi = math.radians(x_rotation)
+    cos_phi = math.cos(phi)
+    sin_phi = math.sin(phi)
+
+    # F.6.5.1 — compute (x1', y1')
+    dx2 = (cx0 - x) / 2.0
+    dy2 = (cy0 - y) / 2.0
+    x1p = cos_phi * dx2 + sin_phi * dy2
+    y1p = -sin_phi * dx2 + cos_phi * dy2
+
+    # F.6.6.2 — ensure radii are large enough
+    x1p_sq = x1p * x1p
+    y1p_sq = y1p * y1p
+    rx_sq = rx * rx
+    ry_sq = ry * ry
+    lam = x1p_sq / rx_sq + y1p_sq / ry_sq
+    if lam > 1.0:
+        s = math.sqrt(lam)
+        rx *= s
+        ry *= s
+        rx_sq = rx * rx
+        ry_sq = ry * ry
+
+    # F.6.5.2 — compute (cx', cy')
+    num = max(rx_sq * ry_sq - rx_sq * y1p_sq - ry_sq * x1p_sq, 0.0)
+    den = rx_sq * y1p_sq + ry_sq * x1p_sq
+    sq = math.sqrt(num / den) if den > 0 else 0.0
+    if large_arc == sweep:
+        sq = -sq
+    cxp = sq * rx * y1p / ry
+    cyp = -sq * ry * x1p / rx
+
+    # F.6.5.3 — compute (cx, cy)
+    mx = (cx0 + x) / 2.0
+    my = (cy0 + y) / 2.0
+    ccx = cos_phi * cxp - sin_phi * cyp + mx
+    ccy = sin_phi * cxp + cos_phi * cyp + my
+
+    # F.6.5.5/6 — compute theta1 and dtheta
+    def angle(ux: float, uy: float, vx: float, vy: float) -> float:
+        n = math.sqrt(ux * ux + uy * uy) * math.sqrt(vx * vx + vy * vy)
+        if n == 0:
+            return 0.0
+        c = max(-1.0, min(1.0, (ux * vx + uy * vy) / n))
+        a = math.acos(c)
+        if ux * vy - uy * vx < 0:
+            a = -a
+        return a
+
+    theta1 = angle(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry)
+    dtheta = angle(
+        (x1p - cxp) / rx, (y1p - cyp) / ry,
+        (-x1p - cxp) / rx, (-y1p - cyp) / ry,
+    )
+    if not sweep and dtheta > 0:
+        dtheta -= 2 * math.pi
+    elif sweep and dtheta < 0:
+        dtheta += 2 * math.pi
+
+    # Split into segments of at most pi/2
+    n_segs = max(1, int(math.ceil(abs(dtheta) / (math.pi / 2))))
+    seg_angle = dtheta / n_segs
+
+    # Bezier approximation of a unit arc segment
+    alpha = math.sin(seg_angle) * (math.sqrt(4 + 3 * math.tan(seg_angle / 2) ** 2) - 1) / 3
+
+    curves: list[tuple[float, float, float, float, float, float]] = []
+    cos_t = math.cos(theta1)
+    sin_t = math.sin(theta1)
+    for _ in range(n_segs):
+        cos_t2 = math.cos(theta1 + seg_angle)
+        sin_t2 = math.sin(theta1 + seg_angle)
+
+        # Endpoint on the ellipse (before rotation)
+        ex1 = rx * cos_t
+        ey1 = ry * sin_t
+        ex2 = rx * cos_t2
+        ey2 = ry * sin_t2
+
+        # Derivatives
+        dx1 = -rx * sin_t
+        dy1 = ry * cos_t
+        dx2 = -rx * sin_t2
+        dy2 = ry * cos_t2
+
+        # Control points (in rotated frame, then translated)
+        cp1x = cos_phi * (ex1 + alpha * dx1) - sin_phi * (ey1 + alpha * dy1) + ccx
+        cp1y = sin_phi * (ex1 + alpha * dx1) + cos_phi * (ey1 + alpha * dy1) + ccy
+        cp2x = cos_phi * (ex2 - alpha * dx2) - sin_phi * (ey2 - alpha * dy2) + ccx
+        cp2y = sin_phi * (ex2 - alpha * dx2) + cos_phi * (ey2 - alpha * dy2) + ccy
+        epx = cos_phi * ex2 - sin_phi * ey2 + ccx
+        epy = sin_phi * ex2 + cos_phi * ey2 + ccy
+
+        curves.append((cp1x, cp1y, cp2x, cp2y, epx, epy))
+
+        theta1 += seg_angle
+        cos_t = cos_t2
+        sin_t = sin_t2
+
+    return curves
+
+
 def _build_path(cmds: tuple[PathCommand, ...]) -> QPainterPath:
     """Build a QPainterPath from SVG path commands."""
     path = QPainterPath()
@@ -116,9 +234,16 @@ def _build_path(cmds: tuple[PathCommand, ...]) -> QPainterPath:
                     y1 : float = cur.y()
                 path.quadTo(x1, y1, x, y)
                 last_control = (x1, y1)
-            case ArcTo():
-                # Approximate arc with line to endpoint
-                path.lineTo(cmd.x, cmd.y)
+            case ArcTo(rx=arx, ry=ary, x_rotation=rot,
+                       large_arc=la, sweep=sw, x=ax, y=ay):
+                cur = path.currentPosition()
+                beziers = _arc_to_beziers(
+                    cur.x(), cur.y(), arx, ary, rot, la, sw, ax, ay,
+                )
+                for bx1, by1, bx2, by2, bx, by in beziers:
+                    path.cubicTo(bx1, by1, bx2, by2, bx, by)
+                if not beziers:
+                    path.lineTo(ax, ay)
                 last_control = None
             case ClosePath():
                 path.closeSubpath()
@@ -184,10 +309,20 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
             painter.drawPath(_build_path(d))
 
         case Text(x=x, y=y, content=content, font_family=ff,
-                  font_size=fs, width=tw, height=th,
+                  font_size=fs, font_weight=fw, font_style=fst,
+                  text_decoration=td,
+                  width=tw, height=th,
                   fill=fill, stroke=stroke):
             from PySide6.QtGui import QFont
             font = QFont(ff, int(fs))
+            if fw == "bold":
+                font.setBold(True)
+            if fst == "italic":
+                font.setItalic(True)
+            if td == "underline":
+                font.setUnderline(True)
+            elif td == "line-through":
+                font.setStrikeOut(True)
             painter.setFont(font)
             if fill is not None:
                 painter.setPen(_qcolor(fill.color))
@@ -203,9 +338,18 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
 
         case TextPath(d=d, content=content, start_offset=start_offset,
                       font_family=ff, font_size=fs,
+                      font_weight=fw, font_style=fst, text_decoration=td,
                       fill=fill, stroke=stroke):
             from PySide6.QtGui import QFont, QFontMetricsF
             font = QFont(ff, int(fs))
+            if fw == "bold":
+                font.setBold(True)
+            if fst == "italic":
+                font.setItalic(True)
+            if td == "underline":
+                font.setUnderline(True)
+            elif td == "line-through":
+                font.setStrikeOut(True)
             painter.setFont(font)
             if fill is not None:
                 painter.setPen(_qcolor(fill.color))
@@ -245,8 +389,8 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
 
 
 _SELECTION_COLOR = QColor(0, 120, 255)
-_HANDLE_SIZE = 10.0
-_HANDLE_CIRCLE_RADIUS = 5.0
+_HANDLE_SIZE = HANDLE_DRAW_SIZE
+_HANDLE_CIRCLE_RADIUS = HANDLE_DRAW_SIZE / 2.0
 
 
 def _control_points(elem: Element) -> list[tuple[float, float]]:
@@ -347,7 +491,7 @@ def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:
 class CanvasWidget(QWidget):
     """The canvas view. Receives document updates from the Model."""
 
-    _HIT_RADIUS = 8.0  # pixels to detect a click on a control point
+    _HIT_RADIUS = HIT_RADIUS
 
     def __init__(self, model: Model, controller: Controller,
                  bbox: BoundingBox = BoundingBox(0, 0, 800, 600)):

@@ -1,8 +1,10 @@
+import dataclasses
+
 from absl.testing import absltest
 
 from document.controller import Controller
 from document.document import Document, ElementSelection
-from geometry.element import Circle, Ellipse, Group, Layer, Line, Polygon, Rect, control_points, move_control_points
+from geometry.element import Circle, Ellipse, Group, Layer, Line, Polygon, Rect, control_points, control_point_count, move_control_points
 from document.model import Model
 
 
@@ -524,6 +526,124 @@ class MoveSelectionTest(absltest.TestCase):
         self.assertEqual((moved_line.x1, moved_line.y1, moved_line.x2, moved_line.y2),
                          (3.0, 4.0, 13.0, 14.0))
         self.assertEqual((moved_rect.x, moved_rect.y), (23.0, 24.0))
+
+
+class CopySelectionTest(absltest.TestCase):
+
+    def _sel_all_cps(self, doc, *paths):
+        """Create selection with all control points for each path."""
+        sels = set()
+        for p in paths:
+            elem = doc.get_element(p)
+            n = control_point_count(elem)
+            sels.add(ElementSelection(path=p,
+                                      control_points=frozenset(range(n))))
+        return frozenset(sels)
+
+    def test_copy_selection_duplicates_element(self):
+        """copy_selection creates a copy offset from the original."""
+        rect = Rect(x=10, y=20, width=30, height=40)
+        layer = Layer(children=(rect,), name="L0")
+        doc = Document(layers=(layer,))
+        doc = dataclasses.replace(doc, selection=self._sel_all_cps(doc, (0, 0)))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.copy_selection(5.0, 5.0)
+        self.assertEqual(len(ctrl.document.layers[0].children), 2)
+        original = ctrl.document.layers[0].children[0]
+        copy = ctrl.document.layers[0].children[1]
+        self.assertEqual((original.x, original.y), (10, 20))
+        self.assertEqual((copy.x, copy.y), (15, 25))
+
+    def test_copy_selection_updates_selection_to_copy(self):
+        """After copy, the new selection points to the copied element."""
+        rect = Rect(x=0, y=0, width=10, height=10)
+        layer = Layer(children=(rect,), name="L0")
+        doc = Document(layers=(layer,))
+        doc = dataclasses.replace(doc, selection=self._sel_all_cps(doc, (0, 0)))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.copy_selection(1.0, 1.0)
+        paths = _sel_paths(ctrl.document.selection)
+        self.assertIn((0, 1), paths)
+        self.assertNotIn((0, 0), paths)
+
+    def test_copy_selection_multiple_elements(self):
+        """Copying multiple selected elements duplicates each one."""
+        r1 = Rect(x=0, y=0, width=10, height=10)
+        r2 = Rect(x=50, y=50, width=10, height=10)
+        layer = Layer(children=(r1, r2), name="L0")
+        doc = Document(layers=(layer,))
+        doc = dataclasses.replace(doc, selection=self._sel_all_cps(doc, (0, 0), (0, 1)))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.copy_selection(2.0, 2.0)
+        self.assertEqual(len(ctrl.document.layers[0].children), 4)
+
+
+class DeleteSelectionNestedTest(absltest.TestCase):
+
+    def test_delete_selection_simple(self):
+        """Deleting a selected element removes it from the layer."""
+        rect = Rect(x=0, y=0, width=10, height=10)
+        circle = Circle(cx=50, cy=50, r=5)
+        layer = Layer(children=(rect, circle), name="L0")
+        doc = Document(layers=(layer,), selection=_sel((0, 0)))
+        doc2 = doc.delete_selection()
+        self.assertEqual(len(doc2.layers[0].children), 1)
+        self.assertIsInstance(doc2.layers[0].children[0], Circle)
+        self.assertEqual(doc2.selection, frozenset())
+
+    def test_delete_selection_in_group(self):
+        """Deleting an element nested inside a group removes only that element."""
+        line1 = Line(x1=0, y1=0, x2=1, y2=1)
+        line2 = Line(x1=2, y1=2, x2=3, y2=3)
+        group = Group(children=(line1, line2))
+        layer = Layer(children=(group,), name="L0")
+        doc = Document(layers=(layer,), selection=_sel((0, 0, 0)))
+        doc2 = doc.delete_selection()
+        inner_group = doc2.layers[0].children[0]
+        self.assertIsInstance(inner_group, Group)
+        self.assertEqual(len(inner_group.children), 1)
+        self.assertEqual(inner_group.children[0], line2)
+
+    def test_delete_selection_nested_group(self):
+        """Deleting an element in a nested group works correctly."""
+        line = Line(x1=0, y1=0, x2=1, y2=1)
+        rect = Rect(x=0, y=0, width=5, height=5)
+        inner = Group(children=(line, rect))
+        outer = Group(children=(inner,))
+        layer = Layer(children=(outer,), name="L0")
+        doc = Document(layers=(layer,), selection=_sel((0, 0, 0, 1)))
+        doc2 = doc.delete_selection()
+        inner2 = doc2.layers[0].children[0].children[0]
+        self.assertIsInstance(inner2, Group)
+        self.assertEqual(len(inner2.children), 1)
+        self.assertEqual(inner2.children[0], line)
+
+    def test_delete_multiple_from_same_group(self):
+        """Deleting multiple elements from the same group handles index shifting."""
+        l1 = Line(x1=0, y1=0, x2=1, y2=1)
+        l2 = Line(x1=2, y1=2, x2=3, y2=3)
+        l3 = Line(x1=4, y1=4, x2=5, y2=5)
+        group = Group(children=(l1, l2, l3))
+        layer = Layer(children=(group,), name="L0")
+        doc = Document(layers=(layer,), selection=_sel((0, 0, 0), (0, 0, 2)))
+        doc2 = doc.delete_selection()
+        inner = doc2.layers[0].children[0]
+        self.assertEqual(len(inner.children), 1)
+        self.assertEqual(inner.children[0], l2)
+
+    def test_delete_from_different_levels(self):
+        """Deleting elements at different nesting levels works correctly."""
+        rect = Rect(x=0, y=0, width=10, height=10)
+        line = Line(x1=0, y1=0, x2=1, y2=1)
+        group = Group(children=(line,))
+        layer = Layer(children=(rect, group), name="L0")
+        doc = Document(layers=(layer,), selection=_sel((0, 0), (0, 1, 0)))
+        doc2 = doc.delete_selection()
+        # rect removed, group's child removed -> empty group remains
+        self.assertEqual(len(doc2.layers[0].children), 1)
+        inner = doc2.layers[0].children[0]
+        self.assertIsInstance(inner, Group)
+        self.assertEqual(len(inner.children), 0)
 
 
 if __name__ == "__main__":

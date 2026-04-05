@@ -85,17 +85,22 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Text { x; y; content; font_family; font_size; text_width; text_height; fill; opacity; transform; _ } ->
+  | Text { x; y; content; font_family; font_size; font_weight; font_style; text_width; text_height; fill; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     begin match fill with
     | Some { fill_color = c } -> Cairo.set_source_rgba cr c.r c.g c.b c.a
     | None -> Cairo.set_source_rgb cr 0.0 0.0 0.0
     end;
+    let slant = if font_style = "italic" || font_style = "oblique" then Cairo.Italic else Cairo.Upright in
+    let weight = if font_weight = "bold" then Cairo.Bold else Cairo.Normal in
     if text_width > 0.0 && text_height > 0.0 then begin
       (* Area text: use Pango for word wrapping *)
       let layout = Pango.Layout.create (Cairo_pango.Font_map.create_context (Cairo_pango.Font_map.get_default ())) in
-      let font_desc = Pango.Font.from_string (Printf.sprintf "%s %d" font_family (int_of_float font_size)) in
+      let style_parts = ref [font_family; string_of_int (int_of_float font_size)] in
+      if font_weight = "bold" then style_parts := !style_parts @ ["Bold"];
+      if font_style = "italic" then style_parts := !style_parts @ ["Italic"];
+      let font_desc = Pango.Font.from_string (String.concat " " !style_parts) in
       Pango.Layout.set_font_description layout font_desc;
       Pango.Layout.set_text layout content;
       Pango.Layout.set_width layout (int_of_float (text_width *. float_of_int Pango.scale));
@@ -103,7 +108,7 @@ let rec draw_element cr (elem : Element.element) =
       Cairo.move_to cr x y;
       Cairo_pango.show_layout cr layout
     end else begin
-      Cairo.select_font_face cr font_family;
+      Cairo.select_font_face cr font_family ~slant ~weight;
       Cairo.set_font_size cr font_size;
       Cairo.move_to cr x y;
       Cairo.show_text cr content
@@ -111,20 +116,22 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Text_path { d; content; start_offset; font_family; font_size; fill; opacity; transform; _ } ->
+  | Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; fill; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     begin match fill with
     | Some { fill_color = c } -> Cairo.set_source_rgba cr c.r c.g c.b c.a
     | None -> Cairo.set_source_rgb cr 0.0 0.0 0.0
     end;
-    Cairo.select_font_face cr font_family;
+    let slant = if font_style = "italic" || font_style = "oblique" then Cairo.Italic else Cairo.Upright in
+    let weight = if font_weight = "bold" then Cairo.Bold else Cairo.Normal in
+    Cairo.select_font_face cr font_family ~slant ~weight;
     Cairo.set_font_size cr font_size;
     (* Flatten path to polyline for arc-length parameterization *)
     let flatten_path cmds =
       let pts = ref [] in
       let cx = ref 0.0 and cy = ref 0.0 in
-      let steps = 20 in
+      let steps = Element.flatten_steps in
       List.iter (fun cmd ->
         let open Element in
         match cmd with
@@ -207,14 +214,14 @@ let rec draw_element cr (elem : Element.element) =
   | Group { children; opacity; transform } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
-    List.iter (draw_element cr) children;
+    Array.iter (draw_element cr) children;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
   | Layer { children; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
-    List.iter (draw_element cr) children;
+    Array.iter (draw_element cr) children;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
   end;
@@ -271,6 +278,81 @@ and draw_points cr points close =
     List.iter (fun (px, py) -> Cairo.line_to cr px py) rest;
     if close then Cairo.Path.close cr
 
+and arc_to_beziers cx0 cy0 rx ry x_rotation large_arc sweep x y =
+  (* W3C SVG endpoint-to-center parameterization (F.6) *)
+  if (cx0 = x && cy0 = y) || (rx = 0.0 && ry = 0.0) then []
+  else
+    let pi = Float.pi in
+    let rx = abs_float rx in
+    let ry = abs_float ry in
+    let phi = x_rotation *. pi /. 180.0 in
+    let cos_phi = cos phi in
+    let sin_phi = sin phi in
+    let dx2 = (cx0 -. x) /. 2.0 in
+    let dy2 = (cy0 -. y) /. 2.0 in
+    let x1p = cos_phi *. dx2 +. sin_phi *. dy2 in
+    let y1p = -. sin_phi *. dx2 +. cos_phi *. dy2 in
+    let x1p_sq = x1p *. x1p in
+    let y1p_sq = y1p *. y1p in
+    let rx, ry =
+      let lam = x1p_sq /. (rx *. rx) +. y1p_sq /. (ry *. ry) in
+      if lam > 1.0 then
+        let s = sqrt lam in (rx *. s, ry *. s)
+      else (rx, ry)
+    in
+    let rx_sq = rx *. rx in
+    let ry_sq = ry *. ry in
+    let num = max 0.0 (rx_sq *. ry_sq -. rx_sq *. y1p_sq -. ry_sq *. x1p_sq) in
+    let den = rx_sq *. y1p_sq +. ry_sq *. x1p_sq in
+    let sq = if den > 0.0 then sqrt (num /. den) else 0.0 in
+    let sq = if large_arc = sweep then -. sq else sq in
+    let cxp = sq *. rx *. y1p /. ry in
+    let cyp = -. sq *. ry *. x1p /. rx in
+    let ccx = cos_phi *. cxp -. sin_phi *. cyp +. (cx0 +. x) /. 2.0 in
+    let ccy = sin_phi *. cxp +. cos_phi *. cyp +. (cy0 +. y) /. 2.0 in
+    let angle ux uy vx vy =
+      let n = sqrt (ux *. ux +. uy *. uy) *. sqrt (vx *. vx +. vy *. vy) in
+      if n = 0.0 then 0.0
+      else
+        let c = max (-1.0) (min 1.0 ((ux *. vx +. uy *. vy) /. n)) in
+        let a = acos c in
+        if ux *. vy -. uy *. vx < 0.0 then -. a else a
+    in
+    let theta1 = angle 1.0 0.0 ((x1p -. cxp) /. rx) ((y1p -. cyp) /. ry) in
+    let dtheta = angle
+      ((x1p -. cxp) /. rx) ((y1p -. cyp) /. ry)
+      ((-. x1p -. cxp) /. rx) ((-. y1p -. cyp) /. ry)
+    in
+    let dtheta =
+      if (not sweep) && dtheta > 0.0 then dtheta -. 2.0 *. pi
+      else if sweep && dtheta < 0.0 then dtheta +. 2.0 *. pi
+      else dtheta
+    in
+    let n_segs = max 1 (int_of_float (ceil (abs_float dtheta /. (pi /. 2.0)))) in
+    let seg_angle = dtheta /. float_of_int n_segs in
+    let alpha = sin seg_angle *. (sqrt (4.0 +. 3.0 *. (tan (seg_angle /. 2.0) ** 2.0)) -. 1.0) /. 3.0 in
+    let curves = ref [] in
+    let theta = ref theta1 in
+    for _ = 0 to n_segs - 1 do
+      let cos_t = cos !theta in
+      let sin_t = sin !theta in
+      let cos_t2 = cos (!theta +. seg_angle) in
+      let sin_t2 = sin (!theta +. seg_angle) in
+      let ex1 = rx *. cos_t in let ey1 = ry *. sin_t in
+      let ex2 = rx *. cos_t2 in let ey2 = ry *. sin_t2 in
+      let dx1 = -. rx *. sin_t in let dy1 = ry *. cos_t in
+      let dx2 = -. rx *. sin_t2 in let dy2 = ry *. cos_t2 in
+      let cp1x = cos_phi *. (ex1 +. alpha *. dx1) -. sin_phi *. (ey1 +. alpha *. dy1) +. ccx in
+      let cp1y = sin_phi *. (ex1 +. alpha *. dx1) +. cos_phi *. (ey1 +. alpha *. dy1) +. ccy in
+      let cp2x = cos_phi *. (ex2 -. alpha *. dx2) -. sin_phi *. (ey2 -. alpha *. dy2) +. ccx in
+      let cp2y = sin_phi *. (ex2 -. alpha *. dx2) +. cos_phi *. (ey2 -. alpha *. dy2) +. ccy in
+      let epx = cos_phi *. ex2 -. sin_phi *. ey2 +. ccx in
+      let epy = sin_phi *. ex2 +. cos_phi *. ey2 +. ccy in
+      curves := (cp1x, cp1y, cp2x, cp2y, epx, epy) :: !curves;
+      theta := !theta +. seg_angle
+    done;
+    List.rev !curves
+
 and build_path cr cmds =
   let _last_ctrl = ref None in
   List.iter (fun cmd ->
@@ -312,9 +394,14 @@ and build_path cr cmds =
       let c2y = y +. 2.0 /. 3.0 *. (y1 -. y) in
       Cairo.curve_to cr c1x c1y c2x c2y x y;
       _last_ctrl := Some (x1, y1)
-    | ArcTo (_, _, _, _, _, x, y) ->
-      (* Approximate arc with line to endpoint *)
-      Cairo.line_to cr x y; _last_ctrl := None
+    | ArcTo (arx, ary, rot, la, sw, x, y) ->
+      let (cx0, cy0) = Cairo.Path.get_current_point cr in
+      let beziers = arc_to_beziers cx0 cy0 arx ary rot la sw x y in
+      (match beziers with
+       | [] -> Cairo.line_to cr x y
+       | _ -> List.iter (fun (bx1, by1, bx2, by2, bx, by) ->
+           Cairo.curve_to cr bx1 by1 bx2 by2 bx by) beziers);
+      _last_ctrl := None
     | ClosePath ->
       Cairo.Path.close cr; _last_ctrl := None
   ) cmds
@@ -332,7 +419,7 @@ and rounded_rect cr x y w h rx ry =
   Cairo.line_to cr x (y +. ry);
   Cairo.curve_to cr x y (x +. rx) y (x +. rx) y
 
-let handle_size = 10.0
+let handle_size = Canvas_tool.handle_draw_size
 
 let control_points (elem : Element.element) =
   Element.control_points elem
@@ -433,7 +520,7 @@ let draw_selection_overlays cr (doc : Document.document) =
     | [] -> ()
     | _ ->
       Cairo.save cr;
-      let node = ref (List.nth doc.layers (List.hd path)) in
+      let node = ref doc.layers.(List.hd path) in
       if List.length path > 1 then begin
         apply_transform cr (match !node with
           | Element.Layer { transform; _ } -> transform
@@ -444,19 +531,19 @@ let draw_selection_overlays cr (doc : Document.document) =
         List.iter (fun idx ->
           let children = match !node with
             | Element.Group { children; _ } | Element.Layer { children; _ } -> children
-            | _ -> []
+            | _ -> [||]
           in
-          node := List.nth children idx;
+          node := children.(idx);
           apply_transform cr (match !node with
             | Element.Group { transform; _ } | Element.Layer { transform; _ } -> transform
             | _ -> None)
         ) intermediate;
         let children = match !node with
           | Element.Group { children; _ } | Element.Layer { children; _ } -> children
-          | _ -> []
+          | _ -> [||]
         in
         let last_idx = List.nth rest (List.length rest - 1) in
-        node := List.nth children last_idx
+        node := children.(last_idx)
       end;
       (* Apply the selected element's own transform *)
       apply_transform cr (match !node with
@@ -483,7 +570,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
   let canvas_area = GMisc.drawing_area () in
   object (_self)
     val mutable current_doc = model#document
-    val hit_radius = 8.0
+    val hit_radius = Canvas_tool.hit_radius
     (* Inline text editing state *)
     val mutable text_editor : GEdit.entry option = None
     val mutable text_popup : GWindow.window option = None
@@ -503,12 +590,12 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
     method private hit_test_text px py =
       let doc = current_doc in
       let result = ref None in
-      List.iteri (fun li layer ->
+      Array.iteri (fun li layer ->
         let children = match layer with
           | Element.Layer { children; _ } -> children
-          | _ -> []
+          | _ -> [||]
         in
-        List.iteri (fun ci child ->
+        Array.iteri (fun ci child ->
           if !result = None then
             match child with
             | Element.Text _ ->
@@ -534,12 +621,12 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       let doc = current_doc in
       let threshold = hit_radius +. 2.0 in
       let result = ref None in
-      List.iteri (fun li layer ->
+      Array.iteri (fun li layer ->
         let children = match layer with
           | Element.Layer { children; _ } -> children
-          | _ -> []
+          | _ -> [||]
         in
-        List.iteri (fun ci child ->
+        Array.iteri (fun ci child ->
           if !result = None then
             match child with
             | Element.Path { d; _ } | Element.Text_path { d; _ } ->
@@ -547,7 +634,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
               if dist <= threshold then
                 result := Some ([li; ci], child)
             | Element.Group { children = gc; _ } ->
-              List.iteri (fun gi gchild ->
+              Array.iteri (fun gi gchild ->
                 if !result = None then
                   match gchild with
                   | Element.Path { d; _ } | Element.Text_path { d; _ } ->
@@ -704,7 +791,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         Cairo.set_source_rgb cr 1.0 1.0 1.0;
         Cairo.rectangle cr 0.0 0.0 ~w ~h;
         Cairo.fill cr;
-        List.iter (draw_element cr) current_doc.Document.layers;
+        Array.iter (draw_element cr) current_doc.Document.layers;
         (* Draw selection overlays *)
         draw_selection_overlays cr current_doc;
         (* Draw active tool overlay *)

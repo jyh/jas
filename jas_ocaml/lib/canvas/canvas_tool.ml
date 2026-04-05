@@ -51,7 +51,13 @@ let constrain_angle sx sy ex ey =
     let snapped = Float.round (angle /. (Float.pi /. 4.0)) *. (Float.pi /. 4.0) in
     (sx +. dist *. cos snapped, sy +. dist *. sin snapped)
 
-let polygon_sides = 5
+(* Shared tool constants *)
+let hit_radius = 8.0          (* pixels to detect a click on a control point *)
+let handle_draw_size = 10.0   (* diameter of control-point handles in pixels *)
+let drag_threshold = 4.0      (* pixels of movement before a click becomes a drag *)
+let paste_offset = 24.0       (* translation in pt applied when pasting *)
+let long_press_ms = 500       (* milliseconds before a press becomes a long-press *)
+let polygon_sides = 5         (* default number of sides for the polygon tool *)
 
 let regular_polygon_points x1 y1 x2 y2 n =
   let ex = x2 -. x1 and ey = y2 -. y1 in

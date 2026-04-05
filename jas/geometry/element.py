@@ -11,6 +11,9 @@ from enum import Enum
 from typing import Tuple
 
 
+# Geometry constants
+FLATTEN_STEPS = 20  # line segments per Bezier curve when flattening paths
+
 # SVG presentation attributes
 
 @dataclass(frozen=True)
@@ -161,6 +164,15 @@ class ClosePath:
 PathCommand = MoveTo | LineTo | CurveTo | SmoothCurveTo | QuadTo | SmoothQuadTo | ArcTo | ClosePath
 
 
+def _inflate_bounds(bbox: Tuple[float, float, float, float],
+                    stroke: "Stroke | None") -> Tuple[float, float, float, float]:
+    """Expand a bounding box by half the stroke width on all sides."""
+    if stroke is None:
+        return bbox
+    half = stroke.width / 2.0
+    return (bbox[0] - half, bbox[1] - half, bbox[2] + stroke.width, bbox[3] + stroke.width)
+
+
 # SVG Elements
 
 class Element(ABC):
@@ -189,8 +201,9 @@ class Line(Element):
     def bounds(self) -> Tuple[float, float, float, float]:
         min_x = min(self.x1, self.x2)
         min_y = min(self.y1, self.y2)
-        return (min_x, min_y,
-                abs(self.x2 - self.x1), abs(self.y2 - self.y1))
+        return _inflate_bounds(
+            (min_x, min_y, abs(self.x2 - self.x1), abs(self.y2 - self.y1)),
+            self.stroke)
 
 
 @dataclass(frozen=True)
@@ -208,7 +221,7 @@ class Rect(Element):
     transform: Transform | None = None
 
     def bounds(self) -> Tuple[float, float, float, float]:
-        return (self.x, self.y, self.width, self.height)
+        return _inflate_bounds((self.x, self.y, self.width, self.height), self.stroke)
 
 
 @dataclass(frozen=True)
@@ -223,8 +236,9 @@ class Circle(Element):
     transform: Transform | None = None
 
     def bounds(self) -> Tuple[float, float, float, float]:
-        return (self.cx - self.r, self.cy - self.r,
-                self.r * 2, self.r * 2)
+        return _inflate_bounds(
+            (self.cx - self.r, self.cy - self.r, self.r * 2, self.r * 2),
+            self.stroke)
 
 
 @dataclass(frozen=True)
@@ -240,8 +254,9 @@ class Ellipse(Element):
     transform: Transform | None = None
 
     def bounds(self) -> Tuple[float, float, float, float]:
-        return (self.cx - self.rx, self.cy - self.ry,
-                self.rx * 2, self.ry * 2)
+        return _inflate_bounds(
+            (self.cx - self.rx, self.cy - self.ry, self.rx * 2, self.ry * 2),
+            self.stroke)
 
 
 @dataclass(frozen=True)
@@ -259,7 +274,8 @@ class Polyline(Element):
         xs = [p[0] for p in self.points]
         ys = [p[1] for p in self.points]
         min_x, min_y = min(xs), min(ys)
-        return (min_x, min_y, max(xs) - min_x, max(ys) - min_y)
+        return _inflate_bounds(
+            (min_x, min_y, max(xs) - min_x, max(ys) - min_y), self.stroke)
 
 
 @dataclass(frozen=True)
@@ -277,7 +293,8 @@ class Polygon(Element):
         xs = [p[0] for p in self.points]
         ys = [p[1] for p in self.points]
         min_x, min_y = min(xs), min(ys)
-        return (min_x, min_y, max(xs) - min_x, max(ys) - min_y)
+        return _inflate_bounds(
+            (min_x, min_y, max(xs) - min_x, max(ys) - min_y), self.stroke)
 
 
 @dataclass(frozen=True)
@@ -290,7 +307,7 @@ class Path(Element):
     transform: Transform | None = None
 
     def bounds(self) -> Tuple[float, float, float, float]:
-        return _path_bounds(self.d)
+        return _inflate_bounds(_path_bounds(self.d), self.stroke)
 
 
 def _path_bounds(d) -> Tuple[float, float, float, float]:
@@ -327,6 +344,9 @@ class Text(Element):
     content: str
     font_family: str = "sans-serif"
     font_size: float = 16.0
+    font_weight: str = "normal"
+    font_style: str = "normal"
+    text_decoration: str = "none"
     width: float = 0.0
     height: float = 0.0
     fill: Fill | None = None
@@ -354,6 +374,9 @@ class TextPath(Element):
     start_offset: float = 0.0
     font_family: str = "sans-serif"
     font_size: float = 16.0
+    font_weight: str = "normal"
+    font_style: str = "normal"
+    text_decoration: str = "none"
     fill: Fill | None = None
     stroke: Stroke | None = None
     opacity: float = 1.0
@@ -361,7 +384,7 @@ class TextPath(Element):
 
     def bounds(self) -> Tuple[float, float, float, float]:
         # Approximate from path bounds
-        return _path_bounds(self.d)
+        return _inflate_bounds(_path_bounds(self.d), self.stroke)
 
 
 @dataclass(frozen=True)
@@ -641,7 +664,7 @@ def _flatten_path_commands(d: tuple) -> list[tuple[float, float]]:
     import math
     pts: list[tuple[float, float]] = []
     cx, cy = 0.0, 0.0
-    steps = 20
+    steps = FLATTEN_STEPS
     for cmd in d:
         match cmd:
             case MoveTo(x, y):

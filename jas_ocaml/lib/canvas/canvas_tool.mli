@@ -29,6 +29,21 @@ end
 (** Constrain an angle to 45-degree increments. *)
 val constrain_angle : float -> float -> float -> float -> float * float
 
+(** Pixels to detect a click on a control point or handle. *)
+val hit_radius : float
+
+(** Diameter of control-point handles in pixels. *)
+val handle_draw_size : float
+
+(** Pixels of movement before a click becomes a drag. *)
+val drag_threshold : float
+
+(** Translation in pt applied when pasting. *)
+val paste_offset : float
+
+(** Milliseconds before a press becomes a long-press. *)
+val long_press_ms : int
+
 (** Number of sides for the polygon tool. *)
 val polygon_sides : int
 

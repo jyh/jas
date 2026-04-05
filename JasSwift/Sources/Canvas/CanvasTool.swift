@@ -5,22 +5,22 @@ import Foundation
 
 /// Facade passed to tools giving access to model, controller, and canvas services.
 class ToolContext {
-    let model: JasModel
+    let model: Model
     let controller: Controller
     let hitTestSelection: (NSPoint) -> Bool
     let hitTestHandle: (NSPoint) -> (path: ElementPath, anchorIdx: Int, handleType: String)?
-    let hitTestText: (NSPoint) -> (ElementPath, JasText)?
+    let hitTestText: (NSPoint) -> (ElementPath, Text)?
     let hitTestPathCurve: (Double, Double) -> (ElementPath, Element)?
     let requestUpdate: () -> Void
     let startTextEdit: (ElementPath, Element) -> Void
     let commitTextEdit: () -> Void
     let drawElementOverlayFn: (CGContext, Element, Set<Int>) -> Void
 
-    init(model: JasModel,
+    init(model: Model,
          controller: Controller,
          hitTestSelection: @escaping (NSPoint) -> Bool,
          hitTestHandle: @escaping (NSPoint) -> (path: ElementPath, anchorIdx: Int, handleType: String)?,
-         hitTestText: @escaping (NSPoint) -> (ElementPath, JasText)?,
+         hitTestText: @escaping (NSPoint) -> (ElementPath, Text)?,
          hitTestPathCurve: @escaping (Double, Double) -> (ElementPath, Element)?,
          requestUpdate: @escaping () -> Void,
          startTextEdit: @escaping (ElementPath, Element) -> Void,
@@ -38,7 +38,7 @@ class ToolContext {
         self.drawElementOverlayFn = drawElementOverlay
     }
 
-    var document: JasDocument { model.document }
+    var document: Document { model.document }
 
     func snapshot() { model.snapshot() }
 }
@@ -67,6 +67,16 @@ extension CanvasTool {
 
 // MARK: - Helpers
 
+// MARK: - Shared tool constants
+
+let hitRadius: CGFloat = 8.0        // pixels to detect a click on a control point
+let handleDrawSize: CGFloat = 10.0  // diameter of control-point handles in pixels
+let dragThreshold: Double = 4.0     // pixels of movement before a click becomes a drag
+let pasteOffset: Double = 24.0      // translation in pt applied when pasting
+let longPressDuration: Double = 0.5 // seconds before a press becomes a long-press
+let polygonSides = 5                // default number of sides for the polygon tool
+let flattenSteps = 20               // line segments per Bezier curve when flattening
+
 let toolSelectionColor = CGColor(red: 0, green: 0.47, blue: 1.0, alpha: 1.0)
 
 func constrainAngle(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> (Double, Double) {
@@ -77,8 +87,6 @@ func constrainAngle(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> (
     let snapped = (angle / (.pi / 4)).rounded() * (.pi / 4)
     return (sx + dist * cos(snapped), sy + dist * sin(snapped))
 }
-
-let polygonSides = 5
 
 func regularPolygonPoints(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, _ n: Int) -> [(Double, Double)] {
     let ex = x2 - x1, ey = y2 - y1
