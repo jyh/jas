@@ -94,6 +94,17 @@ def create_menus(window: QMainWindow) -> None:
     select_all_action.setShortcut(QKeySequence.SelectAll)
     select_all_action.triggered.connect(lambda: print("Select all"))
 
+    # Object menu
+    object_menu = menubar.addMenu("&Object")
+
+    group_action = object_menu.addAction("&Group")
+    group_action.setShortcut(QKeySequence("Ctrl+G"))
+    group_action.triggered.connect(lambda: _with_model(lambda m: _group_selection(m)))
+
+    ungroup_action = object_menu.addAction("&Ungroup")
+    ungroup_action.setShortcut(QKeySequence("Ctrl+Shift+G"))
+    ungroup_action.triggered.connect(lambda: _with_model(lambda m: _ungroup_selection(m)))
+
     # View menu
     view_menu = menubar.addMenu("&View")
 
@@ -199,6 +210,115 @@ def _save_as(window: QMainWindow, model: Model) -> None:
         f.write(svg)
     model.mark_saved()
     model.filename = path
+
+
+def _group_selection(model: Model) -> None:
+    """Group the selected elements into a single Group element."""
+    from dataclasses import replace as dreplace
+    from document.document import ElementSelection
+    from geometry.element import Group, control_point_count
+
+    doc = model.document
+    if not doc.selection:
+        return
+    # Collect selected paths sorted by position
+    paths = sorted(es.path for es in doc.selection)
+    if len(paths) < 2:
+        return
+    # All selected elements must be siblings (same parent path prefix)
+    parent = paths[0][:-1]
+    if not all(p[:-1] == parent for p in paths):
+        return
+    # Gather elements in order
+    elements = []
+    for p in paths:
+        try:
+            elements.append(doc.get_element(p))
+        except (IndexError, ValueError):
+            return
+    # Remove selected elements in reverse order to preserve indices
+    model.snapshot()
+    new_doc = doc
+    for p in reversed(paths):
+        new_doc = new_doc.delete_element(p)
+    # Create the group
+    group = Group(children=tuple(elements))
+    # Insert at the position of the first selected element
+    insert_path = paths[0]
+    layer_idx = insert_path[0]
+    child_idx = insert_path[1] if len(insert_path) > 1 else 0
+    # Insert into the layer
+    layer = new_doc.layers[layer_idx]
+    new_children = layer.children[:child_idx] + (group,) + layer.children[child_idx:]
+    new_layer = dreplace(layer, children=new_children)
+    new_layers = new_doc.layers[:layer_idx] + (new_layer,) + new_doc.layers[layer_idx + 1:]
+    # Select the new group
+    group_path = insert_path
+    n = control_point_count(group)
+    new_selection = frozenset([ElementSelection(
+        path=group_path, control_points=frozenset(range(n)))])
+    model.document = dreplace(new_doc, layers=tuple(new_layers), selection=new_selection)
+
+
+def _ungroup_selection(model: Model) -> None:
+    """Ungroup all selected Group elements, replacing each with its children."""
+    from dataclasses import replace as dreplace
+    from document.document import ElementSelection
+    from geometry.element import Group, control_point_count
+
+    doc = model.document
+    if not doc.selection:
+        return
+    # Collect selected paths that are Groups, sorted by position
+    group_paths = []
+    for es in doc.selection:
+        try:
+            elem = doc.get_element(es.path)
+            if isinstance(elem, Group):
+                group_paths.append(es.path)
+        except (IndexError, ValueError):
+            pass
+    if not group_paths:
+        return
+    group_paths.sort()
+    model.snapshot()
+    new_doc = doc
+    new_selection: set[ElementSelection] = set()
+    # Process in reverse order to preserve indices
+    for gpath in reversed(group_paths):
+        group_elem = new_doc.get_element(gpath)
+        children = group_elem.children
+        # Delete the group
+        new_doc = new_doc.delete_element(gpath)
+        # Insert children at the group's position
+        layer_idx = gpath[0]
+        child_idx = gpath[1] if len(gpath) > 1 else 0
+        layer = new_doc.layers[layer_idx]
+        new_children = (layer.children[:child_idx]
+                        + children
+                        + layer.children[child_idx:])
+        new_layer = dreplace(layer, children=new_children)
+        new_layers = (new_doc.layers[:layer_idx]
+                      + (new_layer,)
+                      + new_doc.layers[layer_idx + 1:])
+        new_doc = dreplace(new_doc, layers=tuple(new_layers))
+    # Build selection for all unpacked children (forward pass)
+    # Recompute paths after all modifications
+    offset = 0
+    for gpath in group_paths:
+        orig_group = doc.get_element(gpath)
+        n_children = len(orig_group.children)
+        layer_idx = gpath[0]
+        child_idx = (gpath[1] if len(gpath) > 1 else 0) + offset
+        for j in range(n_children):
+            path = (layer_idx, child_idx + j)
+            elem = new_doc.get_element(path)
+            n = control_point_count(elem)
+            new_selection.add(ElementSelection(
+                path=path, control_points=frozenset(range(n))))
+        # Each ungroup replaces 1 element with n_children, shifting by n_children - 1
+        offset += n_children - 1
+    model.document = dreplace(new_doc, selection=frozenset(new_selection))
 
 
 def _copy_selection(model: Model) -> None:

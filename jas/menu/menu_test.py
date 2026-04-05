@@ -24,13 +24,13 @@ class MenubarTest(absltest.TestCase):
     def test_menubar_has_three_menus(self):
         menubar = self.window.menuBar()
         menu_actions = menubar.actions()
-        self.assertEqual(len(menu_actions), 3)
+        self.assertEqual(len(menu_actions), 4)
 
     def test_menu_titles(self):
         menubar = self.window.menuBar()
         menu_actions = menubar.actions()
         menu_texts = [action.text() for action in menu_actions]
-        self.assertEqual(menu_texts, ["&File", "&Edit", "&View"])
+        self.assertEqual(menu_texts, ["&File", "&Edit", "&Object", "&View"])
 
     def test_file_menu_exists(self):
         menubar = self.window.menuBar()

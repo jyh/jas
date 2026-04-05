@@ -45,3 +45,4 @@ val insert_element_after : document -> element_path -> Element.element -> docume
 val delete_element : document -> element_path -> document
 val delete_selection : document -> document
 val children_of : Element.element -> Element.element array
+val with_children : Element.element -> Element.element array -> Element.element
