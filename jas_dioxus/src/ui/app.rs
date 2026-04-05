@@ -1009,40 +1009,7 @@ pub fn App() -> Element {
     // --- Menu bar data ---
     let mut open_menu = use_signal(|| Option::<String>::None);
 
-    // Menu item: (label, command, shortcut_hint)
-    type MenuItem = (&'static str, &'static str, &'static str);
-    // Separator
-    const SEP: MenuItem = ("---", "", "");
-
-    let menus: &[(&str, &[MenuItem])] = &[
-        ("File", &[
-            ("New", "new", "\u{2318}N"),
-            ("Open...", "open", "\u{2318}O"),
-            ("Save", "save", "\u{2318}S"),
-            SEP,
-            ("Close Tab", "close", "\u{2318}W"),
-        ]),
-        ("Edit", &[
-            ("Undo", "undo", "\u{2318}Z"),
-            ("Redo", "redo", "\u{21e7}\u{2318}Z"),
-            SEP,
-            ("Cut", "cut", "\u{2318}X"),
-            ("Copy", "copy", "\u{2318}C"),
-            ("Paste", "paste", "\u{2318}V"),
-            ("Paste in Place", "paste_in_place", "\u{21e7}\u{2318}V"),
-            SEP,
-            ("Delete", "delete", "\u{232b}"),
-            ("Select All", "select_all", "\u{2318}A"),
-        ]),
-        ("Object", &[
-            ("Group", "group", "\u{2318}G"),
-            ("Ungroup", "ungroup", "\u{21e7}\u{2318}G"),
-            ("Ungroup All", "ungroup_all", ""),
-            SEP,
-            ("Lock", "lock", "\u{2318}2"),
-            ("Unlock All", "unlock_all", "\u{2325}\u{2318}2"),
-        ]),
-    ];
+    let menus = super::menu::MENU_BAR;
 
     // Pre-build each menu dropdown as a complete VNode
     let menu_nodes: Vec<Result<VNode, RenderError>> = menus.iter().enumerate().map(|(mi, (menu_name, items))| {
