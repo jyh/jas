@@ -1,15 +1,15 @@
 from absl.testing import absltest
 
-from toolbar import Tool
-from canvas import BoundingBox, CanvasWidget, _draw_element, _build_path
-from controller import Controller
-from document import Document
-from element import (
+from tools.toolbar import Tool
+from canvas.canvas import BoundingBox, CanvasWidget, _draw_element, _build_path
+from document.controller import Controller
+from document.document import Document
+from geometry.element import (
     Circle, Color, CurveTo, ClosePath, Ellipse, Fill, Group, Layer, Line,
     LineTo, MoveTo, Path, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
     SmoothQuadTo, Stroke, Text, TextPath, Transform,
 )
-from model import Model
+from document.model import Model
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication

@@ -6,7 +6,7 @@ whenever the document is replaced.
 
 from typing import Callable
 
-from document import Document
+from document.document import Document
 
 
 class Model:

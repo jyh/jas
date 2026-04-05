@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from element import Color, Fill, Text
-from tool import CanvasTool, ToolContext
+from geometry.element import Color, Fill, Text
+from tools.tool import CanvasTool, ToolContext
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter

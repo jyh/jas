@@ -1,12 +1,12 @@
 from absl.testing import absltest
 
-from document import Document
-from element import (
+from document.document import Document
+from geometry.element import (
     ArcTo, Circle, ClosePath, Color, CurveTo, Ellipse, Fill, Group, Layer,
     Line, LineCap, LineJoin, LineTo, MoveTo, Path, Polygon, Polyline,
     QuadTo, Rect, SmoothCurveTo, SmoothQuadTo, Stroke, Text, Transform,
 )
-from svg import document_to_svg, svg_to_document
+from geometry.svg import document_to_svg, svg_to_document
 
 
 # 1 pt = 96/72 px = 4/3 px

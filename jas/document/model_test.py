@@ -1,8 +1,8 @@
 from absl.testing import absltest
 
-from document import Document
-from element import Layer, Rect
-from model import Model
+from document.document import Document
+from geometry.element import Layer, Rect
+from document.model import Model
 
 
 class ModelTest(absltest.TestCase):

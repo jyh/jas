@@ -7,8 +7,8 @@ that replaces the old one in the Model.
 
 from dataclasses import replace
 
-from document import Document, ElementPath, ElementSelection, Selection
-from element import (
+from document.document import Document, ElementPath, ElementSelection, Selection
+from geometry.element import (
     Circle, Element, Ellipse, Group, Layer, Line, Path, Polygon, Polyline,
     Rect, Text,
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo,
@@ -16,7 +16,7 @@ from element import (
     control_point_count, control_points, move_control_points,
     move_path_handle as _move_path_handle,
 )
-from model import Model
+from document.model import Model
 
 
 # ---------------------------------------------------------------------------

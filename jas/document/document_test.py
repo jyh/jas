@@ -1,7 +1,7 @@
 from absl.testing import absltest
 
-from element import Group, Layer, Line, Rect, Circle
-from document import Document
+from geometry.element import Group, Layer, Line, Rect, Circle
+from document.document import Document
 
 
 class DocumentTest(absltest.TestCase):

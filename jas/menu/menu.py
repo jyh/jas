@@ -3,7 +3,7 @@
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QApplication, QMainWindow
 
-from model import Model
+from document.model import Model
 
 
 def create_menus(window: QMainWindow, model: Model) -> None:
@@ -93,9 +93,9 @@ def create_menus(window: QMainWindow, model: Model) -> None:
 
 def _copy_selection(model: Model) -> None:
     """Copy selected elements to the system clipboard as SVG."""
-    from document import Document
-    from element import Layer
-    from svg import document_to_svg
+    from document.document import Document
+    from geometry.element import Layer
+    from geometry.svg import document_to_svg
 
     doc = model.document
     if not doc.selection:
@@ -125,7 +125,7 @@ def _cut_selection(model: Model) -> None:
 
 def _translate_element(elem, dx: float, dy: float):
     """Translate an element by (dx, dy) using move_control_points with all CPs."""
-    from element import control_point_count, move_control_points
+    from geometry.element import control_point_count, move_control_points
     if dx == 0.0 and dy == 0.0:
         return elem
     n = control_point_count(elem)
@@ -147,9 +147,9 @@ def _paste_clipboard(model: Model, offset: float) -> None:
     """
     from dataclasses import replace as dreplace
 
-    from document import Document, ElementSelection
-    from element import Group, Layer, Text, control_point_count
-    from svg import svg_to_document
+    from document.document import Document, ElementSelection
+    from geometry.element import Group, Layer, Text, control_point_count
+    from geometry.svg import svg_to_document
 
     clipboard = QApplication.clipboard()
     text = clipboard.text()

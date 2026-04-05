@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
-    from controller import Controller
-    from document import Document
-    from element import Text
-    from model import Model
+    from document.controller import Controller
+    from document.document import Document
+    from geometry.element import Text
+    from document.model import Model
 
 
 class ToolContext:
