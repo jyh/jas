@@ -4,7 +4,7 @@ type tool = Selection | Direct_selection | Group_selection | Pen | Text_tool | T
 
 let tool_button_size = 32
 let title_bar_height = 24
-let long_press_ms = 500
+let long_press_ms = Canvas_tool.long_press_ms
 
 class toolbar ~title ~x ~y (fixed : GPack.fixed) =
   let frame = GBin.frame ~shadow_type:`ETCHED_IN () in

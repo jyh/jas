@@ -20,7 +20,7 @@ public enum Tool: String, CaseIterable {
 
 public struct CanvasEntry: Identifiable {
     public let id = UUID()
-    public let model: JasModel
+    public let model: Model
 }
 
 // MARK: - Workspace state (shared with app delegate for quit-save prompt)
@@ -31,14 +31,14 @@ public class WorkspaceState: ObservableObject {
 
     public init() {}
 
-    public var activeModel: JasModel? {
+    public var activeModel: Model? {
         if let id = selectedTab, let entry = canvases.first(where: { $0.id == id }) {
             return entry.model
         }
         return canvases.first?.model
     }
 
-    public var modifiedModels: [JasModel] {
+    public var modifiedModels: [Model] {
         canvases.compactMap { $0.model.isModified ? $0.model : nil }
     }
 }
@@ -76,12 +76,12 @@ public struct ContentView: View {
                         }
                     }
                     .frame(height: 28)
-                    .background(Color(nsColor: NSColor(white: 0.20, alpha: 1.0)))
+                    .background(SwiftUI.Color(nsColor: NSColor(white: 0.20, alpha: 1.0)))
                 }
 
                 // Canvas content
                 ZStack {
-                    Color(nsColor: NSColor(white: 0.50, alpha: 1.0))
+                    SwiftUI.Color(nsColor: NSColor(white: 0.50, alpha: 1.0))
                     ForEach(workspace.canvases) { entry in
                         if entry.id == workspace.selectedTab {
                             CanvasTab(
@@ -97,7 +97,7 @@ public struct ContentView: View {
         }
         .frame(minWidth: 640, minHeight: 480)
         .overlay {
-            Color.clear
+            SwiftUI.Color.clear
                 .focusedSceneValue(\.addCanvas, { newModel in addCanvas(newModel) })
                 .allowsHitTesting(false)
         }
@@ -115,7 +115,7 @@ public struct ContentView: View {
 
     /// Add a canvas for the given model. If a canvas for the same file
     /// already exists (non-untitled), focus it instead of creating a duplicate.
-    private func addCanvas(_ model: JasModel) {
+    private func addCanvas(_ model: Model) {
         if !model.filename.hasPrefix("Untitled-"),
            let existing = workspace.canvases.first(where: { $0.model.filename == model.filename }) {
             workspace.selectedTab = existing.id
@@ -155,7 +155,7 @@ public struct ContentView: View {
         }
     }
 
-    public static func saveModel(_ model: JasModel) {
+    public static func saveModel(_ model: Model) {
         if model.filename.hasPrefix("Untitled-") {
             let panel = NSSavePanel()
             panel.title = "Save As"
@@ -187,14 +187,14 @@ public struct ContentView: View {
 // MARK: - Tab label with close button
 
 struct CanvasTabLabel: View {
-    @ObservedObject var model: JasModel
+    @ObservedObject var model: Model
     var isSelected: Bool
     var onSelect: () -> Void
     var onClose: () -> Void
 
     var body: some View {
         HStack(spacing: 4) {
-            Text(model.isModified ? "\(model.filename) *" : model.filename)
+            SwiftUI.Text(model.isModified ? "\(model.filename) *" : model.filename)
                 .font(.system(size: 11))
                 .lineLimit(1)
             Button(action: onClose) {
@@ -208,8 +208,8 @@ struct CanvasTabLabel: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
         .background(isSelected
-            ? Color(nsColor: NSColor(white: 0.35, alpha: 1.0))
-            : Color(nsColor: NSColor(white: 0.25, alpha: 1.0)))
+            ? SwiftUI.Color(nsColor: NSColor(white: 0.35, alpha: 1.0))
+            : SwiftUI.Color(nsColor: NSColor(white: 0.25, alpha: 1.0)))
         .foregroundColor(.white)
         .onTapGesture { onSelect() }
     }
@@ -218,10 +218,10 @@ struct CanvasTabLabel: View {
 // MARK: - Focused model provider (observes the active model for menu state)
 
 struct FocusedModelProvider: View {
-    @ObservedObject var model: JasModel
+    @ObservedObject var model: Model
 
     var body: some View {
-        Color.clear
+        SwiftUI.Color.clear
             .focusedSceneValue(\.jasModel, model)
             .focusedSceneValue(\.hasSelection, !model.document.selection.isEmpty)
             .focusedSceneValue(\.canUndo, model.canUndo)
@@ -233,7 +233,7 @@ struct FocusedModelProvider: View {
 // MARK: - Canvas Tab (observes model for document updates)
 
 struct CanvasTab: View {
-    @ObservedObject var model: JasModel
+    @ObservedObject var model: Model
     @Binding var currentTool: Tool
     var onFocus: (() -> Void)?
 
@@ -261,8 +261,8 @@ struct ToolbarPanel: View {
         VStack(spacing: 0) {
             // Title
             ZStack {
-                Color(nsColor: NSColor(white: 0.6, alpha: 1.0))
-                Text("Tools")
+                SwiftUI.Color(nsColor: NSColor(white: 0.6, alpha: 1.0))
+                SwiftUI.Text("Tools")
                     .font(.system(size: 11))
                     .foregroundColor(.black)
             }
@@ -297,12 +297,12 @@ struct ToolbarPanel: View {
             }
             .padding(4)
             .frame(width: toolbarWidth)
-            .background(Color(nsColor: NSColor(white: 0.30, alpha: 1.0)))
+            .background(SwiftUI.Color(nsColor: NSColor(white: 0.30, alpha: 1.0)))
 
             Spacer()
         }
         .frame(width: toolbarWidth)
-        .background(Color(nsColor: NSColor(white: 0.25, alpha: 1.0)))
+        .background(SwiftUI.Color(nsColor: NSColor(white: 0.25, alpha: 1.0)))
     }
 }
 

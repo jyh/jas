@@ -13,7 +13,7 @@ let copy_selection (model : Model.model) () =
     | [] -> ()
     | elems ->
       let temp_doc = Document.make_document
-        [Element.make_layer (List.rev elems)] in
+        [|Element.make_layer (Array.of_list (List.rev elems))|] in
       let svg = Svg.document_to_svg temp_doc in
       let clipboard = GtkBase.Clipboard.get Gdk.Atom.clipboard in
       GtkBase.Clipboard.set_text clipboard svg
@@ -51,14 +51,14 @@ let paste_clipboard (model : Model.model) offset () =
       let new_sel = ref Document.PathMap.empty in
       if is_svg text then begin
         let pasted_doc = Svg.svg_to_document text in
-        let new_layers = Array.of_list doc.Document.layers in
-        List.iter (fun pasted_layer ->
+        let new_layers = Array.copy doc.Document.layers in
+        Array.iter (fun pasted_layer ->
           let children = match pasted_layer with
             | Element.Layer { children; _ } ->
-              List.map (fun c -> translate_element c offset offset) children
-            | _ -> []
+              Array.map (fun c -> translate_element c offset offset) children
+            | _ -> [||]
           in
-          if children = [] then ()
+          if Array.length children = 0 then ()
           else begin
             let name = match pasted_layer with
               | Element.Layer { name; _ } -> name
@@ -79,10 +79,10 @@ let paste_clipboard (model : Model.model) offset () =
             let idx = !target_idx in
             (* Record paths for pasted elements *)
             let base = match new_layers.(idx) with
-              | Element.Layer { children = ec; _ } -> List.length ec
+              | Element.Layer { children = ec; _ } -> Array.length ec
               | _ -> 0
             in
-            List.iteri (fun j child ->
+            Array.iteri (fun j child ->
               let path = [idx; base + j] in
               let n = Element.control_point_count child in
               new_sel := Document.PathMap.add path
@@ -91,18 +91,18 @@ let paste_clipboard (model : Model.model) offset () =
             ) children;
             match new_layers.(idx) with
             | Element.Layer { name = n; children = ec; opacity; transform } ->
-              new_layers.(idx) <- Element.Layer { name = n; children = ec @ children; opacity; transform }
+              new_layers.(idx) <- Element.Layer { name = n; children = Array.append ec children; opacity; transform }
             | _ -> ()
           end
         ) pasted_doc.Document.layers;
-        model#set_document { doc with layers = Array.to_list new_layers;
+        model#set_document { doc with layers = new_layers;
                                       selection = !new_sel }
       end else begin
         (* Plain text: create a Text element *)
         let elem = Element.make_text (offset) (offset +. 16.0) text in
         let idx = doc.Document.selected_layer in
-        let base = match List.nth doc.Document.layers idx with
-          | Element.Layer { children; _ } -> List.length children
+        let base = match doc.Document.layers.(idx) with
+          | Element.Layer { children; _ } -> Array.length children
           | _ -> 0
         in
         let path = [idx; base] in
@@ -110,11 +110,11 @@ let paste_clipboard (model : Model.model) offset () =
         new_sel := Document.PathMap.add path
           (Document.make_element_selection ~control_points:(List.init n Fun.id) path)
           !new_sel;
-        let new_layers = List.mapi (fun i l ->
+        let new_layers = Array.mapi (fun i l ->
           if i = idx then
             match l with
             | Element.Layer layer ->
-              Element.Layer { layer with children = layer.children @ [elem] }
+              Element.Layer { layer with children = Array.append layer.children [| elem |] }
             | _ -> l
           else l
         ) doc.Document.layers in
@@ -244,7 +244,7 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   ignore (edit_factory#add_separator ());
   ignore (edit_factory#add_item "Cut" ~key:GdkKeysyms._x ~callback:(fun () -> cut_selection (m ()) ()));
   ignore (edit_factory#add_item "Copy" ~key:GdkKeysyms._c ~callback:(fun () -> copy_selection (m ()) ()));
-  ignore (edit_factory#add_item "Paste" ~key:GdkKeysyms._v ~callback:(fun () -> paste_clipboard (m ()) 24.0 ()));
+  ignore (edit_factory#add_item "Paste" ~key:GdkKeysyms._v ~callback:(fun () -> paste_clipboard (m ()) Canvas_tool.paste_offset ()));
   ignore (edit_factory#add_item "Paste in Place" ~callback:(fun () -> paste_clipboard (m ()) 0.0 ()));
   ignore (edit_factory#add_separator ());
   ignore (edit_factory#add_item "Select All" ~key:GdkKeysyms._a ~callback:(fun () -> print_endline "Select All"));

@@ -52,7 +52,7 @@ import AppKit
 }
 
 @Test func lineToolCreatesLineElement() {
-    let model = JasModel()
+    let model = Model()
     let controller = Controller(model: model)
     let view = CanvasNSView()
     view.document = model.document
@@ -76,7 +76,7 @@ import AppKit
 }
 
 @Test func rectToolCreatesRectElement() {
-    let model = JasModel()
+    let model = Model()
     let controller = Controller(model: model)
     let view = CanvasNSView()
     view.document = model.document
@@ -100,13 +100,13 @@ import AppKit
 }
 
 @Test func drawingAddsToExistingLayer() {
-    let model = JasModel()
+    let model = Model()
     let controller = Controller(model: model)
-    let layer = JasLayer(name: "L1", children: [
-        .line(JasLine(x1: 0, y1: 0, x2: 1, y2: 1,
-                      stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0))))
+    let layer = Layer(name: "L1", children: [
+        .line(Line(x1: 0, y1: 0, x2: 1, y2: 1,
+                      stroke: Stroke(color: Color(r: 0, g: 0, b: 0))))
     ])
-    model.document = JasDocument(layers: [layer])
+    model.document = Document(layers: [layer])
 
     let view = CanvasNSView()
     view.document = model.document
@@ -122,7 +122,7 @@ import AppKit
 }
 
 @Test func selectionToolIgnoresMouse() {
-    let model = JasModel()
+    let model = Model()
     let controller = Controller(model: model)
     let view = CanvasNSView()
     view.document = model.document

@@ -161,14 +161,19 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}/>')
 
         case Text(x=x, y=y, content=content, font_family=ff, font_size=fs,
+                  font_weight=fw, font_style=fst, text_decoration=td,
                   width=tw, height=th,
                   fill=fill, stroke=stroke, opacity=opacity, transform=transform):
             area_attrs = ""
             if tw > 0 and th > 0:
                 area_attrs = (f' style="inline-size: {_fmt(_px(tw))}px;'
                               f' white-space: pre-wrap;"')
+            fw_attr = f' font-weight="{fw}"' if fw != "normal" else ""
+            fst_attr = f' font-style="{fst}"' if fst != "normal" else ""
+            td_attr = f' text-decoration="{td}"' if td != "none" else ""
             return (f'{indent}<text x="{_fmt(_px(x))}" y="{_fmt(_px(y))}"'
                     f' font-family="{escape(ff)}" font-size="{_fmt(_px(fs))}"'
+                    f'{fw_attr}{fst_attr}{td_attr}'
                     f'{area_attrs}'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}>'
@@ -435,6 +440,9 @@ def _parse_element(node: ET.Element) -> Element | None:
         content = node.text or ""
         ff = node.get("font-family", "sans-serif")
         fs = _pt(float(node.get("font-size", "16")))
+        fw = node.get("font-weight", "normal")
+        fst = node.get("font-style", "normal")
+        td = node.get("text-decoration", "none")
         tw = 0.0
         style = node.get("style", "")
         if style:
@@ -451,6 +459,7 @@ def _parse_element(node: ET.Element) -> Element | None:
             x=_pt(float(node.get("x", "0"))),
             y=_pt(float(node.get("y", "0"))),
             content=content, font_family=ff, font_size=fs,
+            font_weight=fw, font_style=fst, text_decoration=td,
             width=tw, height=th,
             fill=fill, stroke=stroke, opacity=opacity, transform=transform)
 

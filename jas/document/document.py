@@ -24,11 +24,21 @@ _G = TypeVar("_G", bound=Group)
 ElementPath = tuple[int, ...]
 
 # Per-element selection state: which element and which of its control points
-# are selected.
-@dataclass(frozen=True)
+# are selected.  Hash/equality is by path only so that a frozenset behaves
+# as a path-keyed collection (matching OCaml's PathMap and Swift's
+# path-only Hashable conformance).
+@dataclass(frozen=True, eq=False)
 class ElementSelection:
     path: ElementPath
     control_points: frozenset[int] = frozenset()
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ElementSelection):
+            return NotImplemented
+        return self.path == other.path
+
+    def __hash__(self) -> int:
+        return hash(self.path)
 
 # A selection is an immutable set of ElementSelection entries (unique by path).
 Selection = frozenset[ElementSelection]

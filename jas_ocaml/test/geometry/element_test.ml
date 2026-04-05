@@ -91,23 +91,23 @@ let () =
   (match txt2 with Text { font_family; font_size; _ } -> assert (font_family = "monospace" && font_size = 24.0) | _ -> assert false);
 
   (* Test group bounds *)
-  let g = make_group [r; el] in
+  let g = make_group [|r; el|] in
   let (x, y, w, h) = bounds g in
   assert (x = 5.0 && y = 10.0 && w = 100.0 && h = 55.0);
 
   (* Test empty group *)
-  let eg = make_group [] in
+  let eg = make_group [||] in
   let (x, y, w, h) = bounds eg in
   assert (x = 0.0 && y = 0.0 && w = 0.0 && h = 0.0);
 
   (* Test nested group *)
-  let inner = make_group [make_rect 10.0 10.0 5.0 5.0] in
-  let outer = make_group [make_rect 0.0 0.0 1.0 1.0; inner] in
+  let inner = make_group [|make_rect 10.0 10.0 5.0 5.0|] in
+  let outer = make_group [|make_rect 0.0 0.0 1.0 1.0; inner|] in
   let (x, y, w, h) = bounds outer in
   assert (x = 0.0 && y = 0.0 && w = 15.0 && h = 15.0);
 
   (* Test group with transform *)
-  let gt = make_group ~transform:(Some (make_translate 100.0 200.0)) [make_rect 0.0 0.0 10.0 10.0] in
+  let gt = make_group ~transform:(Some (make_translate 100.0 200.0)) [|make_rect 0.0 0.0 10.0 10.0|] in
   (match gt with Group { transform; _ } ->
     (match transform with Some t -> assert (t.e = 100.0) | None -> assert false)
    | _ -> assert false);
@@ -179,7 +179,7 @@ let () =
   assert (abs_float (tr.b -. 1.0) < 1e-10);
 
   (* Test group with all element types *)
-  let all_types = make_group [
+  let all_types = make_group [|
     make_line 0.0 0.0 10.0 10.0;
     make_rect 0.0 0.0 20.0 20.0;
     make_circle 50.0 50.0 10.0;
@@ -188,33 +188,89 @@ let () =
     make_polygon [(0.0, 0.0); (10.0, 0.0); (5.0, 10.0)];
     make_path [MoveTo (0.0, 0.0); LineTo (10.0, 10.0)];
     make_text 0.0 20.0 "test";
-  ] in
+  |] in
   let (x, _, w, h) = bounds all_types in
   assert (x = 0.0 && w > 0.0 && h > 0.0);
 
   (* Test deeply nested groups (3 levels) *)
-  let deep_inner = make_group [make_rect 10.0 10.0 5.0 5.0] in
-  let deep_mid = make_group [make_rect 0.0 0.0 1.0 1.0; deep_inner] in
-  let deep_outer = make_group [make_rect 20.0 20.0 3.0 3.0; deep_mid] in
+  let deep_inner = make_group [|make_rect 10.0 10.0 5.0 5.0|] in
+  let deep_mid = make_group [|make_rect 0.0 0.0 1.0 1.0; deep_inner|] in
+  let deep_outer = make_group [|make_rect 20.0 20.0 3.0 3.0; deep_mid|] in
   let (x, y, w, h) = bounds deep_outer in
   assert (x = 0.0 && y = 0.0 && w = 23.0 && h = 23.0);
 
   (* Test layer default name *)
-  let layer = make_layer [make_rect 0.0 0.0 10.0 10.0] in
+  let layer = make_layer [|make_rect 0.0 0.0 10.0 10.0|] in
   (match layer with Layer { name; _ } -> assert (name = "Layer") | _ -> assert false);
 
   (* Test layer custom name *)
-  let layer2 = make_layer ~name:"Background" [make_rect 0.0 0.0 10.0 10.0] in
+  let layer2 = make_layer ~name:"Background" [|make_rect 0.0 0.0 10.0 10.0|] in
   (match layer2 with Layer { name; _ } -> assert (name = "Background") | _ -> assert false);
 
   (* Test layer bounds *)
-  let layer3 = make_layer ~name:"Shapes" [make_rect 0.0 0.0 10.0 10.0; make_circle 50.0 50.0 5.0] in
+  let layer3 = make_layer ~name:"Shapes" [|make_rect 0.0 0.0 10.0 10.0; make_circle 50.0 50.0 5.0|] in
   let (x, y, w, h) = bounds layer3 in
   assert (x = 0.0 && y = 0.0 && w = 55.0 && h = 55.0);
 
   (* Test empty layer *)
-  let layer4 = make_layer ~name:"Empty" [] in
+  let layer4 = make_layer ~name:"Empty" [||] in
   let (x, y, w, h) = bounds layer4 in
   assert (x = 0.0 && y = 0.0 && w = 0.0 && h = 0.0);
+
+  (* === Path offset tests === *)
+
+  let eps = 1e-6 in
+
+  (* Straight horizontal path from (0,0) to (100,0) *)
+  let straight = [MoveTo (0.0, 0.0); LineTo (100.0, 0.0)] in
+
+  (* point_at_offset: start *)
+  let (px, py) = path_point_at_offset straight 0.0 in
+  assert (abs_float px < eps && abs_float py < eps);
+
+  (* point_at_offset: end *)
+  let (px, py) = path_point_at_offset straight 1.0 in
+  assert (abs_float (px -. 100.0) < eps && abs_float py < eps);
+
+  (* point_at_offset: midpoint *)
+  let (px, py) = path_point_at_offset straight 0.5 in
+  assert (abs_float (px -. 50.0) < eps && abs_float py < eps);
+
+  (* point_at_offset: clamped below *)
+  let (px, py) = path_point_at_offset straight (-1.0) in
+  assert (abs_float px < eps && abs_float py < eps);
+
+  (* point_at_offset: clamped above *)
+  let (px, py) = path_point_at_offset straight 2.0 in
+  assert (abs_float (px -. 100.0) < eps && abs_float py < eps);
+
+  (* point_at_offset: multi-segment L-shape *)
+  let lpath = [MoveTo (0.0, 0.0); LineTo (100.0, 0.0); LineTo (100.0, 100.0)] in
+  let (px, py) = path_point_at_offset lpath 0.5 in
+  assert (abs_float (px -. 100.0) < 1.0 && abs_float py < 1.0);
+
+  (* closest_offset: point on the line *)
+  let off = path_closest_offset straight 50.0 0.0 in
+  assert (abs_float (off -. 0.5) < 0.01);
+
+  (* closest_offset: start *)
+  let off = path_closest_offset straight (-10.0) 0.0 in
+  assert (abs_float off < 0.01);
+
+  (* closest_offset: end *)
+  let off = path_closest_offset straight 200.0 0.0 in
+  assert (abs_float (off -. 1.0) < 0.01);
+
+  (* closest_offset: perpendicular to midpoint *)
+  let off = path_closest_offset straight 50.0 30.0 in
+  assert (abs_float (off -. 0.5) < 0.01);
+
+  (* distance_to_point: on path *)
+  let d = path_distance_to_point straight 50.0 0.0 in
+  assert (d < eps);
+
+  (* distance_to_point: perpendicular *)
+  let d = path_distance_to_point straight 50.0 30.0 in
+  assert (abs_float (d -. 30.0) < eps);
 
   Printf.printf "All element tests passed.\n"

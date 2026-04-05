@@ -4,6 +4,7 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
 
 from document.model import Model
+from tools.tool import PASTE_OFFSET
 
 
 def create_menus(window: QMainWindow) -> None:
@@ -74,7 +75,7 @@ def create_menus(window: QMainWindow) -> None:
 
     paste_action = edit_menu.addAction("&Paste")
     paste_action.setShortcut(QKeySequence.Paste)
-    paste_action.triggered.connect(lambda: _model() and _paste_clipboard(_model(), 24.0))
+    paste_action.triggered.connect(lambda: _model() and _paste_clipboard(_model(), PASTE_OFFSET))
 
     paste_in_place_action = edit_menu.addAction("Paste in &Place")
     paste_in_place_action.setShortcut(QKeySequence("Ctrl+Shift+V"))

@@ -15,26 +15,26 @@ public struct CanvasBoundingBox: Equatable {
 
 // MARK: - Element drawing
 
-private func nsColor(_ c: JasColor) -> NSColor {
+private func nsColor(_ c: Color) -> NSColor {
     NSColor(red: c.r, green: c.g, blue: c.b, alpha: c.a)
 }
 
-private func cgColor(_ c: JasColor) -> CGColor {
+private func cgColor(_ c: Color) -> CGColor {
     CGColor(red: c.r, green: c.g, blue: c.b, alpha: c.a)
 }
 
-private func applyTransform(_ ctx: CGContext, _ t: JasTransform?) {
+private func applyTransform(_ ctx: CGContext, _ t: Transform?) {
     guard let t = t else { return }
     ctx.concatenate(CGAffineTransform(a: t.a, b: t.b, c: t.c, d: t.d, tx: t.e, ty: t.f))
 }
 
-private func setFill(_ ctx: CGContext, _ fill: JasFill?) {
+private func setFill(_ ctx: CGContext, _ fill: Fill?) {
     if let fill = fill {
         ctx.setFillColor(cgColor(fill.color))
     }
 }
 
-private func setStroke(_ ctx: CGContext, _ stroke: JasStroke?) {
+private func setStroke(_ ctx: CGContext, _ stroke: Stroke?) {
     guard let stroke = stroke else { return }
     ctx.setStrokeColor(cgColor(stroke.color))
     ctx.setLineWidth(stroke.width)
@@ -48,6 +48,83 @@ private func setStroke(_ ctx: CGContext, _ stroke: JasStroke?) {
     case .round: ctx.setLineJoin(.round)
     case .bevel: ctx.setLineJoin(.bevel)
     }
+}
+
+/// Convert an SVG arc to cubic Bezier curves (W3C SVG F.6).
+private func arcToBeziers(
+    cx0: Double, cy0: Double,
+    rx rxIn: Double, ry ryIn: Double, xRotation: Double,
+    largeArc: Bool, sweep: Bool,
+    x: Double, y: Double
+) -> [(Double, Double, Double, Double, Double, Double)] {
+    if (cx0 == x && cy0 == y) || (rxIn == 0 && ryIn == 0) { return [] }
+
+    var rx = abs(rxIn)
+    var ry = abs(ryIn)
+    let phi = xRotation * .pi / 180.0
+    let cosPhi = cos(phi), sinPhi = sin(phi)
+
+    let dx2 = (cx0 - x) / 2.0, dy2 = (cy0 - y) / 2.0
+    let x1p = cosPhi * dx2 + sinPhi * dy2
+    let y1p = -sinPhi * dx2 + cosPhi * dy2
+
+    let x1pSq = x1p * x1p, y1pSq = y1p * y1p
+    let lam = x1pSq / (rx * rx) + y1pSq / (ry * ry)
+    if lam > 1.0 {
+        let s = sqrt(lam); rx *= s; ry *= s
+    }
+    let rxSq = rx * rx, rySq = ry * ry
+
+    let num = max(0.0, rxSq * rySq - rxSq * y1pSq - rySq * x1pSq)
+    let den = rxSq * y1pSq + rySq * x1pSq
+    var sq = den > 0 ? sqrt(num / den) : 0.0
+    if largeArc == sweep { sq = -sq }
+    let cxp = sq * rx * y1p / ry
+    let cyp = -sq * ry * x1p / rx
+
+    let ccx = cosPhi * cxp - sinPhi * cyp + (cx0 + x) / 2.0
+    let ccy = sinPhi * cxp + cosPhi * cyp + (cy0 + y) / 2.0
+
+    func vecAngle(_ ux: Double, _ uy: Double, _ vx: Double, _ vy: Double) -> Double {
+        let n = sqrt(ux * ux + uy * uy) * sqrt(vx * vx + vy * vy)
+        if n == 0 { return 0 }
+        let c = max(-1.0, min(1.0, (ux * vx + uy * vy) / n))
+        let a = acos(c)
+        return (ux * vy - uy * vx < 0) ? -a : a
+    }
+
+    var theta1 = vecAngle(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry)
+    var dtheta = vecAngle(
+        (x1p - cxp) / rx, (y1p - cyp) / ry,
+        (-x1p - cxp) / rx, (-y1p - cyp) / ry)
+    if !sweep && dtheta > 0 { dtheta -= 2 * .pi }
+    else if sweep && dtheta < 0 { dtheta += 2 * .pi }
+
+    let nSegs = max(1, Int(ceil(abs(dtheta) / (.pi / 2))))
+    let segAngle = dtheta / Double(nSegs)
+    let alpha = sin(segAngle) * (sqrt(4 + 3 * pow(tan(segAngle / 2), 2)) - 1) / 3
+
+    var curves: [(Double, Double, Double, Double, Double, Double)] = []
+    for _ in 0..<nSegs {
+        let cosT = cos(theta1), sinT = sin(theta1)
+        let cosT2 = cos(theta1 + segAngle), sinT2 = sin(theta1 + segAngle)
+
+        let ex1 = rx * cosT, ey1 = ry * sinT
+        let ex2 = rx * cosT2, ey2 = ry * sinT2
+        let ddx1 = -rx * sinT, ddy1 = ry * cosT
+        let ddx2 = -rx * sinT2, ddy2 = ry * cosT2
+
+        let cp1x = cosPhi * (ex1 + alpha * ddx1) - sinPhi * (ey1 + alpha * ddy1) + ccx
+        let cp1y = sinPhi * (ex1 + alpha * ddx1) + cosPhi * (ey1 + alpha * ddy1) + ccy
+        let cp2x = cosPhi * (ex2 - alpha * ddx2) - sinPhi * (ey2 - alpha * ddy2) + ccx
+        let cp2y = sinPhi * (ex2 - alpha * ddx2) + cosPhi * (ey2 - alpha * ddy2) + ccy
+        let epx = cosPhi * ex2 - sinPhi * ey2 + ccx
+        let epy = sinPhi * ex2 + cosPhi * ey2 + ccy
+
+        curves.append((cp1x, cp1y, cp2x, cp2y, epx, epy))
+        theta1 += segAngle
+    }
+    return curves
 }
 
 private func buildPath(_ ctx: CGContext, _ cmds: [PathCommand]) {
@@ -91,9 +168,20 @@ private func buildPath(_ ctx: CGContext, _ cmds: [PathCommand]) {
             }
             ctx.addQuadCurve(to: CGPoint(x: x, y: y), control: c1)
             lastControl = c1
-        case .arcTo(_, _, _, _, _, let x, let y):
-            // Approximate arc with line to endpoint
-            ctx.addLine(to: CGPoint(x: x, y: y))
+        case .arcTo(let arx, let ary, let rot, let la, let sw, let x, let y):
+            let cur = ctx.currentPointOfPath
+            let beziers = arcToBeziers(
+                cx0: cur.x, cy0: cur.y, rx: arx, ry: ary, xRotation: rot,
+                largeArc: la, sweep: sw, x: x, y: y)
+            if beziers.isEmpty {
+                ctx.addLine(to: CGPoint(x: x, y: y))
+            } else {
+                for (bx1, by1, bx2, by2, bx, by) in beziers {
+                    ctx.addCurve(to: CGPoint(x: bx, y: by),
+                                 control1: CGPoint(x: bx1, y: by1),
+                                 control2: CGPoint(x: bx2, y: by2))
+                }
+            }
             lastControl = nil
         case .closePath:
             ctx.closePath()
@@ -144,8 +232,20 @@ private func buildCGPath(_ path: CGMutablePath, _ cmds: [PathCommand]) {
             }
             path.addQuadCurve(to: CGPoint(x: x, y: y), control: c1)
             lastControl = c1
-        case .arcTo(_, _, _, _, _, let x, let y):
-            path.addLine(to: CGPoint(x: x, y: y))
+        case .arcTo(let arx, let ary, let rot, let la, let sw, let x, let y):
+            let cur = path.currentPoint
+            let beziers = arcToBeziers(
+                cx0: cur.x, cy0: cur.y, rx: arx, ry: ary, xRotation: rot,
+                largeArc: la, sweep: sw, x: x, y: y)
+            if beziers.isEmpty {
+                path.addLine(to: CGPoint(x: x, y: y))
+            } else {
+                for (bx1, by1, bx2, by2, bx, by) in beziers {
+                    path.addCurve(to: CGPoint(x: bx, y: by),
+                                  control1: CGPoint(x: bx1, y: by1),
+                                  control2: CGPoint(x: bx2, y: by2))
+                }
+            }
             lastControl = nil
         case .closePath:
             path.closeSubpath()
@@ -154,7 +254,7 @@ private func buildCGPath(_ path: CGMutablePath, _ cmds: [PathCommand]) {
     }
 }
 
-private func fillAndStroke(_ ctx: CGContext, _ fill: JasFill?, _ stroke: JasStroke?) {
+private func fillAndStroke(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?) {
     let hasFill = fill != nil
     let hasStroke = stroke != nil
     if hasFill && hasStroke {
@@ -237,17 +337,27 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
     case .text(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
-        let font = NSFont(name: v.fontFamily, size: v.fontSize) ?? NSFont.systemFont(ofSize: v.fontSize)
+        var fontDesc = NSFontDescriptor(name: v.fontFamily, size: v.fontSize)
+        var traits: NSFontDescriptor.SymbolicTraits = []
+        if v.fontWeight == "bold" { traits.insert(.bold) }
+        if v.fontStyle == "italic" || v.fontStyle == "oblique" { traits.insert(.italic) }
+        fontDesc = fontDesc.withSymbolicTraits(traits)
+        let font = NSFont(descriptor: fontDesc, size: v.fontSize) ?? NSFont.systemFont(ofSize: v.fontSize)
         let color: NSColor
         if let fill = v.fill {
             color = nsColor(fill.color)
         } else {
             color = .black
         }
-        let attrs: [NSAttributedString.Key: Any] = [
+        var attrs: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color,
         ]
+        if v.textDecoration == "underline" {
+            attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+        } else if v.textDecoration == "line-through" {
+            attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+        }
         let str = NSAttributedString(string: v.content, attributes: attrs)
         ctx.saveGState()
         if v.isAreaText {
@@ -268,7 +378,12 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
     case .textPath(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
-        let font = NSFont(name: v.fontFamily, size: v.fontSize) ?? NSFont.systemFont(ofSize: v.fontSize)
+        var fontDesc = NSFontDescriptor(name: v.fontFamily, size: v.fontSize)
+        var traits: NSFontDescriptor.SymbolicTraits = []
+        if v.fontWeight == "bold" { traits.insert(.bold) }
+        if v.fontStyle == "italic" || v.fontStyle == "oblique" { traits.insert(.italic) }
+        fontDesc = fontDesc.withSymbolicTraits(traits)
+        let font = NSFont(descriptor: fontDesc, size: v.fontSize) ?? NSFont.systemFont(ofSize: v.fontSize)
         let color: NSColor
         if let fill = v.fill {
             color = nsColor(fill.color)
@@ -288,7 +403,7 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
                 // Flatten cubic bezier
                 let n = points.isEmpty ? 0 : points.count - 1
                 let (sx, sy) = points.isEmpty ? (0.0, 0.0) : points[n]
-                let steps = 20
+                let steps = flattenSteps
                 for i in 1...steps {
                     let t = Double(i) / Double(steps)
                     let mt = 1.0 - t
@@ -299,7 +414,7 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
             case .addQuadCurveToPoint:
                 let n = points.isEmpty ? 0 : points.count - 1
                 let (sx, sy) = points.isEmpty ? (0.0, 0.0) : points[n]
-                let steps = 20
+                let steps = flattenSteps
                 for i in 1...steps {
                     let t = Double(i) / Double(steps)
                     let mt = 1.0 - t
@@ -368,7 +483,7 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
 // MARK: - Selection overlay drawing
 
 private let selectionColor = CGColor(red: 0, green: 0.47, blue: 1.0, alpha: 1.0)
-private let handleSize: CGFloat = 10.0
+private let handleSize: CGFloat = handleDrawSize
 
 /// Draw an element's selection overlay (outline + control handles).
 /// Internal so tools can call it via the ToolContext.
@@ -488,7 +603,7 @@ private func elemChildren(_ e: Element) -> [Element] {
     }
 }
 
-private func drawSelectionOverlays(_ ctx: CGContext, _ doc: JasDocument) {
+private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document) {
     for es in doc.selection {
         let path = es.path
         guard !path.isEmpty else { continue }
@@ -531,7 +646,7 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: JasDocument) {
 /// An NSView that draws the document's elements using CoreGraphics.
 /// Dispatches mouse/key events through the CanvasTool protocol.
 class CanvasNSView: NSView {
-    var document: JasDocument = JasDocument()
+    var document: Document = Document()
     var controller: Controller?
     var currentTool: Tool = .selection {
         didSet {
@@ -542,7 +657,7 @@ class CanvasNSView: NSView {
                 // Preserve selection across tool changes
                 if document.selection != savedSelection {
                     var doc = document
-                    doc = JasDocument(layers: doc.layers,
+                    doc = Document(layers: doc.layers,
                                       selectedLayer: doc.selectedLayer,
                                       selection: savedSelection)
                     controller?.model.document = doc
@@ -560,8 +675,6 @@ class CanvasNSView: NSView {
     // Inline text editing state (managed by canvas, exposed via context)
     private var textEditor: NSTextField?
     private var editingPath: ElementPath?
-
-    private let hitRadius: CGFloat = 8.0
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -652,7 +765,7 @@ class CanvasNSView: NSView {
         return nil
     }
 
-    private func hitTestText(_ pos: NSPoint) -> (ElementPath, JasText)? {
+    private func hitTestText(_ pos: NSPoint) -> (ElementPath, Text)? {
         for (li, layer) in document.layers.enumerated() {
             for (ci, child) in layer.children.enumerated() {
                 if case .text(let v) = child {
@@ -765,7 +878,7 @@ class CanvasNSView: NSView {
         let elem = document.getElement(path)
         switch elem {
         case .text(let v) where v.content != newText:
-            let newElem = Element.text(JasText(
+            let newElem = Element.text(Text(
                 x: v.x, y: v.y, content: newText,
                 fontFamily: v.fontFamily, fontSize: v.fontSize,
                 width: v.width, height: v.height,
@@ -774,7 +887,7 @@ class CanvasNSView: NSView {
             ))
             controller?.model.document = document.replaceElement(path, with: newElem)
         case .textPath(let v) where v.content != newText:
-            let newElem = Element.textPath(JasTextPath(
+            let newElem = Element.textPath(TextPath(
                 d: v.d, content: newText, startOffset: v.startOffset,
                 fontFamily: v.fontFamily, fontSize: v.fontSize,
                 fill: v.fill, stroke: v.stroke,
@@ -889,7 +1002,7 @@ class CanvasNSView: NSView {
 
 /// Bridges the CoreGraphics-based CanvasNSView into SwiftUI.
 struct CanvasRepresentable: NSViewRepresentable {
-    let document: JasDocument
+    let document: Document
     let controller: Controller
     @Binding var currentTool: Tool
     var onFocus: (() -> Void)?

@@ -92,26 +92,19 @@ let segments_of_element (elem : Element.element) =
        let (fx, fy) = List.hd points in
        segs @ [(lx, ly, fx, fy)])
   | Path { d; _ } ->
-    let segs = ref [] in
-    let cur = ref (0.0, 0.0) in
-    List.iter (fun cmd ->
-      match cmd with
-      | MoveTo (x, y) -> cur := (x, y)
-      | LineTo (x, y) ->
-        let (cx, cy) = !cur in
-        segs := (cx, cy, x, y) :: !segs; cur := (x, y)
-      | CurveTo (_, _, _, _, x, y)
-      | SmoothCurveTo (_, _, x, y)
-      | QuadTo (_, _, x, y)
-      | SmoothQuadTo (x, y)
-      | ArcTo (_, _, _, _, _, x, y) ->
-        let (cx, cy) = !cur in
-        segs := (cx, cy, x, y) :: !segs; cur := (x, y)
-      | ClosePath -> ()
-    ) d;
-    List.rev !segs
+    (* Flatten Bezier curves into a polyline for accurate hit-testing *)
+    let pts = Element.flatten_path_commands d in
+    let rec pairs = function
+      | [] | [_] -> []
+      | (x1, y1) :: ((x2, y2) :: _ as rest) -> (x1, y1, x2, y2) :: pairs rest
+    in
+    pairs pts
   | _ -> []
 
+(* TODO: This ignores the element's transform. If an element has a non-identity
+   transform, its visual position differs from its raw coordinates. To fix,
+   inverse-transform the selection rect into the element's local coordinate
+   space before testing (inheriting transforms from parent groups). *)
 let element_intersects_rect (elem : Element.element) rx ry rw rh =
   let open Element in
   match elem with
@@ -130,6 +123,9 @@ let element_intersects_rect (elem : Element.element) rx ry rw rh =
     ellipse_intersects_rect cx cy erx ery rx ry rw rh (fill <> None)
   | Polyline { fill; _ } ->
     if fill <> None then
+      (* TODO: Uses bounding-box approximation. For concave shapes,
+         this over-selects in the concave region. Should use
+         point-in-polygon (ray casting) to test rect corners. *)
       let (bx, by, bw, bh) = Element.bounds elem in
       rects_intersect bx by bw bh rx ry rw rh
     else
@@ -182,20 +178,23 @@ class controller ?(model = Model.create ()) () =
       model#set_filename filename
 
     method add_layer (layer : Element.element) =
-      model#set_document { model#document with Document.layers = model#document.Document.layers @ [layer] }
+      model#set_document { model#document with Document.layers = Array.append model#document.Document.layers [|layer|] }
 
     method remove_layer (index : int) =
-      let layers = List.filteri (fun i _ -> i <> index) model#document.Document.layers in
-      model#set_document { model#document with Document.layers = layers }
+      let doc = model#document in
+      let layers = Array.init (Array.length doc.Document.layers - 1) (fun i ->
+        if i < index then doc.Document.layers.(i)
+        else doc.Document.layers.(i + 1)) in
+      model#set_document { doc with Document.layers = layers }
 
     method add_element (elem : Element.element) =
       let doc = model#document in
       let idx = doc.Document.selected_layer in
-      let new_layers = List.mapi (fun i l ->
+      let new_layers = Array.mapi (fun i l ->
         if i = idx then
           match l with
           | Element.Layer layer ->
-            Element.Layer { layer with children = layer.children @ [elem] }
+            Element.Layer { layer with children = Array.append layer.children [| elem |] }
           | _ -> l
         else l
       ) doc.Document.layers in
@@ -223,17 +222,17 @@ class controller ?(model = Model.create ()) () =
     method select_rect ?(extend=false) x y w h =
       let doc = model#document in
       let selection = ref Document.PathMap.empty in
-      List.iteri (fun li layer ->
+      Array.iteri (fun li layer ->
         match layer with
         | Element.Layer { children; _ } ->
-          List.iteri (fun ci child ->
+          Array.iteri (fun ci child ->
             match child with
             | Element.Group { children = gc; _ } ->
-              let any_hit = List.exists (fun c ->
+              let any_hit = Array.exists (fun c ->
                 element_intersects_rect c x y w h
               ) gc in
               if any_hit then
-                List.iteri (fun gi gc_elem ->
+                Array.iteri (fun gi gc_elem ->
                   let path = [li; ci; gi] in
                   selection := Document.PathMap.add path
                     (Document.make_element_selection ~control_points:(all_cps gc_elem) path) !selection
@@ -255,13 +254,13 @@ class controller ?(model = Model.create ()) () =
       let rec check path (elem : Element.element) =
         match elem with
         | Element.Layer { children; _ } | Element.Group { children; _ } ->
-          List.iteri (fun i child -> check (path @ [i]) child) children
+          Array.iteri (fun i child -> check (path @ [i]) child) children
         | _ ->
           if element_intersects_rect elem x y w h then
             selection := Document.PathMap.add path
               (Document.make_element_selection ~control_points:(all_cps elem) path) !selection
       in
-      List.iteri (fun li layer -> check [li] layer) doc.Document.layers;
+      Array.iteri (fun li layer -> check [li] layer) doc.Document.layers;
       let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
       model#set_document { doc with Document.selection = new_sel }
 
@@ -271,7 +270,7 @@ class controller ?(model = Model.create ()) () =
       let rec check path (elem : Element.element) =
         match elem with
         | Element.Layer { children; _ } | Element.Group { children; _ } ->
-          List.iteri (fun i child -> check (path @ [i]) child) children
+          Array.iteri (fun i child -> check (path @ [i]) child) children
         | _ ->
           let cps = Element.control_points elem in
           let hit_cps =
@@ -283,7 +282,7 @@ class controller ?(model = Model.create ()) () =
             selection := Document.PathMap.add path
               (Document.make_element_selection ~control_points:hit_cps path) !selection
       in
-      List.iteri (fun li layer -> check [li] layer) doc.Document.layers;
+      Array.iteri (fun li layer -> check [li] layer) doc.Document.layers;
       let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
       model#set_document { doc with Document.selection = new_sel }
 
@@ -300,12 +299,12 @@ class controller ?(model = Model.create ()) () =
           let parent = Document.get_element doc parent_path in
           match parent with
           | Element.Group { children; _ } ->
-            let selection = List.fold_left (fun acc i ->
+            let selection = Array.fold_left (fun acc i ->
               let p = parent_path @ [i] in
-              let elem = List.nth children i in
+              let elem = children.(i) in
               Document.PathMap.add p
                 (Document.make_element_selection ~control_points:(all_cps elem) p) acc
-            ) Document.PathMap.empty (List.init (List.length children) Fun.id) in
+            ) Document.PathMap.empty (Array.init (Array.length children) Fun.id) in
             model#set_document { doc with Document.selection = selection }
           | _ ->
             let elem = Document.get_element doc path in

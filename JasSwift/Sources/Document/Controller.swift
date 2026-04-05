@@ -104,31 +104,21 @@ private func segmentsOfElement(_ elem: Element) -> [(Double, Double, Double, Dou
         segs.append((last.0, last.1, first.0, first.1))
         return segs
     case .path(let v):
-        var segs: [(Double, Double, Double, Double)] = []
-        var curX = 0.0, curY = 0.0
-        for cmd in v.d {
-            switch cmd {
-            case .moveTo(let x, let y):
-                curX = x; curY = y
-            case .lineTo(let x, let y):
-                segs.append((curX, curY, x, y)); curX = x; curY = y
-            case .curveTo(_, _, _, _, let x, let y),
-                 .smoothCurveTo(_, _, let x, let y),
-                 .quadTo(_, _, let x, let y),
-                 .smoothQuadTo(let x, let y):
-                segs.append((curX, curY, x, y)); curX = x; curY = y
-            case .arcTo(_, _, _, _, _, let x, let y):
-                segs.append((curX, curY, x, y)); curX = x; curY = y
-            case .closePath:
-                break
-            }
+        // Flatten Bezier curves into a polyline for accurate hit-testing
+        let pts = flattenPathCommands(v.d)
+        guard pts.count >= 2 else { return [] }
+        return (0..<pts.count-1).map { i in
+            (pts[i].0, pts[i].1, pts[i+1].0, pts[i+1].1)
         }
-        return segs
     default:
         return []
     }
 }
 
+// TODO: This ignores the element's transform. If an element has a non-identity
+// transform, its visual position differs from its raw coordinates. To fix,
+// inverse-transform the selection rect into the element's local coordinate
+// space before testing (inheriting transforms from parent groups).
 private func elementIntersectsRect(_ elem: Element,
                                    _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double) -> Bool {
     switch elem {
@@ -147,6 +137,9 @@ private func elementIntersectsRect(_ elem: Element,
         return ellipseIntersectsRect(v.cx, v.cy, v.rx, v.ry, rx, ry, rw, rh, filled: v.fill != nil)
     case .polyline(let v):
         if v.fill != nil {
+            // TODO: Uses bounding-box approximation. For concave shapes,
+            // this over-selects in the concave region. Should use
+            // point-in-polygon (ray casting) to test rect corners.
             let b = elem.bounds
             return rectsIntersect(b.x, b.y, b.width, b.height, rx, ry, rw, rh)
         }
@@ -193,17 +186,17 @@ private func allCPs(_ elem: Element) -> Set<Int> {
 }
 
 public class Controller {
-    public let model: JasModel
+    public let model: Model
 
-    public init(model: JasModel = JasModel()) {
+    public init(model: Model = Model()) {
         self.model = model
     }
 
-    public var document: JasDocument {
+    public var document: Document {
         model.document
     }
 
-    public func setDocument(_ document: JasDocument) {
+    public func setDocument(_ document: Document) {
         model.document = document
     }
 
@@ -211,25 +204,25 @@ public class Controller {
         model.filename = filename
     }
 
-    public func addLayer(_ layer: JasLayer) {
-        model.document = JasDocument(layers: model.document.layers + [layer])
+    public func addLayer(_ layer: Layer) {
+        model.document = Document(layers: model.document.layers + [layer])
     }
 
     public func removeLayer(at index: Int) {
         var layers = model.document.layers
         layers.remove(at: index)
-        model.document = JasDocument(layers: layers)
+        model.document = Document(layers: layers)
     }
 
     public func addElement(_ element: Element) {
         let doc = model.document
         let idx = doc.selectedLayer
         let target = doc.layers[idx]
-        let newLayer = JasLayer(name: target.name, children: target.children + [element],
+        let newLayer = Layer(name: target.name, children: target.children + [element],
                                 opacity: target.opacity, transform: target.transform)
         var layers = doc.layers
         layers[idx] = newLayer
-        model.document = JasDocument(layers: layers, selectedLayer: idx,
+        model.document = Document(layers: layers, selectedLayer: idx,
                                      selection: doc.selection)
     }
 
@@ -278,7 +271,7 @@ public class Controller {
             }
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
-        model.document = JasDocument(layers: doc.layers,
+        model.document = Document(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: finalSel)
     }
 
@@ -303,7 +296,7 @@ public class Controller {
             check([li], .layer(layer))
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
-        model.document = JasDocument(layers: doc.layers,
+        model.document = Document(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: finalSel)
     }
 
@@ -333,13 +326,13 @@ public class Controller {
             check([li], .layer(layer))
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
-        model.document = JasDocument(layers: doc.layers,
+        model.document = Document(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: finalSel)
     }
 
     public func setSelection(_ selection: Selection) {
         let doc = model.document
-        model.document = JasDocument(layers: doc.layers,
+        model.document = Document(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: selection)
     }
 
@@ -354,13 +347,13 @@ public class Controller {
                     ElementSelection(path: parentPath + [$0],
                                      controlPoints: allCPs(g.children[$0]))
                 })
-                model.document = JasDocument(layers: doc.layers,
+                model.document = Document(layers: doc.layers,
                                              selectedLayer: doc.selectedLayer, selection: selection)
                 return
             }
         }
         let elem = doc.getElement(path)
-        model.document = JasDocument(layers: doc.layers,
+        model.document = Document(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer,
                                      selection: [ElementSelection(path: path,
                                                                    controlPoints: allCPs(elem))])
@@ -370,7 +363,7 @@ public class Controller {
         precondition(!path.isEmpty, "Path must be non-empty")
         let doc = model.document
         let es = ElementSelection(path: path, controlPoints: [index])
-        model.document = JasDocument(layers: doc.layers,
+        model.document = Document(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: [es])
     }
 
@@ -380,7 +373,7 @@ public class Controller {
         let elem = doc.getElement(path)
         if case .path(let v) = elem {
             let newD = JasLib.movePathHandle(v.d, anchorIdx: anchorIdx, handleType: handleType, dx: dx, dy: dy)
-            let newElem = Element.path(JasPath(d: newD, fill: v.fill, stroke: v.stroke,
+            let newElem = Element.path(Path(d: newD, fill: v.fill, stroke: v.stroke,
                                                opacity: v.opacity, transform: v.transform))
             doc = doc.replaceElement(path, with: newElem)
             model.document = doc
@@ -411,7 +404,7 @@ public class Controller {
             let allCPs = Set(0..<copied.controlPointCount)
             newSelection.insert(ElementSelection(path: copyPath, controlPoints: allCPs))
         }
-        model.document = JasDocument(layers: doc.layers,
+        model.document = Document(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: newSelection)
     }
 }

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from geometry.element import Color, Fill, Text
-from tools.tool import CanvasTool, ToolContext
+from tools.tool import CanvasTool, ToolContext, DRAG_THRESHOLD
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
@@ -37,7 +37,7 @@ class TextTool(CanvasTool):
         self._drag_end = None
         w = abs(x - sx)
         h = abs(y - sy)
-        if w > 4 or h > 4:
+        if w > DRAG_THRESHOLD or h > DRAG_THRESHOLD:
             bx, by = min(sx, x), min(sy, y)
             elem = Text(x=bx, y=by, content="Lorem Ipsum",
                         width=w, height=h,

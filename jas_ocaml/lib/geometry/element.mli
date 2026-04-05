@@ -1,5 +1,8 @@
 (** Immutable document elements conforming to SVG element types. *)
 
+(** Line segments per Bezier curve when flattening paths. *)
+val flatten_steps : int
+
 (** RGBA color with components in [0, 1]. *)
 type color = {
   r : float;
@@ -101,6 +104,9 @@ type element =
       content : string;
       font_family : string;
       font_size : float;
+      font_weight : string;
+      font_style : string;
+      text_decoration : string;
       text_width : float;
       text_height : float;
       fill : fill option;
@@ -114,19 +120,22 @@ type element =
       start_offset : float;
       font_family : string;
       font_size : float;
+      font_weight : string;
+      font_style : string;
+      text_decoration : string;
       fill : fill option;
       stroke : stroke option;
       opacity : float;
       transform : transform option;
     }
   | Group of {
-      children : element list;
+      children : element array;
       opacity : float;
       transform : transform option;
     }
   | Layer of {
       name : string;
-      children : element list;
+      children : element array;
       opacity : float;
       transform : transform option;
     }
@@ -150,10 +159,10 @@ val make_ellipse : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float 
 val make_polyline : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> (float * float) list -> element
 val make_polygon : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> (float * float) list -> element
 val make_path : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> path_command list -> element
-val make_text : ?font_family:string -> ?font_size:float -> ?text_width:float -> ?text_height:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> float -> float -> string -> element
-val make_text_path : ?start_offset:float -> ?font_family:string -> ?font_size:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> path_command list -> string -> element
-val make_group : ?opacity:float -> ?transform:transform option -> element list -> element
-val make_layer : ?name:string -> ?opacity:float -> ?transform:transform option -> element list -> element
+val make_text : ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?text_width:float -> ?text_height:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> float -> float -> string -> element
+val make_text_path : ?start_offset:float -> ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> path_command list -> string -> element
+val make_group : ?opacity:float -> ?transform:transform option -> element array -> element
+val make_layer : ?name:string -> ?opacity:float -> ?transform:transform option -> element array -> element
 
 (** {2 Control points} *)
 
@@ -167,6 +176,7 @@ val move_control_points : element -> int list -> float -> float -> element
 
 (** {2 Path geometry utilities} *)
 
+val flatten_path_commands : path_command list -> (float * float) list
 val path_point_at_offset : path_command list -> float -> float * float
 val path_closest_offset : path_command list -> float -> float -> float
 val path_distance_to_point : path_command list -> float -> float -> float

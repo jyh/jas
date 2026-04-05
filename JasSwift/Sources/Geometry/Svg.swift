@@ -22,7 +22,7 @@ private func fmt(_ v: Double) -> String {
     return String(s[s.startIndex..<end])
 }
 
-private func colorStr(_ c: JasColor) -> String {
+private func colorStr(_ c: Color) -> String {
     let r = Int(round(c.r * 255))
     let g = Int(round(c.g * 255))
     let b = Int(round(c.b * 255))
@@ -37,12 +37,12 @@ private func escapeXml(_ s: String) -> String {
      .replacingOccurrences(of: "\"", with: "&quot;")
 }
 
-private func fillAttrs(_ fill: JasFill?) -> String {
+private func fillAttrs(_ fill: Fill?) -> String {
     guard let fill = fill else { return " fill=\"none\"" }
     return " fill=\"\(colorStr(fill.color))\""
 }
 
-private func strokeAttrs(_ stroke: JasStroke?) -> String {
+private func strokeAttrs(_ stroke: Stroke?) -> String {
     guard let stroke = stroke else { return " stroke=\"none\"" }
     var s = " stroke=\"\(colorStr(stroke.color))\""
     s += " stroke-width=\"\(fmt(px(stroke.width)))\""
@@ -59,7 +59,7 @@ private func strokeAttrs(_ stroke: JasStroke?) -> String {
     return s
 }
 
-private func transformAttr(_ t: JasTransform?) -> String {
+private func transformAttr(_ t: Transform?) -> String {
     guard let t = t else { return "" }
     return " transform=\"matrix(\(fmt(t.a)),\(fmt(t.b)),\(fmt(t.c)),\(fmt(t.d)),\(fmt(px(t.e))),\(fmt(px(t.f))))\""
 }
@@ -140,8 +140,12 @@ private func elementSvg(_ elem: Element, indent: String) -> String {
         let areaAttrs = v.isAreaText
             ? " style=\"inline-size: \(fmt(px(v.width)))px; white-space: pre-wrap;\""
             : ""
+        let fwAttr = v.fontWeight != "normal" ? " font-weight=\"\(v.fontWeight)\"" : ""
+        let fsAttr = v.fontStyle != "normal" ? " font-style=\"\(v.fontStyle)\"" : ""
+        let tdAttr = v.textDecoration != "none" ? " text-decoration=\"\(v.textDecoration)\"" : ""
         return "\(indent)<text x=\"\(fmt(px(v.x)))\" y=\"\(fmt(px(v.y)))\"" +
             " font-family=\"\(escapeXml(v.fontFamily))\" font-size=\"\(fmt(px(v.fontSize)))\"" +
+            "\(fwAttr)\(fsAttr)\(tdAttr)" +
             "\(areaAttrs)" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))>" +
@@ -149,8 +153,12 @@ private func elementSvg(_ elem: Element, indent: String) -> String {
 
     case .textPath(let v):
         let d = pathData(v.d)
+        let fwAttr = v.fontWeight != "normal" ? " font-weight=\"\(v.fontWeight)\"" : ""
+        let fsAttr = v.fontStyle != "normal" ? " font-style=\"\(v.fontStyle)\"" : ""
+        let tdAttr = v.textDecoration != "none" ? " text-decoration=\"\(v.textDecoration)\"" : ""
         return "\(indent)<text\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
             " font-family=\"\(escapeXml(v.fontFamily))\" font-size=\"\(fmt(px(v.fontSize)))\"" +
+            "\(fwAttr)\(fsAttr)\(tdAttr)" +
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))>" +
             "<textPath path=\"\(d)\"" +
             (v.startOffset > 0 ? " startOffset=\"\(fmt(v.startOffset * 100))%\"" : "") +
@@ -175,7 +183,7 @@ private func elementSvg(_ elem: Element, indent: String) -> String {
     }
 }
 
-public func documentToSvg(_ doc: JasDocument) -> String {
+public func documentToSvg(_ doc: Document) -> String {
     let b = doc.bounds
     let vb = "\(fmt(px(b.x))) \(fmt(px(b.y))) \(fmt(px(b.width))) \(fmt(px(b.height)))"
     var lines = [
@@ -195,7 +203,7 @@ private let pxToPt = 72.0 / 96.0
 
 private func toPt(_ v: Double) -> Double { v * pxToPt }
 
-private func parseColor(_ s: String) -> JasColor? {
+private func parseColor(_ s: String) -> Color? {
     let s = s.trimmingCharacters(in: .whitespaces)
     if s == "none" { return nil }
     if s.hasPrefix("rgba(") {
@@ -204,25 +212,25 @@ private func parseColor(_ s: String) -> JasColor? {
         guard parts.count >= 4,
               let r = Int(parts[0]), let g = Int(parts[1]),
               let b = Int(parts[2]), let a = Double(parts[3]) else { return nil }
-        return JasColor(r: Double(r) / 255.0, g: Double(g) / 255.0, b: Double(b) / 255.0, a: a)
+        return Color(r: Double(r) / 255.0, g: Double(g) / 255.0, b: Double(b) / 255.0, a: a)
     }
     if s.hasPrefix("rgb(") {
         let inner = s.dropFirst(4).dropLast(1)
         let parts = inner.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
         guard parts.count >= 3,
               let r = Int(parts[0]), let g = Int(parts[1]), let b = Int(parts[2]) else { return nil }
-        return JasColor(r: Double(r) / 255.0, g: Double(g) / 255.0, b: Double(b) / 255.0)
+        return Color(r: Double(r) / 255.0, g: Double(g) / 255.0, b: Double(b) / 255.0)
     }
     return nil
 }
 
-private func parseFill(_ node: XMLElement) -> JasFill? {
+private func parseFill(_ node: XMLElement) -> Fill? {
     guard let val = node.attribute(forName: "fill")?.stringValue, val != "none" else { return nil }
     guard let c = parseColor(val) else { return nil }
-    return JasFill(color: c)
+    return Fill(color: c)
 }
 
-private func parseStroke(_ node: XMLElement) -> JasStroke? {
+private func parseStroke(_ node: XMLElement) -> Stroke? {
     guard let val = node.attribute(forName: "stroke")?.stringValue, val != "none" else { return nil }
     guard let c = parseColor(val) else { return nil }
     let width = toPt(Double(node.attribute(forName: "stroke-width")?.stringValue ?? "1") ?? 1.0)
@@ -230,16 +238,16 @@ private func parseStroke(_ node: XMLElement) -> JasStroke? {
     let ljStr = node.attribute(forName: "stroke-linejoin")?.stringValue ?? "miter"
     let lc: LineCap = lcStr == "round" ? .round : lcStr == "square" ? .square : .butt
     let lj: LineJoin = ljStr == "round" ? .round : ljStr == "bevel" ? .bevel : .miter
-    return JasStroke(color: c, width: width, linecap: lc, linejoin: lj)
+    return Stroke(color: c, width: width, linecap: lc, linejoin: lj)
 }
 
-private func parseTransform(_ node: XMLElement) -> JasTransform? {
+private func parseTransform(_ node: XMLElement) -> Transform? {
     guard let val = node.attribute(forName: "transform")?.stringValue else { return nil }
     if val.hasPrefix("matrix(") {
         let inner = val.dropFirst(7).dropLast(1)
         let parts = inner.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
         guard parts.count >= 6 else { return nil }
-        return JasTransform(a: parts[0], b: parts[1], c: parts[2],
+        return Transform(a: parts[0], b: parts[1], c: parts[2],
                             d: parts[3], e: toPt(parts[4]), f: toPt(parts[5]))
     }
     if val.hasPrefix("translate(") {
@@ -247,19 +255,19 @@ private func parseTransform(_ node: XMLElement) -> JasTransform? {
         let parts = inner.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
         guard !parts.isEmpty else { return nil }
         let ty = parts.count > 1 ? parts[1] : 0.0
-        return JasTransform.translate(toPt(parts[0]), toPt(ty))
+        return Transform.translate(toPt(parts[0]), toPt(ty))
     }
     if val.hasPrefix("rotate(") {
         let inner = val.dropFirst(7).dropLast(1)
         guard let deg = Double(inner.trimmingCharacters(in: .whitespaces)) else { return nil }
-        return JasTransform.rotate(deg)
+        return Transform.rotate(deg)
     }
     if val.hasPrefix("scale(") {
         let inner = val.dropFirst(6).dropLast(1)
         let parts = inner.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
         guard !parts.isEmpty else { return nil }
         let sy = parts.count > 1 ? parts[1] : parts[0]
-        return JasTransform.scale(parts[0], sy)
+        return Transform.scale(parts[0], sy)
     }
     return nil
 }
@@ -354,49 +362,52 @@ private func parseElement(_ node: XMLNode) -> Element? {
 
     switch tag {
     case "line":
-        return .line(JasLine(
+        return .line(Line(
             x1: toPt(attrF(elem, "x1")), y1: toPt(attrF(elem, "y1")),
             x2: toPt(attrF(elem, "x2")), y2: toPt(attrF(elem, "y2")),
             stroke: stroke, opacity: opacity, transform: transform))
 
     case "rect":
-        return .rect(JasRect(
+        return .rect(Rect(
             x: toPt(attrF(elem, "x")), y: toPt(attrF(elem, "y")),
             width: toPt(attrF(elem, "width")), height: toPt(attrF(elem, "height")),
             rx: toPt(attrF(elem, "rx")), ry: toPt(attrF(elem, "ry")),
             fill: fill, stroke: stroke, opacity: opacity, transform: transform))
 
     case "circle":
-        return .circle(JasCircle(
+        return .circle(Circle(
             cx: toPt(attrF(elem, "cx")), cy: toPt(attrF(elem, "cy")),
             r: toPt(attrF(elem, "r")),
             fill: fill, stroke: stroke, opacity: opacity, transform: transform))
 
     case "ellipse":
-        return .ellipse(JasEllipse(
+        return .ellipse(Ellipse(
             cx: toPt(attrF(elem, "cx")), cy: toPt(attrF(elem, "cy")),
             rx: toPt(attrF(elem, "rx")), ry: toPt(attrF(elem, "ry")),
             fill: fill, stroke: stroke, opacity: opacity, transform: transform))
 
     case "polyline":
         let pts = parsePoints(elem.attribute(forName: "points")?.stringValue ?? "")
-        return .polyline(JasPolyline(points: pts, fill: fill, stroke: stroke,
+        return .polyline(Polyline(points: pts, fill: fill, stroke: stroke,
                                       opacity: opacity, transform: transform))
 
     case "polygon":
         let pts = parsePoints(elem.attribute(forName: "points")?.stringValue ?? "")
-        return .polygon(JasPolygon(points: pts, fill: fill, stroke: stroke,
+        return .polygon(Polygon(points: pts, fill: fill, stroke: stroke,
                                     opacity: opacity, transform: transform))
 
     case "path":
         let d = parsePathD(elem.attribute(forName: "d")?.stringValue ?? "")
-        return .path(JasPath(d: d, fill: fill, stroke: stroke,
+        return .path(Path(d: d, fill: fill, stroke: stroke,
                               opacity: opacity, transform: transform))
 
     case "text":
         let content = elem.stringValue ?? ""
         let ff = elem.attribute(forName: "font-family")?.stringValue ?? "sans-serif"
         let fs = toPt(attrF(elem, "font-size", 16.0))
+        let fw = elem.attribute(forName: "font-weight")?.stringValue ?? "normal"
+        let fst = elem.attribute(forName: "font-style")?.stringValue ?? "normal"
+        let td = elem.attribute(forName: "text-decoration")?.stringValue ?? "none"
         var tw = 0.0
         if let style = elem.attribute(forName: "style")?.stringValue {
             if let range = style.range(of: #"inline-size:\s*([\d.]+)px"#, options: .regularExpression) {
@@ -411,9 +422,10 @@ private func parseElement(_ node: XMLNode) -> Element? {
             let lines = max(1, Int(Double(content.count) * fs * 0.6 / tw) + 1)
             th = Double(lines) * fs * 1.2
         }
-        return .text(JasText(
+        return .text(Text(
             x: toPt(attrF(elem, "x")), y: toPt(attrF(elem, "y")),
             content: content, fontFamily: ff, fontSize: fs,
+            fontWeight: fw, fontStyle: fst, textDecoration: td,
             width: tw, height: th,
             fill: fill, stroke: stroke, opacity: opacity, transform: transform))
 
@@ -429,10 +441,10 @@ private func parseElement(_ node: XMLNode) -> Element? {
         let label = elem.attribute(forName: "label")?.stringValue
                   ?? elem.attribute(forName: "inkscape:label")?.stringValue
         if let name = label {
-            return .layer(JasLayer(name: name, children: children,
+            return .layer(Layer(name: name, children: children,
                                     opacity: opacity, transform: transform))
         }
-        return .group(JasGroup(children: children,
+        return .group(Group(children: children,
                                 opacity: opacity, transform: transform))
 
     default:
@@ -440,16 +452,16 @@ private func parseElement(_ node: XMLNode) -> Element? {
     }
 }
 
-public func svgToDocument(_ svg: String) -> JasDocument {
+public func svgToDocument(_ svg: String) -> Document {
     guard let data = svg.data(using: .utf8),
           let xmlDoc = try? XMLDocument(data: data, options: []) else {
-        return JasDocument(layers: [JasLayer(children: [])])
+        return Document(layers: [Layer(children: [])])
     }
     guard let root = xmlDoc.rootElement() else {
-        return JasDocument(layers: [JasLayer(children: [])])
+        return Document(layers: [Layer(children: [])])
     }
 
-    var layers: [JasLayer] = []
+    var layers: [Layer] = []
     if let childNodes = root.children {
         for child in childNodes {
             guard let elem = parseElement(child) else { continue }
@@ -457,19 +469,19 @@ public func svgToDocument(_ svg: String) -> JasDocument {
             case .layer(let l):
                 layers.append(l)
             case .group(let g):
-                layers.append(JasLayer(name: "", children: g.children,
+                layers.append(Layer(name: "", children: g.children,
                                         opacity: g.opacity, transform: g.transform))
             default:
                 if layers.isEmpty || !layers.last!.name.isEmpty {
-                    layers.append(JasLayer(name: "", children: [elem]))
+                    layers.append(Layer(name: "", children: [elem]))
                 } else {
                     let last = layers.removeLast()
-                    layers.append(JasLayer(name: "", children: last.children + [elem],
+                    layers.append(Layer(name: "", children: last.children + [elem],
                                             opacity: last.opacity, transform: last.transform))
                 }
             }
         }
     }
-    if layers.isEmpty { layers = [JasLayer(children: [])] }
-    return JasDocument(layers: layers)
+    if layers.isEmpty { layers = [Layer(children: [])] }
+    return Document(layers: layers)
 }

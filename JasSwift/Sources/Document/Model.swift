@@ -13,20 +13,20 @@ private func freshFilename() -> String {
 ///
 /// Views register callbacks via onDocumentChanged to be notified
 /// whenever the document is replaced.
-public class JasModel: ObservableObject {
-    @Published public var document: JasDocument {
+public class Model: ObservableObject {
+    @Published public var document: Document {
         didSet { notify() }
     }
     @Published public var filename: String
-    public private(set) var savedDocument: JasDocument
-    private var listeners: [(JasDocument) -> Void] = []
-    private var undoStack: [JasDocument] = []
-    private var redoStack: [JasDocument] = []
+    public private(set) var savedDocument: Document
+    private var listeners: [(Document) -> Void] = []
+    private var undoStack: [Document] = []
+    private var redoStack: [Document] = []
     private let maxUndo = 100
 
     public var isModified: Bool { document != savedDocument }
 
-    public init(document: JasDocument = JasDocument(), filename: String? = nil) {
+    public init(document: Document = Document(), filename: String? = nil) {
         self.document = document
         self.savedDocument = document
         self.filename = filename ?? freshFilename()
@@ -37,7 +37,7 @@ public class JasModel: ObservableObject {
         objectWillChange.send()
     }
 
-    public func onDocumentChanged(_ callback: @escaping (JasDocument) -> Void) {
+    public func onDocumentChanged(_ callback: @escaping (Document) -> Void) {
         listeners.append(callback)
     }
 

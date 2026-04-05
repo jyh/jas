@@ -1,9 +1,12 @@
 import Foundation
 
+/// Line segments per Bezier curve when flattening paths.
+public let elementFlattenSteps = 20
+
 // MARK: - SVG presentation attributes
 
 /// RGBA color with components in [0, 1].
-public struct JasColor: Equatable, Hashable {
+public struct Color: Equatable, Hashable {
     public let r: Double
     public let g: Double
     public let b: Double
@@ -32,19 +35,19 @@ public enum LineJoin: Equatable, Hashable {
 }
 
 /// SVG fill presentation attribute.
-public struct JasFill: Equatable, Hashable {
-    public let color: JasColor
-    public init(color: JasColor) { self.color = color }
+public struct Fill: Equatable, Hashable {
+    public let color: Color
+    public init(color: Color) { self.color = color }
 }
 
 /// SVG stroke presentation attributes.
-public struct JasStroke: Equatable, Hashable {
-    public let color: JasColor
+public struct Stroke: Equatable, Hashable {
+    public let color: Color
     public let width: Double
     public let linecap: LineCap
     public let linejoin: LineJoin
 
-    public init(color: JasColor, width: Double = 1.0, linecap: LineCap = .butt, linejoin: LineJoin = .miter) {
+    public init(color: Color, width: Double = 1.0, linecap: LineCap = .butt, linejoin: LineJoin = .miter) {
         self.color = color
         self.width = width
         self.linecap = linecap
@@ -53,24 +56,24 @@ public struct JasStroke: Equatable, Hashable {
 }
 
 /// SVG transform as a 2D affine matrix [a b c d e f].
-public struct JasTransform: Equatable, Hashable {
+public struct Transform: Equatable, Hashable {
     public let a: Double, b: Double, c: Double, d: Double, e: Double, f: Double
 
     public init(a: Double = 1, b: Double = 0, c: Double = 0, d: Double = 1, e: Double = 0, f: Double = 0) {
         self.a = a; self.b = b; self.c = c; self.d = d; self.e = e; self.f = f
     }
 
-    public static func translate(_ tx: Double, _ ty: Double) -> JasTransform {
-        JasTransform(e: tx, f: ty)
+    public static func translate(_ tx: Double, _ ty: Double) -> Transform {
+        Transform(e: tx, f: ty)
     }
 
-    public static func scale(_ sx: Double, _ sy: Double? = nil) -> JasTransform {
-        JasTransform(a: sx, d: sy ?? sx)
+    public static func scale(_ sx: Double, _ sy: Double? = nil) -> Transform {
+        Transform(a: sx, d: sy ?? sx)
     }
 
-    public static func rotate(_ angleDeg: Double) -> JasTransform {
+    public static func rotate(_ angleDeg: Double) -> Transform {
         let rad = angleDeg * .pi / 180
-        return JasTransform(a: cos(rad), b: sin(rad), c: -sin(rad), d: cos(rad))
+        return Transform(a: cos(rad), b: sin(rad), c: -sin(rad), d: cos(rad))
     }
 }
 
@@ -117,30 +120,37 @@ public enum PathCommand: Equatable {
 /// Bounding box as (x, y, width, height).
 public typealias BBox = (x: Double, y: Double, width: Double, height: Double)
 
+/// Expand a bounding box by half the stroke width on all sides.
+private func inflateBounds(_ bbox: BBox, _ stroke: Stroke?) -> BBox {
+    guard let stroke = stroke else { return bbox }
+    let half = stroke.width / 2.0
+    return (bbox.x - half, bbox.y - half, bbox.width + stroke.width, bbox.height + stroke.width)
+}
+
 /// An SVG document element. All elements are immutable value types.
 public enum Element: Equatable {
     /// SVG \<line\>
-    case line(JasLine)
+    case line(Line)
     /// SVG \<rect\>
-    case rect(JasRect)
+    case rect(Rect)
     /// SVG \<circle\>
-    case circle(JasCircle)
+    case circle(Circle)
     /// SVG \<ellipse\>
-    case ellipse(JasEllipse)
+    case ellipse(Ellipse)
     /// SVG \<polyline\>
-    case polyline(JasPolyline)
+    case polyline(Polyline)
     /// SVG \<polygon\>
-    case polygon(JasPolygon)
+    case polygon(Polygon)
     /// SVG \<path\>
-    case path(JasPath)
+    case path(Path)
     /// SVG \<text\>
-    case text(JasText)
+    case text(Text)
     /// SVG \<text\>\<textPath\>
-    case textPath(JasTextPath)
+    case textPath(TextPath)
     /// SVG \<g\>
-    case group(JasGroup)
+    case group(Group)
     /// Named layer
-    case layer(JasLayer)
+    case layer(Layer)
 
     public var bounds: BBox {
         switch self {
@@ -198,7 +208,7 @@ public enum Element: Equatable {
     public func moveControlPoints(_ indices: Set<Int>, dx: Double, dy: Double) -> Element {
         switch self {
         case .line(let v):
-            return .line(JasLine(
+            return .line(Line(
                 x1: v.x1 + (indices.contains(0) ? dx : 0),
                 y1: v.y1 + (indices.contains(0) ? dy : 0),
                 x2: v.x2 + (indices.contains(1) ? dx : 0),
@@ -206,7 +216,7 @@ public enum Element: Equatable {
                 stroke: v.stroke, opacity: v.opacity, transform: v.transform))
         case .rect(let v):
             if indices.count >= 4 {
-                return .rect(JasRect(x: v.x + dx, y: v.y + dy, width: v.width, height: v.height,
+                return .rect(Rect(x: v.x + dx, y: v.y + dy, width: v.width, height: v.height,
                                      rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
                                      opacity: v.opacity, transform: v.transform))
             }
@@ -215,12 +225,12 @@ public enum Element: Equatable {
             for i in 0..<4 where indices.contains(i) {
                 pts[i] = (pts[i].0 + dx, pts[i].1 + dy)
             }
-            return .polygon(JasPolygon(points: pts,
+            return .polygon(Polygon(points: pts,
                                        fill: v.fill, stroke: v.stroke,
                                        opacity: v.opacity, transform: v.transform))
         case .circle(let v):
             if indices.count >= 4 {
-                return .circle(JasCircle(cx: v.cx + dx, cy: v.cy + dy, r: v.r,
+                return .circle(Circle(cx: v.cx + dx, cy: v.cy + dy, r: v.r,
                                          fill: v.fill, stroke: v.stroke,
                                          opacity: v.opacity, transform: v.transform))
             }
@@ -232,12 +242,12 @@ public enum Element: Equatable {
             let ncx = (cps[1].0 + cps[3].0) / 2
             let ncy = (cps[0].1 + cps[2].1) / 2
             let nr = max(abs(cps[1].0 - ncx), abs(cps[0].1 - ncy))
-            return .circle(JasCircle(cx: ncx, cy: ncy, r: nr,
+            return .circle(Circle(cx: ncx, cy: ncy, r: nr,
                                      fill: v.fill, stroke: v.stroke,
                                      opacity: v.opacity, transform: v.transform))
         case .ellipse(let v):
             if indices.count >= 4 {
-                return .ellipse(JasEllipse(cx: v.cx + dx, cy: v.cy + dy, rx: v.rx, ry: v.ry,
+                return .ellipse(Ellipse(cx: v.cx + dx, cy: v.cy + dy, rx: v.rx, ry: v.ry,
                                            fill: v.fill, stroke: v.stroke,
                                            opacity: v.opacity, transform: v.transform))
             }
@@ -248,7 +258,7 @@ public enum Element: Equatable {
             }
             let ncx = (cps[1].0 + cps[3].0) / 2
             let ncy = (cps[0].1 + cps[2].1) / 2
-            return .ellipse(JasEllipse(cx: ncx, cy: ncy,
+            return .ellipse(Ellipse(cx: ncx, cy: ncy,
                                        rx: abs(cps[1].0 - ncx), ry: abs(cps[0].1 - ncy),
                                        fill: v.fill, stroke: v.stroke,
                                        opacity: v.opacity, transform: v.transform))
@@ -256,7 +266,7 @@ public enum Element: Equatable {
             let newPoints = v.points.enumerated().map { (i, pt) in
                 indices.contains(i) ? (pt.0 + dx, pt.1 + dy) : pt
             }
-            return .polygon(JasPolygon(points: newPoints,
+            return .polygon(Polygon(points: newPoints,
                                        fill: v.fill, stroke: v.stroke,
                                        opacity: v.opacity, transform: v.transform))
         case .path(let v):
@@ -291,7 +301,7 @@ public enum Element: Equatable {
                 }
                 anchorIdx += 1
             }
-            return .path(JasPath(d: cmds, fill: v.fill, stroke: v.stroke,
+            return .path(Path(d: cmds, fill: v.fill, stroke: v.stroke,
                                  opacity: v.opacity, transform: v.transform))
         case .textPath(let v):
             var cmds = v.d
@@ -325,7 +335,7 @@ public enum Element: Equatable {
                 }
                 anchorIdx += 1
             }
-            return .textPath(JasTextPath(d: cmds, content: v.content,
+            return .textPath(TextPath(d: cmds, content: v.content,
                                           startOffset: v.startOffset,
                                           fontFamily: v.fontFamily, fontSize: v.fontSize,
                                           fill: v.fill, stroke: v.stroke,
@@ -457,92 +467,92 @@ public func movePathHandle(_ d: [PathCommand], anchorIdx: Int, handleType: Strin
 }
 
 /// SVG \<line\> element.
-public struct JasLine: Equatable {
+public struct Line: Equatable {
     public let x1: Double, y1: Double, x2: Double, y2: Double
-    public let stroke: JasStroke?
+    public let stroke: Stroke?
     public let opacity: Double
-    public let transform: JasTransform?
+    public let transform: Transform?
 
     public init(x1: Double, y1: Double, x2: Double, y2: Double,
-                stroke: JasStroke? = nil, opacity: Double = 1.0, transform: JasTransform? = nil) {
+                stroke: Stroke? = nil, opacity: Double = 1.0, transform: Transform? = nil) {
         self.x1 = x1; self.y1 = y1; self.x2 = x2; self.y2 = y2
         self.stroke = stroke; self.opacity = opacity; self.transform = transform
     }
 
     public var bounds: BBox {
         let minX = min(x1, x2), minY = min(y1, y2)
-        return (minX, minY, abs(x2 - x1), abs(y2 - y1))
+        return inflateBounds((minX, minY, abs(x2 - x1), abs(y2 - y1)), stroke)
     }
 }
 
 /// SVG \<rect\> element.
-public struct JasRect: Equatable {
+public struct Rect: Equatable {
     public let x: Double, y: Double, width: Double, height: Double
     public let rx: Double, ry: Double
-    public let fill: JasFill?
-    public let stroke: JasStroke?
+    public let fill: Fill?
+    public let stroke: Stroke?
     public let opacity: Double
-    public let transform: JasTransform?
+    public let transform: Transform?
 
     public init(x: Double, y: Double, width: Double, height: Double,
                 rx: Double = 0, ry: Double = 0,
-                fill: JasFill? = nil, stroke: JasStroke? = nil,
-                opacity: Double = 1.0, transform: JasTransform? = nil) {
+                fill: Fill? = nil, stroke: Stroke? = nil,
+                opacity: Double = 1.0, transform: Transform? = nil) {
         self.x = x; self.y = y; self.width = width; self.height = height
         self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
     }
 
-    public var bounds: BBox { (x, y, width, height) }
+    public var bounds: BBox { inflateBounds((x, y, width, height), stroke) }
 }
 
 /// SVG \<circle\> element.
-public struct JasCircle: Equatable {
+public struct Circle: Equatable {
     public let cx: Double, cy: Double, r: Double
-    public let fill: JasFill?
-    public let stroke: JasStroke?
+    public let fill: Fill?
+    public let stroke: Stroke?
     public let opacity: Double
-    public let transform: JasTransform?
+    public let transform: Transform?
 
     public init(cx: Double, cy: Double, r: Double,
-                fill: JasFill? = nil, stroke: JasStroke? = nil,
-                opacity: Double = 1.0, transform: JasTransform? = nil) {
+                fill: Fill? = nil, stroke: Stroke? = nil,
+                opacity: Double = 1.0, transform: Transform? = nil) {
         self.cx = cx; self.cy = cy; self.r = r
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
     }
 
-    public var bounds: BBox { (cx - r, cy - r, r * 2, r * 2) }
+    public var bounds: BBox { inflateBounds((cx - r, cy - r, r * 2, r * 2), stroke) }
 }
 
 /// SVG \<ellipse\> element.
-public struct JasEllipse: Equatable {
+public struct Ellipse: Equatable {
     public let cx: Double, cy: Double, rx: Double, ry: Double
-    public let fill: JasFill?
-    public let stroke: JasStroke?
+    public let fill: Fill?
+    public let stroke: Stroke?
     public let opacity: Double
-    public let transform: JasTransform?
+    public let transform: Transform?
 
     public init(cx: Double, cy: Double, rx: Double, ry: Double,
-                fill: JasFill? = nil, stroke: JasStroke? = nil,
-                opacity: Double = 1.0, transform: JasTransform? = nil) {
+                fill: Fill? = nil, stroke: Stroke? = nil,
+                opacity: Double = 1.0, transform: Transform? = nil) {
         self.cx = cx; self.cy = cy; self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
     }
 
-    public var bounds: BBox { (cx - rx, cy - ry, rx * 2, ry * 2) }
+    public var bounds: BBox { inflateBounds((cx - rx, cy - ry, rx * 2, ry * 2), stroke) }
 }
 
 /// SVG \<polyline\> element.
-public struct JasPolyline: Equatable {
+public struct Polyline: Equatable {
     public let points: [(Double, Double)]
-    public let fill: JasFill?
-    public let stroke: JasStroke?
+    public let fill: Fill?
+    public let stroke: Stroke?
     public let opacity: Double
-    public let transform: JasTransform?
+    public let transform: Transform?
 
     public init(points: [(Double, Double)],
-                fill: JasFill? = nil, stroke: JasStroke? = nil,
-                opacity: Double = 1.0, transform: JasTransform? = nil) {
+                fill: Fill? = nil, stroke: Stroke? = nil,
+                opacity: Double = 1.0, transform: Transform? = nil) {
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
     }
@@ -551,10 +561,10 @@ public struct JasPolyline: Equatable {
         guard !points.isEmpty else { return (0, 0, 0, 0) }
         let xs = points.map(\.0), ys = points.map(\.1)
         let minX = xs.min()!, minY = ys.min()!
-        return (minX, minY, xs.max()! - minX, ys.max()! - minY)
+        return inflateBounds((minX, minY, xs.max()! - minX, ys.max()! - minY), stroke)
     }
 
-    public static func == (lhs: JasPolyline, rhs: JasPolyline) -> Bool {
+    public static func == (lhs: Polyline, rhs: Polyline) -> Bool {
         lhs.points.count == rhs.points.count
             && zip(lhs.points, rhs.points).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
             && lhs.fill == rhs.fill && lhs.stroke == rhs.stroke
@@ -563,16 +573,16 @@ public struct JasPolyline: Equatable {
 }
 
 /// SVG \<polygon\> element.
-public struct JasPolygon: Equatable {
+public struct Polygon: Equatable {
     public let points: [(Double, Double)]
-    public let fill: JasFill?
-    public let stroke: JasStroke?
+    public let fill: Fill?
+    public let stroke: Stroke?
     public let opacity: Double
-    public let transform: JasTransform?
+    public let transform: Transform?
 
     public init(points: [(Double, Double)],
-                fill: JasFill? = nil, stroke: JasStroke? = nil,
-                opacity: Double = 1.0, transform: JasTransform? = nil) {
+                fill: Fill? = nil, stroke: Stroke? = nil,
+                opacity: Double = 1.0, transform: Transform? = nil) {
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
     }
@@ -581,10 +591,10 @@ public struct JasPolygon: Equatable {
         guard !points.isEmpty else { return (0, 0, 0, 0) }
         let xs = points.map(\.0), ys = points.map(\.1)
         let minX = xs.min()!, minY = ys.min()!
-        return (minX, minY, xs.max()! - minX, ys.max()! - minY)
+        return inflateBounds((minX, minY, xs.max()! - minX, ys.max()! - minY), stroke)
     }
 
-    public static func == (lhs: JasPolygon, rhs: JasPolygon) -> Bool {
+    public static func == (lhs: Polygon, rhs: Polygon) -> Bool {
         lhs.points.count == rhs.points.count
             && zip(lhs.points, rhs.points).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
             && lhs.fill == rhs.fill && lhs.stroke == rhs.stroke
@@ -602,45 +612,51 @@ func pathBounds(_ d: [PathCommand]) -> BBox {
     return (minX, minY, xs.max()! - minX, ys.max()! - minY)
 }
 
-public struct JasPath: Equatable {
+public struct Path: Equatable {
     public let d: [PathCommand]
-    public let fill: JasFill?
-    public let stroke: JasStroke?
+    public let fill: Fill?
+    public let stroke: Stroke?
     public let opacity: Double
-    public let transform: JasTransform?
+    public let transform: Transform?
 
     public init(d: [PathCommand],
-                fill: JasFill? = nil, stroke: JasStroke? = nil,
-                opacity: Double = 1.0, transform: JasTransform? = nil) {
+                fill: Fill? = nil, stroke: Stroke? = nil,
+                opacity: Double = 1.0, transform: Transform? = nil) {
         self.d = d
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
     }
 
     public var bounds: BBox {
-        return pathBounds(d)
+        return inflateBounds(pathBounds(d), stroke)
     }
 }
 
 /// SVG \<text\> element.
-public struct JasText: Equatable {
+public struct Text: Equatable {
     public let x: Double, y: Double
     public let content: String
     public let fontFamily: String
     public let fontSize: Double
+    public let fontWeight: String
+    public let fontStyle: String
+    public let textDecoration: String
     public let width: Double
     public let height: Double
-    public let fill: JasFill?
-    public let stroke: JasStroke?
+    public let fill: Fill?
+    public let stroke: Stroke?
     public let opacity: Double
-    public let transform: JasTransform?
+    public let transform: Transform?
 
     public init(x: Double, y: Double, content: String,
                 fontFamily: String = "sans-serif", fontSize: Double = 16.0,
+                fontWeight: String = "normal", fontStyle: String = "normal",
+                textDecoration: String = "none",
                 width: Double = 0, height: Double = 0,
-                fill: JasFill? = nil, stroke: JasStroke? = nil,
-                opacity: Double = 1.0, transform: JasTransform? = nil) {
+                fill: Fill? = nil, stroke: Stroke? = nil,
+                opacity: Double = 1.0, transform: Transform? = nil) {
         self.x = x; self.y = y; self.content = content
         self.fontFamily = fontFamily; self.fontSize = fontSize
+        self.fontWeight = fontWeight; self.fontStyle = fontStyle; self.textDecoration = textDecoration
         self.width = width; self.height = height
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
     }
@@ -657,39 +673,45 @@ public struct JasText: Equatable {
 }
 
 /// SVG \<text\>\<textPath\> — text rendered along a path.
-public struct JasTextPath: Equatable {
+public struct TextPath: Equatable {
     public let d: [PathCommand]
     public let content: String
     public let startOffset: Double
     public let fontFamily: String
     public let fontSize: Double
-    public let fill: JasFill?
-    public let stroke: JasStroke?
+    public let fontWeight: String
+    public let fontStyle: String
+    public let textDecoration: String
+    public let fill: Fill?
+    public let stroke: Stroke?
     public let opacity: Double
-    public let transform: JasTransform?
+    public let transform: Transform?
 
     public init(d: [PathCommand], content: String = "Lorem Ipsum",
                 startOffset: Double = 0.0,
                 fontFamily: String = "sans-serif", fontSize: Double = 16.0,
-                fill: JasFill? = nil, stroke: JasStroke? = nil,
-                opacity: Double = 1.0, transform: JasTransform? = nil) {
+                fontWeight: String = "normal", fontStyle: String = "normal",
+                textDecoration: String = "none",
+                fill: Fill? = nil, stroke: Stroke? = nil,
+                opacity: Double = 1.0, transform: Transform? = nil) {
         self.d = d; self.content = content; self.startOffset = startOffset
         self.fontFamily = fontFamily; self.fontSize = fontSize
+        self.fontWeight = fontWeight; self.fontStyle = fontStyle; self.textDecoration = textDecoration
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
     }
 
     public var bounds: BBox {
-        return pathBounds(d)
+        return inflateBounds(pathBounds(d), stroke)
     }
 }
 
 /// SVG \<g\> element.
-public struct JasGroup: Equatable {
+public struct Group: Equatable {
     public let children: [Element]
     public let opacity: Double
-    public let transform: JasTransform?
+    public let transform: Transform?
 
-    public init(children: [Element], opacity: Double = 1.0, transform: JasTransform? = nil) {
+    public init(children: [Element], opacity: Double = 1.0, transform: Transform? = nil) {
         self.children = children
         self.opacity = opacity; self.transform = transform
     }
@@ -705,13 +727,13 @@ public struct JasGroup: Equatable {
 }
 
 /// A named group (layer) of elements.
-public struct JasLayer: Equatable {
+public struct Layer: Equatable {
     public let name: String
     public let children: [Element]
     public let opacity: Double
-    public let transform: JasTransform?
+    public let transform: Transform?
 
-    public init(name: String = "Layer", children: [Element], opacity: Double = 1.0, transform: JasTransform? = nil) {
+    public init(name: String = "Layer", children: [Element], opacity: Double = 1.0, transform: Transform? = nil) {
         self.name = name
         self.children = children
         self.opacity = opacity; self.transform = transform
@@ -733,7 +755,7 @@ public struct JasLayer: Equatable {
 public func flattenPathCommands(_ d: [PathCommand]) -> [(Double, Double)] {
     var pts: [(Double, Double)] = []
     var cx = 0.0, cy = 0.0
-    let steps = 20
+    let steps = elementFlattenSteps
     var firstPt = (0.0, 0.0)
     for cmd in d {
         switch cmd {

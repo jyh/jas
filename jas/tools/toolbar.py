@@ -1,5 +1,7 @@
 from enum import Enum, auto
 
+from tools.tool import LONG_PRESS_MS
+
 from PySide6.QtCore import Qt, Signal, QTimer, QPoint
 from PySide6.QtGui import QPainter, QColor, QPen, QPainterPath, QFont
 from PySide6.QtWidgets import (
@@ -192,7 +194,7 @@ _ARROW_SLOT_TOOLS = {Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION}
 _TEXT_SLOT_TOOLS = {Tool.TEXT, Tool.TEXT_PATH}
 # Tools that share the rect/polygon slot
 _SHAPE_SLOT_TOOLS = {Tool.RECT, Tool.POLYGON}
-_LONG_PRESS_MS = 500
+_LONG_PRESS_MS = LONG_PRESS_MS
 
 
 class Toolbar(QWidget):

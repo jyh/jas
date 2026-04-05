@@ -1,9 +1,9 @@
 (** Immutable document model.
 
-    A document is an ordered list of layers.
+    A document is an ordered array of layers.
 
     Elements within the document are identified by their path: a list of integer
-    indices tracing the route from the document's layer list to the element.
+    indices tracing the route from the document's layer array to the element.
     For example, path [0; 2] means layer 0, child 2.  Path [1] means layer 1
     itself.  This allows selections and updates without requiring element identity. *)
 
@@ -32,9 +32,9 @@ end)
 
 type selection = element_selection PathMap.t
 
-(** A document consisting of an ordered list of layers. *)
+(** A document consisting of an ordered array of layers. *)
 type document = {
-  layers : element list;
+  layers : element array;
   selected_layer : int;
   selection : selection;
 }
@@ -54,17 +54,16 @@ let get_element_selection sel path =
   PathMap.find_opt path sel
 
 let default_document () = make_document
-  ~selection:PathMap.empty [Element.make_layer []]
+  ~selection:PathMap.empty [| Element.make_layer [||] |]
 
 let bounds doc =
-  match doc.layers with
-  | [] -> (0.0, 0.0, 0.0, 0.0)
-  | _ ->
-    let all_bounds = List.map Element.bounds doc.layers in
-    let min_x = List.fold_left (fun acc (x, _, _, _) -> min acc x) infinity all_bounds in
-    let min_y = List.fold_left (fun acc (_, y, _, _) -> min acc y) infinity all_bounds in
-    let max_x = List.fold_left (fun acc (x, _, w, _) -> max acc (x +. w)) neg_infinity all_bounds in
-    let max_y = List.fold_left (fun acc (_, y, _, h) -> max acc (y +. h)) neg_infinity all_bounds in
+  if Array.length doc.layers = 0 then (0.0, 0.0, 0.0, 0.0)
+  else
+    let all_bounds = Array.map Element.bounds doc.layers in
+    let min_x = Array.fold_left (fun acc (x, _, _, _) -> min acc x) infinity all_bounds in
+    let min_y = Array.fold_left (fun acc (_, y, _, _) -> min acc y) infinity all_bounds in
+    let max_x = Array.fold_left (fun acc (x, _, w, _) -> max acc (x +. w)) neg_infinity all_bounds in
+    let max_y = Array.fold_left (fun acc (_, y, _, h) -> max acc (y +. h)) neg_infinity all_bounds in
     (min_x, min_y, max_x -. min_x, max_y -. min_y)
 
 (** Return the children of an element, if it is a group or layer. *)
@@ -76,118 +75,102 @@ let children_of = function
 let get_element doc path =
   match path with
   | [] -> failwith "path must be non-empty"
-  | [i] -> List.nth doc.layers i
+  | [i] -> doc.layers.(i)
   | i :: rest ->
     let rec walk node = function
       | [] -> node
-      | j :: rest -> walk (List.nth (children_of node) j) rest
+      | j :: rest -> walk (children_of node).(j) rest
     in
-    walk (List.nth doc.layers i) rest
+    walk doc.layers.(i) rest
 
-(** Replace the nth element of a list. *)
-let list_replace_nth lst n x =
-  List.mapi (fun i e -> if i = n then x else e) lst
+(** Return a copy of the array with element at index n replaced. *)
+let array_replace_nth arr n x =
+  let a = Array.copy arr in
+  a.(n) <- x; a
+
+(** Return the node with new_children substituted. *)
+let with_children node new_children =
+  match node with
+  | Group { opacity; transform; _ } -> Group { children = new_children; opacity; transform }
+  | Layer { name; opacity; transform; _ } -> Layer { name; children = new_children; opacity; transform }
+  | _ -> failwith "element has no children"
 
 (** Recursively replace the element at [rest] inside a group/layer node. *)
 let rec replace_in_group node rest new_elem =
   match rest with
   | [] -> new_elem
   | [i] ->
-    let cs = children_of node in
-    let new_children = list_replace_nth cs i new_elem in
-    (match node with
-     | Group { opacity; transform; _ } -> Group { children = new_children; opacity; transform }
-     | Layer { name; opacity; transform; _ } -> Layer { name; children = new_children; opacity; transform }
-     | _ -> failwith "element has no children")
+    with_children node (array_replace_nth (children_of node) i new_elem)
   | i :: rest ->
     let cs = children_of node in
-    let child = List.nth cs i in
-    let new_child = replace_in_group child rest new_elem in
-    let new_children = list_replace_nth cs i new_child in
-    (match node with
-     | Group { opacity; transform; _ } -> Group { children = new_children; opacity; transform }
-     | Layer { name; opacity; transform; _ } -> Layer { name; children = new_children; opacity; transform }
-     | _ -> failwith "element has no children")
+    let new_child = replace_in_group cs.(i) rest new_elem in
+    with_children node (array_replace_nth cs i new_child)
 
-(** Insert an element into a list after position n. *)
-let list_insert_after lst n x =
-  let rec aux i = function
-    | [] -> [x]
-    | e :: rest ->
-      if i = n then e :: x :: rest
-      else e :: aux (i + 1) rest
-  in
-  aux 0 lst
+(** Return a new array with x inserted after position n. *)
+let array_insert_after arr n x =
+  let len = Array.length arr in
+  Array.init (len + 1) (fun i ->
+    if i <= n then arr.(i)
+    else if i = n + 1 then x
+    else arr.(i - 1))
 
 (** Recursively insert new_elem after the position indicated by rest. *)
 let rec insert_after_in_group node rest new_elem =
-  let with_children cs = match node with
-    | Group { opacity; transform; _ } -> Group { children = cs; opacity; transform }
-    | Layer { name; opacity; transform; _ } -> Layer { name; children = cs; opacity; transform }
-    | _ -> failwith "element has no children"
-  in
   match rest with
   | [] -> failwith "rest must be non-empty"
   | [i] ->
-    let cs = children_of node in
-    with_children (list_insert_after cs i new_elem)
+    with_children node (array_insert_after (children_of node) i new_elem)
   | i :: rest ->
     let cs = children_of node in
-    let child = List.nth cs i in
-    let new_child = insert_after_in_group child rest new_elem in
-    with_children (list_replace_nth cs i new_child)
+    let new_child = insert_after_in_group cs.(i) rest new_elem in
+    with_children node (array_replace_nth cs i new_child)
 
 (** Return a new document with new_elem inserted immediately after path. *)
 let insert_element_after doc path new_elem =
   match path with
   | [] -> failwith "path must be non-empty"
   | [i] ->
-    { doc with layers = list_insert_after doc.layers i new_elem }
+    { doc with layers = array_insert_after doc.layers i new_elem }
   | i :: rest ->
-    let layer = List.nth doc.layers i in
+    let layer = doc.layers.(i) in
     let new_layer = insert_after_in_group layer rest new_elem in
-    { doc with layers = list_replace_nth doc.layers i new_layer }
+    { doc with layers = array_replace_nth doc.layers i new_layer }
 
 (** Return a new document with the element at [path] replaced by [new_elem]. *)
 let replace_element doc path new_elem =
   match path with
   | [] -> failwith "path must be non-empty"
   | [i] ->
-    { doc with layers = list_replace_nth doc.layers i new_elem }
+    { doc with layers = array_replace_nth doc.layers i new_elem }
   | i :: rest ->
-    let layer = List.nth doc.layers i in
+    let layer = doc.layers.(i) in
     let new_layer = replace_in_group layer rest new_elem in
-    { doc with layers = list_replace_nth doc.layers i new_layer }
+    { doc with layers = array_replace_nth doc.layers i new_layer }
 
-(** Remove the nth element from a list. *)
-let list_remove_nth lst n =
-  List.filteri (fun i _ -> i <> n) lst
+(** Return a new array with element at index n removed. *)
+let array_remove_nth arr n =
+  let len = Array.length arr in
+  Array.init (len - 1) (fun i -> if i < n then arr.(i) else arr.(i + 1))
 
 (** Recursively remove the element at [rest] inside a group/layer node. *)
 let rec remove_from_group node rest =
-  let with_children cs = match node with
-    | Group { opacity; transform; _ } -> Group { children = cs; opacity; transform }
-    | Layer { name; opacity; transform; _ } -> Layer { name; children = cs; opacity; transform }
-    | _ -> failwith "element has no children"
-  in
   match rest with
   | [] -> failwith "rest must be non-empty"
-  | [i] -> with_children (list_remove_nth (children_of node) i)
+  | [i] -> with_children node (array_remove_nth (children_of node) i)
   | i :: rest ->
     let cs = children_of node in
-    let child = List.nth cs i in
-    let new_child = remove_from_group child rest in
-    with_children (list_replace_nth cs i new_child)
+    let new_child = remove_from_group cs.(i) rest in
+    with_children node (array_replace_nth cs i new_child)
 
 (** Return a new document with the element at [path] removed. *)
 let delete_element doc path =
   match path with
   | [] -> failwith "path must be non-empty"
-  | [i] -> { doc with layers = list_remove_nth doc.layers i }
+  | [i] -> { doc with layers = array_remove_nth doc.layers i }
   | i :: rest ->
-    let layer = List.nth doc.layers i in
+    let layer = doc.layers.(i) in
     let new_layer = remove_from_group layer rest in
-    { doc with layers = list_replace_nth doc.layers i new_layer }
+    { doc with layers = array_replace_nth doc.layers i new_layer }
 
 (** Return a new document with all selected elements removed and selection cleared. *)
 let delete_selection doc =

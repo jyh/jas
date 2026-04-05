@@ -19,6 +19,15 @@ if TYPE_CHECKING:
     from document.model import Model
 
 
+# Shared tool constants
+HIT_RADIUS = 8.0          # pixels to detect a click on a control point or handle
+HANDLE_DRAW_SIZE = 10.0   # diameter of control-point handles in pixels
+DRAG_THRESHOLD = 4.0      # pixels of movement before a click becomes a drag
+PASTE_OFFSET = 24.0       # translation in pt applied when pasting
+LONG_PRESS_MS = 500       # milliseconds before a press becomes a long-press
+POLYGON_SIDES = 5         # default number of sides for the polygon tool
+
+
 class ToolContext:
     """Facade passed to tools giving access to model, controller, and canvas services."""
 

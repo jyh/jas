@@ -3,6 +3,9 @@
     All elements are immutable value types. Element types and attributes
     follow the SVG 1.1 specification. *)
 
+(** Line segments per Bezier curve when flattening paths. *)
+let flatten_steps = 20
+
 (** RGBA color with components in [0, 1]. *)
 type color = {
   r : float;
@@ -116,6 +119,9 @@ type element =
       content : string;
       font_family : string;
       font_size : float;
+      font_weight : string;
+      font_style : string;
+      text_decoration : string;
       text_width : float;
       text_height : float;
       fill : fill option;
@@ -129,36 +135,71 @@ type element =
       start_offset : float;
       font_family : string;
       font_size : float;
+      font_weight : string;
+      font_style : string;
+      text_decoration : string;
       fill : fill option;
       stroke : stroke option;
       opacity : float;
       transform : transform option;
     }
   | Group of {
-      children : element list;
+      children : element array;
       opacity : float;
       transform : transform option;
     }
   | Layer of {
       name : string;
-      children : element list;
+      children : element array;
       opacity : float;
       transform : transform option;
     }
 
+(** Expand a bounding box by half the stroke width on all sides. *)
+let inflate_bounds (bx, by, bw, bh) stroke =
+  match stroke with
+  | None -> (bx, by, bw, bh)
+  | Some { stroke_width; _ } ->
+    let half = stroke_width /. 2.0 in
+    (bx -. half, by -. half, bw +. stroke_width, bh +. stroke_width)
+
+let path_cmd_bounds cmds =
+  let collect_endpoints =
+    List.fold_left (fun (xs, ys) cmd ->
+      match cmd with
+      | MoveTo (x, y) | LineTo (x, y) | SmoothQuadTo (x, y) ->
+        (x :: xs, y :: ys)
+      | CurveTo (_, _, _, _, x, y) | SmoothCurveTo (_, _, x, y) ->
+        (x :: xs, y :: ys)
+      | QuadTo (_, _, x, y) ->
+        (x :: xs, y :: ys)
+      | ArcTo (_, _, _, _, _, x, y) ->
+        (x :: xs, y :: ys)
+      | ClosePath -> (xs, ys)
+    ) ([], [])
+  in
+  let (xs, ys) = collect_endpoints cmds in
+  match xs, ys with
+  | [], [] -> (0.0, 0.0, 0.0, 0.0)
+  | _ ->
+    let min_f = List.fold_left min infinity in
+    let max_f = List.fold_left max neg_infinity in
+    let min_x = min_f xs and min_y = min_f ys in
+    (min_x, min_y, max_f xs -. min_x, max_f ys -. min_y)
+
 (** Return the bounding box as (x, y, width, height). *)
 let rec bounds = function
-  | Line { x1; y1; x2; y2; _ } ->
+  | Line { x1; y1; x2; y2; stroke; _ } ->
     let min_x = min x1 x2 in
     let min_y = min y1 y2 in
-    (min_x, min_y, abs_float (x2 -. x1), abs_float (y2 -. y1))
-  | Rect { x; y; width; height; _ } ->
-    (x, y, width, height)
-  | Circle { cx; cy; r; _ } ->
-    (cx -. r, cy -. r, r *. 2.0, r *. 2.0)
-  | Ellipse { cx; cy; rx; ry; _ } ->
-    (cx -. rx, cy -. ry, rx *. 2.0, ry *. 2.0)
-  | Polyline { points; _ } | Polygon { points; _ } ->
+    inflate_bounds (min_x, min_y, abs_float (x2 -. x1), abs_float (y2 -. y1)) stroke
+  | Rect { x; y; width; height; stroke; _ } ->
+    inflate_bounds (x, y, width, height) stroke
+  | Circle { cx; cy; r; stroke; _ } ->
+    inflate_bounds (cx -. r, cy -. r, r *. 2.0, r *. 2.0) stroke
+  | Ellipse { cx; cy; rx; ry; stroke; _ } ->
+    inflate_bounds (cx -. rx, cy -. ry, rx *. 2.0, ry *. 2.0) stroke
+  | Polyline { points; stroke; _ } ->
     begin match points with
     | [] -> (0.0, 0.0, 0.0, 0.0)
     | _ ->
@@ -167,56 +208,23 @@ let rec bounds = function
       let min_f = List.fold_left min infinity in
       let max_f = List.fold_left max neg_infinity in
       let min_x = min_f xs and min_y = min_f ys in
-      (min_x, min_y, max_f xs -. min_x, max_f ys -. min_y)
+      inflate_bounds (min_x, min_y, max_f xs -. min_x, max_f ys -. min_y) stroke
     end
-  | Path { d; _ } ->
-    let collect_endpoints cmds =
-      List.fold_left (fun (xs, ys) cmd ->
-        match cmd with
-        | MoveTo (x, y) | LineTo (x, y) | SmoothQuadTo (x, y) ->
-          (x :: xs, y :: ys)
-        | CurveTo (_, _, _, _, x, y) | SmoothCurveTo (_, _, x, y) ->
-          (x :: xs, y :: ys)
-        | QuadTo (_, _, x, y) ->
-          (x :: xs, y :: ys)
-        | ArcTo (_, _, _, _, _, x, y) ->
-          (x :: xs, y :: ys)
-        | ClosePath -> (xs, ys)
-      ) ([], []) cmds
-    in
-    let (xs, ys) = collect_endpoints d in
-    begin match xs, ys with
-    | [], [] -> (0.0, 0.0, 0.0, 0.0)
+  | Polygon { points; stroke; _ } ->
+    begin match points with
+    | [] -> (0.0, 0.0, 0.0, 0.0)
     | _ ->
+      let xs = List.map fst points in
+      let ys = List.map snd points in
       let min_f = List.fold_left min infinity in
       let max_f = List.fold_left max neg_infinity in
       let min_x = min_f xs and min_y = min_f ys in
-      (min_x, min_y, max_f xs -. min_x, max_f ys -. min_y)
+      inflate_bounds (min_x, min_y, max_f xs -. min_x, max_f ys -. min_y) stroke
     end
-  | Text_path { d; _ } ->
-    let collect_endpoints cmds =
-      List.fold_left (fun (xs, ys) cmd ->
-        match cmd with
-        | MoveTo (x, y) | LineTo (x, y) | SmoothQuadTo (x, y) ->
-          (x :: xs, y :: ys)
-        | CurveTo (_, _, _, _, x, y) | SmoothCurveTo (_, _, x, y) ->
-          (x :: xs, y :: ys)
-        | QuadTo (_, _, x, y) ->
-          (x :: xs, y :: ys)
-        | ArcTo (_, _, _, _, _, x, y) ->
-          (x :: xs, y :: ys)
-        | ClosePath -> (xs, ys)
-      ) ([], []) cmds
-    in
-    let (xs, ys) = collect_endpoints d in
-    begin match xs, ys with
-    | [], [] -> (0.0, 0.0, 0.0, 0.0)
-    | _ ->
-      let min_f = List.fold_left min infinity in
-      let max_f = List.fold_left max neg_infinity in
-      let min_x = min_f xs and min_y = min_f ys in
-      (min_x, min_y, max_f xs -. min_x, max_f ys -. min_y)
-    end
+  | Path { d; stroke; _ } ->
+    inflate_bounds (path_cmd_bounds d) stroke
+  | Text_path { d; stroke; _ } ->
+    inflate_bounds (path_cmd_bounds d) stroke
   | Text { x; y; content; font_size; text_width; text_height; _ } ->
     if text_width > 0.0 && text_height > 0.0 then
       (x, y, text_width, text_height)
@@ -224,16 +232,14 @@ let rec bounds = function
       let approx_width = float_of_int (String.length content) *. font_size *. 0.6 in
       (x, y -. font_size, approx_width, font_size)
   | Group { children; _ } | Layer { children; _ } ->
-    begin match children with
-    | [] -> (0.0, 0.0, 0.0, 0.0)
-    | _ ->
-      let all_bounds = List.map bounds children in
-      let min_x = List.fold_left (fun acc (x, _, _, _) -> min acc x) infinity all_bounds in
-      let min_y = List.fold_left (fun acc (_, y, _, _) -> min acc y) infinity all_bounds in
-      let max_x = List.fold_left (fun acc (x, _, w, _) -> max acc (x +. w)) neg_infinity all_bounds in
-      let max_y = List.fold_left (fun acc (_, y, _, h) -> max acc (y +. h)) neg_infinity all_bounds in
+    if Array.length children = 0 then (0.0, 0.0, 0.0, 0.0)
+    else
+      let all_bounds = Array.map bounds children in
+      let min_x = Array.fold_left (fun acc (x, _, _, _) -> min acc x) infinity all_bounds in
+      let min_y = Array.fold_left (fun acc (_, y, _, _) -> min acc y) infinity all_bounds in
+      let max_x = Array.fold_left (fun acc (x, _, w, _) -> max acc (x +. w)) neg_infinity all_bounds in
+      let max_y = Array.fold_left (fun acc (_, y, _, h) -> max acc (y +. h)) neg_infinity all_bounds in
       (min_x, min_y, max_x -. min_x, max_y -. min_y)
-    end
 
 (** Helper constructors. *)
 
@@ -275,11 +281,11 @@ let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = 
 let make_path ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) d =
   Path { d; fill; stroke; opacity; transform }
 
-let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(text_width = 0.0) ?(text_height = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) x y content =
-  Text { x; y; content; font_family; font_size; text_width; text_height; fill; stroke; opacity; transform }
+let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none") ?(text_width = 0.0) ?(text_height = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) x y content =
+  Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration; text_width; text_height; fill; stroke; opacity; transform }
 
-let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_size = 16.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) d content =
-  Text_path { d; content; start_offset; font_family; font_size; fill; stroke; opacity; transform }
+let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none") ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) d content =
+  Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration; fill; stroke; opacity; transform }
 
 let make_group ?(opacity = 1.0) ?(transform = None) children =
   Group { children; opacity; transform }
@@ -557,7 +563,7 @@ let flatten_path_commands d =
   let pts = ref [] in
   let cx = ref 0.0 in
   let cy = ref 0.0 in
-  let steps = 20 in
+  let steps = flatten_steps in
   let first = ref (0.0, 0.0) in
   List.iter (fun cmd ->
     match cmd with

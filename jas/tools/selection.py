@@ -44,7 +44,6 @@ class SelectionToolBase(CanvasTool):
 
     def on_press(self, ctx: ToolContext, x: float, y: float,
                  shift: bool = False, alt: bool = False) -> None:
-        ctx.snapshot()
         if self._check_handle_hit(ctx, x, y):
             return
         if ctx.hit_test_selection(x, y):
@@ -78,12 +77,14 @@ class SelectionToolBase(CanvasTool):
         if was_moving:
             dx, dy = x - sx, y - sy
             if dx != 0 or dy != 0:
+                ctx.snapshot()
                 if alt:
                     ctx.controller.copy_selection(dx, dy)
                 else:
                     ctx.controller.move_selection(dx, dy)
             ctx.request_update()
             return
+        ctx.snapshot()
         self._select_rect(ctx,
                           min(sx, x), min(sy, y),
                           abs(x - sx), abs(y - sy),
@@ -158,6 +159,7 @@ class DirectSelectionTool(SelectionToolBase):
             self._handle_drag_start = None
             self._handle_drag_end = None
             if dx != 0 or dy != 0:
+                ctx.snapshot()
                 ctx.controller.move_path_handle(path, anchor_idx, handle_type, dx, dy)
             ctx.request_update()
             return

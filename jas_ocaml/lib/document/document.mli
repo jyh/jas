@@ -23,14 +23,14 @@ type selection = element_selection PathMap.t
 
 (** A document consisting of an ordered list of layers. *)
 type document = {
-  layers : Element.element list;
+  layers : Element.element array;
   selected_layer : int;
   selection : selection;
 }
 
 val make_document :
   ?selected_layer:int -> ?selection:selection ->
-  Element.element list -> document
+  Element.element array -> document
 
 val make_element_selection :
   ?control_points:int list -> element_path -> element_selection
@@ -44,4 +44,4 @@ val replace_element : document -> element_path -> Element.element -> document
 val insert_element_after : document -> element_path -> Element.element -> document
 val delete_element : document -> element_path -> document
 val delete_selection : document -> document
-val children_of : Element.element -> Element.element list
+val children_of : Element.element -> Element.element array

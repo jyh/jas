@@ -14,7 +14,6 @@ class virtual selection_tool_base = object (self)
 
   method on_press (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
     ignore (shift, alt);
-    ctx.model#snapshot;
     if self#check_handle_hit ctx x y then ()
     else if ctx.hit_test_selection x y then begin
       drag_start <- Some (x, y);
@@ -47,11 +46,13 @@ class virtual selection_tool_base = object (self)
         let (ex, ey) = if shift then Canvas_tool.constrain_angle sx sy x y else (x, y) in
         let dx = ex -. sx and dy = ey -. sy in
         if dx <> 0.0 || dy <> 0.0 then begin
+          ctx.model#snapshot;
           if alt then ctx.controller#copy_selection dx dy
           else ctx.controller#move_selection dx dy
         end;
         ctx.request_update ()
       end else begin
+        ctx.model#snapshot;
         let rx = min sx x and ry = min sy y in
         let rw = abs_float (x -. sx) and rh = abs_float (y -. sy) in
         self#select_rect ctx rx ry rw rh ~extend:shift
@@ -150,8 +151,10 @@ class direct_selection_tool = object (self)
       handle_drag <- None;
       handle_drag_start <- None;
       handle_drag_end <- None;
-      if dx <> 0.0 || dy <> 0.0 then
-        ctx.controller#move_path_handle path anchor_idx ht dx dy;
+      if dx <> 0.0 || dy <> 0.0 then begin
+        ctx.model#snapshot;
+        ctx.controller#move_path_handle path anchor_idx ht dx dy
+      end;
       ctx.request_update ()
     | _ ->
       ignore (self : #selection_tool_base);

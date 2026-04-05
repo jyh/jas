@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 // MARK: - FocusedValue for model access from commands
 
 public struct FocusedModelKey: FocusedValueKey {
-    public typealias Value = JasModel
+    public typealias Value = Model
 }
 
 public struct FocusedHasSelectionKey: FocusedValueKey {
@@ -21,11 +21,11 @@ public struct FocusedCanRedoKey: FocusedValueKey {
 }
 
 public struct FocusedAddCanvasKey: FocusedValueKey {
-    public typealias Value = (JasModel) -> Void
+    public typealias Value = (Model) -> Void
 }
 
 public extension FocusedValues {
-    var jasModel: JasModel? {
+    var jasModel: Model? {
         get { self[FocusedModelKey.self] }
         set { self[FocusedModelKey.self] = newValue }
     }
@@ -41,7 +41,7 @@ public extension FocusedValues {
         get { self[FocusedCanRedoKey.self] }
         set { self[FocusedCanRedoKey.self] = newValue }
     }
-    var addCanvas: ((JasModel) -> Void)? {
+    var addCanvas: ((Model) -> Void)? {
         get { self[FocusedAddCanvasKey.self] }
         set { self[FocusedAddCanvasKey.self] = newValue }
     }
@@ -60,7 +60,7 @@ public struct JasCommands: Commands {
     public var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New") {
-                addCanvas?(JasModel())
+                addCanvas?(Model())
             }
             .keyboardShortcut("n", modifiers: .command)
 
@@ -117,7 +117,7 @@ public struct JasCommands: Commands {
             .disabled(!(hasSelection ?? false))
 
             Button("Paste") {
-                pasteClipboard(offset: 24.0)
+                pasteClipboard(offset: pasteOffset)
             }
             .keyboardShortcut("v", modifiers: .command)
 
@@ -169,7 +169,7 @@ public struct JasCommands: Commands {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             let svg = try String(contentsOf: url, encoding: .utf8)
-            let newModel = JasModel(document: svgToDocument(svg), filename: url.path)
+            let newModel = Model(document: svgToDocument(svg), filename: url.path)
             addCanvas?(newModel)
         } catch {
             let alert = NSAlert(error: error)
@@ -209,8 +209,9 @@ public struct JasCommands: Commands {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             let svg = try String(contentsOfFile: model.filename, encoding: .utf8)
+            let newDoc = svgToDocument(svg)
             model.snapshot()
-            model.document = svgToDocument(svg)
+            model.document = newDoc
             model.markSaved()
         } catch {
             let errAlert = NSAlert(error: error)
@@ -262,27 +263,27 @@ public struct JasCommands: Commands {
                     newSelection.insert(ElementSelection(path: path,
                                                           controlPoints: Set(0..<n)))
                 }
-                newLayers[idx] = JasLayer(name: newLayers[idx].name,
+                newLayers[idx] = Layer(name: newLayers[idx].name,
                                           children: newLayers[idx].children + children,
                                           opacity: newLayers[idx].opacity,
                                           transform: newLayers[idx].transform)
             }
-            model.document = JasDocument(layers: newLayers,
+            model.document = Document(layers: newLayers,
                                           selectedLayer: doc.selectedLayer, selection: newSelection)
         } else {
             // Plain text: create a Text element
-            let elem = Element.text(JasText(x: offset, y: offset + 16.0, content: text))
+            let elem = Element.text(Text(x: offset, y: offset + 16.0, content: text))
             let idx = doc.selectedLayer
             let path: ElementPath = [idx, doc.layers[idx].children.count]
             let n = elem.controlPointCount
             newSelection.insert(ElementSelection(path: path,
                                                   controlPoints: Set(0..<n)))
             var newLayers = doc.layers
-            newLayers[idx] = JasLayer(name: newLayers[idx].name,
+            newLayers[idx] = Layer(name: newLayers[idx].name,
                                       children: newLayers[idx].children + [elem],
                                       opacity: newLayers[idx].opacity,
                                       transform: newLayers[idx].transform)
-            model.document = JasDocument(layers: newLayers,
+            model.document = Document(layers: newLayers,
                                           selectedLayer: doc.selectedLayer, selection: newSelection)
         }
     }
@@ -304,7 +305,7 @@ public struct JasCommands: Commands {
             elements.append(elem)
         }
         guard !elements.isEmpty else { return }
-        let tempDoc = JasDocument(layers: [JasLayer(children: elements)])
+        let tempDoc = Document(layers: [Layer(children: elements)])
         let svg = documentToSvg(tempDoc)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()

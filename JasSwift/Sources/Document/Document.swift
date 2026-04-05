@@ -36,13 +36,13 @@ public struct ElementSelection: Equatable, Hashable {
 public typealias Selection = Set<ElementSelection>
 
 /// A document consisting of an ordered list of layers and a selection.
-public struct JasDocument: Equatable {
-    public let layers: [JasLayer]
+public struct Document: Equatable {
+    public let layers: [Layer]
     public let selectedLayer: Int
     public let selection: Selection
 
     public init(
-        layers: [JasLayer] = [JasLayer(children: [])],
+        layers: [Layer] = [Layer(children: [])],
         selectedLayer: Int = 0,
         selection: Selection = []
     ) {
@@ -81,7 +81,7 @@ public struct JasDocument: Equatable {
     }
 
     /// Return a new document with the element at path replaced by newElem.
-    public func replaceElement(_ path: ElementPath, with newElem: Element) -> JasDocument {
+    public func replaceElement(_ path: ElementPath, with newElem: Element) -> Document {
         precondition(!path.isEmpty, "Path must be non-empty")
         var newLayers = layers
         if path.count == 1 {
@@ -94,10 +94,10 @@ public struct JasDocument: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return JasDocument(layers: newLayers, selectedLayer: selectedLayer, selection: selection)
+        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection)
     }
     /// Return a new document with newElem inserted immediately after path.
-    public func insertElementAfter(_ path: ElementPath, element newElem: Element) -> JasDocument {
+    public func insertElementAfter(_ path: ElementPath, element newElem: Element) -> Document {
         precondition(!path.isEmpty, "Path must be non-empty")
         var newLayers = layers
         if path.count == 1 {
@@ -110,11 +110,11 @@ public struct JasDocument: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return JasDocument(layers: newLayers, selectedLayer: selectedLayer, selection: selection)
+        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection)
     }
 
     /// Return a new document with the element at path removed.
-    public func deleteElement(_ path: ElementPath) -> JasDocument {
+    public func deleteElement(_ path: ElementPath) -> Document {
         precondition(!path.isEmpty, "Path must be non-empty")
         var newLayers = layers
         if path.count == 1 {
@@ -124,17 +124,17 @@ public struct JasDocument: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return JasDocument(layers: newLayers, selectedLayer: selectedLayer, selection: selection)
+        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection)
     }
 
     /// Return a new document with all selected elements removed and selection cleared.
-    public func deleteSelection() -> JasDocument {
+    public func deleteSelection() -> Document {
         let sortedPaths = selection.map(\.path).sorted { $0.lexicographicallyPrecedes($1) }.reversed()
         var doc = self
         for path in sortedPaths {
             doc = doc.deleteElement(path)
         }
-        return JasDocument(layers: doc.layers,
+        return Document(layers: doc.layers,
                            selectedLayer: doc.selectedLayer, selection: [])
     }
 }
@@ -152,9 +152,9 @@ private func childrenOf(_ elem: Element) -> [Element] {
 private func withChildren(_ elem: Element, _ newChildren: [Element]) -> Element {
     switch elem {
     case .group(let g):
-        return .group(JasGroup(children: newChildren, opacity: g.opacity, transform: g.transform))
+        return .group(Group(children: newChildren, opacity: g.opacity, transform: g.transform))
     case .layer(let l):
-        return .layer(JasLayer(name: l.name, children: newChildren, opacity: l.opacity, transform: l.transform))
+        return .layer(Layer(name: l.name, children: newChildren, opacity: l.opacity, transform: l.transform))
     default:
         fatalError("Element has no children")
     }

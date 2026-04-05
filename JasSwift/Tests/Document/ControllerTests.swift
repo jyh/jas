@@ -6,6 +6,14 @@ private func sel(_ paths: ElementPath...) -> Selection {
     Set(paths.map { ElementSelection(path: $0) })
 }
 
+/// Helper: create a Selection with all control points for elements in a document.
+private func selAllCPs(_ doc: Document, _ paths: ElementPath...) -> Selection {
+    Set(paths.map { p in
+        let elem = doc.getElement(p)
+        return ElementSelection(path: p, controlPoints: Set(0..<elem.controlPointCount))
+    })
+}
+
 /// Helper: extract the set of paths from a Selection.
 private func selPaths(_ selection: Selection) -> Set<ElementPath> {
     Set(selection.map(\.path))
@@ -18,7 +26,7 @@ private func selPaths(_ selection: Selection) -> Set<ElementPath> {
 }
 
 @Test func controllerInitialFilename() {
-    let model = JasModel(filename: "Test")
+    let model = Model(filename: "Test")
     let ctrl = Controller(model: model)
     #expect(ctrl.model.filename == "Test")
 }
@@ -31,16 +39,16 @@ private func selPaths(_ selection: Selection) -> Set<ElementPath> {
 
 @Test func controllerAddLayer() {
     let ctrl = Controller()
-    let layer = JasLayer(name: "L1", children: [.rect(JasRect(x: 0, y: 0, width: 10, height: 10))])
+    let layer = Layer(name: "L1", children: [.rect(Rect(x: 0, y: 0, width: 10, height: 10))])
     ctrl.addLayer(layer)
     #expect(ctrl.document.layers.count == 2)
     #expect(ctrl.document.layers[1].name == "L1")
 }
 
 @Test func controllerRemoveLayer() {
-    let l1 = JasLayer(name: "A", children: [])
-    let l2 = JasLayer(name: "B", children: [])
-    let model = JasModel(document: JasDocument(layers: [l1, l2]))
+    let l1 = Layer(name: "A", children: [])
+    let l2 = Layer(name: "B", children: [])
+    let model = Model(document: Document(layers: [l1, l2]))
     let ctrl = Controller(model: model)
     ctrl.removeLayer(at: 0)
     #expect(ctrl.document.layers.count == 1)
@@ -49,29 +57,29 @@ private func selPaths(_ selection: Selection) -> Set<ElementPath> {
 
 @Test func controllerSetDocument() {
     let ctrl = Controller()
-    ctrl.setDocument(JasDocument(layers: []))
+    ctrl.setDocument(Document(layers: []))
     #expect(ctrl.document.layers.count == 0)
 }
 
 @Test func controllerSetDocumentNotifiesModel() {
-    let model = JasModel()
+    let model = Model()
     let ctrl = Controller(model: model)
     var received: [Int] = []
     model.onDocumentChanged { doc in received.append(doc.layers.count) }
-    ctrl.setDocument(JasDocument(layers: []))
+    ctrl.setDocument(Document(layers: []))
     #expect(received == [0])
 }
 
 // MARK: - Selection controller tests
 
 private func makeSelectionCtrl() -> Controller {
-    let rect = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
-    let line1 = Element.line(JasLine(x1: 0, y1: 0, x2: 5, y2: 5))
-    let line2 = Element.line(JasLine(x1: 1, y1: 1, x2: 2, y2: 2))
-    let group = Element.group(JasGroup(children: [line1, line2]))
-    let layer = JasLayer(name: "L0", children: [rect, group])
-    let doc = JasDocument(layers: [layer])
-    return Controller(model: JasModel(document: doc))
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let line1 = Element.line(Line(x1: 0, y1: 0, x2: 5, y2: 5))
+    let line2 = Element.line(Line(x1: 1, y1: 1, x2: 2, y2: 2))
+    let group = Element.group(Group(children: [line1, line2]))
+    let layer = Layer(name: "L0", children: [rect, group])
+    let doc = Document(layers: [layer])
+    return Controller(model: Model(document: doc))
 }
 
 @Test func controllerSetSelection() {
@@ -123,12 +131,12 @@ private func makeSelectionCtrl() -> Controller {
 // MARK: - Marquee selection tests
 
 private func makeMarqueeCtrl() -> Controller {
-    let rectFar = Element.rect(JasRect(x: 100, y: 100, width: 10, height: 10))
-    let line1 = Element.line(JasLine(x1: 0, y1: 0, x2: 5, y2: 5))
-    let line2 = Element.line(JasLine(x1: 1, y1: 1, x2: 2, y2: 2))
-    let group = Element.group(JasGroup(children: [line1, line2]))
-    let layer = JasLayer(name: "L0", children: [rectFar, group])
-    return Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let rectFar = Element.rect(Rect(x: 100, y: 100, width: 10, height: 10))
+    let line1 = Element.line(Line(x1: 0, y1: 0, x2: 5, y2: 5))
+    let line2 = Element.line(Line(x1: 1, y1: 1, x2: 2, y2: 2))
+    let group = Element.group(Group(children: [line1, line2]))
+    let layer = Layer(name: "L0", children: [rectFar, group])
+    return Controller(model: Model(document: Document(layers: [layer])))
 }
 
 @Test func selectRectHitsElement() {
@@ -168,34 +176,34 @@ private func makeMarqueeCtrl() -> Controller {
 // MARK: - Precise geometric hit-testing tests
 
 @Test func selectRectMissesDiagonalLineCorner() {
-    let line = Element.line(JasLine(x1: 0, y1: 0, x2: 100, y2: 100))
-    let layer = JasLayer(name: "L0", children: [line])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let line = Element.line(Line(x1: 0, y1: 0, x2: 100, y2: 100))
+    let layer = Layer(name: "L0", children: [line])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.selectRect(x: 80, y: 0, width: 20, height: 20)
     #expect(ctrl.document.selection.isEmpty)
 }
 
 @Test func selectRectHitsDiagonalLine() {
-    let line = Element.line(JasLine(x1: 0, y1: 0, x2: 100, y2: 100))
-    let layer = JasLayer(name: "L0", children: [line])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let line = Element.line(Line(x1: 0, y1: 0, x2: 100, y2: 100))
+    let layer = Layer(name: "L0", children: [line])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.selectRect(x: 40, y: 40, width: 20, height: 20)
     #expect(selPaths(ctrl.document.selection).contains([0, 0]))
 }
 
 @Test func selectRectStrokeOnlyRectInteriorMisses() {
-    let r = Element.rect(JasRect(x: 0, y: 0, width: 100, height: 100))
-    let layer = JasLayer(name: "L0", children: [r])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let r = Element.rect(Rect(x: 0, y: 0, width: 100, height: 100))
+    let layer = Layer(name: "L0", children: [r])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.selectRect(x: 30, y: 30, width: 10, height: 10)
     #expect(ctrl.document.selection.isEmpty)
 }
 
 @Test func selectRectFilledRectInteriorHits() {
-    let r = Element.rect(JasRect(x: 0, y: 0, width: 100, height: 100,
-                                  fill: JasFill(color: JasColor(r: 1, g: 0, b: 0))))
-    let layer = JasLayer(name: "L0", children: [r])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let r = Element.rect(Rect(x: 0, y: 0, width: 100, height: 100,
+                                  fill: Fill(color: Color(r: 1, g: 0, b: 0))))
+    let layer = Layer(name: "L0", children: [r])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.selectRect(x: 30, y: 30, width: 10, height: 10)
     #expect(selPaths(ctrl.document.selection).contains([0, 0]))
 }
@@ -203,9 +211,9 @@ private func makeMarqueeCtrl() -> Controller {
 // MARK: - Control point selection tests
 
 @Test func selectControlPoint() {
-    let line = Element.line(JasLine(x1: 10, y1: 20, x2: 50, y2: 60))
-    let layer = JasLayer(name: "L0", children: [line])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let line = Element.line(Line(x1: 10, y1: 20, x2: 50, y2: 60))
+    let layer = Layer(name: "L0", children: [line])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.selectControlPoint(path: [0, 0], index: 1)
     #expect(ctrl.document.selection.count == 1)
     let es = ctrl.document.selection.first!
@@ -224,11 +232,11 @@ private func makeMarqueeCtrl() -> Controller {
 // MARK: - Direct selection tests
 
 @Test func directSelectRectNoGroupExpansion() {
-    let line1 = Element.line(JasLine(x1: 0, y1: 0, x2: 5, y2: 5))
-    let line2 = Element.line(JasLine(x1: 50, y1: 50, x2: 55, y2: 55))
-    let group = Element.group(JasGroup(children: [line1, line2]))
-    let layer = JasLayer(name: "L0", children: [group])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let line1 = Element.line(Line(x1: 0, y1: 0, x2: 5, y2: 5))
+    let line2 = Element.line(Line(x1: 50, y1: 50, x2: 55, y2: 55))
+    let group = Element.group(Group(children: [line1, line2]))
+    let layer = Layer(name: "L0", children: [group])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.directSelectRect(x: -1, y: -1, width: 7, height: 7)
     let paths = selPaths(ctrl.document.selection)
     #expect(paths.contains([0, 0, 0]))
@@ -236,9 +244,9 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func directSelectRectSelectsOnlyHitCPs() {
-    let r = Element.rect(JasRect(x: 0, y: 0, width: 100, height: 100))
-    let layer = JasLayer(name: "L0", children: [r])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let r = Element.rect(Rect(x: 0, y: 0, width: 100, height: 100))
+    let layer = Layer(name: "L0", children: [r])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.directSelectRect(x: -5, y: -5, width: 10, height: 10)
     #expect(ctrl.document.selection.count == 1)
     let es = ctrl.document.selection.first!
@@ -247,9 +255,9 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func directSelectRectNoCPsWhenNoneInRect() {
-    let line = Element.line(JasLine(x1: 0, y1: 0, x2: 100, y2: 100))
-    let layer = JasLayer(name: "L0", children: [line])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let line = Element.line(Line(x1: 0, y1: 0, x2: 100, y2: 100))
+    let layer = Layer(name: "L0", children: [line])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.directSelectRect(x: 40, y: 40, width: 20, height: 20)
     #expect(ctrl.document.selection.count == 1)
     let es = ctrl.document.selection.first!
@@ -257,9 +265,9 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func directSelectRectMissesElement() {
-    let r = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
-    let layer = JasLayer(name: "L0", children: [r])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let r = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [r])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.directSelectRect(x: 200, y: 200, width: 10, height: 10)
     #expect(ctrl.document.selection.isEmpty)
 }
@@ -267,11 +275,11 @@ private func makeMarqueeCtrl() -> Controller {
 // MARK: - Group selection tests
 
 @Test func groupSelectRectNoGroupExpansion() {
-    let line1 = Element.line(JasLine(x1: 0, y1: 0, x2: 5, y2: 5))
-    let line2 = Element.line(JasLine(x1: 50, y1: 50, x2: 55, y2: 55))
-    let group = Element.group(JasGroup(children: [line1, line2]))
-    let layer = JasLayer(name: "L0", children: [group])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let line1 = Element.line(Line(x1: 0, y1: 0, x2: 5, y2: 5))
+    let line2 = Element.line(Line(x1: 50, y1: 50, x2: 55, y2: 55))
+    let group = Element.group(Group(children: [line1, line2]))
+    let layer = Layer(name: "L0", children: [group])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.groupSelectRect(x: -1, y: -1, width: 7, height: 7)
     let paths = selPaths(ctrl.document.selection)
     #expect(paths.contains([0, 0, 0]))
@@ -279,9 +287,9 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func groupSelectRectSelectsAllCPs() {
-    let r = Element.rect(JasRect(x: 0, y: 0, width: 100, height: 100))
-    let layer = JasLayer(name: "L0", children: [r])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let r = Element.rect(Rect(x: 0, y: 0, width: 100, height: 100))
+    let layer = Layer(name: "L0", children: [r])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.groupSelectRect(x: -5, y: -5, width: 10, height: 10)
     #expect(ctrl.document.selection.count == 1)
     let es = ctrl.document.selection.first!
@@ -289,9 +297,9 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func groupSelectRectMissesElement() {
-    let r = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
-    let layer = JasLayer(name: "L0", children: [r])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let r = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [r])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.groupSelectRect(x: 200, y: 200, width: 10, height: 10)
     #expect(ctrl.document.selection.isEmpty)
 }
@@ -299,10 +307,10 @@ private func makeMarqueeCtrl() -> Controller {
 // MARK: - Extend (shift-toggle) selection tests
 
 @Test func extendAddsNewElement() {
-    let r1 = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
-    let r2 = Element.rect(JasRect(x: 50, y: 50, width: 10, height: 10))
-    let layer = JasLayer(name: "L0", children: [r1, r2])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let r1 = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let r2 = Element.rect(Rect(x: 50, y: 50, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [r1, r2])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.selectRect(x: -1, y: -1, width: 12, height: 12)
     #expect(selPaths(ctrl.document.selection) == [[0, 0]])
     ctrl.selectRect(x: 49, y: 49, width: 12, height: 12, extend: true)
@@ -310,10 +318,10 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func extendRemovesExistingElement() {
-    let r1 = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
-    let r2 = Element.rect(JasRect(x: 50, y: 50, width: 10, height: 10))
-    let layer = JasLayer(name: "L0", children: [r1, r2])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let r1 = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let r2 = Element.rect(Rect(x: 50, y: 50, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [r1, r2])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.selectRect(x: -1, y: -1, width: 70, height: 70)
     #expect(selPaths(ctrl.document.selection) == [[0, 0], [0, 1]])
     ctrl.selectRect(x: -1, y: -1, width: 12, height: 12, extend: true)
@@ -321,10 +329,10 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func extendDirectSelect() {
-    let l1 = Element.line(JasLine(x1: 0, y1: 0, x2: 5, y2: 5))
-    let l2 = Element.line(JasLine(x1: 50, y1: 50, x2: 55, y2: 55))
-    let layer = JasLayer(name: "L0", children: [l1, l2])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let l1 = Element.line(Line(x1: 0, y1: 0, x2: 5, y2: 5))
+    let l2 = Element.line(Line(x1: 50, y1: 50, x2: 55, y2: 55))
+    let layer = Layer(name: "L0", children: [l1, l2])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.directSelectRect(x: -1, y: -1, width: 7, height: 7)
     #expect(selPaths(ctrl.document.selection) == [[0, 0]])
     ctrl.directSelectRect(x: 49, y: 49, width: 7, height: 7, extend: true)
@@ -333,9 +341,9 @@ private func makeMarqueeCtrl() -> Controller {
 
 @Test func extendDirectSelectTogglesCPs() {
     // Rect at (0,0) size 10x10 — CPs at (0,0), (10,0), (10,10), (0,10)
-    let r = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
-    let layer = JasLayer(name: "L0", children: [r])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let r = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [r])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     // Direct select top-left corner CP 0 at (0,0)
     ctrl.directSelectRect(x: -1, y: -1, width: 2, height: 2)
     let sel0 = ctrl.document.selection.first { $0.path == [0, 0] }!
@@ -351,10 +359,10 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func extendGroupSelect() {
-    let r1 = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
-    let r2 = Element.rect(JasRect(x: 50, y: 50, width: 10, height: 10))
-    let layer = JasLayer(name: "L0", children: [r1, r2])
-    let ctrl = Controller(model: JasModel(document: JasDocument(layers: [layer])))
+    let r1 = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let r2 = Element.rect(Rect(x: 50, y: 50, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [r1, r2])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.groupSelectRect(x: -1, y: -1, width: 12, height: 12)
     #expect(selPaths(ctrl.document.selection) == [[0, 0]])
     ctrl.groupSelectRect(x: 49, y: 49, width: 12, height: 12, extend: true)
@@ -364,7 +372,7 @@ private func makeMarqueeCtrl() -> Controller {
 // MARK: - Control point positions tests
 
 @Test func lineControlPointPositions() {
-    let line = Element.line(JasLine(x1: 10, y1: 20, x2: 30, y2: 40))
+    let line = Element.line(Line(x1: 10, y1: 20, x2: 30, y2: 40))
     let cps = line.controlPointPositions
     #expect(cps.count == 2)
     #expect(cps[0] == (10, 20))
@@ -372,7 +380,7 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func rectControlPointPositions() {
-    let r = Element.rect(JasRect(x: 5, y: 10, width: 20, height: 30))
+    let r = Element.rect(Rect(x: 5, y: 10, width: 20, height: 30))
     let cps = r.controlPointPositions
     #expect(cps.count == 4)
     #expect(cps[0] == (5, 10))
@@ -382,7 +390,7 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func circleControlPointPositions() {
-    let c = Element.circle(JasCircle(cx: 50, cy: 50, r: 10))
+    let c = Element.circle(Circle(cx: 50, cy: 50, r: 10))
     let cps = c.controlPointPositions
     #expect(cps.count == 4)
     #expect(cps[0] == (50, 40))
@@ -392,7 +400,7 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func ellipseControlPointPositions() {
-    let e = Element.ellipse(JasEllipse(cx: 50, cy: 50, rx: 20, ry: 10))
+    let e = Element.ellipse(Ellipse(cx: 50, cy: 50, rx: 20, ry: 10))
     let cps = e.controlPointPositions
     #expect(cps.count == 4)
     #expect(cps[0] == (50, 40))
@@ -404,7 +412,7 @@ private func makeMarqueeCtrl() -> Controller {
 // MARK: - Move control points tests
 
 @Test func moveLineBothCPs() {
-    let line = Element.line(JasLine(x1: 10, y1: 20, x2: 30, y2: 40))
+    let line = Element.line(Line(x1: 10, y1: 20, x2: 30, y2: 40))
     let moved = line.moveControlPoints([0, 1], dx: 5, dy: -3)
     if case .line(let v) = moved {
         #expect(v.x1 == 15); #expect(v.y1 == 17)
@@ -413,7 +421,7 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func moveLineOneCP() {
-    let line = Element.line(JasLine(x1: 0, y1: 0, x2: 10, y2: 10))
+    let line = Element.line(Line(x1: 0, y1: 0, x2: 10, y2: 10))
     let moved = line.moveControlPoints([1], dx: 5, dy: 5)
     if case .line(let v) = moved {
         #expect(v.x1 == 0); #expect(v.y1 == 0)
@@ -422,7 +430,7 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func moveRectAllCPs() {
-    let rect = Element.rect(JasRect(x: 10, y: 20, width: 30, height: 40))
+    let rect = Element.rect(Rect(x: 10, y: 20, width: 30, height: 40))
     let moved = rect.moveControlPoints([0, 1, 2, 3], dx: 5, dy: -5)
     if case .rect(let v) = moved {
         #expect(v.x == 15); #expect(v.y == 15)
@@ -431,7 +439,7 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func moveRectOneCorner() {
-    let rect = Element.rect(JasRect(x: 0, y: 0, width: 10, height: 10))
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
     let moved = rect.moveControlPoints([2], dx: 5, dy: 5)
     if case .polygon(let v) = moved {
         #expect(v.points.count == 4)
@@ -443,7 +451,7 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func moveCircleAllCPs() {
-    let circle = Element.circle(JasCircle(cx: 50, cy: 50, r: 10))
+    let circle = Element.circle(Circle(cx: 50, cy: 50, r: 10))
     let moved = circle.moveControlPoints([0, 1, 2, 3], dx: 10, dy: -10)
     if case .circle(let v) = moved {
         #expect(v.cx == 60); #expect(v.cy == 40); #expect(v.r == 10)
@@ -451,7 +459,7 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func moveEllipseAllCPs() {
-    let ellipse = Element.ellipse(JasEllipse(cx: 50, cy: 50, rx: 20, ry: 10))
+    let ellipse = Element.ellipse(Ellipse(cx: 50, cy: 50, rx: 20, ry: 10))
     let moved = ellipse.moveControlPoints([0, 1, 2, 3], dx: -5, dy: 5)
     if case .ellipse(let v) = moved {
         #expect(v.cx == 45); #expect(v.cy == 55)
@@ -462,11 +470,11 @@ private func makeMarqueeCtrl() -> Controller {
 // MARK: - Move selection tests
 
 @Test func moveSelectedLine() {
-    let line = Element.line(JasLine(x1: 10, y1: 20, x2: 30, y2: 40))
-    let layer = JasLayer(children: [line])
-    let doc = JasDocument(layers: [layer],
+    let line = Element.line(Line(x1: 10, y1: 20, x2: 30, y2: 40))
+    let layer = Layer(children: [line])
+    let doc = Document(layers: [layer],
                           selection: [ElementSelection(path: [0, 0], controlPoints: [0, 1])])
-    let ctrl = Controller(model: JasModel(document: doc))
+    let ctrl = Controller(model: Model(document: doc))
     ctrl.moveSelection(dx: 5, dy: -3)
     if case .line(let v) = ctrl.document.layers[0].children[0] {
         #expect(v.x1 == 15); #expect(v.y1 == 17)
@@ -475,11 +483,11 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func moveSelectedRect() {
-    let rect = Element.rect(JasRect(x: 0, y: 0, width: 20, height: 10))
-    let layer = JasLayer(children: [rect])
-    let doc = JasDocument(layers: [layer],
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 20, height: 10))
+    let layer = Layer(children: [rect])
+    let doc = Document(layers: [layer],
                           selection: [ElementSelection(path: [0, 0], controlPoints: [0, 1, 2, 3])])
-    let ctrl = Controller(model: JasModel(document: doc))
+    let ctrl = Controller(model: Model(document: doc))
     ctrl.moveSelection(dx: 10, dy: 10)
     if case .rect(let v) = ctrl.document.layers[0].children[0] {
         #expect(v.x == 10); #expect(v.y == 10)
@@ -488,11 +496,11 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func movePartialCPs() {
-    let line = Element.line(JasLine(x1: 0, y1: 0, x2: 10, y2: 10))
-    let layer = JasLayer(children: [line])
-    let doc = JasDocument(layers: [layer],
+    let line = Element.line(Line(x1: 0, y1: 0, x2: 10, y2: 10))
+    let layer = Layer(children: [line])
+    let doc = Document(layers: [layer],
                           selection: [ElementSelection(path: [0, 0], controlPoints: [0])])
-    let ctrl = Controller(model: JasModel(document: doc))
+    let ctrl = Controller(model: Model(document: doc))
     ctrl.moveSelection(dx: 5, dy: 5)
     if case .line(let v) = ctrl.document.layers[0].children[0] {
         #expect(v.x1 == 5); #expect(v.y1 == 5)
@@ -501,15 +509,15 @@ private func makeMarqueeCtrl() -> Controller {
 }
 
 @Test func moveMultipleElements() {
-    let line = Element.line(JasLine(x1: 0, y1: 0, x2: 10, y2: 10))
-    let rect = Element.rect(JasRect(x: 20, y: 20, width: 10, height: 10))
-    let layer = JasLayer(children: [line, rect])
-    let doc = JasDocument(layers: [layer],
+    let line = Element.line(Line(x1: 0, y1: 0, x2: 10, y2: 10))
+    let rect = Element.rect(Rect(x: 20, y: 20, width: 10, height: 10))
+    let layer = Layer(children: [line, rect])
+    let doc = Document(layers: [layer],
                           selection: [
                               ElementSelection(path: [0, 0], controlPoints: [0, 1]),
                               ElementSelection(path: [0, 1], controlPoints: [0, 1, 2, 3]),
                           ])
-    let ctrl = Controller(model: JasModel(document: doc))
+    let ctrl = Controller(model: Model(document: doc))
     ctrl.moveSelection(dx: 3, dy: 4)
     if case .line(let v) = ctrl.document.layers[0].children[0] {
         #expect(v.x1 == 3); #expect(v.y1 == 4)
@@ -518,4 +526,95 @@ private func makeMarqueeCtrl() -> Controller {
     if case .rect(let v) = ctrl.document.layers[0].children[1] {
         #expect(v.x == 23); #expect(v.y == 24)
     } else { Issue.record("Expected rect") }
+}
+
+// MARK: - Copy selection tests
+
+@Test func copySelectionDuplicatesElement() {
+    let rect = Element.rect(Rect(x: 10, y: 20, width: 30, height: 40))
+    let layer = Layer(name: "L0", children: [rect])
+    let baseDoc = Document(layers: [layer])
+    let doc = Document(layers: baseDoc.layers,
+                          selection: selAllCPs(baseDoc, [0, 0]))
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.copySelection(dx: 5, dy: 5)
+    #expect(ctrl.document.layers[0].children.count == 2)
+    if case .rect(let orig) = ctrl.document.layers[0].children[0] {
+        #expect(orig.x == 10); #expect(orig.y == 20)
+    } else { Issue.record("Expected rect") }
+    if case .rect(let copy) = ctrl.document.layers[0].children[1] {
+        #expect(copy.x == 15); #expect(copy.y == 25)
+    } else { Issue.record("Expected rect") }
+}
+
+@Test func copySelectionUpdatesSelectionToCopy() {
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [rect])
+    let baseDoc = Document(layers: [layer])
+    let doc = Document(layers: baseDoc.layers,
+                          selection: selAllCPs(baseDoc, [0, 0]))
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.copySelection(dx: 1, dy: 1)
+    let paths = selPaths(ctrl.document.selection)
+    #expect(paths.contains([0, 1]))
+    #expect(!paths.contains([0, 0]))
+}
+
+// MARK: - Delete selection with nested groups
+
+@Test func deleteSelectionSimple() {
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let circle = Element.circle(Circle(cx: 50, cy: 50, r: 5))
+    let layer = Layer(name: "L0", children: [rect, circle])
+    let doc = Document(layers: [layer],
+                          selection: sel([0, 0]))
+    let doc2 = doc.deleteSelection()
+    #expect(doc2.layers[0].children.count == 1)
+    if case .circle = doc2.layers[0].children[0] { } else { Issue.record("Expected circle") }
+    #expect(doc2.selection.isEmpty)
+}
+
+@Test func deleteSelectionInGroup() {
+    let line1 = Element.line(Line(x1: 0, y1: 0, x2: 1, y2: 1))
+    let line2 = Element.line(Line(x1: 2, y1: 2, x2: 3, y2: 3))
+    let group = Element.group(Group(children: [line1, line2]))
+    let layer = Layer(name: "L0", children: [group])
+    let doc = Document(layers: [layer],
+                          selection: sel([0, 0, 0]))
+    let doc2 = doc.deleteSelection()
+    if case .group(let g) = doc2.layers[0].children[0] {
+        #expect(g.children.count == 1)
+        #expect(g.children[0] == line2)
+    } else { Issue.record("Expected group") }
+}
+
+@Test func deleteSelectionNestedGroup() {
+    let line = Element.line(Line(x1: 0, y1: 0, x2: 1, y2: 1))
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 5, height: 5))
+    let inner = Element.group(Group(children: [line, rect]))
+    let outer = Element.group(Group(children: [inner]))
+    let layer = Layer(name: "L0", children: [outer])
+    let doc = Document(layers: [layer],
+                          selection: sel([0, 0, 0, 1]))
+    let doc2 = doc.deleteSelection()
+    if case .group(let og) = doc2.layers[0].children[0],
+       case .group(let ig) = og.children[0] {
+        #expect(ig.children.count == 1)
+        #expect(ig.children[0] == line)
+    } else { Issue.record("Expected nested groups") }
+}
+
+@Test func deleteMultipleFromSameGroup() {
+    let l1 = Element.line(Line(x1: 0, y1: 0, x2: 1, y2: 1))
+    let l2 = Element.line(Line(x1: 2, y1: 2, x2: 3, y2: 3))
+    let l3 = Element.line(Line(x1: 4, y1: 4, x2: 5, y2: 5))
+    let group = Element.group(Group(children: [l1, l2, l3]))
+    let layer = Layer(name: "L0", children: [group])
+    let doc = Document(layers: [layer],
+                          selection: sel([0, 0, 0], [0, 0, 2]))
+    let doc2 = doc.deleteSelection()
+    if case .group(let g) = doc2.layers[0].children[0] {
+        #expect(g.children.count == 1)
+        #expect(g.children[0] == l2)
+    } else { Issue.record("Expected group") }
 }

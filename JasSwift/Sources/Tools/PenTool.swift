@@ -24,8 +24,8 @@ class PenPoint {
 // MARK: - Pen tool
 
 class PenTool: CanvasTool {
-    private let penCloseRadius: Double = 8.0
-    private let handleSize: CGFloat = 10.0
+    private let penCloseRadius: Double = Double(hitRadius)
+    private let handleSize: CGFloat = handleDrawSize
     var points: [PenPoint] = []
     var penDragging: Bool = false
     var mouseX: Double = 0
@@ -60,9 +60,9 @@ class PenTool: CanvasTool {
                                  x: p0.x, y: p0.y))
             cmds.append(.closePath)
         }
-        let elem = Element.path(JasPath(
+        let elem = Element.path(Path(
             d: cmds,
-            stroke: JasStroke(color: JasColor(r: 0, g: 0, b: 0), width: 1.0)
+            stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)
         ))
         ctx.controller.addElement(elem)
         points.removeAll()

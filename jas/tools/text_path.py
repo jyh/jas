@@ -15,7 +15,7 @@ from geometry.element import (
     Color, CurveTo, Fill, LineTo, MoveTo, Path, TextPath,
     path_closest_offset, path_distance_to_point, path_point_at_offset,
 )
-from tools.tool import CanvasTool, ToolContext
+from tools.tool import CanvasTool, ToolContext, DRAG_THRESHOLD
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
@@ -82,7 +82,7 @@ class TextPathTool(CanvasTool):
             sx, sy = self._drag_start
             dx, dy = x - sx, y - sy
             dist = (dx * dx + dy * dy) ** 0.5
-            if dist > 4:
+            if dist > DRAG_THRESHOLD:
                 nx, ny = -dy / dist, dx / dist
                 mx, my = (sx + x) / 2, (sy + y) / 2
                 self._control = (mx + nx * dist * 0.3, my + ny * dist * 0.3)
@@ -112,7 +112,7 @@ class TextPathTool(CanvasTool):
         w = abs(x - sx)
         h = abs(y - sy)
 
-        if w <= 4 and h <= 4:
+        if w <= DRAG_THRESHOLD and h <= DRAG_THRESHOLD:
             # Click (not drag): check if we hit a Path to convert
             hit = ctx.hit_test_path_curve(x, y)
             if hit is not None:
