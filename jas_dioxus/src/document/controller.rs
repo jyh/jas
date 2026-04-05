@@ -300,6 +300,28 @@ impl Controller {
         model.set_document(new_doc);
     }
 
+    /// Select all unlocked elements in the document.
+    pub fn select_all(model: &mut Model) {
+        let doc = model.document().clone();
+        let mut entries: Selection = Vec::new();
+        for (li, layer) in doc.layers.iter().enumerate() {
+            if let Some(children) = layer.children() {
+                for (ci, child) in children.iter().enumerate() {
+                    if child.locked() {
+                        continue;
+                    }
+                    entries.push(ElementSelection {
+                        path: vec![li, ci],
+                        control_points: all_cps(child),
+                    });
+                }
+            }
+        }
+        let mut new_doc = doc;
+        new_doc.selection = entries;
+        model.set_document(new_doc);
+    }
+
     /// Set the document selection directly.
     pub fn set_selection(model: &mut Model, selection: Selection) {
         let mut doc = model.document().clone();
