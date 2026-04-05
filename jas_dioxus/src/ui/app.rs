@@ -127,6 +127,131 @@ impl AppState {
     }
 }
 
+/// Write text to the system clipboard (fire-and-forget async).
+fn clipboard_write(text: String) {
+    if let Some(window) = web_sys::window() {
+        let clipboard = window.navigator().clipboard();
+        let promise = clipboard.write_text(&text);
+        let _ = wasm_bindgen_futures::JsFuture::from(promise);
+        // Fire and forget — spawn to avoid blocking
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = wasm_bindgen_futures::JsFuture::from(
+                web_sys::window().unwrap().navigator().clipboard().write_text(&text)
+            ).await;
+        });
+    }
+}
+
+/// Read text from the system clipboard, then call the callback with it.
+fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64>, offset: f64) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let clipboard_text = async {
+            let window = web_sys::window()?;
+            let clipboard = window.navigator().clipboard();
+            let promise = clipboard.read_text();
+            let val = wasm_bindgen_futures::JsFuture::from(promise).await.ok()?;
+            val.as_string()
+        }.await;
+
+        let mut st = app.borrow_mut();
+        let tab = st.tab_mut();
+
+        // Check if clipboard contains SVG
+        if let Some(text) = &clipboard_text {
+            let trimmed = text.trim();
+            if trimmed.starts_with("<?xml") || trimmed.starts_with("<svg") {
+                let pasted_doc = svg_to_document(text);
+                tab.model.snapshot();
+                let mut doc = tab.model.document().clone();
+                let idx = doc.selected_layer;
+                let mut new_selection = Vec::new();
+                let base = doc.layers[idx].children().map_or(0, |c| c.len());
+                let mut j = 0;
+                for layer in &pasted_doc.layers {
+                    if let Some(children) = layer.children() {
+                        for child in children {
+                            let translated = translate_element(child, offset, offset);
+                            let path = vec![idx, base + j];
+                            let n = control_point_count(&translated);
+                            new_selection.push(ElementSelection {
+                                path,
+                                control_points: (0..n).collect(),
+                            });
+                            if let Some(layer_children) = doc.layers[idx].children_mut() {
+                                layer_children.push(translated);
+                            }
+                            j += 1;
+                        }
+                    }
+                }
+                if j > 0 {
+                    doc.selection = new_selection;
+                    tab.model.set_document(doc);
+                    drop(st);
+                    revision += 1;
+                    return;
+                }
+            }
+        }
+
+        // Fall back to internal clipboard
+        if tab.clipboard.is_empty() {
+            return;
+        }
+        tab.model.snapshot();
+        let mut doc = tab.model.document().clone();
+        let idx = doc.selected_layer;
+        let mut new_selection = Vec::new();
+        let base = doc.layers[idx].children().map_or(0, |c| c.len());
+        for (j, elem) in tab.clipboard.iter().enumerate() {
+            let translated = translate_element(elem, offset, offset);
+            let path = vec![idx, base + j];
+            let n = control_point_count(&translated);
+            new_selection.push(ElementSelection {
+                path,
+                control_points: (0..n).collect(),
+            });
+            if let Some(children) = doc.layers[idx].children_mut() {
+                children.push(translated);
+            }
+        }
+        doc.selection = new_selection;
+        tab.model.set_document(doc);
+        drop(st);
+        revision += 1;
+    });
+}
+
+/// Build SVG string from selected elements for clipboard export.
+fn selection_to_svg(st: &AppState) -> Option<String> {
+    let tab = st.tab();
+    let doc = tab.model.document();
+    if doc.selection.is_empty() {
+        return None;
+    }
+    let mut elements = Vec::new();
+    for es in &doc.selection {
+        if let Some(elem) = doc.get_element(&es.path) {
+            elements.push(elem.clone());
+        }
+    }
+    if elements.is_empty() {
+        return None;
+    }
+    use crate::document::document::Document;
+    use crate::geometry::element::{LayerElem, CommonProps};
+    let temp_doc = Document {
+        layers: vec![GeoElement::Layer(LayerElem {
+            children: elements,
+            name: String::new(),
+            common: CommonProps::default(),
+        })],
+        selected_layer: 0,
+        selection: Vec::new(),
+    };
+    Some(document_to_svg(&temp_doc))
+}
+
 /// Download a string as a file in the browser.
 fn download_file(filename: &str, content: &str) {
     let window = match web_sys::window() {
@@ -370,6 +495,11 @@ pub fn App() -> Element {
                 Key::Character(ref c) if (c == "c" || c == "C") && cmd => {
                     evt.prevent_default();
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        // Write SVG to system clipboard
+                        if let Some(svg) = selection_to_svg(st) {
+                            clipboard_write(svg);
+                        }
+                        // Also update internal clipboard
                         let tab = st.tab();
                         let doc = tab.model.document();
                         let mut elements = Vec::new();
@@ -384,6 +514,11 @@ pub fn App() -> Element {
                 Key::Character(ref c) if (c == "x" || c == "X") && cmd => {
                     evt.prevent_default();
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        // Write SVG to system clipboard
+                        if let Some(svg) = selection_to_svg(st) {
+                            clipboard_write(svg);
+                        }
+                        // Update internal clipboard and delete
                         let tab = st.tab();
                         let doc = tab.model.document();
                         let mut elements = Vec::new();
@@ -402,31 +537,12 @@ pub fn App() -> Element {
                 Key::Character(ref c) if (c == "v" || c == "V") && cmd => {
                     evt.prevent_default();
                     let offset = if mods.shift() { 0.0 } else { PASTE_OFFSET };
-                    (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                        let tab = st.tab_mut();
-                        if tab.clipboard.is_empty() {
-                            return;
-                        }
-                        tab.model.snapshot();
-                        let mut doc = tab.model.document().clone();
-                        let idx = doc.selected_layer;
-                        let mut new_selection = Vec::new();
-                        let base = doc.layers[idx].children().map_or(0, |c| c.len());
-                        for (j, elem) in tab.clipboard.iter().enumerate() {
-                            let translated = translate_element(elem, offset, offset);
-                            let path = vec![idx, base + j];
-                            let n = control_point_count(&translated);
-                            new_selection.push(ElementSelection {
-                                path,
-                                control_points: (0..n).collect(),
-                            });
-                            if let Some(children) = doc.layers[idx].children_mut() {
-                                children.push(translated);
-                            }
-                        }
-                        doc.selection = new_selection;
-                        tab.model.set_document(doc);
-                    }));
+                    // Try async clipboard read first, fall back to internal
+                    clipboard_read_and_paste(
+                        app_for_keys.clone(),
+                        revision_for_keys.clone(),
+                        offset,
+                    );
                 }
                 Key::Character(ref c) if (c == "a" || c == "A") && cmd => {
                     evt.prevent_default();
