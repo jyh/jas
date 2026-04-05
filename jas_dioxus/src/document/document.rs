@@ -129,6 +129,20 @@ impl Document {
         doc
     }
 
+    /// Return a new Document with new_elem inserted at the given path index.
+    pub fn insert_element_at(&self, path: &ElementPath, new_elem: Element) -> Self {
+        let mut doc = self.clone();
+        if path.is_empty() {
+            return doc;
+        }
+        if path.len() == 1 {
+            doc.layers.insert(path[0], new_elem);
+        } else {
+            insert_at_in_children(&mut doc.layers[path[0]], &path[1..], new_elem);
+        }
+        doc
+    }
+
     /// Return a new Document with the element at path removed.
     pub fn delete_element(&self, path: &ElementPath) -> Self {
         let mut doc = self.clone();
@@ -163,6 +177,16 @@ fn replace_in_children(node: &mut Element, rest: &[usize], new_elem: Element) {
             children[rest[0]] = new_elem;
         } else {
             replace_in_children(&mut children[rest[0]], &rest[1..], new_elem);
+        }
+    }
+}
+
+fn insert_at_in_children(node: &mut Element, rest: &[usize], new_elem: Element) {
+    if let Some(children) = node.children_mut() {
+        if rest.len() == 1 {
+            children.insert(rest[0], new_elem);
+        } else {
+            insert_at_in_children(&mut children[rest[0]], &rest[1..], new_elem);
         }
     }
 }

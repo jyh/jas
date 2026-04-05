@@ -401,6 +401,178 @@ impl Controller {
         model.set_document(new_doc);
     }
 
+    /// Group selected elements into a single Group.
+    pub fn group_selection(model: &mut Model) {
+        let doc = model.document();
+        if doc.selection.is_empty() {
+            return;
+        }
+        let mut paths: Vec<ElementPath> = doc.selection.iter().map(|es| es.path.clone()).collect();
+        paths.sort();
+        if paths.len() < 2 {
+            return;
+        }
+        // All selected elements must be siblings (same parent prefix)
+        let parent: ElementPath = paths[0][..paths[0].len() - 1].to_vec();
+        if !paths.iter().all(|p| p.len() == paths[0].len() && p[..p.len() - 1] == parent[..]) {
+            return;
+        }
+        // Gather elements in order
+        let elements: Vec<Element> = paths
+            .iter()
+            .filter_map(|p| doc.get_element(p).cloned())
+            .collect();
+        if elements.len() != paths.len() {
+            return;
+        }
+        // Delete selected elements in reverse order
+        let mut new_doc = doc.clone();
+        for p in paths.iter().rev() {
+            new_doc = new_doc.delete_element(p);
+        }
+        // Create group and insert at first selected position
+        let group = Element::Group(crate::geometry::element::GroupElem {
+            children: elements,
+            common: crate::geometry::element::CommonProps::default(),
+        });
+        let insert_path = paths[0].clone();
+        new_doc = new_doc.insert_element_at(&insert_path, group.clone());
+        // Select the new group
+        let n = control_point_count(&group);
+        new_doc.selection = vec![ElementSelection {
+            path: insert_path,
+            control_points: (0..n).collect(),
+        }];
+        model.set_document(new_doc);
+    }
+
+    /// Ungroup all selected Group elements, replacing each with its children.
+    pub fn ungroup_selection(model: &mut Model) {
+        let doc = model.document();
+        if doc.selection.is_empty() {
+            return;
+        }
+        // Find selected groups
+        let mut group_paths: Vec<ElementPath> = Vec::new();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                if elem.is_group() {
+                    group_paths.push(es.path.clone());
+                }
+            }
+        }
+        if group_paths.is_empty() {
+            return;
+        }
+        group_paths.sort();
+
+        let orig_doc = doc.clone();
+        let mut new_doc = doc.clone();
+
+        // Process in reverse order to preserve indices
+        for gpath in group_paths.iter().rev() {
+            let group_elem = match new_doc.get_element(gpath).cloned() {
+                Some(e) => e,
+                None => continue,
+            };
+            let children = match group_elem.children() {
+                Some(c) => c.to_vec(),
+                None => continue,
+            };
+            // Delete the group
+            new_doc = new_doc.delete_element(gpath);
+            // Insert children at the group's position
+            if gpath.len() >= 2 {
+                let layer_idx = gpath[0];
+                let child_idx = gpath[1];
+                if let Some(layer_children) = new_doc.layers[layer_idx].children_mut() {
+                    for (j, child) in children.into_iter().enumerate() {
+                        layer_children.insert(child_idx + j, child);
+                    }
+                }
+            }
+        }
+
+        // Build selection for ungrouped children
+        let mut new_selection = Vec::new();
+        let mut offset: i64 = 0;
+        for gpath in &group_paths {
+            let orig_group = match orig_doc.get_element(gpath) {
+                Some(e) => e,
+                None => continue,
+            };
+            let n_children = orig_group.children().map_or(0, |c| c.len());
+            if gpath.len() >= 2 {
+                let layer_idx = gpath[0];
+                let child_idx = (gpath[1] as i64 + offset) as usize;
+                for j in 0..n_children {
+                    let path = vec![layer_idx, child_idx + j];
+                    if let Some(elem) = new_doc.get_element(&path) {
+                        let n = control_point_count(elem);
+                        new_selection.push(ElementSelection {
+                            path,
+                            control_points: (0..n).collect(),
+                        });
+                    }
+                }
+            }
+            offset += n_children as i64 - 1;
+        }
+        new_doc.selection = new_selection;
+        model.set_document(new_doc);
+    }
+
+    /// Ungroup all unlocked Group elements in the entire document.
+    pub fn ungroup_all(model: &mut Model) {
+        let doc = model.document().clone();
+        let mut changed = false;
+
+        fn flatten(children: &[Element], changed: &mut bool) -> Vec<Element> {
+            let mut result = Vec::new();
+            for child in children {
+                if child.is_group() && !child.locked() {
+                    *changed = true;
+                    let inner = child.children().unwrap_or(&[]);
+                    result.extend(flatten(inner, changed));
+                } else if child.is_group() {
+                    // Locked group: recurse into children but keep the group
+                    let inner = child.children().unwrap_or(&[]);
+                    let new_children = flatten(inner, changed);
+                    let mut new_group = child.clone();
+                    if let Some(gc) = new_group.children_mut() {
+                        *gc = new_children;
+                    }
+                    result.push(new_group);
+                } else {
+                    result.push(child.clone());
+                }
+            }
+            result
+        }
+
+        let new_layers: Vec<Element> = doc
+            .layers
+            .iter()
+            .map(|layer| {
+                let children = layer.children().unwrap_or(&[]);
+                let new_children = flatten(children, &mut changed);
+                let mut new_layer = layer.clone();
+                if let Some(lc) = new_layer.children_mut() {
+                    *lc = new_children;
+                }
+                new_layer
+            })
+            .collect();
+
+        if !changed {
+            return;
+        }
+        let mut new_doc = doc;
+        new_doc.layers = new_layers;
+        new_doc.selection.clear();
+        model.set_document(new_doc);
+    }
+
     /// Lock all selected elements.
     pub fn lock_selection(model: &mut Model) {
         let doc = model.document().clone();
