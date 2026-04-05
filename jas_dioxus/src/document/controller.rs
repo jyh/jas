@@ -9,7 +9,8 @@ use std::collections::HashSet;
 use crate::document::document::{ElementPath, ElementSelection, Selection};
 use crate::document::model::Model;
 use crate::geometry::element::{
-    control_point_count, control_points, flatten_path_commands, move_control_points, Element,
+    control_point_count, control_points, flatten_path_commands, move_control_points,
+    move_path_handle, Element, PathElem,
 };
 
 // ---------------------------------------------------------------------------
@@ -415,6 +416,23 @@ impl Controller {
         }
         new_doc.selection.clear();
         model.set_document(new_doc);
+    }
+
+    /// Move a Bezier handle of a path element.
+    pub fn move_path_handle(
+        model: &mut Model,
+        path: &ElementPath,
+        anchor_idx: usize,
+        handle_type: &str,
+        dx: f64,
+        dy: f64,
+    ) {
+        let doc = model.document().clone();
+        if let Some(Element::Path(pe)) = doc.get_element(path) {
+            let new_pe = move_path_handle(pe, anchor_idx, handle_type, dx, dy);
+            let new_doc = doc.replace_element(path, Element::Path(new_pe));
+            model.set_document(new_doc);
+        }
     }
 
     /// Unlock all locked elements.

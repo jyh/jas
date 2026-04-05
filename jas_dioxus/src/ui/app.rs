@@ -12,6 +12,8 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 use crate::canvas::render;
 use crate::document::model::Model;
+use crate::tools::direct_selection::DirectSelectionTool;
+use crate::tools::group_selection::GroupSelectionTool;
 use crate::tools::line::LineTool;
 use crate::tools::pen::PenTool;
 use crate::tools::pencil::PencilTool;
@@ -32,6 +34,8 @@ impl AppState {
     fn new() -> Self {
         let mut tools: HashMap<ToolKind, Box<dyn CanvasTool>> = HashMap::new();
         tools.insert(ToolKind::Selection, Box::new(SelectionTool::new()));
+        tools.insert(ToolKind::DirectSelection, Box::new(DirectSelectionTool::new()));
+        tools.insert(ToolKind::GroupSelection, Box::new(GroupSelectionTool::new()));
         tools.insert(ToolKind::Pen, Box::new(PenTool::new()));
         tools.insert(ToolKind::Pencil, Box::new(PencilTool::new()));
         tools.insert(ToolKind::Text, Box::new(TextTool::new()));
@@ -77,6 +81,8 @@ impl AppState {
 
 const TOOLBAR_TOOLS: &[ToolKind] = &[
     ToolKind::Selection,
+    ToolKind::DirectSelection,
+    ToolKind::GroupSelection,
     ToolKind::Pen,
     ToolKind::Pencil,
     ToolKind::Text,
@@ -89,6 +95,7 @@ fn toolbar_icon(kind: ToolKind) -> &'static str {
     match kind {
         ToolKind::Selection => "\u{25b3}",      // triangle (arrow-like)
         ToolKind::DirectSelection => "\u{25ef}", // hollow circle
+        ToolKind::GroupSelection => "\u{29c9}",  // two joined squares
         ToolKind::Line => "\u{2571}",            // diagonal
         ToolKind::Rect => "\u{25a1}",            // square
         ToolKind::Pen => "\u{270e}",             // pen
@@ -208,6 +215,11 @@ pub fn App() -> Element {
                 Key::Character(ref c) if c == "v" || c == "V" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         st.active_tool = ToolKind::Selection;
+                    }));
+                }
+                Key::Character(ref c) if c == "a" || c == "A" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.active_tool = ToolKind::DirectSelection;
                     }));
                 }
                 Key::Character(ref c) if c == "p" || c == "P" => {
