@@ -6,6 +6,7 @@ use web_sys::CanvasRenderingContext2d;
 
 use crate::document::document::Document;
 use crate::geometry::element::*;
+use crate::geometry::measure::path_point_at_offset;
 use crate::tools::tool::HANDLE_DRAW_SIZE;
 
 // ---------------------------------------------------------------------------
@@ -197,13 +198,54 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element) {
             ctx.fill_text(&e.content, e.x, e.y + e.font_size).ok();
         }
         Element::TextPath(e) => {
-            // Simplified: just draw the path and text at start
-            apply_fill(ctx, e.fill.as_ref());
-            apply_stroke(ctx, e.stroke.as_ref());
+            // Draw the path as a faint guide line
+            ctx.set_stroke_style_str("rgba(180,180,180,0.4)");
+            ctx.set_line_width(1.0);
             ctx.begin_path();
             build_path(ctx, &e.d);
-            if e.stroke.is_some() {
-                ctx.stroke();
+            ctx.stroke();
+
+            // Draw text along the path
+            if !e.content.is_empty() && !e.d.is_empty() {
+                apply_fill(ctx, e.fill.as_ref());
+                let font = format!(
+                    "{} {} {}px {}",
+                    e.font_style, e.font_weight, e.font_size, e.font_family
+                );
+                ctx.set_font(&font);
+
+                // Flatten the path and measure total length
+                let pts = flatten_path_commands(&e.d);
+                let mut lengths = vec![0.0_f64];
+                for i in 1..pts.len() {
+                    let dx = pts[i].0 - pts[i - 1].0;
+                    let dy = pts[i].1 - pts[i - 1].1;
+                    lengths.push(lengths[i - 1] + (dx * dx + dy * dy).sqrt());
+                }
+                let total = *lengths.last().unwrap_or(&0.0);
+                if total > 0.0 {
+                    let mut offset = e.start_offset * total;
+                    for ch in e.content.chars() {
+                        let ch_str = ch.to_string();
+                        let ch_width = ctx.measure_text(&ch_str).map(|m: web_sys::TextMetrics| m.width()).unwrap_or(8.0);
+                        let t = (offset + ch_width / 2.0) / total;
+                        if t > 1.0 { break; }
+                        if t >= 0.0 {
+                            // Get point and tangent at offset
+                            let (px, py) = path_point_at_offset(&e.d, t);
+                            let t2 = ((offset + ch_width) / total).min(1.0);
+                            let (px2, py2) = path_point_at_offset(&e.d, t2);
+                            let angle = (py2 - py).atan2(px2 - px);
+
+                            ctx.save();
+                            ctx.translate(px, py).ok();
+                            ctx.rotate(angle).ok();
+                            ctx.fill_text(&ch_str, -ch_width / 2.0, e.font_size * 0.35).ok();
+                            ctx.restore();
+                        }
+                        offset += ch_width;
+                    }
+                }
             }
         }
         Element::Group(g) => {

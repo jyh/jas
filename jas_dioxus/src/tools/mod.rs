@@ -8,3 +8,4 @@ pub mod pen;
 pub mod pencil;
 pub mod polygon;
 pub mod text;
+pub mod text_path;

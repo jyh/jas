@@ -26,6 +26,7 @@ use crate::tools::polygon::PolygonTool;
 use crate::tools::rect::RectTool;
 use crate::tools::selection::SelectionTool;
 use crate::tools::text::TextTool;
+use crate::tools::text_path::TextPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind, PASTE_OFFSET};
 
 /// Per-tab state: each tab has its own document, tools, and clipboard.
@@ -48,6 +49,7 @@ impl TabState {
         tools.insert(ToolKind::Pen, Box::new(PenTool::new()));
         tools.insert(ToolKind::Pencil, Box::new(PencilTool::new()));
         tools.insert(ToolKind::Text, Box::new(TextTool::new()));
+        tools.insert(ToolKind::TextOnPath, Box::new(TextPathTool::new()));
         tools.insert(ToolKind::Rect, Box::new(RectTool::new()));
         tools.insert(ToolKind::Polygon, Box::new(PolygonTool::new()));
         tools.insert(ToolKind::Line, Box::new(LineTool::new()));
@@ -350,6 +352,7 @@ const TOOLBAR_TOOLS: &[ToolKind] = &[
     ToolKind::Pen,
     ToolKind::Pencil,
     ToolKind::Text,
+    ToolKind::TextOnPath,
     ToolKind::Line,
     ToolKind::Rect,
     ToolKind::Polygon,
@@ -366,6 +369,7 @@ fn toolbar_icon(kind: ToolKind) -> &'static str {
         ToolKind::Pencil => "\u{270f}",          // pencil
         ToolKind::Polygon => "\u{2b53}",          // pentagon
         ToolKind::Text => "T",
+        ToolKind::TextOnPath => "\u{2923}", // ↗ curved arrow
         _ => "?",
     }
 }
