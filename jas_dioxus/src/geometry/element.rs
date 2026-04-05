@@ -1095,3 +1095,72 @@ fn move_path_command_points(
     }
     new_cmds
 }
+
+// ---------------------------------------------------------------------------
+// Translate element
+// ---------------------------------------------------------------------------
+
+fn translate_path_commands(d: &[PathCommand], dx: f64, dy: f64) -> Vec<PathCommand> {
+    d.iter()
+        .map(|cmd| match cmd {
+            PathCommand::MoveTo { x, y } => PathCommand::MoveTo { x: x + dx, y: y + dy },
+            PathCommand::LineTo { x, y } => PathCommand::LineTo { x: x + dx, y: y + dy },
+            PathCommand::CurveTo { x1, y1, x2, y2, x, y } => PathCommand::CurveTo {
+                x1: x1 + dx, y1: y1 + dy, x2: x2 + dx, y2: y2 + dy, x: x + dx, y: y + dy,
+            },
+            PathCommand::SmoothCurveTo { x2, y2, x, y } => PathCommand::SmoothCurveTo {
+                x2: x2 + dx, y2: y2 + dy, x: x + dx, y: y + dy,
+            },
+            PathCommand::QuadTo { x1, y1, x, y } => PathCommand::QuadTo {
+                x1: x1 + dx, y1: y1 + dy, x: x + dx, y: y + dy,
+            },
+            PathCommand::SmoothQuadTo { x, y } => PathCommand::SmoothQuadTo { x: x + dx, y: y + dy },
+            PathCommand::ArcTo { rx, ry, x_rotation, large_arc, sweep, x, y } => PathCommand::ArcTo {
+                rx: *rx, ry: *ry, x_rotation: *x_rotation, large_arc: *large_arc, sweep: *sweep,
+                x: x + dx, y: y + dy,
+            },
+            PathCommand::ClosePath => PathCommand::ClosePath,
+        })
+        .collect()
+}
+
+/// Translate an element by (dx, dy), recursing into groups.
+pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
+    match elem {
+        Element::Line(e) => Element::Line(LineElem {
+            x1: e.x1 + dx, y1: e.y1 + dy, x2: e.x2 + dx, y2: e.y2 + dy, ..e.clone()
+        }),
+        Element::Rect(e) => Element::Rect(RectElem {
+            x: e.x + dx, y: e.y + dy, ..e.clone()
+        }),
+        Element::Circle(e) => Element::Circle(CircleElem {
+            cx: e.cx + dx, cy: e.cy + dy, ..e.clone()
+        }),
+        Element::Ellipse(e) => Element::Ellipse(EllipseElem {
+            cx: e.cx + dx, cy: e.cy + dy, ..e.clone()
+        }),
+        Element::Polyline(e) => Element::Polyline(PolylineElem {
+            points: e.points.iter().map(|(x, y)| (x + dx, y + dy)).collect(), ..e.clone()
+        }),
+        Element::Polygon(e) => Element::Polygon(PolygonElem {
+            points: e.points.iter().map(|(x, y)| (x + dx, y + dy)).collect(), ..e.clone()
+        }),
+        Element::Path(e) => Element::Path(PathElem {
+            d: translate_path_commands(&e.d, dx, dy), ..e.clone()
+        }),
+        Element::Text(e) => Element::Text(TextElem {
+            x: e.x + dx, y: e.y + dy, ..e.clone()
+        }),
+        Element::TextPath(e) => Element::TextPath(TextPathElem {
+            d: translate_path_commands(&e.d, dx, dy), ..e.clone()
+        }),
+        Element::Group(e) => Element::Group(GroupElem {
+            children: e.children.iter().map(|c| translate_element(c, dx, dy)).collect(),
+            ..e.clone()
+        }),
+        Element::Layer(e) => Element::Layer(LayerElem {
+            children: e.children.iter().map(|c| translate_element(c, dx, dy)).collect(),
+            ..e.clone()
+        }),
+    }
+}

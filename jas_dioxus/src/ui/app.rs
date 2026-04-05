@@ -11,7 +11,10 @@ use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 use crate::canvas::render;
+use crate::document::controller::Controller;
+use crate::document::document::ElementSelection;
 use crate::document::model::Model;
+use crate::geometry::element::{control_point_count, translate_element, Element as GeoElement};
 use crate::tools::direct_selection::DirectSelectionTool;
 use crate::tools::group_selection::GroupSelectionTool;
 use crate::tools::line::LineTool;
@@ -21,13 +24,14 @@ use crate::tools::polygon::PolygonTool;
 use crate::tools::rect::RectTool;
 use crate::tools::selection::SelectionTool;
 use crate::tools::text::TextTool;
-use crate::tools::tool::{CanvasTool, ToolKind};
+use crate::tools::tool::{CanvasTool, ToolKind, PASTE_OFFSET};
 
 /// Shared application state.
 struct AppState {
     model: Model,
     active_tool: ToolKind,
     tools: HashMap<ToolKind, Box<dyn CanvasTool>>,
+    clipboard: Vec<GeoElement>,
 }
 
 impl AppState {
@@ -46,6 +50,7 @@ impl AppState {
             model: Model::default(),
             active_tool: ToolKind::Selection,
             tools,
+            clipboard: Vec::new(),
         }
     }
 
@@ -211,7 +216,92 @@ pub fn App() -> Element {
         move |evt: Event<KeyboardData>| {
             let key = evt.data().key();
             let mods = evt.data().modifiers();
+            let cmd = mods.meta() || mods.ctrl();
             match key {
+                // --- Modifier shortcuts (must come before bare key shortcuts) ---
+                Key::Character(ref c) if (c == "z" || c == "Z") && cmd => {
+                    evt.prevent_default();
+                    if mods.shift() {
+                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                            st.model.redo();
+                        }));
+                    } else {
+                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                            st.model.undo();
+                        }));
+                    }
+                }
+                Key::Character(ref c) if (c == "c" || c == "C") && cmd => {
+                    evt.prevent_default();
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        let doc = st.model.document();
+                        let mut elements = Vec::new();
+                        for es in &doc.selection {
+                            if let Some(elem) = doc.get_element(&es.path) {
+                                elements.push(elem.clone());
+                            }
+                        }
+                        st.clipboard = elements;
+                    }));
+                }
+                Key::Character(ref c) if (c == "x" || c == "X") && cmd => {
+                    evt.prevent_default();
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        let doc = st.model.document();
+                        let mut elements = Vec::new();
+                        for es in &doc.selection {
+                            if let Some(elem) = doc.get_element(&es.path) {
+                                elements.push(elem.clone());
+                            }
+                        }
+                        st.clipboard = elements;
+                        st.model.snapshot();
+                        let new_doc = st.model.document().delete_selection();
+                        st.model.set_document(new_doc);
+                    }));
+                }
+                Key::Character(ref c) if (c == "v" || c == "V") && cmd => {
+                    evt.prevent_default();
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if st.clipboard.is_empty() {
+                            return;
+                        }
+                        st.model.snapshot();
+                        let mut doc = st.model.document().clone();
+                        let idx = doc.selected_layer;
+                        let mut new_selection = Vec::new();
+                        let base = doc.layers[idx].children().map_or(0, |c| c.len());
+                        for (j, elem) in st.clipboard.iter().enumerate() {
+                            let translated = translate_element(elem, PASTE_OFFSET, PASTE_OFFSET);
+                            let path = vec![idx, base + j];
+                            let n = control_point_count(&translated);
+                            new_selection.push(ElementSelection {
+                                path,
+                                control_points: (0..n).collect(),
+                            });
+                            if let Some(children) = doc.layers[idx].children_mut() {
+                                children.push(translated);
+                            }
+                        }
+                        doc.selection = new_selection;
+                        st.model.set_document(doc);
+                    }));
+                }
+                Key::Character(ref c) if (c == "g" || c == "G") && cmd => {
+                    evt.prevent_default();
+                    if mods.shift() {
+                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                            st.model.snapshot();
+                            Controller::ungroup_selection(&mut st.model);
+                        }));
+                    } else {
+                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                            st.model.snapshot();
+                            Controller::group_selection(&mut st.model);
+                        }));
+                    }
+                }
+                // --- Tool shortcuts (bare keys, no modifier) ---
                 Key::Character(ref c) if c == "v" || c == "V" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         st.active_tool = ToolKind::Selection;
@@ -246,18 +336,6 @@ pub fn App() -> Element {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         st.active_tool = ToolKind::Rect;
                     }));
-                }
-                Key::Character(ref c) if (c == "z" || c == "Z") && (mods.meta() || mods.ctrl()) => {
-                    evt.prevent_default();
-                    if mods.shift() {
-                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.model.redo();
-                        }));
-                    } else {
-                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.model.undo();
-                        }));
-                    }
                 }
                 Key::Escape | Key::Enter => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
