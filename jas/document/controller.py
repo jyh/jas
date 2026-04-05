@@ -47,10 +47,11 @@ def _segments_intersect(ax1: float, ay1: float, ax2: float, ay2: float,
     if ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and \
        ((d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0)):
         return True
-    if d1 == 0 and _on_segment(bx1, by1, bx2, by2, ax1, ay1): return True
-    if d2 == 0 and _on_segment(bx1, by1, bx2, by2, ax2, ay2): return True
-    if d3 == 0 and _on_segment(ax1, ay1, ax2, ay2, bx1, by1): return True
-    if d4 == 0 and _on_segment(ax1, ay1, ax2, ay2, bx2, by2): return True
+    eps = 1e-10
+    if abs(d1) < eps and _on_segment(bx1, by1, bx2, by2, ax1, ay1): return True
+    if abs(d2) < eps and _on_segment(bx1, by1, bx2, by2, ax2, ay2): return True
+    if abs(d3) < eps and _on_segment(ax1, ay1, ax2, ay2, bx1, by1): return True
+    if abs(d4) < eps and _on_segment(ax1, ay1, ax2, ay2, bx2, by2): return True
     return False
 
 

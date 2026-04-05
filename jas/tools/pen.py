@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from geometry.element import (
@@ -16,6 +17,12 @@ if TYPE_CHECKING:
 
 _PEN_CLOSE_RADIUS = HIT_RADIUS
 _HANDLE_SIZE = HANDLE_DRAW_SIZE
+
+
+class _PenState(Enum):
+    IDLE = auto()          # no points placed yet
+    PLACING = auto()       # points placed, waiting for next click
+    DRAGGING = auto()      # dragging a handle after placing a point
 
 
 class PenPoint:
@@ -35,7 +42,7 @@ class PenPoint:
 class PenTool(CanvasTool):
     def __init__(self):
         self._points: list[PenPoint] = []
-        self._dragging: bool = False
+        self._state: _PenState = _PenState.IDLE
         self._mouse_x: float = 0
         self._mouse_y: float = 0
 
@@ -77,7 +84,7 @@ class PenTool(CanvasTool):
                     stroke=Stroke(color=Color(0, 0, 0), width=1.0))
         ctx.controller.add_element(elem)
         self._points.clear()
-        self._dragging = False
+        self._state = _PenState.IDLE
         ctx.request_update()
 
     def on_press(self, ctx: ToolContext, x: float, y: float,
@@ -88,7 +95,7 @@ class PenTool(CanvasTool):
             if math.hypot(x - p0.x, y - p0.y) <= _PEN_CLOSE_RADIUS:
                 self._finish(ctx, close=True)
                 return
-        self._dragging = True
+        self._state = _PenState.DRAGGING
         self._points.append(PenPoint(x, y))
         ctx.request_update()
 
@@ -96,7 +103,7 @@ class PenTool(CanvasTool):
                 shift: bool = False, dragging: bool = False) -> None:
         self._mouse_x = x
         self._mouse_y = y
-        if self._dragging and self._points:
+        if self._state == _PenState.DRAGGING and self._points:
             pt = self._points[-1]
             pt.hx_out = x
             pt.hy_out = y
@@ -107,7 +114,8 @@ class PenTool(CanvasTool):
 
     def on_release(self, ctx: ToolContext, x: float, y: float,
                    shift: bool = False, alt: bool = False) -> None:
-        self._dragging = False
+        if self._state == _PenState.DRAGGING:
+            self._state = _PenState.PLACING
         ctx.request_update()
 
     def on_double_click(self, ctx: ToolContext, x: float, y: float) -> None:
@@ -147,7 +155,7 @@ class PenTool(CanvasTool):
                              curr.x, curr.y)
             painter.drawPath(path)
         # Draw preview curve from last point to mouse
-        if not self._dragging:
+        if self._state != _PenState.DRAGGING:
             last = self._points[-1]
             mx, my = self._mouse_x, self._mouse_y
             p0 = self._points[0]

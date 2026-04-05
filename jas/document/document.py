@@ -79,7 +79,8 @@ class Document:
             raise ValueError("Path must be non-empty")
         node: Element = self.layers[path[0]]
         for idx in path[1:]:
-            assert isinstance(node, Group)
+            if not isinstance(node, Group):
+                raise ValueError(f"Expected Group at path, got {type(node).__name__}")
             node = node.children[idx]
         return node
 
@@ -89,7 +90,8 @@ class Document:
             raise ValueError("Path must be non-empty")
         new_layers = list(self.layers)
         if len(path) == 1:
-            assert isinstance(new_elem, Layer)
+            if not isinstance(new_elem, Layer):
+                raise ValueError("Top-level element must be a Layer")
             new_layers[path[0]] = new_elem
         else:
             new_layers[path[0]] = _replace_in_group(self.layers[path[0]], path[1:], new_elem)
@@ -102,7 +104,8 @@ class Document:
             raise ValueError("Path must be non-empty")
         if len(path) == 1:
             new_layers = list(self.layers)
-            assert isinstance(new_elem, Layer)
+            if not isinstance(new_elem, Layer):
+                raise ValueError("Top-level element must be a Layer")
             new_layers.insert(path[0] + 1, new_elem)
             return dataclasses.replace(self, layers=tuple(new_layers))
         new_layers = list(self.layers)
@@ -132,14 +135,20 @@ class Document:
         return dataclasses.replace(doc, selection=frozenset())
 
 
+def _expect_group(node: Element, context: str) -> Group:
+    """Validate that node is a Group, raising ValueError if not."""
+    if not isinstance(node, Group):
+        raise ValueError(f"Expected Group {context}, got {type(node).__name__}")
+    return node
+
+
 def _remove_from_group(node: _G, rest: ElementPath) -> _G:
     """Remove the element at rest within a group."""
     new_children = list(node.children)
     if len(rest) == 1:
         del new_children[rest[0]]
     else:
-        child = node.children[rest[0]]
-        assert isinstance(child, Group)
+        child = _expect_group(node.children[rest[0]], "in path")
         new_children[rest[0]] = _remove_from_group(child, rest[1:])
     return dataclasses.replace(node, children=tuple(new_children))
 
@@ -150,8 +159,7 @@ def _insert_after_in_group(node: _G, rest: ElementPath, new_elem: Element) -> _G
     if len(rest) == 1:
         new_children.insert(rest[0] + 1, new_elem)
     else:
-        child = node.children[rest[0]]
-        assert isinstance(child, Group)
+        child = _expect_group(node.children[rest[0]], "in path")
         new_children[rest[0]] = _insert_after_in_group(child, rest[1:], new_elem)
     return dataclasses.replace(node, children=tuple(new_children))
 
@@ -162,7 +170,6 @@ def _replace_in_group(node: _G, rest: ElementPath, new_elem: Element) -> _G:
     if len(rest) == 1:
         new_children[rest[0]] = new_elem
     else:
-        child = node.children[rest[0]]
-        assert isinstance(child, Group)
+        child = _expect_group(node.children[rest[0]], "in path")
         new_children[rest[0]] = _replace_in_group(child, rest[1:], new_elem)
     return dataclasses.replace(node, children=tuple(new_children))

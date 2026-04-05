@@ -190,16 +190,65 @@ let px_to_pt = 72.0 /. 96.0
 
 let pt v = v *. px_to_pt
 
+let parse_hex2 s i =
+  int_of_string ("0x" ^ String.sub s i 2)
+
+let named_colors = [
+  "black", (0, 0, 0); "white", (255, 255, 255); "red", (255, 0, 0);
+  "green", (0, 128, 0); "blue", (0, 0, 255); "yellow", (255, 255, 0);
+  "cyan", (0, 255, 255); "magenta", (255, 0, 255); "gray", (128, 128, 128);
+  "grey", (128, 128, 128); "silver", (192, 192, 192); "maroon", (128, 0, 0);
+  "olive", (128, 128, 0); "lime", (0, 255, 0); "aqua", (0, 255, 255);
+  "teal", (0, 128, 128); "navy", (0, 0, 128); "fuchsia", (255, 0, 255);
+  "purple", (128, 0, 128); "orange", (255, 165, 0); "pink", (255, 192, 203);
+  "brown", (165, 42, 42); "coral", (255, 127, 80); "crimson", (220, 20, 60);
+  "gold", (255, 215, 0); "indigo", (75, 0, 130); "ivory", (255, 255, 240);
+  "khaki", (240, 230, 140); "lavender", (230, 230, 250); "plum", (221, 160, 221);
+  "salmon", (250, 128, 114); "sienna", (160, 82, 45); "tan", (210, 180, 140);
+  "tomato", (255, 99, 71); "turquoise", (64, 224, 208); "violet", (238, 130, 238);
+  "wheat", (245, 222, 179); "steelblue", (70, 130, 180); "skyblue", (135, 206, 235);
+  "slategray", (112, 128, 144); "slategrey", (112, 128, 144);
+  "darkgray", (169, 169, 169); "darkgrey", (169, 169, 169);
+  "lightgray", (211, 211, 211); "lightgrey", (211, 211, 211);
+  "darkblue", (0, 0, 139); "darkgreen", (0, 100, 0); "darkred", (139, 0, 0);
+]
+
+let lookup_named_color name =
+  let lower = String.lowercase_ascii name in
+  match List.assoc_opt lower named_colors with
+  | Some (r, g, b) ->
+    Some (Element.make_color (float r /. 255.0) (float g /. 255.0) (float b /. 255.0))
+  | None -> None
+
 let parse_color s =
   let s = String.trim s in
   if s = "none" then None
+  else match lookup_named_color s with
+  | Some _ as c -> c
+  | None ->
+  if String.length s = 7 && s.[0] = '#' then
+    (* #RRGGBB *)
+    (try
+       let r = parse_hex2 s 1 in let g = parse_hex2 s 3 in let b = parse_hex2 s 5 in
+       Some (Element.make_color (float r /. 255.0) (float g /. 255.0) (float b /. 255.0))
+     with _ -> None)
+  else if String.length s = 4 && s.[0] = '#' then
+    (* #RGB *)
+    (try
+       let c1 = int_of_string ("0x" ^ String.make 2 s.[1]) in
+       let c2 = int_of_string ("0x" ^ String.make 2 s.[2]) in
+       let c3 = int_of_string ("0x" ^ String.make 2 s.[3]) in
+       Some (Element.make_color (float c1 /. 255.0) (float c2 /. 255.0) (float c3 /. 255.0))
+     with _ -> None)
   else
     try Scanf.sscanf s "rgba(%d,%d,%d,%f)"
       (fun r g b a -> Some (Element.make_color ~a (float r /. 255.0) (float g /. 255.0) (float b /. 255.0)))
     with _ ->
     try Scanf.sscanf s "rgb(%d,%d,%d)"
       (fun r g b -> Some (Element.make_color (float r /. 255.0) (float g /. 255.0) (float b /. 255.0)))
-    with _ -> None
+    with _ ->
+      Printf.eprintf "Warning: unrecognized SVG color value: %s\n" s;
+      None
 
 let get_attr attrs name =
   try Some (List.assoc name attrs) with Not_found -> None
@@ -269,6 +318,8 @@ let parse_points s =
 let parse_path_d d =
   let len = String.length d in
   let pos = ref 0 in
+  let cur_x = ref 0.0 in let cur_y = ref 0.0 in
+  let start_x = ref 0.0 in let start_y = ref 0.0 in
   let skip_ws () =
     while !pos < len && (d.[!pos] = ' ' || d.[!pos] = ',' || d.[!pos] = '\n' || d.[!pos] = '\r' || d.[!pos] = '\t') do
       incr pos
@@ -289,6 +340,7 @@ let parse_path_d d =
     end;
     float_of_string (String.sub d start (!pos - start))
   in
+  let update x y = cur_x := x; cur_y := y in
   let cmds = ref [] in
   let add c = cmds := c :: !cmds in
   while !pos < len do
@@ -297,30 +349,96 @@ let parse_path_d d =
     else
       let c = d.[!pos] in
       match c with
-      | 'M' -> incr pos; add (Element.MoveTo (pt (read_num ()), pt (read_num ())))
-      | 'L' -> incr pos; add (Element.LineTo (pt (read_num ()), pt (read_num ())))
+      | 'M' -> incr pos;
+        let x = read_num () in let y = read_num () in
+        add (Element.MoveTo (pt x, pt y));
+        update x y; start_x := x; start_y := y
+      | 'm' -> incr pos;
+        let x = !cur_x +. read_num () in let y = !cur_y +. read_num () in
+        add (Element.MoveTo (pt x, pt y));
+        update x y; start_x := x; start_y := y
+      | 'L' -> incr pos;
+        let x = read_num () in let y = read_num () in
+        add (Element.LineTo (pt x, pt y));
+        update x y
+      | 'l' -> incr pos;
+        let x = !cur_x +. read_num () in let y = !cur_y +. read_num () in
+        add (Element.LineTo (pt x, pt y));
+        update x y
+      | 'H' -> incr pos;
+        let x = read_num () in
+        add (Element.LineTo (pt x, pt !cur_y));
+        cur_x := x
+      | 'h' -> incr pos;
+        let x = !cur_x +. read_num () in
+        add (Element.LineTo (pt x, pt !cur_y));
+        cur_x := x
+      | 'V' -> incr pos;
+        let y = read_num () in
+        add (Element.LineTo (pt !cur_x, pt y));
+        cur_y := y
+      | 'v' -> incr pos;
+        let y = !cur_y +. read_num () in
+        add (Element.LineTo (pt !cur_x, pt y));
+        cur_y := y
       | 'C' -> incr pos;
-        let x1 = pt (read_num ()) in let y1 = pt (read_num ()) in
-        let x2 = pt (read_num ()) in let y2 = pt (read_num ()) in
-        let x = pt (read_num ()) in let y = pt (read_num ()) in
-        add (Element.CurveTo (x1, y1, x2, y2, x, y))
+        let x1 = read_num () in let y1 = read_num () in
+        let x2 = read_num () in let y2 = read_num () in
+        let x = read_num () in let y = read_num () in
+        add (Element.CurveTo (pt x1, pt y1, pt x2, pt y2, pt x, pt y));
+        update x y
+      | 'c' -> incr pos;
+        let x1 = !cur_x +. read_num () in let y1 = !cur_y +. read_num () in
+        let x2 = !cur_x +. read_num () in let y2 = !cur_y +. read_num () in
+        let x = !cur_x +. read_num () in let y = !cur_y +. read_num () in
+        add (Element.CurveTo (pt x1, pt y1, pt x2, pt y2, pt x, pt y));
+        update x y
       | 'S' -> incr pos;
-        let x2 = pt (read_num ()) in let y2 = pt (read_num ()) in
-        let x = pt (read_num ()) in let y = pt (read_num ()) in
-        add (Element.SmoothCurveTo (x2, y2, x, y))
+        let x2 = read_num () in let y2 = read_num () in
+        let x = read_num () in let y = read_num () in
+        add (Element.SmoothCurveTo (pt x2, pt y2, pt x, pt y));
+        update x y
+      | 's' -> incr pos;
+        let x2 = !cur_x +. read_num () in let y2 = !cur_y +. read_num () in
+        let x = !cur_x +. read_num () in let y = !cur_y +. read_num () in
+        add (Element.SmoothCurveTo (pt x2, pt y2, pt x, pt y));
+        update x y
       | 'Q' -> incr pos;
-        let x1 = pt (read_num ()) in let y1 = pt (read_num ()) in
-        let x = pt (read_num ()) in let y = pt (read_num ()) in
-        add (Element.QuadTo (x1, y1, x, y))
-      | 'T' -> incr pos; add (Element.SmoothQuadTo (pt (read_num ()), pt (read_num ())))
+        let x1 = read_num () in let y1 = read_num () in
+        let x = read_num () in let y = read_num () in
+        add (Element.QuadTo (pt x1, pt y1, pt x, pt y));
+        update x y
+      | 'q' -> incr pos;
+        let x1 = !cur_x +. read_num () in let y1 = !cur_y +. read_num () in
+        let x = !cur_x +. read_num () in let y = !cur_y +. read_num () in
+        add (Element.QuadTo (pt x1, pt y1, pt x, pt y));
+        update x y
+      | 'T' -> incr pos;
+        let x = read_num () in let y = read_num () in
+        add (Element.SmoothQuadTo (pt x, pt y));
+        update x y
+      | 't' -> incr pos;
+        let x = !cur_x +. read_num () in let y = !cur_y +. read_num () in
+        add (Element.SmoothQuadTo (pt x, pt y));
+        update x y
       | 'A' -> incr pos;
-        let rx = pt (read_num ()) in let ry = pt (read_num ()) in
+        let rx = read_num () in let ry = read_num () in
         let rot = read_num () in
         let large = read_num () <> 0.0 in
         let sweep = read_num () <> 0.0 in
-        let x = pt (read_num ()) in let y = pt (read_num ()) in
-        add (Element.ArcTo (rx, ry, rot, large, sweep, x, y))
-      | 'Z' | 'z' -> incr pos; add Element.ClosePath
+        let x = read_num () in let y = read_num () in
+        add (Element.ArcTo (pt rx, pt ry, rot, large, sweep, pt x, pt y));
+        update x y
+      | 'a' -> incr pos;
+        let rx = read_num () in let ry = read_num () in
+        let rot = read_num () in
+        let large = read_num () <> 0.0 in
+        let sweep = read_num () <> 0.0 in
+        let x = !cur_x +. read_num () in let y = !cur_y +. read_num () in
+        add (Element.ArcTo (pt rx, pt ry, rot, large, sweep, pt x, pt y));
+        update x y
+      | 'Z' | 'z' -> incr pos; add Element.ClosePath;
+        cur_x := !start_x; cur_y := !start_y
       | _ -> incr pos  (* skip unknown *)
   done;
   List.rev !cmds
@@ -379,29 +497,35 @@ let rec parse_element i =
         let d = parse_path_d (match get_attr attrs "d" with Some s -> s | None -> "") in
         Some (Element.make_path ~fill ~stroke ~opacity ~transform d)
       | "text" ->
-        let content = collect_text i in
         let ff = match get_attr attrs "font-family" with Some s -> s | None -> "sans-serif" in
         let fs = pt (get_attr_f attrs "font-size" 16.0) in
         let fw = match get_attr attrs "font-weight" with Some s -> s | None -> "normal" in
         let fst = match get_attr attrs "font-style" with Some s -> s | None -> "normal" in
         let td = match get_attr attrs "text-decoration" with Some s -> s | None -> "none" in
-        let tw = match get_attr attrs "style" with
-          | Some style ->
-            (try
-              let re = Str.regexp {|inline-size:[ ]*\([0-9.]+\)px|} in
-              ignore (Str.search_forward re style 0);
-              pt (float_of_string (Str.matched_group 1 style))
-            with Not_found -> 0.0)
-          | None -> 0.0
-        in
-        let th = if tw > 0.0 then
-          let lines = max 1 (int_of_float (float_of_int (String.length content) *. fs *. 0.6 /. tw) + 1) in
-          float_of_int lines *. fs *. 1.2
-        else 0.0 in
-        Some (Element.make_text ~font_family:ff ~font_size:fs ~font_weight:fw ~font_style:fst ~text_decoration:td ~text_width:tw ~text_height:th ~fill ~stroke ~opacity ~transform
-          (pt (get_attr_f attrs "x" 0.0))
-          (pt (get_attr_f attrs "y" 0.0))
-          content)
+        let (tp_result, content) = collect_text_or_textpath i in
+        (match tp_result with
+         | Some (tp_d, tp_content, tp_offset) ->
+           Some (Element.make_text_path ~start_offset:tp_offset
+             ~font_family:ff ~font_size:fs ~font_weight:fw ~font_style:fst ~text_decoration:td
+             ~fill ~stroke ~opacity ~transform tp_d tp_content)
+         | None ->
+           let tw = match get_attr attrs "style" with
+             | Some style ->
+               (try
+                 let re = Str.regexp {|inline-size:[ ]*\([0-9.]+\)px|} in
+                 ignore (Str.search_forward re style 0);
+                 pt (float_of_string (Str.matched_group 1 style))
+               with Not_found -> 0.0)
+             | None -> 0.0
+           in
+           let th = if tw > 0.0 then
+             let lines = max 1 (int_of_float (float_of_int (String.length content) *. fs *. 0.6 /. tw) + 1) in
+             float_of_int lines *. fs *. 1.2
+           else 0.0 in
+           Some (Element.make_text ~font_family:ff ~font_size:fs ~font_weight:fw ~font_style:fst ~text_decoration:td ~text_width:tw ~text_height:th ~fill ~stroke ~opacity ~transform
+             (pt (get_attr_f attrs "x" 0.0))
+             (pt (get_attr_f attrs "y" 0.0))
+             content))
       | "g" ->
         let children = parse_children i in
         let label = get_attr attrs "label" in
@@ -421,17 +545,44 @@ let rec parse_element i =
     elem
   | _ -> None
 
-and collect_text i =
+and collect_text_or_textpath i =
+  (* Parse <text> children, looking for <textPath>. Returns (textpath_option, plain_text). *)
   let buf = Buffer.create 64 in
+  let tp_result = ref None in
   let rec loop () =
     match Xmlm.peek i with
     | `El_end -> let _ = Xmlm.input i in ()
     | `Data s -> let _ = Xmlm.input i in Buffer.add_string buf s; loop ()
+    | `El_start ((_, tag), _) when tag = "textPath" ->
+      let (_, tp_attrs) = match Xmlm.input i with `El_start (_, a) -> ("", a) | _ -> ("", []) in
+      let tp_a = attrs_of_xmlm_attrs tp_attrs in
+      let d_str = match get_attr tp_a "path" with Some s -> s | None ->
+        match get_attr tp_a "d" with Some s -> s | None -> "" in
+      let d = parse_path_d d_str in
+      let tp_content = Buffer.create 32 in
+      let rec collect_tp () =
+        match Xmlm.peek i with
+        | `El_end -> let _ = Xmlm.input i in ()
+        | `Data s -> let _ = Xmlm.input i in Buffer.add_string tp_content s; collect_tp ()
+        | `El_start _ -> skip_element_full i; collect_tp ()
+        | `Dtd _ -> let _ = Xmlm.input i in collect_tp ()
+      in
+      collect_tp ();
+      let offset_str = match get_attr tp_a "startOffset" with Some s -> s | None -> "0" in
+      let start_offset =
+        let len = String.length offset_str in
+        if len > 0 && offset_str.[len - 1] = '%' then
+          float_of_string (String.sub offset_str 0 (len - 1)) /. 100.0
+        else
+          (try float_of_string offset_str with _ -> 0.0)
+      in
+      tp_result := Some (d, Buffer.contents tp_content, start_offset);
+      loop ()
     | `El_start _ -> skip_element_full i; loop ()
     | `Dtd _ -> let _ = Xmlm.input i in loop ()
   in
   loop ();
-  Buffer.contents buf
+  (!tp_result, Buffer.contents buf)
 
 and parse_children i =
   let children = ref [] in
@@ -466,19 +617,23 @@ and skip_element_full i =
   | _ -> ()
 
 let svg_to_document svg =
-  let i = Xmlm.make_input (`String (0, svg)) in
-  (* skip dtd *)
-  (match Xmlm.peek i with `Dtd _ -> let _ = Xmlm.input i in () | _ -> ());
-  (* expect <svg> start *)
-  (match Xmlm.input i with `El_start _ -> () | _ -> failwith "expected <svg> element");
-  let children = parse_children i in
-  let layers = Array.to_list (Array.map (fun elem ->
-    match elem with
-    | Element.Layer _ -> elem
-    | Element.Group { children; opacity; transform } ->
-      Element.make_layer ~name:"" ~opacity ~transform children
-    | _ ->
-      Element.make_layer ~name:"" [|elem|]
-  ) children) in
-  let layers = if layers = [] then [Element.make_layer [||]] else layers in
-  Document.make_document (Array.of_list layers)
+  try
+    let i = Xmlm.make_input (`String (0, svg)) in
+    (* skip dtd *)
+    (match Xmlm.peek i with `Dtd _ -> let _ = Xmlm.input i in () | _ -> ());
+    (* expect <svg> start *)
+    (match Xmlm.input i with `El_start _ -> () | _ -> failwith "expected <svg> element");
+    let children = parse_children i in
+    let layers = Array.to_list (Array.map (fun elem ->
+      match elem with
+      | Element.Layer _ -> elem
+      | Element.Group { children; opacity; transform } ->
+        Element.make_layer ~name:"" ~opacity ~transform children
+      | _ ->
+        Element.make_layer ~name:"" [|elem|]
+    ) children) in
+    let layers = if layers = [] then [Element.make_layer [||]] else layers in
+    Document.make_document (Array.of_list layers)
+  with e ->
+    Printf.eprintf "Warning: SVG parse error: %s\n" (Printexc.to_string e);
+    Document.make_document [|Element.make_layer [||]|]

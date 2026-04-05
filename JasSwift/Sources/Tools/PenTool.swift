@@ -1,6 +1,14 @@
 import AppKit
 import Foundation
 
+// MARK: - Pen state
+
+enum PenToolState {
+    case idle       // no points placed yet
+    case placing    // points placed, waiting for next click
+    case dragging   // dragging a handle after placing a point
+}
+
 // MARK: - Pen point
 
 /// A control point in the pen tool's in-progress path.
@@ -27,14 +35,14 @@ class PenTool: CanvasTool {
     private let penCloseRadius: Double = Double(hitRadius)
     private let handleSize: CGFloat = handleDrawSize
     var points: [PenPoint] = []
-    var penDragging: Bool = false
+    var penState: PenToolState = .idle
     var mouseX: Double = 0
     var mouseY: Double = 0
 
     func finish(_ ctx: ToolContext, close: Bool = false) {
         guard points.count >= 2 else {
             points.removeAll()
-            penDragging = false
+            penState = .idle
             ctx.requestUpdate()
             return
         }
@@ -66,7 +74,7 @@ class PenTool: CanvasTool {
         ))
         ctx.controller.addElement(elem)
         points.removeAll()
-        penDragging = false
+        penState = .idle
         ctx.requestUpdate()
     }
 
@@ -79,7 +87,7 @@ class PenTool: CanvasTool {
                 return
             }
         }
-        penDragging = true
+        penState = .dragging
         points.append(PenPoint(x: x, y: y))
         ctx.requestUpdate()
     }
@@ -87,7 +95,7 @@ class PenTool: CanvasTool {
     func onMove(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, dragging: Bool) {
         mouseX = x
         mouseY = y
-        if penDragging, let pt = points.last {
+        if penState == .dragging, let pt = points.last {
             pt.hxOut = x
             pt.hyOut = y
             pt.hxIn = 2 * pt.x - x
@@ -98,7 +106,7 @@ class PenTool: CanvasTool {
     }
 
     func onRelease(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
-        penDragging = false
+        if penState == .dragging { penState = .placing }
         ctx.requestUpdate()
     }
 
@@ -142,7 +150,7 @@ class PenTool: CanvasTool {
         }
 
         // Draw preview curve from last point to mouse
-        if !penDragging {
+        if penState != .dragging {
             let last = points.last!
             let p0 = points[0]
             let nearStart = points.count >= 2 && hypot(mouseX - p0.x, mouseY - p0.y) <= penCloseRadius

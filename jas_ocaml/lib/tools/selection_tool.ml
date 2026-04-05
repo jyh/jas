@@ -1,13 +1,15 @@
 (** Selection tools: selection, group selection, direct selection. *)
 
+type selection_state = Idle | Marquee | Moving
+
 (* ------------------------------------------------------------------ *)
 (* Selection tool base                                                 *)
 (* ------------------------------------------------------------------ *)
 
 class virtual selection_tool_base = object (self)
+  val mutable state : selection_state = Idle
   val mutable drag_start : (float * float) option = None
   val mutable drag_end : (float * float) option = None
-  val mutable moving = false
 
   method virtual private select_rect : Canvas_tool.tool_context -> float -> float -> float -> float -> extend:bool -> unit
   method virtual private check_handle_hit : Canvas_tool.tool_context -> float -> float -> bool
@@ -15,34 +17,34 @@ class virtual selection_tool_base = object (self)
   method on_press (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
     ignore (shift, alt);
     if self#check_handle_hit ctx x y then ()
-    else if ctx.hit_test_selection x y then begin
+    else begin
       drag_start <- Some (x, y);
       drag_end <- Some (x, y);
-      moving <- true
-    end else begin
-      drag_start <- Some (x, y);
-      drag_end <- Some (x, y);
-      moving <- false
+      state <- if ctx.hit_test_selection x y then Moving else Marquee
     end
 
   method on_move (ctx : Canvas_tool.tool_context) x y ~shift ~(dragging : bool) =
     ignore dragging;
-    match drag_start with
-    | Some (sx, sy) ->
-      let (cx, cy) = if shift then Canvas_tool.constrain_angle sx sy x y else (x, y) in
-      drag_end <- Some (cx, cy);
-      ctx.request_update ()
-    | None -> ()
+    match state with
+    | Idle -> ()
+    | Marquee | Moving ->
+      match drag_start with
+      | Some (sx, sy) ->
+        let (cx, cy) = if shift then Canvas_tool.constrain_angle sx sy x y else (x, y) in
+        drag_end <- Some (cx, cy);
+        ctx.request_update ()
+      | None -> ()
 
   method on_release (ctx : Canvas_tool.tool_context) x y ~shift ~alt =
-    match drag_start with
-    | None -> ()
-    | Some (sx, sy) ->
-      let was_moving = moving in
+    match state with
+    | Idle -> ()
+    | _ ->
+      let (sx, sy) = match drag_start with Some s -> s | None -> (x, y) in
+      let was_state = state in
+      state <- Idle;
       drag_start <- None;
       drag_end <- None;
-      moving <- false;
-      if was_moving then begin
+      if was_state = Moving then begin
         let (ex, ey) = if shift then Canvas_tool.constrain_angle sx sy x y else (x, y) in
         let dx = ex -. sx and dy = ey -. sy in
         if dx <> 0.0 || dy <> 0.0 then begin
@@ -64,9 +66,10 @@ class virtual selection_tool_base = object (self)
   method deactivate (_ctx : Canvas_tool.tool_context) = ()
 
   method draw_overlay (ctx : Canvas_tool.tool_context) cr =
-    match drag_start, drag_end with
-    | Some (sx, sy), Some (ex, ey) ->
-      if moving then begin
+    match state, drag_start, drag_end with
+    | Idle, _, _ -> ()
+    | _, Some (sx, sy), Some (ex, ey) ->
+      if state = Moving then begin
         let dx = ex -. sx and dy = ey -. sy in
         Cairo.set_source_rgb cr 0.0 0.47 1.0;
         Cairo.set_line_width cr 1.0;

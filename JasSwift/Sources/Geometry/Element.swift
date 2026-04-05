@@ -113,6 +113,24 @@ public enum PathCommand: Equatable {
             return nil
         }
     }
+
+    /// All significant points (endpoints + control points) for bounds calculation.
+    public var allPoints: [(Double, Double)] {
+        switch self {
+        case .moveTo(let x, let y), .lineTo(let x, let y), .smoothQuadTo(let x, let y):
+            return [(x, y)]
+        case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
+            return [(x1, y1), (x2, y2), (x, y)]
+        case .smoothCurveTo(let x2, let y2, let x, let y):
+            return [(x2, y2), (x, y)]
+        case .quadTo(let x1, let y1, let x, let y):
+            return [(x1, y1), (x, y)]
+        case .arcTo(_, _, _, _, _, let x, let y):
+            return [(x, y)]
+        case .closePath:
+            return []
+        }
+    }
 }
 
 // MARK: - SVG Elements
@@ -603,11 +621,11 @@ public struct Polygon: Equatable {
 }
 
 /// SVG \<path\> element.
-/// Approximate bounds from path command endpoints.
+/// Bounds from path command endpoints and control points.
 func pathBounds(_ d: [PathCommand]) -> BBox {
-    let endpoints = d.compactMap(\.endpoint)
-    guard !endpoints.isEmpty else { return (0, 0, 0, 0) }
-    let xs = endpoints.map(\.0), ys = endpoints.map(\.1)
+    let pts = d.flatMap(\.allPoints)
+    guard !pts.isEmpty else { return (0, 0, 0, 0) }
+    let xs = pts.map(\.0), ys = pts.map(\.1)
     let minX = xs.min()!, minY = ys.min()!
     return (minX, minY, xs.max()! - minX, ys.max()! - minY)
 }

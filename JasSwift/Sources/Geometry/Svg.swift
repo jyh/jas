@@ -203,9 +203,52 @@ private let pxToPt = 72.0 / 96.0
 
 private func toPt(_ v: Double) -> Double { v * pxToPt }
 
+private let namedColors: [String: (Int, Int, Int)] = [
+    "black": (0, 0, 0), "white": (255, 255, 255), "red": (255, 0, 0),
+    "green": (0, 128, 0), "blue": (0, 0, 255), "yellow": (255, 255, 0),
+    "cyan": (0, 255, 255), "magenta": (255, 0, 255), "gray": (128, 128, 128),
+    "grey": (128, 128, 128), "silver": (192, 192, 192), "maroon": (128, 0, 0),
+    "olive": (128, 128, 0), "lime": (0, 255, 0), "aqua": (0, 255, 255),
+    "teal": (0, 128, 128), "navy": (0, 0, 128), "fuchsia": (255, 0, 255),
+    "purple": (128, 0, 128), "orange": (255, 165, 0), "pink": (255, 192, 203),
+    "brown": (165, 42, 42), "coral": (255, 127, 80), "crimson": (220, 20, 60),
+    "gold": (255, 215, 0), "indigo": (75, 0, 130), "ivory": (255, 255, 240),
+    "khaki": (240, 230, 140), "lavender": (230, 230, 250), "plum": (221, 160, 221),
+    "salmon": (250, 128, 114), "sienna": (160, 82, 45), "tan": (210, 180, 140),
+    "tomato": (255, 99, 71), "turquoise": (64, 224, 208), "violet": (238, 130, 238),
+    "wheat": (245, 222, 179), "steelblue": (70, 130, 180), "skyblue": (135, 206, 235),
+    "slategray": (112, 128, 144), "slategrey": (112, 128, 144),
+    "darkgray": (169, 169, 169), "darkgrey": (169, 169, 169),
+    "lightgray": (211, 211, 211), "lightgrey": (211, 211, 211),
+    "darkblue": (0, 0, 139), "darkgreen": (0, 100, 0), "darkred": (139, 0, 0),
+]
+
 private func parseColor(_ s: String) -> Color? {
     let s = s.trimmingCharacters(in: .whitespaces)
     if s == "none" { return nil }
+    // Named SVG colors
+    if let (r, g, b) = namedColors[s.lowercased()] {
+        return Color(r: Double(r) / 255.0, g: Double(g) / 255.0, b: Double(b) / 255.0)
+    }
+    // Hex colors: #RRGGBB or #RGB
+    if s.hasPrefix("#") {
+        let hex = String(s.dropFirst())
+        if hex.count == 6 {
+            guard let val = UInt32(hex, radix: 16) else { return nil }
+            return Color(r: Double((val >> 16) & 0xFF) / 255.0,
+                         g: Double((val >> 8) & 0xFF) / 255.0,
+                         b: Double(val & 0xFF) / 255.0)
+        }
+        if hex.count == 3 {
+            let chars = Array(hex)
+            guard let r = UInt8(String(repeating: chars[0], count: 2), radix: 16),
+                  let g = UInt8(String(repeating: chars[1], count: 2), radix: 16),
+                  let b = UInt8(String(repeating: chars[2], count: 2), radix: 16) else { return nil }
+            return Color(r: Double(r) / 255.0, g: Double(g) / 255.0, b: Double(b) / 255.0)
+        }
+        return nil
+    }
+    // rgba()/rgb() functional notation
     if s.hasPrefix("rgba(") {
         let inner = s.dropFirst(5).dropLast(1)
         let parts = inner.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -221,6 +264,7 @@ private func parseColor(_ s: String) -> Color? {
               let r = Int(parts[0]), let g = Int(parts[1]), let b = Int(parts[2]) else { return nil }
         return Color(r: Double(r) / 255.0, g: Double(g) / 255.0, b: Double(b) / 255.0)
     }
+    print("Warning: unrecognized SVG color value: \(s)")
     return nil
 }
 
@@ -289,6 +333,8 @@ private func parsePathD(_ d: String) -> [PathCommand] {
     let chars = Array(d)
     let len = chars.count
     var pos = 0
+    var curX = 0.0, curY = 0.0
+    var startX = 0.0, startY = 0.0
 
     func skipWs() {
         while pos < len && (chars[pos] == " " || chars[pos] == "," || chars[pos] == "\n" || chars[pos] == "\r" || chars[pos] == "\t") {
@@ -309,39 +355,112 @@ private func parsePathD(_ d: String) -> [PathCommand] {
         return Double(String(chars[start..<pos])) ?? 0
     }
 
+    func update(_ x: Double, _ y: Double) { curX = x; curY = y }
+
     while pos < len {
         skipWs()
         guard pos < len else { break }
         let c = chars[pos]
         switch c {
-        case "M": pos += 1; commands.append(.moveTo(toPt(readNum()), toPt(readNum())))
-        case "L": pos += 1; commands.append(.lineTo(toPt(readNum()), toPt(readNum())))
+        case "M":
+            pos += 1; let x = readNum(), y = readNum()
+            commands.append(.moveTo(toPt(x), toPt(y)))
+            update(x, y); startX = x; startY = y
+        case "m":
+            pos += 1; let x = curX + readNum(), y = curY + readNum()
+            commands.append(.moveTo(toPt(x), toPt(y)))
+            update(x, y); startX = x; startY = y
+        case "L":
+            pos += 1; let x = readNum(), y = readNum()
+            commands.append(.lineTo(toPt(x), toPt(y)))
+            update(x, y)
+        case "l":
+            pos += 1; let x = curX + readNum(), y = curY + readNum()
+            commands.append(.lineTo(toPt(x), toPt(y)))
+            update(x, y)
+        case "H":
+            pos += 1; let x = readNum()
+            commands.append(.lineTo(toPt(x), toPt(curY)))
+            curX = x
+        case "h":
+            pos += 1; let x = curX + readNum()
+            commands.append(.lineTo(toPt(x), toPt(curY)))
+            curX = x
+        case "V":
+            pos += 1; let y = readNum()
+            commands.append(.lineTo(toPt(curX), toPt(y)))
+            curY = y
+        case "v":
+            pos += 1; let y = curY + readNum()
+            commands.append(.lineTo(toPt(curX), toPt(y)))
+            curY = y
         case "C":
             pos += 1
-            let x1 = toPt(readNum()), y1 = toPt(readNum())
-            let x2 = toPt(readNum()), y2 = toPt(readNum())
-            let x = toPt(readNum()), y = toPt(readNum())
-            commands.append(.curveTo(x1: x1, y1: y1, x2: x2, y2: y2, x: x, y: y))
+            let x1 = readNum(), y1 = readNum()
+            let x2 = readNum(), y2 = readNum()
+            let x = readNum(), y = readNum()
+            commands.append(.curveTo(x1: toPt(x1), y1: toPt(y1), x2: toPt(x2), y2: toPt(y2), x: toPt(x), y: toPt(y)))
+            update(x, y)
+        case "c":
+            pos += 1
+            let x1 = curX + readNum(), y1 = curY + readNum()
+            let x2 = curX + readNum(), y2 = curY + readNum()
+            let x = curX + readNum(), y = curY + readNum()
+            commands.append(.curveTo(x1: toPt(x1), y1: toPt(y1), x2: toPt(x2), y2: toPt(y2), x: toPt(x), y: toPt(y)))
+            update(x, y)
         case "S":
             pos += 1
-            let x2 = toPt(readNum()), y2 = toPt(readNum())
-            let x = toPt(readNum()), y = toPt(readNum())
-            commands.append(.smoothCurveTo(x2: x2, y2: y2, x: x, y: y))
+            let x2 = readNum(), y2 = readNum()
+            let x = readNum(), y = readNum()
+            commands.append(.smoothCurveTo(x2: toPt(x2), y2: toPt(y2), x: toPt(x), y: toPt(y)))
+            update(x, y)
+        case "s":
+            pos += 1
+            let x2 = curX + readNum(), y2 = curY + readNum()
+            let x = curX + readNum(), y = curY + readNum()
+            commands.append(.smoothCurveTo(x2: toPt(x2), y2: toPt(y2), x: toPt(x), y: toPt(y)))
+            update(x, y)
         case "Q":
             pos += 1
-            let x1 = toPt(readNum()), y1 = toPt(readNum())
-            let x = toPt(readNum()), y = toPt(readNum())
-            commands.append(.quadTo(x1: x1, y1: y1, x: x, y: y))
-        case "T": pos += 1; commands.append(.smoothQuadTo(toPt(readNum()), toPt(readNum())))
+            let x1 = readNum(), y1 = readNum()
+            let x = readNum(), y = readNum()
+            commands.append(.quadTo(x1: toPt(x1), y1: toPt(y1), x: toPt(x), y: toPt(y)))
+            update(x, y)
+        case "q":
+            pos += 1
+            let x1 = curX + readNum(), y1 = curY + readNum()
+            let x = curX + readNum(), y = curY + readNum()
+            commands.append(.quadTo(x1: toPt(x1), y1: toPt(y1), x: toPt(x), y: toPt(y)))
+            update(x, y)
+        case "T":
+            pos += 1; let x = readNum(), y = readNum()
+            commands.append(.smoothQuadTo(toPt(x), toPt(y)))
+            update(x, y)
+        case "t":
+            pos += 1; let x = curX + readNum(), y = curY + readNum()
+            commands.append(.smoothQuadTo(toPt(x), toPt(y)))
+            update(x, y)
         case "A":
             pos += 1
-            let rx = toPt(readNum()), ry = toPt(readNum())
+            let rx = readNum(), ry = readNum()
             let rot = readNum()
             let large = readNum() != 0
             let sweep = readNum() != 0
-            let x = toPt(readNum()), y = toPt(readNum())
-            commands.append(.arcTo(rx: rx, ry: ry, rotation: rot, largeArc: large, sweep: sweep, x: x, y: y))
-        case "Z", "z": pos += 1; commands.append(.closePath)
+            let x = readNum(), y = readNum()
+            commands.append(.arcTo(rx: toPt(rx), ry: toPt(ry), rotation: rot, largeArc: large, sweep: sweep, x: toPt(x), y: toPt(y)))
+            update(x, y)
+        case "a":
+            pos += 1
+            let rx = readNum(), ry = readNum()
+            let rot = readNum()
+            let large = readNum() != 0
+            let sweep = readNum() != 0
+            let x = curX + readNum(), y = curY + readNum()
+            commands.append(.arcTo(rx: toPt(rx), ry: toPt(ry), rotation: rot, largeArc: large, sweep: sweep, x: toPt(x), y: toPt(y)))
+            update(x, y)
+        case "Z", "z":
+            pos += 1; commands.append(.closePath)
+            curX = startX; curY = startY
         default: pos += 1
         }
     }
@@ -402,12 +521,34 @@ private func parseElement(_ node: XMLNode) -> Element? {
                               opacity: opacity, transform: transform))
 
     case "text":
-        let content = elem.stringValue ?? ""
         let ff = elem.attribute(forName: "font-family")?.stringValue ?? "sans-serif"
         let fs = toPt(attrF(elem, "font-size", 16.0))
         let fw = elem.attribute(forName: "font-weight")?.stringValue ?? "normal"
         let fst = elem.attribute(forName: "font-style")?.stringValue ?? "normal"
         let td = elem.attribute(forName: "text-decoration")?.stringValue ?? "none"
+        // Check for <textPath> child
+        if let children = elem.children {
+            for child in children {
+                guard let tpElem = child as? XMLElement, tpElem.localName == "textPath" else { continue }
+                let dStr = tpElem.attribute(forName: "path")?.stringValue
+                        ?? tpElem.attribute(forName: "d")?.stringValue ?? ""
+                let d = parsePathD(dStr)
+                let tpContent = tpElem.stringValue ?? ""
+                var startOffset = 0.0
+                let offsetStr = tpElem.attribute(forName: "startOffset")?.stringValue ?? "0"
+                if offsetStr.hasSuffix("%") {
+                    startOffset = (Double(String(offsetStr.dropLast())) ?? 0) / 100.0
+                } else {
+                    startOffset = Double(offsetStr) ?? 0
+                }
+                return .textPath(TextPath(
+                    d: d, content: tpContent, startOffset: startOffset,
+                    fontFamily: ff, fontSize: fs,
+                    fontWeight: fw, fontStyle: fst, textDecoration: td,
+                    fill: fill, stroke: stroke, opacity: opacity, transform: transform))
+            }
+        }
+        let content = elem.stringValue ?? ""
         var tw = 0.0
         if let style = elem.attribute(forName: "style")?.stringValue {
             if let range = style.range(of: #"inline-size:\s*([\d.]+)px"#, options: .regularExpression) {
@@ -453,8 +594,12 @@ private func parseElement(_ node: XMLNode) -> Element? {
 }
 
 public func svgToDocument(_ svg: String) -> Document {
-    guard let data = svg.data(using: .utf8),
-          let xmlDoc = try? XMLDocument(data: data, options: []) else {
+    guard let data = svg.data(using: .utf8) else {
+        print("Warning: SVG string is not valid UTF-8")
+        return Document(layers: [Layer(children: [])])
+    }
+    guard let xmlDoc = try? XMLDocument(data: data, options: []) else {
+        print("Warning: Failed to parse SVG XML")
         return Document(layers: [Layer(children: [])])
     }
     guard let root = xmlDoc.rootElement() else {

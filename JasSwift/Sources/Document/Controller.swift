@@ -32,10 +32,11 @@ private func segmentsIntersect(_ ax1: Double, _ ay1: Double, _ ax2: Double, _ ay
     let d4 = cross(ax1, ay1, ax2, ay2, bx2, by2)
     if ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)) { return true }
-    if d1 == 0 && onSegment(bx1, by1, bx2, by2, ax1, ay1) { return true }
-    if d2 == 0 && onSegment(bx1, by1, bx2, by2, ax2, ay2) { return true }
-    if d3 == 0 && onSegment(ax1, ay1, ax2, ay2, bx1, by1) { return true }
-    if d4 == 0 && onSegment(ax1, ay1, ax2, ay2, bx2, by2) { return true }
+    let eps = 1e-10
+    if abs(d1) < eps && onSegment(bx1, by1, bx2, by2, ax1, ay1) { return true }
+    if abs(d2) < eps && onSegment(bx1, by1, bx2, by2, ax2, ay2) { return true }
+    if abs(d3) < eps && onSegment(ax1, ay1, ax2, ay2, bx1, by1) { return true }
+    if abs(d4) < eps && onSegment(ax1, ay1, ax2, ay2, bx2, by2) { return true }
     return false
 }
 
@@ -337,7 +338,7 @@ public class Controller {
     }
 
     public func selectElement(_ path: ElementPath) {
-        precondition(!path.isEmpty, "Path must be non-empty")
+        guard !path.isEmpty else { fatalError("Path must be non-empty") }
         let doc = model.document
         if path.count >= 2 {
             let parentPath = Array(path.dropLast())
@@ -360,7 +361,7 @@ public class Controller {
     }
 
     public func selectControlPoint(path: ElementPath, index: Int) {
-        precondition(!path.isEmpty, "Path must be non-empty")
+        guard !path.isEmpty else { fatalError("Path must be non-empty") }
         let doc = model.document
         let es = ElementSelection(path: path, controlPoints: [index])
         model.document = Document(layers: doc.layers,

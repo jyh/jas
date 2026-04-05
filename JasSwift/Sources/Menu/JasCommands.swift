@@ -147,8 +147,14 @@ public struct JasCommands: Commands {
 
     private func save() {
         guard let model = model else { return }
+        JasCommands.saveModel(model)
+    }
+
+    /// Save a model to disk (named file) or present Save As for untitled.
+    /// Shared between JasCommands menu and ContentView close-tab prompt.
+    public static func saveModel(_ model: Model) {
         if model.filename.hasPrefix("Untitled-") {
-            saveAs()
+            saveModelAs(model)
             return
         }
         let svg = documentToSvg(model.document)
@@ -168,6 +174,14 @@ public struct JasCommands: Commands {
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
+            let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+            if let size = attrs[.size] as? Int, size > 100 * 1024 * 1024 {
+                let alert = NSAlert()
+                alert.messageText = "File too large (over 100 MB)."
+                alert.alertStyle = .critical
+                alert.runModal()
+                return
+            }
             let svg = try String(contentsOf: url, encoding: .utf8)
             let newModel = Model(document: svgToDocument(svg), filename: url.path)
             addCanvas?(newModel)
@@ -179,6 +193,11 @@ public struct JasCommands: Commands {
 
     private func saveAs() {
         guard let model = model else { return }
+        JasCommands.saveModelAs(model)
+    }
+
+    /// Present Save As panel and save to chosen location.
+    public static func saveModelAs(_ model: Model) {
         let panel = NSSavePanel()
         panel.title = "Save As"
         panel.nameFieldStringValue = (model.filename as NSString).lastPathComponent
@@ -208,6 +227,14 @@ public struct JasCommands: Commands {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
+            let attrs = try FileManager.default.attributesOfItem(atPath: model.filename)
+            if let size = attrs[.size] as? Int, size > 100 * 1024 * 1024 {
+                let alert = NSAlert()
+                alert.messageText = "File too large (over 100 MB)."
+                alert.alertStyle = .critical
+                alert.runModal()
+                return
+            }
             let svg = try String(contentsOfFile: model.filename, encoding: .utf8)
             let newDoc = svgToDocument(svg)
             model.snapshot()
@@ -221,8 +248,18 @@ public struct JasCommands: Commands {
 
     private func translateElement(_ elem: Element, dx: Double, dy: Double) -> Element {
         if dx == 0 && dy == 0 { return elem }
-        let n = elem.controlPointCount
-        return elem.moveControlPoints(Set(0..<n), dx: dx, dy: dy)
+        switch elem {
+        case .group(let g):
+            return .group(Group(children: g.children.map { translateElement($0, dx: dx, dy: dy) },
+                                opacity: g.opacity, transform: g.transform))
+        case .layer(let l):
+            return .layer(Layer(name: l.name,
+                                children: l.children.map { translateElement($0, dx: dx, dy: dy) },
+                                opacity: l.opacity, transform: l.transform))
+        default:
+            let n = elem.controlPointCount
+            return elem.moveControlPoints(Set(0..<n), dx: dx, dy: dy)
+        }
     }
 
     private func isSvg(_ text: String) -> Bool {
