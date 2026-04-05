@@ -554,6 +554,7 @@ def _reflect_handle_keep_distance(ax: float, ay: float,
 def move_path_handle(elem: Path, anchor_idx: int, handle_type: str,
                      dx: float, dy: float) -> Path:
     """Move a specific handle ('in' or 'out') of a path anchor by (dx, dy)."""
+    from dataclasses import replace
     d = elem.d
     cmd_indices: list[int] = []
     for ci, cmd in enumerate(d):

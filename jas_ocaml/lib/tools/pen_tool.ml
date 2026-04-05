@@ -13,8 +13,8 @@ type pen_point = {
 let make_pen_point x y =
   { px = x; py = y; hx_in = x; hy_in = y; hx_out = x; hy_out = y; smooth = false }
 
-let handle_size = 6.0
-let pen_close_radius = 6.0
+let handle_size = 10.0
+let pen_close_radius = 8.0
 
 class pen_tool = object (self)
   val mutable points : pen_point list = []

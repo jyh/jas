@@ -368,7 +368,7 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
 // MARK: - Selection overlay drawing
 
 private let selectionColor = CGColor(red: 0, green: 0.47, blue: 1.0, alpha: 1.0)
-private let handleSize: CGFloat = 6.0
+private let handleSize: CGFloat = 10.0
 
 /// Draw an element's selection overlay (outline + control handles).
 /// Internal so tools can call it via the ToolContext.
@@ -559,7 +559,7 @@ class CanvasNSView: NSView {
     private var textEditor: NSTextField?
     private var editingPath: ElementPath?
 
-    private let hitRadius: CGFloat = 6.0
+    private let hitRadius: CGFloat = 8.0
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }

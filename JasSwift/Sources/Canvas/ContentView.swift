@@ -19,8 +19,8 @@ public enum Tool: String, CaseIterable {
 
 public struct ContentView: View {
     @State private var currentTool: Tool = .selection
-    @State private var canvasPosition: CGPoint = CGPoint(x: 50, y: 50)
-    @State private var toolbarPosition: CGPoint = CGPoint(x: 10, y: 10)
+    @State private var canvasPosition: CGPoint = CGPoint(x: 84, y: 0)
+    @State private var toolbarPosition: CGPoint = CGPoint(x: 0, y: 0)
     @StateObject private var model = JasModel()
 
     public init() {}

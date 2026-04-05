@@ -332,7 +332,7 @@ and rounded_rect cr x y w h rx ry =
   Cairo.line_to cr x (y +. ry);
   Cairo.curve_to cr x y (x +. rx) y (x +. rx) y
 
-let handle_size = 6.0
+let handle_size = 10.0
 
 let control_points (elem : Element.element) =
   Element.control_points elem
@@ -492,7 +492,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
     val mutable drag_offset_x = 0.0
     val mutable drag_offset_y = 0.0
     val mutable current_doc = model#document
-    val hit_radius = 6.0
+    val hit_radius = 8.0
     (* Inline text editing state *)
     val mutable text_editor : GEdit.entry option = None
     val mutable editing_path : int list option = None

@@ -37,15 +37,16 @@ class MainWindow(QMainWindow):
         self.toolbar_window.setWindowTitle("Tools")
         self.mdi_area.addSubWindow(self.toolbar_window)
         self.toolbar_window.resize(80, 100)
-        self.toolbar_window.move(10, 10)
+        self.toolbar_window.move(0, 0)
         self.toolbar_window.show()
 
-        # Canvas subwindow (view)
+        # Canvas subwindow (view) — placed right next to the toolbar
         self.canvas = CanvasWidget(model=self.model, controller=self.controller)
         self.sub_window = QMdiSubWindow()
         self.sub_window.setWidget(self.canvas)
         self.mdi_area.addSubWindow(self.sub_window)
         self.sub_window.resize(820, 640)
+        self.sub_window.move(self.toolbar_window.frameGeometry().right() + 4, 0)
         self.sub_window.show()
         self.sub_window.setWindowTitle(self.model.document.title)
 
