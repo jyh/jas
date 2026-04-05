@@ -53,6 +53,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Rect of {
       x : float; y : float;
@@ -62,6 +63,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Circle of {
       cx : float; cy : float; r : float;
@@ -69,6 +71,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Ellipse of {
       cx : float; cy : float;
@@ -77,6 +80,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Polyline of {
       points : (float * float) list;
@@ -84,6 +88,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Polygon of {
       points : (float * float) list;
@@ -91,6 +96,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Path of {
       d : path_command list;
@@ -98,6 +104,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Text of {
       x : float; y : float;
@@ -113,6 +120,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Text_path of {
       d : path_command list;
@@ -127,17 +135,20 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Group of {
       children : element array;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Layer of {
       name : string;
       children : element array;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
 
 (** Return the bounding box as (x, y, width, height). *)
@@ -152,17 +163,22 @@ val identity_transform : transform
 val make_translate : float -> float -> transform
 val make_scale : float -> float -> transform
 val make_rotate : float -> transform
-val make_line : ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> float -> float -> float -> float -> element
-val make_rect : ?rx:float -> ?ry:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> float -> float -> float -> float -> element
-val make_circle : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> float -> float -> float -> element
-val make_ellipse : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> float -> float -> float -> float -> element
-val make_polyline : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> (float * float) list -> element
-val make_polygon : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> (float * float) list -> element
-val make_path : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> path_command list -> element
-val make_text : ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?text_width:float -> ?text_height:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> float -> float -> string -> element
-val make_text_path : ?start_offset:float -> ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> path_command list -> string -> element
-val make_group : ?opacity:float -> ?transform:transform option -> element array -> element
-val make_layer : ?name:string -> ?opacity:float -> ?transform:transform option -> element array -> element
+val make_line : ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
+val make_rect : ?rx:float -> ?ry:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
+val make_circle : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> element
+val make_ellipse : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
+val make_polyline : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
+val make_polygon : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
+val make_path : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> path_command list -> element
+val make_text : ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?text_width:float -> ?text_height:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> string -> element
+val make_text_path : ?start_offset:float -> ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> path_command list -> string -> element
+val make_group : ?opacity:float -> ?transform:transform option -> ?locked:bool -> element array -> element
+val make_layer : ?name:string -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> element array -> element
+
+(** {2 Lock state} *)
+
+val is_locked : element -> bool
+val set_locked : bool -> element -> element
 
 (** {2 Control points} *)
 

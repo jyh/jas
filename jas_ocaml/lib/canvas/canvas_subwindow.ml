@@ -20,7 +20,7 @@ let rec draw_element cr (elem : Element.element) =
   let open Element in
   Cairo.save cr;
   begin match elem with
-  | Line { x1; y1; x2; y2; stroke; opacity; transform } ->
+  | Line { x1; y1; x2; y2; stroke; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     apply_stroke cr stroke;
@@ -30,7 +30,7 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform } ->
+  | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     if rx > 0.0 || ry > 0.0 then
@@ -41,7 +41,7 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Circle { cx; cy; r; fill; stroke; opacity; transform } ->
+  | Circle { cx; cy; r; fill; stroke; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     Cairo.arc cr cx cy ~r ~a1:0.0 ~a2:(2.0 *. Float.pi);
@@ -49,7 +49,7 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform } ->
+  | Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     Cairo.save cr;
@@ -61,7 +61,7 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Polyline { points; fill; stroke; opacity; transform } ->
+  | Polyline { points; fill; stroke; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     draw_points cr points false;
@@ -69,7 +69,7 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Polygon { points; fill; stroke; opacity; transform } ->
+  | Polygon { points; fill; stroke; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     draw_points cr points true;
@@ -77,7 +77,7 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Path { d; fill; stroke; opacity; transform } ->
+  | Path { d; fill; stroke; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     build_path cr d;
@@ -211,7 +211,7 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Group { children; opacity; transform } ->
+  | Group { children; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     Array.iter (draw_element cr) children;

@@ -284,6 +284,8 @@ class Controller:
         entries: list[ElementSelection] = []
         for li, layer in enumerate(doc.layers):
             for ci, child in enumerate(layer.children):
+                if child.locked:
+                    continue
                 if isinstance(child, Group) and not isinstance(child, Layer):
                     if any(_element_intersects_rect(gc, x, y, width, height)
                            for gc in child.children):
@@ -311,6 +313,8 @@ class Controller:
         entries: list[ElementSelection] = []
 
         def _check(path: ElementPath, elem: Element) -> None:
+            if elem.locked:
+                return
             if isinstance(elem, (Group, Layer)):
                 for i, child in enumerate(elem.children):
                     _check(path + (i,), child)
@@ -338,6 +342,8 @@ class Controller:
         entries: list[ElementSelection] = []
 
         def _check(path: ElementPath, elem: Element) -> None:
+            if elem.locked:
+                return
             if isinstance(elem, (Group, Layer)):
                 for i, child in enumerate(elem.children):
                     _check(path + (i,), child)
@@ -370,11 +376,14 @@ class Controller:
 
         If the element's immediate parent is a Group (not a Layer), all
         children of that Group are selected.  Otherwise just the single
-        element is selected.
+        element is selected.  Locked elements cannot be selected.
         """
         if not path:
             raise ValueError("Path must be non-empty")
         doc = self._model.document
+        elem = doc.get_element(path)
+        if elem.locked:
+            return
         if len(path) >= 2:
             parent_path = path[:-1]
             parent = doc.get_element(parent_path)
@@ -386,7 +395,6 @@ class Controller:
                 )
                 self._model.document = replace(doc, selection=selection)
                 return
-        elem = doc.get_element(path)
         self._model.document = replace(
             doc, selection=frozenset({ElementSelection(path=path,
                                                        control_points=_all_cps(elem))})
@@ -435,6 +443,66 @@ class Controller:
                                                control_points=all_cps))
         self._model.document = replace(
             new_doc, selection=frozenset(new_selection))
+
+    def lock_selection(self) -> None:
+        """Lock all selected elements and clear the selection.
+
+        When a Group is locked, all its children are locked recursively.
+        """
+        doc = self._model.document
+        if not doc.selection:
+            return
+
+        def _lock(elem: Element) -> Element:
+            if isinstance(elem, Group) and not isinstance(elem, Layer):
+                new_children = tuple(_lock(c) for c in elem.children)
+                return replace(elem, children=new_children, locked=True)
+            return replace(elem, locked=True)
+
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            new_doc = new_doc.replace_element(es.path, _lock(elem))
+        self._model.document = replace(new_doc, selection=frozenset())
+
+    def unlock_all(self) -> None:
+        """Unlock all locked elements and select them."""
+        from geometry.element import control_point_count
+        doc = self._model.document
+        unlocked_paths: list[tuple[ElementPath, Element]] = []
+
+        def _collect_locked(path: ElementPath, elem: Element) -> None:
+            if isinstance(elem, Group) and not isinstance(elem, Layer):
+                if elem.locked:
+                    unlocked_paths.append((path, elem))
+                for i, child in enumerate(elem.children):
+                    _collect_locked(path + (i,), child)
+            elif elem.locked:
+                unlocked_paths.append((path, elem))
+
+        for li, layer in enumerate(doc.layers):
+            for ci, child in enumerate(layer.children):
+                _collect_locked((li, ci), child)
+
+        def _unlock(elem: Element) -> Element:
+            if isinstance(elem, Group):
+                new_children = tuple(_unlock(c) for c in elem.children)
+                return replace(elem, children=new_children, locked=False)
+            return replace(elem, locked=False)
+
+        new_layers = tuple(
+            replace(layer, children=tuple(_unlock(c) for c in layer.children))
+            for layer in doc.layers
+        )
+        # Select all newly unlocked elements
+        new_selection: set[ElementSelection] = set()
+        new_doc = replace(doc, layers=new_layers)
+        for path, _ in unlocked_paths:
+            elem = new_doc.get_element(path)
+            n = control_point_count(elem)
+            new_selection.add(ElementSelection(
+                path=path, control_points=frozenset(range(n))))
+        self._model.document = replace(new_doc, selection=frozenset(new_selection))
 
     def move_path_handle(self, path: ElementPath, anchor_idx: int,
                          handle_type: str, dx: float, dy: float) -> None:

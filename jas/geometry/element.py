@@ -180,6 +180,7 @@ class Element(ABC):
 
     Elements are immutable. All concrete subclasses use frozen dataclasses.
     """
+    locked: bool
 
     @abstractmethod
     def bounds(self) -> Tuple[float, float, float, float]:
@@ -197,6 +198,7 @@ class Line(Element):
     stroke: Stroke | None = None
     opacity: float = 1.0
     transform: Transform | None = None
+    locked: bool = False
 
     def bounds(self) -> Tuple[float, float, float, float]:
         min_x = min(self.x1, self.x2)
@@ -219,6 +221,7 @@ class Rect(Element):
     stroke: Stroke | None = None
     opacity: float = 1.0
     transform: Transform | None = None
+    locked: bool = False
 
     def bounds(self) -> Tuple[float, float, float, float]:
         return _inflate_bounds((self.x, self.y, self.width, self.height), self.stroke)
@@ -234,6 +237,7 @@ class Circle(Element):
     stroke: Stroke | None = None
     opacity: float = 1.0
     transform: Transform | None = None
+    locked: bool = False
 
     def bounds(self) -> Tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -252,6 +256,7 @@ class Ellipse(Element):
     stroke: Stroke | None = None
     opacity: float = 1.0
     transform: Transform | None = None
+    locked: bool = False
 
     def bounds(self) -> Tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -267,6 +272,7 @@ class Polyline(Element):
     stroke: Stroke | None = None
     opacity: float = 1.0
     transform: Transform | None = None
+    locked: bool = False
 
     def bounds(self) -> Tuple[float, float, float, float]:
         if not self.points:
@@ -286,6 +292,7 @@ class Polygon(Element):
     stroke: Stroke | None = None
     opacity: float = 1.0
     transform: Transform | None = None
+    locked: bool = False
 
     def bounds(self) -> Tuple[float, float, float, float]:
         if not self.points:
@@ -305,6 +312,7 @@ class Path(Element):
     stroke: Stroke | None = None
     opacity: float = 1.0
     transform: Transform | None = None
+    locked: bool = False
 
     def bounds(self) -> Tuple[float, float, float, float]:
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
@@ -355,6 +363,7 @@ class Text(Element):
     stroke: Stroke | None = None
     opacity: float = 1.0
     transform: Transform | None = None
+    locked: bool = False
 
     @property
     def is_area_text(self) -> bool:
@@ -383,6 +392,7 @@ class TextPath(Element):
     stroke: Stroke | None = None
     opacity: float = 1.0
     transform: Transform | None = None
+    locked: bool = False
 
     def bounds(self) -> Tuple[float, float, float, float]:
         # Approximate from path bounds
@@ -395,6 +405,7 @@ class Group(Element):
     children: tuple[Element, ...] = ()
     opacity: float = 1.0
     transform: Transform | None = None
+    locked: bool = False
 
     def bounds(self) -> Tuple[float, float, float, float]:
         if not self.children:

@@ -94,44 +94,44 @@ let path_data cmds =
 let rec element_svg indent (elem : Element.element) =
   let open Element in
   match elem with
-  | Line { x1; y1; x2; y2; stroke; opacity; transform } ->
+  | Line { x1; y1; x2; y2; stroke; opacity; transform; _ } ->
     Printf.sprintf "%s<line x1=\"%s\" y1=\"%s\" x2=\"%s\" y2=\"%s\"%s%s%s/>"
       indent (fmt (px x1)) (fmt (px y1)) (fmt (px x2)) (fmt (px y2))
       (stroke_attrs stroke) (opacity_attr opacity) (transform_attr transform)
-  | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform } ->
+  | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; _ } ->
     let rxy = (if rx > 0.0 then Printf.sprintf " rx=\"%s\"" (fmt (px rx)) else "")
             ^ (if ry > 0.0 then Printf.sprintf " ry=\"%s\"" (fmt (px ry)) else "") in
     Printf.sprintf "%s<rect x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\"%s%s%s%s%s/>"
       indent (fmt (px x)) (fmt (px y)) (fmt (px width)) (fmt (px height))
       rxy (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
       (transform_attr transform)
-  | Circle { cx; cy; r; fill; stroke; opacity; transform } ->
+  | Circle { cx; cy; r; fill; stroke; opacity; transform; _ } ->
     Printf.sprintf "%s<circle cx=\"%s\" cy=\"%s\" r=\"%s\"%s%s%s%s/>"
       indent (fmt (px cx)) (fmt (px cy)) (fmt (px r))
       (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
       (transform_attr transform)
-  | Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform } ->
+  | Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; _ } ->
     Printf.sprintf "%s<ellipse cx=\"%s\" cy=\"%s\" rx=\"%s\" ry=\"%s\"%s%s%s%s/>"
       indent (fmt (px cx)) (fmt (px cy)) (fmt (px rx)) (fmt (px ry))
       (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
       (transform_attr transform)
-  | Polyline { points; fill; stroke; opacity; transform } ->
+  | Polyline { points; fill; stroke; opacity; transform; _ } ->
     let ps = String.concat " "
       (List.map (fun (x, y) -> Printf.sprintf "%s,%s" (fmt (px x)) (fmt (px y))) points) in
     Printf.sprintf "%s<polyline points=\"%s\"%s%s%s%s/>"
       indent ps (fill_attrs fill) (stroke_attrs stroke)
       (opacity_attr opacity) (transform_attr transform)
-  | Polygon { points; fill; stroke; opacity; transform } ->
+  | Polygon { points; fill; stroke; opacity; transform; _ } ->
     let ps = String.concat " "
       (List.map (fun (x, y) -> Printf.sprintf "%s,%s" (fmt (px x)) (fmt (px y))) points) in
     Printf.sprintf "%s<polygon points=\"%s\"%s%s%s%s/>"
       indent ps (fill_attrs fill) (stroke_attrs stroke)
       (opacity_attr opacity) (transform_attr transform)
-  | Path { d; fill; stroke; opacity; transform } ->
+  | Path { d; fill; stroke; opacity; transform; _ } ->
     Printf.sprintf "%s<path d=\"%s\"%s%s%s%s/>"
       indent (path_data d) (fill_attrs fill) (stroke_attrs stroke)
       (opacity_attr opacity) (transform_attr transform)
-  | Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration; text_width; text_height = _; fill; stroke; opacity; transform } ->
+  | Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration; text_width; text_height = _; fill; stroke; opacity; transform; _ } ->
     let area_attrs = if text_width > 0.0 then
       Printf.sprintf " style=\"inline-size: %spx; white-space: pre-wrap;\"" (fmt (px text_width))
     else "" in
@@ -143,7 +143,7 @@ let rec element_svg indent (elem : Element.element) =
       fw_attr fs_attr td_attr
       area_attrs (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
       (transform_attr transform) (escape_xml content)
-  | Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration; fill; stroke; opacity; transform } ->
+  | Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration; fill; stroke; opacity; transform; _ } ->
     let offset_attr = if start_offset > 0.0 then
       Printf.sprintf " startOffset=\"%s%%\"" (fmt (start_offset *. 100.0))
     else "" in
@@ -156,13 +156,13 @@ let rec element_svg indent (elem : Element.element) =
       fw_attr fs_attr td_attr
       (opacity_attr opacity) (transform_attr transform)
       (path_data d) offset_attr (escape_xml content)
-  | Group { children; opacity; transform } ->
+  | Group { children; opacity; transform; _ } ->
     let header = Printf.sprintf "%s<g%s%s>"
       indent (opacity_attr opacity) (transform_attr transform) in
     let child_lines = Array.to_list (Array.map (element_svg (indent ^ "  ")) children) in
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
-  | Layer { name; children; opacity; transform } ->
+  | Layer { name; children; opacity; transform; _ } ->
     let label = if name <> "" then Printf.sprintf " inkscape:label=\"%s\"" (escape_xml name) else "" in
     let header = Printf.sprintf "%s<g%s%s%s>"
       indent label (opacity_attr opacity) (transform_attr transform) in
@@ -627,7 +627,7 @@ let svg_to_document svg =
     let layers = Array.to_list (Array.map (fun elem ->
       match elem with
       | Element.Layer _ -> elem
-      | Element.Group { children; opacity; transform } ->
+      | Element.Group { children; opacity; transform; _ } ->
         Element.make_layer ~name:"" ~opacity ~transform children
       | _ ->
         Element.make_layer ~name:"" [|elem|]

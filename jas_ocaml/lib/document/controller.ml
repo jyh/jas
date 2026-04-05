@@ -227,6 +227,8 @@ class controller ?(model = Model.create ()) () =
         match layer with
         | Element.Layer { children; _ } ->
           Array.iteri (fun ci child ->
+            if Element.is_locked child then ()
+            else
             match child with
             | Element.Group { children = gc; _ } ->
               let any_hit = Array.exists (fun c ->
@@ -253,6 +255,8 @@ class controller ?(model = Model.create ()) () =
       let doc = model#document in
       let selection = ref Document.PathMap.empty in
       let rec check path (elem : Element.element) =
+        if Element.is_locked elem then ()
+        else
         match elem with
         | Element.Layer { children; _ } | Element.Group { children; _ } ->
           Array.iteri (fun i child -> check (path @ [i]) child) children
@@ -269,6 +273,8 @@ class controller ?(model = Model.create ()) () =
       let doc = model#document in
       let selection = ref Document.PathMap.empty in
       let rec check path (elem : Element.element) =
+        if Element.is_locked elem then ()
+        else
         match elem with
         | Element.Layer { children; _ } | Element.Group { children; _ } ->
           Array.iteri (fun i child -> check (path @ [i]) child) children
@@ -295,6 +301,9 @@ class controller ?(model = Model.create ()) () =
       | [] -> failwith "path must be non-empty"
       | _ ->
         let doc = model#document in
+        let elem = Document.get_element doc path in
+        if Element.is_locked elem then ()
+        else
         let parent_path = List.filteri (fun i _ -> i < List.length path - 1) path in
         if List.length path >= 2 then
           let parent = Document.get_element doc parent_path in
@@ -336,6 +345,66 @@ class controller ?(model = Model.create ()) () =
          let new_elem = Element.Path { r with d = new_d } in
          model#set_document (Document.replace_element doc path new_elem)
        | _ -> ())
+
+    method lock_selection =
+      let doc = model#document in
+      if Document.PathMap.is_empty doc.Document.selection then ()
+      else begin
+        let rec lock elem =
+          match elem with
+          | Element.Group r ->
+            Element.Group { r with children = Array.map lock r.children; locked = true }
+          | _ -> Element.set_locked true elem
+        in
+        let new_doc = Document.PathMap.fold (fun path _ acc ->
+          let elem = Document.get_element acc path in
+          Document.replace_element acc path (lock elem)
+        ) doc.Document.selection doc in
+        model#set_document { new_doc with Document.selection = Document.PathMap.empty }
+      end
+
+    method unlock_all =
+      let doc = model#document in
+      let locked_paths = ref [] in
+      let rec collect_locked path elem =
+        match elem with
+        | Element.Group { locked = true; children; _ } ->
+          locked_paths := path :: !locked_paths;
+          Array.iteri (fun i c -> collect_locked (path @ [i]) c) children
+        | Element.Group { children; _ } | Element.Layer { children; _ } ->
+          Array.iteri (fun i c -> collect_locked (path @ [i]) c) children
+        | _ ->
+          if Element.is_locked elem then
+            locked_paths := path :: !locked_paths
+      in
+      Array.iteri (fun li layer ->
+        match layer with
+        | Element.Layer { children; _ } ->
+          Array.iteri (fun ci child -> collect_locked [li; ci] child) children
+        | _ -> ()
+      ) doc.Document.layers;
+      let rec unlock elem =
+        match elem with
+        | Element.Group r ->
+          Element.Group { r with children = Array.map unlock r.children; locked = false }
+        | Element.Layer r ->
+          Element.Layer { r with children = Array.map unlock r.children; locked = false }
+        | _ -> Element.set_locked false elem
+      in
+      let new_layers = Array.map (fun layer ->
+        match layer with
+        | Element.Layer r ->
+          Element.Layer { r with children = Array.map unlock r.children }
+        | _ -> layer
+      ) doc.Document.layers in
+      let new_doc = { doc with Document.layers = new_layers } in
+      let new_sel = List.fold_left (fun acc path ->
+        let elem = Document.get_element new_doc path in
+        let n = Element.control_point_count elem in
+        Document.PathMap.add path
+          (Document.make_element_selection ~control_points:(List.init n Fun.id) path) acc
+      ) Document.PathMap.empty !locked_paths in
+      model#set_document { new_doc with Document.selection = new_sel }
 
     method move_selection (dx : float) (dy : float) =
       let doc = model#document in

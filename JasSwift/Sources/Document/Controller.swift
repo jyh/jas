@@ -255,6 +255,7 @@ public class Controller {
         var selection: Selection = []
         for (li, layer) in doc.layers.enumerated() {
             for (ci, child) in layer.children.enumerated() {
+                if child.isLocked { continue }
                 if case .group(let g) = child {
                     let anyHit = g.children.contains { elementIntersectsRect($0, x, y, width, height) }
                     if anyHit {
@@ -281,6 +282,7 @@ public class Controller {
         var selection: Selection = []
 
         func check(_ path: [Int], _ elem: Element) {
+            if elem.isLocked { return }
             switch elem {
             case .layer(let v):
                 for (i, child) in v.children.enumerated() { check(path + [i], child) }
@@ -306,6 +308,7 @@ public class Controller {
         var selection: Selection = []
 
         func check(_ path: [Int], _ elem: Element) {
+            if elem.isLocked { return }
             switch elem {
             case .layer(let v):
                 for (i, child) in v.children.enumerated() { check(path + [i], child) }
@@ -340,6 +343,8 @@ public class Controller {
     public func selectElement(_ path: ElementPath) {
         guard !path.isEmpty else { fatalError("Path must be non-empty") }
         let doc = model.document
+        let elem = doc.getElement(path)
+        if elem.isLocked { return }
         if path.count >= 2 {
             let parentPath = Array(path.dropLast())
             let parent = doc.getElement(parentPath)
@@ -353,7 +358,6 @@ public class Controller {
                 return
             }
         }
-        let elem = doc.getElement(path)
         model.document = Document(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer,
                                      selection: [ElementSelection(path: path,
@@ -375,7 +379,8 @@ public class Controller {
         if case .path(let v) = elem {
             let newD = JasLib.movePathHandle(v.d, anchorIdx: anchorIdx, handleType: handleType, dx: dx, dy: dy)
             let newElem = Element.path(Path(d: newD, fill: v.fill, stroke: v.stroke,
-                                               opacity: v.opacity, transform: v.transform))
+                                               opacity: v.opacity, transform: v.transform,
+                                               locked: v.locked))
             doc = doc.replaceElement(path, with: newElem)
             model.document = doc
         }
@@ -389,6 +394,82 @@ public class Controller {
             doc = doc.replaceElement(es.path, with: newElem)
         }
         model.document = doc
+    }
+
+    public func lockSelection() {
+        func lockRecursive(_ elem: Element) -> Element {
+            switch elem {
+            case .group(let g):
+                return .group(Group(children: g.children.map { lockRecursive($0) },
+                                    opacity: g.opacity, transform: g.transform, locked: true))
+            default:
+                return elem.withLocked(true)
+            }
+        }
+        var doc = model.document
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            doc = doc.replaceElement(es.path, with: lockRecursive(elem))
+        }
+        model.document = Document(layers: doc.layers,
+                                     selectedLayer: doc.selectedLayer, selection: [])
+    }
+
+    public func unlockAll() {
+        let doc = model.document
+        var lockedPaths: [ElementPath] = []
+
+        func collectLocked(_ path: ElementPath, _ elem: Element) {
+            switch elem {
+            case .group(let g):
+                if g.locked { lockedPaths.append(path) }
+                for (i, child) in g.children.enumerated() {
+                    collectLocked(path + [i], child)
+                }
+            case .layer(let l):
+                for (i, child) in l.children.enumerated() {
+                    collectLocked(path + [i], child)
+                }
+            default:
+                if elem.isLocked { lockedPaths.append(path) }
+            }
+        }
+        for (li, layer) in doc.layers.enumerated() {
+            for (ci, child) in layer.children.enumerated() {
+                collectLocked([li, ci], child)
+            }
+        }
+
+        func unlockChildren(_ elements: [Element]) -> [Element] {
+            elements.map { elem in
+                switch elem {
+                case .group(let g):
+                    let children = unlockChildren(g.children)
+                    return Element.group(Group(children: children, opacity: g.opacity,
+                                              transform: g.transform, locked: false))
+                case .layer(let l):
+                    let children = unlockChildren(l.children)
+                    return Element.layer(Layer(name: l.name, children: children,
+                                              opacity: l.opacity, transform: l.transform, locked: false))
+                default:
+                    return elem.isLocked ? elem.withLocked(false) : elem
+                }
+            }
+        }
+        let newLayers = doc.layers.map { layer in
+            let children = unlockChildren(layer.children)
+            return Layer(name: layer.name, children: children,
+                         opacity: layer.opacity, transform: layer.transform, locked: false)
+        }
+        let newDoc = Document(layers: newLayers, selectedLayer: doc.selectedLayer, selection: [])
+        var newSelection: Selection = []
+        for path in lockedPaths {
+            let elem = newDoc.getElement(path)
+            let n = elem.controlPointCount
+            newSelection.insert(ElementSelection(path: path, controlPoints: Set(0..<n)))
+        }
+        model.document = Document(layers: newLayers,
+                                     selectedLayer: doc.selectedLayer, selection: newSelection)
     }
 
     public func copySelection(dx: Double, dy: Double) {

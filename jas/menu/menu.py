@@ -105,6 +105,19 @@ def create_menus(window: QMainWindow) -> None:
     ungroup_action.setShortcut(QKeySequence("Ctrl+Shift+G"))
     ungroup_action.triggered.connect(lambda: _with_model(lambda m: _ungroup_selection(m)))
 
+    ungroup_all_action = object_menu.addAction("Ungroup A&ll")
+    ungroup_all_action.triggered.connect(lambda: _with_model(lambda m: _ungroup_all(m)))
+
+    object_menu.addSeparator()
+
+    lock_action = object_menu.addAction("&Lock")
+    lock_action.setShortcut(QKeySequence("Ctrl+2"))
+    lock_action.triggered.connect(lambda: _with_model(lambda m: _lock_selection(m)))
+
+    unlock_all_action = object_menu.addAction("Unlock &All")
+    unlock_all_action.setShortcut(QKeySequence("Ctrl+Alt+2"))
+    unlock_all_action.triggered.connect(lambda: _with_model(lambda m: _unlock_all(m)))
+
     # View menu
     view_menu = menubar.addMenu("&View")
 
@@ -210,6 +223,22 @@ def _save_as(window: QMainWindow, model: Model) -> None:
         f.write(svg)
     model.mark_saved()
     model.filename = path
+
+
+def _lock_selection(model: Model) -> None:
+    """Lock all selected elements and clear the selection."""
+    from document.controller import DocumentController
+    controller = DocumentController(model)
+    model.snapshot()
+    controller.lock_selection()
+
+
+def _unlock_all(model: Model) -> None:
+    """Unlock all locked elements in the document."""
+    from document.controller import DocumentController
+    controller = DocumentController(model)
+    model.snapshot()
+    controller.unlock_all()
 
 
 def _group_selection(model: Model) -> None:
@@ -319,6 +348,41 @@ def _ungroup_selection(model: Model) -> None:
         # Each ungroup replaces 1 element with n_children, shifting by n_children - 1
         offset += n_children - 1
     model.document = dreplace(new_doc, selection=frozenset(new_selection))
+
+
+def _ungroup_all(model: Model) -> None:
+    """Ungroup all unlocked Group elements in the document."""
+    from dataclasses import replace as dreplace
+    from geometry.element import Group, Layer
+
+    doc = model.document
+    changed = False
+
+    def _flatten(children: tuple) -> tuple:
+        """Replace unlocked Groups with their children, recursively."""
+        nonlocal changed
+        result = []
+        for child in children:
+            if isinstance(child, Group) and not isinstance(child, Layer) and not child.locked:
+                changed = True
+                # Recursively flatten the group's children too
+                result.extend(_flatten(child.children))
+            elif isinstance(child, Group) and not isinstance(child, Layer):
+                # Locked group: recurse into children but keep the group
+                new_children = _flatten(child.children)
+                result.append(dreplace(child, children=new_children))
+            else:
+                result.append(child)
+        return tuple(result)
+
+    new_layers = tuple(
+        dreplace(layer, children=_flatten(layer.children))
+        for layer in doc.layers
+    )
+    if not changed:
+        return
+    model.snapshot()
+    model.document = dreplace(doc, layers=new_layers, selection=frozenset())
 
 
 def _copy_selection(model: Model) -> None:
