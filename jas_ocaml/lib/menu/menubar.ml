@@ -1,5 +1,109 @@
 (** Menubar for the main window. *)
 
+let group_selection (model : Model.model) () =
+  let doc = model#document in
+  let sel = doc.Document.selection in
+  if Document.PathMap.is_empty sel then ()
+  else begin
+    let paths = Document.PathMap.fold (fun path _ acc -> path :: acc) sel [] in
+    let sorted_paths = List.sort compare paths in
+    if List.length sorted_paths < 2 then ()
+    else begin
+      (* Check all selected elements are siblings *)
+      let parent p = match List.rev p with _ :: rest -> List.rev rest | [] -> [] in
+      let first_parent = parent (List.hd sorted_paths) in
+      if List.for_all (fun p -> parent p = first_parent) sorted_paths then begin
+        let elements = List.map (fun p -> Document.get_element doc p) sorted_paths in
+        model#snapshot;
+        (* Delete in reverse order *)
+        let rev_paths = List.sort (fun a b -> compare b a) sorted_paths in
+        let new_doc = List.fold_left Document.delete_element doc rev_paths in
+        (* Create group and insert at position of first element *)
+        let group = Element.make_group (Array.of_list elements) in
+        let insert_path = List.hd sorted_paths in
+        let layer_idx = List.hd insert_path in
+        let child_idx = match insert_path with _ :: i :: _ -> i | _ -> 0 in
+        let layer = new_doc.Document.layers.(layer_idx) in
+        let old_children = Document.children_of layer in
+        let n = Array.length old_children in
+        let new_children = Array.init (n + 1) (fun i ->
+          if i < child_idx then old_children.(i)
+          else if i = child_idx then group
+          else old_children.(i - 1)
+        ) in
+        let new_layer = Document.with_children layer new_children in
+        let new_layers = Array.copy new_doc.Document.layers in
+        new_layers.(layer_idx) <- new_layer;
+        let new_sel = Document.PathMap.singleton insert_path
+          (Document.make_element_selection insert_path) in
+        model#set_document { new_doc with
+          Document.layers = new_layers;
+          Document.selection = new_sel }
+      end
+    end
+  end
+
+let ungroup_selection (model : Model.model) () =
+  let doc = model#document in
+  let sel = doc.Document.selection in
+  if Document.PathMap.is_empty sel then ()
+  else begin
+    (* Collect selected paths that are Groups *)
+    let group_paths = Document.PathMap.fold (fun path _ acc ->
+      try
+        let elem = Document.get_element doc path in
+        (match elem with Element.Group _ -> path :: acc | _ -> acc)
+      with _ -> acc
+    ) sel [] in
+    let sorted_paths = List.sort compare group_paths in
+    if sorted_paths = [] then ()
+    else begin
+      model#snapshot;
+      (* Process in reverse order to preserve indices *)
+      let new_doc = List.fold_left (fun doc gpath ->
+        let group_elem = Document.get_element doc gpath in
+        let children = Document.children_of group_elem in
+        (* Delete the group *)
+        let doc = Document.delete_element doc gpath in
+        let layer_idx = List.hd gpath in
+        let child_idx = match gpath with _ :: i :: _ -> i | _ -> 0 in
+        let layer = doc.Document.layers.(layer_idx) in
+        let old_children = Document.children_of layer in
+        let n_old = Array.length old_children in
+        let n_new = Array.length children in
+        let new_children = Array.init (n_old + n_new) (fun i ->
+          if i < child_idx then old_children.(i)
+          else if i < child_idx + n_new then children.(i - child_idx)
+          else old_children.(i - n_new)
+        ) in
+        let new_layer = Document.with_children layer new_children in
+        let new_layers = Array.copy doc.Document.layers in
+        new_layers.(layer_idx) <- new_layer;
+        { doc with Document.layers = new_layers }
+      ) doc (List.rev sorted_paths) in
+      (* Build selection for unpacked children *)
+      let new_sel = ref Document.PathMap.empty in
+      let offset = ref 0 in
+      List.iter (fun gpath ->
+        let group_elem = Document.get_element doc gpath in
+        let children = Document.children_of group_elem in
+        let n_children = Array.length children in
+        let layer_idx = List.hd gpath in
+        let child_idx = (match gpath with _ :: i :: _ -> i | _ -> 0) + !offset in
+        for j = 0 to n_children - 1 do
+          let path = [layer_idx; child_idx + j] in
+          let elem = Document.get_element new_doc path in
+          let n = Element.control_point_count elem in
+          new_sel := Document.PathMap.add path
+            (Document.make_element_selection ~control_points:(List.init n Fun.id) path)
+            !new_sel
+        done;
+        offset := !offset + n_children - 1
+      ) sorted_paths;
+      model#set_document { new_doc with Document.selection = !new_sel }
+    end
+  end
+
 let copy_selection (model : Model.model) () =
   let doc = model#document in
   let sel = doc.Document.selection in
@@ -271,6 +375,12 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   ignore (edit_factory#add_item "Paste in Place" ~callback:(fun () -> paste_clipboard (m ()) 0.0 ()));
   ignore (edit_factory#add_separator ());
   ignore (edit_factory#add_item "Select All" ~key:GdkKeysyms._a ~callback:(fun () -> print_endline "Select All"));
+
+  (* Object menu *)
+  let _object_menu = factory#add_submenu "Object" in
+  let object_factory = new GMenu.factory _object_menu in
+  ignore (object_factory#add_item "Group" ~key:GdkKeysyms._g ~callback:(fun () -> group_selection (m ()) ()));
+  ignore (object_factory#add_item "Ungroup" ~callback:(fun () -> ungroup_selection (m ()) ()));
 
   (* View menu *)
   let _view_menu = factory#add_submenu "View" in
