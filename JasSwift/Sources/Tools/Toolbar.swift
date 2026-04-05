@@ -69,6 +69,24 @@ public struct ToolbarView {
                 slit.addLine(to: CGPoint(x: ox + 16, y: oy + 20))
                 context.stroke(slit, with: .color(color), lineWidth: 1.5)
 
+            case .pencil:
+                var path = SwiftUI.Path()
+                // Pencil body (angled)
+                path.move(to: CGPoint(x: ox + 6, y: oy + 22))
+                path.addLine(to: CGPoint(x: ox + 20, y: oy + 8))
+                path.addLine(to: CGPoint(x: ox + 24, y: oy + 4))
+                path.addLine(to: CGPoint(x: ox + 26, y: oy + 6))
+                path.addLine(to: CGPoint(x: ox + 22, y: oy + 10))
+                path.addLine(to: CGPoint(x: ox + 8, y: oy + 24))
+                path.closeSubpath()
+                context.stroke(path, with: .color(color), lineWidth: 1.5)
+                // Tip
+                var tip = SwiftUI.Path()
+                tip.move(to: CGPoint(x: ox + 6, y: oy + 22))
+                tip.addLine(to: CGPoint(x: ox + 4, y: oy + 26))
+                tip.addLine(to: CGPoint(x: ox + 8, y: oy + 24))
+                context.stroke(tip, with: .color(color), lineWidth: 1.5)
+
             case .text:
                 context.draw(
                     SwiftUI.Text("T").font(.system(size: 18, weight: .bold))
@@ -204,6 +222,8 @@ private struct ArrowSlotButton: View {
         switch tool {
         case .directSelection: return "Direct Selection"
         case .groupSelection: return "Group Selection"
+        case .pen: return "Pen"
+        case .pencil: return "Pencil"
         case .text: return "Text"
         case .textPath: return "Text on Path"
         case .rect: return "Rectangle"

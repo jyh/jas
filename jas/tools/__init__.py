@@ -6,6 +6,7 @@ from tools.toolbar import Tool
 from tools.selection import SelectionTool, DirectSelectionTool, GroupSelectionTool
 from tools.drawing import LineTool, RectTool, PolygonTool
 from tools.pen import PenTool
+from tools.pencil import PencilTool
 from tools.text import TextTool
 from tools.text_path import TextPathTool
 
@@ -17,6 +18,7 @@ def create_tools() -> dict[Tool, CanvasTool]:
         Tool.DIRECT_SELECTION: DirectSelectionTool(),
         Tool.GROUP_SELECTION: GroupSelectionTool(),
         Tool.PEN: PenTool(),
+        Tool.PENCIL: PencilTool(),
         Tool.TEXT: TextTool(),
         Tool.TEXT_PATH: TextPathTool(),
         Tool.LINE: LineTool(),
