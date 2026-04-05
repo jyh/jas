@@ -738,6 +738,257 @@ pub fn App() -> Element {
         }
     }).collect();
 
+    // --- Menu dispatch ---
+    // Shared dispatch function for menu items (avoids duplicating keyboard handler logic).
+    let dispatch = {
+        let act = act.clone();
+        let app_for_menu = app.clone();
+        let revision_for_menu = revision.clone();
+        Rc::new(move |cmd: &str| {
+            match cmd {
+                "new" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.add_tab(TabState::new());
+                    }));
+                }
+                "open" => {
+                    open_file_dialog(app_for_menu.clone(), revision_for_menu.clone());
+                }
+                "save" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        let tab = st.tab_mut();
+                        let svg = document_to_svg(tab.model.document());
+                        let filename = if tab.model.filename.ends_with(".svg") {
+                            tab.model.filename.clone()
+                        } else {
+                            format!("{}.svg", tab.model.filename)
+                        };
+                        download_file(&filename, &svg);
+                        tab.model.mark_saved();
+                    }));
+                }
+                "close" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        let idx = st.active_tab;
+                        st.close_tab(idx);
+                    }));
+                }
+                "undo" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.tab_mut().model.undo();
+                    }));
+                }
+                "redo" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.tab_mut().model.redo();
+                    }));
+                }
+                "cut" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if let Some(svg) = selection_to_svg(st) {
+                            clipboard_write(svg);
+                        }
+                        let tab = st.tab();
+                        let doc = tab.model.document();
+                        let elements: Vec<GeoElement> = doc.selection.iter()
+                            .filter_map(|es| doc.get_element(&es.path).cloned())
+                            .collect();
+                        let tab = st.tab_mut();
+                        tab.clipboard = elements;
+                        tab.model.snapshot();
+                        let new_doc = tab.model.document().delete_selection();
+                        tab.model.set_document(new_doc);
+                    }));
+                }
+                "copy" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if let Some(svg) = selection_to_svg(st) {
+                            clipboard_write(svg);
+                        }
+                        let tab = st.tab();
+                        let doc = tab.model.document();
+                        let elements: Vec<GeoElement> = doc.selection.iter()
+                            .filter_map(|es| doc.get_element(&es.path).cloned())
+                            .collect();
+                        st.tab_mut().clipboard = elements;
+                    }));
+                }
+                "paste" => {
+                    clipboard_read_and_paste(
+                        app_for_menu.clone(), revision_for_menu.clone(), PASTE_OFFSET,
+                    );
+                }
+                "paste_in_place" => {
+                    clipboard_read_and_paste(
+                        app_for_menu.clone(), revision_for_menu.clone(), 0.0,
+                    );
+                }
+                "select_all" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        Controller::select_all(&mut st.tab_mut().model);
+                    }));
+                }
+                "delete" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        let tab = st.tab_mut();
+                        tab.model.snapshot();
+                        let new_doc = tab.model.document().delete_selection();
+                        tab.model.set_document(new_doc);
+                    }));
+                }
+                "group" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.tab_mut().model.snapshot();
+                        Controller::group_selection(&mut st.tab_mut().model);
+                    }));
+                }
+                "ungroup" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.tab_mut().model.snapshot();
+                        Controller::ungroup_selection(&mut st.tab_mut().model);
+                    }));
+                }
+                "ungroup_all" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.tab_mut().model.snapshot();
+                        Controller::ungroup_all(&mut st.tab_mut().model);
+                    }));
+                }
+                "lock" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.tab_mut().model.snapshot();
+                        Controller::lock_selection(&mut st.tab_mut().model);
+                    }));
+                }
+                "unlock_all" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.tab_mut().model.snapshot();
+                        Controller::unlock_all(&mut st.tab_mut().model);
+                    }));
+                }
+                _ => {}
+            }
+        })
+    };
+
+    // --- Menu bar data ---
+    let mut open_menu = use_signal(|| Option::<String>::None);
+
+    // Menu item: (label, command, shortcut_hint)
+    type MenuItem = (&'static str, &'static str, &'static str);
+    // Separator
+    const SEP: MenuItem = ("---", "", "");
+
+    let menus: &[(&str, &[MenuItem])] = &[
+        ("File", &[
+            ("New", "new", "\u{2318}N"),
+            ("Open...", "open", "\u{2318}O"),
+            ("Save", "save", "\u{2318}S"),
+            SEP,
+            ("Close Tab", "close", "\u{2318}W"),
+        ]),
+        ("Edit", &[
+            ("Undo", "undo", "\u{2318}Z"),
+            ("Redo", "redo", "\u{21e7}\u{2318}Z"),
+            SEP,
+            ("Cut", "cut", "\u{2318}X"),
+            ("Copy", "copy", "\u{2318}C"),
+            ("Paste", "paste", "\u{2318}V"),
+            ("Paste in Place", "paste_in_place", "\u{21e7}\u{2318}V"),
+            SEP,
+            ("Delete", "delete", "\u{232b}"),
+            ("Select All", "select_all", "\u{2318}A"),
+        ]),
+        ("Object", &[
+            ("Group", "group", "\u{2318}G"),
+            ("Ungroup", "ungroup", "\u{21e7}\u{2318}G"),
+            ("Ungroup All", "ungroup_all", ""),
+            SEP,
+            ("Lock", "lock", "\u{2318}2"),
+            ("Unlock All", "unlock_all", "\u{2325}\u{2318}2"),
+        ]),
+    ];
+
+    // Pre-build each menu dropdown as a complete VNode
+    let menu_nodes: Vec<Result<VNode, RenderError>> = menus.iter().enumerate().map(|(mi, (menu_name, items))| {
+        let menu_name_str = menu_name.to_string();
+        let menu_name_str2 = menu_name_str.clone();
+        let is_open = open_menu() == Some(menu_name_str.clone());
+        let dispatch = dispatch.clone();
+        let mut open_menu_sig = open_menu.clone();
+
+        // Pre-build item nodes for this menu
+        let item_nodes: Vec<Result<VNode, RenderError>> = if is_open {
+            items.iter().map(|&(label, cmd, shortcut)| {
+                if label == "---" {
+                    rsx! {
+                        div {
+                            style: "height:1px; background:#ddd; margin:4px 8px;",
+                        }
+                    }
+                } else {
+                    let dispatch = dispatch.clone();
+                    let cmd = cmd.to_string();
+                    let mut open_menu_sig2 = open_menu_sig.clone();
+                    rsx! {
+                        div {
+                            style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; display:flex; justify-content:space-between; white-space:nowrap;",
+                            onmousedown: move |evt: Event<MouseData>| {
+                                evt.stop_propagation();
+                                dispatch(&cmd);
+                                open_menu_sig2.set(None);
+                            },
+                            span { "{label}" }
+                            span {
+                                style: "color:#999; margin-left:24px; font-size:12px;",
+                                "{shortcut}"
+                            }
+                        }
+                    }
+                }
+            }).collect()
+        } else {
+            Vec::new()
+        };
+
+        let bg = if is_open { "#d0d0d0" } else { "transparent" };
+        rsx! {
+            div {
+                key: "menu-{mi}",
+                style: "position:relative; display:inline-block;",
+                div {
+                    style: "padding:3px 8px; cursor:pointer; font-size:13px; user-select:none; background:{bg};",
+                    onmousedown: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        let name = menu_name_str2.clone();
+                        if open_menu() == Some(name.clone()) {
+                            open_menu_sig.set(None);
+                        } else {
+                            open_menu_sig.set(Some(name));
+                        }
+                    },
+                    "{menu_name_str}"
+                }
+                if is_open {
+                    div {
+                        style: "position:absolute; top:100%; left:0; background:#fff; border:1px solid #ccc; box-shadow:2px 2px 8px rgba(0,0,0,0.15); min-width:200px; z-index:1000; padding:4px 0;",
+                        for node in item_nodes {
+                            {node}
+                        }
+                    }
+                }
+            }
+        }
+    }).collect();
+
+    // Close menu when clicking anywhere outside
+    let on_main_mousedown = {
+        let mut open_menu_sig = open_menu.clone();
+        move |_: Event<MouseData>| {
+            open_menu_sig.set(None);
+        }
+    };
+
     rsx! {
         div {
             tabindex: "0",
@@ -752,9 +1003,18 @@ pub fn App() -> Element {
                 }
             }
 
-            // Main area (tabs + canvas)
+            // Main area (menu + tabs + canvas)
             div {
                 style: "flex:1; display:flex; flex-direction:column; overflow:hidden;",
+                onmousedown: on_main_mousedown,
+
+                // Menu bar
+                div {
+                    style: "display:flex; background:#f0f0f0; border-bottom:1px solid #ddd; padding:0 4px; min-height:24px; align-items:center;",
+                    for node in menu_nodes {
+                        {node}
+                    }
+                }
 
                 // Tab bar
                 div {
