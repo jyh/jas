@@ -45,11 +45,18 @@ def create_menus(window: QMainWindow, model: Model) -> None:
 
     undo_action = edit_menu.addAction("&Undo")
     undo_action.setShortcut(QKeySequence.Undo)
-    undo_action.triggered.connect(lambda: print("Undo"))
+    undo_action.triggered.connect(lambda: model.undo())
+    undo_action.setEnabled(False)
 
     redo_action = edit_menu.addAction("&Redo")
     redo_action.setShortcut(QKeySequence.Redo)
-    redo_action.triggered.connect(lambda: print("Redo"))
+    redo_action.triggered.connect(lambda: model.redo())
+    redo_action.setEnabled(False)
+
+    def _update_undo_redo(_doc):
+        undo_action.setEnabled(model.can_undo)
+        redo_action.setEnabled(model.can_redo)
+    model.on_document_changed(_update_undo_redo)
 
     edit_menu.addSeparator()
 
@@ -119,6 +126,7 @@ def _copy_selection(model: Model) -> None:
 
 def _cut_selection(model: Model) -> None:
     """Copy selected elements to clipboard, then delete them."""
+    model.snapshot()
     _copy_selection(model)
     model.document = model.document.delete_selection()
 
@@ -145,6 +153,7 @@ def _paste_clipboard(model: Model, offset: float) -> None:
     If it contains plain text, add a Text element.
     offset: translation in pt (24 for Paste, 0 for Paste in Place).
     """
+    model.snapshot()
     from dataclasses import replace as dreplace
 
     from document.document import Document, ElementSelection

@@ -34,4 +34,37 @@ let () =
   assert (before.Jas.Document.title = "Untitled");
   assert (after.Jas.Document.title = "New");
 
+  (* Test undo/redo *)
+  let model6 = Jas.Model.create () in
+  assert (not model6#can_undo);
+  model6#snapshot;
+  model6#set_document (Jas.Document.make_document ~title:"A" []);
+  assert model6#can_undo;
+  assert (not model6#can_redo);
+  model6#undo;
+  assert (model6#document.Jas.Document.title = "Untitled");
+  assert model6#can_redo;
+  model6#redo;
+  assert (model6#document.Jas.Document.title = "A");
+
+  (* Test undo clears redo on new edit *)
+  let model7 = Jas.Model.create () in
+  model7#snapshot;
+  model7#set_document (Jas.Document.make_document ~title:"A" []);
+  model7#snapshot;
+  model7#set_document (Jas.Document.make_document ~title:"B" []);
+  model7#undo;
+  assert (model7#document.Jas.Document.title = "A");
+  assert model7#can_redo;
+  model7#snapshot;
+  model7#set_document (Jas.Document.make_document ~title:"C" []);
+  assert (not model7#can_redo);
+
+  (* Test undo/redo on empty stacks *)
+  let model8 = Jas.Model.create () in
+  model8#undo;
+  assert (model8#document.Jas.Document.title = "Untitled");
+  model8#redo;
+  assert (model8#document.Jas.Document.title = "Untitled");
+
   Printf.printf "All model tests passed.\n"

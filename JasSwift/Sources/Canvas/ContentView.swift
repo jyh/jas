@@ -51,6 +51,8 @@ public struct ContentView: View {
         .clipped()
         .focusedSceneValue(\.jasModel, model)
         .focusedSceneValue(\.hasSelection, !model.document.selection.isEmpty)
+        .focusedSceneValue(\.canUndo, model.canUndo)
+        .focusedSceneValue(\.canRedo, model.canRedo)
         .background(
             KeyboardShortcutHandler(currentTool: $currentTool, model: model)
         )
@@ -135,10 +137,21 @@ struct KeyboardShortcutHandler: NSViewRepresentable {
 
     func makeNSView(context: Context) -> KeyCaptureView {
         let view = KeyCaptureView()
-        view.onKey = { key in
+        view.onKey = { key, modifiers in
+            let hasCmd = modifiers.contains(.command)
+            let hasShift = modifiers.contains(.shift)
+            if hasCmd && key.lowercased() == "z" {
+                if hasShift {
+                    model.redo()
+                } else {
+                    model.undo()
+                }
+                return
+            }
             switch key {
             case "\u{7F}", "\u{F728}":  // Backspace, Forward Delete
                 if !model.document.selection.isEmpty {
+                    model.snapshot()
                     model.document = model.document.deleteSelection()
                 }
             default:
@@ -167,13 +180,13 @@ struct KeyboardShortcutHandler: NSViewRepresentable {
 }
 
 class KeyCaptureView: NSView {
-    var onKey: ((String) -> Void)?
+    var onKey: ((String, NSEvent.ModifierFlags) -> Void)?
 
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
         if let chars = event.charactersIgnoringModifiers {
-            onKey?(chars)
+            onKey?(chars, event.modifierFlags)
         } else {
             super.keyDown(with: event)
         }

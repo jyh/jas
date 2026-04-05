@@ -8,6 +8,7 @@ class TextTool: CanvasTool {
     var dragEnd: (Double, Double)?
 
     func onPress(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
+        ctx.snapshot()
         dragStart = (x, y)
         dragEnd = (x, y)
     }

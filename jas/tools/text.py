@@ -18,6 +18,7 @@ class TextTool(CanvasTool):
 
     def on_press(self, ctx: ToolContext, x: float, y: float,
                  shift: bool = False, alt: bool = False) -> None:
+        ctx.snapshot()
         self._drag_start = (x, y)
         self._drag_end = (x, y)
 

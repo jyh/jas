@@ -68,10 +68,19 @@ class MainWindow(QMainWindow):
                   lambda: self.toolbar.select_tool(Tool.RECT))
         QShortcut(QKeySequence(Qt.Key_Delete), self, self._delete_selection)
         QShortcut(QKeySequence(Qt.Key_Backspace), self, self._delete_selection)
+        QShortcut(QKeySequence.StandardKey.Undo, self, self._undo)
+        QShortcut(QKeySequence.StandardKey.Redo, self, self._redo)
+
+    def _undo(self):
+        self.model.undo()
+
+    def _redo(self):
+        self.model.redo()
 
     def _delete_selection(self):
         doc = self.model.document
         if doc.selection:
+            self.model.snapshot()
             self.model.document = doc.delete_selection()
 
 

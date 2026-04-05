@@ -71,6 +71,7 @@ class PenTool: CanvasTool {
     }
 
     func onPress(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
+        ctx.snapshot()
         if points.count >= 2 {
             let p0 = points[0]
             if hypot(x - p0.x, y - p0.y) <= penCloseRadius {
