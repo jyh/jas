@@ -9,6 +9,7 @@ public enum Tool: String, CaseIterable {
     case directSelection
     case groupSelection
     case pen
+    case pencil
     case text
     case textPath
     case line
@@ -256,14 +257,17 @@ struct ToolbarPanel: View {
                 }
                 HStack(spacing: 2) {
                     ToolbarView.toolButton(currentTool: $currentTool, tool: .pen)
+                    ToolbarView.toolButton(currentTool: $currentTool, tool: .pencil)
+                }
+                HStack(spacing: 2) {
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $textSlotTool,
                         alternates: [.text, .textPath]
                     )
+                    ToolbarView.toolButton(currentTool: $currentTool, tool: .line)
                 }
                 HStack(spacing: 2) {
-                    ToolbarView.toolButton(currentTool: $currentTool, tool: .line)
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $shapeSlotTool,

@@ -14,6 +14,7 @@ class Tool(Enum):
     DIRECT_SELECTION = auto()
     GROUP_SELECTION = auto()
     PEN = auto()
+    PENCIL = auto()
     TEXT = auto()
     TEXT_PATH = auto()
     LINE = auto()
@@ -76,6 +77,8 @@ class ToolButton(QToolButton):
             self._draw_rect_tool(painter)
         elif self.tool == Tool.PEN:
             self._draw_pen_tool(painter)
+        elif self.tool == Tool.PENCIL:
+            self._draw_pencil_tool(painter)
         elif self.tool == Tool.TEXT:
             self._draw_text_tool(painter)
         elif self.tool == Tool.TEXT_PATH:
@@ -137,6 +140,23 @@ class ToolButton(QToolButton):
         painter.drawPath(path)
         # Center line (nib slit)
         painter.drawLine(16, 10, 16, 20)
+
+    def _draw_pencil_tool(self, painter):
+        painter.setPen(QPen(QColor("#cccccc"), 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        path = QPainterPath()
+        # Pencil body (angled)
+        path.moveTo(6, 22)
+        path.lineTo(20, 8)
+        path.lineTo(24, 4)
+        path.lineTo(26, 6)
+        path.lineTo(22, 10)
+        path.lineTo(8, 24)
+        path.closeSubpath()
+        painter.drawPath(path)
+        # Tip
+        painter.drawLine(6, 22, 4, 26)
+        painter.drawLine(4, 26, 8, 24)
 
     def _draw_text_tool(self, painter):
         painter.setPen(QPen(QColor("#cccccc"), 1.5))
@@ -231,9 +251,10 @@ class Toolbar(QWidget):
             (Tool.SELECTION, 0, 0),
             (Tool.DIRECT_SELECTION, 0, 1),
             (Tool.PEN, 1, 0),
-            (Tool.TEXT, 1, 1),
-            (Tool.LINE, 2, 0),
-            (Tool.RECT, 2, 1),
+            (Tool.PENCIL, 1, 1),
+            (Tool.TEXT, 2, 0),
+            (Tool.LINE, 2, 1),
+            (Tool.RECT, 3, 0),
         ]
         for tool, row, col in tools:
             has_alt = tool in _ARROW_SLOT_TOOLS or tool in _TEXT_SLOT_TOOLS or tool in _SHAPE_SLOT_TOOLS
