@@ -1,0 +1,3 @@
+(test
+ (name toolbar_test)
+ (libraries jas lablgtk3))
