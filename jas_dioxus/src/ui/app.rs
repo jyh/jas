@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
+use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
@@ -15,6 +16,7 @@ use crate::document::controller::Controller;
 use crate::document::document::ElementSelection;
 use crate::document::model::Model;
 use crate::geometry::element::{control_point_count, translate_element, Element as GeoElement};
+use crate::geometry::svg::{document_to_svg, svg_to_document};
 use crate::tools::direct_selection::DirectSelectionTool;
 use crate::tools::group_selection::GroupSelectionTool;
 use crate::tools::line::LineTool;
@@ -82,6 +84,97 @@ impl AppState {
             tool.draw_overlay(&self.model, &ctx);
         }
     }
+}
+
+/// Download a string as a file in the browser.
+fn download_file(filename: &str, content: &str) {
+    let window = match web_sys::window() {
+        Some(w) => w,
+        None => return,
+    };
+    let document = match window.document() {
+        Some(d) => d,
+        None => return,
+    };
+    let parts = js_sys::Array::new();
+    parts.push(&content.into());
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type("image/svg+xml");
+    let blob = match web_sys::Blob::new_with_str_sequence_and_options(&parts, &opts) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    let url = match web_sys::Url::create_object_url_with_blob(&blob) {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+    let a: web_sys::HtmlAnchorElement = document
+        .create_element("a")
+        .unwrap()
+        .unchecked_into();
+    a.set_href(&url);
+    a.set_download(filename);
+    a.click();
+    let _ = web_sys::Url::revoke_object_url(&url);
+}
+
+/// Trigger a file open dialog and call the callback with the file contents.
+fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
+    let window = match web_sys::window() {
+        Some(w) => w,
+        None => return,
+    };
+    let document = match window.document() {
+        Some(d) => d,
+        None => return,
+    };
+    let input: web_sys::HtmlInputElement = document
+        .create_element("input")
+        .unwrap()
+        .unchecked_into();
+    input.set_type("file");
+    input.set_attribute("accept", ".svg,image/svg+xml").ok();
+
+    let app2 = app.clone();
+    let revision2 = revision.clone();
+    let input2 = input.clone();
+    let onchange = Closure::wrap(Box::new(move |_evt: web_sys::Event| {
+        let files = match input2.files() {
+            Some(f) => f,
+            None => return,
+        };
+        let file = match files.get(0) {
+            Some(f) => f,
+            None => return,
+        };
+        let filename = file.name();
+        let reader = web_sys::FileReader::new().unwrap();
+        let reader2 = reader.clone();
+        let app3 = app2.clone();
+        let mut revision3 = revision2.clone();
+        let onload = Closure::wrap(Box::new(move |_evt: web_sys::Event| {
+            let result = match reader2.result() {
+                Ok(r) => r,
+                Err(_) => return,
+            };
+            let text = match result.as_string() {
+                Some(s) => s,
+                None => return,
+            };
+            let doc = svg_to_document(&text);
+            let mut st = app3.borrow_mut();
+            st.model = Model::new(doc, Some(filename.clone()));
+            st.clipboard.clear();
+            drop(st);
+            revision3 += 1;
+        }) as Box<dyn FnMut(web_sys::Event)>);
+        reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+        onload.forget(); // leak closure — it only fires once
+        reader.read_as_text(&file).ok();
+    }) as Box<dyn FnMut(web_sys::Event)>);
+    input.set_onchange(Some(onchange.as_ref().unchecked_ref()));
+    onchange.forget();
+    input.click();
 }
 
 const TOOLBAR_TOOLS: &[ToolKind] = &[
@@ -213,6 +306,8 @@ pub fn App() -> Element {
     // --- Keyboard events ---
     let on_keydown = {
         let act = act.clone();
+        let app_for_keys = app.clone();
+        let revision_for_keys = revision.clone();
         move |evt: Event<KeyboardData>| {
             let key = evt.data().key();
             let mods = evt.data().modifiers();
@@ -307,6 +402,23 @@ pub fn App() -> Element {
                             Controller::lock_selection(&mut st.model);
                         }));
                     }
+                }
+                Key::Character(ref c) if (c == "s" || c == "S") && cmd => {
+                    evt.prevent_default();
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        let svg = document_to_svg(st.model.document());
+                        let filename = if st.model.filename.ends_with(".svg") {
+                            st.model.filename.clone()
+                        } else {
+                            format!("{}.svg", st.model.filename)
+                        };
+                        download_file(&filename, &svg);
+                        st.model.mark_saved();
+                    }));
+                }
+                Key::Character(ref c) if (c == "o" || c == "O") && cmd => {
+                    evt.prevent_default();
+                    open_file_dialog(app_for_keys.clone(), revision_for_keys.clone());
                 }
                 Key::Character(ref c) if (c == "g" || c == "G") && cmd => {
                     evt.prevent_default();
