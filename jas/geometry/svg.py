@@ -8,8 +8,8 @@ import re
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
-from document import Document
-from element import (
+from document.document import Document
+from geometry.element import (
     ArcTo, Circle, ClosePath, Color, CurveTo, Element, Ellipse, Fill,
     Group, Layer, Line, LineCap, LineJoin, LineTo, MoveTo, Path,
     PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,

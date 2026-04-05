@@ -11,11 +11,11 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING
 
-from element import (
+from geometry.element import (
     Color, CurveTo, Fill, LineTo, MoveTo, Path, TextPath,
     path_closest_offset, path_distance_to_point, path_point_at_offset,
 )
-from tool import CanvasTool, ToolContext
+from tools.tool import CanvasTool, ToolContext
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter

@@ -1,7 +1,7 @@
 """Canvas tool implementations."""
 
-from tool import CanvasTool
-from toolbar import Tool
+from tools.tool import CanvasTool
+from tools.toolbar import Tool
 
 from tools.selection import SelectionTool, DirectSelectionTool, GroupSelectionTool
 from tools.drawing import LineTool, RectTool, PolygonTool

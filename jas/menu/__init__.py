@@ -1,0 +1,1 @@
+"""Menu: application menu bar."""

@@ -12,7 +12,7 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Tuple, TypeVar
 
-from element import Element, Group, Layer
+from geometry.element import Element, Group, Layer
 
 _G = TypeVar("_G", bound=Group)
 

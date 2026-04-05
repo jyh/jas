@@ -8,9 +8,9 @@ from PySide6.QtWidgets import QLineEdit, QTextEdit, QWidget
 
 import math
 
-from controller import Controller
-from document import Document, ElementSelection
-from element import (
+from document.controller import Controller
+from document.document import Document, ElementSelection
+from geometry.element import (
     ArcTo, Circle, ClosePath, CurveTo, Element, Ellipse, Group, Layer, Line,
     LineTo, MoveTo, Path, PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
     SmoothQuadTo, Text, TextPath,
@@ -20,9 +20,9 @@ from element import (
     path_distance_to_point,
     path_point_at_offset,
 )
-from model import Model
-from tool import CanvasTool, ToolContext
-from toolbar import Tool
+from document.model import Model
+from tools.tool import CanvasTool, ToolContext
+from tools.toolbar import Tool
 from tools import create_tools
 
 

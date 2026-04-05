@@ -6,11 +6,11 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QMdiArea, QMdiSubWindow,
 )
 
-from canvas import CanvasWidget
-from controller import Controller
-from menu import create_menus
-from model import Model
-from toolbar import Tool, Toolbar
+from canvas.canvas import CanvasWidget
+from document.controller import Controller
+from menu.menu import create_menus
+from document.model import Model
+from tools.toolbar import Tool, Toolbar
 
 
 class MainWindow(QMainWindow):

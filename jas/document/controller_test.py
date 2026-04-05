@@ -1,9 +1,9 @@
 from absl.testing import absltest
 
-from controller import Controller
-from document import Document, ElementSelection
-from element import Circle, Ellipse, Group, Layer, Line, Rect, control_points, move_control_points
-from model import Model
+from document.controller import Controller
+from document.document import Document, ElementSelection
+from geometry.element import Circle, Ellipse, Group, Layer, Line, Polygon, Rect, control_points, move_control_points
+from document.model import Model
 
 
 def _sel(*paths):
@@ -190,7 +190,7 @@ class SelectionControllerTest(absltest.TestCase):
 
     def test_select_rect_filled_rect_interior_hits(self):
         """Marquee inside a filled rect should select it."""
-        from element import Fill, Color
+        from geometry.element import Fill, Color
         rect = Rect(x=0, y=0, width=100, height=100,
                     fill=Fill(color=Color(1, 0, 0)))
         layer = Layer(children=(rect,), name="L0")
@@ -452,9 +452,10 @@ class MoveControlPointsTest(absltest.TestCase):
     def test_move_rect_one_corner(self):
         rect = Rect(x=0, y=0, width=10, height=10)
         moved = move_control_points(rect, frozenset({2}), 5.0, 5.0)
-        # CP2 is bottom-right (10,10) → (15,15)
-        self.assertEqual((moved.x, moved.y, moved.width, moved.height),
-                         (0.0, 0.0, 15.0, 15.0))
+        # CP2 is bottom-right (10,10) → (15,15); partial CP move converts to Polygon
+        self.assertIsInstance(moved, Polygon)
+        self.assertEqual(moved.points,
+                         ((0.0, 0.0), (10.0, 0.0), (15.0, 15.0), (0.0, 10.0)))
 
     def test_move_circle_all_cps(self):
         circle = Circle(cx=50, cy=50, r=10)

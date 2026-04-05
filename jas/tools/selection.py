@@ -5,11 +5,11 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-from element import (
+from geometry.element import (
     Path, control_points as element_control_points, move_control_points,
     path_handle_positions, move_path_handle,
 )
-from tool import CanvasTool, ToolContext
+from tools.tool import CanvasTool, ToolContext
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
@@ -97,7 +97,7 @@ class SelectionToolBase(CanvasTool):
         ex, ey = self._drag_end
         if self._moving:
             dx, dy = ex - sx, ey - sy
-            from canvas import _SELECTION_COLOR, _draw_element_overlay
+            from canvas.canvas import _SELECTION_COLOR, _draw_element_overlay
             for es in ctx.document.selection:
                 elem = ctx.document.get_element(es.path)
                 moved = move_control_points(elem, es.control_points, dx, dy)
@@ -166,7 +166,7 @@ class DirectSelectionTool(SelectionToolBase):
         if self._handle_drag is not None and self._handle_drag_start is not None and self._handle_drag_end is not None:
             from PySide6.QtCore import Qt
             from PySide6.QtGui import QBrush, QPen
-            from canvas import _SELECTION_COLOR, _draw_element_overlay
+            from canvas.canvas import _SELECTION_COLOR, _draw_element_overlay
             sx, sy = self._handle_drag_start
             ex, ey = self._handle_drag_end
             path, anchor_idx, handle_type = self._handle_drag

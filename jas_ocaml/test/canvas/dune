@@ -1,0 +1,3 @@
+(test
+ (name canvas_test)
+ (libraries jas lablgtk3))

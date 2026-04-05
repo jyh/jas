@@ -1,6 +1,6 @@
 from absl.testing import absltest
 
-from measure import Unit, Measure, px, pt
+from geometry.measure import Unit, Measure, px, pt
 
 
 class MeasureTest(absltest.TestCase):

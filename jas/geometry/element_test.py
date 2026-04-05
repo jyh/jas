@@ -1,6 +1,6 @@
 from absl.testing import absltest
 
-from element import (
+from geometry.element import (
     Color, Fill, Stroke, LineCap, LineJoin, Transform,
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, Group, Layer,
