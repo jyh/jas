@@ -36,6 +36,15 @@ def create_menus(window: QMainWindow) -> None:
     save_as_action.setShortcut(QKeySequence.SaveAs)
     save_as_action.triggered.connect(lambda: _save_as(window, _model()))
 
+    revert_action = file_menu.addAction("&Revert")
+    revert_action.triggered.connect(lambda: _revert(window, _model()))
+    # Dynamically enable/disable: only when model is modified and has a saved file
+    file_menu.aboutToShow.connect(lambda: revert_action.setEnabled(
+        _model() is not None
+        and _model().is_modified
+        and not _model().filename.startswith("Untitled-")
+    ))
+
     file_menu.addSeparator()
 
     quit_action = file_menu.addAction("&Quit")
@@ -117,6 +126,32 @@ def _open_file(window: QMainWindow) -> None:
         svg = f.read()
     new_model = Model(document=svg_to_document(svg), filename=path)
     window.add_canvas(new_model)
+
+
+def _revert(window: QMainWindow, model: Model | None) -> None:
+    """Revert the document to the last saved version on disk."""
+    if not model or not model.is_modified or model.filename.startswith("Untitled-"):
+        return
+    from PySide6.QtWidgets import QMessageBox
+    reply = QMessageBox.warning(
+        window,
+        "Revert",
+        f'Revert to the saved version of "{model.filename}"?\n\n'
+        "All current modifications will be lost.",
+        QMessageBox.Ok | QMessageBox.Cancel,
+        QMessageBox.Cancel,
+    )
+    if reply != QMessageBox.Ok:
+        return
+    from geometry.svg import svg_to_document
+    try:
+        with open(model.filename, "r", encoding="utf-8") as f:
+            svg = f.read()
+        model.snapshot()
+        model.document = svg_to_document(svg)
+        model.mark_saved()
+    except Exception as e:
+        QMessageBox.critical(window, "Error", str(e))
 
 
 def _save(window: QMainWindow, model: Model | None) -> None:
