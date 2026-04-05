@@ -80,6 +80,13 @@ public struct JasCommands: Commands {
                 saveAs()
             }
             .keyboardShortcut("s", modifiers: [.command, .shift])
+
+            Button("Revert") {
+                revert()
+            }
+            .disabled(model == nil
+                      || !(model?.isModified ?? false)
+                      || (model?.filename.hasPrefix("Untitled-") ?? true))
         }
 
         CommandGroup(replacing: .undoRedo) {
@@ -186,6 +193,28 @@ public struct JasCommands: Commands {
         } catch {
             let alert = NSAlert(error: error)
             alert.runModal()
+        }
+    }
+
+    private func revert() {
+        guard let model = model,
+              model.isModified,
+              !model.filename.hasPrefix("Untitled-") else { return }
+        let alert = NSAlert()
+        alert.messageText = "Revert to the saved version of \"\(model.filename)\"?"
+        alert.informativeText = "All current modifications will be lost."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Revert")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            let svg = try String(contentsOfFile: model.filename, encoding: .utf8)
+            model.snapshot()
+            model.document = svgToDocument(svg)
+            model.markSaved()
+        } catch {
+            let errAlert = NSAlert(error: error)
+            errAlert.runModal()
         }
     }
 

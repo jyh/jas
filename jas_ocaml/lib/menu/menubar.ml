@@ -194,6 +194,31 @@ let save (model : Model.model) (parent : GWindow.window) () =
     model#mark_saved
   end
 
+let revert (get_model : unit -> Model.model) (parent : GWindow.window) () =
+  let model = get_model () in
+  if not model#is_modified then ()
+  else if is_untitled model#filename then ()
+  else begin
+    let dialog = GWindow.message_dialog
+      ~message:(Printf.sprintf "Revert to the saved version of \"%s\"?\n\nAll current modifications will be lost." model#filename)
+      ~message_type:`WARNING
+      ~buttons:GWindow.Buttons.ok_cancel
+      ~parent
+      () in
+    let response = dialog#run () in
+    dialog#destroy ();
+    match response with
+    | `OK ->
+      let ic = open_in model#filename in
+      let n = in_channel_length ic in
+      let svg = really_input_string ic n in
+      close_in ic;
+      model#snapshot;
+      model#set_document (Svg.svg_to_document svg);
+      model#mark_saved
+    | _ -> ()
+  end
+
 let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open (vbox : GPack.box) =
   let m () = get_model () in
   (* Menubar *)
@@ -207,6 +232,7 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   ignore (file_factory#add_item "Open..." ~key:GdkKeysyms._o ~callback:(open_file on_open parent));
   ignore (file_factory#add_item "Save" ~key:GdkKeysyms._s ~callback:(fun () -> save (m ()) parent ()));
   ignore (file_factory#add_item "Save As..." ~key:GdkKeysyms._s ~callback:(fun () -> save_as (m ()) parent ()));
+  ignore (file_factory#add_item "Revert" ~callback:(revert m parent));
   ignore (file_factory#add_separator ());
   ignore (file_factory#add_item "Quit" ~key:GdkKeysyms._q ~callback:(fun () -> GMain.quit ()));
 
