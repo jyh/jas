@@ -1164,3 +1164,192 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x: f64, y: f64, w: f64, h: f64) -> Element {
+        Element::Rect(RectElem {
+            x, y, width: w, height: h, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+        })
+    }
+
+    fn line(x1: f64, y1: f64, x2: f64, y2: f64) -> Element {
+        Element::Line(LineElem {
+            x1, y1, x2, y2,
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            common: CommonProps::default(),
+        })
+    }
+
+    fn circle(cx: f64, cy: f64, r: f64) -> Element {
+        Element::Circle(CircleElem {
+            cx, cy, r,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+        })
+    }
+
+    fn ellipse(cx: f64, cy: f64, rx: f64, ry: f64) -> Element {
+        Element::Ellipse(EllipseElem {
+            cx, cy, rx, ry,
+            fill: None, stroke: None,
+            common: CommonProps::default(),
+        })
+    }
+
+    fn path_elem(d: Vec<PathCommand>) -> Element {
+        Element::Path(PathElem {
+            d, fill: None, stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            common: CommonProps::default(),
+        })
+    }
+
+    fn group(children: Vec<Element>) -> Element {
+        Element::Group(GroupElem { children, common: CommonProps::default() })
+    }
+
+    // --- Bounds tests ---
+
+    #[test]
+    fn rect_bounds() {
+        assert_eq!(rect(10.0, 20.0, 30.0, 40.0).bounds(), (10.0, 20.0, 30.0, 40.0));
+    }
+
+    #[test]
+    fn line_bounds_no_stroke() {
+        let e = Element::Line(LineElem {
+            x1: 0.0, y1: 0.0, x2: 50.0, y2: 50.0,
+            stroke: None, common: CommonProps::default(),
+        });
+        assert_eq!(e.bounds(), (0.0, 0.0, 50.0, 50.0));
+    }
+
+    #[test]
+    fn line_bounds_with_stroke() {
+        let e = line(0.0, 0.0, 50.0, 50.0);
+        let (bx, by, bw, bh) = e.bounds();
+        assert!(bx < 0.0); // inflated by stroke
+        assert!(by < 0.0);
+        assert!(bw > 50.0);
+        assert!(bh > 50.0);
+    }
+
+    #[test]
+    fn circle_bounds() {
+        let (bx, by, bw, bh) = circle(50.0, 50.0, 20.0).bounds();
+        assert_eq!((bx, by, bw, bh), (30.0, 30.0, 40.0, 40.0));
+    }
+
+    #[test]
+    fn ellipse_bounds() {
+        let (bx, by, bw, bh) = ellipse(50.0, 50.0, 30.0, 15.0).bounds();
+        assert_eq!((bx, by, bw, bh), (20.0, 35.0, 60.0, 30.0));
+    }
+
+    #[test]
+    fn group_bounds() {
+        let g = group(vec![
+            rect(0.0, 0.0, 10.0, 10.0),
+            rect(20.0, 20.0, 10.0, 10.0),
+        ]);
+        assert_eq!(g.bounds(), (0.0, 0.0, 30.0, 30.0));
+    }
+
+    #[test]
+    fn empty_group_bounds() {
+        let g = group(vec![]);
+        assert_eq!(g.bounds(), (0.0, 0.0, 0.0, 0.0));
+    }
+
+    // --- Control points tests ---
+
+    #[test]
+    fn rect_has_4_control_points() {
+        assert_eq!(control_point_count(&rect(0.0, 0.0, 10.0, 10.0)), 4);
+    }
+
+    #[test]
+    fn line_has_2_control_points() {
+        assert_eq!(control_point_count(&line(0.0, 0.0, 10.0, 10.0)), 2);
+    }
+
+    #[test]
+    fn circle_has_4_control_points() {
+        assert_eq!(control_point_count(&circle(50.0, 50.0, 20.0)), 4);
+    }
+
+    #[test]
+    fn rect_control_points_are_corners() {
+        let cps = control_points(&rect(10.0, 20.0, 30.0, 40.0));
+        assert_eq!(cps, vec![
+            (10.0, 20.0), (40.0, 20.0), (40.0, 60.0), (10.0, 60.0)
+        ]);
+    }
+
+    #[test]
+    fn line_control_points_are_endpoints() {
+        let cps = control_points(&line(5.0, 10.0, 15.0, 20.0));
+        assert_eq!(cps, vec![(5.0, 10.0), (15.0, 20.0)]);
+    }
+
+    // --- Translate tests ---
+
+    #[test]
+    fn translate_rect() {
+        let e = translate_element(&rect(10.0, 20.0, 30.0, 40.0), 5.0, -3.0);
+        if let Element::Rect(r) = e {
+            assert_eq!(r.x, 15.0);
+            assert_eq!(r.y, 17.0);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn translate_line() {
+        let e = translate_element(&line(0.0, 0.0, 10.0, 10.0), 5.0, 5.0);
+        if let Element::Line(l) = e {
+            assert_eq!((l.x1, l.y1, l.x2, l.y2), (5.0, 5.0, 15.0, 15.0));
+        } else {
+            panic!("expected Line");
+        }
+    }
+
+    // --- Path flattening ---
+
+    #[test]
+    fn flatten_line_path() {
+        let d = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 10.0, y: 0.0 },
+        ];
+        let pts = flatten_path_commands(&d);
+        assert_eq!(pts.len(), 2);
+        assert_eq!(pts[0], (0.0, 0.0));
+        assert_eq!(pts[1], (10.0, 0.0));
+    }
+
+    #[test]
+    fn flatten_empty_path() {
+        let pts = flatten_path_commands(&[]);
+        assert!(pts.is_empty());
+    }
+
+    #[test]
+    fn flatten_curve_path() {
+        let d = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 10.0, y1: 0.0, x2: 10.0, y2: 10.0, x: 10.0, y: 10.0 },
+        ];
+        let pts = flatten_path_commands(&d);
+        assert!(pts.len() > 2); // Bezier gets subdivided
+        assert_eq!(pts[0], (0.0, 0.0));
+        let last = pts.last().unwrap();
+        assert!((last.0 - 10.0).abs() < 0.01);
+        assert!((last.1 - 10.0).abs() < 0.01);
+    }
+}

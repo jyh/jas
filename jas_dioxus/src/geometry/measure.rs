@@ -106,3 +106,74 @@ pub fn path_distance_to_point(d: &[PathCommand], px: f64, py: f64) -> f64 {
     }
     best_dist
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::element::PathCommand;
+
+    fn straight_path() -> Vec<PathCommand> {
+        vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+        ]
+    }
+
+    #[test]
+    fn arc_lengths_straight() {
+        let pts = vec![(0.0, 0.0), (10.0, 0.0), (20.0, 0.0)];
+        let lens = arc_lengths(&pts);
+        assert_eq!(lens, vec![0.0, 10.0, 20.0]);
+    }
+
+    #[test]
+    fn point_at_offset_start() {
+        let (x, y) = path_point_at_offset(&straight_path(), 0.0);
+        assert!((x - 0.0).abs() < 0.01);
+        assert!((y - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn point_at_offset_end() {
+        let (x, y) = path_point_at_offset(&straight_path(), 1.0);
+        assert!((x - 100.0).abs() < 0.01);
+        assert!((y - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn point_at_offset_midpoint() {
+        let (x, y) = path_point_at_offset(&straight_path(), 0.5);
+        assert!((x - 50.0).abs() < 0.01);
+        assert!((y - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn closest_offset_on_path() {
+        let t = path_closest_offset(&straight_path(), 50.0, 0.0);
+        assert!((t - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn closest_offset_off_path() {
+        let t = path_closest_offset(&straight_path(), 50.0, 30.0);
+        assert!((t - 0.5).abs() < 0.01); // closest point is still at x=50
+    }
+
+    #[test]
+    fn distance_to_point_on_path() {
+        let d = path_distance_to_point(&straight_path(), 50.0, 0.0);
+        assert!(d < 0.01);
+    }
+
+    #[test]
+    fn distance_to_point_off_path() {
+        let d = path_distance_to_point(&straight_path(), 50.0, 30.0);
+        assert!((d - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn distance_to_point_past_endpoint() {
+        let d = path_distance_to_point(&straight_path(), 100.0, 10.0);
+        assert!((d - 10.0).abs() < 0.01);
+    }
+}

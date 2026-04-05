@@ -99,3 +99,102 @@ impl Model {
         self.saved_document = self.document.clone();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::element::*;
+
+    fn make_layer(name: &str) -> Element {
+        Element::Layer(LayerElem {
+            name: name.to_string(), children: Vec::new(), common: CommonProps::default(),
+        })
+    }
+
+    #[test]
+    fn default_model_has_untitled_filename() {
+        let model = Model::default();
+        assert!(model.filename.starts_with("Untitled-"));
+    }
+
+    #[test]
+    fn default_model_has_one_layer() {
+        let model = Model::default();
+        assert_eq!(model.document().layers.len(), 1);
+    }
+
+    #[test]
+    fn new_model_with_filename() {
+        let model = Model::new(Document::default(), Some("test.svg".to_string()));
+        assert_eq!(model.filename, "test.svg");
+    }
+
+    #[test]
+    fn set_document() {
+        let mut model = Model::default();
+        let doc = Document { layers: vec![], selected_layer: 0, selection: vec![] };
+        model.set_document(doc);
+        assert_eq!(model.document().layers.len(), 0);
+    }
+
+    #[test]
+    fn undo_redo() {
+        let mut model = Model::default();
+        assert!(!model.can_undo());
+
+        model.snapshot();
+        model.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![] });
+        assert!(model.can_undo());
+        assert!(!model.can_redo());
+
+        model.undo();
+        assert_eq!(model.document().layers.len(), 1);
+        assert!(model.can_redo());
+
+        model.redo();
+        assert_eq!(model.document().layers.len(), 0);
+    }
+
+    #[test]
+    fn undo_clears_redo_on_new_edit() {
+        let mut model = Model::default();
+        let layer = make_layer("L1");
+
+        model.snapshot();
+        model.set_document(Document { layers: vec![layer.clone()], selected_layer: 0, selection: vec![] });
+        model.snapshot();
+        model.set_document(Document { layers: vec![layer.clone(), layer.clone()], selected_layer: 0, selection: vec![] });
+
+        model.undo();
+        assert_eq!(model.document().layers.len(), 1);
+        assert!(model.can_redo());
+
+        model.snapshot();
+        model.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![] });
+        assert!(!model.can_redo());
+    }
+
+    #[test]
+    fn undo_empty_stack_is_noop() {
+        let mut model = Model::default();
+        model.undo();
+        assert_eq!(model.document().layers.len(), 1);
+    }
+
+    #[test]
+    fn redo_empty_stack_is_noop() {
+        let mut model = Model::default();
+        model.redo();
+        assert_eq!(model.document().layers.len(), 1);
+    }
+
+    #[test]
+    fn undo_stack_capped_at_100() {
+        let mut model = Model::default();
+        for _ in 0..150 {
+            model.snapshot();
+        }
+        // Internal: undo_stack should not exceed 100
+        assert!(model.undo_stack.len() <= 100);
+    }
+}

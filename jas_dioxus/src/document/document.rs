@@ -210,3 +210,168 @@ fn remove_from_children(node: &mut Element, rest: &[usize]) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::element::*;
+
+    fn make_rect(x: f64, y: f64, w: f64, h: f64) -> Element {
+        Element::Rect(RectElem {
+            x, y, width: w, height: h, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+        })
+    }
+
+    fn make_line(x1: f64, y1: f64, x2: f64, y2: f64) -> Element {
+        Element::Line(LineElem {
+            x1, y1, x2, y2,
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            common: CommonProps::default(),
+        })
+    }
+
+    fn make_layer(name: &str, children: Vec<Element>) -> Element {
+        Element::Layer(LayerElem {
+            name: name.to_string(), children, common: CommonProps::default(),
+        })
+    }
+
+    fn make_group(children: Vec<Element>) -> Element {
+        Element::Group(GroupElem { children, common: CommonProps::default() })
+    }
+
+    #[test]
+    fn default_document_has_one_layer() {
+        let doc = Document::default();
+        assert_eq!(doc.layers.len(), 1);
+        assert!(matches!(&doc.layers[0], Element::Layer(_)));
+    }
+
+    #[test]
+    fn default_selection_empty() {
+        let doc = Document::default();
+        assert!(doc.selection.is_empty());
+    }
+
+    #[test]
+    fn empty_document_bounds() {
+        let doc = Document { layers: vec![], selected_layer: 0, selection: vec![] };
+        assert_eq!(doc.bounds(), (0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn single_layer_bounds() {
+        let layer = make_layer("L1", vec![make_rect(0.0, 0.0, 10.0, 10.0)]);
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        assert_eq!(doc.bounds(), (0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn get_element_layer() {
+        let doc = Document::default();
+        assert!(doc.get_element(&vec![0]).is_some());
+    }
+
+    #[test]
+    fn get_element_child() {
+        let layer = make_layer("L", vec![make_rect(0.0, 0.0, 10.0, 10.0)]);
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let elem = doc.get_element(&vec![0, 0]).unwrap();
+        assert!(matches!(elem, Element::Rect(_)));
+    }
+
+    #[test]
+    fn get_element_nested() {
+        let group = make_group(vec![make_line(0.0, 0.0, 1.0, 1.0)]);
+        let layer = make_layer("L", vec![group]);
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let elem = doc.get_element(&vec![0, 0, 0]).unwrap();
+        assert!(matches!(elem, Element::Line(_)));
+    }
+
+    #[test]
+    fn get_element_empty_path() {
+        let doc = Document::default();
+        assert!(doc.get_element(&vec![]).is_none());
+    }
+
+    #[test]
+    fn replace_element_child() {
+        let layer = make_layer("L", vec![make_rect(0.0, 0.0, 10.0, 10.0)]);
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let new_rect = make_rect(5.0, 5.0, 20.0, 20.0);
+        let doc2 = doc.replace_element(&vec![0, 0], new_rect.clone());
+        assert_eq!(doc2.get_element(&vec![0, 0]).unwrap(), &new_rect);
+        // Original unchanged
+        if let Element::Rect(r) = doc.get_element(&vec![0, 0]).unwrap() {
+            assert_eq!(r.x, 0.0);
+        }
+    }
+
+    #[test]
+    fn replace_element_preserves_other_children() {
+        let layer = make_layer("L", vec![
+            make_rect(0.0, 0.0, 10.0, 10.0),
+            make_line(0.0, 0.0, 5.0, 5.0),
+        ]);
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc2 = doc.replace_element(&vec![0, 0], make_rect(99.0, 99.0, 1.0, 1.0));
+        assert!(matches!(doc2.get_element(&vec![0, 1]).unwrap(), Element::Line(_)));
+    }
+
+    #[test]
+    fn delete_element() {
+        let layer = make_layer("L", vec![
+            make_rect(0.0, 0.0, 10.0, 10.0),
+            make_line(0.0, 0.0, 5.0, 5.0),
+        ]);
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc2 = doc.delete_element(&vec![0, 0]);
+        if let Element::Layer(l) = &doc2.layers[0] {
+            assert_eq!(l.children.len(), 1);
+            assert!(matches!(&l.children[0], Element::Line(_)));
+        } else {
+            panic!("expected layer");
+        }
+    }
+
+    #[test]
+    fn delete_selection() {
+        let layer = make_layer("L", vec![
+            make_rect(0.0, 0.0, 10.0, 10.0),
+            make_line(0.0, 0.0, 5.0, 5.0),
+        ]);
+        let sel = vec![ElementSelection { path: vec![0, 0], control_points: HashSet::new() }];
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: sel };
+        let doc2 = doc.delete_selection();
+        assert!(doc2.selection.is_empty());
+        if let Element::Layer(l) = &doc2.layers[0] {
+            assert_eq!(l.children.len(), 1);
+        }
+    }
+
+    #[test]
+    fn insert_element_after() {
+        let layer = make_layer("L", vec![make_rect(0.0, 0.0, 10.0, 10.0)]);
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc2 = doc.insert_element_after(&vec![0, 0], make_line(0.0, 0.0, 5.0, 5.0));
+        if let Element::Layer(l) = &doc2.layers[0] {
+            assert_eq!(l.children.len(), 2);
+            assert!(matches!(&l.children[1], Element::Line(_)));
+        }
+    }
+
+    #[test]
+    fn insert_element_at() {
+        let layer = make_layer("L", vec![make_line(0.0, 0.0, 5.0, 5.0)]);
+        let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
+        let doc2 = doc.insert_element_at(&vec![0, 0], make_rect(0.0, 0.0, 10.0, 10.0));
+        if let Element::Layer(l) = &doc2.layers[0] {
+            assert_eq!(l.children.len(), 2);
+            assert!(matches!(&l.children[0], Element::Rect(_)));
+            assert!(matches!(&l.children[1], Element::Line(_)));
+        }
+    }
+}

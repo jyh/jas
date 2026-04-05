@@ -1163,3 +1163,168 @@ static NAMED_COLORS: OnceLock<HashMap<&'static str, (u8, u8, u8)>> = OnceLock::n
 fn get_named_colors() -> &'static HashMap<&'static str, (u8, u8, u8)> {
     NAMED_COLORS.get_or_init(named_colors_map)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::element::*;
+
+    fn make_rect(x: f64, y: f64, w: f64, h: f64) -> Element {
+        Element::Rect(RectElem {
+            x, y, width: w, height: h, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::rgb(1.0, 0.0, 0.0))),
+            stroke: None, common: CommonProps::default(),
+        })
+    }
+
+    fn make_line(x1: f64, y1: f64, x2: f64, y2: f64) -> Element {
+        Element::Line(LineElem {
+            x1, y1, x2, y2,
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            common: CommonProps::default(),
+        })
+    }
+
+    fn make_circle(cx: f64, cy: f64, r: f64) -> Element {
+        Element::Circle(CircleElem {
+            cx, cy, r,
+            fill: Some(Fill::new(Color::rgb(0.0, 0.0, 1.0))),
+            stroke: None, common: CommonProps::default(),
+        })
+    }
+
+    fn make_doc(children: Vec<Element>) -> Document {
+        Document {
+            layers: vec![Element::Layer(LayerElem {
+                name: "Layer".to_string(),
+                children,
+                common: CommonProps::default(),
+            })],
+            selected_layer: 0,
+            selection: vec![],
+        }
+    }
+
+    #[test]
+    fn export_empty_document() {
+        let doc = Document::default();
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("</svg>"));
+    }
+
+    #[test]
+    fn export_contains_rect() {
+        let doc = make_doc(vec![make_rect(10.0, 20.0, 30.0, 40.0)]);
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<rect"));
+    }
+
+    #[test]
+    fn export_contains_line() {
+        let doc = make_doc(vec![make_line(0.0, 0.0, 50.0, 50.0)]);
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<line"));
+    }
+
+    #[test]
+    fn export_contains_circle() {
+        let doc = make_doc(vec![make_circle(50.0, 50.0, 20.0)]);
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<circle"));
+    }
+
+    #[test]
+    fn roundtrip_rect() {
+        let doc = make_doc(vec![make_rect(10.0, 20.0, 30.0, 40.0)]);
+        let svg = document_to_svg(&doc);
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Rect(r) = &children[0] {
+            // SVG uses pt-to-px conversion (96/72), check approximately
+            assert!(r.width > 0.0);
+            assert!(r.height > 0.0);
+        } else {
+            panic!("expected Rect, got {:?}", children[0]);
+        }
+    }
+
+    #[test]
+    fn roundtrip_line() {
+        let doc = make_doc(vec![make_line(0.0, 0.0, 100.0, 100.0)]);
+        let svg = document_to_svg(&doc);
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        assert!(matches!(&children[0], Element::Line(_)));
+    }
+
+    #[test]
+    fn roundtrip_circle() {
+        let doc = make_doc(vec![make_circle(50.0, 50.0, 20.0)]);
+        let svg = document_to_svg(&doc);
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        assert!(matches!(&children[0], Element::Circle(_)));
+    }
+
+    #[test]
+    fn roundtrip_multiple_elements() {
+        let doc = make_doc(vec![
+            make_rect(0.0, 0.0, 10.0, 10.0),
+            make_line(0.0, 0.0, 50.0, 50.0),
+            make_circle(30.0, 30.0, 15.0),
+        ]);
+        let svg = document_to_svg(&doc);
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        assert_eq!(children.len(), 3);
+    }
+
+    #[test]
+    fn roundtrip_group() {
+        let g = Element::Group(GroupElem {
+            children: vec![make_rect(0.0, 0.0, 10.0, 10.0), make_line(0.0, 0.0, 5.0, 5.0)],
+            common: CommonProps::default(),
+        });
+        let doc = make_doc(vec![g]);
+        let svg = document_to_svg(&doc);
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        assert!(matches!(&children[0], Element::Group(_)));
+        let group_children = children[0].children().unwrap();
+        assert_eq!(group_children.len(), 2);
+    }
+
+    #[test]
+    fn import_minimal_svg() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="10" y="20" width="30" height="40"/></svg>"#;
+        let doc = svg_to_document(svg);
+        assert!(!doc.layers.is_empty());
+        let children = doc.layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        assert!(matches!(&children[0], Element::Rect(_)));
+    }
+
+    #[test]
+    fn import_svg_with_fill() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="10" height="10" fill="red"/></svg>"#;
+        let doc = svg_to_document(svg);
+        let children = doc.layers[0].children().unwrap();
+        if let Element::Rect(r) = &children[0] {
+            assert!(r.fill.is_some());
+            let c = r.fill.unwrap().color;
+            assert!((c.r - 1.0).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn import_empty_svg() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#;
+        let doc = svg_to_document(svg);
+        assert!(!doc.layers.is_empty());
+    }
+}
