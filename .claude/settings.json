@@ -25,7 +25,8 @@
       "Bash(python -m pytest geometry/ document/ canvas/ tools/ menu/ -q)",
       "Bash(python -m pytest document/model_test.py -x -q)",
       "Bash(python -m pytest jas/ -x -q)",
-      "Bash(.build/debug/Jas)"
+      "Bash(.build/debug/Jas)",
+      "Bash(python -m jas.jas_app)"
     ]
   }
 }

@@ -3,33 +3,41 @@ let () =
   let model = Jas.Model.create () in
   let active_model = ref model in
   let active_canvas = ref None in
-  let fixed_ref = ref None in
+  let notebook_ref = ref None in
   let toolbar_ref = ref None in
 
   let add_canvas new_model =
-    match !fixed_ref, !toolbar_ref with
-    | Some fixed, Some toolbar ->
+    match !notebook_ref, !toolbar_ref with
+    | Some notebook, Some toolbar ->
       let controller = Jas.Controller.create ~model:new_model () in
       let on_focus () = active_model := new_model in
       let canvas = Jas.Canvas_subwindow.create
-        ~model:new_model ~controller ~toolbar ~on_focus
-        ~x:184 ~y:0 ~width:820 ~height:640 fixed in
+        ~model:new_model ~controller ~toolbar ~on_focus notebook in
       active_model := new_model;
-      active_canvas := Some canvas
+      active_canvas := Some canvas;
+      (* Switch to the new tab *)
+      let n = notebook#page_num canvas#widget in
+      notebook#goto_page n
     | _ -> ()
   in
 
   let get_model () = !active_model in
-  let main_window, fixed = Jas.Canvas.create_main_window ~get_model ~on_open:add_canvas () in
-  fixed_ref := Some fixed;
-  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 fixed in
+  let main_window, toolbar_fixed, notebook = Jas.Canvas.create_main_window ~get_model ~on_open:add_canvas () in
+  notebook_ref := Some notebook;
+  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 toolbar_fixed in
   toolbar_ref := Some toolbar;
   let controller = Jas.Controller.create ~model () in
   let on_focus () = active_model := model in
   let canvas = Jas.Canvas_subwindow.create
-    ~model ~controller ~toolbar ~on_focus
-    ~x:84 ~y:0 ~width:820 ~height:640 fixed in
+    ~model ~controller ~toolbar ~on_focus notebook in
   active_canvas := Some canvas;
+
+  (* Update active model/canvas when switching tabs *)
+  notebook#connect#switch_page ~callback:(fun page_num ->
+    let page = notebook#get_nth_page page_num in
+    (* Find the canvas whose widget matches this page *)
+    ignore page  (* We track focus via on_focus callbacks on click *)
+  ) |> ignore;
 
   (* Keyboard shortcuts: V = Selection, A = Direct Selection, \ = Line *)
   main_window#event#connect#key_press ~callback:(fun ev ->

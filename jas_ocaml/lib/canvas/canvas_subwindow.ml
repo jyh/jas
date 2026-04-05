@@ -471,43 +471,33 @@ let draw_selection_overlays cr (doc : Document.document) =
   ) doc.selection
 
 class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controller)
-    ~(toolbar : Toolbar.toolbar) ~x ~y ~width ~height ~(bbox : bounding_box) (fixed : GPack.fixed) =
-  let frame = GBin.frame ~shadow_type:`ETCHED_IN () in
-  let vbox = GPack.vbox ~packing:frame#add () in
+    ~(toolbar : Toolbar.toolbar) ~(bbox : bounding_box) =
 
-  (* Title bar *)
-  let title_bar = GMisc.drawing_area
-    ~packing:(vbox#pack ~expand:false) () in
-  let () = title_bar#misc#set_size_request ~height:title_bar_height () in
-
-  (* Canvas drawing area *)
-  let canvas_area = GMisc.drawing_area
-    ~packing:(vbox#pack ~expand:true ~fill:true) () in
+  (* The canvas drawing area is used directly as the notebook page widget.
+     We avoid wrapping it in a GPack.fixed or GBin.frame because GPack.fixed
+     does not propagate size allocation to its children — the canvas would
+     remain at 0x0 pixels regardless of hexpand/vexpand settings.
+     Text editors for inline editing use popup windows positioned relative
+     to the canvas via Gdk.Window.get_origin, since there is no parent
+     fixed container to place them in. *)
+  let canvas_area = GMisc.drawing_area () in
   object (_self)
-    val mutable pos_x = x
-    val mutable pos_y = y
-    val mutable sub_width = width
-    val mutable sub_height = height
-    val mutable dragging = false
-    val mutable drag_offset_x = 0.0
-    val mutable drag_offset_y = 0.0
     val mutable current_doc = model#document
     val hit_radius = 8.0
     (* Inline text editing state *)
     val mutable text_editor : GEdit.entry option = None
+    val mutable text_popup : GWindow.window option = None
     val mutable editing_path : int list option = None
     (* Active tool and tool instances *)
     val mutable active_tool : Canvas_tool.canvas_tool = Tool_factory.create_tool Toolbar.Selection
     val mutable current_tool_type : Toolbar.tool = Toolbar.Selection
 
-    method widget = frame#coerce
+    method widget = canvas_area#coerce
     method canvas = canvas_area
     method model = model
     method title =
       if model#is_modified then model#filename ^ " *"
       else model#filename
-    method x = pos_x
-    method y = pos_y
     method bbox = bbox
 
     method private hit_test_text px py =
@@ -599,8 +589,8 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       ) current_doc.Document.selection None
 
     method private commit_text_edit =
-      match text_editor, editing_path with
-      | Some entry, Some path ->
+      match text_editor, text_popup, editing_path with
+      | Some entry, Some popup, Some path ->
         let new_text = entry#text in
         let doc = current_doc in
         (try
@@ -614,45 +604,46 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
              model#set_document (Document.replace_element doc path new_elem)
            | _ -> ())
         with _ -> ());
-        entry#misc#hide ();
-        entry#destroy ();
+        popup#destroy ();
         text_editor <- None;
+        text_popup <- None;
         editing_path <- None
       | _ -> ()
+
+    method private make_text_popup ~x ~y ~bw ~bh ~content ~font_size ~font_family =
+      let popup = GWindow.window ~kind:`POPUP ~decorated:false () in
+      let entry = GEdit.entry ~packing:popup#add () in
+      entry#set_text content;
+      let font_desc = GPango.font_description_from_string
+        (Printf.sprintf "%s %d" font_family (int_of_float font_size)) in
+      entry#misc#modify_font font_desc;
+      entry#misc#set_size_request ~width:bw ~height:bh ();
+      let (cx, cy) = Gdk.Window.get_origin (canvas_area#misc#window) in
+      popup#move ~x:(cx + x) ~y:(cy + y);
+      entry#connect#activate ~callback:(fun () -> _self#commit_text_edit) |> ignore;
+      popup#show ();
+      entry#misc#grab_focus ();
+      entry#select_region ~start:0 ~stop:(String.length content);
+      text_editor <- Some entry;
+      text_popup <- Some popup
 
     method private start_text_edit path text_elem =
       _self#commit_text_edit;
       editing_path <- Some path;
       match text_elem with
       | Element.Text { x = tx; y = ty; content; font_size; font_family; _ } ->
-        let entry = GEdit.entry ~packing:(fun w ->
-          fixed#put w ~x:(pos_x + int_of_float tx) ~y:(pos_y + int_of_float (ty -. font_size))
-        ) () in
-        entry#set_text content;
-        let font_desc = GPango.font_description_from_string (Printf.sprintf "%s %d" font_family (int_of_float font_size)) in
-        entry#misc#modify_font font_desc;
         let bw = max (int_of_float (float_of_int (String.length content) *. font_size *. 0.6) + 20) 100 in
-        entry#misc#set_size_request ~width:bw ~height:(int_of_float font_size + 4) ();
-        entry#connect#activate ~callback:(fun () -> _self#commit_text_edit) |> ignore;
-        entry#misc#show ();
-        entry#misc#grab_focus ();
-        entry#select_region ~start:0 ~stop:(String.length content);
-        text_editor <- Some entry
+        _self#make_text_popup
+          ~x:(int_of_float tx) ~y:(int_of_float (ty -. font_size))
+          ~bw ~bh:(int_of_float font_size + 4)
+          ~content ~font_size ~font_family
       | Element.Text_path { d; content; start_offset; font_size; font_family; _ } ->
         let (px, py) = Element.path_point_at_offset d start_offset in
-        let entry = GEdit.entry ~packing:(fun w ->
-          fixed#put w ~x:(pos_x + int_of_float px) ~y:(pos_y + int_of_float (py -. font_size -. 4.0))
-        ) () in
-        entry#set_text content;
-        let font_desc = GPango.font_description_from_string (Printf.sprintf "%s %d" font_family (int_of_float font_size)) in
-        entry#misc#modify_font font_desc;
         let bw = max (int_of_float (float_of_int (String.length content) *. font_size *. 0.7) + 20) 200 in
-        entry#misc#set_size_request ~width:bw ~height:(int_of_float font_size + 8) ();
-        entry#connect#activate ~callback:(fun () -> _self#commit_text_edit) |> ignore;
-        entry#misc#show ();
-        entry#misc#grab_focus ();
-        entry#select_region ~start:0 ~stop:(String.length content);
-        text_editor <- Some entry
+        _self#make_text_popup
+          ~x:(int_of_float px) ~y:(int_of_float (py -. font_size -. 4.0))
+          ~bw ~bh:(int_of_float font_size + 8)
+          ~content ~font_size ~font_family
       | _ -> ()
 
     method private tool_context : Canvas_tool.tool_context = {
@@ -698,40 +689,12 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       canvas_area#misc#queue_draw ()
 
     initializer
-      fixed#put frame#coerce ~x:pos_x ~y:pos_y;
-      frame#misc#set_size_request ~width:sub_width ~height:sub_height ();
-
       (* Register for document changes *)
       model#on_document_changed (fun doc ->
         current_doc <- doc;
-        title_bar#misc#queue_draw ();
         canvas_area#misc#queue_draw ()
       );
 
-      (* Redraw title bar when filename changes *)
-      model#on_filename_changed (fun _name ->
-        title_bar#misc#queue_draw ()
-      );
-
-      (* Draw title bar *)
-      title_bar#misc#connect#draw ~callback:(fun cr ->
-        let alloc = title_bar#misc#allocation in
-        let w = float_of_int alloc.Gtk.width in
-        let h = float_of_int alloc.Gtk.height in
-        Cairo.set_source_rgb cr 0.6 0.6 0.6;
-        Cairo.rectangle cr 0.0 0.0 ~w ~h;
-        Cairo.fill cr;
-        Cairo.set_source_rgb cr 0.0 0.0 0.0;
-        Cairo.select_font_face cr "Sans";
-        Cairo.set_font_size cr 13.0;
-        let title = if model#is_modified then model#filename ^ " *" else model#filename in
-        let extents = Cairo.text_extents cr title in
-        let tx = (w -. extents.Cairo.width) /. 2.0 in
-        let ty = (h +. extents.Cairo.height) /. 2.0 in
-        Cairo.move_to cr tx ty;
-        Cairo.show_text cr title;
-        true
-      ) |> ignore;
 
       (* Draw canvas: white background, then document layers, then tool overlay *)
       canvas_area#misc#connect#draw ~callback:(fun cr ->
@@ -792,40 +755,22 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         end else false
       ) |> ignore;
 
-      (* Title bar drag events *)
-      title_bar#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION];
-      title_bar#event#connect#button_press ~callback:(fun ev ->
-        if GdkEvent.Button.button ev = 1 then begin
-          dragging <- true;
-          drag_offset_x <- GdkEvent.Button.x ev;
-          drag_offset_y <- GdkEvent.Button.y ev;
-          true
-        end else false
-      ) |> ignore;
-      title_bar#event#connect#button_release ~callback:(fun ev ->
-        if GdkEvent.Button.button ev = 1 then begin
-          dragging <- false;
-          true
-        end else false
-      ) |> ignore;
-      title_bar#event#connect#motion_notify ~callback:(fun ev ->
-        if dragging then begin
-          let mx = GdkEvent.Motion.x ev in
-          let my = GdkEvent.Motion.y ev in
-          let dx = int_of_float (mx -. drag_offset_x) in
-          let dy = int_of_float (my -. drag_offset_y) in
-          pos_x <- pos_x + dx;
-          pos_y <- pos_y + dy;
-          fixed#move frame#coerce ~x:pos_x ~y:pos_y;
-          true
-        end else false
-      ) |> ignore
   end
 
-let create ?(model = Model.create ()) ~controller ~toolbar ?(on_focus = fun () -> ()) ~x ~y ~width ~height ?(bbox = make_bounding_box ()) fixed =
-  let sub = new canvas_subwindow ~model ~controller ~toolbar ~x ~y ~width ~height ~bbox fixed in
-  (* Fire on_focus when canvas or title bar is clicked *)
+let create ?(model = Model.create ()) ~controller ~toolbar ?(on_focus = fun () -> ()) ?(bbox = make_bounding_box ()) (notebook : GPack.notebook) =
+  let sub = new canvas_subwindow ~model ~controller ~toolbar ~bbox in
+  (* Add as a notebook page with the filename as tab label *)
+  let tab_label = GMisc.label ~text:model#filename () in
+  notebook#append_page ~tab_label:tab_label#coerce sub#widget |> ignore;
+  (* Update tab label on document/filename changes *)
+  let update_label () =
+    let title = if model#is_modified then model#filename ^ " *" else model#filename in
+    tab_label#set_text title
+  in
+  model#on_document_changed (fun _doc -> update_label ());
+  model#on_filename_changed (fun _name -> update_label ());
+  (* Fire on_focus when canvas is clicked *)
   sub#canvas#event#connect#button_press ~callback:(fun _ev ->
-    on_focus (); false  (* false = don't consume, let normal handler run *)
+    on_focus (); false
   ) |> ignore;
   sub
