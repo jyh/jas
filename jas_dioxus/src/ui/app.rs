@@ -346,17 +346,20 @@ fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
 }
 
 /// Toolbar layout: 2-column grid matching the Python/Qt version.
-/// Each entry is (row, col, tool_kind).
-const TOOLBAR_GRID: &[(usize, usize, ToolKind)] = &[
-    (0, 0, ToolKind::Selection),
-    (0, 1, ToolKind::DirectSelection),
-    (1, 0, ToolKind::Pen),
-    (1, 1, ToolKind::Pencil),
-    (2, 0, ToolKind::Text),
-    (2, 1, ToolKind::Line),
-    (3, 0, ToolKind::Rect),
-    (3, 1, ToolKind::Polygon),
+/// Each entry is (row, col, primary_tool, alternates).
+/// Slots with alternates show the current alternate and support long-press to switch.
+const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
+    (0, 0, &[ToolKind::Selection]),
+    (0, 1, &[ToolKind::DirectSelection, ToolKind::GroupSelection]),
+    (1, 0, &[ToolKind::Pen]),
+    (1, 1, &[ToolKind::Pencil]),
+    (2, 0, &[ToolKind::Text, ToolKind::TextOnPath]),
+    (2, 1, &[ToolKind::Line]),
+    (3, 0, &[ToolKind::Rect, ToolKind::Polygon]),
 ];
+
+/// Long-press threshold in milliseconds.
+const LONG_PRESS_MS: i32 = 500;
 
 /// SVG path data for each tool icon (28x28 viewBox, matching Python toolbar.py).
 /// Uses rgb(204,204,204) instead of #ccc to avoid Rust 2021 literal prefix issues.
@@ -695,33 +698,133 @@ pub fn App() -> Element {
         }
     };
 
-    // --- Tool buttons ---
+    // --- Tool buttons with shared slots ---
+    // Track which alternate is visible in each shared slot.
+    // Key: index into TOOLBAR_SLOTS for slots with alternates.
+    let mut slot_alternates = use_signal(|| {
+        let mut map = HashMap::<usize, usize>::new();
+        for (i, (_r, _c, tools)) in TOOLBAR_SLOTS.iter().enumerate() {
+            if tools.len() > 1 {
+                map.insert(i, 0); // default to first alternate
+            }
+        }
+        map
+    });
+    // Signal for which slot is showing a long-press popup (-1 = none)
+    let mut popup_slot = use_signal(|| Option::<usize>::None);
+
     let active_tool = app.borrow().active_tool;
-    let tool_buttons: Vec<Result<VNode, RenderError>> = TOOLBAR_GRID
+
+    // If active tool is an alternate that's not currently visible, update the slot
+    for (si, (_r, _c, tools)) in TOOLBAR_SLOTS.iter().enumerate() {
+        if tools.len() > 1 {
+            if let Some(pos) = tools.iter().position(|&t| t == active_tool) {
+                let current = *slot_alternates.read().get(&si).unwrap_or(&0);
+                if current != pos {
+                    slot_alternates.write().insert(si, pos);
+                }
+            }
+        }
+    }
+
+    let tool_buttons: Vec<Result<VNode, RenderError>> = TOOLBAR_SLOTS
         .iter()
-        .map(|&(row, col, kind)| {
+        .enumerate()
+        .map(|(si, &(row, col, tools))| {
             let act = act.clone();
-            let is_active = active_tool == kind;
+            let alt_idx = *slot_alternates.read().get(&si).unwrap_or(&0);
+            let kind = tools[alt_idx.min(tools.len() - 1)];
+            let has_alternates = tools.len() > 1;
+            let is_active = tools.contains(&active_tool);
             let bg = if is_active { "#505050" } else { "transparent" };
+
+            // Build SVG with optional alternate triangle indicator
             let svg_inner = toolbar_svg_icon(kind);
-            let svg_html = format!(r#"<svg viewBox="0 0 28 28" width="28" height="28" xmlns="http://www.w3.org/2000/svg">{svg_inner}</svg>"#);
-            let grid_col = col + 1; // CSS grid is 1-based
+            let triangle = if has_alternates {
+                format!(r#"<path d="M28,28 L23,28 L28,23 Z" fill="{IC}"/>"#)
+            } else {
+                String::new()
+            };
+            let svg_html = format!(
+                r#"<svg viewBox="0 0 28 28" width="28" height="28" xmlns="http://www.w3.org/2000/svg">{svg_inner}{triangle}</svg>"#
+            );
+            let grid_col = col + 1;
             let grid_row = row + 1;
+
             rsx! {
                 div {
-                    key: "{kind:?}",
-                    style: "grid-column:{grid_col}; grid-row:{grid_row}; width:32px; height:32px; background:{bg}; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:2px;",
+                    key: "slot-{si}",
+                    style: "grid-column:{grid_col}; grid-row:{grid_row}; width:32px; height:32px; background:{bg}; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:2px; position:relative;",
                     title: "{kind.label()}",
-                    onclick: move |_| {
-                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            st.active_tool = kind;
-                        }));
+                    onmousedown: {
+                        let act = act.clone();
+                        move |evt: Event<MouseData>| {
+                            evt.stop_propagation();
+                            if has_alternates {
+                                // Start long-press timer via setTimeout
+                                let slot_idx = si;
+                                let mut popup = popup_slot.clone();
+                                let window = web_sys::window().unwrap();
+                                let cb = Closure::once(move || {
+                                    popup.set(Some(slot_idx));
+                                });
+                                window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                    cb.as_ref().unchecked_ref(), LONG_PRESS_MS
+                                ).ok();
+                                cb.forget();
+                            }
+                            // Normal click: select this tool
+                            (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                st.active_tool = kind;
+                            }));
+                        }
+                    },
+                    onmouseup: move |_| {
+                        // If popup hasn't shown yet, cancel by ignoring
+                        // (timer will fire but popup will be dismissed on next click)
                     },
                     dangerous_inner_html: "{svg_html}",
                 }
             }
         })
         .collect();
+
+    // Build popup for long-press alternate selection
+    let popup_node: Option<Result<VNode, RenderError>> = popup_slot().map(|si| {
+        let (_row, col, tools) = TOOLBAR_SLOTS[si];
+        let items: Vec<Result<VNode, RenderError>> = tools.iter().enumerate().map(|(ti, &tool_kind)| {
+            let act = act.clone();
+            let label = tool_kind.label();
+            let is_current = tool_kind == active_tool;
+            let bg = if is_current { "#606060" } else { "#4a4a4a" };
+            rsx! {
+                div {
+                    class: "jas-tool-popup-item",
+                    style: "padding:4px 10px; cursor:pointer; font-size:12px; color:#ccc; white-space:nowrap; background:{bg}; border-radius:2px;",
+                    onmousedown: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        slot_alternates.write().insert(si, ti);
+                        popup_slot.set(None);
+                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                            st.active_tool = tool_kind;
+                        }));
+                    },
+                    "{label}"
+                }
+            }
+        }).collect();
+        // Position the popup next to the toolbar
+        let top = _row as u32 * 34 + 4;
+        let left = if col == 0 { 72 } else { 72 };
+        rsx! {
+            div {
+                style: "position:fixed; top:{top}px; left:{left}px; background:#4a4a4a; border:1px solid #666; box-shadow:2px 2px 8px rgba(0,0,0,0.3); z-index:2000; padding:4px; border-radius:4px;",
+                for item in items {
+                    {item}
+                }
+            }
+        }
+    });
 
     // --- Tab bar ---
     let borrowed = app.borrow();
@@ -1015,11 +1118,12 @@ pub fn App() -> Element {
         }
     }).collect();
 
-    // Close menu when clicking anywhere outside
+    // Close menu/popup when clicking anywhere outside
     let on_main_mousedown = {
         let mut open_menu_sig = open_menu.clone();
         move |_: Event<MouseData>| {
             open_menu_sig.set(None);
+            popup_slot.set(None);
         }
     };
 
@@ -1027,18 +1131,31 @@ pub fn App() -> Element {
         style { r#"
             .jas-menu-title:hover {{ background: #d0d0d0; }}
             .jas-menu-item:hover {{ background: #e8e8e8; }}
+            .jas-tool-popup-item:hover {{ background: #606060 !important; }}
         "#  }
         div {
             tabindex: "0",
             onkeydown: on_keydown,
+            onmousedown: move |_| {
+                popup_slot.set(None);
+            },
             style: "display:flex; height:100vh; outline:none; font-family:sans-serif;",
 
             // Toolbar
             div {
                 style: "width:72px; background:#3c3c3c; border-right:1px solid #555; padding:4px 2px; display:grid; grid-template-columns:32px 32px; grid-auto-rows:32px; gap:2px; justify-content:center; align-content:start;",
+                onmousedown: move |_| {
+                    // Close menu dropdowns when clicking on toolbar
+                    open_menu.set(None);
+                },
                 for btn in tool_buttons {
                     {btn}
                 }
+            }
+
+            // Tool alternate popup (shown on long-press)
+            if let Some(popup) = popup_node {
+                {popup}
             }
 
             // Main area (menu + tabs + canvas)
