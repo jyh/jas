@@ -20,98 +20,118 @@ public enum Tool: String, CaseIterable {
 struct CanvasEntry: Identifiable {
     let id = UUID()
     let model: JasModel
-    var position: CGPoint
 }
 
 // MARK: - Content View
 
 public struct ContentView: View {
     @State private var currentTool: Tool = .selection
-    @State private var toolbarPosition: CGPoint = CGPoint(x: 0, y: 0)
     @State private var canvases: [CanvasEntry] = [
-        CanvasEntry(model: JasModel(), position: CGPoint(x: 84, y: 0))
+        CanvasEntry(model: JasModel())
     ]
-    @State private var activeIndex: Int = 0
+    @State private var selectedTab: UUID?
 
     public init() {}
 
-    private var activeModel: JasModel { canvases[activeIndex].model }
+    private var activeModel: JasModel {
+        if let id = selectedTab, let entry = canvases.first(where: { $0.id == id }) {
+            return entry.model
+        }
+        return canvases.first!.model
+    }
 
     public var body: some View {
-        ZStack(alignment: .topLeading) {
-            // Workspace background
-            Color(nsColor: NSColor(white: 0.235, alpha: 1.0))
+        HStack(spacing: 0) {
+            // Toolbar on the left
+            ToolbarPanel(currentTool: $currentTool)
 
-            // Canvas subwindows
-            ForEach(Array(canvases.enumerated()), id: \.element.id) { index, entry in
-                CanvasSubwindow(
-                    model: entry.model,
-                    controller: Controller(model: entry.model),
-                    currentTool: $currentTool,
-                    position: $canvases[index].position,
-                    bbox: CanvasBoundingBox(),
-                    onFocus: { activeIndex = index }
-                )
-                .zIndex(index == activeIndex ? 1 : 0)
+            // Tabbed canvas area
+            TabView(selection: $selectedTab) {
+                ForEach(canvases) { entry in
+                    CanvasTab(
+                        model: entry.model,
+                        currentTool: $currentTool,
+                        onFocus: { selectedTab = entry.id }
+                    )
+                    .tabItem {
+                        Text(entry.model.isModified ? "\(entry.model.filename) *" : entry.model.filename)
+                    }
+                    .tag(entry.id)
+                }
             }
-
-            // Floating toolbar
-            FloatingToolbar(
-                currentTool: $currentTool,
-                position: $toolbarPosition
-            )
         }
         .frame(minWidth: 640, minHeight: 480)
-        .clipped()
-        .focusedSceneValue(\.jasModel, activeModel)
-        .focusedSceneValue(\.hasSelection, !activeModel.document.selection.isEmpty)
-        .focusedSceneValue(\.canUndo, activeModel.canUndo)
-        .focusedSceneValue(\.canRedo, activeModel.canRedo)
-        .focusedSceneValue(\.addCanvas, { newModel in
-            addCanvas(newModel)
-        })
+        .overlay {
+            FocusedModelProvider(model: activeModel, addCanvas: addCanvas)
+        }
+        .onAppear {
+            if selectedTab == nil {
+                selectedTab = canvases.first?.id
+            }
+        }
     }
 
     private func addCanvas(_ model: JasModel) {
-        let offset = CGFloat(canvases.count) * 30.0
-        let position = CGPoint(x: 84 + offset, y: offset)
-        canvases.append(CanvasEntry(model: model, position: position))
-        activeIndex = canvases.count - 1
+        let entry = CanvasEntry(model: model)
+        canvases.append(entry)
+        selectedTab = entry.id
     }
 }
 
-// MARK: - Floating Toolbar
+// MARK: - Focused model provider (observes the active model for menu state)
 
-struct FloatingToolbar: View {
+struct FocusedModelProvider: View {
+    @ObservedObject var model: JasModel
+    var addCanvas: (JasModel) -> Void
+
+    var body: some View {
+        Color.clear
+            .focusedSceneValue(\.jasModel, model)
+            .focusedSceneValue(\.hasSelection, !model.document.selection.isEmpty)
+            .focusedSceneValue(\.canUndo, model.canUndo)
+            .focusedSceneValue(\.canRedo, model.canRedo)
+            .focusedSceneValue(\.addCanvas, { newModel in addCanvas(newModel) })
+            .allowsHitTesting(false)
+    }
+}
+
+// MARK: - Canvas Tab (observes model for document updates)
+
+struct CanvasTab: View {
+    @ObservedObject var model: JasModel
     @Binding var currentTool: Tool
-    @Binding var position: CGPoint
+    var onFocus: (() -> Void)?
+
+    var body: some View {
+        CanvasRepresentable(
+            document: model.document,
+            controller: Controller(model: model),
+            currentTool: $currentTool,
+            onFocus: onFocus
+        )
+    }
+}
+
+// MARK: - Toolbar Panel
+
+struct ToolbarPanel: View {
+    @Binding var currentTool: Tool
     @State private var arrowSlotTool: Tool = .directSelection
     @State private var textSlotTool: Tool = .text
     @State private var shapeSlotTool: Tool = .rect
 
-    private let titleBarHeight: CGFloat = 24
     private let toolbarWidth: CGFloat = 80
 
     var body: some View {
-        let contentHeight: CGFloat = 76
-        let totalHeight = titleBarHeight + contentHeight
-
         VStack(spacing: 0) {
-            // Title bar
+            // Title
             ZStack {
                 Color(nsColor: NSColor(white: 0.6, alpha: 1.0))
                 Text("Tools")
                     .font(.system(size: 11))
                     .foregroundColor(.black)
             }
-            .frame(width: toolbarWidth, height: titleBarHeight)
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        position.x += value.translation.width
-                        position.y += value.translation.height
-                    }
-            )
+            .frame(width: toolbarWidth, height: 24)
 
             // Tool buttons
             VStack(spacing: 2) {
@@ -143,10 +163,11 @@ struct FloatingToolbar: View {
             .padding(4)
             .frame(width: toolbarWidth)
             .background(Color(nsColor: NSColor(white: 0.30, alpha: 1.0)))
+
+            Spacer()
         }
-        .border(Color(nsColor: NSColor(white: 0.4, alpha: 1.0)), width: 1)
-        .frame(width: toolbarWidth, height: totalHeight)
-        .position(x: position.x + toolbarWidth / 2, y: position.y + totalHeight / 2)
+        .frame(width: toolbarWidth)
+        .background(Color(nsColor: NSColor(white: 0.25, alpha: 1.0)))
     }
 }
 

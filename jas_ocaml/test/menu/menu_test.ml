@@ -7,6 +7,6 @@ let () =
      testing. This test ensures the menubar module is linkable and that
      the main window with vbox layout can be created. *)
   let model = Jas.Model.create () in
-  let _main_window, _fixed = Jas.Canvas.create_main_window ~get_model:(fun () -> model) ~on_open:(fun _ -> ()) () in
+  let _main_window, _toolbar_fixed, _notebook = Jas.Canvas.create_main_window ~get_model:(fun () -> model) ~on_open:(fun _ -> ()) () in
 
   Printf.printf "All menu tests passed.\n"

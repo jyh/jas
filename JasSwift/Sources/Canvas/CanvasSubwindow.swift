@@ -887,57 +887,6 @@ class CanvasNSView: NSView {
     }
 }
 
-// MARK: - CanvasSubwindow
-
-/// An embedded, draggable canvas subwindow within the workspace.
-/// The view observes the model's document for its title.
-public struct CanvasSubwindow: View {
-    @ObservedObject var model: JasModel
-    var controller: Controller
-    @Binding var currentTool: Tool
-    @Binding var position: CGPoint
-    public let bbox: CanvasBoundingBox
-    var onFocus: (() -> Void)?
-
-    private let titleBarHeight: CGFloat = 24
-    private var canvasSize: CGSize { CGSize(width: bbox.width, height: bbox.height) }
-
-    public var body: some View {
-        let totalWidth = canvasSize.width
-        let totalHeight = titleBarHeight + canvasSize.height
-
-        return ZStack(alignment: .topLeading) {
-            VStack(spacing: 0) {
-                // Title bar
-                ZStack {
-                    Color(nsColor: NSColor(white: 0.6, alpha: 1.0))
-                    Text(model.isModified ? "\(model.filename) *" : model.filename)
-                        .font(.system(size: 12))
-                        .foregroundColor(.black)
-                }
-                .frame(width: totalWidth, height: titleBarHeight)
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            onFocus?()
-                            if abs(value.translation.width) > 1 || abs(value.translation.height) > 1 {
-                                position.x += value.translation.width
-                                position.y += value.translation.height
-                            }
-                        }
-                )
-
-                // Canvas drawing area
-                CanvasRepresentable(document: model.document, controller: controller, currentTool: $currentTool, onFocus: onFocus)
-                    .frame(width: totalWidth, height: canvasSize.height)
-            }
-            .border(Color(nsColor: NSColor(white: 0.4, alpha: 1.0)), width: 1)
-        }
-        .frame(width: totalWidth, height: totalHeight)
-        .position(x: position.x + totalWidth / 2, y: position.y + totalHeight / 2)
-    }
-}
-
 /// Bridges the CoreGraphics-based CanvasNSView into SwiftUI.
 struct CanvasRepresentable: NSViewRepresentable {
     let document: JasDocument

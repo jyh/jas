@@ -1,4 +1,4 @@
-(** Main window with dark workspace and menubar. *)
+(** Main window with toolbar and tabbed canvas workspace. *)
 
 let create_main_window ~get_model ~on_open () =
   let window = GWindow.window
@@ -13,22 +13,13 @@ let create_main_window ~get_model ~on_open () =
   (* Create menubar *)
   Menubar.create get_model window ~on_open vbox;
 
-  (* Dark workspace background *)
-  let fixed = GPack.fixed ~packing:vbox#add () in
-  let bg = GMisc.drawing_area ~packing:(fixed#put ~x:0 ~y:0) () in
-  let resize_bg () =
-    let alloc = fixed#misc#allocation in
-    bg#misc#set_size_request ~width:alloc.Gtk.width ~height:alloc.Gtk.height ()
-  in
-  fixed#misc#connect#size_allocate ~callback:(fun _ -> resize_bg ()) |> ignore;
-  bg#misc#connect#draw ~callback:(fun cr ->
-    let alloc = bg#misc#allocation in
-    let w = float_of_int alloc.Gtk.width in
-    let h = float_of_int alloc.Gtk.height in
-    Cairo.set_source_rgb cr 0.235 0.235 0.235;
-    Cairo.rectangle cr 0.0 0.0 ~w ~h;
-    Cairo.fill cr;
-    true
-  ) |> ignore;
+  (* Horizontal layout: toolbar | notebook *)
+  let hbox = GPack.hbox ~packing:(vbox#pack ~expand:true ~fill:true) () in
 
-  (window, fixed)
+  (* Toolbar container - use a fixed so the toolbar can position itself *)
+  let toolbar_fixed = GPack.fixed ~packing:(hbox#pack ~expand:false) () in
+
+  (* Tabbed notebook for canvases *)
+  let notebook = GPack.notebook ~packing:(hbox#pack ~expand:true ~fill:true) () in
+
+  (window, toolbar_fixed, notebook)

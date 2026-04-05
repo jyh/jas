@@ -1,4 +1,4 @@
-(** A floating canvas subwindow embedded inside the main workspace. *)
+(** A canvas view embedded as a tab in a notebook. *)
 
 (** Axis-aligned bounding box for the canvas coordinate space. *)
 type bounding_box = {
@@ -15,15 +15,11 @@ class canvas_subwindow :
   model:Model.model ->
   controller:Controller.controller ->
   toolbar:Toolbar.toolbar ->
-  x:int -> y:int -> width:int -> height:int ->
-  bbox:bounding_box ->
-  GPack.fixed -> object
+  bbox:bounding_box -> object
   method widget : GObj.widget
   method canvas : GMisc.drawing_area
   method model : Model.model
   method title : string
-  method x : int
-  method y : int
   method bbox : bounding_box
   method pen_finish : unit
   method pen_finish_close : unit
@@ -35,6 +31,5 @@ val create :
   controller:Controller.controller ->
   toolbar:Toolbar.toolbar ->
   ?on_focus:(unit -> unit) ->
-  x:int -> y:int -> width:int -> height:int ->
   ?bbox:bounding_box ->
-  GPack.fixed -> canvas_subwindow
+  GPack.notebook -> canvas_subwindow

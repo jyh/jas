@@ -3,11 +3,11 @@ let () =
 
   (* Test main window creation *)
   let model = Jas.Model.create () in
-  let main_window, fixed = Jas.Canvas.create_main_window ~get_model:(fun () -> model) ~on_open:(fun _ -> ()) () in
+  let main_window, toolbar_fixed, notebook = Jas.Canvas.create_main_window ~get_model:(fun () -> model) ~on_open:(fun _ -> ()) () in
   assert (main_window#title = "Jas");
 
   (* Test toolbar creation *)
-  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:10 ~y:10 fixed in
+  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:10 ~y:10 toolbar_fixed in
   assert (toolbar#current_tool = Jas.Toolbar.Selection);
   toolbar#select_tool Jas.Toolbar.Direct_selection;
   assert (toolbar#current_tool = Jas.Toolbar.Direct_selection);
@@ -16,14 +16,14 @@ let () =
   let model = Jas.Model.create () in
   let controller = Jas.Controller.create ~model () in
   let canvas = Jas.Canvas_subwindow.create
-    ~model ~controller ~toolbar ~x:100 ~y:50 ~width:820 ~height:640 fixed in
+    ~model ~controller ~toolbar notebook in
   assert (String.sub canvas#title 0 9 = "Untitled-");
 
   (* Test canvas with named model *)
   let model2 = Jas.Model.create ~filename:"My Drawing" () in
   let controller2 = Jas.Controller.create ~model:model2 () in
   let canvas2 = Jas.Canvas_subwindow.create
-    ~model:model2 ~controller:controller2 ~toolbar ~x:100 ~y:50 ~width:820 ~height:640 fixed in
+    ~model:model2 ~controller:controller2 ~toolbar notebook in
   assert (canvas2#title = "My Drawing");
 
   (* Test title updates when model filename changes *)
