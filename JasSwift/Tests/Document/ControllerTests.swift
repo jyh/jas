@@ -105,13 +105,13 @@ private func makeSelectionCtrl() -> Controller {
 @Test func controllerSelectElementInGroup() {
     let ctrl = makeSelectionCtrl()
     ctrl.selectElement([0, 1, 0])
-    #expect(selPaths(ctrl.document.selection) == [[0, 1, 0], [0, 1, 1]])
+    #expect(selPaths(ctrl.document.selection) == [[0, 1], [0, 1, 0], [0, 1, 1]])
 }
 
 @Test func controllerSelectElementInGroupOtherChild() {
     let ctrl = makeSelectionCtrl()
     ctrl.selectElement([0, 1, 1])
-    #expect(selPaths(ctrl.document.selection) == [[0, 1, 0], [0, 1, 1]])
+    #expect(selPaths(ctrl.document.selection) == [[0, 1], [0, 1, 0], [0, 1, 1]])
 }
 
 @Test func controllerSelectElementNotifies() {
@@ -154,7 +154,7 @@ private func makeMarqueeCtrl() -> Controller {
 @Test func selectRectGroupExpansion() {
     let ctrl = makeMarqueeCtrl()
     ctrl.selectRect(x: -1, y: -1, width: 7, height: 7)
-    #expect(selPaths(ctrl.document.selection) == [[0, 1, 0], [0, 1, 1]])
+    #expect(selPaths(ctrl.document.selection) == [[0, 1], [0, 1, 0], [0, 1, 1]])
 }
 
 @Test func selectRectReplacesPrevious() {

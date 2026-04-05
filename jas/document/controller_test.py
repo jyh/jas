@@ -156,6 +156,29 @@ class SelectionControllerTest(absltest.TestCase):
             frozenset({(0, 1), (0, 1, 0), (0, 1, 1)}),
         )
 
+    def test_locked_group_not_selectable(self):
+        """Locking a group prevents it from being selected again."""
+        line1 = Line(x1=0, y1=0, x2=5, y2=5)
+        line2 = Line(x1=1, y1=1, x2=2, y2=2)
+        group = Group(children=(line1, line2))
+        layer = Layer(children=(group,), name="L0")
+        doc = Document(layers=(layer,))
+        model = Model(document=doc)
+        ctrl = Controller(model=model)
+        # Select the group, then lock it
+        ctrl.select_rect(-1, -1, 7, 7)
+        self.assertTrue(len(ctrl.document.selection) > 0)
+        ctrl.lock_selection()
+        self.assertEqual(ctrl.document.selection, frozenset())
+        # Verify the group and children are locked
+        locked_group = ctrl.document.layers[0].children[0]
+        self.assertTrue(locked_group.locked)
+        self.assertTrue(locked_group.children[0].locked)
+        self.assertTrue(locked_group.children[1].locked)
+        # Try to select again — should fail
+        ctrl.select_rect(-1, -1, 7, 7)
+        self.assertEqual(ctrl.document.selection, frozenset())
+
     def test_select_rect_replaces_previous(self):
         """Marquee selection replaces any prior selection."""
         self.ctrl.set_selection(_sel((0, 0)))
