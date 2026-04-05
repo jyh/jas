@@ -39,6 +39,8 @@ class ToolContext {
     }
 
     var document: JasDocument { model.document }
+
+    func snapshot() { model.snapshot() }
 }
 
 // MARK: - CanvasTool protocol

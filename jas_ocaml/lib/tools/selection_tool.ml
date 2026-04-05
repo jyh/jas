@@ -14,6 +14,7 @@ class virtual selection_tool_base = object (self)
 
   method on_press (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
     ignore (shift, alt);
+    ctx.model#snapshot;
     if self#check_handle_hit ctx x y then ()
     else if ctx.hit_test_selection x y then begin
       drag_start <- Some (x, y);

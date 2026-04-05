@@ -17,6 +17,7 @@ class SelectionToolBase: CanvasTool {
     }
 
     func onPress(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
+        ctx.snapshot()
         if checkHandleHit(ctx, x: x, y: y) { return }
         let pt = NSPoint(x: x, y: y)
         if ctx.hitTestSelection(pt) {

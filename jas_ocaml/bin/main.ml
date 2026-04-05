@@ -27,10 +27,21 @@ let () =
       canvas#pen_finish; true
     end else if key = GdkKeysyms._Delete || key = GdkKeysyms._BackSpace then begin
       let doc = model#document in
-      if not (Jas.Document.PathMap.is_empty doc.Jas.Document.selection) then
-        model#set_document (Jas.Document.delete_selection doc);
+      if not (Jas.Document.PathMap.is_empty doc.Jas.Document.selection) then begin
+        model#snapshot;
+        model#set_document (Jas.Document.delete_selection doc)
+      end;
       true
-    end else false
+    end else begin
+      let state = GdkEvent.Key.state ev in
+      let has_ctrl = List.mem `CONTROL state in
+      let has_shift = List.mem `SHIFT state in
+      if has_ctrl && key = GdkKeysyms._z then begin
+        model#undo; true
+      end else if has_ctrl && has_shift && key = GdkKeysyms._Z then begin
+        model#redo; true
+      end else false
+    end
   ) |> ignore;
 
   main_window#show ();

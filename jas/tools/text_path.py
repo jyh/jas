@@ -53,6 +53,7 @@ class TextPathTool(CanvasTool):
 
     def on_press(self, ctx: ToolContext, x: float, y: float,
                  shift: bool = False, alt: bool = False) -> None:
+        ctx.snapshot()
         # 1) Check offset handle drag
         handle_hit = self._find_selected_textpath_handle(ctx, x, y)
         if handle_hit is not None:

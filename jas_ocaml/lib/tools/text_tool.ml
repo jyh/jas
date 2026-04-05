@@ -4,8 +4,9 @@ class text_tool = object (_self)
   val mutable drag_start : (float * float) option = None
   val mutable drag_end : (float * float) option = None
 
-  method on_press (_ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
+  method on_press (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
     ignore (shift, alt);
+    ctx.model#snapshot;
     drag_start <- Some (x, y);
     drag_end <- Some (x, y)
 

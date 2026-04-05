@@ -32,6 +32,7 @@ class text_path_tool = object (_self)
 
   method on_press (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
     ignore (shift, alt);
+    ctx.model#snapshot;
     (* 1) Check offset handle drag *)
     (match _self#find_selected_textpath_handle ctx x y with
      | Some (path, _elem) ->

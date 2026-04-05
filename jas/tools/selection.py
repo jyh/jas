@@ -44,6 +44,7 @@ class SelectionToolBase(CanvasTool):
 
     def on_press(self, ctx: ToolContext, x: float, y: float,
                  shift: bool = False, alt: bool = False) -> None:
+        ctx.snapshot()
         if self._check_handle_hit(ctx, x, y):
             return
         if ctx.hit_test_selection(x, y):

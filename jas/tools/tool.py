@@ -40,6 +40,10 @@ class ToolContext:
     def document(self) -> Document:
         return self.model.document
 
+    def snapshot(self) -> None:
+        """Save the current document state for undo."""
+        self.model.snapshot()
+
 
 class CanvasTool(ABC):
     """Interface for canvas interaction tools."""

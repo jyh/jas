@@ -20,6 +20,7 @@ let copy_selection (model : Model.model) () =
   end
 
 let cut_selection (model : Model.model) () =
+  model#snapshot;
   copy_selection model ();
   model#set_document (Document.delete_selection model#document)
 
@@ -39,6 +40,7 @@ let is_svg text =
   starts_with "<?xml" || starts_with "<svg"
 
 let paste_clipboard (model : Model.model) offset () =
+  model#snapshot;
   let clipboard = GtkBase.Clipboard.get Gdk.Atom.clipboard in
   GtkBase.Clipboard.request_text clipboard ~callback:(fun text_opt ->
     match text_opt with
@@ -139,8 +141,14 @@ let create (model : Model.model) (vbox : GPack.box) =
   (* Edit menu *)
   let _edit_menu = factory#add_submenu "Edit" in
   let edit_factory = new GMenu.factory _edit_menu in
-  ignore (edit_factory#add_item "Undo" ~key:GdkKeysyms._z ~callback:(fun () -> print_endline "Undo"));
-  ignore (edit_factory#add_item "Redo" ~key:GdkKeysyms._y ~callback:(fun () -> print_endline "Redo"));
+  let undo_item = edit_factory#add_item "Undo" ~key:GdkKeysyms._z ~callback:(fun () -> model#undo) in
+  let redo_item = edit_factory#add_item "Redo" ~key:GdkKeysyms._y ~callback:(fun () -> model#redo) in
+  undo_item#misc#set_sensitive model#can_undo;
+  redo_item#misc#set_sensitive model#can_redo;
+  model#on_document_changed (fun _doc ->
+    undo_item#misc#set_sensitive model#can_undo;
+    redo_item#misc#set_sensitive model#can_redo
+  );
   ignore (edit_factory#add_separator ());
   ignore (edit_factory#add_item "Cut" ~key:GdkKeysyms._x ~callback:(cut_selection model));
   ignore (edit_factory#add_item "Copy" ~key:GdkKeysyms._c ~callback:(copy_selection model));

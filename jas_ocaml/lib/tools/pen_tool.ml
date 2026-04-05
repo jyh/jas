@@ -56,6 +56,7 @@ class pen_tool = object (self)
 
   method on_press (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
     ignore (shift, alt);
+    ctx.model#snapshot;
     let pts = List.rev points in
     let n = List.length pts in
     if n >= 2 then begin

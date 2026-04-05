@@ -49,3 +49,43 @@ import Testing
     #expect(before.title == "Untitled")
     #expect(after.title == "New")
 }
+
+@Test func modelUndoRedo() {
+    let model = JasModel()
+    #expect(!model.canUndo)
+    model.snapshot()
+    model.document = JasDocument(title: "A")
+    #expect(model.canUndo)
+    #expect(!model.canRedo)
+    model.undo()
+    #expect(model.document.title == "Untitled")
+    #expect(model.canRedo)
+    model.redo()
+    #expect(model.document.title == "A")
+}
+
+@Test func modelUndoClearsRedoOnNewEdit() {
+    let model = JasModel()
+    model.snapshot()
+    model.document = JasDocument(title: "A")
+    model.snapshot()
+    model.document = JasDocument(title: "B")
+    model.undo()
+    #expect(model.document.title == "A")
+    #expect(model.canRedo)
+    model.snapshot()
+    model.document = JasDocument(title: "C")
+    #expect(!model.canRedo)
+}
+
+@Test func modelUndoEmptyStack() {
+    let model = JasModel()
+    model.undo()
+    #expect(model.document.title == "Untitled")
+}
+
+@Test func modelRedoEmptyStack() {
+    let model = JasModel()
+    model.redo()
+    #expect(model.document.title == "Untitled")
+}

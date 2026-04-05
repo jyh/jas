@@ -11,8 +11,9 @@ class virtual drawing_tool_base = object (_self)
   method virtual private create_element : float -> float -> float -> float -> Element.element option
   method virtual private draw_preview : Cairo.context -> float -> float -> float -> float -> unit
 
-  method on_press (_ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
+  method on_press (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
     ignore (shift, alt);
+    ctx.model#snapshot;
     drag_start <- Some (x, y);
     drag_end <- Some (x, y)
 

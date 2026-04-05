@@ -50,6 +50,42 @@ class ModelTest(absltest.TestCase):
         self.assertEqual(before.title, "Untitled")
         self.assertEqual(after.title, "New")
 
+    def test_undo_redo(self):
+        model = Model()
+        self.assertFalse(model.can_undo)
+        model.snapshot()
+        model.document = Document(title="A")
+        self.assertTrue(model.can_undo)
+        self.assertFalse(model.can_redo)
+        model.undo()
+        self.assertEqual(model.document.title, "Untitled")
+        self.assertTrue(model.can_redo)
+        model.redo()
+        self.assertEqual(model.document.title, "A")
+
+    def test_undo_clears_redo_on_new_edit(self):
+        model = Model()
+        model.snapshot()
+        model.document = Document(title="A")
+        model.snapshot()
+        model.document = Document(title="B")
+        model.undo()
+        self.assertEqual(model.document.title, "A")
+        self.assertTrue(model.can_redo)
+        model.snapshot()
+        model.document = Document(title="C")
+        self.assertFalse(model.can_redo)
+
+    def test_undo_empty_stack(self):
+        model = Model()
+        model.undo()
+        self.assertEqual(model.document.title, "Untitled")
+
+    def test_redo_empty_stack(self):
+        model = Model()
+        model.redo()
+        self.assertEqual(model.document.title, "Untitled")
+
 
 if __name__ == "__main__":
     absltest.main()

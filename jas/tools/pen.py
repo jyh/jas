@@ -82,6 +82,7 @@ class PenTool(CanvasTool):
 
     def on_press(self, ctx: ToolContext, x: float, y: float,
                  shift: bool = False, alt: bool = False) -> None:
+        ctx.snapshot()
         if len(self._points) >= 2:
             p0 = self._points[0]
             if math.hypot(x - p0.x, y - p0.y) <= _PEN_CLOSE_RADIUS:

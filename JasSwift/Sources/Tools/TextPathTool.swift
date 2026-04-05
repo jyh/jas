@@ -31,6 +31,7 @@ class TextPathTool: CanvasTool {
     }
 
     func onPress(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
+        ctx.snapshot()
         // 1) Check offset handle drag
         if let (path, _) = findSelectedTextPathHandle(ctx, x: x, y: y) {
             offsetDragging = true

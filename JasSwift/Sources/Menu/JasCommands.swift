@@ -11,6 +11,14 @@ public struct FocusedHasSelectionKey: FocusedValueKey {
     public typealias Value = Bool
 }
 
+public struct FocusedCanUndoKey: FocusedValueKey {
+    public typealias Value = Bool
+}
+
+public struct FocusedCanRedoKey: FocusedValueKey {
+    public typealias Value = Bool
+}
+
 public extension FocusedValues {
     var jasModel: JasModel? {
         get { self[FocusedModelKey.self] }
@@ -20,12 +28,22 @@ public extension FocusedValues {
         get { self[FocusedHasSelectionKey.self] }
         set { self[FocusedHasSelectionKey.self] = newValue }
     }
+    var canUndo: Bool? {
+        get { self[FocusedCanUndoKey.self] }
+        set { self[FocusedCanUndoKey.self] = newValue }
+    }
+    var canRedo: Bool? {
+        get { self[FocusedCanRedoKey.self] }
+        set { self[FocusedCanRedoKey.self] = newValue }
+    }
 }
 
 /// Custom menu commands for Jas app (File, Edit, View menus).
 public struct JasCommands: Commands {
     @FocusedValue(\.jasModel) private var model
     @FocusedValue(\.hasSelection) private var hasSelection
+    @FocusedValue(\.canUndo) private var canUndo
+    @FocusedValue(\.canRedo) private var canRedo
 
     public init() {}
 
@@ -57,6 +75,20 @@ public struct JasCommands: Commands {
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q", modifiers: .command)
+        }
+
+        CommandGroup(replacing: .undoRedo) {
+            Button("Undo") {
+                model?.undo()
+            }
+            .keyboardShortcut("z", modifiers: .command)
+            .disabled(!(canUndo ?? false))
+
+            Button("Redo") {
+                model?.redo()
+            }
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+            .disabled(!(canRedo ?? false))
         }
 
         CommandGroup(replacing: .pasteboard) {
@@ -114,6 +146,7 @@ public struct JasCommands: Commands {
 
     private func pasteClipboard(offset: Double) {
         guard let model = model else { return }
+        model.snapshot()
         let pasteboard = NSPasteboard.general
         guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
         let doc = model.document
@@ -170,8 +203,9 @@ public struct JasCommands: Commands {
     }
 
     private func cutSelection() {
-        copySelection()
         guard let model = model else { return }
+        model.snapshot()
+        copySelection()
         model.document = model.document.deleteSelection()
     }
 
