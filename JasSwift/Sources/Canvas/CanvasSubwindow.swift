@@ -911,7 +911,7 @@ class CanvasNSView: NSView {
     func penCancel() {
         guard let penTool = tools[.pen] as? PenTool else { return }
         penTool.points.removeAll()
-        penTool.penDragging = false
+        penTool.penState = .idle
         needsDisplay = true
     }
 

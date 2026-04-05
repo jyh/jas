@@ -169,10 +169,12 @@ let path_cmd_bounds cmds =
       match cmd with
       | MoveTo (x, y) | LineTo (x, y) | SmoothQuadTo (x, y) ->
         (x :: xs, y :: ys)
-      | CurveTo (_, _, _, _, x, y) | SmoothCurveTo (_, _, x, y) ->
-        (x :: xs, y :: ys)
-      | QuadTo (_, _, x, y) ->
-        (x :: xs, y :: ys)
+      | CurveTo (x1, y1, x2, y2, x, y) ->
+        (x1 :: x2 :: x :: xs, y1 :: y2 :: y :: ys)
+      | SmoothCurveTo (x2, y2, x, y) ->
+        (x2 :: x :: xs, y2 :: y :: ys)
+      | QuadTo (x1, y1, x, y) ->
+        (x1 :: x :: xs, y1 :: y :: ys)
       | ArcTo (_, _, _, _, _, x, y) ->
         (x :: xs, y :: ys)
       | ClosePath -> (xs, ys)

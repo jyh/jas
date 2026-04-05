@@ -72,7 +72,7 @@ public struct Document: Equatable {
 
     /// Return the element at the given path.
     public func getElement(_ path: ElementPath) -> Element {
-        precondition(!path.isEmpty, "Path must be non-empty")
+        guard !path.isEmpty else { fatalError("Path must be non-empty") }
         var node: Element = .layer(layers[path[0]])
         for idx in path.dropFirst() {
             node = childrenOf(node)[idx]
@@ -82,11 +82,11 @@ public struct Document: Equatable {
 
     /// Return a new document with the element at path replaced by newElem.
     public func replaceElement(_ path: ElementPath, with newElem: Element) -> Document {
-        precondition(!path.isEmpty, "Path must be non-empty")
+        guard !path.isEmpty else { fatalError("Path must be non-empty") }
         var newLayers = layers
         if path.count == 1 {
             guard case .layer(let l) = newElem else {
-                preconditionFailure("Replacing a layer requires a .layer element")
+                fatalError("Replacing a layer requires a .layer element")
             }
             newLayers[path[0]] = l
         } else {
@@ -98,11 +98,11 @@ public struct Document: Equatable {
     }
     /// Return a new document with newElem inserted immediately after path.
     public func insertElementAfter(_ path: ElementPath, element newElem: Element) -> Document {
-        precondition(!path.isEmpty, "Path must be non-empty")
+        guard !path.isEmpty else { fatalError("Path must be non-empty") }
         var newLayers = layers
         if path.count == 1 {
             guard case .layer(let l) = newElem else {
-                preconditionFailure("Inserting at layer level requires a .layer element")
+                fatalError("Inserting at layer level requires a .layer element")
             }
             newLayers.insert(l, at: path[0] + 1)
         } else {
@@ -115,7 +115,7 @@ public struct Document: Equatable {
 
     /// Return a new document with the element at path removed.
     public func deleteElement(_ path: ElementPath) -> Document {
-        precondition(!path.isEmpty, "Path must be non-empty")
+        guard !path.isEmpty else { fatalError("Path must be non-empty") }
         var newLayers = layers
         if path.count == 1 {
             newLayers.remove(at: path[0])

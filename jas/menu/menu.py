@@ -55,32 +55,38 @@ def create_menus(window: QMainWindow) -> None:
     # Edit menu
     edit_menu = menubar.addMenu("&Edit")
 
+    def _with_model(fn):
+        """Call fn(model) if a model is active, avoiding double _model() calls."""
+        m = _model()
+        if m:
+            fn(m)
+
     undo_action = edit_menu.addAction("&Undo")
     undo_action.setShortcut(QKeySequence.Undo)
-    undo_action.triggered.connect(lambda: _model() and _model().undo())
+    undo_action.triggered.connect(lambda: _with_model(lambda m: m.undo()))
 
     redo_action = edit_menu.addAction("&Redo")
     redo_action.setShortcut(QKeySequence.Redo)
-    redo_action.triggered.connect(lambda: _model() and _model().redo())
+    redo_action.triggered.connect(lambda: _with_model(lambda m: m.redo()))
 
     edit_menu.addSeparator()
 
     cut_action = edit_menu.addAction("Cu&t")
     cut_action.setShortcut(QKeySequence.Cut)
-    cut_action.triggered.connect(lambda: _model() and _cut_selection(_model()))
+    cut_action.triggered.connect(lambda: _with_model(lambda m: _cut_selection(m)))
 
     copy_action = edit_menu.addAction("&Copy")
     copy_action.setShortcut(QKeySequence.Copy)
-    copy_action.triggered.connect(lambda: _model() and _copy_selection(_model()))
+    copy_action.triggered.connect(lambda: _with_model(lambda m: _copy_selection(m)))
 
     paste_action = edit_menu.addAction("&Paste")
     paste_action.setShortcut(QKeySequence.Paste)
-    paste_action.triggered.connect(lambda: _model() and _paste_clipboard(_model(), PASTE_OFFSET))
+    paste_action.triggered.connect(lambda: _with_model(lambda m: _paste_clipboard(m, PASTE_OFFSET)))
 
     paste_in_place_action = edit_menu.addAction("Paste in &Place")
     paste_in_place_action.setShortcut(QKeySequence("Ctrl+Shift+V"))
     paste_in_place_action.triggered.connect(
-        lambda: _model() and _paste_clipboard(_model(), 0.0))
+        lambda: _with_model(lambda m: _paste_clipboard(m, 0.0)))
 
     edit_menu.addSeparator()
 
@@ -123,6 +129,12 @@ def _open_file(window: QMainWindow) -> None:
         if isinstance(canvas, CanvasWidget) and canvas._model.filename == path:
             window.tab_widget.setCurrentIndex(i)
             return
+    import os
+    file_size = os.path.getsize(path)
+    if file_size > 100 * 1024 * 1024:
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.critical(window, "Error", "File too large (over 100 MB).")
+        return
     with open(path, "r", encoding="utf-8") as f:
         svg = f.read()
     new_model = Model(document=svg_to_document(svg), filename=path)
@@ -146,6 +158,11 @@ def _revert(window: QMainWindow, model: Model | None) -> None:
         return
     from geometry.svg import svg_to_document
     try:
+        import os
+        file_size = os.path.getsize(model.filename)
+        if file_size > 100 * 1024 * 1024:
+            QMessageBox.critical(window, "Error", "File too large (over 100 MB).")
+            return
         with open(model.filename, "r", encoding="utf-8") as f:
             svg = f.read()
         model.snapshot()
@@ -218,10 +235,14 @@ def _cut_selection(model: Model) -> None:
 
 
 def _translate_element(elem, dx: float, dy: float):
-    """Translate an element by (dx, dy) using move_control_points with all CPs."""
-    from geometry.element import control_point_count, move_control_points
+    """Translate an element by (dx, dy), recursing into Groups."""
+    from dataclasses import replace as _replace
+    from geometry.element import Group, control_point_count, move_control_points
     if dx == 0.0 and dy == 0.0:
         return elem
+    if isinstance(elem, Group):
+        return _replace(elem, children=tuple(
+            _translate_element(c, dx, dy) for c in elem.children))
     n = control_point_count(elem)
     return move_control_points(elem, frozenset(range(n)), dx, dy)
 

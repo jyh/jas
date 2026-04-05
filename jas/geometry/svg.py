@@ -13,7 +13,7 @@ from geometry.element import (
     ArcTo, Circle, ClosePath, Color, CurveTo, Element, Ellipse, Fill,
     Group, Layer, Line, LineCap, LineJoin, LineTo, MoveTo, Path,
     PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
-    SmoothQuadTo, Stroke, Text, Transform,
+    SmoothQuadTo, Stroke, Text, TextPath, Transform,
 )
 
 _PT_TO_PX = 96.0 / 72.0
@@ -160,6 +160,23 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}/>')
 
+        case TextPath(d=cmds, content=content, start_offset=start_offset,
+                      font_family=ff, font_size=fs,
+                      font_weight=fw, font_style=fst, text_decoration=td,
+                      fill=fill, stroke=stroke, opacity=opacity, transform=transform):
+            offset_attr = (f' startOffset="{_fmt(start_offset * 100)}%"'
+                           if start_offset > 0 else "")
+            fw_attr = f' font-weight="{fw}"' if fw != "normal" else ""
+            fst_attr = f' font-style="{fst}"' if fst != "normal" else ""
+            td_attr = f' text-decoration="{td}"' if td != "none" else ""
+            return (f'{indent}<text'
+                    f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
+                    f' font-family="{escape(ff)}" font-size="{_fmt(_px(fs))}"'
+                    f'{fw_attr}{fst_attr}{td_attr}'
+                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}>'
+                    f'<textPath path="{_path_data(cmds)}"{offset_attr}>'
+                    f'{escape(content)}</textPath></text>')
+
         case Text(x=x, y=y, content=content, font_family=ff, font_size=fs,
                   font_weight=fw, font_style=fst, text_decoration=td,
                   width=tw, height=th,
@@ -227,11 +244,51 @@ def _pt(v: float) -> float:
     return v * _PX_TO_PT
 
 
+_NAMED_COLORS: dict[str, tuple[int, int, int]] = {
+    "black": (0, 0, 0), "white": (255, 255, 255), "red": (255, 0, 0),
+    "green": (0, 128, 0), "blue": (0, 0, 255), "yellow": (255, 255, 0),
+    "cyan": (0, 255, 255), "magenta": (255, 0, 255), "gray": (128, 128, 128),
+    "grey": (128, 128, 128), "silver": (192, 192, 192), "maroon": (128, 0, 0),
+    "olive": (128, 128, 0), "lime": (0, 255, 0), "aqua": (0, 255, 255),
+    "teal": (0, 128, 128), "navy": (0, 0, 128), "fuchsia": (255, 0, 255),
+    "purple": (128, 0, 128), "orange": (255, 165, 0), "pink": (255, 192, 203),
+    "brown": (165, 42, 42), "coral": (255, 127, 80), "crimson": (220, 20, 60),
+    "gold": (255, 215, 0), "indigo": (75, 0, 130), "ivory": (255, 255, 240),
+    "khaki": (240, 230, 140), "lavender": (230, 230, 250), "plum": (221, 160, 221),
+    "salmon": (250, 128, 114), "sienna": (160, 82, 45), "tan": (210, 180, 140),
+    "tomato": (255, 99, 71), "turquoise": (64, 224, 208), "violet": (238, 130, 238),
+    "wheat": (245, 222, 179), "steelblue": (70, 130, 180), "skyblue": (135, 206, 235),
+    "slategray": (112, 128, 144), "slategrey": (112, 128, 144),
+    "darkgray": (169, 169, 169), "darkgrey": (169, 169, 169),
+    "lightgray": (211, 211, 211), "lightgrey": (211, 211, 211),
+    "darkblue": (0, 0, 139), "darkgreen": (0, 100, 0), "darkred": (139, 0, 0),
+}
+
+
 def _parse_color(s: str) -> Color | None:
-    """Parse rgb(r,g,b) or rgba(r,g,b,a) or 'none'."""
+    """Parse color string: rgb()/rgba(), #RRGGBB, #RGB, named colors, or 'none'."""
     s = s.strip()
     if s == "none":
         return None
+    # Named SVG colors
+    named = _NAMED_COLORS.get(s.lower())
+    if named is not None:
+        return Color(named[0] / 255.0, named[1] / 255.0, named[2] / 255.0)
+    # Hex colors: #RRGGBB or #RGB
+    if s.startswith("#"):
+        h = s[1:]
+        if len(h) == 3:
+            r = int(h[0] + h[0], 16) / 255.0
+            g = int(h[1] + h[1], 16) / 255.0
+            b = int(h[2] + h[2], 16) / 255.0
+            return Color(r, g, b)
+        if len(h) == 6:
+            r = int(h[0:2], 16) / 255.0
+            g = int(h[2:4], 16) / 255.0
+            b = int(h[4:6], 16) / 255.0
+            return Color(r, g, b)
+        return None
+    # rgb()/rgba() functional notation
     m = re.match(r"rgba?\(([^)]+)\)", s)
     if m:
         parts = m.group(1).split(",")
@@ -240,6 +297,8 @@ def _parse_color(s: str) -> Color | None:
         b = int(parts[2].strip()) / 255.0
         a = float(parts[3].strip()) if len(parts) > 3 else 1.0
         return Color(r, g, b, a)
+    import logging
+    logging.warning("Unrecognized SVG color value: %s", s)
     return None
 
 
@@ -309,10 +368,17 @@ _PATH_CMD_RE = re.compile(r"([MmLlHhVvCcSsQqTtAaZz])|([+-]?(?:\d+\.?\d*|\.\d+)(?
 
 
 def _parse_path_d(d: str) -> tuple[PathCommand, ...]:
-    """Parse an SVG path d attribute into PathCommands (absolute only)."""
+    """Parse an SVG path d attribute into PathCommands.
+
+    Supports both absolute (uppercase) and relative (lowercase) commands,
+    including H/h (horizontal lineto) and V/v (vertical lineto).
+    All commands are converted to absolute coordinates.
+    """
     tokens = _PATH_CMD_RE.findall(d)
     commands: list[PathCommand] = []
     i = 0
+    cur_x = cur_y = 0.0  # current point (in px, before pt conversion)
+    start_x = start_y = 0.0  # subpath start (for Z)
 
     def _next_num() -> float:
         nonlocal i
@@ -323,6 +389,10 @@ def _parse_path_d(d: str) -> tuple[PathCommand, ...]:
         v = float(tokens[i][1])
         i += 1
         return v
+
+    def _update(x: float, y: float) -> None:
+        nonlocal cur_x, cur_y
+        cur_x, cur_y = x, y
 
     while i < len(tokens):
         cmd_str, num_str = tokens[i]
@@ -337,32 +407,101 @@ def _parse_path_d(d: str) -> tuple[PathCommand, ...]:
 
         if cmd in ("Z", "z"):
             commands.append(ClosePath())
+            cur_x, cur_y = start_x, start_y
         elif cmd == "M":
-            commands.append(MoveTo(_pt(_next_num()), _pt(_next_num())))
+            x, y = _next_num(), _next_num()
+            commands.append(MoveTo(_pt(x), _pt(y)))
+            _update(x, y)
+            start_x, start_y = x, y
+        elif cmd == "m":
+            x, y = cur_x + _next_num(), cur_y + _next_num()
+            commands.append(MoveTo(_pt(x), _pt(y)))
+            _update(x, y)
+            start_x, start_y = x, y
         elif cmd == "L":
-            commands.append(LineTo(_pt(_next_num()), _pt(_next_num())))
+            x, y = _next_num(), _next_num()
+            commands.append(LineTo(_pt(x), _pt(y)))
+            _update(x, y)
+        elif cmd == "l":
+            x, y = cur_x + _next_num(), cur_y + _next_num()
+            commands.append(LineTo(_pt(x), _pt(y)))
+            _update(x, y)
+        elif cmd == "H":
+            x = _next_num()
+            commands.append(LineTo(_pt(x), _pt(cur_y)))
+            cur_x = x
+        elif cmd == "h":
+            x = cur_x + _next_num()
+            commands.append(LineTo(_pt(x), _pt(cur_y)))
+            cur_x = x
+        elif cmd == "V":
+            y = _next_num()
+            commands.append(LineTo(_pt(cur_x), _pt(y)))
+            cur_y = y
+        elif cmd == "v":
+            y = cur_y + _next_num()
+            commands.append(LineTo(_pt(cur_x), _pt(y)))
+            cur_y = y
         elif cmd == "C":
-            x1, y1 = _pt(_next_num()), _pt(_next_num())
-            x2, y2 = _pt(_next_num()), _pt(_next_num())
-            x, y = _pt(_next_num()), _pt(_next_num())
-            commands.append(CurveTo(x1, y1, x2, y2, x, y))
+            x1, y1 = _next_num(), _next_num()
+            x2, y2 = _next_num(), _next_num()
+            x, y = _next_num(), _next_num()
+            commands.append(CurveTo(_pt(x1), _pt(y1), _pt(x2), _pt(y2),
+                                    _pt(x), _pt(y)))
+            _update(x, y)
+        elif cmd == "c":
+            x1, y1 = cur_x + _next_num(), cur_y + _next_num()
+            x2, y2 = cur_x + _next_num(), cur_y + _next_num()
+            x, y = cur_x + _next_num(), cur_y + _next_num()
+            commands.append(CurveTo(_pt(x1), _pt(y1), _pt(x2), _pt(y2),
+                                    _pt(x), _pt(y)))
+            _update(x, y)
         elif cmd == "S":
-            x2, y2 = _pt(_next_num()), _pt(_next_num())
-            x, y = _pt(_next_num()), _pt(_next_num())
-            commands.append(SmoothCurveTo(x2, y2, x, y))
+            x2, y2 = _next_num(), _next_num()
+            x, y = _next_num(), _next_num()
+            commands.append(SmoothCurveTo(_pt(x2), _pt(y2), _pt(x), _pt(y)))
+            _update(x, y)
+        elif cmd == "s":
+            x2, y2 = cur_x + _next_num(), cur_y + _next_num()
+            x, y = cur_x + _next_num(), cur_y + _next_num()
+            commands.append(SmoothCurveTo(_pt(x2), _pt(y2), _pt(x), _pt(y)))
+            _update(x, y)
         elif cmd == "Q":
-            x1, y1 = _pt(_next_num()), _pt(_next_num())
-            x, y = _pt(_next_num()), _pt(_next_num())
-            commands.append(QuadTo(x1, y1, x, y))
+            x1, y1 = _next_num(), _next_num()
+            x, y = _next_num(), _next_num()
+            commands.append(QuadTo(_pt(x1), _pt(y1), _pt(x), _pt(y)))
+            _update(x, y)
+        elif cmd == "q":
+            x1, y1 = cur_x + _next_num(), cur_y + _next_num()
+            x, y = cur_x + _next_num(), cur_y + _next_num()
+            commands.append(QuadTo(_pt(x1), _pt(y1), _pt(x), _pt(y)))
+            _update(x, y)
         elif cmd == "T":
-            commands.append(SmoothQuadTo(_pt(_next_num()), _pt(_next_num())))
+            x, y = _next_num(), _next_num()
+            commands.append(SmoothQuadTo(_pt(x), _pt(y)))
+            _update(x, y)
+        elif cmd == "t":
+            x, y = cur_x + _next_num(), cur_y + _next_num()
+            commands.append(SmoothQuadTo(_pt(x), _pt(y)))
+            _update(x, y)
         elif cmd == "A":
-            rx, ry = _pt(_next_num()), _pt(_next_num())
+            rx, ry = _next_num(), _next_num()
             rotation = _next_num()
             large_arc = _next_num() != 0
             sweep = _next_num() != 0
-            x, y = _pt(_next_num()), _pt(_next_num())
-            commands.append(ArcTo(rx, ry, rotation, large_arc, sweep, x, y))
+            x, y = _next_num(), _next_num()
+            commands.append(ArcTo(_pt(rx), _pt(ry), rotation, large_arc, sweep,
+                                  _pt(x), _pt(y)))
+            _update(x, y)
+        elif cmd == "a":
+            rx, ry = _next_num(), _next_num()
+            rotation = _next_num()
+            large_arc = _next_num() != 0
+            sweep = _next_num() != 0
+            x, y = cur_x + _next_num(), cur_y + _next_num()
+            commands.append(ArcTo(_pt(rx), _pt(ry), rotation, large_arc, sweep,
+                                  _pt(x), _pt(y)))
+            _update(x, y)
         else:
             i += 1  # skip unsupported commands
 
@@ -437,12 +576,30 @@ def _parse_element(node: ET.Element) -> Element | None:
                     opacity=opacity, transform=transform)
 
     if tag == "text":
-        content = node.text or ""
         ff = node.get("font-family", "sans-serif")
         fs = _pt(float(node.get("font-size", "16")))
         fw = node.get("font-weight", "normal")
         fst = node.get("font-style", "normal")
         td = node.get("text-decoration", "none")
+        # Check for <textPath> child
+        for child in node:
+            ctag = _strip_ns(child.tag)
+            if ctag == "textPath":
+                d_str = child.get("path") or child.get("d") or ""
+                d = _parse_path_d(d_str)
+                tp_content = child.text or ""
+                offset_str = child.get("startOffset", "0")
+                start_offset = 0.0
+                if offset_str.endswith("%"):
+                    start_offset = float(offset_str[:-1]) / 100.0
+                else:
+                    start_offset = float(offset_str)
+                return TextPath(
+                    d=d, content=tp_content, start_offset=start_offset,
+                    font_family=ff, font_size=fs,
+                    font_weight=fw, font_style=fst, text_decoration=td,
+                    fill=fill, stroke=stroke, opacity=opacity, transform=transform)
+        content = node.text or ""
         tw = 0.0
         style = node.get("style", "")
         if style:
@@ -481,8 +638,16 @@ def _parse_element(node: ET.Element) -> Element | None:
 
 
 def svg_to_document(svg: str) -> Document:
-    """Parse an SVG string and return a Document."""
-    root = ET.fromstring(svg)
+    """Parse an SVG string and return a Document.
+
+    Returns an empty document if the SVG is malformed, logging a warning.
+    """
+    import logging
+    try:
+        root = ET.fromstring(svg)
+    except ET.ParseError as e:
+        logging.warning("Failed to parse SVG: %s", e)
+        return Document(layers=(Layer(children=()),))
     layers: list[Layer] = []
     for child in root:
         elem = _parse_element(child)

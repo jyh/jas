@@ -1,12 +1,20 @@
 import AppKit
 import Foundation
 
+// MARK: - Selection state
+
+enum SelectionToolState {
+    case idle
+    case marquee    // drag-to-select rectangle
+    case moving     // drag-to-move selection
+}
+
 // MARK: - Selection tool base
 
 class SelectionToolBase: CanvasTool {
+    var state: SelectionToolState = .idle
     var dragStart: (Double, Double)?
     var dragEnd: (Double, Double)?
-    var moving: Bool = false
 
     func selectRect(_ ctx: ToolContext, x: Double, y: Double, w: Double, h: Double, extend: Bool) {
         fatalError("Subclasses must implement selectRect")
@@ -18,20 +26,14 @@ class SelectionToolBase: CanvasTool {
 
     func onPress(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
         if checkHandleHit(ctx, x: x, y: y) { return }
-        let pt = NSPoint(x: x, y: y)
-        if ctx.hitTestSelection(pt) {
-            dragStart = (x, y)
-            dragEnd = (x, y)
-            moving = true
-            return
-        }
         dragStart = (x, y)
         dragEnd = (x, y)
-        moving = false
+        let pt = NSPoint(x: x, y: y)
+        state = ctx.hitTestSelection(pt) ? .moving : .marquee
     }
 
     func onMove(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, dragging: Bool) {
-        guard dragStart != nil else { return }
+        guard state != .idle else { return }
         var fx = x, fy = y
         if shift, let s = dragStart {
             (fx, fy) = constrainAngle(s.0, s.1, x, y)
@@ -41,16 +43,16 @@ class SelectionToolBase: CanvasTool {
     }
 
     func onRelease(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
-        guard let (sx, sy) = dragStart else { return }
+        guard state != .idle, let (sx, sy) = dragStart else { return }
         var fx = x, fy = y
-        if shift && moving {
+        if shift && state == .moving {
             (fx, fy) = constrainAngle(sx, sy, x, y)
         }
+        let wasState = state
+        state = .idle
         dragStart = nil
         dragEnd = nil
-        let wasMoving = moving
-        moving = false
-        if wasMoving {
+        if wasState == .moving {
             let dx = fx - sx, dy = fy - sy
             if dx != 0 || dy != 0 {
                 ctx.snapshot()
@@ -71,8 +73,8 @@ class SelectionToolBase: CanvasTool {
     }
 
     func drawOverlay(_ ctx: ToolContext, _ cgCtx: CGContext) {
-        guard let (sx, sy) = dragStart, let (ex, ey) = dragEnd else { return }
-        if moving {
+        guard state != .idle, let (sx, sy) = dragStart, let (ex, ey) = dragEnd else { return }
+        if state == .moving {
             let dx = ex - sx, dy = ey - sy
             cgCtx.setStrokeColor(toolSelectionColor)
             cgCtx.setLineWidth(1.0)

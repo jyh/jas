@@ -1,5 +1,7 @@
 (** Pen tool for creating Bezier paths. *)
 
+type pen_state = PenIdle | PenPlacing | PenDragging
+
 type pen_point = {
   mutable px : float;
   mutable py : float;
@@ -18,7 +20,7 @@ let pen_close_radius = Canvas_tool.hit_radius
 
 class pen_tool = object (self)
   val mutable points : pen_point list = []
-  val mutable pen_dragging = false
+  val mutable pen_state : pen_state = PenIdle
   val mutable mouse_x = 0.0
   val mutable mouse_y = 0.0
 
@@ -51,7 +53,7 @@ class pen_tool = object (self)
       ctx.controller#add_element elem
     end;
     points <- [];
-    pen_dragging <- false;
+    pen_state <- PenIdle;
     ctx.request_update ()
 
   method on_press (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
@@ -65,12 +67,12 @@ class pen_tool = object (self)
       if dist <= pen_close_radius then begin
         self#finish ctx ~close:true ();
       end else begin
-        pen_dragging <- true;
+        pen_state <- PenDragging;
         points <- (make_pen_point x y) :: points;
         ctx.request_update ()
       end
     end else begin
-      pen_dragging <- true;
+      pen_state <- PenDragging;
       points <- (make_pen_point x y) :: points;
       ctx.request_update ()
     end
@@ -79,7 +81,7 @@ class pen_tool = object (self)
     ignore (shift, dragging);
     mouse_x <- x;
     mouse_y <- y;
-    if pen_dragging then begin
+    if pen_state = PenDragging then begin
       match points with
       | pt :: _ ->
         pt.hx_out <- x;
@@ -93,7 +95,7 @@ class pen_tool = object (self)
 
   method on_release (ctx : Canvas_tool.tool_context) (_x : float) (_y : float) ~(shift : bool) ~(alt : bool) =
     ignore (shift, alt);
-    pen_dragging <- false;
+    (if pen_state = PenDragging then pen_state <- PenPlacing);
     ctx.request_update ()
 
   method on_double_click (ctx : Canvas_tool.tool_context) (_x : float) (_y : float) =
@@ -132,7 +134,7 @@ class pen_tool = object (self)
         Cairo.stroke cr
       end;
       (* Draw preview curve from last point to mouse *)
-      if not pen_dragging then begin
+      if pen_state <> PenDragging then begin
         let last = List.hd points in
         let p0 = List.hd pts in
         let n = List.length pts in

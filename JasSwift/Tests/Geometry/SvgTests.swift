@@ -400,3 +400,191 @@ private func roundtrip(_ doc: Document) -> Document {
         Issue.record("Expected rect")
     }
 }
+
+@Test func svgImportHexColor6() {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg">\
+    <g><rect x="0" y="0" width="96" height="96" fill="#ff8000"/></g></svg>
+    """
+    let doc = svgToDocument(svg)
+    if case .rect(let v) = doc.layers[0].children[0] {
+        #expect(v.fill != nil)
+        #expect(abs(v.fill!.color.r - 1.0) < 0.01)
+        #expect(abs(v.fill!.color.g - 128.0 / 255.0) < 0.01)
+        #expect(abs(v.fill!.color.b - 0.0) < 0.01)
+    } else {
+        Issue.record("Expected rect")
+    }
+}
+
+@Test func svgImportHexColor3() {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg">\
+    <g><rect x="0" y="0" width="96" height="96" fill="#f00"/></g></svg>
+    """
+    let doc = svgToDocument(svg)
+    if case .rect(let v) = doc.layers[0].children[0] {
+        #expect(v.fill != nil)
+        #expect(abs(v.fill!.color.r - 1.0) < 0.01)
+        #expect(abs(v.fill!.color.g - 0.0) < 0.01)
+    } else {
+        Issue.record("Expected rect")
+    }
+}
+
+@Test func svgImportHexStroke() {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg">\
+    <g><line x1="0" y1="0" x2="96" y2="96" stroke="#0000ff" stroke-width="2"/></g></svg>
+    """
+    let doc = svgToDocument(svg)
+    if case .line(let v) = doc.layers[0].children[0] {
+        #expect(v.stroke != nil)
+        #expect(abs(v.stroke!.color.b - 1.0) < 0.01)
+    } else {
+        Issue.record("Expected line")
+    }
+}
+
+private func pt(_ px: Double) -> Double { px * 72.0 / 96.0 }
+
+@Test func svgImportRelativePathCommands() {
+    // m 10,20 l 30,0 l 0,40 z => absolute M(10,20) L(40,20) L(40,60) Z
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg">\
+    <g><path d="m 10,20 l 30,0 l 0,40 z" stroke="rgb(0,0,0)" stroke-width="1"/></g></svg>
+    """
+    let doc = svgToDocument(svg)
+    if case .path(let v) = doc.layers[0].children[0] {
+        #expect(v.d.count == 4)
+        if case .moveTo(let x, let y) = v.d[0] {
+            #expect(abs(x - pt(10)) < 0.1)
+            #expect(abs(y - pt(20)) < 0.1)
+        } else { Issue.record("Expected moveTo") }
+        if case .lineTo(let x, let y) = v.d[1] {
+            #expect(abs(x - pt(40)) < 0.1)
+            #expect(abs(y - pt(20)) < 0.1)
+        } else { Issue.record("Expected lineTo") }
+        if case .lineTo(let x, let y) = v.d[2] {
+            #expect(abs(x - pt(40)) < 0.1)
+            #expect(abs(y - pt(60)) < 0.1)
+        } else { Issue.record("Expected lineTo") }
+        if case .closePath = v.d[3] {} else { Issue.record("Expected closePath") }
+    } else {
+        Issue.record("Expected path")
+    }
+}
+
+@Test func svgImportRelativeCurve() {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg">\
+    <g><path d="M 0,0 c 10,20 30,40 50,60" stroke="rgb(0,0,0)" stroke-width="1"/></g></svg>
+    """
+    let doc = svgToDocument(svg)
+    if case .path(let v) = doc.layers[0].children[0] {
+        if case .curveTo(let x1, let y1, _, _, let x, let y) = v.d[1] {
+            #expect(abs(x1 - pt(10)) < 0.1)
+            #expect(abs(y1 - pt(20)) < 0.1)
+            #expect(abs(x - pt(50)) < 0.1)
+            #expect(abs(y - pt(60)) < 0.1)
+        } else { Issue.record("Expected curveTo") }
+    } else {
+        Issue.record("Expected path")
+    }
+}
+
+@Test func svgImportHVCommands() {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg">\
+    <g><path d="M 10,10 H 50 V 80 h -20 v -30" stroke="rgb(0,0,0)" stroke-width="1"/></g></svg>
+    """
+    let doc = svgToDocument(svg)
+    if case .path(let v) = doc.layers[0].children[0] {
+        #expect(v.d.count == 5)
+        // H 50 => LineTo(pt(50), pt(10))
+        if case .lineTo(let x, let y) = v.d[1] {
+            #expect(abs(x - pt(50)) < 0.1)
+            #expect(abs(y - pt(10)) < 0.1)
+        } else { Issue.record("Expected lineTo") }
+        // V 80 => LineTo(pt(50), pt(80))
+        if case .lineTo(let x, let y) = v.d[2] {
+            #expect(abs(x - pt(50)) < 0.1)
+            #expect(abs(y - pt(80)) < 0.1)
+        } else { Issue.record("Expected lineTo") }
+        // h -20 => LineTo(pt(30), pt(80))
+        if case .lineTo(let x, let y) = v.d[3] {
+            #expect(abs(x - pt(30)) < 0.1)
+            #expect(abs(y - pt(80)) < 0.1)
+        } else { Issue.record("Expected lineTo") }
+        // v -30 => LineTo(pt(30), pt(50))
+        if case .lineTo(let x, let y) = v.d[4] {
+            #expect(abs(x - pt(30)) < 0.1)
+            #expect(abs(y - pt(50)) < 0.1)
+        } else { Issue.record("Expected lineTo") }
+    } else {
+        Issue.record("Expected path")
+    }
+}
+
+// MARK: - Arc round-trip tests
+
+@Test func svgRoundtripArcLargeSweep() {
+    let layer = Layer(children: [
+        .path(Path(d: [.moveTo(0, 0), .arcTo(rx: 36, ry: 36, rotation: 0, largeArc: true, sweep: true, x: 72, y: 0)],
+                   stroke: Stroke(color: Color(r: 0, g: 0, b: 0))))
+    ])
+    let doc = Document(layers: [layer])
+    let svg = documentToSvg(doc)
+    let doc2 = svgToDocument(svg)
+    if case .path(let v) = doc2.layers[0].children[0] {
+        if case .arcTo(let rx, _, _, let la, let sw, let x, _) = v.d[1] {
+            #expect(abs(rx - 36) < 0.1)
+            #expect(la == true)
+            #expect(sw == true)
+            #expect(abs(x - 72) < 0.1)
+        } else { Issue.record("Expected arcTo") }
+    } else { Issue.record("Expected path") }
+}
+
+@Test func svgRoundtripArcSmallNoSweep() {
+    let layer = Layer(children: [
+        .path(Path(d: [.moveTo(0, 0), .arcTo(rx: 36, ry: 18, rotation: 30, largeArc: false, sweep: false, x: 72, y: 36)],
+                   stroke: Stroke(color: Color(r: 0, g: 0, b: 0))))
+    ])
+    let doc = Document(layers: [layer])
+    let svg = documentToSvg(doc)
+    let doc2 = svgToDocument(svg)
+    if case .path(let v) = doc2.layers[0].children[0] {
+        if case .arcTo(_, let ry, let rot, let la, let sw, _, _) = v.d[1] {
+            #expect(abs(ry - 18) < 0.1)
+            #expect(abs(rot - 30) < 0.1)
+            #expect(la == false)
+            #expect(sw == false)
+        } else { Issue.record("Expected arcTo") }
+    } else { Issue.record("Expected path") }
+}
+
+// MARK: - Named color tests
+
+@Test func svgImportNamedColorRed() {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg"><g><rect x="0" y="0" width="96" height="96" fill="red"/></g></svg>
+    """
+    let doc = svgToDocument(svg)
+    if case .rect(let v) = doc.layers[0].children[0] {
+        #expect(abs(v.fill!.color.r - 1.0) < 0.01)
+        #expect(abs(v.fill!.color.g - 0.0) < 0.01)
+    } else { Issue.record("Expected rect") }
+}
+
+@Test func svgImportNamedColorSteelblue() {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg"><g><rect x="0" y="0" width="96" height="96" fill="steelblue"/></g></svg>
+    """
+    let doc = svgToDocument(svg)
+    if case .rect(let v) = doc.layers[0].children[0] {
+        #expect(abs(v.fill!.color.r - 70.0/255.0) < 0.01)
+        #expect(abs(v.fill!.color.g - 130.0/255.0) < 0.01)
+        #expect(abs(v.fill!.color.b - 180.0/255.0) < 0.01)
+    } else { Issue.record("Expected rect") }
+}

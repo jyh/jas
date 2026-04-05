@@ -24,12 +24,20 @@ let cut_selection (model : Model.model) () =
   copy_selection model ();
   model#set_document (Document.delete_selection model#document)
 
-let translate_element elem dx dy =
+let rec translate_element elem dx dy =
   if dx = 0.0 && dy = 0.0 then elem
   else
-    let n = Element.control_point_count elem in
-    let indices = List.init n Fun.id in
-    Element.move_control_points elem indices dx dy
+    match elem with
+    | Element.Group { children; opacity; transform } ->
+      Element.Group { children = Array.map (fun c -> translate_element c dx dy) children;
+                      opacity; transform }
+    | Element.Layer { name; children; opacity; transform } ->
+      Element.Layer { name; children = Array.map (fun c -> translate_element c dx dy) children;
+                      opacity; transform }
+    | _ ->
+      let n = Element.control_point_count elem in
+      let indices = List.init n Fun.id in
+      Element.move_control_points elem indices dx dy
 
 let is_svg text =
   let s = String.trim text in
@@ -138,14 +146,22 @@ let open_file on_open (parent : GWindow.window) () =
   | `ACCEPT ->
     begin match dialog#filename with
     | Some path ->
+      let max_file_size = 100 * 1024 * 1024 in
       let ic = open_in path in
       let n = in_channel_length ic in
-      let svg = really_input_string ic n in
-      close_in ic;
-      let new_model = Model.create
-        ~document:(Svg.svg_to_document svg) ~filename:path () in
-      dialog#destroy ();
-      on_open new_model
+      if n > max_file_size then begin
+        close_in ic;
+        dialog#destroy ();
+        let _ = GWindow.message_dialog ~message:"File too large (over 100 MB)."
+          ~message_type:`ERROR ~buttons:GWindow.Buttons.ok ~parent () in ()
+      end else begin
+        let svg = really_input_string ic n in
+        close_in ic;
+        let new_model = Model.create
+          ~document:(Svg.svg_to_document svg) ~filename:path () in
+        dialog#destroy ();
+        on_open new_model
+      end
     | None -> dialog#destroy ()
     end
   | _ -> dialog#destroy ()
@@ -209,13 +225,20 @@ let revert (get_model : unit -> Model.model) (parent : GWindow.window) () =
     dialog#destroy ();
     match response with
     | `OK ->
+      let max_file_size = 100 * 1024 * 1024 in
       let ic = open_in model#filename in
       let n = in_channel_length ic in
-      let svg = really_input_string ic n in
-      close_in ic;
-      model#snapshot;
-      model#set_document (Svg.svg_to_document svg);
-      model#mark_saved
+      if n > max_file_size then begin
+        close_in ic;
+        let _ = GWindow.message_dialog ~message:"File too large (over 100 MB)."
+          ~message_type:`ERROR ~buttons:GWindow.Buttons.ok ~parent () in ()
+      end else begin
+        let svg = really_input_string ic n in
+        close_in ic;
+        model#snapshot;
+        model#set_document (Svg.svg_to_document svg);
+        model#mark_saved
+      end
     | _ -> ()
   end
 

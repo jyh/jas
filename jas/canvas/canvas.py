@@ -477,10 +477,13 @@ def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:
         if len(path) > 1:
             _apply_transform(painter, getattr(node, 'transform', None))
             for idx in path[1:-1]:
-                assert isinstance(node, Group)
+                if not isinstance(node, Group):
+                    break
                 node = node.children[idx]
                 _apply_transform(painter, getattr(node, 'transform', None))
-            assert isinstance(node, Group)
+            if not isinstance(node, Group):
+                painter.restore()
+                continue
             node = node.children[path[-1]]
         # Apply the selected element's own transform
         _apply_transform(painter, getattr(node, 'transform', None))

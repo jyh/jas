@@ -75,7 +75,7 @@ let dragThreshold: Double = 4.0     // pixels of movement before a click becomes
 let pasteOffset: Double = 24.0      // translation in pt applied when pasting
 let longPressDuration: Double = 0.5 // seconds before a press becomes a long-press
 let polygonSides = 5                // default number of sides for the polygon tool
-let flattenSteps = 20               // line segments per Bezier curve when flattening
+let flattenSteps = elementFlattenSteps  // shared constant from Element.swift
 
 let toolSelectionColor = CGColor(red: 0, green: 0.47, blue: 1.0, alpha: 1.0)
 

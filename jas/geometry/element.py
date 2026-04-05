@@ -311,17 +311,19 @@ class Path(Element):
 
 
 def _path_bounds(d) -> Tuple[float, float, float, float]:
-    """Approximate bounds from path command endpoints."""
+    """Bounds from path command endpoints and control points."""
     xs: list[float] = []
     ys: list[float] = []
     for cmd in d:
         match cmd:
             case MoveTo(x, y) | LineTo(x, y) | SmoothQuadTo(x, y):
                 xs.append(x); ys.append(y)
-            case CurveTo(_, _, _, _, x, y) | SmoothCurveTo(_, _, x, y):
-                xs.append(x); ys.append(y)
-            case QuadTo(_, _, x, y):
-                xs.append(x); ys.append(y)
+            case CurveTo(x1, y1, x2, y2, x, y):
+                xs.extend((x1, x2, x)); ys.extend((y1, y2, y))
+            case SmoothCurveTo(x2, y2, x, y):
+                xs.extend((x2, x)); ys.extend((y2, y))
+            case QuadTo(x1, y1, x, y):
+                xs.extend((x1, x)); ys.extend((y1, y))
             case ArcTo(_, _, _, _, _, x, y):
                 xs.append(x); ys.append(y)
             case ClosePath():

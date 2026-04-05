@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from geometry.element import (
@@ -26,13 +27,19 @@ def _constrain_angle(sx: float, sy: float, ex: float, ey: float) -> tuple[float,
     return (sx + dist * math.cos(snapped), sy + dist * math.sin(snapped))
 
 
+class _SelectionState(Enum):
+    IDLE = auto()
+    MARQUEE = auto()      # drag-to-select rectangle
+    MOVING = auto()       # drag-to-move selection
+
+
 class SelectionToolBase(CanvasTool):
     """Base class for selection tools with shared drag/move behavior."""
 
     def __init__(self):
+        self._state: _SelectionState = _SelectionState.IDLE
         self._drag_start: tuple[float, float] | None = None
         self._drag_end: tuple[float, float] | None = None
-        self._moving: bool = False
 
     def _select_rect(self, ctx: ToolContext, x: float, y: float,
                      w: float, h: float, extend: bool) -> None:
@@ -46,18 +53,16 @@ class SelectionToolBase(CanvasTool):
                  shift: bool = False, alt: bool = False) -> None:
         if self._check_handle_hit(ctx, x, y):
             return
-        if ctx.hit_test_selection(x, y):
-            self._drag_start = (x, y)
-            self._drag_end = (x, y)
-            self._moving = True
-            return
         self._drag_start = (x, y)
         self._drag_end = (x, y)
-        self._moving = False
+        if ctx.hit_test_selection(x, y):
+            self._state = _SelectionState.MOVING
+        else:
+            self._state = _SelectionState.MARQUEE
 
     def on_move(self, ctx: ToolContext, x: float, y: float,
                 shift: bool = False, dragging: bool = False) -> None:
-        if self._drag_start is not None:
+        if self._state != _SelectionState.IDLE:
             if shift:
                 x, y = _constrain_angle(*self._drag_start, x, y)
             self._drag_end = (x, y)
@@ -65,16 +70,16 @@ class SelectionToolBase(CanvasTool):
 
     def on_release(self, ctx: ToolContext, x: float, y: float,
                    shift: bool = False, alt: bool = False) -> None:
-        if self._drag_start is None:
+        if self._state == _SelectionState.IDLE:
             return
         sx, sy = self._drag_start
-        if shift and self._moving:
+        if shift and self._state == _SelectionState.MOVING:
             x, y = _constrain_angle(sx, sy, x, y)
+        was_state = self._state
+        self._state = _SelectionState.IDLE
         self._drag_start = None
         self._drag_end = None
-        was_moving = self._moving
-        self._moving = False
-        if was_moving:
+        if was_state == _SelectionState.MOVING:
             dx, dy = x - sx, y - sy
             if dx != 0 or dy != 0:
                 ctx.snapshot()
@@ -93,11 +98,11 @@ class SelectionToolBase(CanvasTool):
     def draw_overlay(self, ctx: ToolContext, painter: QPainter) -> None:
         from PySide6.QtCore import QPointF, QRectF, Qt
         from PySide6.QtGui import QBrush, QColor, QPen
-        if self._drag_start is None or self._drag_end is None:
+        if self._state == _SelectionState.IDLE:
             return
         sx, sy = self._drag_start
         ex, ey = self._drag_end
-        if self._moving:
+        if self._state == _SelectionState.MOVING:
             dx, dy = ex - sx, ey - sy
             from canvas.canvas import _SELECTION_COLOR, _draw_element_overlay
             for es in ctx.document.selection:

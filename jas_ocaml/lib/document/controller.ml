@@ -25,10 +25,11 @@ let segments_intersect ax1 ay1 ax2 ay2 bx1 by1 bx2 by2 =
   let d4 = cross ax1 ay1 ax2 ay2 bx2 by2 in
   if ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0)) &&
      ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0)) then true
-  else if d1 = 0.0 && on_segment bx1 by1 bx2 by2 ax1 ay1 then true
-  else if d2 = 0.0 && on_segment bx1 by1 bx2 by2 ax2 ay2 then true
-  else if d3 = 0.0 && on_segment ax1 ay1 ax2 ay2 bx1 by1 then true
-  else if d4 = 0.0 && on_segment ax1 ay1 ax2 ay2 bx2 by2 then true
+  else let eps = 1e-10 in
+  if abs_float d1 < eps && on_segment bx1 by1 bx2 by2 ax1 ay1 then true
+  else if abs_float d2 < eps && on_segment bx1 by1 bx2 by2 ax2 ay2 then true
+  else if abs_float d3 < eps && on_segment ax1 ay1 ax2 ay2 bx1 by1 then true
+  else if abs_float d4 < eps && on_segment ax1 ay1 ax2 ay2 bx2 by2 then true
   else false
 
 let segment_intersects_rect x1 y1 x2 y2 rx ry rw rh =

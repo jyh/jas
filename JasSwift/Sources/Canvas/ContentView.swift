@@ -156,31 +156,7 @@ public struct ContentView: View {
     }
 
     public static func saveModel(_ model: Model) {
-        if model.filename.hasPrefix("Untitled-") {
-            let panel = NSSavePanel()
-            panel.title = "Save As"
-            panel.nameFieldStringValue = (model.filename as NSString).lastPathComponent
-            panel.allowedContentTypes = [.svg]
-            guard panel.runModal() == .OK, let url = panel.url else { return }
-            let svg = documentToSvg(model.document)
-            do {
-                try svg.write(to: url, atomically: true, encoding: .utf8)
-                model.markSaved()
-                model.filename = url.path
-            } catch {
-                let errAlert = NSAlert(error: error)
-                errAlert.runModal()
-            }
-        } else {
-            let svg = documentToSvg(model.document)
-            do {
-                try svg.write(toFile: model.filename, atomically: true, encoding: .utf8)
-                model.markSaved()
-            } catch {
-                let errAlert = NSAlert(error: error)
-                errAlert.runModal()
-            }
-        }
+        JasCommands.saveModel(model)
     }
 }
 
