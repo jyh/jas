@@ -31,5 +31,6 @@ val create :
   controller:Controller.controller ->
   toolbar:Toolbar.toolbar ->
   ?on_focus:(unit -> unit) ->
+  ?on_save:(unit -> unit) ->
   ?bbox:bounding_box ->
   GPack.notebook -> canvas_subwindow

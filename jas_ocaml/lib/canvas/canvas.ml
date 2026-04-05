@@ -5,6 +5,8 @@ let create_main_window ~get_model ~on_open () =
     ~title:"Jas"
     ~width:1200 ~height:900
     () in
+  (* Window close is handled by delete_event in main.ml to allow
+     prompting for unsaved changes before quitting. *)
   window#connect#destroy ~callback:GMain.quit |> ignore;
 
   (* Create a vbox to hold menubar and workspace *)

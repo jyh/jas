@@ -22,7 +22,7 @@ import AppKit
 }
 
 @Test func contentViewInitializes() {
-    let view = ContentView()
+    let view = ContentView(workspace: WorkspaceState())
     _ = view.body
 }
 
