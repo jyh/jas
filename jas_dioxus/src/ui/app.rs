@@ -262,7 +262,8 @@ pub fn App() -> Element {
                 }
                 Key::Character(ref c) if (c == "v" || c == "V") && cmd => {
                     evt.prevent_default();
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                    let offset = if mods.shift() { 0.0 } else { PASTE_OFFSET };
+                    (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                         if st.clipboard.is_empty() {
                             return;
                         }
@@ -272,7 +273,7 @@ pub fn App() -> Element {
                         let mut new_selection = Vec::new();
                         let base = doc.layers[idx].children().map_or(0, |c| c.len());
                         for (j, elem) in st.clipboard.iter().enumerate() {
-                            let translated = translate_element(elem, PASTE_OFFSET, PASTE_OFFSET);
+                            let translated = translate_element(elem, offset, offset);
                             let path = vec![idx, base + j];
                             let n = control_point_count(&translated);
                             new_selection.push(ElementSelection {
@@ -286,6 +287,26 @@ pub fn App() -> Element {
                         doc.selection = new_selection;
                         st.model.set_document(doc);
                     }));
+                }
+                Key::Character(ref c) if (c == "a" || c == "A") && cmd => {
+                    evt.prevent_default();
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        Controller::select_all(&mut st.model);
+                    }));
+                }
+                Key::Character(ref c) if (c == "2") && cmd => {
+                    evt.prevent_default();
+                    if mods.alt() {
+                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                            st.model.snapshot();
+                            Controller::unlock_all(&mut st.model);
+                        }));
+                    } else {
+                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                            st.model.snapshot();
+                            Controller::lock_selection(&mut st.model);
+                        }));
+                    }
                 }
                 Key::Character(ref c) if (c == "g" || c == "G") && cmd => {
                     evt.prevent_default();
