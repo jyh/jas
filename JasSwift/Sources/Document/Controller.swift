@@ -259,6 +259,8 @@ public class Controller {
                 if case .group(let g) = child {
                     let anyHit = g.children.contains { elementIntersectsRect($0, x, y, width, height) }
                     if anyHit {
+                        selection.insert(ElementSelection(path: [li, ci],
+                                                          controlPoints: allCPs(child)))
                         for gi in 0..<g.children.count {
                             selection.insert(ElementSelection(path: [li, ci, gi],
                                                               controlPoints: allCPs(g.children[gi])))
@@ -349,10 +351,13 @@ public class Controller {
             let parentPath = Array(path.dropLast())
             let parent = doc.getElement(parentPath)
             if case .group(let g) = parent {
-                let selection: Selection = Set((0..<g.children.count).map {
-                    ElementSelection(path: parentPath + [$0],
-                                     controlPoints: allCPs(g.children[$0]))
-                })
+                var selection: Selection = [
+                    ElementSelection(path: parentPath, controlPoints: allCPs(parent))
+                ]
+                for i in 0..<g.children.count {
+                    selection.insert(ElementSelection(path: parentPath + [i],
+                                                      controlPoints: allCPs(g.children[i])))
+                }
                 model.document = Document(layers: doc.layers,
                                              selectedLayer: doc.selectedLayer, selection: selection)
                 return

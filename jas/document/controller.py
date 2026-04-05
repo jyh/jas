@@ -289,6 +289,9 @@ class Controller:
                 if isinstance(child, Group) and not isinstance(child, Layer):
                     if any(_element_intersects_rect(gc, x, y, width, height)
                            for gc in child.children):
+                        entries.append(ElementSelection(
+                            path=(li, ci),
+                            control_points=_all_cps(child)))
                         for gi, gc in enumerate(child.children):
                             entries.append(ElementSelection(
                                 path=(li, ci, gi),
@@ -388,12 +391,16 @@ class Controller:
             parent_path = path[:-1]
             parent = doc.get_element(parent_path)
             if isinstance(parent, Group) and not isinstance(parent, Layer):
-                selection: Selection = frozenset(
+                entries = [
+                    ElementSelection(path=parent_path,
+                                     control_points=_all_cps(parent)),
+                ]
+                entries.extend(
                     ElementSelection(path=parent_path + (i,),
                                      control_points=_all_cps(parent.children[i]))
                     for i in range(len(parent.children))
                 )
-                self._model.document = replace(doc, selection=selection)
+                self._model.document = replace(doc, selection=frozenset(entries))
                 return
         self._model.document = replace(
             doc, selection=frozenset({ElementSelection(path=path,

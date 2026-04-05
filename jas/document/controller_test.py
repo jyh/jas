@@ -107,7 +107,7 @@ class SelectionControllerTest(absltest.TestCase):
         self.ctrl.select_element((0, 1, 0))
         self.assertEqual(
             _sel_paths(self.ctrl.document.selection),
-            frozenset({(0, 1, 0), (0, 1, 1)}),
+            frozenset({(0, 1), (0, 1, 0), (0, 1, 1)}),
         )
 
     def test_select_element_in_group_other_child(self):
@@ -115,7 +115,7 @@ class SelectionControllerTest(absltest.TestCase):
         self.ctrl.select_element((0, 1, 1))
         self.assertEqual(
             _sel_paths(self.ctrl.document.selection),
-            frozenset({(0, 1, 0), (0, 1, 1)}),
+            frozenset({(0, 1), (0, 1, 0), (0, 1, 1)}),
         )
 
     def test_select_element_notifies_model(self):
@@ -153,7 +153,7 @@ class SelectionControllerTest(absltest.TestCase):
         ctrl.select_rect(-1, -1, 7, 7)
         self.assertEqual(
             _sel_paths(ctrl.document.selection),
-            frozenset({(0, 1, 0), (0, 1, 1)}),
+            frozenset({(0, 1), (0, 1, 0), (0, 1, 1)}),
         )
 
     def test_select_rect_replaces_previous(self):
