@@ -178,8 +178,8 @@ class controller ?(model = Model.create ()) () =
     method set_document (d : Document.document) =
       model#set_document d
 
-    method set_title (title : string) =
-      model#set_document { model#document with Document.title }
+    method set_filename (filename : string) =
+      model#set_filename filename
 
     method add_layer (layer : Element.element) =
       model#set_document { model#document with Document.layers = model#document.Document.layers @ [layer] }

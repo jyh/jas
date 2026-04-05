@@ -1,7 +1,7 @@
 """Menubar for Jas application."""
 
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
 
 from document.model import Model
 
@@ -24,7 +24,7 @@ def create_menus(window: QMainWindow, model: Model) -> None:
 
     open_action = file_menu.addAction("&Open...")
     open_action.setShortcut(QKeySequence.Open)
-    open_action.triggered.connect(lambda: print("Open file"))
+    open_action.triggered.connect(lambda: _open_file(window, model))
 
     save_action = file_menu.addAction("&Save")
     save_action.setShortcut(QKeySequence.Save)
@@ -32,7 +32,7 @@ def create_menus(window: QMainWindow, model: Model) -> None:
 
     save_as_action = file_menu.addAction("Save &As...")
     save_as_action.setShortcut(QKeySequence.SaveAs)
-    save_as_action.triggered.connect(lambda: print("Save as"))
+    save_as_action.triggered.connect(lambda: _save_as(window, model))
 
     file_menu.addSeparator()
 
@@ -96,6 +96,36 @@ def create_menus(window: QMainWindow, model: Model) -> None:
     fit_action = view_menu.addAction("&Fit in Window")
     fit_action.setShortcut(QKeySequence("Ctrl+0"))
     fit_action.triggered.connect(lambda: print("Fit in window"))
+
+
+def _open_file(window: QMainWindow, model: Model) -> None:
+    """Show Open dialog and load an SVG file."""
+    from geometry.svg import svg_to_document
+
+    path, _ = QFileDialog.getOpenFileName(
+        window, "Open", "", "SVG Files (*.svg)")
+    if not path:
+        return
+    with open(path, "r", encoding="utf-8") as f:
+        svg = f.read()
+    model.document = svg_to_document(svg)
+    model.mark_saved()
+    model.filename = path
+
+
+def _save_as(window: QMainWindow, model: Model) -> None:
+    """Show Save As dialog and save the document as SVG."""
+    from geometry.svg import document_to_svg
+
+    path, _ = QFileDialog.getSaveFileName(
+        window, "Save As", model.filename, "SVG Files (*.svg)")
+    if not path:
+        return
+    svg = document_to_svg(model.document)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(svg)
+    model.mark_saved()
+    model.filename = path
 
 
 def _copy_selection(model: Model) -> None:

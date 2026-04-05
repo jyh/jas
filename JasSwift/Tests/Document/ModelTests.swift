@@ -3,32 +3,32 @@ import Testing
 
 @Test func modelDefaultDocument() {
     let model = JasModel()
-    #expect(model.document.title == "Untitled")
+    #expect(model.filename.hasPrefix("Untitled-"))
     #expect(model.document.layers.count == 1)
 }
 
-@Test func modelInitialDocument() {
-    let model = JasModel(document: JasDocument(title: "Test"))
-    #expect(model.document.title == "Test")
+@Test func modelInitialFilename() {
+    let model = JasModel(filename: "Test")
+    #expect(model.filename == "Test")
 }
 
 @Test func modelSetDocumentNotifies() {
     let model = JasModel()
-    var received: [String] = []
-    model.onDocumentChanged { doc in received.append(doc.title) }
-    model.document = JasDocument(title: "Changed")
-    #expect(received == ["Changed"])
+    var received: [Int] = []
+    model.onDocumentChanged { doc in received.append(doc.layers.count) }
+    model.document = JasDocument(layers: [])
+    #expect(received == [0])
 }
 
 @Test func modelMultipleListeners() {
     let model = JasModel()
-    var a: [String] = []
-    var b: [String] = []
-    model.onDocumentChanged { doc in a.append(doc.title) }
-    model.onDocumentChanged { doc in b.append(doc.title) }
-    model.document = JasDocument(title: "X")
-    #expect(a == ["X"])
-    #expect(b == ["X"])
+    var a: [Int] = []
+    var b: [Int] = []
+    model.onDocumentChanged { doc in a.append(doc.layers.count) }
+    model.onDocumentChanged { doc in b.append(doc.layers.count) }
+    model.document = JasDocument(layers: [])
+    #expect(a == [0])
+    #expect(b == [0])
 }
 
 @Test func modelListenerCalledOnEachChange() {
@@ -44,48 +44,56 @@ import Testing
 @Test func modelImmutability() {
     let model = JasModel()
     let before = model.document
-    model.document = JasDocument(title: "New")
+    model.document = JasDocument(layers: [])
     let after = model.document
-    #expect(before.title == "Untitled")
-    #expect(after.title == "New")
+    #expect(before.layers.count == 1)
+    #expect(after.layers.count == 0)
+}
+
+@Test func modelFilename() {
+    let model = JasModel()
+    #expect(model.filename.hasPrefix("Untitled-"))
+    model.filename = "drawing.jas"
+    #expect(model.filename == "drawing.jas")
 }
 
 @Test func modelUndoRedo() {
     let model = JasModel()
     #expect(!model.canUndo)
     model.snapshot()
-    model.document = JasDocument(title: "A")
+    model.document = JasDocument(layers: [])
     #expect(model.canUndo)
     #expect(!model.canRedo)
     model.undo()
-    #expect(model.document.title == "Untitled")
+    #expect(model.document.layers.count == 1)
     #expect(model.canRedo)
     model.redo()
-    #expect(model.document.title == "A")
+    #expect(model.document.layers.count == 0)
 }
 
 @Test func modelUndoClearsRedoOnNewEdit() {
+    let layer = JasLayer(name: "L1", children: [])
     let model = JasModel()
     model.snapshot()
-    model.document = JasDocument(title: "A")
+    model.document = JasDocument(layers: [layer])
     model.snapshot()
-    model.document = JasDocument(title: "B")
+    model.document = JasDocument(layers: [layer, layer])
     model.undo()
-    #expect(model.document.title == "A")
+    #expect(model.document.layers.count == 1)
     #expect(model.canRedo)
     model.snapshot()
-    model.document = JasDocument(title: "C")
+    model.document = JasDocument(layers: [])
     #expect(!model.canRedo)
 }
 
 @Test func modelUndoEmptyStack() {
     let model = JasModel()
     model.undo()
-    #expect(model.document.title == "Untitled")
+    #expect(model.document.layers.count == 1)
 }
 
 @Test func modelRedoEmptyStack() {
     let model = JasModel()
     model.redo()
-    #expect(model.document.title == "Untitled")
+    #expect(model.document.layers.count == 1)
 }

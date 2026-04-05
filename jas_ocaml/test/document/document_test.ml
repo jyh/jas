@@ -2,13 +2,9 @@ let () =
   let open Jas.Element in
   let open Jas.Document in
 
-  (* Test default title *)
+  (* Test default document *)
   let doc0 = make_document [] in
-  assert (doc0.title = "Untitled");
-
-  (* Test custom title *)
-  let doc0b = make_document ~title:"My Drawing" [] in
-  assert (doc0b.title = "My Drawing");
+  assert (List.length doc0.layers = 0);
 
   (* Test empty document *)
   let doc = make_document [] in

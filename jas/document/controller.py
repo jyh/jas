@@ -223,9 +223,9 @@ class Controller:
         """Replace the entire document."""
         self._model.document = document
 
-    def set_title(self, title: str) -> None:
-        """Update the document title."""
-        self._model.document = replace(self._model.document, title=title)
+    def set_filename(self, filename: str) -> None:
+        """Update the filename."""
+        self._model.filename = filename
 
     def add_layer(self, layer: Layer) -> None:
         """Append a layer to the document."""

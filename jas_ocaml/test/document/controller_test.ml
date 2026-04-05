@@ -3,19 +3,18 @@ let () =
 
   (* Test default document *)
   let ctrl = Jas.Controller.create () in
-  assert (ctrl#document.Jas.Document.title = "Untitled");
+  assert (String.sub ctrl#model#filename 0 9 = "Untitled-");
   assert (List.length ctrl#document.Jas.Document.layers = 1);
 
-  (* Test initial document *)
-  let doc = Jas.Document.make_document ~title:"Test" [] in
-  let model = Jas.Model.create ~document:doc () in
-  let ctrl2 = Jas.Controller.create ~model () in
-  assert (ctrl2#document.Jas.Document.title = "Test");
+  (* Test initial filename *)
+  let model2 = Jas.Model.create ~filename:"Test" () in
+  let ctrl2 = Jas.Controller.create ~model:model2 () in
+  assert (ctrl2#model#filename = "Test");
 
-  (* Test set_title *)
+  (* Test set_filename *)
   let ctrl3 = Jas.Controller.create () in
-  ctrl3#set_title "New Title";
-  assert (ctrl3#document.Jas.Document.title = "New Title");
+  ctrl3#set_filename "New Name";
+  assert (ctrl3#model#filename = "New Name");
 
   (* Test add_layer *)
   let ctrl4 = Jas.Controller.create () in
@@ -37,25 +36,17 @@ let () =
 
   (* Test set_document *)
   let ctrl6 = Jas.Controller.create () in
-  let new_doc = Jas.Document.make_document ~title:"Replaced" [] in
+  let new_doc = Jas.Document.make_document [] in
   ctrl6#set_document new_doc;
-  assert (ctrl6#document.Jas.Document.title = "Replaced");
+  assert (List.length ctrl6#document.Jas.Document.layers = 0);
 
-  (* Test mutations notify model *)
+  (* Test set_document notifies model *)
   let model7 = Jas.Model.create () in
   let ctrl7 = Jas.Controller.create ~model:model7 () in
   let received = ref [] in
-  model7#on_document_changed (fun doc -> received := doc.Jas.Document.title :: !received);
-  ctrl7#set_title "Changed";
-  assert (!received = ["Changed"]);
-
-  (* Test model immutability: old snapshots unchanged *)
-  let ctrl8 = Jas.Controller.create () in
-  let before = ctrl8#document in
-  ctrl8#set_title "New";
-  let after = ctrl8#document in
-  assert (before.Jas.Document.title = "Untitled");
-  assert (after.Jas.Document.title = "New");
+  model7#on_document_changed (fun doc -> received := List.length doc.Jas.Document.layers :: !received);
+  ctrl7#set_document (Jas.Document.make_document []);
+  assert (!received = [0]);
 
   (* === Selection controller tests === *)
 

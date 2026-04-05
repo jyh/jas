@@ -17,18 +17,17 @@ let () =
   let controller = Jas.Controller.create ~model () in
   let canvas = Jas.Canvas_subwindow.create
     ~model ~controller ~toolbar ~x:100 ~y:50 ~width:820 ~height:640 fixed in
-  assert (canvas#title = "Untitled");
+  assert (String.sub canvas#title 0 9 = "Untitled-");
 
-  (* Test canvas with named document via model *)
-  let doc = Jas.Document.make_document ~title:"My Drawing" [] in
-  let model2 = Jas.Model.create ~document:doc () in
+  (* Test canvas with named model *)
+  let model2 = Jas.Model.create ~filename:"My Drawing" () in
   let controller2 = Jas.Controller.create ~model:model2 () in
   let canvas2 = Jas.Canvas_subwindow.create
     ~model:model2 ~controller:controller2 ~toolbar ~x:100 ~y:50 ~width:820 ~height:640 fixed in
   assert (canvas2#title = "My Drawing");
 
-  (* Test title updates when model changes document *)
-  model2#set_document (Jas.Document.make_document ~title:"Renamed" []);
+  (* Test title updates when model filename changes *)
+  model2#set_filename "Renamed";
   assert (canvas2#title = "Renamed");
 
   (* Test default bounding box *)

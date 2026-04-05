@@ -48,7 +48,15 @@ class MainWindow(QMainWindow):
         self.sub_window.resize(820, 640)
         self.sub_window.move(self.toolbar_window.frameGeometry().right() + 4, 0)
         self.sub_window.show()
-        self.sub_window.setWindowTitle(self.model.document.title)
+        self._update_canvas_title()
+        self.model.on_document_changed(lambda _: self._update_canvas_title())
+        self.model.on_filename_changed(lambda _: self._update_canvas_title())
+
+    def _update_canvas_title(self):
+        title = self.model.filename
+        if self.model.is_modified:
+            title += " *"
+        self.sub_window.setWindowTitle(title)
 
         # Connect toolbar to canvas
         self.toolbar.tool_changed.connect(self.canvas.set_tool)

@@ -6,7 +6,7 @@ class controller : ?model:Model.model -> unit -> object
   method model : Model.model
   method document : Document.document
   method set_document : Document.document -> unit
-  method set_title : string -> unit
+  method set_filename : string -> unit
   method add_layer : Element.element -> unit
   method remove_layer : int -> unit
   method add_element : Element.element -> unit

@@ -123,7 +123,64 @@ let paste_clipboard (model : Model.model) offset () =
       end
   )
 
-let create (model : Model.model) (vbox : GPack.box) =
+let open_file (model : Model.model) (parent : GWindow.window) () =
+  let dialog = GWindow.file_chooser_dialog
+    ~action:`OPEN
+    ~title:"Open"
+    ~parent
+    () in
+  dialog#add_button_stock `CANCEL `CANCEL;
+  dialog#add_button_stock `OPEN `ACCEPT;
+  let filter = GFile.filter ~name:"SVG Files" ~patterns:["*.svg"] () in
+  dialog#add_filter filter;
+  dialog#set_filter filter;
+  begin match dialog#run () with
+  | `ACCEPT ->
+    begin match dialog#filename with
+    | Some path ->
+      let ic = open_in path in
+      let n = in_channel_length ic in
+      let svg = really_input_string ic n in
+      close_in ic;
+      model#set_document (Svg.svg_to_document svg);
+      model#mark_saved;
+      model#set_filename path
+    | None -> ()
+    end
+  | _ -> ()
+  end;
+  dialog#destroy ()
+
+let save_as (model : Model.model) (parent : GWindow.window) () =
+  let dialog = GWindow.file_chooser_dialog
+    ~action:`SAVE
+    ~title:"Save As"
+    ~parent
+    () in
+  dialog#add_button_stock `CANCEL `CANCEL;
+  dialog#add_button_stock `SAVE `ACCEPT;
+  dialog#set_current_name (Filename.basename model#filename);
+  let filter = GFile.filter ~name:"SVG Files" ~patterns:["*.svg"] () in
+  dialog#add_filter filter;
+  dialog#set_filter filter;
+  dialog#set_do_overwrite_confirmation true;
+  begin match dialog#run () with
+  | `ACCEPT ->
+    begin match dialog#filename with
+    | Some path ->
+      let svg = Svg.document_to_svg model#document in
+      let oc = open_out path in
+      output_string oc svg;
+      close_out oc;
+      model#mark_saved;
+      model#set_filename path
+    | None -> ()
+    end
+  | _ -> ()
+  end;
+  dialog#destroy ()
+
+let create (model : Model.model) (parent : GWindow.window) (vbox : GPack.box) =
   (* Menubar *)
   let menubar = GMenu.menu_bar ~packing:(fun w -> vbox#pack w) () in
   let factory = new GMenu.factory menubar in
@@ -132,9 +189,9 @@ let create (model : Model.model) (vbox : GPack.box) =
   let _file_menu = factory#add_submenu "File" in
   let file_factory = new GMenu.factory _file_menu in
   ignore (file_factory#add_item "New" ~key:GdkKeysyms._n ~callback:(fun () -> print_endline "New"));
-  ignore (file_factory#add_item "Open..." ~key:GdkKeysyms._o ~callback:(fun () -> print_endline "Open"));
+  ignore (file_factory#add_item "Open..." ~key:GdkKeysyms._o ~callback:(open_file model parent));
   ignore (file_factory#add_item "Save" ~key:GdkKeysyms._s ~callback:(fun () -> print_endline "Save"));
-  ignore (file_factory#add_item "Save As..." ~key:GdkKeysyms._s ~callback:(fun () -> print_endline "Save As"));
+  ignore (file_factory#add_item "Save As..." ~key:GdkKeysyms._s ~callback:(save_as model parent));
   ignore (file_factory#add_separator ());
   ignore (file_factory#add_item "Quit" ~key:GdkKeysyms._q ~callback:(fun () -> GMain.quit ()));
 

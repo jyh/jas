@@ -503,7 +503,9 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
     method widget = frame#coerce
     method canvas = canvas_area
     method model = model
-    method title = current_doc.Document.title
+    method title =
+      if model#is_modified then model#filename ^ " *"
+      else model#filename
     method x = pos_x
     method y = pos_y
     method bbox = bbox
@@ -706,6 +708,11 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         canvas_area#misc#queue_draw ()
       );
 
+      (* Redraw title bar when filename changes *)
+      model#on_filename_changed (fun _name ->
+        title_bar#misc#queue_draw ()
+      );
+
       (* Draw title bar *)
       title_bar#misc#connect#draw ~callback:(fun cr ->
         let alloc = title_bar#misc#allocation in
@@ -717,7 +724,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         Cairo.set_source_rgb cr 0.0 0.0 0.0;
         Cairo.select_font_face cr "Sans";
         Cairo.set_font_size cr 13.0;
-        let title = current_doc.Document.title in
+        let title = if model#is_modified then model#filename ^ " *" else model#filename in
         let extents = Cairo.text_extents cr title in
         let tx = (w -. extents.Cairo.width) /. 2.0 in
         let ty = (h +. extents.Cairo.height) /. 2.0 in

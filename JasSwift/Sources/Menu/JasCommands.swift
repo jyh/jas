@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 // MARK: - FocusedValue for model access from commands
 
@@ -48,33 +49,28 @@ public struct JasCommands: Commands {
     public init() {}
 
     public var body: some Commands {
-        CommandMenu("File") {
+        CommandGroup(replacing: .newItem) {
             Button("New") {
                 print("New document")
             }
             .keyboardShortcut("n", modifiers: .command)
 
             Button("Open...") {
-                print("Open document")
+                openFile()
             }
             .keyboardShortcut("o", modifiers: .command)
+        }
 
+        CommandGroup(replacing: .saveItem) {
             Button("Save") {
                 print("Save document")
             }
             .keyboardShortcut("s", modifiers: .command)
 
             Button("Save As...") {
-                print("Save as")
+                saveAs()
             }
             .keyboardShortcut("s", modifiers: [.command, .shift])
-
-            Divider()
-
-            Button("Quit Jas") {
-                NSApplication.shared.terminate(nil)
-            }
-            .keyboardShortcut("q", modifiers: .command)
         }
 
         CommandGroup(replacing: .undoRedo) {
@@ -133,6 +129,43 @@ public struct JasCommands: Commands {
         }
     }
 
+    private func openFile() {
+        guard let model = model else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Open"
+        panel.allowedContentTypes = [.svg]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let svg = try String(contentsOf: url, encoding: .utf8)
+            model.document = svgToDocument(svg)
+            model.markSaved()
+            model.filename = url.path
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.runModal()
+        }
+    }
+
+    private func saveAs() {
+        guard let model = model else { return }
+        let panel = NSSavePanel()
+        panel.title = "Save As"
+        panel.nameFieldStringValue = (model.filename as NSString).lastPathComponent
+        panel.allowedContentTypes = [.svg]
+        panel.allowsOtherFileTypes = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let svg = documentToSvg(model.document)
+        do {
+            try svg.write(to: url, atomically: true, encoding: .utf8)
+            model.markSaved()
+            model.filename = url.path
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.runModal()
+        }
+    }
+
     private func translateElement(_ elem: Element, dx: Double, dy: Double) -> Element {
         if dx == 0 && dy == 0 { return elem }
         let n = elem.controlPointCount
@@ -182,7 +215,7 @@ public struct JasCommands: Commands {
                                           opacity: newLayers[idx].opacity,
                                           transform: newLayers[idx].transform)
             }
-            model.document = JasDocument(title: doc.title, layers: newLayers,
+            model.document = JasDocument(layers: newLayers,
                                           selectedLayer: doc.selectedLayer, selection: newSelection)
         } else {
             // Plain text: create a Text element
@@ -197,7 +230,7 @@ public struct JasCommands: Commands {
                                       children: newLayers[idx].children + [elem],
                                       opacity: newLayers[idx].opacity,
                                       transform: newLayers[idx].transform)
-            model.document = JasDocument(title: doc.title, layers: newLayers,
+            model.document = JasDocument(layers: newLayers,
                                           selectedLayer: doc.selectedLayer, selection: newSelection)
         }
     }
