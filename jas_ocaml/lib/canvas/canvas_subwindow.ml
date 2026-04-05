@@ -757,11 +757,54 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
 
   end
 
-let create ?(model = Model.create ()) ~controller ~toolbar ?(on_focus = fun () -> ()) ?(bbox = make_bounding_box ()) (notebook : GPack.notebook) =
+(** Prompt to save a modified model before closing a tab.
+    Returns true if the close should proceed, false to cancel.
+
+    Three outcomes:
+    - Save: calls the on_save callback (which triggers Menubar.save, handling
+      both named files and the Save-As dialog for untitled documents). After
+      saving, we re-check is_modified: if still true the user cancelled the
+      Save-As dialog, so we abort the close.
+    - Don't Save: proceeds without saving.
+    - Cancel / dialog closed: aborts the close. *)
+let confirm_close_save ~(model : Model.model) ~(save : unit -> unit) () =
+  if not model#is_modified then true
+  else begin
+    let dialog = GWindow.dialog ~title:"Save Changes" ~modal:true () in
+    dialog#add_button "Cancel" `CANCEL;
+    dialog#add_button "Don't Save" `REJECT;
+    dialog#add_button "Save" `ACCEPT;
+    let label = GMisc.label
+      ~text:(Printf.sprintf "Do you want to save changes to \"%s\"?" model#filename)
+      ~packing:dialog#vbox#add () in
+    ignore label;
+    let response = dialog#run () in
+    dialog#destroy ();
+    match response with
+    | `ACCEPT -> save (); not model#is_modified
+    | `REJECT -> true
+    | _ -> false
+  end
+
+let create ?(model = Model.create ()) ~controller ~toolbar ?(on_focus = fun () -> ()) ?(on_save = fun () -> ()) ?(bbox = make_bounding_box ()) (notebook : GPack.notebook) =
   let sub = new canvas_subwindow ~model ~controller ~toolbar ~bbox in
-  (* Add as a notebook page with the filename as tab label *)
-  let tab_label = GMisc.label ~text:model#filename () in
-  notebook#append_page ~tab_label:tab_label#coerce sub#widget |> ignore;
+  (* GTK3 notebooks don't provide built-in closable tabs, so we build a
+     custom tab label: an hbox containing the filename label and a flat
+     close button. The close button triggers confirm_close_save before
+     removing the page. *)
+  let tab_hbox = GPack.hbox ~spacing:4 () in
+  let tab_label = GMisc.label ~text:model#filename ~packing:tab_hbox#add () in
+  let close_btn = GButton.button ~packing:tab_hbox#add () in
+  close_btn#set_relief `NONE;
+  ignore (GMisc.label ~text:"\xC3\x97" ~packing:close_btn#add ());
+  notebook#append_page ~tab_label:tab_hbox#coerce sub#widget |> ignore;
+  (* Close button handler *)
+  close_btn#connect#clicked ~callback:(fun () ->
+    if confirm_close_save ~model ~save:on_save () then begin
+      let page_num = notebook#page_num sub#widget in
+      if page_num >= 0 then notebook#remove_page page_num
+    end
+  ) |> ignore;
   (* Update tab label on document/filename changes *)
   let update_label () =
     let title = if model#is_modified then model#filename ^ " *" else model#filename in

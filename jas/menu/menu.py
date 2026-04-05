@@ -95,13 +95,24 @@ def create_menus(window: QMainWindow) -> None:
 
 
 def _open_file(window: QMainWindow) -> None:
-    """Show Open dialog and load an SVG file into a new canvas."""
+    """Show Open dialog and load an SVG file into a new canvas.
+
+    If the file is already open in an existing tab, focus that tab
+    instead of reading the file again.
+    """
     from geometry.svg import svg_to_document
 
     path, _ = QFileDialog.getOpenFileName(
         window, "Open", "", "SVG Files (*.svg)")
     if not path:
         return
+    # Check if a canvas for this file already exists
+    from canvas.canvas import CanvasWidget
+    for i in range(window.tab_widget.count()):
+        canvas = window.tab_widget.widget(i)
+        if isinstance(canvas, CanvasWidget) and canvas._model.filename == path:
+            window.tab_widget.setCurrentIndex(i)
+            return
     with open(path, "r", encoding="utf-8") as f:
         svg = f.read()
     new_model = Model(document=svg_to_document(svg), filename=path)

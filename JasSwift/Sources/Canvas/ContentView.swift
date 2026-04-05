@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 // MARK: - Tool enum
 
@@ -17,27 +18,39 @@ public enum Tool: String, CaseIterable {
 
 // MARK: - Canvas entry for multi-canvas workspace
 
-struct CanvasEntry: Identifiable {
-    let id = UUID()
-    let model: JasModel
+public struct CanvasEntry: Identifiable {
+    public let id = UUID()
+    public let model: JasModel
+}
+
+// MARK: - Workspace state (shared with app delegate for quit-save prompt)
+
+public class WorkspaceState: ObservableObject {
+    @Published public var canvases: [CanvasEntry] = []
+    @Published public var selectedTab: UUID?
+
+    public init() {}
+
+    public var activeModel: JasModel? {
+        if let id = selectedTab, let entry = canvases.first(where: { $0.id == id }) {
+            return entry.model
+        }
+        return canvases.first?.model
+    }
+
+    public var modifiedModels: [JasModel] {
+        canvases.compactMap { $0.model.isModified ? $0.model : nil }
+    }
 }
 
 // MARK: - Content View
 
 public struct ContentView: View {
+    @ObservedObject var workspace: WorkspaceState
     @State private var currentTool: Tool = .selection
-    @State private var canvases: [CanvasEntry] = [
-        CanvasEntry(model: JasModel())
-    ]
-    @State private var selectedTab: UUID?
 
-    public init() {}
-
-    private var activeModel: JasModel {
-        if let id = selectedTab, let entry = canvases.first(where: { $0.id == id }) {
-            return entry.model
-        }
-        return canvases.first!.model
+    public init(workspace: WorkspaceState) {
+        self.workspace = workspace
     }
 
     public var body: some View {
@@ -45,36 +58,160 @@ public struct ContentView: View {
             // Toolbar on the left
             ToolbarPanel(currentTool: $currentTool)
 
-            // Tabbed canvas area
-            TabView(selection: $selectedTab) {
-                ForEach(canvases) { entry in
-                    CanvasTab(
-                        model: entry.model,
-                        currentTool: $currentTool,
-                        onFocus: { selectedTab = entry.id }
-                    )
-                    .tabItem {
-                        Text(entry.model.isModified ? "\(entry.model.filename) *" : entry.model.filename)
+            // Tabbed canvas area — SwiftUI's TabView doesn't support closable
+            // tabs, so we build a custom tab bar (CanvasTabLabel views in an
+            // HStack) above a ZStack that shows only the selected canvas.
+            VStack(spacing: 0) {
+                if !workspace.canvases.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 0) {
+                            ForEach(workspace.canvases) { entry in
+                                CanvasTabLabel(
+                                    model: entry.model,
+                                    isSelected: workspace.selectedTab == entry.id,
+                                    onSelect: { workspace.selectedTab = entry.id },
+                                    onClose: { closeCanvas(entry.id) }
+                                )
+                            }
+                        }
                     }
-                    .tag(entry.id)
+                    .frame(height: 28)
+                    .background(Color(nsColor: NSColor(white: 0.20, alpha: 1.0)))
                 }
+
+                // Canvas content
+                ZStack {
+                    Color(nsColor: NSColor(white: 0.50, alpha: 1.0))
+                    ForEach(workspace.canvases) { entry in
+                        if entry.id == workspace.selectedTab {
+                            CanvasTab(
+                                model: entry.model,
+                                currentTool: $currentTool,
+                                onFocus: { workspace.selectedTab = entry.id }
+                            )
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(minWidth: 640, minHeight: 480)
         .overlay {
-            FocusedModelProvider(model: activeModel, addCanvas: addCanvas)
+            Color.clear
+                .focusedSceneValue(\.addCanvas, { newModel in addCanvas(newModel) })
+                .allowsHitTesting(false)
+        }
+        .overlay {
+            if let model = workspace.activeModel {
+                FocusedModelProvider(model: model)
+            }
         }
         .onAppear {
-            if selectedTab == nil {
-                selectedTab = canvases.first?.id
+            if workspace.selectedTab == nil {
+                workspace.selectedTab = workspace.canvases.first?.id
             }
         }
     }
 
+    /// Add a canvas for the given model. If a canvas for the same file
+    /// already exists (non-untitled), focus it instead of creating a duplicate.
     private func addCanvas(_ model: JasModel) {
+        if !model.filename.hasPrefix("Untitled-"),
+           let existing = workspace.canvases.first(where: { $0.model.filename == model.filename }) {
+            workspace.selectedTab = existing.id
+            return
+        }
         let entry = CanvasEntry(model: model)
-        canvases.append(entry)
-        selectedTab = entry.id
+        workspace.canvases.append(entry)
+        workspace.selectedTab = entry.id
+    }
+
+    /// Close a canvas tab, prompting to save unsaved changes.
+    ///
+    /// Uses NSAlert with Save/Don't Save/Cancel buttons. If the user
+    /// chooses Save, we call saveModel which handles both named files and
+    /// the Save-As flow for untitled documents. After saving, we re-check
+    /// isModified: if still true the user cancelled the Save-As panel and
+    /// the tab should remain open.
+    private func closeCanvas(_ id: UUID) {
+        guard let entry = workspace.canvases.first(where: { $0.id == id }) else { return }
+        let model = entry.model
+        if model.isModified {
+            let alert = NSAlert()
+            alert.messageText = "Do you want to save changes to \"\(model.filename)\"?"
+            alert.addButton(withTitle: "Save")
+            alert.addButton(withTitle: "Don't Save")
+            alert.addButton(withTitle: "Cancel")
+            let response = alert.runModal()
+            if response == .alertThirdButtonReturn { return }
+            if response == .alertFirstButtonReturn {
+                ContentView.saveModel(model)
+                if model.isModified { return }
+            }
+        }
+        workspace.canvases.removeAll { $0.id == id }
+        if workspace.selectedTab == id {
+            workspace.selectedTab = workspace.canvases.first?.id
+        }
+    }
+
+    public static func saveModel(_ model: JasModel) {
+        if model.filename.hasPrefix("Untitled-") {
+            let panel = NSSavePanel()
+            panel.title = "Save As"
+            panel.nameFieldStringValue = (model.filename as NSString).lastPathComponent
+            panel.allowedContentTypes = [.svg]
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            let svg = documentToSvg(model.document)
+            do {
+                try svg.write(to: url, atomically: true, encoding: .utf8)
+                model.markSaved()
+                model.filename = url.path
+            } catch {
+                let errAlert = NSAlert(error: error)
+                errAlert.runModal()
+            }
+        } else {
+            let svg = documentToSvg(model.document)
+            do {
+                try svg.write(toFile: model.filename, atomically: true, encoding: .utf8)
+                model.markSaved()
+            } catch {
+                let errAlert = NSAlert(error: error)
+                errAlert.runModal()
+            }
+        }
+    }
+}
+
+// MARK: - Tab label with close button
+
+struct CanvasTabLabel: View {
+    @ObservedObject var model: JasModel
+    var isSelected: Bool
+    var onSelect: () -> Void
+    var onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(model.isModified ? "\(model.filename) *" : model.filename)
+                .font(.system(size: 11))
+                .lineLimit(1)
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(.gray)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 14, height: 14)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(isSelected
+            ? Color(nsColor: NSColor(white: 0.35, alpha: 1.0))
+            : Color(nsColor: NSColor(white: 0.25, alpha: 1.0)))
+        .foregroundColor(.white)
+        .onTapGesture { onSelect() }
     }
 }
 
@@ -82,7 +219,6 @@ public struct ContentView: View {
 
 struct FocusedModelProvider: View {
     @ObservedObject var model: JasModel
-    var addCanvas: (JasModel) -> Void
 
     var body: some View {
         Color.clear
@@ -90,7 +226,6 @@ struct FocusedModelProvider: View {
             .focusedSceneValue(\.hasSelection, !model.document.selection.isEmpty)
             .focusedSceneValue(\.canUndo, model.canUndo)
             .focusedSceneValue(\.canRedo, model.canRedo)
-            .focusedSceneValue(\.addCanvas, { newModel in addCanvas(newModel) })
             .allowsHitTesting(false)
     }
 }
