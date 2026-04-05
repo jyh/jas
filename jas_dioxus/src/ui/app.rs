@@ -1,6 +1,6 @@
 //! Main Dioxus application component.
 //!
-//! Hosts the toolbar, canvas, and wires keyboard shortcuts.
+//! Hosts the toolbar, tab bar, canvas, and wires keyboard shortcuts.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -28,16 +28,19 @@ use crate::tools::selection::SelectionTool;
 use crate::tools::text::TextTool;
 use crate::tools::tool::{CanvasTool, ToolKind, PASTE_OFFSET};
 
-/// Shared application state.
-struct AppState {
+/// Per-tab state: each tab has its own document, tools, and clipboard.
+struct TabState {
     model: Model,
-    active_tool: ToolKind,
     tools: HashMap<ToolKind, Box<dyn CanvasTool>>,
     clipboard: Vec<GeoElement>,
 }
 
-impl AppState {
+impl TabState {
     fn new() -> Self {
+        Self::with_model(Model::default())
+    }
+
+    fn with_model(model: Model) -> Self {
         let mut tools: HashMap<ToolKind, Box<dyn CanvasTool>> = HashMap::new();
         tools.insert(ToolKind::Selection, Box::new(SelectionTool::new()));
         tools.insert(ToolKind::DirectSelection, Box::new(DirectSelectionTool::new()));
@@ -48,11 +51,48 @@ impl AppState {
         tools.insert(ToolKind::Rect, Box::new(RectTool::new()));
         tools.insert(ToolKind::Polygon, Box::new(PolygonTool::new()));
         tools.insert(ToolKind::Line, Box::new(LineTool::new()));
+        Self { model, tools, clipboard: Vec::new() }
+    }
+}
+
+/// Shared application state.
+struct AppState {
+    tabs: Vec<TabState>,
+    active_tab: usize,
+    active_tool: ToolKind,
+}
+
+impl AppState {
+    fn new() -> Self {
         Self {
-            model: Model::default(),
+            tabs: vec![TabState::new()],
+            active_tab: 0,
             active_tool: ToolKind::Selection,
-            tools,
-            clipboard: Vec::new(),
+        }
+    }
+
+    fn tab(&self) -> &TabState {
+        &self.tabs[self.active_tab]
+    }
+
+    fn tab_mut(&mut self) -> &mut TabState {
+        &mut self.tabs[self.active_tab]
+    }
+
+    fn add_tab(&mut self, tab: TabState) {
+        self.tabs.push(tab);
+        self.active_tab = self.tabs.len() - 1;
+    }
+
+    fn close_tab(&mut self, index: usize) {
+        if self.tabs.len() <= 1 {
+            return; // keep at least one tab
+        }
+        self.tabs.remove(index);
+        if self.active_tab >= self.tabs.len() {
+            self.active_tab = self.tabs.len() - 1;
+        } else if self.active_tab > index {
+            self.active_tab -= 1;
         }
     }
 
@@ -77,11 +117,12 @@ impl AppState {
             .unchecked_into();
         let w = canvas.width() as f64;
         let h = canvas.height() as f64;
-        render::render(&ctx, w, h, self.model.document());
+        let tab = self.tab();
+        render::render(&ctx, w, h, tab.model.document());
 
         // Draw tool overlay
-        if let Some(tool) = self.tools.get(&self.active_tool) {
-            tool.draw_overlay(&self.model, &ctx);
+        if let Some(tool) = tab.tools.get(&self.active_tool) {
+            tool.draw_overlay(&tab.model, &ctx);
         }
     }
 }
@@ -118,7 +159,7 @@ fn download_file(filename: &str, content: &str) {
     let _ = web_sys::Url::revoke_object_url(&url);
 }
 
-/// Trigger a file open dialog and call the callback with the file contents.
+/// Trigger a file open dialog and load the file into a new tab.
 fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
     let window = match web_sys::window() {
         Some(w) => w,
@@ -162,14 +203,14 @@ fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
                 None => return,
             };
             let doc = svg_to_document(&text);
+            let model = Model::new(doc, Some(filename.clone()));
             let mut st = app3.borrow_mut();
-            st.model = Model::new(doc, Some(filename.clone()));
-            st.clipboard.clear();
+            st.add_tab(TabState::with_model(model));
             drop(st);
             revision3 += 1;
         }) as Box<dyn FnMut(web_sys::Event)>);
         reader.set_onload(Some(onload.as_ref().unchecked_ref()));
-        onload.forget(); // leak closure — it only fires once
+        onload.forget();
         reader.read_as_text(&file).ok();
     }) as Box<dyn FnMut(web_sys::Event)>);
     input.set_onchange(Some(onchange.as_ref().unchecked_ref()));
@@ -206,8 +247,6 @@ fn toolbar_icon(kind: ToolKind) -> &'static str {
 
 #[component]
 pub fn App() -> Element {
-    // Shared state wrapped in Rc<RefCell<>> for interior mutability.
-    // We use a revision signal to trigger Dioxus re-renders after state changes.
     let app = use_hook(|| Rc::new(RefCell::new(AppState::new())));
     let mut revision = use_signal(|| 0u64);
 
@@ -231,8 +270,6 @@ pub fn App() -> Element {
     let act = Rc::new(RefCell::new(act));
 
     // --- Mouse events ---
-    // Dioxus mouse events provide element_coordinates() for position relative
-    // to the target element, and modifiers() for shift/alt/ctrl/meta.
 
     let on_mousedown = {
         let act = act.clone();
@@ -245,8 +282,9 @@ pub fn App() -> Element {
             let alt = mods.alt();
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                if let Some(tool) = st.tools.get_mut(&kind) {
-                    tool.on_press(&mut st.model, cx, cy, shift, alt);
+                let tab = st.tab_mut();
+                if let Some(tool) = tab.tools.get_mut(&kind) {
+                    tool.on_press(&mut tab.model, cx, cy, shift, alt);
                 }
             }));
         }
@@ -263,8 +301,9 @@ pub fn App() -> Element {
             let dragging = evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary);
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                if let Some(tool) = st.tools.get_mut(&kind) {
-                    tool.on_move(&mut st.model, cx, cy, shift, dragging);
+                let tab = st.tab_mut();
+                if let Some(tool) = tab.tools.get_mut(&kind) {
+                    tool.on_move(&mut tab.model, cx, cy, shift, dragging);
                 }
             }));
         }
@@ -281,8 +320,9 @@ pub fn App() -> Element {
             let alt = mods.alt();
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                if let Some(tool) = st.tools.get_mut(&kind) {
-                    tool.on_release(&mut st.model, cx, cy, shift, alt);
+                let tab = st.tab_mut();
+                if let Some(tool) = tab.tools.get_mut(&kind) {
+                    tool.on_release(&mut tab.model, cx, cy, shift, alt);
                 }
             }));
         }
@@ -296,8 +336,9 @@ pub fn App() -> Element {
             let cy = coords.y;
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                if let Some(tool) = st.tools.get_mut(&kind) {
-                    tool.on_double_click(&mut st.model, cx, cy);
+                let tab = st.tab_mut();
+                if let Some(tool) = tab.tools.get_mut(&kind) {
+                    tool.on_double_click(&mut tab.model, cx, cy);
                 }
             }));
         }
@@ -313,61 +354,65 @@ pub fn App() -> Element {
             let mods = evt.data().modifiers();
             let cmd = mods.meta() || mods.ctrl();
             match key {
-                // --- Modifier shortcuts (must come before bare key shortcuts) ---
+                // --- Modifier shortcuts ---
                 Key::Character(ref c) if (c == "z" || c == "Z") && cmd => {
                     evt.prevent_default();
                     if mods.shift() {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.model.redo();
+                            st.tab_mut().model.redo();
                         }));
                     } else {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.model.undo();
+                            st.tab_mut().model.undo();
                         }));
                     }
                 }
                 Key::Character(ref c) if (c == "c" || c == "C") && cmd => {
                     evt.prevent_default();
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let doc = st.model.document();
+                        let tab = st.tab();
+                        let doc = tab.model.document();
                         let mut elements = Vec::new();
                         for es in &doc.selection {
                             if let Some(elem) = doc.get_element(&es.path) {
                                 elements.push(elem.clone());
                             }
                         }
-                        st.clipboard = elements;
+                        st.tab_mut().clipboard = elements;
                     }));
                 }
                 Key::Character(ref c) if (c == "x" || c == "X") && cmd => {
                     evt.prevent_default();
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let doc = st.model.document();
+                        let tab = st.tab();
+                        let doc = tab.model.document();
                         let mut elements = Vec::new();
                         for es in &doc.selection {
                             if let Some(elem) = doc.get_element(&es.path) {
                                 elements.push(elem.clone());
                             }
                         }
-                        st.clipboard = elements;
-                        st.model.snapshot();
-                        let new_doc = st.model.document().delete_selection();
-                        st.model.set_document(new_doc);
+                        let tab = st.tab_mut();
+                        tab.clipboard = elements;
+                        tab.model.snapshot();
+                        let new_doc = tab.model.document().delete_selection();
+                        tab.model.set_document(new_doc);
                     }));
                 }
                 Key::Character(ref c) if (c == "v" || c == "V") && cmd => {
                     evt.prevent_default();
                     let offset = if mods.shift() { 0.0 } else { PASTE_OFFSET };
                     (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                        if st.clipboard.is_empty() {
+                        let tab = st.tab_mut();
+                        if tab.clipboard.is_empty() {
                             return;
                         }
-                        st.model.snapshot();
-                        let mut doc = st.model.document().clone();
+                        tab.model.snapshot();
+                        let mut doc = tab.model.document().clone();
                         let idx = doc.selected_layer;
                         let mut new_selection = Vec::new();
                         let base = doc.layers[idx].children().map_or(0, |c| c.len());
-                        for (j, elem) in st.clipboard.iter().enumerate() {
+                        for (j, elem) in tab.clipboard.iter().enumerate() {
                             let translated = translate_element(elem, offset, offset);
                             let path = vec![idx, base + j];
                             let n = control_point_count(&translated);
@@ -380,57 +425,71 @@ pub fn App() -> Element {
                             }
                         }
                         doc.selection = new_selection;
-                        st.model.set_document(doc);
+                        tab.model.set_document(doc);
                     }));
                 }
                 Key::Character(ref c) if (c == "a" || c == "A") && cmd => {
                     evt.prevent_default();
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        Controller::select_all(&mut st.model);
+                        Controller::select_all(&mut st.tab_mut().model);
                     }));
                 }
                 Key::Character(ref c) if (c == "2") && cmd => {
                     evt.prevent_default();
                     if mods.alt() {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.model.snapshot();
-                            Controller::unlock_all(&mut st.model);
+                            st.tab_mut().model.snapshot();
+                            Controller::unlock_all(&mut st.tab_mut().model);
                         }));
                     } else {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.model.snapshot();
-                            Controller::lock_selection(&mut st.model);
+                            st.tab_mut().model.snapshot();
+                            Controller::lock_selection(&mut st.tab_mut().model);
                         }));
                     }
                 }
                 Key::Character(ref c) if (c == "s" || c == "S") && cmd => {
                     evt.prevent_default();
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let svg = document_to_svg(st.model.document());
-                        let filename = if st.model.filename.ends_with(".svg") {
-                            st.model.filename.clone()
+                        let tab = st.tab_mut();
+                        let svg = document_to_svg(tab.model.document());
+                        let filename = if tab.model.filename.ends_with(".svg") {
+                            tab.model.filename.clone()
                         } else {
-                            format!("{}.svg", st.model.filename)
+                            format!("{}.svg", tab.model.filename)
                         };
                         download_file(&filename, &svg);
-                        st.model.mark_saved();
+                        tab.model.mark_saved();
                     }));
                 }
                 Key::Character(ref c) if (c == "o" || c == "O") && cmd => {
                     evt.prevent_default();
                     open_file_dialog(app_for_keys.clone(), revision_for_keys.clone());
                 }
+                Key::Character(ref c) if (c == "n" || c == "N") && cmd => {
+                    evt.prevent_default();
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.add_tab(TabState::new());
+                    }));
+                }
+                Key::Character(ref c) if (c == "w" || c == "W") && cmd => {
+                    evt.prevent_default();
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        let idx = st.active_tab;
+                        st.close_tab(idx);
+                    }));
+                }
                 Key::Character(ref c) if (c == "g" || c == "G") && cmd => {
                     evt.prevent_default();
                     if mods.shift() {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.model.snapshot();
-                            Controller::ungroup_selection(&mut st.model);
+                            st.tab_mut().model.snapshot();
+                            Controller::ungroup_selection(&mut st.tab_mut().model);
                         }));
                     } else {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.model.snapshot();
-                            Controller::group_selection(&mut st.model);
+                            st.tab_mut().model.snapshot();
+                            Controller::group_selection(&mut st.tab_mut().model);
                         }));
                     }
                 }
@@ -473,16 +532,18 @@ pub fn App() -> Element {
                 Key::Escape | Key::Enter => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         let kind = st.active_tool;
-                        if let Some(tool) = st.tools.get_mut(&kind) {
-                            tool.on_key(&mut st.model, "Escape");
+                        let tab = st.tab_mut();
+                        if let Some(tool) = tab.tools.get_mut(&kind) {
+                            tool.on_key(&mut tab.model, "Escape");
                         }
                     }));
                 }
                 Key::Delete | Key::Backspace => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.model.snapshot();
-                        let new_doc = st.model.document().delete_selection();
-                        st.model.set_document(new_doc);
+                        let tab = st.tab_mut();
+                        tab.model.snapshot();
+                        let new_doc = tab.model.document().delete_selection();
+                        tab.model.set_document(new_doc);
                     }));
                 }
                 _ => {}
@@ -514,6 +575,53 @@ pub fn App() -> Element {
         })
         .collect();
 
+    // --- Tab bar ---
+    let borrowed = app.borrow();
+    let tab_info: Vec<(usize, String, bool)> = borrowed.tabs.iter().enumerate().map(|(i, tab)| {
+        (i, tab.model.filename.clone(), i == borrowed.active_tab)
+    }).collect();
+    let num_tabs = borrowed.tabs.len();
+    drop(borrowed);
+
+    let tab_buttons: Vec<Result<VNode, RenderError>> = tab_info.iter().map(|(i, name, is_active)| {
+        let idx = *i;
+        let act = act.clone();
+        let bg = if *is_active { "#fff" } else { "#e0e0e0" };
+        let border_bottom = if *is_active { "2px solid #fff" } else { "2px solid #ccc" };
+        let closable = num_tabs > 1;
+        let display_name = name.clone();
+        rsx! {
+            div {
+                key: "tab-{idx}",
+                style: "display:inline-flex; align-items:center; padding:4px 8px; margin-right:1px; background:{bg}; border:1px solid #ccc; border-bottom:{border_bottom}; cursor:pointer; font-size:12px; user-select:none;",
+                onclick: move |_| {
+                    let act = act.clone();
+                    (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                        st.active_tab = idx;
+                    }));
+                },
+                span { "{display_name}" }
+                if closable {
+                    {
+                        let act2 = act.clone();
+                        rsx! {
+                            span {
+                                style: "margin-left:6px; color:#888; cursor:pointer; font-size:14px; line-height:1;",
+                                onclick: move |evt: Event<MouseData>| {
+                                    evt.stop_propagation();
+                                    (act2.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                        st.close_tab(idx);
+                                    }));
+                                },
+                                "\u{00d7}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }).collect();
+
     rsx! {
         div {
             tabindex: "0",
@@ -528,18 +636,31 @@ pub fn App() -> Element {
                 }
             }
 
-            // Canvas area
+            // Main area (tabs + canvas)
             div {
-                style: "flex:1; position:relative; overflow:hidden;",
-                canvas {
-                    id: "jas-canvas",
-                    width: "1200",
-                    height: "800",
-                    style: "display:block; cursor:crosshair;",
-                    onmousedown: on_mousedown,
-                    onmousemove: on_mousemove,
-                    onmouseup: on_mouseup,
-                    ondoubleclick: on_dblclick,
+                style: "flex:1; display:flex; flex-direction:column; overflow:hidden;",
+
+                // Tab bar
+                div {
+                    style: "display:flex; background:#e8e8e8; border-bottom:1px solid #ccc; padding:2px 4px 0; min-height:28px; align-items:flex-end;",
+                    for btn in tab_buttons {
+                        {btn}
+                    }
+                }
+
+                // Canvas area
+                div {
+                    style: "flex:1; position:relative; overflow:hidden;",
+                    canvas {
+                        id: "jas-canvas",
+                        width: "1200",
+                        height: "800",
+                        style: "display:block; cursor:crosshair;",
+                        onmousedown: on_mousedown,
+                        onmousemove: on_mousemove,
+                        onmouseup: on_mouseup,
+                        ondoubleclick: on_dblclick,
+                    }
                 }
             }
         }
