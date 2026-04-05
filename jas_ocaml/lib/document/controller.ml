@@ -230,16 +230,20 @@ class controller ?(model = Model.create ()) () =
             if Element.is_locked child then ()
             else
             match child with
-            | Element.Group { children = gc; _ } ->
+            | Element.Group { children = gc; _ } as grp ->
               let any_hit = Array.exists (fun c ->
                 element_intersects_rect c x y w h
               ) gc in
-              if any_hit then
+              if any_hit then begin
+                let grp_path = [li; ci] in
+                selection := Document.PathMap.add grp_path
+                  (Document.make_element_selection ~control_points:(all_cps grp) grp_path) !selection;
                 Array.iteri (fun gi gc_elem ->
                   let path = [li; ci; gi] in
                   selection := Document.PathMap.add path
                     (Document.make_element_selection ~control_points:(all_cps gc_elem) path) !selection
                 ) gc
+              end
             | _ ->
               if element_intersects_rect child x y w h then
                 let path = [li; ci] in
@@ -308,13 +312,15 @@ class controller ?(model = Model.create ()) () =
         if List.length path >= 2 then
           let parent = Document.get_element doc parent_path in
           match parent with
-          | Element.Group { children; _ } ->
+          | Element.Group { children; _ } as grp ->
+            let selection = Document.PathMap.singleton parent_path
+              (Document.make_element_selection ~control_points:(all_cps grp) parent_path) in
             let selection = Array.fold_left (fun acc i ->
               let p = parent_path @ [i] in
               let elem = children.(i) in
               Document.PathMap.add p
                 (Document.make_element_selection ~control_points:(all_cps elem) p) acc
-            ) Document.PathMap.empty (Array.init (Array.length children) Fun.id) in
+            ) selection (Array.init (Array.length children) Fun.id) in
             model#set_document { doc with Document.selection = selection }
           | _ ->
             let elem = Document.get_element doc path in
