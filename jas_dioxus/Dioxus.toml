@@ -1,0 +1,9 @@
+[application]
+name = "Jas"
+
+[web.app]
+title = "Jas — Vector Drawing"
+
+[web.watcher]
+reload_html = true
+watch_path = ["src"]
