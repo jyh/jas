@@ -49,9 +49,10 @@ public struct ContentView: View {
                     controller: Controller(model: entry.model),
                     currentTool: $currentTool,
                     position: $canvases[index].position,
-                    bbox: CanvasBoundingBox()
+                    bbox: CanvasBoundingBox(),
+                    onFocus: { activeIndex = index }
                 )
-                .onTapGesture { activeIndex = index }
+                .zIndex(index == activeIndex ? 1 : 0)
             }
 
             // Floating toolbar
@@ -69,9 +70,6 @@ public struct ContentView: View {
         .focusedSceneValue(\.addCanvas, { newModel in
             addCanvas(newModel)
         })
-        .background(
-            KeyboardShortcutHandler(currentTool: $currentTool, model: activeModel)
-        )
     }
 
     private func addCanvas(_ model: JasModel) {
@@ -152,66 +150,3 @@ struct FloatingToolbar: View {
     }
 }
 
-// MARK: - Keyboard shortcuts
-
-struct KeyboardShortcutHandler: NSViewRepresentable {
-    @Binding var currentTool: Tool
-    var model: JasModel
-
-    func makeNSView(context: Context) -> KeyCaptureView {
-        let view = KeyCaptureView()
-        view.onKey = { key, modifiers in
-            let hasCmd = modifiers.contains(.command)
-            let hasShift = modifiers.contains(.shift)
-            if hasCmd && key.lowercased() == "z" {
-                if hasShift {
-                    model.redo()
-                } else {
-                    model.undo()
-                }
-                return
-            }
-            switch key {
-            case "\u{7F}", "\u{F728}":  // Backspace, Forward Delete
-                if !model.document.selection.isEmpty {
-                    model.snapshot()
-                    model.document = model.document.deleteSelection()
-                }
-            default:
-                switch key.lowercased() {
-                case "v": currentTool = .selection
-                case "a": currentTool = .directSelection
-                case "p": currentTool = .pen
-                case "t": currentTool = .text
-                case "\\": currentTool = .line
-                case "m": currentTool = .rect
-                default: break
-                }
-            }
-        }
-        DispatchQueue.main.async {
-            view.window?.makeFirstResponder(view)
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: KeyCaptureView, context: Context) {
-        DispatchQueue.main.async {
-            nsView.window?.makeFirstResponder(nsView)
-        }
-    }
-}
-
-class KeyCaptureView: NSView {
-    var onKey: ((String, NSEvent.ModifierFlags) -> Void)?
-
-    override var acceptsFirstResponder: Bool { true }
-
-    override func keyDown(with event: NSEvent) {
-        if let chars = event.charactersIgnoringModifiers {
-            onKey?(chars, event.modifierFlags)
-        } else {
-            super.keyDown(with: event)
-        }
-    }
-}

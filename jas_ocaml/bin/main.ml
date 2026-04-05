@@ -2,16 +2,20 @@ let () =
   ignore (GMain.init ());
   let model = Jas.Model.create () in
   let active_model = ref model in
+  let active_canvas = ref None in
   let fixed_ref = ref None in
   let toolbar_ref = ref None in
 
   let add_canvas new_model =
     match !fixed_ref, !toolbar_ref with
     | Some fixed, Some toolbar ->
-      active_model := new_model;
       let controller = Jas.Controller.create ~model:new_model () in
-      ignore (Jas.Canvas_subwindow.create
-        ~model:new_model ~controller ~toolbar ~x:184 ~y:0 ~width:820 ~height:640 fixed)
+      let on_focus () = active_model := new_model in
+      let canvas = Jas.Canvas_subwindow.create
+        ~model:new_model ~controller ~toolbar ~on_focus
+        ~x:184 ~y:0 ~width:820 ~height:640 fixed in
+      active_model := new_model;
+      active_canvas := Some canvas
     | _ -> ()
   in
 
@@ -21,8 +25,11 @@ let () =
   let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 fixed in
   toolbar_ref := Some toolbar;
   let controller = Jas.Controller.create ~model () in
+  let on_focus () = active_model := model in
   let canvas = Jas.Canvas_subwindow.create
-    ~model ~controller ~toolbar ~x:84 ~y:0 ~width:820 ~height:640 fixed in
+    ~model ~controller ~toolbar ~on_focus
+    ~x:84 ~y:0 ~width:820 ~height:640 fixed in
+  active_canvas := Some canvas;
 
   (* Keyboard shortcuts: V = Selection, A = Direct Selection, \ = Line *)
   main_window#event#connect#key_press ~callback:(fun ev ->
@@ -41,7 +48,8 @@ let () =
       toolbar#select_tool Jas.Toolbar.Rect; true
     end else if key = GdkKeysyms._Escape
              || key = GdkKeysyms._Return || key = GdkKeysyms._KP_Enter then begin
-      canvas#pen_finish; true
+      (match !active_canvas with Some c -> c#pen_finish | None -> ());
+      true
     end else if key = GdkKeysyms._Delete || key = GdkKeysyms._BackSpace then begin
       let m = !active_model in
       let doc = m#document in

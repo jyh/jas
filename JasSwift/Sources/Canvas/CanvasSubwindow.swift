@@ -551,6 +551,8 @@ class CanvasNSView: NSView {
         }
     }
     var onToolRead: (() -> Tool)?
+    var onToolChange: ((Tool) -> Void)?
+    var onFocus: (() -> Void)?
 
     // Tool system
     let tools: [Tool: CanvasTool] = createTools()
@@ -806,10 +808,42 @@ class CanvasNSView: NSView {
         if let ctx = toolContext, activeTool.onKey(ctx, keyCode: event.keyCode) {
             return
         }
-        super.keyDown(with: event)
+        guard let chars = event.charactersIgnoringModifiers else {
+            super.keyDown(with: event)
+            return
+        }
+        let hasCmd = event.modifierFlags.contains(.command)
+        let hasShift = event.modifierFlags.contains(.shift)
+        if hasCmd && chars.lowercased() == "z" {
+            if hasShift {
+                controller?.model.redo()
+            } else {
+                controller?.model.undo()
+            }
+            return
+        }
+        switch chars {
+        case "\u{7F}", "\u{F728}":  // Backspace, Forward Delete
+            if let model = controller?.model, !model.document.selection.isEmpty {
+                model.snapshot()
+                model.document = model.document.deleteSelection()
+            }
+        default:
+            switch chars.lowercased() {
+            case "v": onToolChange?(.selection)
+            case "a": onToolChange?(.directSelection)
+            case "p": onToolChange?(.pen)
+            case "t": onToolChange?(.text)
+            case "\\": onToolChange?(.line)
+            case "m": onToolChange?(.rect)
+            default: super.keyDown(with: event)
+            }
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
+        onFocus?()
+        window?.makeFirstResponder(self)
         guard let ctx = toolContext else { return }
         let pt = convert(event.locationInWindow, from: nil)
         if event.clickCount >= 2 {
@@ -863,6 +897,7 @@ public struct CanvasSubwindow: View {
     @Binding var currentTool: Tool
     @Binding var position: CGPoint
     public let bbox: CanvasBoundingBox
+    var onFocus: (() -> Void)?
 
     private let titleBarHeight: CGFloat = 24
     private var canvasSize: CGSize { CGSize(width: bbox.width, height: bbox.height) }
@@ -882,15 +917,18 @@ public struct CanvasSubwindow: View {
                 }
                 .frame(width: totalWidth, height: titleBarHeight)
                 .gesture(
-                    DragGesture()
+                    DragGesture(minimumDistance: 0)
                         .onChanged { value in
-                            position.x += value.translation.width
-                            position.y += value.translation.height
+                            onFocus?()
+                            if abs(value.translation.width) > 1 || abs(value.translation.height) > 1 {
+                                position.x += value.translation.width
+                                position.y += value.translation.height
+                            }
                         }
                 )
 
                 // Canvas drawing area
-                CanvasRepresentable(document: model.document, controller: controller, currentTool: $currentTool)
+                CanvasRepresentable(document: model.document, controller: controller, currentTool: $currentTool, onFocus: onFocus)
                     .frame(width: totalWidth, height: canvasSize.height)
             }
             .border(Color(nsColor: NSColor(white: 0.4, alpha: 1.0)), width: 1)
@@ -905,6 +943,7 @@ struct CanvasRepresentable: NSViewRepresentable {
     let document: JasDocument
     let controller: Controller
     @Binding var currentTool: Tool
+    var onFocus: (() -> Void)?
 
     func makeNSView(context: Context) -> CanvasNSView {
         let view = CanvasNSView()
@@ -912,6 +951,8 @@ struct CanvasRepresentable: NSViewRepresentable {
         view.controller = controller
         view.currentTool = currentTool
         view.onToolRead = { [self] in self.currentTool }
+        view.onToolChange = { [self] tool in self.currentTool = tool }
+        view.onFocus = onFocus
         return view
     }
 
@@ -920,6 +961,8 @@ struct CanvasRepresentable: NSViewRepresentable {
         nsView.controller = controller
         nsView.currentTool = currentTool
         nsView.onToolRead = { [self] in self.currentTool }
+        nsView.onToolChange = { [self] tool in self.currentTool = tool }
+        nsView.onFocus = onFocus
         nsView.needsDisplay = true
     }
 }

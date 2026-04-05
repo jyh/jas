@@ -34,6 +34,7 @@ val create :
   ?model:Model.model ->
   controller:Controller.controller ->
   toolbar:Toolbar.toolbar ->
+  ?on_focus:(unit -> unit) ->
   x:int -> y:int -> width:int -> height:int ->
   ?bbox:bounding_box ->
   GPack.fixed -> canvas_subwindow
