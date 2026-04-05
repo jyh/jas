@@ -68,6 +68,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Rect of {
       x : float; y : float;
@@ -77,6 +78,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Circle of {
       cx : float; cy : float; r : float;
@@ -84,6 +86,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Ellipse of {
       cx : float; cy : float;
@@ -92,6 +95,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Polyline of {
       points : (float * float) list;
@@ -99,6 +103,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Polygon of {
       points : (float * float) list;
@@ -106,6 +111,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Path of {
       d : path_command list;
@@ -113,6 +119,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Text of {
       x : float; y : float;
@@ -128,6 +135,7 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Text_path of {
       d : path_command list;
@@ -142,17 +150,20 @@ type element =
       stroke : stroke option;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Group of {
       children : element array;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
   | Layer of {
       name : string;
       children : element array;
       opacity : float;
       transform : transform option;
+      locked : bool;
     }
 
 (** Expand a bounding box by half the stroke width on all sides. *)
@@ -262,38 +273,57 @@ let make_rotate angle_deg =
   let rad = angle_deg *. Float.pi /. 180.0 in
   { identity_transform with a = cos rad; b = sin rad; c = -. sin rad; d = cos rad }
 
-let make_line ?(stroke = None) ?(opacity = 1.0) ?(transform = None) x1 y1 x2 y2 =
-  Line { x1; y1; x2; y2; stroke; opacity; transform }
+let make_line ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
+  Line { x1; y1; x2; y2; stroke; opacity; transform; locked }
 
-let make_rect ?(rx = 0.0) ?(ry = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) x y width height =
-  Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform }
+let make_rect ?(rx = 0.0) ?(ry = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y width height =
+  Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked }
 
-let make_circle ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) cx cy r =
-  Circle { cx; cy; r; fill; stroke; opacity; transform }
+let make_circle ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy r =
+  Circle { cx; cy; r; fill; stroke; opacity; transform; locked }
 
-let make_ellipse ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) cx cy rx ry =
-  Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform }
+let make_ellipse ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy rx ry =
+  Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; locked }
 
-let make_polyline ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) points =
-  Polyline { points; fill; stroke; opacity; transform }
+let make_polyline ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
+  Polyline { points; fill; stroke; opacity; transform; locked }
 
-let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) points =
-  Polygon { points; fill; stroke; opacity; transform }
+let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
+  Polygon { points; fill; stroke; opacity; transform; locked }
 
-let make_path ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) d =
-  Path { d; fill; stroke; opacity; transform }
+let make_path ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d =
+  Path { d; fill; stroke; opacity; transform; locked }
 
-let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none") ?(text_width = 0.0) ?(text_height = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) x y content =
-  Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration; text_width; text_height; fill; stroke; opacity; transform }
+let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none") ?(text_width = 0.0) ?(text_height = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y content =
+  Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration; text_width; text_height; fill; stroke; opacity; transform; locked }
 
-let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none") ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) d content =
-  Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration; fill; stroke; opacity; transform }
+let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none") ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d content =
+  Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration; fill; stroke; opacity; transform; locked }
 
-let make_group ?(opacity = 1.0) ?(transform = None) children =
-  Group { children; opacity; transform }
+let make_group ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
+  Group { children; opacity; transform; locked }
 
-let make_layer ?(name = "Layer") ?(opacity = 1.0) ?(transform = None) children =
-  Layer { name; children; opacity; transform }
+let make_layer ?(name = "Layer") ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
+  Layer { name; children; opacity; transform; locked }
+
+let is_locked = function
+  | Line { locked; _ } | Rect { locked; _ } | Circle { locked; _ }
+  | Ellipse { locked; _ } | Polyline { locked; _ } | Polygon { locked; _ }
+  | Path { locked; _ } | Text { locked; _ } | Text_path { locked; _ }
+  | Group { locked; _ } | Layer { locked; _ } -> locked
+
+let set_locked v = function
+  | Line r -> Line { r with locked = v }
+  | Rect r -> Rect { r with locked = v }
+  | Circle r -> Circle { r with locked = v }
+  | Ellipse r -> Ellipse { r with locked = v }
+  | Polyline r -> Polyline { r with locked = v }
+  | Polygon r -> Polygon { r with locked = v }
+  | Path r -> Path { r with locked = v }
+  | Text r -> Text { r with locked = v }
+  | Text_path r -> Text_path { r with locked = v }
+  | Group r -> Group { r with locked = v }
+  | Layer r -> Layer { r with locked = v }
 
 let path_anchor_points d =
   List.fold_left (fun acc cmd ->
@@ -455,7 +485,8 @@ let move_control_points elem indices dx dy =
       done;
       Polygon { points = Array.to_list pts;
                 fill = r.fill; stroke = r.stroke;
-                opacity = r.opacity; transform = r.transform }
+                opacity = r.opacity; transform = r.transform;
+                locked = r.locked }
   | Circle r ->
     if List.length indices >= 4 then
       Circle { r with cx = r.cx +. dx; cy = r.cy +. dy }

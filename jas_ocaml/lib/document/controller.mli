@@ -17,6 +17,8 @@ class controller : ?model:Model.model -> unit -> object
   method select_element : Document.element_path -> unit
   method select_control_point : Document.element_path -> int -> unit
   method move_path_handle : int list -> int -> string -> float -> float -> unit
+  method lock_selection : unit
+  method unlock_all : unit
   method move_selection : float -> float -> unit
   method copy_selection : float -> float -> unit
 end

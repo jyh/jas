@@ -29,7 +29,8 @@
       "Bash(python -m jas.jas_app)",
       "Bash(python -m pytest jas/ -q)",
       "Bash(python -m pytest -x -q)",
-      "Bash(python -m jas.main)"
+      "Bash(python -m jas.main)",
+      "Bash(python jas/jas_app.py)"
     ]
   }
 }

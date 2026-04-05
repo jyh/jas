@@ -91,8 +91,8 @@ let array_replace_nth arr n x =
 (** Return the node with new_children substituted. *)
 let with_children node new_children =
   match node with
-  | Group { opacity; transform; _ } -> Group { children = new_children; opacity; transform }
-  | Layer { name; opacity; transform; _ } -> Layer { name; children = new_children; opacity; transform }
+  | Group { opacity; transform; locked; _ } -> Group { children = new_children; opacity; transform; locked }
+  | Layer { name; opacity; transform; locked; _ } -> Layer { name; children = new_children; opacity; transform; locked }
   | _ -> failwith "element has no children"
 
 (** Recursively replace the element at [rest] inside a group/layer node. *)

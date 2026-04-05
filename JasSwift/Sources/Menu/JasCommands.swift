@@ -139,6 +139,23 @@ public struct JasCommands: Commands {
             }
             .keyboardShortcut("g", modifiers: [.command, .shift])
             .disabled(!(hasSelection ?? false))
+
+            Button("Ungroup All") {
+                ungroupAll()
+            }
+
+            Divider()
+
+            Button("Lock") {
+                lockSelection()
+            }
+            .keyboardShortcut("2", modifiers: .command)
+            .disabled(!(hasSelection ?? false))
+
+            Button("Unlock All") {
+                unlockAll()
+            }
+            .keyboardShortcut("2", modifiers: [.command, .option])
         }
 
         CommandMenu("View") {
@@ -265,11 +282,11 @@ public struct JasCommands: Commands {
         switch elem {
         case .group(let g):
             return .group(Group(children: g.children.map { translateElement($0, dx: dx, dy: dy) },
-                                opacity: g.opacity, transform: g.transform))
+                                opacity: g.opacity, transform: g.transform, locked: g.locked))
         case .layer(let l):
             return .layer(Layer(name: l.name,
                                 children: l.children.map { translateElement($0, dx: dx, dy: dy) },
-                                opacity: l.opacity, transform: l.transform))
+                                opacity: l.opacity, transform: l.transform, locked: l.locked))
         default:
             let n = elem.controlPointCount
             return elem.moveControlPoints(Set(0..<n), dx: dx, dy: dy)
@@ -432,6 +449,59 @@ public struct JasCommands: Commands {
         model.document = Document(layers: newDoc.layers,
                                   selectedLayer: newDoc.selectedLayer,
                                   selection: newSelection)
+    }
+
+    private func ungroupAll() {
+        guard let model = model else { return }
+        let doc = model.document
+        var changed = false
+
+        func flatten(_ children: [Element]) -> [Element] {
+            var result: [Element] = []
+            for child in children {
+                switch child {
+                case .group(let g) where !g.locked:
+                    changed = true
+                    result.append(contentsOf: flatten(g.children))
+                case .group(let g):
+                    // Locked group: recurse into children but keep the group
+                    let newChildren = flatten(g.children)
+                    result.append(.group(Group(children: newChildren,
+                                               opacity: g.opacity, transform: g.transform,
+                                               locked: g.locked)))
+                default:
+                    result.append(child)
+                }
+            }
+            return result
+        }
+
+        let newLayers = doc.layers.map { layer in
+            let newChildren = flatten(layer.children)
+            return Layer(name: layer.name, children: newChildren,
+                         opacity: layer.opacity, transform: layer.transform,
+                         locked: layer.locked)
+        }
+        guard changed else { return }
+        model.snapshot()
+        model.document = Document(layers: newLayers,
+                                  selectedLayer: doc.selectedLayer, selection: [])
+    }
+
+    private func lockSelection() {
+        guard let model = model else { return }
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        model.snapshot()
+        let controller = Controller(model: model)
+        controller.lockSelection()
+    }
+
+    private func unlockAll() {
+        guard let model = model else { return }
+        model.snapshot()
+        let controller = Controller(model: model)
+        controller.unlockAll()
     }
 
     private func cutSelection() {

@@ -104,6 +104,36 @@ let ungroup_selection (model : Model.model) () =
     end
   end
 
+let ungroup_all (model : Model.model) () =
+  let doc = model#document in
+  let changed = ref false in
+  let rec flatten children =
+    Array.to_list children |> List.concat_map (fun child ->
+      match child with
+      | Element.Group { children = gc; locked = false; _ } ->
+        changed := true;
+        flatten gc
+      | Element.Group r ->
+        (* Locked group: recurse into children but keep the group *)
+        let new_children = Array.of_list (flatten r.children) in
+        [Element.Group { r with children = new_children }]
+      | _ -> [child]
+    )
+  in
+  let new_layers = Array.map (fun layer ->
+    match layer with
+    | Element.Layer r ->
+      let new_children = Array.of_list (flatten r.children) in
+      Element.Layer { r with children = new_children }
+    | _ -> layer
+  ) doc.Document.layers in
+  if !changed then begin
+    model#snapshot;
+    model#set_document { doc with
+      Document.layers = new_layers;
+      Document.selection = Document.PathMap.empty }
+  end
+
 let copy_selection (model : Model.model) () =
   let doc = model#document in
   let sel = doc.Document.selection in
@@ -132,12 +162,12 @@ let rec translate_element elem dx dy =
   if dx = 0.0 && dy = 0.0 then elem
   else
     match elem with
-    | Element.Group { children; opacity; transform } ->
+    | Element.Group { children; opacity; transform; locked; _ } ->
       Element.Group { children = Array.map (fun c -> translate_element c dx dy) children;
-                      opacity; transform }
-    | Element.Layer { name; children; opacity; transform } ->
+                      opacity; transform; locked }
+    | Element.Layer { name; children; opacity; transform; locked; _ } ->
       Element.Layer { name; children = Array.map (fun c -> translate_element c dx dy) children;
-                      opacity; transform }
+                      opacity; transform; locked }
     | _ ->
       let n = Element.control_point_count elem in
       let indices = List.init n Fun.id in
@@ -202,8 +232,8 @@ let paste_clipboard (model : Model.model) offset () =
                 !new_sel
             ) children;
             match new_layers.(idx) with
-            | Element.Layer { name = n; children = ec; opacity; transform } ->
-              new_layers.(idx) <- Element.Layer { name = n; children = Array.append ec children; opacity; transform }
+            | Element.Layer { name = n; children = ec; opacity; transform; locked; _ } ->
+              new_layers.(idx) <- Element.Layer { name = n; children = Array.append ec children; opacity; transform; locked }
             | _ -> ()
           end
         ) pasted_doc.Document.layers;
@@ -381,6 +411,12 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   let object_factory = new GMenu.factory _object_menu in
   ignore (object_factory#add_item "Group" ~key:GdkKeysyms._g ~callback:(fun () -> group_selection (m ()) ()));
   ignore (object_factory#add_item "Ungroup" ~callback:(fun () -> ungroup_selection (m ()) ()));
+  ignore (object_factory#add_item "Ungroup All" ~callback:(fun () -> ungroup_all (m ()) ()));
+  ignore (object_factory#add_separator ());
+  ignore (object_factory#add_item "Lock" ~key:GdkKeysyms._2 ~callback:(fun () ->
+    let model = m () in model#snapshot; (new Controller.controller ~model ())#lock_selection));
+  ignore (object_factory#add_item "Unlock All" ~callback:(fun () ->
+    let model = m () in model#snapshot; (new Controller.controller ~model ())#unlock_all));
 
   (* View menu *)
   let _view_menu = factory#add_submenu "View" in
