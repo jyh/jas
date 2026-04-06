@@ -273,12 +273,6 @@ impl CanvasTool for TextPathTool {
                             common: CommonProps::default(),
                         });
                         Controller::add_element(model, elem);
-                        // Select the newly created element
-                        let doc = model.document();
-                        let li = doc.selected_layer;
-                        let ci = doc.layers[li].children().map_or(0, |c| c.len() - 1);
-                        let path = vec![li, ci];
-                        Controller::select_element(model, &path);
                     }
                 }
             }

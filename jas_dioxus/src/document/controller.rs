@@ -23,17 +23,24 @@ use crate::geometry::hit_test::{all_cps, element_intersects_rect, point_in_rect}
 pub struct Controller;
 
 impl Controller {
-    /// Add an element to the selected layer.
+    /// Add an element to the selected layer and select it with all CPs.
     pub fn add_element(model: &mut Model, element: Element) {
         let doc = model.document().clone();
         let idx = doc.selected_layer;
-        if let Some(children) = model.document().layers[idx].children() {
-            let _ = children; // just checking it's a layer
-        }
+        let n = control_point_count(&element);
         let mut new_doc = doc;
-        if let Some(children) = new_doc.layers[idx].children_mut() {
+        let child_idx = if let Some(children) = new_doc.layers[idx].children_mut() {
+            let ci = children.len();
             children.push(Rc::new(element));
-        }
+            ci
+        } else {
+            model.set_document(new_doc);
+            return;
+        };
+        new_doc.selection = vec![ElementSelection {
+            path: vec![idx, child_idx],
+            control_points: (0..n).collect(),
+        }];
         model.set_document(new_doc);
     }
 

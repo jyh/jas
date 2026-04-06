@@ -98,6 +98,14 @@ impl AppState {
         }
     }
 
+    fn set_tool(&mut self, kind: ToolKind) {
+        let tab = &mut self.tabs[self.active_tab];
+        if let Some(tool) = tab.tools.get_mut(&self.active_tool) {
+            tool.deactivate(&mut tab.model);
+        }
+        self.active_tool = kind;
+    }
+
     fn repaint(&self) {
         let window = match web_sys::window() {
             Some(w) => w,
@@ -647,37 +655,37 @@ pub fn App() -> Element {
                 // --- Tool shortcuts (bare keys, no modifier) ---
                 Key::Character(ref c) if c == "v" || c == "V" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.active_tool = ToolKind::Selection;
+                        st.set_tool(ToolKind::Selection);
                     }));
                 }
                 Key::Character(ref c) if c == "a" || c == "A" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.active_tool = ToolKind::DirectSelection;
+                        st.set_tool(ToolKind::DirectSelection);
                     }));
                 }
                 Key::Character(ref c) if c == "p" || c == "P" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.active_tool = ToolKind::Pen;
+                        st.set_tool(ToolKind::Pen);
                     }));
                 }
                 Key::Character(ref c) if c == "n" || c == "N" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.active_tool = ToolKind::Pencil;
+                        st.set_tool(ToolKind::Pencil);
                     }));
                 }
                 Key::Character(ref c) if c == "t" || c == "T" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.active_tool = ToolKind::Text;
+                        st.set_tool(ToolKind::Text);
                     }));
                 }
                 Key::Character(ref c) if c == "l" || c == "L" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.active_tool = ToolKind::Line;
+                        st.set_tool(ToolKind::Line);
                     }));
                 }
                 Key::Character(ref c) if c == "m" || c == "M" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.active_tool = ToolKind::Rect;
+                        st.set_tool(ToolKind::Rect);
                     }));
                 }
                 Key::Escape | Key::Enter => {
@@ -717,6 +725,8 @@ pub fn App() -> Element {
     // Signal for which slot is showing a long-press popup (-1 = none)
     let mut popup_slot = use_signal(|| Option::<usize>::None);
 
+    // Read revision to trigger re-render when state changes.
+    let _ = revision();
     let active_tool = app.borrow().active_tool;
 
     // If active tool is an alternate that's not currently visible, update the slot
@@ -779,7 +789,7 @@ pub fn App() -> Element {
                             }
                             // Normal click: select this tool
                             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                st.active_tool = kind;
+                                st.set_tool(kind);
                             }));
                         }
                     },
@@ -810,7 +820,7 @@ pub fn App() -> Element {
                         slot_alternates.write().insert(si, ti);
                         popup_slot.set(None);
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            st.active_tool = tool_kind;
+                            st.set_tool(tool_kind);
                         }));
                     },
                     "{label}"

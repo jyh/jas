@@ -650,10 +650,12 @@ class CanvasNSView: NSView {
     var controller: Controller?
     var currentTool: Tool = .selection {
         didSet {
-            if oldValue != currentTool, let ctx = toolContext {
+            if let ctx = toolContext {
                 let savedSelection = document.selection
                 tools[oldValue]?.deactivate(ctx)
-                tools[currentTool]?.activate(ctx)
+                if oldValue != currentTool {
+                    tools[currentTool]?.activate(ctx)
+                }
                 // Preserve selection across tool changes
                 if document.selection != savedSelection {
                     var doc = document
