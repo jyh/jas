@@ -1,6 +1,22 @@
 # Jas
 
-Vector graphics editor implemented in three languages: Python, OCaml, and Swift.
+Vector graphics editor with four parallel implementations sharing the same
+architecture:
+
+| Implementation | UI Framework | Directory |
+|----------------|-------------|-----------|
+| Python | Qt/PySide6 | `jas/` |
+| OCaml | GTK/lablgtk | `jas_ocaml/` |
+| Rust | Dioxus/WASM | `jas_dioxus/` |
+| Swift | AppKit | `JasSwift/` |
+
+## Design
+
+- [ARCH.md](ARCH.md) — MVC architecture, model, controller, canvas, and tools overview
+- [DOCUMENT.md](DOCUMENT.md) — Document model, layers, element types, path commands, and bounds
+- [SELECTION.md](SELECTION.md) — Selection state, three selection modes, hit testing, and operations
+- [TOOLS.md](TOOLS.md) — Toolbar layout, CanvasTool interface, and all ten tools
+- [MENU.md](MENU.md) — Menu bar structure, commands, and keyboard shortcuts
 
 ## Project Structure
 
@@ -26,6 +42,13 @@ cd jas_ocaml
 ./run.sh
 ```
 
+### Rust (`jas_dioxus/`)
+
+```bash
+cd jas_dioxus
+dx serve
+```
+
 ### Swift (`JasSwift/`)
 
 ```bash
@@ -41,6 +64,9 @@ cd jas && python -m pytest geometry/ document/ canvas/ tools/ menu/ -q
 
 # OCaml
 cd jas_ocaml && dune runtest
+
+# Rust
+cd jas_dioxus && cargo test
 
 # Swift
 cd JasSwift && swift test
