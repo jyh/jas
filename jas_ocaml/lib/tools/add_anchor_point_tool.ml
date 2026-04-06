@@ -158,6 +158,8 @@ let insert_point_in_path d seg_idx t =
   let cmds_list = List.rev !result in
   (* first_new_idx equals the number of commands before the split point,
      which is exactly the forward index of the new anchor after reversal. *)
+  (* first_new_idx equals the number of commands before the split point,
+     which is exactly the forward index of the new anchor after reversal. *)
   let idx = !first_new_idx in
   (cmds_list, idx, !anchor_x, !anchor_y)
 
@@ -382,6 +384,7 @@ type drag_state = {
 
 class add_anchor_point_tool = object (_self)
   val mutable drag : drag_state option = None
+  val mutable space_held : bool = false
 
   method on_press (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
     ignore shift;
@@ -462,16 +465,23 @@ class add_anchor_point_tool = object (_self)
     else match drag with
     | None -> ()
     | Some ds ->
-      ds.last_x <- x;
-      ds.last_y <- y;
       let doc = ctx.model#document in
       let elem = Document.get_element doc ds.elem_path in
       let d = match elem with Element.Path { d; _ } -> d | _ -> [] in
       if d <> [] then begin
-        (* Normal drag: update handles. Alt state not available in on_move,
-           so we always do smooth here. The Rust version checks alt, but OCaml
-           tool protocol doesn't pass alt to on_move. We'll treat it as smooth. *)
-        let new_cmds = update_handles d ds.first_cmd_idx ds.anchor_x ds.anchor_y x y false in
+        let new_cmds =
+          if space_held then begin
+            (* Space held: reposition the anchor point *)
+            let dx = x -. ds.last_x and dy = y -. ds.last_y in
+            ds.last_x <- x; ds.last_y <- y;
+            ds.anchor_x <- ds.anchor_x +. dx;
+            ds.anchor_y <- ds.anchor_y +. dy;
+            reposition_anchor d ds.first_cmd_idx ds.anchor_x ds.anchor_y dx dy
+          end else begin
+            ds.last_x <- x; ds.last_y <- y;
+            update_handles d ds.first_cmd_idx ds.anchor_x ds.anchor_y x y false
+          end
+        in
         let new_elem = match elem with
           | Element.Path { fill; stroke; opacity; transform; locked; _ } ->
             Element.Path { d = new_cmds; fill; stroke; opacity; transform; locked }
@@ -484,11 +494,20 @@ class add_anchor_point_tool = object (_self)
 
   method on_release (_ctx : Canvas_tool.tool_context) (_x : float) (_y : float) ~(shift : bool) ~(alt : bool) =
     ignore (shift, alt);
-    drag <- None
+    drag <- None;
+    space_held <- false
 
   method on_double_click (_ctx : Canvas_tool.tool_context) (_x : float) (_y : float) = ()
 
-  method on_key (_ctx : Canvas_tool.tool_context) (_key : int) = false
+  method on_key (_ctx : Canvas_tool.tool_context) (key : int) =
+    if key = GdkKeysyms._space && drag <> None then begin
+      space_held <- true; true
+    end else false
+
+  method on_key_release (_ctx : Canvas_tool.tool_context) (key : int) =
+    if key = GdkKeysyms._space then begin
+      space_held <- false; true
+    end else false
 
   method activate (_ctx : Canvas_tool.tool_context) = ()
 

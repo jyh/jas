@@ -62,6 +62,7 @@ class virtual selection_tool_base = object (self)
 
   method on_double_click (_ctx : Canvas_tool.tool_context) (_x : float) (_y : float) = ()
   method on_key (_ctx : Canvas_tool.tool_context) (_key : int) = false
+  method on_key_release (_ctx : Canvas_tool.tool_context) (_key : int) = false
   method activate (_ctx : Canvas_tool.tool_context) = ()
   method deactivate (_ctx : Canvas_tool.tool_context) = ()
 

@@ -56,7 +56,13 @@ let () =
   (* Keyboard shortcuts: V = Selection, A = Direct Selection, \ = Line *)
   main_window#event#connect#key_press ~callback:(fun ev ->
     let key = GdkEvent.Key.keyval ev in
-    if key = GdkKeysyms._v || key = GdkKeysyms._V then begin
+    (* Forward to active tool first (e.g. Space for anchor repositioning) *)
+    let tool_handled = match !active_canvas with
+      | Some c -> c#forward_key key
+      | None -> false
+    in
+    if tool_handled then true
+    else if key = GdkKeysyms._v || key = GdkKeysyms._V then begin
       toolbar#select_tool Jas.Toolbar.Selection; true
     end else if key = GdkKeysyms._a || key = GdkKeysyms._A then begin
       toolbar#select_tool Jas.Toolbar.Direct_selection; true
@@ -92,6 +98,13 @@ let () =
         (!active_model)#redo; true
       end else false
     end
+  ) |> ignore;
+
+  main_window#event#connect#key_release ~callback:(fun ev ->
+    let key = GdkEvent.Key.keyval ev in
+    match !active_canvas with
+    | Some c -> c#forward_key_release key
+    | None -> false
   ) |> ignore;
 
   (* Intercept window close to prompt for unsaved changes.

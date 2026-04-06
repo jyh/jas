@@ -572,6 +572,7 @@ class CanvasWidget(QWidget):
     def __init__(self, model: Model, controller: Controller,
                  bbox: BoundingBox = BoundingBox(0, 0, 800, 600)):
         super().__init__()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._model = model
         self._controller = controller
         self._bbox = bbox
@@ -763,6 +764,11 @@ class CanvasWidget(QWidget):
             return
         super().keyPressEvent(event)
 
+    def keyReleaseEvent(self, event):
+        if self._active_tool.on_key_release(self._tool_ctx, event.key()):
+            return
+        super().keyReleaseEvent(event)
+
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
             pos = event.position()
@@ -771,6 +777,7 @@ class CanvasWidget(QWidget):
         super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
+        self.setFocus()
         if event.button() == Qt.MouseButton.LeftButton:
             pos = event.position()
             shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)

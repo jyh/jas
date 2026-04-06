@@ -1084,6 +1084,13 @@ class CanvasNSView: NSView {
         }
     }
 
+    override func keyUp(with event: NSEvent) {
+        if let ctx = toolContext, activeTool.onKeyUp(ctx, keyCode: event.keyCode) {
+            return
+        }
+        super.keyUp(with: event)
+    }
+
     override func mouseDown(with event: NSEvent) {
         onFocus?()
         window?.makeFirstResponder(self)

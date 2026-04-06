@@ -29,6 +29,10 @@ private struct DragState {
 
 final class AddAnchorPointTool: CanvasTool {
     private var drag: DragState?
+    private var spaceHeld: Bool = false
+
+    /// macOS key code for the Space bar.
+    private static let spaceKeyCode: UInt16 = 49
 
     // MARK: - De Casteljau subdivision
 
@@ -251,6 +255,27 @@ final class AddAnchorPointTool: CanvasTool {
                                              x2: 2.0 * anchorX - dragX,
                                              y2: 2.0 * anchorY - dragY,
                                              x: x, y: y)
+            }
+        }
+    }
+
+    /// Reposition the anchor point, moving handles by the same delta.
+    static func repositionAnchor(
+        _ cmds: inout [PathCommand],
+        firstCmdIdx: Int,
+        newAX: Double, newAY: Double,
+        dx: Double, dy: Double
+    ) {
+        if case .curveTo(let x1, let y1, let x2, let y2, _, _) = cmds[firstCmdIdx] {
+            cmds[firstCmdIdx] = .curveTo(x1: x1, y1: y1,
+                                         x2: x2 + dx, y2: y2 + dy,
+                                         x: newAX, y: newAY)
+        }
+        if firstCmdIdx + 1 < cmds.count {
+            if case .curveTo(let x1, let y1, let x2, let y2, let x, let y) = cmds[firstCmdIdx + 1] {
+                cmds[firstCmdIdx + 1] = .curveTo(x1: x1 + dx, y1: y1 + dy,
+                                                  x2: x2, y2: y2,
+                                                  x: x, y: y)
             }
         }
     }
@@ -487,19 +512,29 @@ final class AddAnchorPointTool: CanvasTool {
         guard dragging, var d = drag else { return }
         let alt = NSEvent.modifierFlags.contains(.option)
 
-        d.lastX = x; d.lastY = y
         let elemPath = d.elemPath
         let idx = d.firstCmdIdx
-        let ax = d.anchorX, ay = d.anchorY
-        self.drag = d
 
         let doc = ctx.document
         let elem = doc.getElement(elemPath)
         guard case .path(let pe) = elem else { return }
         var newCmds = pe.d
-        Self.updateHandles(&newCmds, firstCmdIdx: idx,
-                           anchorX: ax, anchorY: ay,
-                           dragX: x, dragY: y, cusp: alt)
+
+        if spaceHeld {
+            let dx = x - d.lastX, dy = y - d.lastY
+            d.lastX = x; d.lastY = y
+            d.anchorX += dx; d.anchorY += dy
+            Self.repositionAnchor(&newCmds, firstCmdIdx: idx,
+                                  newAX: d.anchorX, newAY: d.anchorY,
+                                  dx: dx, dy: dy)
+        } else {
+            d.lastX = x; d.lastY = y
+            Self.updateHandles(&newCmds, firstCmdIdx: idx,
+                               anchorX: d.anchorX, anchorY: d.anchorY,
+                               dragX: x, dragY: y, cusp: alt)
+        }
+        self.drag = d
+
         let newElem = Element.path(Path(d: newCmds, fill: pe.fill, stroke: pe.stroke,
                                         opacity: pe.opacity, transform: pe.transform,
                                         locked: pe.locked))
@@ -510,6 +545,23 @@ final class AddAnchorPointTool: CanvasTool {
 
     func onRelease(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
         drag = nil
+        spaceHeld = false
+    }
+
+    func onKey(_ ctx: ToolContext, keyCode: UInt16) -> Bool {
+        if keyCode == Self.spaceKeyCode && drag != nil {
+            spaceHeld = true
+            return true
+        }
+        return false
+    }
+
+    func onKeyUp(_ ctx: ToolContext, keyCode: UInt16) -> Bool {
+        if keyCode == Self.spaceKeyCode {
+            spaceHeld = false
+            return true
+        }
+        return false
     }
 
     func drawOverlay(_ ctx: ToolContext, _ cgCtx: CGContext) {

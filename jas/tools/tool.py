@@ -86,6 +86,9 @@ class CanvasTool(ABC):
     def on_key(self, ctx: ToolContext, key: int) -> bool:
         return False
 
+    def on_key_release(self, ctx: ToolContext, key: int) -> bool:
+        return False
+
     @abstractmethod
     def draw_overlay(self, ctx: ToolContext, painter: QPainter) -> None:
         ...

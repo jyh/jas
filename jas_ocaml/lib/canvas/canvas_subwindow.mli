@@ -24,6 +24,8 @@ class canvas_subwindow :
   method pen_finish : unit
   method pen_finish_close : unit
   method pen_cancel : unit
+  method forward_key : int -> bool
+  method forward_key_release : int -> bool
 end
 
 val create :

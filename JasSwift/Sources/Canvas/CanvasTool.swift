@@ -52,6 +52,7 @@ protocol CanvasTool: AnyObject {
     func onRelease(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool)
     func onDoubleClick(_ ctx: ToolContext, x: Double, y: Double)
     func onKey(_ ctx: ToolContext, keyCode: UInt16) -> Bool
+    func onKeyUp(_ ctx: ToolContext, keyCode: UInt16) -> Bool
     func drawOverlay(_ ctx: ToolContext, _ cgCtx: CGContext)
     func activate(_ ctx: ToolContext)
     func deactivate(_ ctx: ToolContext)
@@ -61,6 +62,7 @@ protocol CanvasTool: AnyObject {
 extension CanvasTool {
     func onDoubleClick(_ ctx: ToolContext, x: Double, y: Double) {}
     func onKey(_ ctx: ToolContext, keyCode: UInt16) -> Bool { false }
+    func onKeyUp(_ ctx: ToolContext, keyCode: UInt16) -> Bool { false }
     func activate(_ ctx: ToolContext) {}
     func deactivate(_ ctx: ToolContext) {}
 }

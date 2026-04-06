@@ -1009,4 +1009,56 @@ mod tests {
         assert_eq!(seg, 2);
         assert!((t - 0.5).abs() < 0.02);
     }
+
+    #[test]
+    fn reposition_anchor_moves_point_and_handles() {
+        // Insert a point into a straight cubic, then reposition it
+        let cmds = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 33.0, y1: 0.0, x2: 67.0, y2: 0.0, x: 100.0, y: 0.0 },
+        ];
+        let ins = insert_point_in_path(&cmds, 1, 0.5);
+        let mut new_cmds = ins.commands.clone();
+        let idx = ins.first_new_idx;
+        let ax = ins.anchor_x;
+        let ay = ins.anchor_y;
+
+        // Record the incoming handle (x2 of cmd at idx) before reposition
+        let old_in_h = if let PathCommand::CurveTo { x2, y2, .. } = new_cmds[idx] {
+            (x2, y2)
+        } else { panic!("expected CurveTo") };
+        // Record the outgoing handle (x1 of cmd at idx+1) before reposition
+        let old_out_h = if let PathCommand::CurveTo { x1, y1, .. } = new_cmds[idx + 1] {
+            (x1, y1)
+        } else { panic!("expected CurveTo") };
+
+        // Reposition anchor by (10, 5)
+        let dx = 10.0;
+        let dy = 5.0;
+        reposition_anchor(&mut new_cmds, idx, ax + dx, ay + dy, dx, dy);
+
+        // Anchor endpoint should have moved
+        if let PathCommand::CurveTo { x, y, .. } = new_cmds[idx] {
+            assert!((x - (ax + dx)).abs() < 0.01);
+            assert!((y - (ay + dy)).abs() < 0.01);
+        } else { panic!("expected CurveTo") }
+
+        // Incoming handle should have shifted by same delta
+        if let PathCommand::CurveTo { x2, y2, .. } = new_cmds[idx] {
+            assert!((x2 - (old_in_h.0 + dx)).abs() < 0.01);
+            assert!((y2 - (old_in_h.1 + dy)).abs() < 0.01);
+        }
+
+        // Outgoing handle should have shifted by same delta
+        if let PathCommand::CurveTo { x1, y1, .. } = new_cmds[idx + 1] {
+            assert!((x1 - (old_out_h.0 + dx)).abs() < 0.01);
+            assert!((y1 - (old_out_h.1 + dy)).abs() < 0.01);
+        }
+
+        // Endpoints of first and last commands should be unchanged
+        if let PathCommand::CurveTo { x, y, .. } = new_cmds[idx + 1] {
+            assert!((x - 100.0).abs() < 0.01);
+            assert!((y - 0.0).abs() < 0.01);
+        }
+    }
 }

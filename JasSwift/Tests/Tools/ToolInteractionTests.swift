@@ -355,6 +355,53 @@ private func layerChildren(_ model: Model) -> [Element] {
     #expect(es!.controlPoints == [0, 1, 2])
 }
 
+@Test func addAnchorPointSpaceRepositionsAnchor() {
+    let tool = AddAnchorPointTool()
+    let pathElem: Element = .path(Path(
+        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
+    ))
+    let layer = Layer(name: "L", children: [pathElem])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+
+    // Insert point at midpoint
+    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
+
+    // Simulate Space press (keyCode 49), then drag to reposition
+    let spaceKey: UInt16 = 49
+    #expect(tool.onKey(ctx, keyCode: spaceKey) == true)
+    tool.onMove(ctx, x: 60, y: 10, shift: false, dragging: true)
+
+    // Anchor command endpoint should be at (60, 10)
+    if case .path(let p) = layerChildren(model)[0] {
+        if case .curveTo(_, _, _, _, let x, let y) = p.d[1] {
+            #expect(abs(x - 60.0) < 1.0)
+            #expect(abs(y - 10.0) < 1.0)
+        } else { Issue.record("Expected CurveTo") }
+    } else { Issue.record("Expected Path") }
+
+    // Release Space, drag further — should adjust handles, not reposition
+    _ = tool.onKeyUp(ctx, keyCode: spaceKey)
+    tool.onMove(ctx, x: 70, y: 20, shift: false, dragging: true)
+
+    // Anchor should still be near (60, 10)
+    if case .path(let p) = layerChildren(model)[0] {
+        if case .curveTo(_, _, _, _, let x, let y) = p.d[1] {
+            #expect(abs(x - 60.0) < 1.0)
+            #expect(abs(y - 10.0) < 1.0)
+        } else { Issue.record("Expected CurveTo") }
+        // Outgoing handle should reflect the drag
+        if case .curveTo(let x1, let y1, _, _, _, _) = p.d[2] {
+            #expect(abs(x1 - 70.0) < 1.0)
+            #expect(abs(y1 - 20.0) < 1.0)
+        } else { Issue.record("Expected CurveTo") }
+    } else { Issue.record("Expected Path") }
+
+    tool.onRelease(ctx, x: 70, y: 20, shift: false, alt: false)
+}
+
 @Test func addAnchorPointSplitLineSegment() {
     let tool = AddAnchorPointTool()
     let pathElem: Element = .path(Path(
