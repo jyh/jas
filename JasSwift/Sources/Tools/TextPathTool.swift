@@ -133,12 +133,10 @@ class TextPathTool: CanvasTool {
             )
             let elem = Element.textPath(tp)
             ctx.controller.addElement(elem)
-            // Select newly created element and start editing
             let doc = ctx.document
             let li = doc.selectedLayer
             let ci = doc.layers[li].children.count - 1
             let path: ElementPath = [li, ci]
-            ctx.controller.selectElement(path)
             ctx.startTextEdit(path, elem)
         }
         controlPt = nil

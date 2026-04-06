@@ -33,6 +33,9 @@ class controller ?(model = Model.create ()) () =
     method add_element (elem : Element.element) =
       let doc = model#document in
       let idx = doc.Document.selected_layer in
+      let child_idx = match doc.Document.layers.(idx) with
+        | Element.Layer layer -> Array.length layer.children
+        | _ -> 0 in
       let new_layers = Array.mapi (fun i l ->
         if i = idx then
           match l with
@@ -41,7 +44,13 @@ class controller ?(model = Model.create ()) () =
           | _ -> l
         else l
       ) doc.Document.layers in
-      model#set_document { doc with Document.layers = new_layers }
+      let n = Element.control_point_count elem in
+      let path = [idx; child_idx] in
+      let es = Document.make_element_selection
+        ~control_points:(List.init n Fun.id) path in
+      let sel = Document.PathMap.singleton path es in
+      model#set_document { doc with Document.layers = new_layers;
+                                    Document.selection = sel }
 
     method private toggle_selection current new_sel =
       (* Toggle at the control-point level.

@@ -153,12 +153,10 @@ class TextPathTool(CanvasTool):
             elem = TextPath(d=d, content="Lorem Ipsum",
                             fill=Fill(color=Color(0, 0, 0)))
             ctx.controller.add_element(elem)
-            # Select the newly created element and start editing
             doc = ctx.document
             li = doc.selected_layer
             ci = len(doc.layers[li].children) - 1
             path = (li, ci)
-            ctx.controller.select_element(path)
             ctx.start_text_edit(path, elem)
         self._control = None
         ctx.request_update()

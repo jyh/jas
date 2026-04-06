@@ -136,7 +136,6 @@ class text_path_tool = object (_self)
             ~fill:(Some Element.{ fill_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 } })
             d "Lorem Ipsum" in
           ctx.controller#add_element elem;
-          (* Select newly created element and start editing *)
           let doc = ctx.model#document in
           let li = doc.Document.selected_layer in
           let layer = doc.Document.layers.(li) in
@@ -144,7 +143,6 @@ class text_path_tool = object (_self)
             | Element.Layer { children; _ } -> Array.length children - 1
             | _ -> 0) in
           let path = [li; ci] in
-          ctx.controller#select_element path;
           ctx.start_text_edit path elem;
           ctx.request_update ()
         end;

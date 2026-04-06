@@ -39,12 +39,16 @@ public class Controller {
         let doc = model.document
         let idx = doc.selectedLayer
         let target = doc.layers[idx]
+        let childIdx = target.children.count
         let newLayer = Layer(name: target.name, children: target.children + [element],
                                 opacity: target.opacity, transform: target.transform)
         var layers = doc.layers
         layers[idx] = newLayer
+        let n = element.controlPointCount
+        let es = ElementSelection(path: [idx, childIdx],
+                                  controlPoints: Set(0..<n))
         model.document = Document(layers: layers, selectedLayer: idx,
-                                     selection: doc.selection)
+                                     selection: [es])
     }
 
     private func toggleSelection(_ current: Selection, _ newSel: Selection) -> Selection {
