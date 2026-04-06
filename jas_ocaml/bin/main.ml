@@ -134,5 +134,8 @@ let () =
     end
   ) |> ignore;
 
+  (* Create an initial empty canvas *)
+  add_canvas (Jas.Model.create ());
+
   main_window#show ();
   GMain.main ()
