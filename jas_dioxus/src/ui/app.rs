@@ -67,18 +67,18 @@ struct AppState {
 impl AppState {
     fn new() -> Self {
         Self {
-            tabs: vec![TabState::new()],
+            tabs: vec![],
             active_tab: 0,
             active_tool: ToolKind::Selection,
         }
     }
 
-    fn tab(&self) -> &TabState {
-        &self.tabs[self.active_tab]
+    fn tab(&self) -> Option<&TabState> {
+        self.tabs.get(self.active_tab)
     }
 
-    fn tab_mut(&mut self) -> &mut TabState {
-        &mut self.tabs[self.active_tab]
+    fn tab_mut(&mut self) -> Option<&mut TabState> {
+        self.tabs.get_mut(self.active_tab)
     }
 
     fn add_tab(&mut self, tab: TabState) {
@@ -87,8 +87,8 @@ impl AppState {
     }
 
     fn close_tab(&mut self, index: usize) {
-        if self.tabs.len() <= 1 {
-            return; // keep at least one tab
+        if index >= self.tabs.len() {
+            return;
         }
         self.tabs.remove(index);
         if self.active_tab >= self.tabs.len() {
@@ -99,9 +99,11 @@ impl AppState {
     }
 
     fn set_tool(&mut self, kind: ToolKind) {
-        let tab = &mut self.tabs[self.active_tab];
-        if let Some(tool) = tab.tools.get_mut(&self.active_tool) {
-            tool.deactivate(&mut tab.model);
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            let active = self.active_tool;
+            if let Some(tool) = tab.tools.get_mut(&active) {
+                tool.deactivate(&mut tab.model);
+            }
         }
         self.active_tool = kind;
     }
@@ -126,7 +128,10 @@ impl AppState {
         };
         let w = canvas.width() as f64;
         let h = canvas.height() as f64;
-        let tab = self.tab();
+        let tab = match self.tab() {
+            Some(t) => t,
+            None => return,
+        };
         render::render(&ctx, w, h, tab.model.document());
 
         // Draw tool overlay
@@ -165,7 +170,10 @@ fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64
         }.await;
 
         let mut st = app.borrow_mut();
-        let tab = st.tab_mut();
+        if st.tab().is_none() {
+            return;
+        }
+        let tab = st.tab_mut().unwrap();
 
         // Check if clipboard contains SVG
         if let Some(text) = &clipboard_text {
@@ -235,7 +243,7 @@ fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64
 
 /// Build SVG string from selected elements for clipboard export.
 fn selection_to_svg(st: &AppState) -> Option<String> {
-    let tab = st.tab();
+    let tab = st.tab()?;
     let doc = tab.model.document();
     if doc.selection.is_empty() {
         return None;
@@ -450,9 +458,10 @@ pub fn App() -> Element {
             let alt = mods.alt();
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                let tab = st.tab_mut();
-                if let Some(tool) = tab.tools.get_mut(&kind) {
-                    tool.on_press(&mut tab.model, cx, cy, shift, alt);
+                if let Some(tab) = st.tab_mut() {
+                    if let Some(tool) = tab.tools.get_mut(&kind) {
+                        tool.on_press(&mut tab.model, cx, cy, shift, alt);
+                    }
                 }
             }));
         }
@@ -469,9 +478,10 @@ pub fn App() -> Element {
             let dragging = evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary);
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                let tab = st.tab_mut();
-                if let Some(tool) = tab.tools.get_mut(&kind) {
-                    tool.on_move(&mut tab.model, cx, cy, shift, dragging);
+                if let Some(tab) = st.tab_mut() {
+                    if let Some(tool) = tab.tools.get_mut(&kind) {
+                        tool.on_move(&mut tab.model, cx, cy, shift, dragging);
+                    }
                 }
             }));
         }
@@ -488,9 +498,10 @@ pub fn App() -> Element {
             let alt = mods.alt();
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                let tab = st.tab_mut();
-                if let Some(tool) = tab.tools.get_mut(&kind) {
-                    tool.on_release(&mut tab.model, cx, cy, shift, alt);
+                if let Some(tab) = st.tab_mut() {
+                    if let Some(tool) = tab.tools.get_mut(&kind) {
+                        tool.on_release(&mut tab.model, cx, cy, shift, alt);
+                    }
                 }
             }));
         }
@@ -504,9 +515,10 @@ pub fn App() -> Element {
             let cy = coords.y;
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                let tab = st.tab_mut();
-                if let Some(tool) = tab.tools.get_mut(&kind) {
-                    tool.on_double_click(&mut tab.model, cx, cy);
+                if let Some(tab) = st.tab_mut() {
+                    if let Some(tool) = tab.tools.get_mut(&kind) {
+                        tool.on_double_click(&mut tab.model, cx, cy);
+                    }
                 }
             }));
         }
@@ -527,50 +539,50 @@ pub fn App() -> Element {
                     evt.prevent_default();
                     if mods.shift() {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.tab_mut().model.redo();
+                            if let Some(tab) = st.tab_mut() { tab.model.redo(); }
                         }));
                     } else {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.tab_mut().model.undo();
+                            if let Some(tab) = st.tab_mut() { tab.model.undo(); }
                         }));
                     }
                 }
                 Key::Character(ref c) if (c == "c" || c == "C") && cmd => {
                     evt.prevent_default();
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if st.tab().is_none() { return; }
                         // Write SVG to system clipboard
                         if let Some(svg) = selection_to_svg(st) {
                             clipboard_write(svg);
                         }
                         // Also update internal clipboard
-                        let tab = st.tab();
-                        let doc = tab.model.document();
-                        let mut elements = Vec::new();
-                        for es in &doc.selection {
-                            if let Some(elem) = doc.get_element(&es.path) {
-                                elements.push(elem.clone());
-                            }
-                        }
-                        st.tab_mut().clipboard = elements;
+                        let elements = {
+                            let tab = st.tab().unwrap();
+                            let doc = tab.model.document();
+                            doc.selection.iter()
+                                .filter_map(|es| doc.get_element(&es.path).cloned())
+                                .collect::<Vec<_>>()
+                        };
+                        st.tab_mut().unwrap().clipboard = elements;
                     }));
                 }
                 Key::Character(ref c) if (c == "x" || c == "X") && cmd => {
                     evt.prevent_default();
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if st.tab().is_none() { return; }
                         // Write SVG to system clipboard
                         if let Some(svg) = selection_to_svg(st) {
                             clipboard_write(svg);
                         }
                         // Update internal clipboard and delete
-                        let tab = st.tab();
-                        let doc = tab.model.document();
-                        let mut elements = Vec::new();
-                        for es in &doc.selection {
-                            if let Some(elem) = doc.get_element(&es.path) {
-                                elements.push(elem.clone());
-                            }
-                        }
-                        let tab = st.tab_mut();
+                        let elements = {
+                            let tab = st.tab().unwrap();
+                            let doc = tab.model.document();
+                            doc.selection.iter()
+                                .filter_map(|es| doc.get_element(&es.path).cloned())
+                                .collect::<Vec<_>>()
+                        };
+                        let tab = st.tab_mut().unwrap();
                         tab.clipboard = elements;
                         tab.model.snapshot();
                         let new_doc = tab.model.document().delete_selection();
@@ -590,35 +602,40 @@ pub fn App() -> Element {
                 Key::Character(ref c) if (c == "a" || c == "A") && cmd => {
                     evt.prevent_default();
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        Controller::select_all(&mut st.tab_mut().model);
+                        if let Some(tab) = st.tab_mut() { Controller::select_all(&mut tab.model); }
                     }));
                 }
                 Key::Character(ref c) if (c == "2") && cmd => {
                     evt.prevent_default();
                     if mods.alt() {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.tab_mut().model.snapshot();
-                            Controller::unlock_all(&mut st.tab_mut().model);
+                            if let Some(tab) = st.tab_mut() {
+                                tab.model.snapshot();
+                                Controller::unlock_all(&mut tab.model);
+                            }
                         }));
                     } else {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.tab_mut().model.snapshot();
-                            Controller::lock_selection(&mut st.tab_mut().model);
+                            if let Some(tab) = st.tab_mut() {
+                                tab.model.snapshot();
+                                Controller::lock_selection(&mut tab.model);
+                            }
                         }));
                     }
                 }
                 Key::Character(ref c) if (c == "s" || c == "S") && cmd => {
                     evt.prevent_default();
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let tab = st.tab_mut();
-                        let svg = document_to_svg(tab.model.document());
-                        let filename = if tab.model.filename.ends_with(".svg") {
-                            tab.model.filename.clone()
-                        } else {
-                            format!("{}.svg", tab.model.filename)
-                        };
-                        download_file(&filename, &svg);
-                        tab.model.mark_saved();
+                        if let Some(tab) = st.tab_mut() {
+                            let svg = document_to_svg(tab.model.document());
+                            let filename = if tab.model.filename.ends_with(".svg") {
+                                tab.model.filename.clone()
+                            } else {
+                                format!("{}.svg", tab.model.filename)
+                            };
+                            download_file(&filename, &svg);
+                            tab.model.mark_saved();
+                        }
                     }));
                 }
                 Key::Character(ref c) if (c == "o" || c == "O") && cmd => {
@@ -642,13 +659,17 @@ pub fn App() -> Element {
                     evt.prevent_default();
                     if mods.shift() {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.tab_mut().model.snapshot();
-                            Controller::ungroup_selection(&mut st.tab_mut().model);
+                            if let Some(tab) = st.tab_mut() {
+                                tab.model.snapshot();
+                                Controller::ungroup_selection(&mut tab.model);
+                            }
                         }));
                     } else {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.tab_mut().model.snapshot();
-                            Controller::group_selection(&mut st.tab_mut().model);
+                            if let Some(tab) = st.tab_mut() {
+                                tab.model.snapshot();
+                                Controller::group_selection(&mut tab.model);
+                            }
                         }));
                     }
                 }
@@ -691,18 +712,20 @@ pub fn App() -> Element {
                 Key::Escape | Key::Enter => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         let kind = st.active_tool;
-                        let tab = st.tab_mut();
-                        if let Some(tool) = tab.tools.get_mut(&kind) {
-                            tool.on_key(&mut tab.model, "Escape");
+                        if let Some(tab) = st.tab_mut() {
+                            if let Some(tool) = tab.tools.get_mut(&kind) {
+                                tool.on_key(&mut tab.model, "Escape");
+                            }
                         }
                     }));
                 }
                 Key::Delete | Key::Backspace => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let tab = st.tab_mut();
-                        tab.model.snapshot();
-                        let new_doc = tab.model.document().delete_selection();
-                        tab.model.set_document(new_doc);
+                        if let Some(tab) = st.tab_mut() {
+                            tab.model.snapshot();
+                            let new_doc = tab.model.document().delete_selection();
+                            tab.model.set_document(new_doc);
+                        }
                     }));
                 }
                 _ => {}
@@ -845,7 +868,7 @@ pub fn App() -> Element {
     let tab_info: Vec<(usize, String, bool)> = borrowed.tabs.iter().enumerate().map(|(i, tab)| {
         (i, tab.model.filename.clone(), i == borrowed.active_tab)
     }).collect();
-    let num_tabs = borrowed.tabs.len();
+    let has_tabs = !borrowed.tabs.is_empty();
     drop(borrowed);
 
     let tab_buttons: Vec<Result<VNode, RenderError>> = tab_info.iter().map(|(i, name, is_active)| {
@@ -853,7 +876,6 @@ pub fn App() -> Element {
         let act = act.clone();
         let bg = if *is_active { "#fff" } else { "#e0e0e0" };
         let border_bottom = if *is_active { "2px solid #fff" } else { "2px solid #ccc" };
-        let closable = num_tabs > 1;
         let display_name = name.clone();
         rsx! {
             div {
@@ -866,20 +888,18 @@ pub fn App() -> Element {
                     }));
                 },
                 span { "{display_name}" }
-                if closable {
-                    {
-                        let act2 = act.clone();
-                        rsx! {
-                            span {
-                                style: "margin-left:6px; color:#888; cursor:pointer; font-size:14px; line-height:1;",
-                                onclick: move |evt: Event<MouseData>| {
-                                    evt.stop_propagation();
-                                    (act2.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                        st.close_tab(idx);
-                                    }));
-                                },
-                                "\u{00d7}"
-                            }
+                {
+                    let act2 = act.clone();
+                    rsx! {
+                        span {
+                            style: "margin-left:6px; color:#888; cursor:pointer; font-size:14px; line-height:1;",
+                            onclick: move |evt: Event<MouseData>| {
+                                evt.stop_propagation();
+                                (act2.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                    st.close_tab(idx);
+                                }));
+                            },
+                            "\u{00d7}"
                         }
                     }
                 }
@@ -905,15 +925,16 @@ pub fn App() -> Element {
                 }
                 "save" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let tab = st.tab_mut();
-                        let svg = document_to_svg(tab.model.document());
-                        let filename = if tab.model.filename.ends_with(".svg") {
-                            tab.model.filename.clone()
-                        } else {
-                            format!("{}.svg", tab.model.filename)
-                        };
-                        download_file(&filename, &svg);
-                        tab.model.mark_saved();
+                        if let Some(tab) = st.tab_mut() {
+                            let svg = document_to_svg(tab.model.document());
+                            let filename = if tab.model.filename.ends_with(".svg") {
+                                tab.model.filename.clone()
+                            } else {
+                                format!("{}.svg", tab.model.filename)
+                            };
+                            download_file(&filename, &svg);
+                            tab.model.mark_saved();
+                        }
                     }));
                 }
                 "close" => {
@@ -924,25 +945,28 @@ pub fn App() -> Element {
                 }
                 "undo" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.tab_mut().model.undo();
+                        if let Some(tab) = st.tab_mut() { tab.model.undo(); }
                     }));
                 }
                 "redo" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.tab_mut().model.redo();
+                        if let Some(tab) = st.tab_mut() { tab.model.redo(); }
                     }));
                 }
                 "cut" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if st.tab().is_none() { return; }
                         if let Some(svg) = selection_to_svg(st) {
                             clipboard_write(svg);
                         }
-                        let tab = st.tab();
-                        let doc = tab.model.document();
-                        let elements: Vec<GeoElement> = doc.selection.iter()
-                            .filter_map(|es| doc.get_element(&es.path).cloned())
-                            .collect();
-                        let tab = st.tab_mut();
+                        let elements: Vec<GeoElement> = {
+                            let tab = st.tab().unwrap();
+                            let doc = tab.model.document();
+                            doc.selection.iter()
+                                .filter_map(|es| doc.get_element(&es.path).cloned())
+                                .collect()
+                        };
+                        let tab = st.tab_mut().unwrap();
                         tab.clipboard = elements;
                         tab.model.snapshot();
                         let new_doc = tab.model.document().delete_selection();
@@ -951,15 +975,18 @@ pub fn App() -> Element {
                 }
                 "copy" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if st.tab().is_none() { return; }
                         if let Some(svg) = selection_to_svg(st) {
                             clipboard_write(svg);
                         }
-                        let tab = st.tab();
-                        let doc = tab.model.document();
-                        let elements: Vec<GeoElement> = doc.selection.iter()
-                            .filter_map(|es| doc.get_element(&es.path).cloned())
-                            .collect();
-                        st.tab_mut().clipboard = elements;
+                        let elements: Vec<GeoElement> = {
+                            let tab = st.tab().unwrap();
+                            let doc = tab.model.document();
+                            doc.selection.iter()
+                                .filter_map(|es| doc.get_element(&es.path).cloned())
+                                .collect()
+                        };
+                        st.tab_mut().unwrap().clipboard = elements;
                     }));
                 }
                 "paste" => {
@@ -974,45 +1001,56 @@ pub fn App() -> Element {
                 }
                 "select_all" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        Controller::select_all(&mut st.tab_mut().model);
+                        if let Some(tab) = st.tab_mut() { Controller::select_all(&mut tab.model); }
                     }));
                 }
                 "delete" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let tab = st.tab_mut();
-                        tab.model.snapshot();
-                        let new_doc = tab.model.document().delete_selection();
-                        tab.model.set_document(new_doc);
+                        if let Some(tab) = st.tab_mut() {
+                            tab.model.snapshot();
+                            let new_doc = tab.model.document().delete_selection();
+                            tab.model.set_document(new_doc);
+                        }
                     }));
                 }
                 "group" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.tab_mut().model.snapshot();
-                        Controller::group_selection(&mut st.tab_mut().model);
+                        if let Some(tab) = st.tab_mut() {
+                            tab.model.snapshot();
+                            Controller::group_selection(&mut tab.model);
+                        }
                     }));
                 }
                 "ungroup" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.tab_mut().model.snapshot();
-                        Controller::ungroup_selection(&mut st.tab_mut().model);
+                        if let Some(tab) = st.tab_mut() {
+                            tab.model.snapshot();
+                            Controller::ungroup_selection(&mut tab.model);
+                        }
                     }));
                 }
                 "ungroup_all" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.tab_mut().model.snapshot();
-                        Controller::ungroup_all(&mut st.tab_mut().model);
+                        if let Some(tab) = st.tab_mut() {
+                            tab.model.snapshot();
+                            Controller::ungroup_all(&mut tab.model);
+                        }
                     }));
                 }
                 "lock" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.tab_mut().model.snapshot();
-                        Controller::lock_selection(&mut st.tab_mut().model);
+                        if let Some(tab) = st.tab_mut() {
+                            tab.model.snapshot();
+                            Controller::lock_selection(&mut tab.model);
+                        }
                     }));
                 }
                 "unlock_all" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.tab_mut().model.snapshot();
-                        Controller::unlock_all(&mut st.tab_mut().model);
+                        if let Some(tab) = st.tab_mut() {
+                            tab.model.snapshot();
+                            Controller::unlock_all(&mut tab.model);
+                        }
                     }));
                 }
                 _ => {}
@@ -1163,16 +1201,18 @@ pub fn App() -> Element {
 
                 // Canvas area
                 div {
-                    style: "flex:1; position:relative; overflow:hidden; cursor:{active_tool.cursor_css()};",
-                    canvas {
-                        id: "jas-canvas",
-                        width: "1200",
-                        height: "800",
-                        style: "display:block; width:100%; height:100%;",
-                        onmousedown: on_mousedown,
-                        onmousemove: on_mousemove,
-                        onmouseup: on_mouseup,
-                        ondoubleclick: on_dblclick,
+                    style: "flex:1; position:relative; overflow:hidden; background:#808080;",
+                    if has_tabs {
+                        canvas {
+                            id: "jas-canvas",
+                            width: "1200",
+                            height: "800",
+                            style: "display:block; width:100%; height:100%; cursor:{active_tool.cursor_css()};",
+                            onmousedown: on_mousedown,
+                            onmousemove: on_mousemove,
+                            onmouseup: on_mouseup,
+                            ondoubleclick: on_dblclick,
+                        }
                     }
                 }
             }
