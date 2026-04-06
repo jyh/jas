@@ -109,6 +109,8 @@ class pen_tool = object (self)
     end else
       false
 
+  method on_key_release (_ctx : Canvas_tool.tool_context) (_key : int) = false
+
   method activate (_ctx : Canvas_tool.tool_context) = ()
 
   method deactivate (ctx : Canvas_tool.tool_context) =

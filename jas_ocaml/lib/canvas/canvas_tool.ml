@@ -33,6 +33,7 @@ class type canvas_tool = object
   method on_release : tool_context -> float -> float -> shift:bool -> alt:bool -> unit
   method on_double_click : tool_context -> float -> float -> unit
   method on_key : tool_context -> int -> bool
+  method on_key_release : tool_context -> int -> bool
   method draw_overlay : tool_context -> Cairo.context -> unit
   method activate : tool_context -> unit
   method deactivate : tool_context -> unit

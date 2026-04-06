@@ -161,6 +161,7 @@ class text_path_tool = object (_self)
      | None -> ())
 
   method on_key (_ctx : Canvas_tool.tool_context) (_key : int) = false
+  method on_key_release (_ctx : Canvas_tool.tool_context) (_key : int) = false
   method activate (_ctx : Canvas_tool.tool_context) = ()
   method deactivate (ctx : Canvas_tool.tool_context) = ctx.commit_text_edit ()
 

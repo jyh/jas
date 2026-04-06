@@ -868,6 +868,14 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       active_tool <- Tool_factory.create_tool Toolbar.Pen;
       canvas_area#misc#queue_draw ()
 
+    method forward_key key =
+      let ctx = _self#tool_context in
+      active_tool#on_key ctx key
+
+    method forward_key_release key =
+      let ctx = _self#tool_context in
+      active_tool#on_key_release ctx key
+
     initializer
       (* Register for document changes *)
       model#on_document_changed (fun doc ->

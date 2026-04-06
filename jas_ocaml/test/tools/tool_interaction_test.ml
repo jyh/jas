@@ -402,4 +402,48 @@ let () =
        | _ -> assert false)
     | _ -> assert false);
 
+  run_test "add anchor point: space repositions anchor during drag" (fun () ->
+    let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+    let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path_elem|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    (* Insert point at midpoint *)
+    tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
+    (* Simulate Space press, then drag to reposition *)
+    assert (tool#on_key ctx GdkKeysyms._space);
+    tool#on_move ctx 60.0 10.0 ~shift:false ~dragging:true;
+    (* Anchor command endpoint should be at (60, 10) *)
+    let children = layer_children model in
+    (match children.(0) with
+     | Path { d; _ } ->
+       (match List.nth d 1 with
+        | CurveTo (_, _, _, _, x, y) ->
+          assert (abs_float (x -. 60.0) < 1.0);
+          assert (abs_float (y -. 10.0) < 1.0)
+        | _ -> assert false)
+     | _ -> assert false);
+    (* Release Space, drag further — should adjust handles, not reposition *)
+    ignore (tool#on_key_release ctx GdkKeysyms._space);
+    tool#on_move ctx 70.0 20.0 ~shift:false ~dragging:true;
+    (* Anchor should still be near (60, 10) *)
+    let children2 = layer_children model in
+    (match children2.(0) with
+     | Path { d; _ } ->
+       (match List.nth d 1 with
+        | CurveTo (_, _, _, _, x, y) ->
+          assert (abs_float (x -. 60.0) < 1.0);
+          assert (abs_float (y -. 10.0) < 1.0)
+        | _ -> assert false);
+       (* But outgoing handle (x1 of cmd 2) should reflect the drag *)
+       (match List.nth d 2 with
+        | CurveTo (x1, y1, _, _, _, _) ->
+          assert (abs_float (x1 -. 70.0) < 1.0);
+          assert (abs_float (y1 -. 20.0) < 1.0)
+        | _ -> assert false)
+     | _ -> assert false);
+    tool#on_release ctx 70.0 20.0 ~shift:false ~alt:false);
+
   Printf.printf "All tool interaction tests passed.\n"

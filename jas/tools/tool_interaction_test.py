@@ -377,5 +377,60 @@ class AddAnchorPointToolTest(absltest.TestCase):
         self.assertAlmostEqual(path.d[1].x, 50.0, delta=1.0)
 
 
+    def test_space_repositions_anchor_during_drag(self):
+        """Holding Space during drag repositions the anchor instead of adjusting handles."""
+        from tools.add_anchor_point import AddAnchorPointTool
+        tool = AddAnchorPointTool()
+        path_elem = Path(
+            d=(MoveTo(0, 0), CurveTo(33, 0, 67, 0, 100, 0)),
+            stroke=Stroke(Color(0, 0, 0), 1.0),
+        )
+        layer = Layer(name="L", children=(path_elem,))
+        doc = Document(layers=(layer,), selection=frozenset())
+        model = Model(document=doc)
+        ctx, model, ctrl = _make_ctx(model)
+        ctx.hit_test_path_curve = lambda x, y: ((0, 0), path_elem) if abs(y) < 20 else None
+
+        # Insert point at midpoint
+        tool.on_press(ctx, 50, 0)
+        # Verify anchor is near (50, 0)
+        self.assertIsNotNone(tool._drag)
+        self.assertAlmostEqual(tool._drag.anchor_x, 50.0, delta=1.0)
+        self.assertAlmostEqual(tool._drag.anchor_y, 0.0, delta=1.0)
+
+        # Simulate Space key press, then drag to reposition
+        from PySide6.QtCore import Qt
+        tool.on_key(ctx, Qt.Key.Key_Space)
+        tool.on_move(ctx, 60, 10, dragging=True)
+
+        # Anchor should have moved by the delta (10, 10)
+        self.assertAlmostEqual(tool._drag.anchor_x, 60.0, delta=1.0)
+        self.assertAlmostEqual(tool._drag.anchor_y, 10.0, delta=1.0)
+
+        # The new anchor command's endpoint should match
+        path = _layer_children(model)[0]
+        new_cmd = path.d[tool._drag.first_cmd_idx]
+        self.assertIsInstance(new_cmd, CurveTo)
+        self.assertAlmostEqual(new_cmd.x, 60.0, delta=1.0)
+        self.assertAlmostEqual(new_cmd.y, 10.0, delta=1.0)
+
+        # Release Space, drag further — should adjust handles, not reposition
+        tool.on_key_release(ctx, Qt.Key.Key_Space)
+        tool.on_move(ctx, 70, 20, dragging=True)
+
+        # Anchor should NOT have moved
+        self.assertAlmostEqual(tool._drag.anchor_x, 60.0, delta=1.0)
+        self.assertAlmostEqual(tool._drag.anchor_y, 10.0, delta=1.0)
+
+        # But the outgoing handle (x1 of next cmd) should reflect the drag
+        path = _layer_children(model)[0]
+        out_cmd = path.d[tool._drag.first_cmd_idx + 1]
+        self.assertIsInstance(out_cmd, CurveTo)
+        self.assertAlmostEqual(out_cmd.x1, 70.0, delta=1.0)
+        self.assertAlmostEqual(out_cmd.y1, 20.0, delta=1.0)
+
+        tool.on_release(ctx, 70, 20)
+
+
 if __name__ == '__main__':
     absltest.main()

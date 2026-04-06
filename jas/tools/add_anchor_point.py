@@ -274,6 +274,32 @@ def _update_handles(
     return result
 
 
+def _reposition_anchor(
+    cmds: list[PathCommand],
+    first_cmd_idx: int,
+    new_ax: float, new_ay: float,
+    dx: float, dy: float,
+) -> list[PathCommand]:
+    """Move the anchor point by (dx, dy), shifting its handles by the same delta."""
+    result = list(cmds)
+    cmd = result[first_cmd_idx]
+    if isinstance(cmd, CurveTo):
+        result[first_cmd_idx] = CurveTo(
+            x1=cmd.x1, y1=cmd.y1,
+            x2=cmd.x2 + dx, y2=cmd.y2 + dy,
+            x=new_ax, y=new_ay,
+        )
+    if first_cmd_idx + 1 < len(result):
+        out_cmd = result[first_cmd_idx + 1]
+        if isinstance(out_cmd, CurveTo):
+            result[first_cmd_idx + 1] = CurveTo(
+                x1=out_cmd.x1 + dx, y1=out_cmd.y1 + dy,
+                x2=out_cmd.x2, y2=out_cmd.y2,
+                x=out_cmd.x, y=out_cmd.y,
+            )
+    return result
+
+
 def _find_prev_anchor(cmds: tuple[PathCommand, ...], idx: int) -> tuple[float, float] | None:
     for i in range(idx - 1, -1, -1):
         cmd = cmds[i]
@@ -424,6 +450,7 @@ class _DragState:
 class AddAnchorPointTool(CanvasTool):
     def __init__(self):
         self._drag: _DragState | None = None
+        self._space_held: bool = False
 
     def on_press(self, ctx: ToolContext, x: float, y: float,
                  shift: bool = False, alt: bool = False) -> None:
@@ -495,25 +522,39 @@ class AddAnchorPointTool(CanvasTool):
 
         drag = self._drag
 
-        # Check alt key state for cusp mode
+        # Check modifier key state
         from PySide6.QtWidgets import QApplication
         from PySide6.QtCore import Qt
         modifiers = QApplication.queryKeyboardModifiers()
         alt = bool(modifiers & Qt.KeyboardModifier.AltModifier)
-
-        drag.last_x = x
-        drag.last_y = y
+        space = self._space_held
 
         doc = ctx.model.document
         elem = doc.get_element(drag.elem_path)
         if not isinstance(elem, Path):
             return
 
-        new_cmds = _update_handles(
-            list(elem.d), drag.first_cmd_idx,
-            drag.anchor_x, drag.anchor_y,
-            x, y, alt,
-        )
+        if space:
+            # Space held: reposition the anchor point
+            dx = x - drag.last_x
+            dy = y - drag.last_y
+            drag.last_x = x
+            drag.last_y = y
+            drag.anchor_x += dx
+            drag.anchor_y += dy
+            new_cmds = _reposition_anchor(
+                list(elem.d), drag.first_cmd_idx,
+                drag.anchor_x, drag.anchor_y,
+                dx, dy,
+            )
+        else:
+            drag.last_x = x
+            drag.last_y = y
+            new_cmds = _update_handles(
+                list(elem.d), drag.first_cmd_idx,
+                drag.anchor_x, drag.anchor_y,
+                x, y, alt,
+            )
         new_elem = dataclasses.replace(elem, d=tuple(new_cmds))
         ctx.model.document = doc.replace_element(drag.elem_path, new_elem)
         ctx.request_update()
@@ -521,6 +562,21 @@ class AddAnchorPointTool(CanvasTool):
     def on_release(self, ctx: ToolContext, x: float, y: float,
                    shift: bool = False, alt: bool = False) -> None:
         self._drag = None
+        self._space_held = False
+
+    def on_key(self, ctx: ToolContext, key: int) -> bool:
+        from PySide6.QtCore import Qt
+        if key == Qt.Key.Key_Space and self._drag is not None:
+            self._space_held = True
+            return True
+        return False
+
+    def on_key_release(self, ctx: ToolContext, key: int) -> bool:
+        from PySide6.QtCore import Qt
+        if key == Qt.Key.Key_Space:
+            self._space_held = False
+            return True
+        return False
 
     def draw_overlay(self, ctx: ToolContext, painter: "QPainter") -> None:
         if self._drag is None:
