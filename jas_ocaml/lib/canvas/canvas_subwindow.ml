@@ -746,6 +746,12 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       draw_element_overlay = draw_element_overlay;
     }
 
+    method private update_cursor =
+      let cursor = Gdk.Cursor.create `CROSSHAIR in
+      let win = canvas_area#misc#window in
+      if Gobject.get_oid win <> 0 then
+        Gdk.Window.set_cursor win cursor
+
     method private switch_tool =
       let new_tool_type = toolbar#current_tool in
       let saved_selection = current_doc.Document.selection in
@@ -756,6 +762,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         active_tool <- Tool_factory.create_tool new_tool_type;
       end;
       active_tool#activate ctx;
+      _self#update_cursor;
       (* Preserve selection across tool changes *)
       let doc = current_doc in
       if doc.Document.selection <> saved_selection then
@@ -782,6 +789,11 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         canvas_area#misc#queue_draw ()
       );
 
+
+      (* Set initial cursor once the widget is realized *)
+      canvas_area#misc#connect#realize ~callback:(fun () ->
+        _self#update_cursor
+      ) |> ignore;
 
       (* Draw canvas: white background, then document layers, then tool overlay *)
       canvas_area#misc#connect#draw ~callback:(fun cr ->
