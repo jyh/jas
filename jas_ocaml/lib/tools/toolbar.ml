@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Pencil | Text_tool | Text_path | Line | Rect | Polygon
+type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Pencil | Text_tool | Text_path | Line | Rect | Polygon
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -68,7 +68,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       (match t with
        | Direct_selection | Group_selection ->
          arrow_slot_tool <- t
-       | Pen | Add_anchor_point ->
+       | Pen | Add_anchor_point | Delete_anchor_point ->
          pen_slot_tool <- t
        | Text_tool | Text_path ->
          text_slot_tool <- t
@@ -389,6 +389,53 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.restore cr
       in
 
+      let draw_delete_anchor_point_icon cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let s = 28.0 /. 256.0 in
+        Cairo.save cr;
+        Cairo.translate cr ox oy;
+        Cairo.scale cr s s;
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        (* Outer nib path *)
+        Cairo.move_to cr 171.16 209.05;
+        Cairo.line_to cr 83.32 256.0;
+        Cairo.curve_to cr 79.37 247.74 75.66 239.67 72.34 231.11;
+        Cairo.curve_to cr 58.84 196.29 34.83 177.34 0.8 161.2;
+        Cairo.line_to cr 0.4 106.59;
+        Cairo.line_to cr 0.0 6.21;
+        Cairo.curve_to cr 0.0 3.95 2.53 0.66 4.05 0.16;
+        Cairo.curve_to cr 5.57 (-0.34) 8.47 0.37 10.38 1.67;
+        Cairo.line_to cr 138.0 87.83;
+        Cairo.curve_to cr 137.83 93.34 137.19 98.26 136.44 104.0;
+        Cairo.curve_to cr 133.14 129.08 137.75 154.95 149.25 177.57;
+        Cairo.line_to cr 171.15 209.05;
+        Cairo.Path.close cr;
+        (* Inner cutout *)
+        Cairo.move_to cr 126.23 94.28;
+        Cairo.line_to cr 23.74 25.13;
+        Cairo.line_to cr 64.38 101.36;
+        Cairo.curve_to cr 59.16 109.38 59.07 117.72 64.69 123.85;
+        Cairo.curve_to cr 70.79 130.51 79.99 130.95 87.74 124.59;
+        Cairo.curve_to cr 94.31 120.05 95.58 112.34 92.78 105.71;
+        Cairo.curve_to cr 90.23 99.59 83.64 94.52 75.2 95.38;
+        Cairo.line_to cr 23.73 25.13;
+        Cairo.line_to cr 126.23 94.28;
+        Cairo.Path.close cr;
+        Cairo.set_fill_rule cr Cairo.EVEN_ODD;
+        Cairo.fill cr;
+        (* Minus sign (rotated rectangle) *)
+        Cairo.save cr;
+        Cairo.translate cr (-31.37) 110.38;
+        Cairo.rotate cr (-28.0 *. Float.pi /. 180.0);
+        Cairo.rectangle cr 158.95 110.41 ~w:93.43 ~h:15.36;
+        Cairo.fill cr;
+        Cairo.restore cr;
+        Cairo.restore cr
+      in
+
       let draw_pencil_icon cr ~alloc =
         let bw = float_of_int alloc.Gtk.width in
         let bh = float_of_int alloc.Gtk.height in
@@ -429,6 +476,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         (match pen_slot_tool with
          | Pen -> draw_pen_icon cr ~alloc
          | Add_anchor_point -> draw_add_anchor_point_icon cr ~alloc
+         | Delete_anchor_point -> draw_delete_anchor_point_icon cr ~alloc
          | _ -> ());
         (* Alternate triangle *)
         let ox = (bw -. 28.0) /. 2.0 in
@@ -662,6 +710,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       in
       add_item "Pen" Pen;
       add_item "Add Anchor Point" Add_anchor_point;
+      add_item "Delete Anchor Point" Delete_anchor_point;
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
 
     method private show_arrow_slot_menu =

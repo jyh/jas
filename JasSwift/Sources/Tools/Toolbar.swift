@@ -173,6 +173,55 @@ public struct ToolbarView {
                 let plusTransformed = plus.applying(transform)
                 context.fill(plusTransformed, with: .color(color))
 
+            case .deleteAnchorPoint:
+                // Delete Anchor Point icon from SVG (viewBox 0 0 256 256), scaled to 28x28
+                let s: CGFloat = 28.0 / 256.0
+                let transform = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: s, y: s)
+                var nib = SwiftUI.Path()
+                nib.move(to: CGPoint(x: 171.16, y: 209.05))
+                nib.addLine(to: CGPoint(x: 83.32, y: 256.0))
+                nib.addCurve(to: CGPoint(x: 72.34, y: 231.11),
+                    control1: CGPoint(x: 79.37, y: 247.74), control2: CGPoint(x: 75.66, y: 239.67))
+                nib.addCurve(to: CGPoint(x: 0.8, y: 161.2),
+                    control1: CGPoint(x: 58.84, y: 196.29), control2: CGPoint(x: 34.83, y: 177.34))
+                nib.addLine(to: CGPoint(x: 0.4, y: 106.59))
+                nib.addLine(to: CGPoint(x: 0, y: 6.21))
+                nib.addCurve(to: CGPoint(x: 4.05, y: 0.16),
+                    control1: CGPoint(x: 0, y: 3.95), control2: CGPoint(x: 2.53, y: 0.66))
+                nib.addCurve(to: CGPoint(x: 10.38, y: 1.67),
+                    control1: CGPoint(x: 5.57, y: -0.34), control2: CGPoint(x: 8.47, y: 0.37))
+                nib.addLine(to: CGPoint(x: 138.0, y: 87.83))
+                nib.addCurve(to: CGPoint(x: 136.44, y: 104.0),
+                    control1: CGPoint(x: 137.83, y: 93.34), control2: CGPoint(x: 137.19, y: 98.26))
+                nib.addCurve(to: CGPoint(x: 149.25, y: 177.57),
+                    control1: CGPoint(x: 133.14, y: 129.08), control2: CGPoint(x: 137.75, y: 154.95))
+                nib.addLine(to: CGPoint(x: 171.15, y: 209.05))
+                nib.closeSubpath()
+                // Inner cutout
+                nib.move(to: CGPoint(x: 126.23, y: 94.28))
+                nib.addLine(to: CGPoint(x: 23.74, y: 25.13))
+                nib.addLine(to: CGPoint(x: 64.38, y: 101.36))
+                nib.addCurve(to: CGPoint(x: 64.69, y: 123.85),
+                    control1: CGPoint(x: 59.16, y: 109.38), control2: CGPoint(x: 59.07, y: 117.72))
+                nib.addCurve(to: CGPoint(x: 87.74, y: 124.59),
+                    control1: CGPoint(x: 70.79, y: 130.51), control2: CGPoint(x: 79.99, y: 130.95))
+                nib.addCurve(to: CGPoint(x: 92.78, y: 105.71),
+                    control1: CGPoint(x: 94.31, y: 120.05), control2: CGPoint(x: 95.58, y: 112.34))
+                nib.addCurve(to: CGPoint(x: 75.2, y: 95.38),
+                    control1: CGPoint(x: 90.23, y: 99.59), control2: CGPoint(x: 83.64, y: 94.52))
+                nib.addLine(to: CGPoint(x: 23.73, y: 25.13))
+                nib.addLine(to: CGPoint(x: 126.23, y: 94.28))
+                nib.closeSubpath()
+                let nibTransformed = nib.applying(transform)
+                context.fill(nibTransformed, with: .color(color), style: FillStyle(eoFill: true))
+                // Minus sign (rotated rectangle)
+                let minusTransform = CGAffineTransform(translationX: -31.37, y: 110.38)
+                    .rotated(by: -28.0 * .pi / 180.0)
+                var minus = SwiftUI.Path()
+                minus.addRect(CGRect(x: 158.95, y: 110.41, width: 93.43, height: 15.36))
+                let minusScaled = minus.applying(minusTransform).applying(transform)
+                context.fill(minusScaled, with: .color(color))
+
             case .pencil:
                 var path = SwiftUI.Path()
                 // Pencil body (angled)

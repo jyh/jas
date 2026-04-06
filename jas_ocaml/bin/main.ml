@@ -70,6 +70,8 @@ let () =
       toolbar#select_tool Jas.Toolbar.Pen; true
     end else if key = GdkKeysyms._plus || key = GdkKeysyms._equal then begin
       toolbar#select_tool Jas.Toolbar.Add_anchor_point; true
+    end else if key = GdkKeysyms._minus || key = GdkKeysyms._underscore then begin
+      toolbar#select_tool Jas.Toolbar.Delete_anchor_point; true
     end else if key = GdkKeysyms._t || key = GdkKeysyms._T then begin
       toolbar#select_tool Jas.Toolbar.Text_tool; true
     end else if key = GdkKeysyms._backslash then begin
