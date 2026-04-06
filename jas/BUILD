@@ -1,80 +1,199 @@
 load("@rules_python//python:defs.bzl", "py_library", "py_test", "py_binary")
 
 py_library(
-    name = "jas_lib",
-    srcs = ["jas_app.py", "canvas.py", "toolbar.py", "menu.py", "element.py", "document.py", "measure.py", "controller.py", "model.py"],
+    name = "geometry",
+    srcs = [
+        "geometry/__init__.py",
+        "geometry/element.py",
+        "geometry/fit_curve.py",
+        "geometry/hit_test.py",
+        "geometry/measure.py",
+        "geometry/svg.py",
+    ],
+    imports = ["."],
+)
+
+py_library(
+    name = "document",
+    srcs = [
+        "document/__init__.py",
+        "document/controller.py",
+        "document/document.py",
+        "document/model.py",
+    ],
+    imports = ["."],
+    deps = [":geometry"],
+)
+
+py_library(
+    name = "tools",
+    srcs = [
+        "tools/__init__.py",
+        "tools/drawing.py",
+        "tools/pen.py",
+        "tools/pencil.py",
+        "tools/selection.py",
+        "tools/text.py",
+        "tools/text_path.py",
+        "tools/tool.py",
+        "tools/toolbar.py",
+    ],
     imports = ["."],
     deps = [
+        ":document",
+        ":geometry",
         "@pip_deps//pyside6",
     ],
+)
+
+py_library(
+    name = "canvas",
+    srcs = [
+        "canvas/__init__.py",
+        "canvas/canvas.py",
+    ],
+    imports = ["."],
+    deps = [
+        ":document",
+        ":geometry",
+        ":tools",
+        "@pip_deps//pyside6",
+    ],
+)
+
+py_library(
+    name = "menu",
+    srcs = [
+        "menu/__init__.py",
+        "menu/menu.py",
+    ],
+    imports = ["."],
+    deps = [
+        ":document",
+        ":geometry",
+        "@pip_deps//pyside6",
+    ],
+)
+
+py_library(
+    name = "jas_lib",
+    srcs = ["jas_app.py"],
+    imports = ["."],
+    deps = [":canvas", ":document", ":geometry", ":menu", ":tools"],
 )
 
 py_binary(
     name = "jas_app",
     srcs = ["jas_app.py"],
-    deps = [":jas_lib"],
+    deps = [":canvas", ":document", ":geometry", ":menu", ":tools"],
     main = "jas_app.py",
 )
 
 py_test(
-    name = "canvas_test",
-    srcs = ["canvas_test.py"],
-    deps = [
-        ":jas_lib",
-        "@pip_deps//absl_py",
-    ],
-)
-
-py_test(
     name = "element_test",
-    srcs = ["element_test.py"],
+    srcs = ["geometry/element_test.py"],
     deps = [
-        ":jas_lib",
-        "@pip_deps//absl_py",
-    ],
-)
-
-py_test(
-    name = "menu_test",
-    srcs = ["menu_test.py"],
-    deps = [
-        ":jas_lib",
-        "@pip_deps//absl_py",
-    ],
-)
-
-py_test(
-    name = "document_test",
-    srcs = ["document_test.py"],
-    deps = [
-        ":jas_lib",
+        ":geometry",
+        ":tools",
         "@pip_deps//absl_py",
     ],
 )
 
 py_test(
     name = "measure_test",
-    srcs = ["measure_test.py"],
+    srcs = ["geometry/measure_test.py"],
     deps = [
-        ":jas_lib",
+        ":geometry",
+        "@pip_deps//absl_py",
+    ],
+)
+
+py_test(
+    name = "svg_test",
+    srcs = ["geometry/svg_test.py"],
+    deps = [
+        ":geometry",
+        ":document",
+        "@pip_deps//absl_py",
+    ],
+)
+
+py_test(
+    name = "document_test",
+    srcs = ["document/document_test.py"],
+    deps = [
+        ":document",
+        ":geometry",
         "@pip_deps//absl_py",
     ],
 )
 
 py_test(
     name = "model_test",
-    srcs = ["model_test.py"],
+    srcs = ["document/model_test.py"],
     deps = [
-        ":jas_lib",
+        ":document",
+        ":geometry",
         "@pip_deps//absl_py",
     ],
 )
 
 py_test(
     name = "controller_test",
-    srcs = ["controller_test.py"],
+    srcs = ["document/controller_test.py"],
+    deps = [
+        ":document",
+        ":geometry",
+        "@pip_deps//absl_py",
+    ],
+)
+
+py_test(
+    name = "canvas_test",
+    srcs = ["canvas/canvas_test.py"],
+    deps = [
+        ":canvas",
+        ":document",
+        ":geometry",
+        ":tools",
+        "@pip_deps//absl_py",
+        "@pip_deps//pyside6",
+    ],
+)
+
+py_test(
+    name = "menu_test",
+    srcs = ["menu/menu_test.py"],
     deps = [
         ":jas_lib",
+        ":menu",
+        ":document",
+        ":geometry",
         "@pip_deps//absl_py",
+        "@pip_deps//pyside6",
+    ],
+)
+
+py_test(
+    name = "toolbar_test",
+    srcs = ["tools/toolbar_test.py"],
+    deps = [
+        ":tools",
+        ":document",
+        ":geometry",
+        "@pip_deps//absl_py",
+        "@pip_deps//pyside6",
+    ],
+)
+
+py_test(
+    name = "tool_interaction_test",
+    srcs = ["tools/tool_interaction_test.py"],
+    deps = [
+        ":tools",
+        ":document",
+        ":geometry",
+        "@pip_deps//absl_py",
+        "@pip_deps//pyside6",
     ],
 )
