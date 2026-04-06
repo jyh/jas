@@ -60,7 +60,7 @@ swift run
 
 ```bash
 # Python
-cd jas && python -m pytest geometry/ document/ canvas/ tools/ menu/ -q
+bazel test //jas/...
 
 # OCaml
 cd jas_ocaml && dune runtest
