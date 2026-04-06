@@ -425,3 +425,87 @@ private func layerChildren(_ model: Model) -> [Element] {
         Issue.record("Expected Path element")
     }
 }
+
+// MARK: - Pencil tool tests
+
+@Test func pencilToolFreehandDrawCreatesPath() {
+    let tool = PencilTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
+    for i in 1...20 {
+        let x = Double(i) * 5.0
+        let y = sin(Double(i) * 0.1) * 20.0
+        tool.onMove(ctx, x: x, y: y, shift: false, dragging: true)
+    }
+    tool.onRelease(ctx, x: 100, y: 0, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 1)
+    if case .path(let p) = children[0] {
+        #expect(p.d.count >= 2)
+        if case .moveTo = p.d[0] {} else { Issue.record("First command should be moveTo") }
+        for cmd in p.d.dropFirst() {
+            if case .curveTo = cmd {} else { Issue.record("Expected curveTo") }
+        }
+    } else {
+        Issue.record("Expected Path element")
+    }
+}
+
+@Test func pencilToolClickWithoutDragCreatesPath() {
+    let tool = PencilTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 1)
+}
+
+@Test func pencilToolPathHasStroke() {
+    let tool = PencilTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
+    tool.onMove(ctx, x: 50, y: 50, shift: false, dragging: true)
+    tool.onRelease(ctx, x: 100, y: 0, shift: false, alt: false)
+    let children = layerChildren(model)
+    if case .path(let p) = children[0] {
+        #expect(p.stroke != nil)
+        #expect(p.fill == nil)
+    } else {
+        Issue.record("Expected Path element")
+    }
+}
+
+@Test func pencilToolReleaseWithoutPressIsNoop() {
+    let tool = PencilTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onRelease(ctx, x: 50, y: 60, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 0)
+}
+
+@Test func pencilToolMoveWithoutPressIsNoop() {
+    let tool = PencilTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onMove(ctx, x: 50, y: 60, shift: false, dragging: true)
+    let children = layerChildren(model)
+    #expect(children.count == 0)
+}
+
+@Test func pencilToolPathStartsAtPressPoint() {
+    let tool = PencilTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 15, y: 25, shift: false, alt: false)
+    tool.onMove(ctx, x: 50, y: 50, shift: false, dragging: true)
+    tool.onRelease(ctx, x: 100, y: 0, shift: false, alt: false)
+    let children = layerChildren(model)
+    if case .path(let p) = children[0] {
+        if case .moveTo(let x, let y) = p.d[0] {
+            #expect(x == 15)
+            #expect(y == 25)
+        } else {
+            Issue.record("First command should be moveTo")
+        }
+    } else {
+        Issue.record("Expected Path element")
+    }
+}

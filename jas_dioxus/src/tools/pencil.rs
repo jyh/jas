@@ -99,3 +99,126 @@ impl CanvasTool for PencilTool {
         ctx.stroke();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::element::{Element, PathCommand};
+
+    #[test]
+    fn freehand_draw_creates_path() {
+        let mut tool = PencilTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        for i in 1..=20 {
+            let x = i as f64 * 5.0;
+            let y = (i as f64 * 0.1).sin() * 20.0;
+            tool.on_move(&mut model, x, y, false, false, true);
+        }
+        tool.on_release(&mut model, 100.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        match &*children[0] {
+            Element::Path(pe) => {
+                assert!(pe.d.len() >= 2, "path should have MoveTo + at least one CurveTo");
+                assert!(matches!(pe.d[0], PathCommand::MoveTo { .. }));
+                for cmd in &pe.d[1..] {
+                    assert!(matches!(cmd, PathCommand::CurveTo { .. }));
+                }
+            }
+            _ => panic!("expected Path element"),
+        }
+    }
+
+    #[test]
+    fn click_without_drag_creates_degenerate_path() {
+        // Press+release at same point still produces a path (2 identical points → fit_curve runs)
+        let mut tool = PencilTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+    }
+
+    #[test]
+    fn path_has_stroke() {
+        let mut tool = PencilTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        tool.on_move(&mut model, 50.0, 50.0, false, false, true);
+        tool.on_release(&mut model, 100.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Path(pe) = &*children[0] {
+            assert!(pe.stroke.is_some(), "pencil path should have a stroke");
+            assert!(pe.fill.is_none(), "pencil path should have no fill");
+        } else {
+            panic!("expected Path element");
+        }
+    }
+
+    #[test]
+    fn move_without_press_is_noop() {
+        let mut tool = PencilTool::new();
+        let mut model = Model::default();
+        tool.on_move(&mut model, 50.0, 60.0, false, false, true);
+        assert!(!tool.drawing);
+        assert!(tool.points.is_empty());
+    }
+
+    #[test]
+    fn release_without_press_is_noop() {
+        let mut tool = PencilTool::new();
+        let mut model = Model::default();
+        tool.on_release(&mut model, 50.0, 60.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 0);
+    }
+
+    #[test]
+    fn drawing_state_transitions() {
+        let mut tool = PencilTool::new();
+        let mut model = Model::default();
+        assert!(!tool.drawing);
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        assert!(tool.drawing);
+        tool.on_move(&mut model, 50.0, 50.0, false, false, true);
+        assert!(tool.drawing);
+        tool.on_release(&mut model, 100.0, 0.0, false, false);
+        assert!(!tool.drawing);
+    }
+
+    #[test]
+    fn points_accumulate_during_draw() {
+        let mut tool = PencilTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        assert_eq!(tool.points.len(), 1);
+        tool.on_move(&mut model, 10.0, 10.0, false, false, true);
+        assert_eq!(tool.points.len(), 2);
+        tool.on_move(&mut model, 20.0, 20.0, false, false, true);
+        assert_eq!(tool.points.len(), 3);
+        tool.on_release(&mut model, 30.0, 30.0, false, false);
+        // Points cleared after finish
+        assert!(tool.points.is_empty());
+    }
+
+    #[test]
+    fn path_starts_at_press_point() {
+        let mut tool = PencilTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 15.0, 25.0, false, false);
+        tool.on_move(&mut model, 50.0, 50.0, false, false, true);
+        tool.on_release(&mut model, 100.0, 0.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        if let Element::Path(pe) = &*children[0] {
+            if let PathCommand::MoveTo { x, y } = pe.d[0] {
+                assert_eq!(x, 15.0);
+                assert_eq!(y, 25.0);
+            } else {
+                panic!("first command should be MoveTo");
+            }
+        }
+    }
+}

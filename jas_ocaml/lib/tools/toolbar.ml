@@ -441,22 +441,78 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         let bh = float_of_int alloc.Gtk.height in
         let ox = (bw -. 28.0) /. 2.0 in
         let oy = (bh -. 28.0) /. 2.0 in
+        let s = 28.0 /. 256.0 in
+        Cairo.save cr;
+        Cairo.translate cr ox oy;
+        Cairo.scale cr s s;
         Cairo.set_source_rgb cr 0.8 0.8 0.8;
-        Cairo.set_line_width cr 1.5;
-        (* Pencil body *)
-        Cairo.move_to cr (ox +. 6.0) (oy +. 22.0);
-        Cairo.line_to cr (ox +. 20.0) (oy +. 8.0);
-        Cairo.line_to cr (ox +. 24.0) (oy +. 4.0);
-        Cairo.line_to cr (ox +. 26.0) (oy +. 6.0);
-        Cairo.line_to cr (ox +. 22.0) (oy +. 10.0);
-        Cairo.line_to cr (ox +. 8.0) (oy +. 24.0);
+        (* Outer path (main outline) *)
+        Cairo.move_to cr 57.6 233.77;
+        Cairo.line_to cr 5.83 255.77;
+        Cairo.curve_to cr 2.04 257.38 (-0.59) 250.2 0.12 246.99;
+        Cairo.line_to cr 15.75 175.88;
+        Cairo.curve_to cr 16.99 170.25 17.94 166.36 21.83 161.79;
+        Cairo.line_to cr 108.97 59.4;
+        Cairo.line_to cr 152.73 9.16;
+        Cairo.curve_to cr 159.64 1.23 172.84 (-3.41) 181.96 3.06;
+        Cairo.curve_to cr 195.07 12.36 206.14 22.95 217.94 33.93;
+        Cairo.curve_to cr 225.32 40.79 226.65 54.5 220.25 62.13;
+        Cairo.line_to cr 191.96 95.82;
+        Cairo.line_to cr 84.39 222.9;
+        Cairo.curve_to cr 75.27 227.22 66.72 229.9 57.6 233.78;
         Cairo.Path.close cr;
-        Cairo.stroke cr;
-        (* Tip *)
-        Cairo.move_to cr (ox +. 6.0) (oy +. 22.0);
-        Cairo.line_to cr (ox +. 4.0) (oy +. 26.0);
-        Cairo.line_to cr (ox +. 8.0) (oy +. 24.0);
-        Cairo.stroke cr
+        Cairo.fill cr;
+        (* Gray facets *)
+        Cairo.set_source_rgb cr 0.235 0.235 0.235;
+        Cairo.move_to cr 208.57 55.33;
+        Cairo.curve_to cr 212.62 47.93 207.38 40.51 202.08 36.15;
+        Cairo.line_to cr 177.08 15.57;
+        Cairo.curve_to cr 166.42 6.79 154.72 26.62 149.01 33.89;
+        Cairo.curve_to cr 163.45 47.79 177.29 60.62 193.41 72.64;
+        Cairo.curve_to cr 199.05 66.99 204.86 62.09 208.57 55.33;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        Cairo.move_to cr 70.01 189.48;
+        Cairo.curve_to cr 64.87 189.83 59.66 190.72 56.07 188.36;
+        Cairo.curve_to cr 53.24 186.5 52.14 178.64 53.23 174.8;
+        Cairo.line_to cr 154.47 55.84;
+        Cairo.curve_to cr 160.42 60.73 165.14 64.9 170.13 70.41;
+        Cairo.line_to cr 70.01 189.48;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        Cairo.move_to cr 47.55 169.12;
+        Cairo.curve_to cr 43.7 170.57 37.83 169.44 34.86 166.85;
+        Cairo.line_to cr 76.41 117.48;
+        Cairo.line_to cr 108.97 79.49;
+        Cairo.line_to cr 138.8 44.51;
+        Cairo.curve_to cr 142.42 44.61 145.79 48.23 147.44 51.6;
+        Cairo.line_to cr 102.14 104.57;
+        Cairo.line_to cr 47.55 169.11;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        Cairo.move_to cr 161.36 111.12;
+        Cairo.line_to cr 93.27 191.72;
+        Cairo.curve_to cr 88.75 197.06 84.94 201.71 79.55 206.85;
+        Cairo.curve_to cr 76.45 203.48 74.45 196.7 78.52 191.88;
+        Cairo.line_to cr 176.03 76.63;
+        Cairo.curve_to cr 179.47 77.08 184.55 80.31 184.28 83.19;
+        Cairo.line_to cr 161.36 111.13;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        (* White tip highlight *)
+        Cairo.set_source_rgb cr 1.0 1.0 1.0;
+        Cairo.move_to cr 71.47 214.03;
+        Cairo.curve_to cr 60.16 218.55 50.33 222.1 39.16 227.63;
+        Cairo.line_to cr 21.93 214.37;
+        Cairo.curve_to cr 22.92 208.81 23.28 203.26 24.61 197.77;
+        Cairo.line_to cr 29.0 179.73;
+        Cairo.curve_to cr 30.63 176.51 40.55 177.54 42.67 180.44;
+        Cairo.curve_to cr 45.87 184.84 45.86 192.69 49.8 196.26;
+        Cairo.curve_to cr 53.77 199.86 60.42 197.04 64.72 199.43;
+        Cairo.curve_to cr 69.02 201.82 69.61 208.63 71.47 214.03;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        Cairo.restore cr
       in
 
       (* Pen slot: draws pen or add-anchor-point depending on pen_slot_tool *)

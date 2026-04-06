@@ -446,4 +446,83 @@ let () =
      | _ -> assert false);
     tool#on_release ctx 70.0 20.0 ~shift:false ~alt:false);
 
+  (* ---- Pencil tool ---- *)
+
+  run_test "pencil tool: freehand draw creates path" (fun () ->
+    let tool = new Jas.Pencil_tool.pencil_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 0.0 0.0 ~shift:false ~alt:false;
+    for i = 1 to 20 do
+      let x = float_of_int i *. 5.0 in
+      let y = sin (float_of_int i *. 0.1) *. 20.0 in
+      tool#on_move ctx x y ~shift:false ~dragging:true
+    done;
+    tool#on_release ctx 100.0 0.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    match children.(0) with
+    | Path { d; _ } ->
+      assert (List.length d >= 2);
+      (match List.hd d with
+       | MoveTo _ -> ()
+       | _ -> assert false);
+      List.iter (fun cmd ->
+        match cmd with
+        | MoveTo _ | CurveTo _ -> ()
+        | _ -> assert false
+      ) d
+    | _ -> assert false);
+
+  run_test "pencil tool: click without drag creates degenerate path" (fun () ->
+    let tool = new Jas.Pencil_tool.pencil_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1));
+
+  run_test "pencil tool: path has stroke" (fun () ->
+    let tool = new Jas.Pencil_tool.pencil_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 0.0 0.0 ~shift:false ~alt:false;
+    tool#on_move ctx 50.0 50.0 ~shift:false ~dragging:true;
+    tool#on_release ctx 100.0 0.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    match children.(0) with
+    | Path { stroke; fill; _ } ->
+      assert (stroke <> None);
+      assert (fill = None)
+    | _ -> assert false);
+
+  run_test "pencil tool: release without press is noop" (fun () ->
+    let tool = new Jas.Pencil_tool.pencil_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 0));
+
+  run_test "pencil tool: move without press is noop" (fun () ->
+    let tool = new Jas.Pencil_tool.pencil_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+    let children = layer_children model in
+    assert (Array.length children = 0));
+
+  run_test "pencil tool: path starts at press point" (fun () ->
+    let tool = new Jas.Pencil_tool.pencil_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 15.0 25.0 ~shift:false ~alt:false;
+    tool#on_move ctx 50.0 50.0 ~shift:false ~dragging:true;
+    tool#on_release ctx 100.0 0.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    match children.(0) with
+    | Path { d; _ } ->
+      (match List.hd d with
+       | MoveTo (x, y) ->
+         assert (x = 15.0);
+         assert (y = 25.0)
+       | _ -> assert false)
+    | _ -> assert false);
+
   Printf.printf "All tool interaction tests passed.\n"
