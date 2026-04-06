@@ -17,6 +17,7 @@ class Tool(Enum):
     ADD_ANCHOR_POINT = auto()
     DELETE_ANCHOR_POINT = auto()
     PENCIL = auto()
+    PATH_ERASER = auto()
     TEXT = auto()
     TEXT_PATH = auto()
     LINE = auto()
@@ -85,6 +86,8 @@ class ToolButton(QToolButton):
             self._draw_delete_anchor_point_tool(painter)
         elif self.tool == Tool.PENCIL:
             self._draw_pencil_tool(painter)
+        elif self.tool == Tool.PATH_ERASER:
+            self._draw_path_eraser_tool(painter)
         elif self.tool == Tool.TEXT:
             self._draw_text_tool(painter)
         elif self.tool == Tool.TEXT_PATH:
@@ -366,6 +369,97 @@ class ToolButton(QToolButton):
         painter.drawPath(tip)
         painter.restore()
 
+    def _draw_path_eraser_tool(self, painter):
+        # Path eraser icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28.
+        s = 28.0 / 256.0
+        ox = (self.ICON_SIZE - 28) / 2.0
+        oy = (self.ICON_SIZE - 28) / 2.0
+        painter.save()
+        painter.translate(ox, oy)
+        painter.scale(s, s)
+        # Outer path (main outline)
+        outer = QPainterPath()
+        outer.moveTo(169.86, 33.13)
+        outer.lineTo(243.34, 1.82)
+        outer.cubicTo(246.77, 0.36, 249.73, -1.15, 253.26, 1.3)
+        outer.cubicTo(255.47, 2.84, 256.6, 6.18, 255.67, 10.06)
+        outer.lineTo(236.36, 90.59)
+        outer.lineTo(128.34, 216.3)
+        outer.lineTo(100.36, 247.5)
+        outer.cubicTo(90.73, 258.24, 75.45, 258.84, 64.8, 249.13)
+        outer.lineTo(36.8, 223.61)
+        outer.cubicTo(27.71, 215.33, 27.26, 200.13, 35.38, 190.66)
+        outer.lineTo(76.02, 143.21)
+        outer.lineTo(169.85, 33.13)
+        outer.closeSubpath()
+        outer.setFillRule(Qt.FillRule.OddEvenFill)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#cccccc"))
+        painter.drawPath(outer)
+        # Gray facets
+        painter.setBrush(QColor("#3c3c3c"))
+        f1 = QPainterPath()
+        f1.moveTo(184.63, 65.93)
+        f1.cubicTo(189.51, 66.39, 194.59, 66.2, 198.13, 68.25)
+        f1.cubicTo(201.04, 69.93, 203.57, 78.45, 201.14, 81.28)
+        f1.lineTo(116.25, 180.28)
+        f1.cubicTo(109.28, 176.56, 104.39, 171.21, 100.36, 164.52)
+        f1.lineTo(184.63, 65.93)
+        f1.closeSubpath()
+        painter.drawPath(f1)
+        f2 = QPainterPath()
+        f2.moveTo(44.69, 212.9)
+        f2.cubicTo(36.95, 201.82, 53.37, 190.58, 61.74, 180.12)
+        f2.lineTo(106.79, 221.05)
+        f2.lineTo(90.97, 239.52)
+        f2.cubicTo(82.2, 249.76, 69.76, 237.13, 64.2, 232.21)
+        f2.cubicTo(57.24, 226.04, 50.08, 220.63, 44.68, 212.9)
+        f2.closeSubpath()
+        painter.drawPath(f2)
+        f3 = QPainterPath()
+        f3.moveTo(207.17, 85.96)
+        f3.cubicTo(211.98, 85.74, 215.71, 86.73, 220.02, 89.55)
+        f3.lineTo(154.89, 165.84)
+        f3.lineTo(131.54, 192.84)
+        f3.cubicTo(127.63, 191.48, 125.1, 188.78, 122.92, 184.95)
+        f3.lineTo(207.17, 85.97)
+        f3.closeSubpath()
+        painter.drawPath(f3)
+        f4 = QPainterPath()
+        f4.moveTo(124.64, 106.13)
+        f4.lineTo(175.0, 47.68)
+        f4.cubicTo(177.8, 51.64, 180.01, 56.74, 178.33, 59.8)
+        f4.cubicTo(173.13, 69.28, 165.51, 76.42, 158.5, 84.62)
+        f4.lineTo(95.94, 157.83)
+        f4.cubicTo(93.95, 160.16, 90.93, 158.89, 89.56, 157.97)
+        f4.cubicTo(87.97, 156.9, 84.31, 153.0, 86.41, 151.47)
+        f4.cubicTo(96.6, 139.21, 107.11, 127.91, 116.95, 115.69)
+        f4.lineTo(124.64, 106.13)
+        f4.closeSubpath()
+        painter.drawPath(f4)
+        # White eraser tip + band
+        painter.setBrush(QColor("white"))
+        tip = QPainterPath()
+        tip.moveTo(183.88, 41.54)
+        tip.cubicTo(191.96, 36.87, 200.2, 34.23, 208.22, 31.18)
+        tip.cubicTo(221.06, 26.3, 214.11, 26.93, 232.64, 41.38)
+        tip.cubicTo(235.55, 41.71, 227.33, 76.83, 225.67, 77.25)
+        tip.cubicTo(222.3, 80.28, 212.1, 79.09, 210.75, 75.03)
+        tip.lineTo(205.76, 60.03)
+        tip.lineTo(189.06, 56.22)
+        tip.cubicTo(184.53, 55.19, 184.95, 47.11, 183.89, 41.54)
+        tip.closeSubpath()
+        painter.drawPath(tip)
+        band = QPainterPath()
+        band.addRect(88.74, 155.97, 14.58, 61.84)
+        from PySide6.QtGui import QTransform
+        xf = QTransform()
+        xf.translate(299.56, 239.09)
+        xf.rotate(131.58)
+        band = xf.map(band)
+        painter.drawPath(band)
+        painter.restore()
+
     def _draw_text_tool(self, painter):
         painter.setPen(QPen(QColor("#cccccc"), 1.5))
         font = QFont("sans-serif", 18, QFont.Weight.Bold)
@@ -420,6 +514,8 @@ class ToolButton(QToolButton):
 _ARROW_SLOT_TOOLS = {Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION}
 # Tools that share the pen/add-anchor-point slot
 _PEN_SLOT_TOOLS = {Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT}
+# Tools that share the pencil/path-eraser slot
+_PENCIL_SLOT_TOOLS = {Tool.PENCIL, Tool.PATH_ERASER}
 # Tools that share the text/text-path slot
 _TEXT_SLOT_TOOLS = {Tool.TEXT, Tool.TEXT_PATH}
 # Tools that share the rect/polygon slot
@@ -441,6 +537,8 @@ class Toolbar(QWidget):
         self._pen_slot_tool = Tool.PEN
         # Which tool is visible in the shared text slot
         self._text_slot_tool = Tool.TEXT
+        # Which tool is visible in the shared pencil slot
+        self._pencil_slot_tool = Tool.PENCIL
         # Which tool is visible in the shared shape slot
         self._shape_slot_tool = Tool.RECT
 
@@ -469,7 +567,7 @@ class Toolbar(QWidget):
             (Tool.RECT, 3, 0),
         ]
         for tool, row, col in tools:
-            has_alt = tool in _ARROW_SLOT_TOOLS or tool in _PEN_SLOT_TOOLS or tool in _TEXT_SLOT_TOOLS or tool in _SHAPE_SLOT_TOOLS
+            has_alt = tool in _ARROW_SLOT_TOOLS or tool in _PEN_SLOT_TOOLS or tool in _PENCIL_SLOT_TOOLS or tool in _TEXT_SLOT_TOOLS or tool in _SHAPE_SLOT_TOOLS
             btn = ToolButton(tool, has_alternates=has_alt)
             self.buttons[tool] = btn
             self.button_group.addButton(btn)
@@ -484,6 +582,8 @@ class Toolbar(QWidget):
         self.button_group.addButton(self.buttons[Tool.TEXT_PATH])
         self.buttons[Tool.POLYGON] = ToolButton(Tool.POLYGON, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.POLYGON])
+        self.buttons[Tool.PATH_ERASER] = ToolButton(Tool.PATH_ERASER, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.PATH_ERASER])
 
         self.buttons[Tool.SELECTION].setChecked(True)
         self.button_group.buttonClicked.connect(self._on_button_clicked)
@@ -522,6 +622,17 @@ class Toolbar(QWidget):
         pen_btn.pressed.connect(self._on_pen_slot_pressed)
         pen_btn.released.connect(self._on_pen_slot_released)
 
+        # Long-press timer for the pencil slot
+        self._pencil_long_press_timer = QTimer(self)
+        self._pencil_long_press_timer.setSingleShot(True)
+        self._pencil_long_press_timer.setInterval(_LONG_PRESS_MS)
+        self._pencil_long_press_timer.timeout.connect(self._show_pencil_slot_menu)
+
+        # Install press/release handling on the pencil slot button
+        pencil_btn = self.buttons[Tool.PENCIL]
+        pencil_btn.pressed.connect(self._on_pencil_slot_pressed)
+        pencil_btn.released.connect(self._on_pencil_slot_released)
+
         # Install press/release handling on the text slot button
         text_btn = self.buttons[Tool.TEXT]
         text_btn.pressed.connect(self._on_text_slot_pressed)
@@ -549,6 +660,13 @@ class Toolbar(QWidget):
     def _on_pen_slot_released(self):
         if self._pen_long_press_timer.isActive():
             self._pen_long_press_timer.stop()
+
+    def _on_pencil_slot_pressed(self):
+        self._pencil_long_press_timer.start()
+
+    def _on_pencil_slot_released(self):
+        if self._pencil_long_press_timer.isActive():
+            self._pencil_long_press_timer.stop()
 
     def _on_text_slot_pressed(self):
         self._text_long_press_timer.start()
@@ -585,6 +703,17 @@ class Toolbar(QWidget):
             action.setChecked(tool == self._pen_slot_tool)
             action.triggered.connect(lambda checked, t=tool: self._switch_pen_slot(t))
         btn = self.buttons[Tool.PEN]
+        menu.exec(btn.mapToGlobal(QPoint(0, btn.height())))
+
+    def _show_pencil_slot_menu(self):
+        menu = QMenu(self)
+        for tool in (Tool.PENCIL, Tool.PATH_ERASER):
+            label = "Pencil" if tool == Tool.PENCIL else "Path Eraser"
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(tool == self._pencil_slot_tool)
+            action.triggered.connect(lambda checked, t=tool: self._switch_pencil_slot(t))
+        btn = self.buttons[Tool.PENCIL]
         menu.exec(btn.mapToGlobal(QPoint(0, btn.height())))
 
     def _show_text_slot_menu(self):
@@ -629,6 +758,16 @@ class Toolbar(QWidget):
         pen_btn.update()
         self.select_tool(tool)
 
+    def _switch_pencil_slot(self, tool: Tool):
+        """Switch the pencil slot to show a different tool."""
+        if tool == self._pencil_slot_tool:
+            return
+        self._pencil_slot_tool = tool
+        pencil_btn = self.buttons[Tool.PENCIL]
+        pencil_btn.tool = tool
+        pencil_btn.update()
+        self.select_tool(tool)
+
     def _switch_text_slot(self, tool: Tool):
         """Switch the text slot to show a different tool."""
         if tool == self._text_slot_tool:
@@ -662,6 +801,12 @@ class Toolbar(QWidget):
             pen_btn.setChecked(True)
             pen_btn.update()
             self._pen_slot_tool = tool
+        elif tool in _PENCIL_SLOT_TOOLS:
+            pencil_btn = self.buttons[Tool.PENCIL]
+            pencil_btn.tool = tool
+            pencil_btn.setChecked(True)
+            pencil_btn.update()
+            self._pencil_slot_tool = tool
         elif tool in _TEXT_SLOT_TOOLS:
             text_btn = self.buttons[Tool.TEXT]
             text_btn.tool = tool

@@ -509,3 +509,122 @@ private func layerChildren(_ model: Model) -> [Element] {
         Issue.record("Expected Path element")
     }
 }
+
+// MARK: - Path Eraser tool tests
+
+private func makeLinePath(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double) -> Element {
+    .path(Path(d: [.moveTo(x1, y1), .lineTo(x2, y2)],
+               stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
+}
+
+private func makeLongPath() -> Element {
+    .path(Path(d: [.moveTo(0, 0), .lineTo(50, 0), .lineTo(100, 0), .lineTo(150, 0)],
+               stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
+}
+
+private func makeClosedPath() -> Element {
+    .path(Path(d: [.moveTo(0, 0), .lineTo(100, 0), .lineTo(100, 100),
+                   .lineTo(0, 100), .closePath],
+               fill: Fill(color: Color(r: 0, g: 0, b: 0)),
+               stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
+}
+
+@Test func pathEraserDeletesSmallPath() {
+    let tool = PathEraserTool()
+    let small = makeLinePath(0, 0, 1, 1)
+    let layer = Layer(name: "L", children: [small])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    tool.onPress(ctx, x: 0.5, y: 0.5, shift: false, alt: false)
+    tool.onRelease(ctx, x: 0.5, y: 0.5, shift: false, alt: false)
+    #expect(layerChildren(model).count == 0)
+}
+
+@Test func pathEraserSplitsOpenPath() {
+    let tool = PathEraserTool()
+    let path = makeLongPath()
+    let layer = Layer(name: "L", children: [path])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    tool.onPress(ctx, x: 75, y: 0, shift: false, alt: false)
+    tool.onRelease(ctx, x: 75, y: 0, shift: false, alt: false)
+    #expect(layerChildren(model).count == 2, "open path should split into 2 parts")
+}
+
+@Test func pathEraserOpensClosedPath() {
+    let tool = PathEraserTool()
+    let path = makeClosedPath()
+    let layer = Layer(name: "L", children: [path])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
+    tool.onRelease(ctx, x: 50, y: 0, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 1, "closed path should become one open path")
+    if case .path(let p) = children[0] {
+        let hasClosed = p.d.contains(where: { if case .closePath = $0 { return true }; return false })
+        #expect(!hasClosed, "result should not be closed")
+    } else {
+        Issue.record("Expected Path element")
+    }
+}
+
+@Test func pathEraserMissDoesNothing() {
+    let tool = PathEraserTool()
+    let path = makeLongPath()
+    let layer = Layer(name: "L", children: [path])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    tool.onPress(ctx, x: 75, y: 50, shift: false, alt: false)
+    tool.onRelease(ctx, x: 75, y: 50, shift: false, alt: false)
+    #expect(layerChildren(model).count == 1)
+}
+
+@Test func pathEraserReleaseWithoutPressIsNoop() {
+    let tool = PathEraserTool()
+    let path = makeLongPath()
+    let layer = Layer(name: "L", children: [path])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    tool.onRelease(ctx, x: 75, y: 0, shift: false, alt: false)
+    #expect(layerChildren(model).count == 1)
+}
+
+@Test func pathEraserMoveWithoutPressIsNoop() {
+    let tool = PathEraserTool()
+    let path = makeLongPath()
+    let layer = Layer(name: "L", children: [path])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    tool.onMove(ctx, x: 75, y: 0, shift: false, dragging: true)
+    #expect(layerChildren(model).count == 1)
+}
+
+@Test func pathEraserStateTransitions() {
+    let tool = PathEraserTool()
+    let (ctx, _, _) = makeCtx()
+    tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
+    tool.onRelease(ctx, x: 0, y: 0, shift: false, alt: false)
+}
+
+@Test func pathEraserLockedPathNotErased() {
+    let tool = PathEraserTool()
+    let small: Element = .path(Path(
+        d: [.moveTo(0, 0), .lineTo(1, 1)],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1),
+        locked: true
+    ))
+    let layer = Layer(name: "L", children: [small])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    tool.onPress(ctx, x: 0.5, y: 0.5, shift: false, alt: false)
+    tool.onRelease(ctx, x: 0.5, y: 0.5, shift: false, alt: false)
+    #expect(layerChildren(model).count == 1, "locked path should not be erased")
+}

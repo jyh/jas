@@ -702,6 +702,8 @@ class CanvasNSView: NSView {
             return makeDeleteAnchorPointCursor()
         case .pencil:
             return makePencilCursor()
+        case .pathEraser:
+            return makePathEraserCursor()
         default:
             return NSCursor.crosshair
         }
@@ -820,6 +822,31 @@ class CanvasNSView: NSView {
             (cwd as NSString).appendingPathComponent("../transcript/icons/pencil tool.png"),
             bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("transcript/icons/pencil tool.png") },
             bundle.path(forResource: "pencil tool", ofType: "png"),
+        ].compactMap { $0 }
+        for path in candidates {
+            if let orig = NSImage(contentsOfFile: path) {
+                let pixelSize = NSSize(width: 32, height: 32)
+                let image = NSImage(size: pixelSize)
+                image.lockFocus()
+                orig.draw(in: NSRect(origin: .zero, size: pixelSize),
+                          from: NSRect(origin: .zero, size: orig.size),
+                          operation: .sourceOver, fraction: 1.0)
+                image.unlockFocus()
+                image.size = NSSize(width: 16, height: 16)
+                return NSCursor(image: image, hotSpot: NSPoint(x: 1, y: 15))
+            }
+        }
+        return NSCursor.crosshair
+    }
+
+    private func makePathEraserCursor() -> NSCursor {
+        let bundle = Bundle.main
+        let cwd = FileManager.default.currentDirectoryPath
+        let candidates = [
+            (cwd as NSString).appendingPathComponent("transcript/icons/path eraser tool.png"),
+            (cwd as NSString).appendingPathComponent("../transcript/icons/path eraser tool.png"),
+            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("transcript/icons/path eraser tool.png") },
+            bundle.path(forResource: "path eraser tool", ofType: "png"),
         ].compactMap { $0 }
         for path in candidates {
             if let orig = NSImage(contentsOfFile: path) {
@@ -1125,16 +1152,20 @@ class CanvasNSView: NSView {
                 model.document = model.document.deleteSelection()
             }
         default:
-            switch chars.lowercased() {
-            case "v": onToolChange?(.selection)
-            case "a": onToolChange?(.directSelection)
-            case "p": onToolChange?(.pen)
-            case "t": onToolChange?(.text)
-            case "\\": onToolChange?(.line)
-            case "m": onToolChange?(.rect)
-            case "=", "+": onToolChange?(.addAnchorPoint)
-            case "-", "_": onToolChange?(.deleteAnchorPoint)
-            default: super.keyDown(with: event)
+            switch chars {
+            case "E": onToolChange?(.pathEraser)
+            default:
+                switch chars.lowercased() {
+                case "v": onToolChange?(.selection)
+                case "a": onToolChange?(.directSelection)
+                case "p": onToolChange?(.pen)
+                case "t": onToolChange?(.text)
+                case "\\": onToolChange?(.line)
+                case "m": onToolChange?(.rect)
+                case "=", "+": onToolChange?(.addAnchorPoint)
+                case "-", "_": onToolChange?(.deleteAnchorPoint)
+                default: super.keyDown(with: event)
+                }
             }
         }
     }

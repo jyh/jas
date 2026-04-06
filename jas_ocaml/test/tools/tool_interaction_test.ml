@@ -525,4 +525,109 @@ let () =
        | _ -> assert false)
     | _ -> assert false);
 
+  (* ---- Path Eraser tool ---- *)
+
+  run_test "path eraser: erase deletes small path" (fun () ->
+    let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+    let small = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); LineTo (1.0, 1.0)] in
+    let layer = make_layer ~name:"L" [|small|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_press ctx 0.5 0.5 ~shift:false ~alt:false;
+    tool#on_release ctx 0.5 0.5 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 0));
+
+  run_test "path eraser: erase splits open path" (fun () ->
+    let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+    let path = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); LineTo (50.0, 0.0); LineTo (100.0, 0.0); LineTo (150.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_press ctx 75.0 0.0 ~shift:false ~alt:false;
+    tool#on_release ctx 75.0 0.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 2));
+
+  run_test "path eraser: erase opens closed path" (fun () ->
+    let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+    let path = make_path
+      ~fill:(Some (make_fill (make_color 0.0 0.0 0.0)))
+      ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); LineTo (100.0, 0.0); LineTo (100.0, 100.0);
+       LineTo (0.0, 100.0); ClosePath] in
+    let layer = make_layer ~name:"L" [|path|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
+    tool#on_release ctx 50.0 0.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    (match children.(0) with
+     | Path { d; _ } ->
+       assert (not (List.exists (fun c -> c = ClosePath) d))
+     | _ -> assert false));
+
+  run_test "path eraser: erase miss does nothing" (fun () ->
+    let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+    let path = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); LineTo (50.0, 0.0); LineTo (100.0, 0.0); LineTo (150.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_press ctx 75.0 50.0 ~shift:false ~alt:false;
+    tool#on_release ctx 75.0 50.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1));
+
+  run_test "path eraser: release without press is noop" (fun () ->
+    let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+    let path = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); LineTo (50.0, 0.0); LineTo (100.0, 0.0); LineTo (150.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_release ctx 75.0 0.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1));
+
+  run_test "path eraser: move without press is noop" (fun () ->
+    let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+    let path = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); LineTo (50.0, 0.0); LineTo (100.0, 0.0); LineTo (150.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_move ctx 75.0 0.0 ~shift:false ~dragging:true;
+    let children = layer_children model in
+    assert (Array.length children = 1));
+
+  run_test "path eraser: erasing state transitions" (fun () ->
+    let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+    let (ctx, _model, _ctrl) = make_ctx () in
+    tool#on_press ctx 0.0 0.0 ~shift:false ~alt:false;
+    tool#on_release ctx 0.0 0.0 ~shift:false ~alt:false);
+
+  run_test "path eraser: locked path not erased" (fun () ->
+    let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+    let small = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      ~locked:true
+      [MoveTo (0.0, 0.0); LineTo (1.0, 1.0)] in
+    let layer = make_layer ~name:"L" [|small|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_press ctx 0.5 0.5 ~shift:false ~alt:false;
+    tool#on_release ctx 0.5 0.5 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1));
+
   Printf.printf "All tool interaction tests passed.\n"

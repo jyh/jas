@@ -533,5 +533,140 @@ class PencilToolTest(absltest.TestCase):
         self.assertEqual(elem.d[0].y, 25)
 
 
+class PathEraserToolTest(absltest.TestCase):
+    def _make_line_path(self, x1, y1, x2, y2):
+        return Path(
+            d=(MoveTo(x1, y1), LineTo(x2, y2)),
+            stroke=Stroke(Color(0, 0, 0), 1.0),
+        )
+
+    def _make_long_path(self):
+        return Path(
+            d=(MoveTo(0, 0), LineTo(50, 0), LineTo(100, 0), LineTo(150, 0)),
+            stroke=Stroke(Color(0, 0, 0), 1.0),
+        )
+
+    def _make_closed_path(self):
+        from geometry.element import ClosePath as CP
+        return Path(
+            d=(MoveTo(0, 0), LineTo(100, 0), LineTo(100, 100),
+               LineTo(0, 100), CP()),
+            fill=Fill(Color(0, 0, 0)),
+            stroke=Stroke(Color(0, 0, 0), 1.0),
+        )
+
+    def test_erase_deletes_small_path(self):
+        """A path with bbox smaller than eraser size is deleted entirely."""
+        from tools.path_eraser import PathEraserTool
+        tool = PathEraserTool()
+        small = self._make_line_path(0, 0, 1, 1)
+        layer = Layer(name="L", children=(small,))
+        doc = Document(layers=(layer,), selection=frozenset())
+        model = Model(document=doc)
+        ctx, model, ctrl = _make_ctx(model)
+        tool.on_press(ctx, 0.5, 0.5)
+        tool.on_release(ctx, 0.5, 0.5)
+        self.assertEqual(len(_layer_children(model)), 0)
+
+    def test_erase_splits_open_path(self):
+        """Erasing a segment of an open path splits it into two paths."""
+        from tools.path_eraser import PathEraserTool
+        tool = PathEraserTool()
+        path = self._make_long_path()
+        layer = Layer(name="L", children=(path,))
+        doc = Document(layers=(layer,), selection=frozenset())
+        model = Model(document=doc)
+        ctx, model, ctrl = _make_ctx(model)
+        tool.on_press(ctx, 75.0, 0.0)
+        tool.on_release(ctx, 75.0, 0.0)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 2, "open path should split into 2 parts")
+
+    def test_erase_opens_closed_path(self):
+        """Erasing a segment of a closed path opens it."""
+        from tools.path_eraser import PathEraserTool
+        tool = PathEraserTool()
+        path = self._make_closed_path()
+        layer = Layer(name="L", children=(path,))
+        doc = Document(layers=(layer,), selection=frozenset())
+        model = Model(document=doc)
+        ctx, model, ctrl = _make_ctx(model)
+        tool.on_press(ctx, 50.0, 0.0)
+        tool.on_release(ctx, 50.0, 0.0)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 1, "closed path should become one open path")
+        self.assertIsInstance(children[0], Path)
+        from geometry.element import ClosePath as CP
+        self.assertFalse(
+            any(isinstance(c, CP) for c in children[0].d),
+            "result should not be closed")
+
+    def test_erase_miss_does_nothing(self):
+        """Erasing far from a path does not modify it."""
+        from tools.path_eraser import PathEraserTool
+        tool = PathEraserTool()
+        path = self._make_long_path()
+        layer = Layer(name="L", children=(path,))
+        doc = Document(layers=(layer,), selection=frozenset())
+        model = Model(document=doc)
+        ctx, model, ctrl = _make_ctx(model)
+        tool.on_press(ctx, 75.0, 50.0)
+        tool.on_release(ctx, 75.0, 50.0)
+        self.assertEqual(len(_layer_children(model)), 1)
+
+    def test_release_without_press_is_noop(self):
+        """Releasing without pressing does nothing."""
+        from tools.path_eraser import PathEraserTool
+        tool = PathEraserTool()
+        path = self._make_long_path()
+        layer = Layer(name="L", children=(path,))
+        doc = Document(layers=(layer,), selection=frozenset())
+        model = Model(document=doc)
+        ctx, model, ctrl = _make_ctx(model)
+        tool.on_release(ctx, 75.0, 0.0)
+        self.assertEqual(len(_layer_children(model)), 1)
+
+    def test_move_without_press_is_noop(self):
+        """Moving without pressing does nothing."""
+        from tools.path_eraser import PathEraserTool
+        tool = PathEraserTool()
+        path = self._make_long_path()
+        layer = Layer(name="L", children=(path,))
+        doc = Document(layers=(layer,), selection=frozenset())
+        model = Model(document=doc)
+        ctx, model, ctrl = _make_ctx(model)
+        tool.on_move(ctx, 75.0, 0.0, dragging=True)
+        self.assertEqual(len(_layer_children(model)), 1)
+
+    def test_erasing_state_transitions(self):
+        """Erasing flag tracks press/release correctly."""
+        from tools.path_eraser import PathEraserTool
+        tool = PathEraserTool()
+        ctx, model, ctrl = _make_ctx()
+        self.assertFalse(tool._erasing)
+        tool.on_press(ctx, 0.0, 0.0)
+        self.assertTrue(tool._erasing)
+        tool.on_release(ctx, 0.0, 0.0)
+        self.assertFalse(tool._erasing)
+
+    def test_locked_path_not_erased(self):
+        """A locked path is not affected by the eraser."""
+        from tools.path_eraser import PathEraserTool
+        tool = PathEraserTool()
+        small = Path(
+            d=(MoveTo(0, 0), LineTo(1, 1)),
+            stroke=Stroke(Color(0, 0, 0), 1.0),
+            locked=True,
+        )
+        layer = Layer(name="L", children=(small,))
+        doc = Document(layers=(layer,), selection=frozenset())
+        model = Model(document=doc)
+        ctx, model, ctrl = _make_ctx(model)
+        tool.on_press(ctx, 0.5, 0.5)
+        tool.on_release(ctx, 0.5, 0.5)
+        self.assertEqual(len(_layer_children(model)), 1,
+                         "locked path should not be erased")
+
+
 if __name__ == '__main__':
     absltest.main()
