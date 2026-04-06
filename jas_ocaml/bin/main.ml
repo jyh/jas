@@ -78,6 +78,8 @@ let () =
       toolbar#select_tool Jas.Toolbar.Line; true
     end else if key = GdkKeysyms._m || key = GdkKeysyms._M then begin
       toolbar#select_tool Jas.Toolbar.Rect; true
+    end else if key = GdkKeysyms._E then begin
+      toolbar#select_tool Jas.Toolbar.Path_eraser; true
     end else if key = GdkKeysyms._Escape
              || key = GdkKeysyms._Return || key = GdkKeysyms._KP_Enter then begin
       (match !active_canvas with Some c -> c#pen_finish | None -> ());

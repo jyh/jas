@@ -25,6 +25,7 @@ use crate::tools::add_anchor_point::AddAnchorPointTool;
 use crate::tools::delete_anchor_point::DeleteAnchorPointTool;
 use crate::tools::anchor_point::AnchorPointTool;
 use crate::tools::pencil::PencilTool;
+use crate::tools::path_eraser::PathEraserTool;
 use crate::tools::polygon::PolygonTool;
 use crate::tools::rect::RectTool;
 use crate::tools::selection::SelectionTool;
@@ -54,6 +55,7 @@ impl TabState {
         tools.insert(ToolKind::DeleteAnchorPoint, Box::new(DeleteAnchorPointTool::new()));
         tools.insert(ToolKind::AnchorPoint, Box::new(AnchorPointTool::new()));
         tools.insert(ToolKind::Pencil, Box::new(PencilTool::new()));
+        tools.insert(ToolKind::PathEraser, Box::new(PathEraserTool::new()));
         tools.insert(ToolKind::Text, Box::new(TextTool::new()));
         tools.insert(ToolKind::TextOnPath, Box::new(TextPathTool::new()));
         tools.insert(ToolKind::Rect, Box::new(RectTool::new()));
@@ -387,7 +389,7 @@ const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (0, 0, &[ToolKind::Selection]),
     (0, 1, &[ToolKind::DirectSelection, ToolKind::GroupSelection]),
     (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint, ToolKind::AnchorPoint]),
-    (1, 1, &[ToolKind::Pencil]),
+    (1, 1, &[ToolKind::Pencil, ToolKind::PathEraser]),
     (2, 0, &[ToolKind::Text, ToolKind::TextOnPath]),
     (2, 1, &[ToolKind::Line]),
     (3, 0, &[ToolKind::Rect, ToolKind::Polygon]),
@@ -436,6 +438,11 @@ fn toolbar_svg_icon(kind: ToolKind) -> String {
         ToolKind::Pencil => {
             let _c = c;
             r##"<g transform="scale(0.109375)"><path d="M57.6,233.77l-51.77,22c-3.79,1.61-6.42-5.57-5.71-8.78l15.63-71.11c1.24-5.63,2.19-9.52,6.08-14.09L108.97,59.4l43.76-50.24c6.91-7.93,20.11-12.57,29.23-6.1,13.11,9.3,24.18,19.89,35.98,30.87,7.38,6.86,8.71,20.57,2.31,28.2l-28.29,33.69-107.57,127.08c-9.12,4.32-17.67,7-26.79,10.88Z" fill="rgb(204,204,204)"/><path d="M208.57,55.33c4.05-7.4-1.19-14.82-6.49-19.18l-25-20.58c-10.66-8.78-22.36,11.05-28.07,18.32,14.44,13.9,28.28,26.73,44.4,38.75,5.64-5.65,11.45-10.55,15.16-17.31Z" fill="#3c3c3c"/><path d="M70.01,189.48c-5.14.35-10.35,1.24-13.94-1.12-2.83-1.86-3.93-9.72-2.84-13.56l101.24-118.96c5.95,4.89,10.67,9.06,15.66,14.57l-100.12,119.07Z" fill="#3c3c3c"/><path d="M47.55,169.12c-3.85,1.45-9.72.32-12.69-2.27l41.55-49.37,32.56-37.99,29.83-34.98c3.62.1,6.99,3.72,8.64,7.09l-45.3,52.97-54.59,64.54Z" fill="#3c3c3c"/><path d="M161.36,111.12l-68.09,80.6c-4.52,5.34-8.33,9.99-13.72,15.13-3.1-3.37-5.1-10.15-1.03-14.97l97.51-115.25c3.44.45,8.52,3.68,8.25,6.56l-22.92,27.94Z" fill="#3c3c3c"/><path d="M71.47,214.03c-11.31,4.52-21.14,8.07-32.31,13.6l-17.23-13.26c.99-5.56,1.35-11.11,2.68-16.6l4.39-18.04c1.63-3.22,11.55-2.19,13.67.71,3.2,4.4,3.19,12.25,7.13,15.82,3.97,3.6,10.62.78,14.92,3.17s4.89,9.2,6.75,14.6Z" fill="white"/></g>"##.to_string()
+        },
+        // Path Eraser (rotated pencil from SVG, scaled from 256→28)
+        ToolKind::PathEraser => {
+            let _c = c;
+            r##"<g transform="scale(0.109375)"><path d="M169.86,33.13L243.34,1.82c3.43-1.46,6.39-2.97,9.92-.52,2.21,1.54,3.34,4.88,2.41,8.76l-19.31,80.53-108.02,125.71-27.98,31.2c-9.63,10.74-24.91,11.34-35.56,1.63l-28-25.52c-9.09-8.28-9.54-23.48-1.42-32.95l40.64-47.45,93.83-110.08Z" fill="rgb(204,204,204)"/><path d="M184.63,65.93c4.88.46,9.96.27,13.5,2.32,2.91,1.68,5.44,10.2,3.01,13.03l-84.89,99c-6.97-3.72-11.86-9.07-15.89-15.76l84.27-98.59Z" fill="#3c3c3c"/><path d="M44.69,212.9c-7.74-11.08,8.68-22.32,17.05-32.78l45.05,40.93-15.82,18.47c-8.77,10.24-21.21-2.39-26.77-7.31-6.96-6.17-14.12-11.58-19.52-19.31Z" fill="#3c3c3c"/><path d="M207.17,85.96c4.81-.22,8.54.77,12.85,3.59l-65.13,76.29-23.35,27c-3.91-1.36-6.44-4.06-8.62-7.89l84.25-98.98Z" fill="#3c3c3c"/><path d="M124.64,106.13l50.36-58.45c2.8,3.96,5.01,9.06,3.33,12.12-5.2,9.48-12.82,16.62-19.83,24.82l-62.56,73.21c-1.99,2.33-5.01,1.06-6.38.14-1.59-1.07-5.25-3.97-3.15-6.5,10.19-12.26,20.7-23.56,30.54-35.78l7.69-9.56Z" fill="#3c3c3c"/><path d="M183.88,41.54c8.08-4.67,16.32-7.31,24.34-10.36,12.84-4.88,5.89-4.25,24.42,10.2,2.91.33-5.31,35.45-6.97,35.87-3.37,3.03-13.57,1.84-14.92-2.22l-4.99-15-16.7-3.81c-4.53-1.03-4.11-9.11-5.17-14.68Z" fill="white"/><rect x="88.74" y="155.97" width="14.58" height="61.84" transform="translate(299.56 239.09) rotate(131.58)" fill="white"/></g>"##.to_string()
         },
         // T letter
         ToolKind::Text => format!(
@@ -745,6 +752,12 @@ pub fn App() -> Element {
                 Key::Character(ref c) if c == "n" || c == "N" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         st.set_tool(ToolKind::Pencil);
+                    }));
+                }
+                Key::Character(ref c) if c == "E" => {
+                    // Shift+E for Path Eraser tool
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.set_tool(ToolKind::PathEraser);
                     }));
                 }
                 Key::Character(ref c) if c == "t" || c == "T" => {

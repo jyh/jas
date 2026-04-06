@@ -299,6 +299,120 @@ public struct ToolbarView {
                 tipPath.closeSubpath()
                 context.fill(tipPath.applying(transform), with: .color(.white))
 
+            case .pathEraser:
+                // Path Eraser icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28
+                let s: CGFloat = 28.0 / 256.0
+                let transform = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: s, y: s)
+                let darkColor = SwiftUI.Color(nsColor: NSColor(white: 0.235, alpha: 1.0))
+
+                // Outer outline
+                var outer = SwiftUI.Path()
+                outer.move(to: CGPoint(x: 169.86, y: 33.13))
+                outer.addLine(to: CGPoint(x: 243.34, y: 1.82))
+                outer.addCurve(to: CGPoint(x: 253.26, y: 1.3),
+                    control1: CGPoint(x: 246.77, y: 0.36), control2: CGPoint(x: 249.73, y: -1.15))
+                outer.addCurve(to: CGPoint(x: 255.67, y: 10.06),
+                    control1: CGPoint(x: 255.47, y: 2.84), control2: CGPoint(x: 256.6, y: 6.18))
+                outer.addLine(to: CGPoint(x: 236.36, y: 90.59))
+                outer.addLine(to: CGPoint(x: 128.34, y: 216.3))
+                outer.addLine(to: CGPoint(x: 100.36, y: 247.5))
+                outer.addCurve(to: CGPoint(x: 64.8, y: 249.13),
+                    control1: CGPoint(x: 90.73, y: 258.24), control2: CGPoint(x: 75.45, y: 258.84))
+                outer.addLine(to: CGPoint(x: 36.8, y: 223.61))
+                outer.addCurve(to: CGPoint(x: 35.38, y: 190.66),
+                    control1: CGPoint(x: 27.71, y: 215.33), control2: CGPoint(x: 27.26, y: 200.13))
+                outer.addLine(to: CGPoint(x: 76.02, y: 143.21))
+                outer.addLine(to: CGPoint(x: 169.85, y: 33.13))
+                outer.closeSubpath()
+                context.fill(outer.applying(transform), with: .color(color))
+
+                // Gray facets
+                var f1 = SwiftUI.Path()
+                f1.move(to: CGPoint(x: 184.63, y: 65.93))
+                f1.addCurve(to: CGPoint(x: 198.13, y: 68.25),
+                    control1: CGPoint(x: 189.51, y: 66.39), control2: CGPoint(x: 194.59, y: 66.2))
+                f1.addCurve(to: CGPoint(x: 201.14, y: 81.28),
+                    control1: CGPoint(x: 201.04, y: 69.93), control2: CGPoint(x: 203.57, y: 78.45))
+                f1.addLine(to: CGPoint(x: 116.25, y: 180.28))
+                f1.addCurve(to: CGPoint(x: 100.36, y: 164.52),
+                    control1: CGPoint(x: 109.28, y: 176.56), control2: CGPoint(x: 104.39, y: 171.21))
+                f1.addLine(to: CGPoint(x: 184.63, y: 65.93))
+                f1.closeSubpath()
+                context.fill(f1.applying(transform), with: .color(darkColor))
+
+                var f2 = SwiftUI.Path()
+                f2.move(to: CGPoint(x: 44.69, y: 212.9))
+                f2.addCurve(to: CGPoint(x: 61.74, y: 180.12),
+                    control1: CGPoint(x: 36.95, y: 201.82), control2: CGPoint(x: 53.37, y: 190.58))
+                f2.addLine(to: CGPoint(x: 106.79, y: 221.05))
+                f2.addLine(to: CGPoint(x: 90.97, y: 239.52))
+                f2.addCurve(to: CGPoint(x: 64.2, y: 232.21),
+                    control1: CGPoint(x: 82.2, y: 249.76), control2: CGPoint(x: 69.76, y: 237.13))
+                f2.addCurve(to: CGPoint(x: 44.68, y: 212.9),
+                    control1: CGPoint(x: 57.24, y: 226.04), control2: CGPoint(x: 50.08, y: 220.63))
+                f2.closeSubpath()
+                context.fill(f2.applying(transform), with: .color(darkColor))
+
+                var f3 = SwiftUI.Path()
+                f3.move(to: CGPoint(x: 207.17, y: 85.96))
+                f3.addCurve(to: CGPoint(x: 220.02, y: 89.55),
+                    control1: CGPoint(x: 211.98, y: 85.74), control2: CGPoint(x: 215.71, y: 86.73))
+                f3.addLine(to: CGPoint(x: 154.89, y: 165.84))
+                f3.addLine(to: CGPoint(x: 131.54, y: 192.84))
+                f3.addCurve(to: CGPoint(x: 122.92, y: 184.95),
+                    control1: CGPoint(x: 127.63, y: 191.48), control2: CGPoint(x: 125.1, y: 188.78))
+                f3.addLine(to: CGPoint(x: 207.17, y: 85.97))
+                f3.closeSubpath()
+                context.fill(f3.applying(transform), with: .color(darkColor))
+
+                var f4 = SwiftUI.Path()
+                f4.move(to: CGPoint(x: 124.64, y: 106.13))
+                f4.addLine(to: CGPoint(x: 175.0, y: 47.68))
+                f4.addCurve(to: CGPoint(x: 178.33, y: 59.8),
+                    control1: CGPoint(x: 177.8, y: 51.64), control2: CGPoint(x: 180.01, y: 56.74))
+                f4.addCurve(to: CGPoint(x: 158.5, y: 84.62),
+                    control1: CGPoint(x: 173.13, y: 69.28), control2: CGPoint(x: 165.51, y: 76.42))
+                f4.addLine(to: CGPoint(x: 95.94, y: 157.83))
+                f4.addCurve(to: CGPoint(x: 89.56, y: 157.97),
+                    control1: CGPoint(x: 93.95, y: 160.16), control2: CGPoint(x: 90.93, y: 158.89))
+                f4.addCurve(to: CGPoint(x: 86.41, y: 151.47),
+                    control1: CGPoint(x: 87.97, y: 156.9), control2: CGPoint(x: 84.31, y: 153.0))
+                f4.addCurve(to: CGPoint(x: 116.95, y: 115.69),
+                    control1: CGPoint(x: 96.6, y: 139.21), control2: CGPoint(x: 107.11, y: 127.91))
+                f4.addLine(to: CGPoint(x: 124.64, y: 106.13))
+                f4.closeSubpath()
+                context.fill(f4.applying(transform), with: .color(darkColor))
+
+                // White tip
+                var tip = SwiftUI.Path()
+                tip.move(to: CGPoint(x: 183.88, y: 41.54))
+                tip.addCurve(to: CGPoint(x: 208.22, y: 31.18),
+                    control1: CGPoint(x: 191.96, y: 36.87), control2: CGPoint(x: 200.2, y: 34.23))
+                tip.addCurve(to: CGPoint(x: 232.64, y: 41.38),
+                    control1: CGPoint(x: 221.06, y: 26.3), control2: CGPoint(x: 214.11, y: 26.93))
+                tip.addCurve(to: CGPoint(x: 225.67, y: 77.25),
+                    control1: CGPoint(x: 235.55, y: 41.71), control2: CGPoint(x: 227.33, y: 76.83))
+                tip.addCurve(to: CGPoint(x: 210.75, y: 75.03),
+                    control1: CGPoint(x: 222.3, y: 80.28), control2: CGPoint(x: 212.1, y: 79.09))
+                tip.addLine(to: CGPoint(x: 205.76, y: 60.03))
+                tip.addLine(to: CGPoint(x: 189.06, y: 56.22))
+                tip.addCurve(to: CGPoint(x: 183.89, y: 41.54),
+                    control1: CGPoint(x: 184.53, y: 55.19), control2: CGPoint(x: 184.95, y: 47.11))
+                tip.closeSubpath()
+                context.fill(tip.applying(transform), with: .color(.white))
+
+                // White band (rotated rectangle)
+                let bandAngle = 131.58 * .pi / 180.0
+                let pivotX = 299.56, pivotY = 239.09
+                let bandTransform = CGAffineTransform(translationX: pivotX, y: pivotY)
+                    .rotated(by: bandAngle)
+                    .translatedBy(x: -pivotX, y: -pivotY)
+                    .translatedBy(x: 88.74, y: 155.97)
+                var band = SwiftUI.Path()
+                band.addRect(CGRect(x: 0, y: 0, width: 14.58, height: 61.84))
+                let bandScaled = band.applying(bandTransform).applying(transform)
+                context.fill(bandScaled, with: .color(.white))
+
             case .text:
                 context.draw(
                     SwiftUI.Text("T").font(.system(size: 18, weight: .bold))
@@ -437,6 +551,7 @@ private struct ArrowSlotButton: View {
         case .pen: return "Pen"
         case .addAnchorPoint: return "Add Anchor Point"
         case .pencil: return "Pencil"
+        case .pathEraser: return "Path Eraser"
         case .text: return "Text"
         case .textPath: return "Text on Path"
         case .rect: return "Rectangle"

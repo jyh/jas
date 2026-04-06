@@ -58,6 +58,8 @@ class MainWindow(QMainWindow):
                   lambda: self.toolbar.select_tool(Tool.LINE))
         QShortcut(QKeySequence("M"), self,
                   lambda: self.toolbar.select_tool(Tool.RECT))
+        QShortcut(QKeySequence("Shift+E"), self,
+                  lambda: self.toolbar.select_tool(Tool.PATH_ERASER))
         QShortcut(QKeySequence(Qt.Key_Delete), self, self._delete_selection)
         QShortcut(QKeySequence(Qt.Key_Backspace), self, self._delete_selection)
         QShortcut(QKeySequence.StandardKey.Undo, self, self._undo)

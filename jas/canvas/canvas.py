@@ -123,6 +123,18 @@ def _make_pencil_cursor() -> QCursor:
     return QCursor(pixmap, 1, 31)
 
 
+def _make_path_eraser_cursor() -> QCursor:
+    """Create a path eraser cursor from the reference PNG bitmap."""
+    import os
+    png_path = os.path.join(os.path.dirname(__file__), "..", "..", "transcript", "icons", "path eraser tool.png")
+    pixmap = QPixmap(png_path)
+    if pixmap.isNull():
+        return QCursor(Qt.CursorShape.CrossCursor)
+    pixmap = pixmap.scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    pixmap.setDevicePixelRatio(2.0)
+    return QCursor(pixmap, 1, 31)
+
+
 @dataclass(frozen=True)
 class BoundingBox:
     """Axis-aligned bounding box in px."""
@@ -661,6 +673,8 @@ class CanvasWidget(QWidget):
             return _make_delete_anchor_point_cursor()
         elif tool == Tool.PENCIL:
             return _make_pencil_cursor()
+        elif tool == Tool.PATH_ERASER:
+            return _make_path_eraser_cursor()
         else:
             return QCursor(Qt.CursorShape.CrossCursor)
 
