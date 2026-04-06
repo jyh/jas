@@ -110,7 +110,7 @@ mod tests {
         tool.on_release(&mut model, 110.0, 70.0, false, false);
         let children = model.document().layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
-        if let Element::Rect(r) = &children[0] {
+        if let Element::Rect(r) = &*children[0] {
             assert_eq!(r.x, 10.0);
             assert_eq!(r.y, 20.0);
             assert_eq!(r.width, 100.0);
@@ -138,7 +138,7 @@ mod tests {
         tool.on_release(&mut model, 10.0, 20.0, false, false);
         let children = model.document().layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
-        if let Element::Rect(r) = &children[0] {
+        if let Element::Rect(r) = &*children[0] {
             assert_eq!(r.x, 10.0);
             assert_eq!(r.y, 20.0);
             assert_eq!(r.width, 90.0);

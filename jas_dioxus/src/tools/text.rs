@@ -119,7 +119,7 @@ impl CanvasTool for TextTool {
         for (li, layer) in doc.layers.iter().enumerate() {
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate().rev() {
-                    if let Element::Text(te) = child {
+                    if let Element::Text(te) = &**child {
                         let (bx, by, bw, bh) = child.bounds();
                         if x >= bx && x <= bx + bw && y >= by && y <= by + bh {
                             if let Some(new_content) = prompt_text(&te.content) {

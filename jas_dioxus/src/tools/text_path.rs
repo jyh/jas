@@ -68,32 +68,32 @@ impl TextPathTool {
         for (li, layer) in doc.layers.iter().enumerate() {
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate() {
-                    match child {
+                    match &**child {
                         Element::Path(e) => {
                             let dist = path_distance_to_point(&e.d, x, y);
                             if dist <= threshold {
-                                return Some((vec![li, ci], child.clone()));
+                                return Some((vec![li, ci], (**child).clone()));
                             }
                         }
                         Element::TextPath(e) => {
                             let dist = path_distance_to_point(&e.d, x, y);
                             if dist <= threshold {
-                                return Some((vec![li, ci], child.clone()));
+                                return Some((vec![li, ci], (**child).clone()));
                             }
                         }
                         Element::Group(g) if !child.common().locked => {
                             for (gi, gc) in g.children.iter().enumerate() {
-                                match gc {
+                                match &**gc {
                                     Element::Path(e) => {
                                         let dist = path_distance_to_point(&e.d, x, y);
                                         if dist <= threshold {
-                                            return Some((vec![li, ci, gi], gc.clone()));
+                                            return Some((vec![li, ci, gi], (**gc).clone()));
                                         }
                                     }
                                     Element::TextPath(e) => {
                                         let dist = path_distance_to_point(&e.d, x, y);
                                         if dist <= threshold {
-                                            return Some((vec![li, ci, gi], gc.clone()));
+                                            return Some((vec![li, ci, gi], (**gc).clone()));
                                         }
                                     }
                                     _ => {}

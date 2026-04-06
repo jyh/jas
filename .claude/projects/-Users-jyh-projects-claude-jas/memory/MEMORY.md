@@ -1,0 +1,5 @@
+- [All three language versions](feedback_all_versions.md) — Always implement features in Python, OCaml, and Swift together
+- [Handle size preference](feedback_handle_size.md) — Use 10px draw / 8px hit radius for control handles
+- [OCaml app auto-run](feedback_ocaml_run.md) — Standing approval to run OCaml app without asking
+- [Only run apps when asked](feedback_run_apps.md) — Don't auto-run all 3 apps; wait for user to ask
+- [Python tests use absltest](feedback_absltest.md) — All Python tests must use absltest, not unittest

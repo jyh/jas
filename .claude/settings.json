@@ -30,7 +30,12 @@
       "Bash(python -m pytest jas/ -q)",
       "Bash(python -m pytest -x -q)",
       "Bash(python -m jas.main)",
-      "Bash(python jas/jas_app.py)"
+      "Bash(python jas/jas_app.py)",
+      "Bash(open .build/debug/Jas.app)",
+      "Bash(rustup target:*)",
+      "Bash(rustc --version)",
+      "Bash(cargo check:*)",
+      "Bash(cargo test:*)"
     ]
   }
 }

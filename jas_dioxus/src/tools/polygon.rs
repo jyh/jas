@@ -152,7 +152,7 @@ mod tests {
         tool.on_release(&mut model, 100.0, 50.0, false, false);
         let children = model.document().layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
-        if let Element::Polygon(p) = &children[0] {
+        if let Element::Polygon(p) = &*children[0] {
             assert_eq!(p.points.len(), POLYGON_SIDES);
         } else {
             panic!("expected Polygon element");

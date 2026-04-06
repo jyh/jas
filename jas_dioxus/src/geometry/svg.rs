@@ -4,6 +4,7 @@
 //! Conversion factor: 96/72 (CSS px per pt at 96 DPI).
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::document::document::Document;
 use crate::geometry::element::*;
@@ -1038,7 +1039,7 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             let mut children = Vec::new();
             for child in &node.children {
                 if let Some(elem) = parse_element(child) {
-                    children.push(elem);
+                    children.push(Rc::new(elem));
                 }
             }
             // Check for inkscape:label
@@ -1084,12 +1085,12 @@ pub fn svg_to_document(svg: &str) -> Document {
                     if let Element::Layer(le) = l { le.name.is_empty() } else { false }
                 }) {
                     layers.push(Element::Layer(LayerElem {
-                        children: vec![elem],
+                        children: vec![Rc::new(elem)],
                         name: String::new(),
                         common: CommonProps::default(),
                     }));
                 } else if let Some(Element::Layer(le)) = layers.last_mut() {
-                    le.children.push(elem);
+                    le.children.push(Rc::new(elem));
                 }
             }
         }
@@ -1202,7 +1203,7 @@ mod tests {
         Document {
             layers: vec![Element::Layer(LayerElem {
                 name: "Layer".to_string(),
-                children,
+                children: children.into_iter().map(Rc::new).collect(),
                 common: CommonProps::default(),
             })],
             selected_layer: 0,
@@ -1246,12 +1247,12 @@ mod tests {
         let doc2 = svg_to_document(&svg);
         let children = doc2.layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
-        if let Element::Rect(r) = &children[0] {
+        if let Element::Rect(r) = &*children[0] {
             // SVG uses pt-to-px conversion (96/72), check approximately
             assert!(r.width > 0.0);
             assert!(r.height > 0.0);
         } else {
-            panic!("expected Rect, got {:?}", children[0]);
+            panic!("expected Rect, got {:?}", &*children[0]);
         }
     }
 
@@ -1262,7 +1263,7 @@ mod tests {
         let doc2 = svg_to_document(&svg);
         let children = doc2.layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
-        assert!(matches!(&children[0], Element::Line(_)));
+        assert!(matches!(&*children[0], Element::Line(_)));
     }
 
     #[test]
@@ -1272,7 +1273,7 @@ mod tests {
         let doc2 = svg_to_document(&svg);
         let children = doc2.layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
-        assert!(matches!(&children[0], Element::Circle(_)));
+        assert!(matches!(&*children[0], Element::Circle(_)));
     }
 
     #[test]
@@ -1291,7 +1292,7 @@ mod tests {
     #[test]
     fn roundtrip_group() {
         let g = Element::Group(GroupElem {
-            children: vec![make_rect(0.0, 0.0, 10.0, 10.0), make_line(0.0, 0.0, 5.0, 5.0)],
+            children: vec![Rc::new(make_rect(0.0, 0.0, 10.0, 10.0)), Rc::new(make_line(0.0, 0.0, 5.0, 5.0))],
             common: CommonProps::default(),
         });
         let doc = make_doc(vec![g]);
@@ -1299,7 +1300,7 @@ mod tests {
         let doc2 = svg_to_document(&svg);
         let children = doc2.layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
-        assert!(matches!(&children[0], Element::Group(_)));
+        assert!(matches!(&*children[0], Element::Group(_)));
         let group_children = children[0].children().unwrap();
         assert_eq!(group_children.len(), 2);
     }
@@ -1311,7 +1312,7 @@ mod tests {
         assert!(!doc.layers.is_empty());
         let children = doc.layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
-        assert!(matches!(&children[0], Element::Rect(_)));
+        assert!(matches!(&*children[0], Element::Rect(_)));
     }
 
     #[test]
@@ -1319,7 +1320,7 @@ mod tests {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="10" height="10" fill="red"/></svg>"#;
         let doc = svg_to_document(svg);
         let children = doc.layers[0].children().unwrap();
-        if let Element::Rect(r) = &children[0] {
+        if let Element::Rect(r) = &*children[0] {
             assert!(r.fill.is_some());
             let c = r.fill.unwrap().color;
             assert!((c.r - 1.0).abs() < 0.01);

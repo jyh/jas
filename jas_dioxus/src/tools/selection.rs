@@ -239,7 +239,7 @@ mod tests {
         });
         let layer = Element::Layer(LayerElem {
             name: "L".to_string(),
-            children: vec![rect],
+            children: vec![std::rc::Rc::new(rect)],
             common: CommonProps::default(),
         });
         let doc = Document {
@@ -293,7 +293,7 @@ mod tests {
         tool.on_move(&mut model, 70.0, 70.0, false, true); // applies dx=5, dy=5
         tool.on_release(&mut model, 70.0, 70.0, false, false);
         let elem = &model.document().layers[0].children().unwrap()[0];
-        if let Element::Rect(r) = elem {
+        if let Element::Rect(r) = &**elem {
             assert_eq!(r.x, 60.0);
             assert_eq!(r.y, 60.0);
         } else {
