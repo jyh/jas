@@ -358,4 +358,48 @@ let () =
        | _ -> assert false)
     | _ -> assert false);
 
+  (* Regression: insert_point_in_path returned wrong index when splitting a
+     segment other than the first one.  The old formula was
+     "total - 1 - first_new_idx" which only works for 2-command paths. *)
+  run_test "add anchor point: split second segment returns correct index" (fun () ->
+    let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+    (* 3 anchors: MoveTo, CurveTo, CurveTo — click on the SECOND curve *)
+    let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0);
+       CurveTo (10.0, 0.0, 20.0, 0.0, 30.0, 0.0);
+       CurveTo (40.0, 0.0, 50.0, 0.0, 60.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path_elem|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    (* Click at x=45 which is on the second curve segment *)
+    tool#on_press ctx 45.0 0.0 ~shift:false ~alt:false;
+    (* Drag to pull handles — if index is wrong, this modifies the wrong cmd *)
+    tool#on_move ctx 45.0 20.0 ~shift:false ~dragging:true;
+    tool#on_release ctx 45.0 20.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    match children.(0) with
+    | Path { d; _ } ->
+      (* Should have 4 commands: MoveTo, CurveTo, CurveTo(new), CurveTo *)
+      assert (List.length d = 4);
+      (* The new anchor at index 2 should be near x=45 *)
+      (match List.nth d 2 with
+       | CurveTo (_, _, _, _, x, _) ->
+         assert (abs_float (x -. 45.0) < 1.0)
+       | _ -> assert false);
+      (* The first curve (index 1) should still end at x=30 — unchanged *)
+      (match List.nth d 1 with
+       | CurveTo (_, _, _, _, x, _) ->
+         assert (abs_float (x -. 30.0) < 0.01)
+       | _ -> assert false);
+      (* The outgoing handle of the new anchor (x1 of cmd 3) should reflect
+         the drag direction, not be at the original position *)
+      (match List.nth d 3 with
+       | CurveTo (x1, y1, _, _, _, _) ->
+         (* Drag was to (45, 20), so outgoing handle should be near there *)
+         assert (abs_float (x1 -. 45.0) < 1.0);
+         assert (abs_float (y1 -. 20.0) < 1.0)
+       | _ -> assert false)
+    | _ -> assert false);
+
   Printf.printf "All tool interaction tests passed.\n"
