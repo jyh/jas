@@ -91,7 +91,9 @@ impl AppState {
             return;
         }
         self.tabs.remove(index);
-        if self.active_tab >= self.tabs.len() {
+        if self.tabs.is_empty() {
+            self.active_tab = 0;
+        } else if self.active_tab >= self.tabs.len() {
             self.active_tab = self.tabs.len() - 1;
         } else if self.active_tab > index {
             self.active_tab -= 1;
@@ -431,7 +433,9 @@ pub fn App() -> Element {
         let app = app.clone();
         use_effect(move || {
             let _rev = revision();
-            app.borrow().repaint();
+            if let Ok(st) = app.try_borrow() {
+                st.repaint();
+            }
         });
     }
 
@@ -752,15 +756,26 @@ pub fn App() -> Element {
     let _ = revision();
     let active_tool = app.borrow().active_tool;
 
-    // If active tool is an alternate that's not currently visible, update the slot
-    for (si, (_r, _c, tools)) in TOOLBAR_SLOTS.iter().enumerate() {
-        if tools.len() > 1 {
-            if let Some(pos) = tools.iter().position(|&t| t == active_tool) {
-                let current = *slot_alternates.read().get(&si).unwrap_or(&0);
-                if current != pos {
-                    slot_alternates.write().insert(si, pos);
+    // If active tool is an alternate that's not currently visible, update the slot.
+    // Collect updates first, then apply — writing to signals during render can cause
+    // borrow conflicts in the Dioxus runtime.
+    let slot_updates: Vec<(usize, usize)> = TOOLBAR_SLOTS.iter().enumerate()
+        .filter_map(|(si, (_r, _c, tools))| {
+            if tools.len() > 1 {
+                if let Some(pos) = tools.iter().position(|&t| t == active_tool) {
+                    let current = *slot_alternates.peek().get(&si).unwrap_or(&0);
+                    if current != pos {
+                        return Some((si, pos));
+                    }
                 }
             }
+            None
+        })
+        .collect();
+    if !slot_updates.is_empty() {
+        let mut alts = slot_alternates.write();
+        for (si, pos) in slot_updates {
+            alts.insert(si, pos);
         }
     }
 
@@ -769,7 +784,7 @@ pub fn App() -> Element {
         .enumerate()
         .map(|(si, &(row, col, tools))| {
             let act = act.clone();
-            let alt_idx = *slot_alternates.read().get(&si).unwrap_or(&0);
+            let alt_idx = *slot_alternates.peek().get(&si).unwrap_or(&0);
             let kind = tools[alt_idx.min(tools.len() - 1)];
             let has_alternates = tools.len() > 1;
             let is_active = tools.contains(&active_tool);
