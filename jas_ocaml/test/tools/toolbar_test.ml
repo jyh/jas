@@ -11,12 +11,12 @@ let () =
   (* All 10 tool variants exist *)
   let all_tools : Jas.Toolbar.tool list = [
     Selection; Direct_selection; Group_selection;
-    Pen; Pencil; Text_tool; Text_path;
+    Pen; Add_anchor_point; Pencil; Text_tool; Text_path;
     Line; Rect; Polygon;
   ] in
 
-  run_test "all 10 tool variants exist" (fun () ->
-    assert (List.length all_tools = 10)
+  run_test "all 11 tool variants exist" (fun () ->
+    assert (List.length all_tools = 11)
   );
 
   run_test "tool equality" (fun () ->
@@ -70,6 +70,11 @@ let () =
   run_test "arrow slot alternate: group selection" (fun () ->
     tb#select_tool Jas.Toolbar.Group_selection;
     assert (tb#current_tool = Jas.Toolbar.Group_selection)
+  );
+
+  run_test "pen slot alternate: add anchor point" (fun () ->
+    tb#select_tool Jas.Toolbar.Add_anchor_point;
+    assert (tb#current_tool = Jas.Toolbar.Add_anchor_point)
   );
 
   run_test "text slot alternate: text tool" (fun () ->

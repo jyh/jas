@@ -182,3 +182,199 @@ private func layerChildren(_ model: Model) -> [Element] {
         Issue.record("Expected Rect element")
     }
 }
+
+// MARK: - Add Anchor Point tool tests
+
+@Test func addAnchorPointClickOnPathAddsPoint() {
+    let tool = AddAnchorPointTool()
+    let pathElem: Element = .path(Path(
+        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
+    ))
+    let layer = Layer(name: "L", children: [pathElem])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
+    tool.onRelease(ctx, x: 50, y: 0, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 1)
+    if case .path(let p) = children[0] {
+        // Original: moveTo + 1 curveTo = 2; after split: moveTo + 2 curveTos = 3
+        #expect(p.d.count == 3)
+        if case .moveTo = p.d[0] {} else { Issue.record("Expected moveTo") }
+        if case .curveTo = p.d[1] {} else { Issue.record("Expected curveTo") }
+        if case .curveTo = p.d[2] {} else { Issue.record("Expected curveTo") }
+    } else {
+        Issue.record("Expected Path element")
+    }
+}
+
+@Test func addAnchorPointClickAwayDoesNothing() {
+    let tool = AddAnchorPointTool()
+    let pathElem: Element = .path(Path(
+        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
+    ))
+    let layer = Layer(name: "L", children: [pathElem])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    tool.onPress(ctx, x: 50, y: 100, shift: false, alt: false)
+    tool.onRelease(ctx, x: 50, y: 100, shift: false, alt: false)
+    if case .path(let p) = layerChildren(model)[0] {
+        #expect(p.d.count == 2)
+    } else {
+        Issue.record("Expected Path element")
+    }
+}
+
+@Test func addAnchorPointSplitPreservesEndpoints() {
+    let tool = AddAnchorPointTool()
+    let pathElem: Element = .path(Path(
+        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
+    ))
+    let layer = Layer(name: "L", children: [pathElem])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
+    tool.onRelease(ctx, x: 50, y: 0, shift: false, alt: false)
+    if case .path(let p) = layerChildren(model)[0] {
+        // First CurveTo endpoint near (50, 0)
+        if case .curveTo(_, _, _, _, let x, let y) = p.d[1] {
+            #expect(abs(x - 50.0) < 1.0)
+            #expect(abs(y) < 1.0)
+        } else { Issue.record("Expected curveTo") }
+        // Second CurveTo endpoint at (100, 0)
+        if case .curveTo(_, _, _, _, let x, let y) = p.d[2] {
+            #expect(abs(x - 100.0) < 0.01)
+            #expect(abs(y) < 0.01)
+        } else { Issue.record("Expected curveTo") }
+    } else {
+        Issue.record("Expected Path element")
+    }
+}
+
+@Test func addAnchorPointDragAdjustsHandles() {
+    let tool = AddAnchorPointTool()
+    let pathElem: Element = .path(Path(
+        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
+    ))
+    let layer = Layer(name: "L", children: [pathElem])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    // Press at midpoint to split, then drag upward
+    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
+    tool.onMove(ctx, x: 50, y: 20, shift: false, dragging: true)
+    tool.onRelease(ctx, x: 50, y: 20, shift: false, alt: false)
+    if case .path(let p) = layerChildren(model)[0] {
+        #expect(p.d.count == 3)
+        // Outgoing handle (x1, y1 of second CurveTo) at drag position
+        if case .curveTo(let x1, let y1, _, _, _, _) = p.d[2] {
+            #expect(abs(x1 - 50.0) < 0.01)
+            #expect(abs(y1 - 20.0) < 0.01)
+        } else { Issue.record("Expected curveTo") }
+        // Incoming handle (x2, y2 of first CurveTo) mirrored
+        if case .curveTo(_, _, let x2, let y2, _, _) = p.d[1] {
+            #expect(abs(x2 - 50.0) < 0.01)
+            #expect(abs(y2 - (-20.0)) < 0.01)
+        } else { Issue.record("Expected curveTo") }
+    } else {
+        Issue.record("Expected Path element")
+    }
+}
+
+@Test func addAnchorPointCuspDragLeavesIncomingHandle() {
+    let tool = AddAnchorPointTool()
+    let pathElem: Element = .path(Path(
+        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
+    ))
+    let layer = Layer(name: "L", children: [pathElem])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    // Split the curve at midpoint
+    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
+    tool.onRelease(ctx, x: 50, y: 0, shift: false, alt: false)
+    if case .path(let p) = layerChildren(model)[0] {
+        #expect(p.d.count == 3)
+        // Record incoming handle before cusp update
+        var inX2 = 0.0, inY2 = 0.0
+        if case .curveTo(_, _, let x2, let y2, _, _) = p.d[1] {
+            inX2 = x2; inY2 = y2
+        }
+        // Apply cusp update directly
+        var cmds = p.d
+        AddAnchorPointTool.updateHandles(&cmds, firstCmdIdx: 1,
+                                          anchorX: 50, anchorY: 0,
+                                          dragX: 50, dragY: 20, cusp: true)
+        // Outgoing handle at drag position
+        if case .curveTo(let x1, let y1, _, _, _, _) = cmds[2] {
+            #expect(abs(x1 - 50.0) < 0.01)
+            #expect(abs(y1 - 20.0) < 0.01)
+        } else { Issue.record("Expected curveTo") }
+        // Incoming handle unchanged (cusp)
+        if case .curveTo(_, _, let x2, let y2, _, _) = cmds[1] {
+            #expect(abs(x2 - inX2) < 0.01)
+            #expect(abs(y2 - inY2) < 0.01)
+        } else { Issue.record("Expected curveTo") }
+    } else {
+        Issue.record("Expected Path element")
+    }
+}
+
+@Test func addAnchorPointInsertUpdatesSelectionIndices() {
+    let tool = AddAnchorPointTool()
+    let pathElem: Element = .path(Path(
+        d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
+    ))
+    let layer = Layer(name: "L", children: [pathElem])
+    // Select the path with all CPs (indices 0 and 1)
+    let sel: Selection = [ElementSelection(path: [0, 0], controlPoints: [0, 1])]
+    let doc = Document(layers: [layer], selection: sel)
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    // Insert at midpoint
+    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
+    tool.onRelease(ctx, x: 50, y: 0, shift: false, alt: false)
+    // Path now has 3 anchors
+    if case .path(let p) = layerChildren(model)[0] {
+        #expect(p.d.count == 3)
+    } else {
+        Issue.record("Expected Path element")
+    }
+    // Selection should have shifted: {0,1} -> {0, 1(new), 2(was 1)}
+    let es = model.document.getElementSelection([0, 0])
+    #expect(es != nil)
+    #expect(es!.controlPoints == [0, 1, 2])
+}
+
+@Test func addAnchorPointSplitLineSegment() {
+    let tool = AddAnchorPointTool()
+    let pathElem: Element = .path(Path(
+        d: [.moveTo(0, 0), .lineTo(100, 0)],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
+    ))
+    let layer = Layer(name: "L", children: [pathElem])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
+    tool.onRelease(ctx, x: 50, y: 0, shift: false, alt: false)
+    if case .path(let p) = layerChildren(model)[0] {
+        #expect(p.d.count == 3)
+        if case .lineTo = p.d[1] {} else { Issue.record("Expected lineTo") }
+        if case .lineTo = p.d[2] {} else { Issue.record("Expected lineTo") }
+        if case .lineTo(let x, _) = p.d[1] {
+            #expect(abs(x - 50.0) < 1.0)
+        }
+    } else {
+        Issue.record("Expected Path element")
+    }
+}

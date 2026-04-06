@@ -1,14 +1,14 @@
 # Toolbar and Tools
 
 This document describes the toolbar layout, the CanvasTool interface, the
-ToolContext facade, and each of the ten tools.
+ToolContext facade, and each of the eleven tools.
 
 ---
 
 ## Toolbar
 
 The toolbar is a vertical 2-column grid of tool buttons. Seven slots are
-visible; three alternate tools are hidden behind shared slots and accessed
+visible; four alternate tools are hidden behind shared slots and accessed
 via long-press menus.
 
 ### Grid layout
@@ -22,12 +22,13 @@ via long-press menus.
 
 ### Shared slots
 
-Three toolbar positions are shared between alternate tools. Long-pressing
+Four toolbar positions are shared between alternate tools. Long-pressing
 the button (500 ms) opens a popup menu to switch:
 
 | Slot | Default | Alternate | Position |
 |------|---------|-----------|----------|
 | Arrow slot | Direct Selection | Group Selection | Row 0, Col 1 |
+| Pen slot | Pen | Add Anchor Point | Row 1, Col 0 |
 | Text slot | Text | Text on Path | Row 2, Col 0 |
 | Shape slot | Rect | Polygon | Row 3, Col 0 |
 
@@ -42,6 +43,7 @@ alternates are available.
 | V | Selection |
 | A | Direct Selection |
 | P | Pen |
+| + / = | Add Anchor Point |
 | N | Pencil |
 | T | Text |
 | L | Line |
@@ -193,6 +195,7 @@ Same as Selection Tool, plus:
 ## Pen Tool
 
 **Shortcut:** P
+**Shared slot:** Pen slot (long-press to switch to Add Anchor Point)
 
 Creates Bezier paths by clicking anchor points and dragging handles.
 
@@ -210,8 +213,8 @@ IDLE ──press──> DRAGGING ──release──> PLACING ──press──>
 
 | Action | Result |
 |--------|--------|
-| Click | Place an anchor point at the click position |
-| Click and drag | Place an anchor and create symmetric handles (smooth point) |
+| Click | Place a corner anchor point (handles at anchor position) |
+| Click and drag | Place a smooth anchor with symmetric handles |
 | Click near first point | Close the path (if 3+ points exist) |
 | Double-click | Finalize the open path (removes last point) |
 | Escape / Enter | Finalize the open path |
@@ -223,15 +226,23 @@ Each `PenPoint` stores:
 - `(x, y)` -- anchor position
 - `(hx_in, hy_in)` -- incoming Bezier handle
 - `(hx_out, hy_out)` -- outgoing Bezier handle
-- `smooth` -- whether handles are symmetric (dragged vs clicked)
+- `smooth` -- whether handles are symmetric (dragged vs. clicked)
 
-When the user drags after placing a point, the outgoing handle follows the
-cursor and the incoming handle is reflected through the anchor:
+A **corner point** is created by clicking without dragging: both handles
+remain at the anchor position, producing a sharp angle at that vertex.
+
+A **smooth point** is created by click-and-drag: the outgoing handle
+follows the cursor and the incoming handle is reflected through the anchor,
+guaranteeing G1 continuity (tangent continuity):
 
 ```
 hx_in = 2 * x - hx_out
 hy_in = 2 * y - hy_out
 ```
+
+The distance from anchor to cursor determines the handle length, which
+controls the "weight" of the curve on each side. Longer handles produce
+broader arcs; handles at the anchor produce straight segments.
 
 ### Path construction
 
@@ -243,14 +254,142 @@ On finalization, the tool converts its point list to path commands:
   `ClosePath`.
 
 Close detection: if the last point is within `HIT_RADIUS` (8 px) of the
-first point, the path is closed.
+first point, the path is closed. When closing, the duplicate final point
+is removed so that the close segment connects from the last distinct point
+back to the first.
+
+A path must have at least 2 points to be finalized. Single-point paths
+are discarded.
 
 ### Overlay
 
 - Black curve segments for the committed portion of the path.
 - Dashed gray preview curve from the last anchor to the current cursor.
-- Blue handle lines and circles for smooth points.
+  If the cursor is near the first point (within close radius), the preview
+  curves to the first point instead of the cursor.
+- Blue handle lines connecting incoming and outgoing handles through smooth
+  anchor points.
+- White-filled blue circles for handle endpoints.
 - Blue filled squares for anchor points.
+
+---
+
+## Add Anchor Point Tool
+
+**Shortcut:** + / =
+**Shared slot:** Pen slot (long-press on the Pen button)
+
+Inserts new anchor points into existing paths. The tool has three modes:
+click to insert, click-and-drag to insert and adjust handles, and
+Alt+click to toggle smooth/corner on an existing anchor.
+
+### Hit detection
+
+The tool finds the nearest path element within `HIT_RADIUS + 2` px of the
+click. For each segment (CurveTo or LineTo) in the path, it computes the
+closest point and parameter `t`:
+
+- **CurveTo segments**: coarse sampling (50 steps) followed by ternary
+  search refinement (20 iterations) on the cubic Bezier.
+- **LineTo segments**: perpendicular projection onto the line segment,
+  clamped to [0, 1].
+
+### Mode 1: Click to insert
+
+Clicking on a path splits the nearest segment at parameter `t` using
+de Casteljau subdivision, inserting a new anchor point that lies exactly
+on the original curve.
+
+**CurveTo splitting:** A single `CurveTo(x1, y1, x2, y2, x, y)` is
+replaced by two CurveTos whose control points are computed by the
+de Casteljau algorithm at parameter `t`:
+
+```
+Given cubic P0, P1, P2, P3 and parameter t:
+
+Level 1:  A1 = lerp(P0, P1, t)    A2 = lerp(P1, P2, t)    A3 = lerp(P2, P3, t)
+Level 2:  B1 = lerp(A1, A2, t)    B2 = lerp(A2, A3, t)
+Level 3:  M  = lerp(B1, B2, t)     ← new anchor point
+
+First half:  CurveTo(A1, B1, M)
+Second half: CurveTo(B2, A3, P3)
+```
+
+This preserves the original curve shape exactly -- the path before and
+after insertion traces the same geometric curve.
+
+**LineTo splitting:** A single `LineTo(x, y)` is replaced by two LineTos
+with the midpoint at `lerp(start, end, t)`.
+
+### Mode 2: Click-and-drag to insert and adjust handles
+
+When the split produces two CurveTo segments, dragging after the click
+adjusts the handles of the newly inserted anchor:
+
+- **Outgoing handle** (`x1, y1` of the second CurveTo): set to the drag
+  position.
+- **Incoming handle** (`x2, y2` of the first CurveTo): by default,
+  mirrored through the anchor for smooth (G1) continuity:
+
+```
+incoming = 2 * anchor - outgoing
+```
+
+Holding **Alt/Option during drag** creates a **cusp point** instead: only
+the outgoing handle moves, while the incoming handle stays at its
+de Casteljau position. This breaks tangent continuity, allowing an abrupt
+change of direction at the anchor.
+
+### Mode 3: Alt+click to toggle smooth/corner
+
+Alt+clicking on an existing anchor point (within `HIT_RADIUS`) toggles
+between smooth and corner:
+
+**Corner → Smooth:** The handles are extended along the direction from the
+previous anchor to the next anchor. The incoming handle extends backward
+at 1/3 the distance to the previous anchor; the outgoing handle extends
+forward at 1/3 the distance to the next anchor.
+
+```
+direction = normalize(next_anchor - prev_anchor)
+incoming_handle  = anchor - direction * dist_to_prev / 3
+outgoing_handle  = anchor + direction * dist_to_next / 3
+```
+
+**Smooth → Corner:** Both handles are collapsed to the anchor position,
+producing a sharp angle.
+
+Detection: a point is considered a corner if both its incoming handle
+(`x2, y2`) and outgoing handle (`x1, y1` of the next command) are within
+0.5 px of the anchor position.
+
+### States
+
+```
+             on_press (click on path)
+    IDLE ────────────────────────────> DRAGGING (if CurveTo pair)
+      │                                    │
+      │  on_press (Alt+click on anchor)    │ on_move: update handles
+      │  → toggle smooth/corner, stay IDLE │   (Alt held → cusp mode)
+      │                                    │
+      │  on_press (miss)                   │ on_release
+      │  → no-op                           v
+      └───────────────────────────────── IDLE
+```
+
+### Overlay (during drag)
+
+- **Smooth point:** a single blue line through the anchor, connecting the
+  incoming and outgoing handles.
+- **Cusp point:** two separate blue lines, each connecting the anchor to
+  one handle independently.
+- White-filled blue circles at handle endpoints.
+- Blue filled square at the anchor point.
+
+Cusp detection uses the cross product and dot product of the two handle
+vectors from the anchor. A point is a cusp if the handles are not
+collinear (`|cross| > max_len * 0.01`) or point in the same direction
+(`dot > 0`).
 
 ---
 

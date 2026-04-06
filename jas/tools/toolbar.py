@@ -14,6 +14,7 @@ class Tool(Enum):
     DIRECT_SELECTION = auto()
     GROUP_SELECTION = auto()
     PEN = auto()
+    ADD_ANCHOR_POINT = auto()
     PENCIL = auto()
     TEXT = auto()
     TEXT_PATH = auto()
@@ -77,6 +78,8 @@ class ToolButton(QToolButton):
             self._draw_rect_tool(painter)
         elif self.tool == Tool.PEN:
             self._draw_pen_tool(painter)
+        elif self.tool == Tool.ADD_ANCHOR_POINT:
+            self._draw_add_anchor_point_tool(painter)
         elif self.tool == Tool.PENCIL:
             self._draw_pencil_tool(painter)
         elif self.tool == Tool.TEXT:
@@ -168,6 +171,67 @@ class ToolButton(QToolButton):
         painter.drawPath(outer)
         painter.restore()
 
+    def _draw_add_anchor_point_tool(self, painter):
+        # Add Anchor Point icon from SVG (viewBox 0 0 256 256), scaled to 28x28.
+        s = 28.0 / 256.0
+        ox = (self.ICON_SIZE - 28) / 2.0
+        oy = (self.ICON_SIZE - 28) / 2.0
+        painter.save()
+        painter.translate(ox, oy)
+        painter.scale(s, s)
+        # Outer pen nib path + inner cutout (OddEvenFill)
+        outer = QPainterPath()
+        # Outer path
+        outer.moveTo(170.82, 209.27)
+        outer.lineTo(82.74, 256.0)
+        outer.lineTo(71.75, 230.69)
+        outer.cubicTo(60.04, 197.72, 31.98, 175.62, 0.51, 162.2)
+        outer.lineTo(0.07, 55.68)
+        outer.lineTo(0.0, 7.02)
+        outer.cubicTo(0.0, 5.03, 0.62, 2.32, 1.66, 1.26)
+        outer.cubicTo(2.7, 0.2, 6.93, -0.46, 8.2, 0.39)
+        outer.lineTo(138.64, 88.51)
+        outer.cubicTo(133.74, 121.05, 134.34, 154.96, 153.1, 182.9)
+        outer.lineTo(170.8, 209.29)
+        outer.closeSubpath()
+        # Inner cutout (white in SVG)
+        outer.moveTo(126.44, 94.04)
+        outer.cubicTo(124.22, 105.79, 123.56, 115.97, 123.97, 126.68)
+        outer.cubicTo(124.49, 142.78, 127.77, 157.48, 135.08, 172.91)
+        outer.lineTo(72.22, 206.36)
+        outer.cubicTo(57.84, 183.55, 37.99, 166.42, 12.09, 155.28)
+        outer.lineTo(11.47, 30.25)
+        outer.lineTo(53.28, 108.01)
+        outer.cubicTo(48.06, 116.03, 47.97, 124.37, 53.59, 130.5)
+        outer.cubicTo(59.69, 137.16, 68.89, 137.6, 76.64, 131.24)
+        outer.cubicTo(83.21, 126.7, 84.48, 118.99, 81.68, 112.36)
+        outer.cubicTo(78.79, 105.53, 72.96, 101.16, 64.53, 102.02)
+        outer.lineTo(22.84, 24.63)
+        outer.lineTo(126.44, 94.04)
+        outer.closeSubpath()
+        outer.setFillRule(Qt.FillRule.OddEvenFill)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#cccccc"))
+        painter.drawPath(outer)
+        # Plus sign path
+        plus = QPainterPath()
+        plus.moveTo(232.87, 153.61)
+        plus.cubicTo(229.4, 156.72, 224.13, 159.41, 219.01, 161.41)
+        plus.lineTo(200.67, 127.38)
+        plus.lineTo(166.99, 145.47)
+        plus.lineTo(159.35, 132.09)
+        plus.lineTo(193.51, 113.89)
+        plus.lineTo(175.05, 78.74)
+        plus.lineTo(188.64, 71.1)
+        plus.lineTo(207.47, 106.52)
+        plus.lineTo(240.85, 88.53)
+        plus.lineTo(248.17, 101.98)
+        plus.lineTo(214.87, 120.12)
+        plus.lineTo(232.86, 153.58)
+        plus.closeSubpath()
+        painter.drawPath(plus)
+        painter.restore()
+
     def _draw_pencil_tool(self, painter):
         painter.setPen(QPen(QColor("#cccccc"), 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -237,6 +301,8 @@ class ToolButton(QToolButton):
 
 # Tools that share the direct/group selection slot
 _ARROW_SLOT_TOOLS = {Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION}
+# Tools that share the pen/add-anchor-point slot
+_PEN_SLOT_TOOLS = {Tool.PEN, Tool.ADD_ANCHOR_POINT}
 # Tools that share the text/text-path slot
 _TEXT_SLOT_TOOLS = {Tool.TEXT, Tool.TEXT_PATH}
 # Tools that share the rect/polygon slot
@@ -254,6 +320,8 @@ class Toolbar(QWidget):
         self.current_tool = Tool.SELECTION
         # Which tool is visible in the shared arrow slot
         self._arrow_slot_tool = Tool.DIRECT_SELECTION
+        # Which tool is visible in the shared pen slot
+        self._pen_slot_tool = Tool.PEN
         # Which tool is visible in the shared text slot
         self._text_slot_tool = Tool.TEXT
         # Which tool is visible in the shared shape slot
@@ -284,7 +352,7 @@ class Toolbar(QWidget):
             (Tool.RECT, 3, 0),
         ]
         for tool, row, col in tools:
-            has_alt = tool in _ARROW_SLOT_TOOLS or tool in _TEXT_SLOT_TOOLS or tool in _SHAPE_SLOT_TOOLS
+            has_alt = tool in _ARROW_SLOT_TOOLS or tool in _PEN_SLOT_TOOLS or tool in _TEXT_SLOT_TOOLS or tool in _SHAPE_SLOT_TOOLS
             btn = ToolButton(tool, has_alternates=has_alt)
             self.buttons[tool] = btn
             self.button_group.addButton(btn)
@@ -293,6 +361,8 @@ class Toolbar(QWidget):
         # Create hidden alternate buttons (not in grid, share slots)
         self.buttons[Tool.GROUP_SELECTION] = ToolButton(Tool.GROUP_SELECTION, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.GROUP_SELECTION])
+        self.buttons[Tool.ADD_ANCHOR_POINT] = ToolButton(Tool.ADD_ANCHOR_POINT, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.ADD_ANCHOR_POINT])
         self.buttons[Tool.TEXT_PATH] = ToolButton(Tool.TEXT_PATH, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.TEXT_PATH])
         self.buttons[Tool.POLYGON] = ToolButton(Tool.POLYGON, has_alternates=True)
@@ -306,6 +376,12 @@ class Toolbar(QWidget):
         self._long_press_timer.setSingleShot(True)
         self._long_press_timer.setInterval(_LONG_PRESS_MS)
         self._long_press_timer.timeout.connect(self._show_arrow_slot_menu)
+
+        # Long-press timer for the pen slot
+        self._pen_long_press_timer = QTimer(self)
+        self._pen_long_press_timer.setSingleShot(True)
+        self._pen_long_press_timer.setInterval(_LONG_PRESS_MS)
+        self._pen_long_press_timer.timeout.connect(self._show_pen_slot_menu)
 
         # Long-press timer for the text slot
         self._text_long_press_timer = QTimer(self)
@@ -323,6 +399,11 @@ class Toolbar(QWidget):
         arrow_btn = self.buttons[Tool.DIRECT_SELECTION]
         arrow_btn.pressed.connect(self._on_arrow_slot_pressed)
         arrow_btn.released.connect(self._on_arrow_slot_released)
+
+        # Install press/release handling on the pen slot button
+        pen_btn = self.buttons[Tool.PEN]
+        pen_btn.pressed.connect(self._on_pen_slot_pressed)
+        pen_btn.released.connect(self._on_pen_slot_released)
 
         # Install press/release handling on the text slot button
         text_btn = self.buttons[Tool.TEXT]
@@ -344,6 +425,13 @@ class Toolbar(QWidget):
     def _on_arrow_slot_released(self):
         if self._long_press_timer.isActive():
             self._long_press_timer.stop()
+
+    def _on_pen_slot_pressed(self):
+        self._pen_long_press_timer.start()
+
+    def _on_pen_slot_released(self):
+        if self._pen_long_press_timer.isActive():
+            self._pen_long_press_timer.stop()
 
     def _on_text_slot_pressed(self):
         self._text_long_press_timer.start()
@@ -368,6 +456,17 @@ class Toolbar(QWidget):
             action.setChecked(tool == self._arrow_slot_tool)
             action.triggered.connect(lambda checked, t=tool: self._switch_arrow_slot(t))
         btn = self.buttons[self._arrow_slot_tool]
+        menu.exec(btn.mapToGlobal(QPoint(0, btn.height())))
+
+    def _show_pen_slot_menu(self):
+        menu = QMenu(self)
+        for tool in (Tool.PEN, Tool.ADD_ANCHOR_POINT):
+            label = "Pen" if tool == Tool.PEN else "Add Anchor Point"
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(tool == self._pen_slot_tool)
+            action.triggered.connect(lambda checked, t=tool: self._switch_pen_slot(t))
+        btn = self.buttons[Tool.PEN]
         menu.exec(btn.mapToGlobal(QPoint(0, btn.height())))
 
     def _show_text_slot_menu(self):
@@ -402,6 +501,16 @@ class Toolbar(QWidget):
         arrow_btn.update()
         self.select_tool(tool)
 
+    def _switch_pen_slot(self, tool: Tool):
+        """Switch the pen slot to show a different tool."""
+        if tool == self._pen_slot_tool:
+            return
+        self._pen_slot_tool = tool
+        pen_btn = self.buttons[Tool.PEN]
+        pen_btn.tool = tool
+        pen_btn.update()
+        self.select_tool(tool)
+
     def _switch_text_slot(self, tool: Tool):
         """Switch the text slot to show a different tool."""
         if tool == self._text_slot_tool:
@@ -429,6 +538,12 @@ class Toolbar(QWidget):
             arrow_btn.setChecked(True)
             arrow_btn.update()
             self._arrow_slot_tool = tool
+        elif tool in _PEN_SLOT_TOOLS:
+            pen_btn = self.buttons[Tool.PEN]
+            pen_btn.tool = tool
+            pen_btn.setChecked(True)
+            pen_btn.update()
+            self._pen_slot_tool = tool
         elif tool in _TEXT_SLOT_TOOLS:
             text_btn = self.buttons[Tool.TEXT]
             text_btn.tool = tool

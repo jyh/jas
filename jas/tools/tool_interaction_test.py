@@ -10,7 +10,7 @@ from document.controller import Controller
 from document.document import Document, ElementSelection, ElementPath
 from document.model import Model
 from geometry.element import (
-    Color, Element, Fill, Layer, Line, Rect, Stroke,
+    Color, CurveTo, Element, Fill, Layer, Line, LineTo, MoveTo, Path, Rect, Stroke,
     control_point_count,
 )
 from tools.tool import ToolContext
@@ -202,6 +202,179 @@ class PolygonToolTest(absltest.TestCase):
         self.assertEqual(len(children), 1)
         self.assertIsInstance(children[0], Polygon)
         self.assertEqual(len(children[0].points), 5)  # default POLYGON_SIDES
+
+
+class AddAnchorPointToolTest(absltest.TestCase):
+    def _make_path_doc(self):
+        """Create a document with a single straight-line cubic path."""
+        path_elem = Path(
+            d=(MoveTo(0, 0), CurveTo(33, 0, 67, 0, 100, 0)),
+            stroke=Stroke(Color(0, 0, 0), 1.0),
+        )
+        layer = Layer(name="L", children=(path_elem,))
+        doc = Document(layers=(layer,), selection=frozenset())
+        return doc
+
+    def _make_ctx_with_path_hit(self, model, path_elem):
+        """Create a ToolContext whose hit_test_path_curve returns the path."""
+        ctx, model, ctrl = _make_ctx(model)
+        ctx.hit_test_path_curve = lambda x, y: ((0, 0), path_elem) if abs(y) < 20 else None
+        return ctx, model, ctrl
+
+    def test_click_on_path_adds_point(self):
+        """Clicking on a path splits the curve into two segments."""
+        from tools.add_anchor_point import AddAnchorPointTool
+        tool = AddAnchorPointTool()
+        doc = self._make_path_doc()
+        model = Model(document=doc)
+        path_elem = model.document.layers[0].children[0]
+        ctx, model, ctrl = self._make_ctx_with_path_hit(model, path_elem)
+        # Click at midpoint of the path
+        tool.on_press(ctx, 50, 0)
+        tool.on_release(ctx, 50, 0)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 1)
+        path = children[0]
+        self.assertIsInstance(path, Path)
+        # Original: MoveTo + 1 CurveTo = 2 commands
+        # After split: MoveTo + 2 CurveTos = 3 commands
+        self.assertEqual(len(path.d), 3)
+        self.assertIsInstance(path.d[0], MoveTo)
+        self.assertIsInstance(path.d[1], CurveTo)
+        self.assertIsInstance(path.d[2], CurveTo)
+
+    def test_click_away_from_path_does_nothing(self):
+        """Clicking far from any path does not modify the document."""
+        from tools.add_anchor_point import AddAnchorPointTool
+        tool = AddAnchorPointTool()
+        doc = self._make_path_doc()
+        model = Model(document=doc)
+        path_elem = model.document.layers[0].children[0]
+        ctx, model, ctrl = self._make_ctx_with_path_hit(model, path_elem)
+        tool.on_press(ctx, 50, 100)  # far from the path at y=0
+        tool.on_release(ctx, 50, 100)
+        children = _layer_children(model)
+        path = children[0]
+        self.assertEqual(len(path.d), 2)  # unchanged
+
+    def test_split_preserves_endpoints(self):
+        """After splitting, the first segment ends near the click and the
+        second segment ends at the original endpoint."""
+        from tools.add_anchor_point import AddAnchorPointTool
+        tool = AddAnchorPointTool()
+        doc = self._make_path_doc()
+        model = Model(document=doc)
+        path_elem = model.document.layers[0].children[0]
+        ctx, model, ctrl = self._make_ctx_with_path_hit(model, path_elem)
+        tool.on_press(ctx, 50, 0)
+        tool.on_release(ctx, 50, 0)
+        path = _layer_children(model)[0]
+        # First new CurveTo endpoint should be near (50, 0)
+        self.assertAlmostEqual(path.d[1].x, 50.0, delta=1.0)
+        self.assertAlmostEqual(path.d[1].y, 0.0, delta=1.0)
+        # Second CurveTo endpoint should be (100, 0)
+        self.assertAlmostEqual(path.d[2].x, 100.0, delta=0.01)
+        self.assertAlmostEqual(path.d[2].y, 0.0, delta=0.01)
+
+    def test_drag_adjusts_handles(self):
+        """Press on path, drag to adjust handles, then release."""
+        from tools.add_anchor_point import AddAnchorPointTool
+        tool = AddAnchorPointTool()
+        doc = self._make_path_doc()
+        model = Model(document=doc)
+        path_elem = model.document.layers[0].children[0]
+        ctx, model, ctrl = self._make_ctx_with_path_hit(model, path_elem)
+        # Press at midpoint to split, then drag upward
+        tool.on_press(ctx, 50, 0)
+        tool.on_move(ctx, 50, 20, dragging=True)
+        tool.on_release(ctx, 50, 20)
+        path = _layer_children(model)[0]
+        self.assertEqual(len(path.d), 3)
+        # Outgoing handle (x1, y1 of second CurveTo) should be at drag pos
+        out_cmd = path.d[2]
+        self.assertIsInstance(out_cmd, CurveTo)
+        self.assertAlmostEqual(out_cmd.x1, 50.0, delta=0.01)
+        self.assertAlmostEqual(out_cmd.y1, 20.0, delta=0.01)
+        # Incoming handle (x2, y2 of first CurveTo) should be mirrored
+        in_cmd = path.d[1]
+        self.assertIsInstance(in_cmd, CurveTo)
+        self.assertAlmostEqual(in_cmd.x2, 50.0, delta=0.01)
+        self.assertAlmostEqual(in_cmd.y2, -20.0, delta=0.01)
+
+    def test_drag_cusp_leaves_incoming_handle(self):
+        """Alt+drag creates a cusp: only outgoing handle moves."""
+        from tools.add_anchor_point import AddAnchorPointTool, _update_handles
+        tool = AddAnchorPointTool()
+        doc = self._make_path_doc()
+        model = Model(document=doc)
+        path_elem = model.document.layers[0].children[0]
+        ctx, model, ctrl = self._make_ctx_with_path_hit(model, path_elem)
+        # Press at midpoint to split the curve
+        tool.on_press(ctx, 50, 0)
+        # The split has happened; now test _update_handles with cusp=True
+        path = _layer_children(model)[0]
+        self.assertEqual(len(path.d), 3)
+        # Record the incoming handle before the cusp update
+        in_x2_before = path.d[1].x2
+        in_y2_before = path.d[1].y2
+        # Apply cusp update directly
+        new_cmds = _update_handles(
+            list(path.d), 1, 50.0, 0.0, 50.0, 20.0, cusp=True,
+        )
+        # Outgoing handle should be at drag position
+        self.assertAlmostEqual(new_cmds[2].x1, 50.0, delta=0.01)
+        self.assertAlmostEqual(new_cmds[2].y1, 20.0, delta=0.01)
+        # Incoming handle should be unchanged (cusp)
+        self.assertAlmostEqual(new_cmds[1].x2, in_x2_before, delta=0.01)
+        self.assertAlmostEqual(new_cmds[1].y2, in_y2_before, delta=0.01)
+
+    def test_insert_updates_selection_indices(self):
+        """Inserting a point shifts selection CP indices so handles stay correct."""
+        from tools.add_anchor_point import AddAnchorPointTool
+        tool = AddAnchorPointTool()
+        path_elem = Path(
+            d=(MoveTo(0, 0), CurveTo(33, 0, 67, 0, 100, 0)),
+            stroke=Stroke(Color(0, 0, 0), 1.0),
+        )
+        layer = Layer(name="L", children=(path_elem,))
+        # Select the path with all CPs (indices 0 and 1)
+        sel = frozenset({ElementSelection(
+            path=(0, 0), control_points=frozenset({0, 1}))})
+        doc = Document(layers=(layer,), selection=sel)
+        model = Model(document=doc)
+        ctx, model, ctrl = _make_ctx(model)
+        ctx.hit_test_path_curve = lambda x, y: ((0, 0), path_elem) if abs(y) < 20 else None
+        # Insert at midpoint
+        tool.on_press(ctx, 50, 0)
+        tool.on_release(ctx, 50, 0)
+        # Path now has 3 anchors (indices 0, 1, 2)
+        path = _layer_children(model)[0]
+        self.assertEqual(len(path.d), 3)
+        # Selection should have shifted: old {0,1} -> {0, 1(new), 2(was 1)}
+        es = model.document.get_element_selection((0, 0))
+        self.assertIsNotNone(es)
+        self.assertEqual(es.control_points, frozenset({0, 1, 2}))
+
+    def test_split_line_segment(self):
+        """Splitting a LineTo segment produces two LineTos."""
+        from tools.add_anchor_point import AddAnchorPointTool
+        tool = AddAnchorPointTool()
+        path_elem = Path(
+            d=(MoveTo(0, 0), LineTo(100, 0)),
+            stroke=Stroke(Color(0, 0, 0), 1.0),
+        )
+        layer = Layer(name="L", children=(path_elem,))
+        doc = Document(layers=(layer,), selection=frozenset())
+        model = Model(document=doc)
+        ctx, model, ctrl = _make_ctx(model)
+        ctx.hit_test_path_curve = lambda x, y: ((0, 0), path_elem) if abs(y) < 20 else None
+        tool.on_press(ctx, 50, 0)
+        tool.on_release(ctx, 50, 0)
+        path = _layer_children(model)[0]
+        self.assertEqual(len(path.d), 3)
+        self.assertIsInstance(path.d[1], LineTo)
+        self.assertIsInstance(path.d[2], LineTo)
+        self.assertAlmostEqual(path.d[1].x, 50.0, delta=1.0)
 
 
 if __name__ == '__main__':

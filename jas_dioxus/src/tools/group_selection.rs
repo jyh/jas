@@ -128,7 +128,7 @@ impl CanvasTool for GroupSelectionTool {
         self.state = State::Marquee { start_x: x, start_y: y, cur_x: x, cur_y: y };
     }
 
-    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _dragging: bool) {
+    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool, _dragging: bool) {
         match &mut self.state {
             State::PendingDrag { start_x, start_y } => {
                 let dist = ((x - *start_x).powi(2) + (y - *start_y).powi(2)).sqrt();

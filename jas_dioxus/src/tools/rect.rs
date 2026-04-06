@@ -37,7 +37,7 @@ impl CanvasTool for RectTool {
         };
     }
 
-    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _dragging: bool) {
+    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool, _dragging: bool) {
         if let State::Drawing { start_x, start_y, .. } = self.state {
             self.state = State::Drawing {
                 start_x,

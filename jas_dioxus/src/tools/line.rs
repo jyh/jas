@@ -43,7 +43,7 @@ impl CanvasTool for LineTool {
         };
     }
 
-    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _dragging: bool) {
+    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool, _dragging: bool) {
         if let State::Drawing { start_x, start_y, .. } = self.state {
             self.state = State::Drawing {
                 start_x,
@@ -101,7 +101,7 @@ mod tests {
         let mut tool = LineTool::new();
         let mut model = Model::default();
         tool.on_press(&mut model, 10.0, 20.0, false, false);
-        tool.on_move(&mut model, 30.0, 40.0, false, true);
+        tool.on_move(&mut model, 30.0, 40.0, false, false, true);
         tool.on_release(&mut model, 50.0, 60.0, false, false);
         let children = model.document().layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
@@ -140,7 +140,7 @@ mod tests {
     fn move_without_press_is_noop() {
         let mut tool = LineTool::new();
         let mut model = Model::default();
-        tool.on_move(&mut model, 50.0, 60.0, false, true);
+        tool.on_move(&mut model, 50.0, 60.0, false, false, true);
         assert!(tool.is_idle());
     }
 }

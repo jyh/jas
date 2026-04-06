@@ -9,6 +9,7 @@ public enum Tool: String, CaseIterable {
     case directSelection
     case groupSelection
     case pen
+    case addAnchorPoint
     case pencil
     case text
     case textPath
@@ -229,6 +230,7 @@ struct CanvasTab: View {
 struct ToolbarPanel: View {
     @Binding var currentTool: Tool
     @State private var arrowSlotTool: Tool = .directSelection
+    @State private var penSlotTool: Tool = .pen
     @State private var textSlotTool: Tool = .text
     @State private var shapeSlotTool: Tool = .rect
 
@@ -256,7 +258,11 @@ struct ToolbarPanel: View {
                     )
                 }
                 HStack(spacing: 2) {
-                    ToolbarView.toolButton(currentTool: $currentTool, tool: .pen)
+                    ToolbarView.toolButtonWithAlternates(
+                        currentTool: $currentTool,
+                        visibleTool: $penSlotTool,
+                        alternates: [.pen, .addAnchorPoint]
+                    )
                     ToolbarView.toolButton(currentTool: $currentTool, tool: .pencil)
                 }
                 HStack(spacing: 2) {

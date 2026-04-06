@@ -755,6 +755,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         | Toolbar.Group_selection ->
           _self#make_arrow_cursor 1.0 1.0 1.0 0.0 0.0 0.0 true
         | Toolbar.Pen -> _self#make_pen_cursor
+        | Toolbar.Add_anchor_point -> _self#make_add_anchor_point_cursor
         | _ -> Gdk.Cursor.create `CROSSHAIR
       in
       let win = canvas_area#misc#window in
@@ -769,6 +770,26 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         Filename.concat (Filename.concat
           (Filename.dirname Sys.executable_name) "..")
           "transcript/icons/pen tool.png";
+      ] in
+      let path = List.find Sys.file_exists candidates in
+      let orig = GdkPixbuf.from_file path in
+      let sz = 16 in
+      let pixbuf = GdkPixbuf.create ~width:sz ~height:sz
+        ~bits:(GdkPixbuf.get_bits_per_sample orig)
+        ~has_alpha:(GdkPixbuf.get_has_alpha orig) () in
+      GdkPixbuf.scale ~dest:pixbuf ~width:sz ~height:sz
+        ~scale_x:(float_of_int sz /. float_of_int (GdkPixbuf.get_width orig))
+        ~scale_y:(float_of_int sz /. float_of_int (GdkPixbuf.get_height orig))
+        ~interp:`BILINEAR orig;
+      Gdk.Cursor.create_from_pixbuf pixbuf ~x:1 ~y:1
+
+    method private make_add_anchor_point_cursor =
+      let candidates = [
+        "transcript/icons/add anchor point.png";
+        "../transcript/icons/add anchor point.png";
+        Filename.concat (Filename.concat
+          (Filename.dirname Sys.executable_name) "..")
+          "transcript/icons/add anchor point.png";
       ] in
       let path = List.find Sys.file_exists candidates in
       let orig = GdkPixbuf.from_file path in
