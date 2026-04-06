@@ -665,6 +665,7 @@ class CanvasNSView: NSView {
                     controller?.model.document = doc
                 }
             }
+            window?.invalidateCursorRects(for: self)
         }
     }
     var onToolRead: (() -> Tool)?
@@ -680,6 +681,68 @@ class CanvasNSView: NSView {
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+
+    override func resetCursorRects() {
+        discardCursorRects()
+        addCursorRect(bounds, cursor: cursorForTool(onToolRead?() ?? currentTool))
+    }
+
+    private func cursorForTool(_ tool: Tool) -> NSCursor {
+        return NSCursor.crosshair
+    }
+
+    private func makeArrowCursor(fill: NSColor, stroke: NSColor) -> NSCursor {
+        let size = NSSize(width: 24, height: 24)
+        let image = NSImage(size: size, flipped: true) { rect in
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: 4, y: 1))
+            path.line(to: NSPoint(x: 4, y: 19))
+            path.line(to: NSPoint(x: 8, y: 15))
+            path.line(to: NSPoint(x: 12, y: 22))
+            path.line(to: NSPoint(x: 15, y: 20))
+            path.line(to: NSPoint(x: 11, y: 13))
+            path.line(to: NSPoint(x: 16, y: 13))
+            path.close()
+            fill.setFill()
+            path.fill()
+            stroke.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+            return true
+        }
+        return NSCursor(image: image, hotSpot: NSPoint(x: 4, y: 1))
+    }
+
+    private func makeGroupSelectionCursor() -> NSCursor {
+        let size = NSSize(width: 24, height: 24)
+        let image = NSImage(size: size, flipped: true) { rect in
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: 4, y: 1))
+            path.line(to: NSPoint(x: 4, y: 19))
+            path.line(to: NSPoint(x: 8, y: 15))
+            path.line(to: NSPoint(x: 12, y: 22))
+            path.line(to: NSPoint(x: 15, y: 20))
+            path.line(to: NSPoint(x: 11, y: 13))
+            path.line(to: NSPoint(x: 16, y: 13))
+            path.close()
+            NSColor.white.setFill()
+            path.fill()
+            NSColor.black.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+            // Plus sign
+            let plus = NSBezierPath()
+            plus.move(to: NSPoint(x: 17, y: 20))
+            plus.line(to: NSPoint(x: 23, y: 20))
+            plus.move(to: NSPoint(x: 20, y: 17))
+            plus.line(to: NSPoint(x: 20, y: 23))
+            NSColor.black.setStroke()
+            plus.lineWidth = 2
+            plus.stroke()
+            return true
+        }
+        return NSCursor(image: image, hotSpot: NSPoint(x: 4, y: 1))
+    }
 
     var activeTool: CanvasTool {
         let tool = onToolRead?() ?? currentTool
