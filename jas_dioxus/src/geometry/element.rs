@@ -4,6 +4,8 @@
 //! one with the desired changes. Element types and attributes follow the SVG 1.1
 //! specification.
 
+use std::rc::Rc;
+
 /// Line segments per Bezier curve when flattening paths.
 pub const FLATTEN_STEPS: usize = 20;
 
@@ -361,14 +363,14 @@ pub struct TextPathElem {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupElem {
-    pub children: Vec<Element>,
+    pub children: Vec<Rc<Element>>,
     pub common: CommonProps,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayerElem {
     pub name: String,
-    pub children: Vec<Element>,
+    pub children: Vec<Rc<Element>>,
     pub common: CommonProps,
 }
 
@@ -421,7 +423,7 @@ impl Element {
         self.common().transform.as_ref()
     }
 
-    pub fn children(&self) -> Option<&[Element]> {
+    pub fn children(&self) -> Option<&[Rc<Element>]> {
         match self {
             Element::Group(g) => Some(&g.children),
             Element::Layer(l) => Some(&l.children),
@@ -429,7 +431,7 @@ impl Element {
         }
     }
 
-    pub fn children_mut(&mut self) -> Option<&mut Vec<Element>> {
+    pub fn children_mut(&mut self) -> Option<&mut Vec<Rc<Element>>> {
         match self {
             Element::Group(g) => Some(&mut g.children),
             Element::Layer(l) => Some(&mut l.children),
@@ -657,7 +659,7 @@ fn path_bounds(d: &[PathCommand]) -> Bounds {
     (min_x, min_y, max_x - min_x, max_y - min_y)
 }
 
-fn children_bounds(children: &[Element]) -> Bounds {
+fn children_bounds(children: &[Rc<Element>]) -> Bounds {
     if children.is_empty() {
         return (0.0, 0.0, 0.0, 0.0);
     }
@@ -1245,11 +1247,11 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
             d: translate_path_commands(&e.d, dx, dy), ..e.clone()
         }),
         Element::Group(e) => Element::Group(GroupElem {
-            children: e.children.iter().map(|c| translate_element(c, dx, dy)).collect(),
+            children: e.children.iter().map(|c| Rc::new(translate_element(c, dx, dy))).collect(),
             ..e.clone()
         }),
         Element::Layer(e) => Element::Layer(LayerElem {
-            children: e.children.iter().map(|c| translate_element(c, dx, dy)).collect(),
+            children: e.children.iter().map(|c| Rc::new(translate_element(c, dx, dy))).collect(),
             ..e.clone()
         }),
     }
@@ -1299,7 +1301,10 @@ mod tests {
     }
 
     fn group(children: Vec<Element>) -> Element {
-        Element::Group(GroupElem { children, common: CommonProps::default() })
+        Element::Group(GroupElem {
+            children: children.into_iter().map(Rc::new).collect(),
+            common: CommonProps::default(),
+        })
     }
 
     // --- Bounds tests ---

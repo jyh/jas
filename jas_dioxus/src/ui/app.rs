@@ -181,7 +181,7 @@ fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64
                                 control_points: (0..n).collect(),
                             });
                             if let Some(layer_children) = doc.layers[idx].children_mut() {
-                                layer_children.push(translated);
+                                layer_children.push(Rc::new(translated));
                             }
                             j += 1;
                         }
@@ -215,7 +215,7 @@ fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64
                 control_points: (0..n).collect(),
             });
             if let Some(children) = doc.layers[idx].children_mut() {
-                children.push(translated);
+                children.push(Rc::new(translated));
             }
         }
         doc.selection = new_selection;
@@ -245,7 +245,7 @@ fn selection_to_svg(st: &AppState) -> Option<String> {
     use crate::geometry::element::{LayerElem, CommonProps};
     let temp_doc = Document {
         layers: vec![GeoElement::Layer(LayerElem {
-            children: elements,
+            children: elements.into_iter().map(Rc::new).collect(),
             name: String::new(),
             common: CommonProps::default(),
         })],

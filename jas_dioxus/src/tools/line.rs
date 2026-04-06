@@ -105,7 +105,7 @@ mod tests {
         tool.on_release(&mut model, 50.0, 60.0, false, false);
         let children = model.document().layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
-        if let Element::Line(line) = &children[0] {
+        if let Element::Line(line) = &*children[0] {
             assert_eq!(line.x1, 10.0);
             assert_eq!(line.y1, 20.0);
             assert_eq!(line.x2, 50.0);

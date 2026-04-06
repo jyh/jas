@@ -26,6 +26,7 @@
 //! element (e.g. `[0, 2, 1]` means layer 0 → child 2 → child 1).
 
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use crate::geometry::element::{Element, LayerElem, CommonProps};
 
@@ -208,9 +209,9 @@ impl Document {
 fn replace_in_children(node: &mut Element, rest: &[usize], new_elem: Element) {
     if let Some(children) = node.children_mut() {
         if rest.len() == 1 {
-            children[rest[0]] = new_elem;
+            children[rest[0]] = Rc::new(new_elem);
         } else {
-            replace_in_children(&mut children[rest[0]], &rest[1..], new_elem);
+            replace_in_children(Rc::make_mut(&mut children[rest[0]]), &rest[1..], new_elem);
         }
     }
 }
@@ -218,9 +219,9 @@ fn replace_in_children(node: &mut Element, rest: &[usize], new_elem: Element) {
 fn insert_at_in_children(node: &mut Element, rest: &[usize], new_elem: Element) {
     if let Some(children) = node.children_mut() {
         if rest.len() == 1 {
-            children.insert(rest[0], new_elem);
+            children.insert(rest[0], Rc::new(new_elem));
         } else {
-            insert_at_in_children(&mut children[rest[0]], &rest[1..], new_elem);
+            insert_at_in_children(Rc::make_mut(&mut children[rest[0]]), &rest[1..], new_elem);
         }
     }
 }
@@ -228,9 +229,9 @@ fn insert_at_in_children(node: &mut Element, rest: &[usize], new_elem: Element) 
 fn insert_after_in_children(node: &mut Element, rest: &[usize], new_elem: Element) {
     if let Some(children) = node.children_mut() {
         if rest.len() == 1 {
-            children.insert(rest[0] + 1, new_elem);
+            children.insert(rest[0] + 1, Rc::new(new_elem));
         } else {
-            insert_after_in_children(&mut children[rest[0]], &rest[1..], new_elem);
+            insert_after_in_children(Rc::make_mut(&mut children[rest[0]]), &rest[1..], new_elem);
         }
     }
 }
@@ -240,7 +241,7 @@ fn remove_from_children(node: &mut Element, rest: &[usize]) {
         if rest.len() == 1 {
             children.remove(rest[0]);
         } else {
-            remove_from_children(&mut children[rest[0]], &rest[1..]);
+            remove_from_children(Rc::make_mut(&mut children[rest[0]]), &rest[1..]);
         }
     }
 }
@@ -268,12 +269,17 @@ mod tests {
 
     fn make_layer(name: &str, children: Vec<Element>) -> Element {
         Element::Layer(LayerElem {
-            name: name.to_string(), children, common: CommonProps::default(),
+            name: name.to_string(),
+            children: children.into_iter().map(Rc::new).collect(),
+            common: CommonProps::default(),
         })
     }
 
     fn make_group(children: Vec<Element>) -> Element {
-        Element::Group(GroupElem { children, common: CommonProps::default() })
+        Element::Group(GroupElem {
+            children: children.into_iter().map(Rc::new).collect(),
+            common: CommonProps::default(),
+        })
     }
 
     #[test]
@@ -365,7 +371,7 @@ mod tests {
         let doc2 = doc.delete_element(&vec![0, 0]);
         if let Element::Layer(l) = &doc2.layers[0] {
             assert_eq!(l.children.len(), 1);
-            assert!(matches!(&l.children[0], Element::Line(_)));
+            assert!(matches!(&*l.children[0], Element::Line(_)));
         } else {
             panic!("expected layer");
         }
@@ -393,7 +399,7 @@ mod tests {
         let doc2 = doc.insert_element_after(&vec![0, 0], make_line(0.0, 0.0, 5.0, 5.0));
         if let Element::Layer(l) = &doc2.layers[0] {
             assert_eq!(l.children.len(), 2);
-            assert!(matches!(&l.children[1], Element::Line(_)));
+            assert!(matches!(&*l.children[1], Element::Line(_)));
         }
     }
 
@@ -404,8 +410,8 @@ mod tests {
         let doc2 = doc.insert_element_at(&vec![0, 0], make_rect(0.0, 0.0, 10.0, 10.0));
         if let Element::Layer(l) = &doc2.layers[0] {
             assert_eq!(l.children.len(), 2);
-            assert!(matches!(&l.children[0], Element::Rect(_)));
-            assert!(matches!(&l.children[1], Element::Line(_)));
+            assert!(matches!(&*l.children[0], Element::Rect(_)));
+            assert!(matches!(&*l.children[1], Element::Line(_)));
         }
     }
 }

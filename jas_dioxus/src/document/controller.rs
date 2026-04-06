@@ -5,6 +5,7 @@
 //! that replaces the old one in the Model.
 
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use crate::document::document::{ElementPath, ElementSelection, Selection};
 use crate::document::model::Model;
@@ -31,7 +32,7 @@ impl Controller {
         }
         let mut new_doc = doc;
         if let Some(children) = new_doc.layers[idx].children_mut() {
-            children.push(element);
+            children.push(Rc::new(element));
         }
         model.set_document(new_doc);
     }
@@ -293,9 +294,9 @@ impl Controller {
             return;
         }
         // Gather elements in order
-        let elements: Vec<Element> = paths
+        let elements: Vec<Rc<Element>> = paths
             .iter()
-            .filter_map(|p| doc.get_element(p).cloned())
+            .filter_map(|p| doc.get_element(p).cloned().map(Rc::new))
             .collect();
         if elements.len() != paths.len() {
             return;
@@ -402,7 +403,7 @@ impl Controller {
         let doc = model.document().clone();
         let mut changed = false;
 
-        fn flatten(children: &[Element], changed: &mut bool) -> Vec<Element> {
+        fn flatten(children: &[Rc<Element>], changed: &mut bool) -> Vec<Rc<Element>> {
             let mut result = Vec::new();
             for child in children {
                 if child.is_group() && !child.locked() {
@@ -413,11 +414,11 @@ impl Controller {
                     // Locked group: recurse into children but keep the group
                     let inner = child.children().unwrap_or(&[]);
                     let new_children = flatten(inner, changed);
-                    let mut new_group = child.clone();
+                    let mut new_group = (**child).clone();
                     if let Some(gc) = new_group.children_mut() {
                         *gc = new_children;
                     }
-                    result.push(new_group);
+                    result.push(Rc::new(new_group));
                 } else {
                     result.push(child.clone());
                 }
@@ -497,7 +498,7 @@ fn lock_element(elem: &Element) -> Element {
     let mut new = elem.clone();
     if new.is_group() {
         if let Some(children) = new.children_mut() {
-            *children = children.iter().map(|c| lock_element(c)).collect();
+            *children = children.iter().map(|c| Rc::new(lock_element(c))).collect();
         }
     }
     new.common_mut().locked = true;
@@ -507,7 +508,7 @@ fn lock_element(elem: &Element) -> Element {
 fn unlock_element(elem: &Element) -> Element {
     let mut new = elem.clone();
     if let Some(children) = new.children_mut() {
-        *children = children.iter().map(|c| unlock_element(c)).collect();
+        *children = children.iter().map(|c| Rc::new(unlock_element(c))).collect();
     }
     new.common_mut().locked = false;
     new
@@ -574,7 +575,10 @@ mod tests {
     }
 
     fn make_group(children: Vec<Element>) -> Element {
-        Element::Group(GroupElem { children, common: CommonProps::default() })
+        Element::Group(GroupElem {
+            children: children.into_iter().map(Rc::new).collect(),
+            common: CommonProps::default(),
+        })
     }
 
     fn sel_paths(model: &Model) -> Vec<Vec<usize>> {
@@ -590,7 +594,7 @@ mod tests {
         let group = make_group(vec![make_line(1.0, 1.0, 2.0, 2.0), make_line(3.0, 3.0, 4.0, 4.0)]);
         let layer = Element::Layer(LayerElem {
             name: "L0".to_string(),
-            children: vec![rect, group, line],
+            children: vec![Rc::new(rect), Rc::new(group), Rc::new(line)],
             common: CommonProps::default(),
         });
         let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![] };
@@ -604,7 +608,7 @@ mod tests {
         Controller::add_element(&mut model, rect);
         let children = model.document().layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
-        assert!(matches!(&children[0], Element::Rect(_)));
+        assert!(matches!(&*children[0], Element::Rect(_)));
     }
 
     #[test]
@@ -689,7 +693,7 @@ mod tests {
         Controller::group_selection(&mut model);
         // The two elements should now be inside a Group
         let children = model.document().layers[0].children().unwrap();
-        let has_group = children.iter().any(|c| matches!(c, Element::Group(_)));
+        let has_group = children.iter().any(|c| matches!(**c, Element::Group(_)));
         assert!(has_group);
     }
 
@@ -702,7 +706,7 @@ mod tests {
         // Group's children should be inlined
         let children = model.document().layers[0].children().unwrap();
         // No more groups (the original group should be ungrouped)
-        let group_count = children.iter().filter(|c| matches!(c, Element::Group(_))).count();
+        let group_count = children.iter().filter(|c| matches!(***c, Element::Group(_))).count();
         assert_eq!(group_count, 0);
     }
 
