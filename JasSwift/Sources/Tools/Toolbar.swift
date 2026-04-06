@@ -36,38 +36,76 @@ public struct ToolbarView {
 
             switch tool {
             case .selection:
-                context.fill(arrowPath(ox: ox, oy: oy), with: .color(color))
+                // Black arrow with white border
+                let p = arrowPath(ox: ox, oy: oy)
+                context.fill(p, with: .color(.black))
+                context.stroke(p, with: .color(.white), lineWidth: 1.0)
 
             case .directSelection:
-                context.stroke(arrowPath(ox: ox, oy: oy), with: .color(color), lineWidth: 1.5)
+                // White arrow with black border
+                let p = arrowPath(ox: ox, oy: oy)
+                context.fill(p, with: .color(.white))
+                context.stroke(p, with: .color(.black), lineWidth: 1.0)
 
             case .groupSelection:
-                context.stroke(arrowPath(ox: ox, oy: oy), with: .color(color), lineWidth: 1.5)
+                // White arrow with black border
+                let p = arrowPath(ox: ox, oy: oy)
+                context.fill(p, with: .color(.white))
+                context.stroke(p, with: .color(.black), lineWidth: 1.0)
                 // Draw '+' badge in lower-right
                 var plus = SwiftUI.Path()
                 plus.move(to: CGPoint(x: ox + 20, y: oy + 20))
                 plus.addLine(to: CGPoint(x: ox + 27, y: oy + 20))
                 plus.move(to: CGPoint(x: ox + 23.5, y: oy + 16.5))
                 plus.addLine(to: CGPoint(x: ox + 23.5, y: oy + 23.5))
-                context.stroke(plus, with: .color(color), lineWidth: 1.5)
+                context.stroke(plus, with: .color(.black), lineWidth: 1.5)
 
             case .pen:
-                var path = SwiftUI.Path()
-                // Fountain pen nib shape
-                path.move(to: CGPoint(x: ox + 8, y: oy + 24))
-                path.addLine(to: CGPoint(x: ox + 10, y: oy + 18))
-                path.addLine(to: CGPoint(x: ox + 14, y: oy + 4))
-                path.addLine(to: CGPoint(x: ox + 18, y: oy + 4))
-                path.addLine(to: CGPoint(x: ox + 22, y: oy + 18))
-                path.addLine(to: CGPoint(x: ox + 24, y: oy + 24))
-                path.addLine(to: CGPoint(x: ox + 16, y: oy + 20))
-                path.closeSubpath()
-                context.stroke(path, with: .color(color), lineWidth: 1.5)
-                // Center line (nib slit)
-                var slit = SwiftUI.Path()
-                slit.move(to: CGPoint(x: ox + 16, y: oy + 10))
-                slit.addLine(to: CGPoint(x: ox + 16, y: oy + 20))
-                context.stroke(slit, with: .color(color), lineWidth: 1.5)
+                // Pen icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28
+                let s: CGFloat = 28.0 / 256.0
+                let transform = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: s, y: s)
+                // Outer path
+                var outer = SwiftUI.Path()
+                outer.move(to: CGPoint(x: 163.07, y: 190.51))
+                outer.addLine(to: CGPoint(x: 175.61, y: 210.03))
+                outer.addLine(to: CGPoint(x: 84.93, y: 255.99))
+                outer.addLine(to: CGPoint(x: 72.47, y: 227.94))
+                outer.addCurve(to: CGPoint(x: 0.13, y: 161.51),
+                    control1: CGPoint(x: 58.86, y: 195.29), control2: CGPoint(x: 32.68, y: 176.45))
+                outer.addLine(to: CGPoint(x: 0, y: 4.58))
+                outer.addCurve(to: CGPoint(x: 4.11, y: -0.37),
+                    control1: CGPoint(x: 0, y: 2.38), control2: CGPoint(x: 2.8, y: -0.28))
+                outer.addCurve(to: CGPoint(x: 9.42, y: 0.97),
+                    control1: CGPoint(x: 5.42, y: -0.46), control2: CGPoint(x: 8.07, y: 0.08))
+                outer.addLine(to: CGPoint(x: 94.84, y: 57.3))
+                outer.addLine(to: CGPoint(x: 143.22, y: 89.45))
+                outer.addCurve(to: CGPoint(x: 163.08, y: 190.51),
+                    control1: CGPoint(x: 135.93, y: 124.03), control2: CGPoint(x: 139.17, y: 161.04))
+                outer.closeSubpath()
+                // Inner cutout
+                outer.move(to: CGPoint(x: 61.7, y: 49.58))
+                outer.addLine(to: CGPoint(x: 23.48, y: 24.2))
+                outer.addLine(to: CGPoint(x: 65.56, y: 102.31))
+                outer.addCurve(to: CGPoint(x: 83.05, y: 111.1),
+                    control1: CGPoint(x: 73.04, y: 102.48), control2: CGPoint(x: 79.74, y: 105.2))
+                outer.addCurve(to: CGPoint(x: 82.1, y: 129.97),
+                    control1: CGPoint(x: 86.36, y: 117.0), control2: CGPoint(x: 86.92, y: 124.26))
+                outer.addCurve(to: CGPoint(x: 57.38, y: 133.01),
+                    control1: CGPoint(x: 75.74, y: 137.51), control2: CGPoint(x: 64.43, y: 138.54))
+                outer.addCurve(to: CGPoint(x: 54.52, y: 108.06),
+                    control1: CGPoint(x: 49.55, y: 126.87), control2: CGPoint(x: 47.97, y: 116.88))
+                outer.addLine(to: CGPoint(x: 12.09, y: 30.4))
+                outer.addLine(to: CGPoint(x: 12.53, y: 100.36))
+                outer.addLine(to: CGPoint(x: 12.24, y: 154.67))
+                outer.addCurve(to: CGPoint(x: 73.77, y: 206.51),
+                    control1: CGPoint(x: 37.86, y: 166.32), control2: CGPoint(x: 59.12, y: 182.87))
+                outer.addLine(to: CGPoint(x: 138.57, y: 173.27))
+                outer.addCurve(to: CGPoint(x: 130.1, y: 95.08),
+                    control1: CGPoint(x: 127.46, y: 148.19), control2: CGPoint(x: 124.88, y: 122.64))
+                outer.addLine(to: CGPoint(x: 61.7, y: 49.58))
+                outer.closeSubpath()
+                let transformed = outer.applying(transform)
+                context.fill(transformed, with: .color(color), style: FillStyle(eoFill: true))
 
             case .pencil:
                 var path = SwiftUI.Path()

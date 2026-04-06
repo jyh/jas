@@ -55,6 +55,9 @@ impl ToolKind {
             ToolKind::GroupSelection => {
                 "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cpath d='M4,1 L4,19 L8,15 L12,22 L15,20 L11,13 L16,13 Z' fill='white' stroke='black' stroke-width='1.5'/%3E%3Cline x1='17' y1='20' x2='23' y2='20' stroke='black' stroke-width='2'/%3E%3Cline x1='20' y1='17' x2='20' y2='23' stroke='black' stroke-width='2'/%3E%3C/svg%3E\") 4 1, default"
             }
+            ToolKind::Pen => {
+                "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='-5 -2 175 265'%3E%3Cpath d='M163.07,190.51l12.54,19.52-90.68,45.96-12.46-28.05C58.86,195.29,32.68,176.45.13,161.51L0,4.58C0,2.38,2.8-.28,4.11-.37s3.96.45,5.31,1.34l85.42,56.33,48.38,32.15c-7.29,34.58-4.05,71.59,19.86,101.06Z' fill='black'/%3E%3Cpath d='M61.7,49.58l68.41,45.5c-5.22,27.56-2.64,53.1,8.47,78.19l-64.8,33.24c-14.66-23.64-35.91-40.19-61.53-51.84l.29-54.31-.44-69.96,42.43,77.66c-6.55,8.82-4.96,18.8,2.86,24.95,7.05,5.53,18.35,4.49,24.72-3.04,4.82-5.71,4.27-12.96.95-18.87s-10.01-8.62-17.49-8.79L23.48,24.2l38.22,25.38Z' fill='white'/%3E%3C/svg%3E\") 1 1, crosshair"
+            }
             _ => "crosshair",
         }
     }

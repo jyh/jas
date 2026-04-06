@@ -650,12 +650,11 @@ class CanvasNSView: NSView {
     var controller: Controller?
     var currentTool: Tool = .selection {
         didSet {
+            guard oldValue != currentTool else { return }
             if let ctx = toolContext {
                 let savedSelection = document.selection
                 tools[oldValue]?.deactivate(ctx)
-                if oldValue != currentTool {
-                    tools[currentTool]?.activate(ctx)
-                }
+                tools[currentTool]?.activate(ctx)
                 // Preserve selection across tool changes
                 if document.selection != savedSelection {
                     var doc = document
@@ -695,6 +694,8 @@ class CanvasNSView: NSView {
             return makeArrowCursor(fill: .white, stroke: .black)
         case .groupSelection:
             return makeGroupSelectionCursor()
+        case .pen:
+            return makePenCursor()
         default:
             return NSCursor.crosshair
         }
@@ -751,6 +752,33 @@ class CanvasNSView: NSView {
             return true
         }
         return NSCursor(image: image, hotSpot: NSPoint(x: 4, y: 1))
+    }
+
+    private func makePenCursor() -> NSCursor {
+        // Load pen cursor from reference PNG bitmap, scaled to 32x32
+        let bundle = Bundle.main
+        let cwd = FileManager.default.currentDirectoryPath
+        let candidates = [
+            (cwd as NSString).appendingPathComponent("transcript/icons/pen tool.png"),
+            (cwd as NSString).appendingPathComponent("../transcript/icons/pen tool.png"),
+            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("transcript/icons/pen tool.png") },
+            bundle.path(forResource: "pen tool", ofType: "png"),
+        ].compactMap { $0 }
+        for path in candidates {
+            if let orig = NSImage(contentsOfFile: path) {
+                // Draw at 32x32 pixels, set size to 16x16 points for @2x Retina
+                let pixelSize = NSSize(width: 32, height: 32)
+                let image = NSImage(size: pixelSize)
+                image.lockFocus()
+                orig.draw(in: NSRect(origin: .zero, size: pixelSize),
+                          from: NSRect(origin: .zero, size: orig.size),
+                          operation: .sourceOver, fraction: 1.0)
+                image.unlockFocus()
+                image.size = NSSize(width: 16, height: 16)
+                return NSCursor(image: image, hotSpot: NSPoint(x: 1, y: 1))
+            }
+        }
+        return NSCursor.crosshair
     }
 
     var activeTool: CanvasTool {

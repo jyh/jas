@@ -397,18 +397,20 @@ const IC: &str = "rgb(204,204,204)";
 fn toolbar_svg_icon(kind: ToolKind) -> String {
     let c = IC;
     match kind {
-        // Filled arrow cursor
+        // Black arrow with white border
         ToolKind::Selection => format!(
-            r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="{c}" stroke="{c}" stroke-width="1"/>"#),
-        // Outline arrow cursor
+            r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="black" stroke="white" stroke-width="1"/>"#),
+        // White arrow with black border
         ToolKind::DirectSelection => format!(
-            r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="none" stroke="{c}" stroke-width="1"/>"#),
-        // Outline arrow + plus badge
+            r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="white" stroke="black" stroke-width="1"/>"#),
+        // White arrow with black border + plus badge
         ToolKind::GroupSelection => format!(
-            r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="none" stroke="{c}" stroke-width="1"/><line x1="20" y1="20" x2="27" y2="20" stroke="{c}" stroke-width="1.5"/><line x1="23.5" y1="16.5" x2="23.5" y2="23.5" stroke="{c}" stroke-width="1.5"/>"#),
-        // Pen nib
-        ToolKind::Pen => format!(
-            r#"<path d="M8,24 L10,18 L14,4 L18,4 L22,18 L24,24 L16,20 Z" fill="none" stroke="{c}" stroke-width="1.5"/><line x1="16" y1="10" x2="16" y2="20" stroke="{c}" stroke-width="1.5"/>"#),
+            r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="white" stroke="black" stroke-width="1"/><line x1="20" y1="20" x2="27" y2="20" stroke="black" stroke-width="1.5"/><line x1="23.5" y1="16.5" x2="23.5" y2="23.5" stroke="black" stroke-width="1.5"/>"#),
+        // Pen nib (from SVG, scaled from 256x256 viewBox to 28x28)
+        ToolKind::Pen => {
+            let _c = c;
+            r##"<g transform="scale(0.109375)"><path d="M163.07,190.51l12.54,19.52-90.68,45.96-12.46-28.05C58.86,195.29,32.68,176.45.13,161.51L0,4.58C0,2.38,2.8-.28,4.11-.37s3.96.45,5.31,1.34l85.42,56.33,48.38,32.15c-7.29,34.58-4.05,71.59,19.86,101.06ZM61.7,49.58L23.48,24.2l42.08,78.11c7.48.17,14.18,2.89,17.49,8.79s3.87,13.16-.95,18.87c-6.36,7.54-17.67,8.57-24.72,3.04-7.83-6.14-9.41-16.13-2.86-24.95L12.09,30.4l.44,69.96-.29,54.31c25.62,11.65,46.88,28.2,61.53,51.84l64.8-33.24c-11.11-25.08-13.69-50.63-8.47-78.19L61.7,49.58Z" fill="rgb(204,204,204)"/><path d="M61.7,49.58l68.41,45.5c-5.22,27.56-2.64,53.1,8.47,78.19l-64.8,33.24c-14.66-23.64-35.91-40.19-61.53-51.84l.29-54.31-.44-69.96,42.43,77.66c-6.55,8.82-4.96,18.8,2.86,24.95,7.05,5.53,18.35,4.49,24.72-3.04,4.82-5.71,4.27-12.96.95-18.87s-10.01-8.62-17.49-8.79L23.48,24.2l38.22,25.38Z" fill="#3c3c3c"/></g>"##.to_string()
+        },
         // Pencil
         ToolKind::Pencil => format!(
             r#"<path d="M6,22 L20,8 L24,4 L26,6 L22,10 L8,24 Z" fill="none" stroke="{c}" stroke-width="1.5"/><line x1="6" y1="22" x2="4" y2="26" stroke="{c}" stroke-width="1.5"/><line x1="4" y1="26" x2="8" y2="24" stroke="{c}" stroke-width="1.5"/>"#),
