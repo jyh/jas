@@ -124,6 +124,13 @@ impl AppState {
             None => return,
         };
         let canvas: HtmlCanvasElement = canvas_el.unchecked_into();
+        // Sync canvas internal resolution to its CSS layout size
+        let cw = canvas.client_width() as u32;
+        let ch = canvas.client_height() as u32;
+        if cw > 0 && ch > 0 && (canvas.width() != cw || canvas.height() != ch) {
+            canvas.set_width(cw);
+            canvas.set_height(ch);
+        }
         let ctx: CanvasRenderingContext2d = match canvas.get_context("2d") {
             Ok(Some(ctx)) => ctx.unchecked_into(),
             _ => return,
@@ -1220,8 +1227,6 @@ pub fn App() -> Element {
                     if has_tabs {
                         canvas {
                             id: "jas-canvas",
-                            width: "1200",
-                            height: "800",
                             style: "display:block; width:100%; height:100%; cursor:{active_tool.cursor_css()};",
                             onmousedown: on_mousedown,
                             onmousemove: on_mousemove,

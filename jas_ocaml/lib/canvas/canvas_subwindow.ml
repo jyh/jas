@@ -747,10 +747,51 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
     }
 
     method private update_cursor =
-      let cursor = Gdk.Cursor.create `CROSSHAIR in
+      let cursor = match current_tool_type with
+        | Toolbar.Selection ->
+          _self#make_arrow_cursor 0.0 0.0 0.0 1.0 1.0 1.0 false
+        | Toolbar.Direct_selection ->
+          _self#make_arrow_cursor 1.0 1.0 1.0 0.0 0.0 0.0 false
+        | Toolbar.Group_selection ->
+          _self#make_arrow_cursor 1.0 1.0 1.0 0.0 0.0 0.0 true
+        | _ -> Gdk.Cursor.create `CROSSHAIR
+      in
       let win = canvas_area#misc#window in
       if Gobject.get_oid win <> 0 then
         Gdk.Window.set_cursor win cursor
+
+    method private make_arrow_cursor fr fg fb sr sg sb with_plus =
+      (* Render arrow cursor from a 24x24 Cairo surface. *)
+      let size = 24 in
+      let surface = Cairo.Image.create Cairo.Image.ARGB32 ~w:size ~h:size in
+      let cr = Cairo.create surface in
+      Cairo.move_to cr 4.0 1.0;
+      Cairo.line_to cr 4.0 19.0;
+      Cairo.line_to cr 8.0 15.0;
+      Cairo.line_to cr 12.0 22.0;
+      Cairo.line_to cr 15.0 20.0;
+      Cairo.line_to cr 11.0 13.0;
+      Cairo.line_to cr 16.0 13.0;
+      Cairo.Path.close cr;
+      Cairo.set_source_rgba cr fr fg fb 1.0;
+      Cairo.fill_preserve cr;
+      Cairo.set_source_rgba cr sr sg sb 1.0;
+      Cairo.set_line_width cr 1.5;
+      Cairo.stroke cr;
+      if with_plus then begin
+        Cairo.set_source_rgba cr 0.0 0.0 0.0 1.0;
+        Cairo.set_line_width cr 2.0;
+        Cairo.move_to cr 17.0 20.0;
+        Cairo.line_to cr 23.0 20.0;
+        Cairo.move_to cr 20.0 17.0;
+        Cairo.line_to cr 20.0 23.0;
+        Cairo.stroke cr
+      end;
+      let tmp = Filename.temp_file "jas_cursor" ".png" in
+      Cairo.PNG.write surface tmp;
+      let pixbuf = GdkPixbuf.from_file tmp in
+      (try Sys.remove tmp with _ -> ());
+      Gdk.Cursor.create_from_pixbuf pixbuf ~x:4 ~y:1
 
     method private switch_tool =
       let new_tool_type = toolbar#current_tool in

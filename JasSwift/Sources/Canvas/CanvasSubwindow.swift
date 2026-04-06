@@ -688,7 +688,16 @@ class CanvasNSView: NSView {
     }
 
     private func cursorForTool(_ tool: Tool) -> NSCursor {
-        return NSCursor.crosshair
+        switch tool {
+        case .selection:
+            return NSCursor.arrow
+        case .directSelection:
+            return makeArrowCursor(fill: .white, stroke: .black)
+        case .groupSelection:
+            return makeGroupSelectionCursor()
+        default:
+            return NSCursor.crosshair
+        }
     }
 
     private func makeArrowCursor(fill: NSColor, stroke: NSColor) -> NSCursor {
