@@ -1142,11 +1142,17 @@ fn move_path_command_points(
                     }
                 }
                 PathCommand::CurveTo {
-                    x1, y1, x2, y2, x, y,
+                    x1: _, y1: _, x2, y2, x, y,
                 } => {
+                    // Preserve x1,y1 from new_cmds — a previous anchor's
+                    // outgoing-handle logic may have already adjusted them.
+                    let (cur_x1, cur_y1) = match new_cmds[ci] {
+                        PathCommand::CurveTo { x1, y1, .. } => (x1, y1),
+                        _ => unreachable!(),
+                    };
                     new_cmds[ci] = PathCommand::CurveTo {
-                        x1,
-                        y1,
+                        x1: cur_x1,
+                        y1: cur_y1,
                         x2: x2 + dx,
                         y2: y2 + dy,
                         x: x + dx,
@@ -1179,6 +1185,22 @@ fn move_path_command_points(
                         x: x + dx,
                         y: y + dy,
                     };
+                    // Move outgoing handle
+                    if ci + 1 < d.len() {
+                        if let PathCommand::CurveTo {
+                            x1, y1, x2, y2, x, y,
+                        } = d[ci + 1]
+                        {
+                            new_cmds[ci + 1] = PathCommand::CurveTo {
+                                x1: x1 + dx,
+                                y1: y1 + dy,
+                                x2,
+                                y2,
+                                x,
+                                y,
+                            };
+                        }
+                    }
                 }
                 _ => {}
             }
