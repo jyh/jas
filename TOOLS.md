@@ -1,7 +1,7 @@
 # Toolbar and Tools
 
 This document describes the toolbar layout, the CanvasTool interface, the
-ToolContext facade, and each of the eleven tools.
+ToolContext facade, and each of the thirteen tools.
 
 ---
 
@@ -25,10 +25,10 @@ via long-press menus.
 Four toolbar positions are shared between alternate tools. Long-pressing
 the button (500 ms) opens a popup menu to switch:
 
-| Slot | Default | Alternate | Position |
-|------|---------|-----------|----------|
+| Slot | Default | Alternates | Position |
+|------|---------|------------|----------|
 | Arrow slot | Direct Selection | Group Selection | Row 0, Col 1 |
-| Pen slot | Pen | Add Anchor Point | Row 1, Col 0 |
+| Pen slot | Pen | Add Anchor Point, Delete Anchor Point, Anchor Point | Row 1, Col 0 |
 | Text slot | Text | Text on Path | Row 2, Col 0 |
 | Shape slot | Rect | Polygon | Row 3, Col 0 |
 
@@ -44,6 +44,8 @@ alternates are available.
 | A | Direct Selection |
 | P | Pen |
 | + / = | Add Anchor Point |
+| - | Delete Anchor Point |
+| Shift+C | Anchor Point |
 | N | Pencil |
 | T | Text |
 | L | Line |
@@ -195,7 +197,7 @@ Same as Selection Tool, plus:
 ## Pen Tool
 
 **Shortcut:** P
-**Shared slot:** Pen slot (long-press to switch to Add Anchor Point)
+**Shared slot:** Pen slot (long-press to switch to Add/Delete/Anchor Point)
 
 Creates Bezier paths by clicking anchor points and dragging handles.
 
@@ -390,6 +392,231 @@ Cusp detection uses the cross product and dot product of the two handle
 vectors from the anchor. A point is a cusp if the handles are not
 collinear (`|cross| > max_len * 0.01`) or point in the same direction
 (`dot > 0`).
+
+---
+
+## Delete Anchor Point Tool
+
+**Shortcut:** -
+**Shared slot:** Pen slot (long-press on the Pen button)
+
+Removes anchor points from existing paths. When an anchor is deleted, the
+adjacent segments are merged into a single segment that preserves the outer
+control handles.
+
+### Hit detection
+
+The tool finds an anchor point within `HIT_RADIUS` (8 px) of the click on
+any path element in the document, including paths inside unlocked groups.
+
+### Deletion algorithm
+
+The tool handles three cases depending on the position of the deleted anchor:
+
+**Case 1: First anchor (MoveTo at index 0)**
+
+The next command's endpoint is promoted to become the new MoveTo. The
+original MoveTo and the command immediately after it are replaced by a
+single MoveTo at the next anchor's position.
+
+```
+Before:  M(0,0) C(10,0, 20,0, 30,0) C(40,0, 50,0, 60,0)
+Delete index 0:
+After:   M(30,0) C(40,0, 50,0, 60,0)
+```
+
+**Case 2: Last anchor**
+
+The path is simply truncated before the deleted anchor. If a ClosePath
+followed the last anchor, it is preserved.
+
+```
+Before:  M(0,0) C(10,0, 20,0, 30,0) C(40,0, 50,0, 60,0)
+Delete index 2:
+After:   M(0,0) C(10,0, 20,0, 30,0)
+```
+
+**Case 3: Interior anchor**
+
+The two adjacent segments (the one ending at the deleted anchor and the one
+starting from it) are merged into a single segment. The merge keeps the
+**outer control handles** -- the outgoing handle of the previous anchor and
+the incoming handle of the next anchor:
+
+| Segments | Merged result |
+|----------|---------------|
+| CurveTo + CurveTo | CurveTo(x1,y1 from first, x2,y2 from second, endpoint from second) |
+| CurveTo + LineTo | CurveTo(x1,y1 from first, endpoint,endpoint, endpoint) |
+| LineTo + CurveTo | CurveTo(prev_anchor, prev_anchor, x2,y2 from second, endpoint) |
+| LineTo + LineTo | LineTo(endpoint of second) |
+
+```
+Before:  M(0,0) C(10,0, 20,0, 30,0) C(40,0, 50,0, 60,0) C(70,0, 80,0, 90,0)
+Delete index 2 (anchor at 60,0):
+After:   M(0,0) C(10,0, 20,0, 30,0) C(40,0, 80,0, 90,0)
+                                       ^^^^   ^^^^
+                                       outer handles preserved
+```
+
+### Minimum path size
+
+If the path would have fewer than 2 anchor points after deletion, the
+entire path element is removed from the document.
+
+### Selection after deletion
+
+After a successful deletion, all remaining control points of the modified
+path are selected.
+
+### States
+
+```
+    IDLE ──press on anchor──> delete anchor, return to IDLE
+      │
+      │ press (miss)
+      └──> no-op
+```
+
+The tool has no drag behavior. All work happens in `on_press`.
+
+### Overlay
+
+None.
+
+---
+
+## Anchor Point Tool (Convert Anchor Point)
+
+**Shortcut:** Shift+C
+**Shared slot:** Pen slot (long-press on the Pen button)
+
+Converts anchor points between corner, smooth, and cusp types. This is the
+primary tool for reshaping curves by changing the relationship between an
+anchor's incoming and outgoing control handles.
+
+### Point types
+
+| Type | Description | Handle behavior |
+|------|-------------|-----------------|
+| Corner | Sharp angle at the anchor | Both handles collapsed to anchor position (or absent) |
+| Smooth | Tangent-continuous (G1) | Handles are collinear through the anchor, reflected symmetrically |
+| Cusp | Abrupt direction change | Handles exist but point in independent directions |
+
+### Interaction
+
+The tool provides three distinct interactions:
+
+**1. Drag on a corner point → convert to smooth**
+
+Dragging from a corner point pulls out symmetric control handles. The
+outgoing handle follows the cursor; the incoming handle is reflected
+through the anchor:
+
+```
+outgoing_handle = cursor_position
+incoming_handle = 2 * anchor - cursor_position
+```
+
+If the anchor was previously a LineTo, it is promoted to a CurveTo. The
+adjacent segments are also converted to CurveTo if necessary to accommodate
+the new handles.
+
+| Action | Result |
+|--------|--------|
+| Press on corner anchor | Begin handle pull |
+| Drag | Live preview: handles extend symmetrically from anchor toward cursor |
+| Release | Commit the conversion; select all remaining CPs |
+
+**2. Click on a smooth point → convert to corner**
+
+Clicking (without dragging) on a smooth point collapses both handles to
+the anchor position, converting it to a corner:
+
+```
+incoming_handle (x2,y2) = anchor position
+outgoing_handle (x1,y1 of next cmd) = anchor position
+```
+
+The CurveTo commands are preserved (not converted back to LineTo) so that
+the adjacent segments retain their other handles. Only the handles touching
+this anchor are collapsed.
+
+| Action | Result |
+|--------|--------|
+| Click on smooth anchor | Collapse both handles to anchor; select all CPs |
+
+**3. Drag on a control handle → create cusp**
+
+Dragging an existing control handle moves **only that handle** without
+reflecting the opposite handle. This breaks the smooth (G1) continuity,
+creating a cusp point where the curve changes direction abruptly.
+
+This differs from the Direct Selection tool, which maintains smooth
+continuity by rotating the opposite handle when one handle is dragged.
+
+```
+Direct Selection:  move handle → opposite handle rotates to stay collinear
+Anchor Point tool: move handle → opposite handle stays fixed (independent)
+```
+
+| Action | Result |
+|--------|--------|
+| Press on handle | Begin independent handle drag |
+| Drag | Move only the pressed handle; opposite handle unchanged |
+| Release | Commit the cusp; select all CPs |
+
+### Hit testing
+
+The tool checks handles before anchors, so dragging a handle that overlaps
+its anchor triggers cusp behavior rather than corner-to-smooth conversion.
+
+Handles are tested on **all** path elements in the document (not just
+selected ones), unlike the Direct Selection tool which only shows handles
+on selected elements.
+
+### States
+
+```
+                 press on handle
+    IDLE ────────────────────────> DRAGGING_HANDLE
+      │                                │
+      │  press on corner anchor        │ on_move: move handle independently
+      │  ──────────────────>           │ on_release: commit cusp
+      │  DRAGGING_CORNER               v
+      │       │                     IDLE
+      │       │ on_move: update
+      │       │   symmetric handles
+      │       │ on_release: commit
+      │       v   smooth conversion
+      │     IDLE
+      │
+      │  press on smooth anchor
+      │  ──────────────────>
+      │  PRESSED_SMOOTH
+      │       │
+      │       │ release (no drag): convert to corner
+      │       │ drag > 3px: convert to DRAGGING_CORNER
+      │       v   (reset handles, then pull new ones)
+      │     IDLE
+      │
+      │  press (miss)
+      └──> no-op
+```
+
+Note: pressing on a smooth point and then dragging beyond 3 px first
+collapses the handles (corner conversion), then immediately begins pulling
+new handles (corner-to-smooth conversion). This allows the user to
+"re-pull" handles in a different direction from a smooth point.
+
+### Selection after conversion
+
+All three interactions select all remaining control points of the modified
+path after committing the change.
+
+### Overlay
+
+None. The canvas's standard handle rendering shows the updated handles
+in real time during the drag.
 
 ---
 
