@@ -2,7 +2,8 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import (
-    QBrush, QColor, QPainter, QPainterPath, QPen, QTransform, QMouseEvent, QPaintEvent,
+    QBrush, QColor, QCursor, QPainter, QPainterPath, QPen, QTransform, QMouseEvent,
+    QPaintEvent,
 )
 from PySide6.QtWidgets import QLineEdit, QTextEdit, QWidget
 
@@ -521,6 +522,7 @@ class CanvasWidget(QWidget):
         )
         self.setMinimumSize(320, 240)
         self.setMouseTracking(True)
+        self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
         model.on_document_changed(self._on_document_changed)
 
     @property

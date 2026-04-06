@@ -45,6 +45,13 @@ impl ToolKind {
         }
     }
 
+    /// Return a CSS cursor value for the canvas when this tool is active.
+    pub fn cursor_css(&self) -> &'static str {
+        match self {
+            _ => "crosshair",
+        }
+    }
+
     pub fn shortcut(&self) -> Option<&'static str> {
         match self {
             ToolKind::Selection => Some("v"),
