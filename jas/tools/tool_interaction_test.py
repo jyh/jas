@@ -432,5 +432,106 @@ class AddAnchorPointToolTest(absltest.TestCase):
         tool.on_release(ctx, 70, 20)
 
 
+class PencilToolTest(absltest.TestCase):
+    def test_freehand_draw_creates_path(self):
+        """Dragging creates a path with MoveTo + CurveTo segments."""
+        from tools.pencil import PencilTool
+        tool = PencilTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 0, 0)
+        for i in range(1, 21):
+            tool.on_move(ctx, i * 5.0, (i * 0.1) * 20.0, dragging=True)
+        tool.on_release(ctx, 100, 0)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 1)
+        elem = children[0]
+        self.assertIsInstance(elem, Path)
+        self.assertGreaterEqual(len(elem.d), 2)
+        self.assertIsInstance(elem.d[0], MoveTo)
+        for cmd in elem.d[1:]:
+            self.assertIsInstance(cmd, CurveTo)
+
+    def test_click_without_drag_creates_degenerate_path(self):
+        """Press+release at same point still produces a path."""
+        from tools.pencil import PencilTool
+        tool = PencilTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 20)
+        tool.on_release(ctx, 10, 20)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 1)
+
+    def test_path_has_stroke(self):
+        """Pencil paths have a stroke and no fill."""
+        from tools.pencil import PencilTool
+        tool = PencilTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 0, 0)
+        tool.on_move(ctx, 50, 50, dragging=True)
+        tool.on_release(ctx, 100, 0)
+        children = _layer_children(model)
+        elem = children[0]
+        self.assertIsNotNone(elem.stroke)
+        self.assertIsNone(elem.fill)
+
+    def test_move_without_press_is_noop(self):
+        """Moving without pressing doesn't start drawing."""
+        from tools.pencil import PencilTool
+        tool = PencilTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_move(ctx, 50, 60, dragging=True)
+        self.assertFalse(tool._drawing)
+
+    def test_release_without_press_is_noop(self):
+        """Releasing without pressing creates nothing."""
+        from tools.pencil import PencilTool
+        tool = PencilTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_release(ctx, 50, 60)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 0)
+
+    def test_drawing_state_transitions(self):
+        """Drawing flag tracks press/release correctly."""
+        from tools.pencil import PencilTool
+        tool = PencilTool()
+        ctx, model, ctrl = _make_ctx()
+        self.assertFalse(tool._drawing)
+        tool.on_press(ctx, 0, 0)
+        self.assertTrue(tool._drawing)
+        tool.on_move(ctx, 50, 50, dragging=True)
+        self.assertTrue(tool._drawing)
+        tool.on_release(ctx, 100, 0)
+        self.assertFalse(tool._drawing)
+
+    def test_points_accumulate_during_draw(self):
+        """Points grow during drag, cleared after finish."""
+        from tools.pencil import PencilTool
+        tool = PencilTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 0, 0)
+        self.assertEqual(len(tool._points), 1)
+        tool.on_move(ctx, 10, 10, dragging=True)
+        self.assertEqual(len(tool._points), 2)
+        tool.on_move(ctx, 20, 20, dragging=True)
+        self.assertEqual(len(tool._points), 3)
+        tool.on_release(ctx, 30, 30)
+        self.assertEqual(len(tool._points), 0)
+
+    def test_path_starts_at_press_point(self):
+        """MoveTo uses the initial press coordinates."""
+        from tools.pencil import PencilTool
+        tool = PencilTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 15, 25)
+        tool.on_move(ctx, 50, 50, dragging=True)
+        tool.on_release(ctx, 100, 0)
+        children = _layer_children(model)
+        elem = children[0]
+        self.assertIsInstance(elem.d[0], MoveTo)
+        self.assertEqual(elem.d[0].x, 15)
+        self.assertEqual(elem.d[0].y, 25)
+
+
 if __name__ == '__main__':
     absltest.main()

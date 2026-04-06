@@ -624,35 +624,130 @@ in real time during the drag.
 
 **Shortcut:** N
 
-Freehand drawing with automatic Bezier curve fitting.
+Freehand drawing with automatic Bezier curve fitting. The pencil tool
+converts a sequence of mouse-sampled points into a smooth piecewise cubic
+Bezier path.
+
+### Cursor and icon
+
+The cursor and toolbar icon are rendered from a detailed SVG pencil image
+(`transcript/icons/pencil tool.svg`, viewBox 0 0 256 256). The pencil
+points to the lower-left; the cursor hotspot is at the tip
+(approximately pixel 1,23 in a 24×24 cursor image). The toolbar icon is
+scaled to 28×28 using a `scale(28/256)` transform and rendered with three
+fill layers:
+
+| Layer | Color (cursor) | Color (toolbar) | Purpose |
+|-------|-----------------|-----------------|---------|
+| Outer outline | black | rgb(204,204,204) | Main pencil silhouette |
+| Facets (×4 paths) | #5f5f5b | #3c3c3c | Body section detail |
+| Tip highlight | white | white | Pencil tip accent |
 
 ### Interaction
 
 | Action | Result |
 |--------|--------|
-| Press | Begin sampling mouse positions |
+| Press | Snapshot document; begin sampling; record press point |
 | Drag | Append each mouse position to the point list; draw polyline preview |
-| Release | Fit cubic Bezier curves to the sampled points; add Path element |
+| Release | Append release point; fit cubic Bezier curves to the sampled points; add Path element |
+| Move without press | No-op (points not accumulated) |
+| Release without press | No-op (no path created) |
+
+### States
+
+```
+                 on_press
+    IDLE ─────────────────> DRAWING
+                               │
+                            on_move: append (x, y) to points
+                               │
+                            on_release: append (x, y),
+                               │        call finish()
+                               v
+                         fit_curve(points, FIT_ERROR)
+                               │
+                    ┌───────────┴───────────┐
+                    │                       │
+               segments empty          segments non-empty
+               or < 2 points           │
+                    │                  build MoveTo + CurveTos
+                    │                  add_element(Path)
+                    v                       │
+                  IDLE                      v
+                (no element)             IDLE
+                                    (path created)
+```
+
+The `drawing` flag tracks whether a press is active. Points are cleared
+after `finish()` regardless of outcome.
 
 ### Curve fitting
 
 The tool uses the **Schneider algorithm** ("An Algorithm for Automatically
 Fitting Digitized Curves", Graphics Gems I, 1990) to convert the sampled
-polyline into a piecewise cubic Bezier spline:
+polyline into a piecewise cubic Bezier spline.
 
-1. Compute endpoint tangent vectors.
-2. Fit a single cubic Bezier to the point sequence.
-3. If the maximum error exceeds the threshold (`FIT_ERROR = 4.0` px),
-   split at the point of maximum error and recursively fit each half.
-4. Iteratively refine parameter values using Newton-Raphson.
+**Algorithm parameters:**
 
-The result is a compact Path element with smooth curves approximating the
-freehand stroke.
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `FIT_ERROR` | 4.0 px | Maximum allowed deviation from sampled points |
+| `MAX_ITERATIONS` | 4 | Newton-Raphson reparameterization iterations |
+
+**Algorithm steps:**
+
+1. **Compute endpoint tangents.** The left tangent at the first point is
+   the direction from point 0 to point 1. The right tangent at the last
+   point is the direction from the last point to the second-to-last point.
+
+2. **Fit a single cubic Bezier** to the full point range using least-squares
+   with chord-length parameterization.
+
+3. **Check maximum error.** Walk all sampled points, compute the distance
+   to the fitted curve at their parameterized positions. If the maximum
+   error is within `FIT_ERROR`, accept the segment.
+
+4. **Reparameterize.** If the error exceeds the threshold but is within
+   a reasonable bound, use Newton-Raphson to refine the parameter values
+   (up to `MAX_ITERATIONS` times) and re-fit. If the refined fit is
+   within `FIT_ERROR`, accept.
+
+5. **Split and recurse.** If the error still exceeds the threshold, split
+   at the point of maximum error. Compute the tangent at the split point
+   (using the adjacent points), then recursively fit the left and right
+   halves independently.
+
+The recursion produces a list of `BezierSegment` tuples, each containing
+8 floats: `(p1x, p1y, c1x, c1y, c2x, c2y, p2x, p2y)`.
+
+### Path construction
+
+The fitted segments are converted to path commands:
+
+```
+cmds = [MoveTo(seg[0].p1x, seg[0].p1y)]
+for each segment:
+    cmds.append(CurveTo(seg.c1x, seg.c1y, seg.c2x, seg.c2y, seg.p2x, seg.p2y))
+```
+
+The resulting Path element has:
+- **Stroke:** 1 px black (`Color(0, 0, 0)`, width 1.0)
+- **Fill:** none
+
+### Edge cases
+
+| Scenario | Behavior |
+|----------|----------|
+| Single point (press + release at same location) | Two identical points are passed to `fit_curve`; a degenerate path is created |
+| Very short drag (2-3 points) | `fit_curve` produces a single CurveTo segment |
+| `fit_curve` returns empty | No path is created; points are discarded |
 
 ### Overlay
 
-- Black polyline connecting all sampled points (real-time feedback during
-  the drag).
+- **During drag:** black polyline connecting all sampled points in order
+  (real-time visual feedback of the freehand stroke).
+- **After release:** no overlay; the fitted path is added to the document
+  as a normal element.
 
 ---
 

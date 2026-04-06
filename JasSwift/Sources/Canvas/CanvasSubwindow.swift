@@ -700,6 +700,8 @@ class CanvasNSView: NSView {
             return makeAddAnchorPointCursor()
         case .deleteAnchorPoint:
             return makeDeleteAnchorPointCursor()
+        case .pencil:
+            return makePencilCursor()
         default:
             return NSCursor.crosshair
         }
@@ -805,6 +807,31 @@ class CanvasNSView: NSView {
                 image.unlockFocus()
                 image.size = NSSize(width: 16, height: 16)
                 return NSCursor(image: image, hotSpot: NSPoint(x: 1, y: 1))
+            }
+        }
+        return NSCursor.crosshair
+    }
+
+    private func makePencilCursor() -> NSCursor {
+        let bundle = Bundle.main
+        let cwd = FileManager.default.currentDirectoryPath
+        let candidates = [
+            (cwd as NSString).appendingPathComponent("transcript/icons/pencil tool.png"),
+            (cwd as NSString).appendingPathComponent("../transcript/icons/pencil tool.png"),
+            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("transcript/icons/pencil tool.png") },
+            bundle.path(forResource: "pencil tool", ofType: "png"),
+        ].compactMap { $0 }
+        for path in candidates {
+            if let orig = NSImage(contentsOfFile: path) {
+                let pixelSize = NSSize(width: 32, height: 32)
+                let image = NSImage(size: pixelSize)
+                image.lockFocus()
+                orig.draw(in: NSRect(origin: .zero, size: pixelSize),
+                          from: NSRect(origin: .zero, size: orig.size),
+                          operation: .sourceOver, fraction: 1.0)
+                image.unlockFocus()
+                image.size = NSSize(width: 16, height: 16)
+                return NSCursor(image: image, hotSpot: NSPoint(x: 1, y: 15))
             }
         }
         return NSCursor.crosshair
