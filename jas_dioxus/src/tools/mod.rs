@@ -7,6 +7,7 @@ pub mod line;
 pub mod pen;
 pub mod add_anchor_point;
 pub mod delete_anchor_point;
+pub mod anchor_point;
 pub mod pencil;
 pub mod polygon;
 pub mod text;

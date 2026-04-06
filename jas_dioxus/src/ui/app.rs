@@ -23,6 +23,7 @@ use crate::tools::line::LineTool;
 use crate::tools::pen::PenTool;
 use crate::tools::add_anchor_point::AddAnchorPointTool;
 use crate::tools::delete_anchor_point::DeleteAnchorPointTool;
+use crate::tools::anchor_point::AnchorPointTool;
 use crate::tools::pencil::PencilTool;
 use crate::tools::polygon::PolygonTool;
 use crate::tools::rect::RectTool;
@@ -51,6 +52,7 @@ impl TabState {
         tools.insert(ToolKind::Pen, Box::new(PenTool::new()));
         tools.insert(ToolKind::AddAnchorPoint, Box::new(AddAnchorPointTool::new()));
         tools.insert(ToolKind::DeleteAnchorPoint, Box::new(DeleteAnchorPointTool::new()));
+        tools.insert(ToolKind::AnchorPoint, Box::new(AnchorPointTool::new()));
         tools.insert(ToolKind::Pencil, Box::new(PencilTool::new()));
         tools.insert(ToolKind::Text, Box::new(TextTool::new()));
         tools.insert(ToolKind::TextOnPath, Box::new(TextPathTool::new()));
@@ -384,7 +386,7 @@ fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
 const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (0, 0, &[ToolKind::Selection]),
     (0, 1, &[ToolKind::DirectSelection, ToolKind::GroupSelection]),
-    (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint]),
+    (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint, ToolKind::AnchorPoint]),
     (1, 1, &[ToolKind::Pencil]),
     (2, 0, &[ToolKind::Text, ToolKind::TextOnPath]),
     (2, 1, &[ToolKind::Line]),
@@ -419,6 +421,11 @@ fn toolbar_svg_icon(kind: ToolKind) -> String {
         ToolKind::AddAnchorPoint => {
             let _c = c;
             r##"<g transform="scale(0.109375)"><path d="M170.82,209.27l-88.08,46.73-10.99-25.31C60.04,197.72,31.98,175.62.51,162.2L.07,55.68,0,7.02C0,5.03.62,2.32,1.66,1.26S6.93-.46,8.2.39l130.44,88.12c-4.9,32.54-4.3,66.45,14.46,94.39l17.7,26.39Z" fill="rgb(204,204,204)"/><path d="M126.44,94.04c-2.22,11.75-2.88,21.93-2.47,32.64.52,16.1,3.8,30.8,11.11,46.23l-62.86,33.45c-14.38-22.81-34.23-39.94-60.13-51.08l-.62-125.03,41.81,77.76c-5.22,8.02-5.31,16.36.31,22.49,6.1,6.66,15.3,7.1,23.05,1.74,6.57-4.54,7.84-12.25,5.04-18.88s-8.7-11.19-17.14-10.35L22.85,24.63l103.56,69.4Z" fill="#3c3c3c"/><path d="M232.87,153.61c-3.47,3.11-8.74,5.8-13.86,7.8l-18.34-34.03-33.68,18.09-7.64-13.38,34.16-18.2-18.46-35.15,13.59-7.64,18.83,35.42,33.38-17.99,7.32,13.45-33.3,18.14,17.99,33.46Z" fill="rgb(204,204,204)"/></g>"##.to_string()
+        },
+        // Anchor Point (pen nib + < chevron, from SVG scaled 256→28)
+        ToolKind::AnchorPoint => {
+            let _c = c;
+            r##"<g transform="scale(0.109375)"><path d="M83.11,256l-17.21-39.82c-14.6-25.62-37.76-42.26-64.64-54.74l-.55-51.33L0,6.71C-.02,4.87,1.44,1.8,2.62.77s5.12-1.03,6.66.01l128.83,87.39-2.52,25.97c-2.03,20.93,1.76,44.01,13.52,61.83l21.9,33.2s-87.9,46.83-87.9,46.83Z" fill="rgb(204,204,204)"/><path d="M125.27,93.8L23.13,24.57l39.47,73.45c1.29,2.43,4.09,4.31,6.62,5.06,10.87,1.39,15.9,13.21,12.45,22.55-3.45,9.33-16.08,13.17-24.38,7.8-8.31-5.38-10.28-16.62-3.7-25.38L12.6,30.88l.27,123.04c23.7,11.46,47.42,29.86,60.53,52.12l60.89-32.47c-10.97-26.18-11.95-50.76-9.02-79.77Z" fill="#3c3c3c"/><path d="M179.5,120.04l32.26,60.93-12.56,6.65-39.41-73.7,73.14-38.92c2.57,3.76,4.72,7.63,7.25,12.71l-60.67,32.35h0Z" fill="rgb(204,204,204)"/></g>"##.to_string()
         },
         // Delete Anchor Point (pen nib + minus sign, from SVG scaled 256→28)
         ToolKind::DeleteAnchorPoint => {
@@ -725,6 +732,12 @@ pub fn App() -> Element {
                 Key::Character(ref c) if c == "-" || c == "_" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         st.set_tool(ToolKind::DeleteAnchorPoint);
+                    }));
+                }
+                Key::Character(ref c) if c == "C" => {
+                    // Shift+C for Anchor Point tool
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.set_tool(ToolKind::AnchorPoint);
                     }));
                 }
                 Key::Character(ref c) if c == "n" || c == "N" => {
