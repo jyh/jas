@@ -50,6 +50,8 @@ class MainWindow(QMainWindow):
                   lambda: self.toolbar.select_tool(Tool.ADD_ANCHOR_POINT))
         QShortcut(QKeySequence("+"), self,
                   lambda: self.toolbar.select_tool(Tool.ADD_ANCHOR_POINT))
+        QShortcut(QKeySequence("-"), self,
+                  lambda: self.toolbar.select_tool(Tool.DELETE_ANCHOR_POINT))
         QShortcut(QKeySequence("T"), self,
                   lambda: self.toolbar.select_tool(Tool.TEXT))
         QShortcut(QKeySequence("\\"), self,

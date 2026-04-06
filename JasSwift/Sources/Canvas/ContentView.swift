@@ -10,6 +10,7 @@ public enum Tool: String, CaseIterable {
     case groupSelection
     case pen
     case addAnchorPoint
+    case deleteAnchorPoint
     case pencil
     case text
     case textPath
@@ -261,7 +262,7 @@ struct ToolbarPanel: View {
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $penSlotTool,
-                        alternates: [.pen, .addAnchorPoint]
+                        alternates: [.pen, .addAnchorPoint, .deleteAnchorPoint]
                     )
                     ToolbarView.toolButton(currentTool: $currentTool, tool: .pencil)
                 }

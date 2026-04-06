@@ -22,6 +22,7 @@ pub enum ToolKind {
     GroupSelection,
     Pen,
     AddAnchorPoint,
+    DeleteAnchorPoint,
     Pencil,
     Text,
     TextOnPath,
@@ -38,6 +39,7 @@ impl ToolKind {
             ToolKind::GroupSelection => "Group Selection",
             ToolKind::Pen => "Pen (P)",
             ToolKind::AddAnchorPoint => "Add Anchor Point (+)",
+            ToolKind::DeleteAnchorPoint => "Delete Anchor Point (-)",
             ToolKind::Pencil => "Pencil (N)",
             ToolKind::Text => "Text (T)",
             ToolKind::TextOnPath => "Text on Path",
@@ -63,6 +65,9 @@ impl ToolKind {
             ToolKind::AddAnchorPoint => {
                 "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='-5 -2 245 265'%3E%3Cpath d='M170.82,209.27l-88.08,46.73-10.99-25.31C60.04,197.72,31.98,175.62.51,162.2L.07,55.68,0,7.02C0,5.03.62,2.32,1.66,1.26S6.93-.46,8.2.39l130.44,88.12c-4.9,32.54-4.3,66.45,14.46,94.39l17.7,26.39Z' fill='black'/%3E%3Cpath d='M126.44,94.04c-2.22,11.75-2.88,21.93-2.47,32.64.52,16.1,3.8,30.8,11.11,46.23l-62.86,33.45c-14.38-22.81-34.23-39.94-60.13-51.08l-.62-125.03,41.81,77.76c-5.22,8.02-5.31,16.36.31,22.49,6.1,6.66,15.3,7.1,23.05,1.74,6.57-4.54,7.84-12.25,5.04-18.88s-8.7-11.19-17.14-10.35L22.85,24.63l103.56,69.4Z' fill='white'/%3E%3Cpath d='M232.87,153.61c-3.47,3.11-8.74,5.8-13.86,7.8l-18.34-34.03-33.68,18.09-7.64-13.38,34.16-18.2-18.46-35.15,13.59-7.64,18.83,35.42,33.38-17.99,7.32,13.45-33.3,18.14,17.99,33.46Z' fill='black'/%3E%3C/svg%3E\") 1 1, crosshair"
             }
+            ToolKind::DeleteAnchorPoint => {
+                "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='-5 -2 265 265'%3E%3Cpath d='M171.16,209.05l-87.84,46.95c-3.95-8.26-7.66-16.33-10.98-24.89-13.5-34.82-37.51-53.77-71.54-69.91l-.4-54.61L0,6.21C0,3.95,2.53.66,4.05.16s4.42.21,6.33,1.51l127.62,86.16c-.17,5.51-.81,10.43-1.56,16.17-3.3,25.08,1.31,50.95,12.81,73.57l21.9,31.48Z' fill='black'/%3E%3Cpath d='M126.23,94.28L22.85,24.63l41.01,76.81c-5.22,7.79-5.06,16.71.29,22.63,6.52,7.2,16.36,7.25,24.09,1.18,5.95-4.67,6.35-12.24,4.2-18.37-2.55-7.28-9.14-10.98-17.57-11.7L23.73,25.13l102.5,69.14c-1.59,10.88-2.27,20.24-2.17,30.44.4,16.82,3.06,32.72,10.5,48.72l-61.27,32.7c-15.09-22.6-34.96-40.67-60.57-52.09l-.37-123.25,41.01,76.81Z' fill='white'/%3E%3Crect x='158.95' y='110.41' width='93.43' height='15.36' transform='translate(-31.37 110.38) rotate(-28)' fill='black'/%3E%3C/svg%3E\") 1 1, crosshair"
+            }
             _ => "crosshair",
         }
     }
@@ -77,6 +82,7 @@ impl ToolKind {
             ToolKind::Line => Some("l"),
             ToolKind::Rect => Some("m"),
             ToolKind::AddAnchorPoint => Some("="),
+            ToolKind::DeleteAnchorPoint => Some("-"),
             _ => None,
         }
     }
@@ -101,13 +107,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tool_kind_has_eleven_variants() {
+    fn tool_kind_has_twelve_variants() {
         let all = [
             ToolKind::Selection,
             ToolKind::DirectSelection,
             ToolKind::GroupSelection,
             ToolKind::Pen,
             ToolKind::AddAnchorPoint,
+            ToolKind::DeleteAnchorPoint,
             ToolKind::Pencil,
             ToolKind::Text,
             ToolKind::TextOnPath,
@@ -115,7 +122,7 @@ mod tests {
             ToolKind::Rect,
             ToolKind::Polygon,
         ];
-        assert_eq!(all.len(), 11);
+        assert_eq!(all.len(), 12);
     }
 
     #[test]
@@ -145,20 +152,22 @@ mod tests {
         let mut set = HashSet::new();
         let all = [
             ToolKind::Selection, ToolKind::DirectSelection, ToolKind::GroupSelection,
-            ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::Pencil, ToolKind::Text,
+            ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint,
+            ToolKind::Pencil, ToolKind::Text,
             ToolKind::TextOnPath, ToolKind::Line, ToolKind::Rect, ToolKind::Polygon,
         ];
         for t in &all {
             set.insert(*t);
         }
-        assert_eq!(set.len(), 11);
+        assert_eq!(set.len(), 12);
     }
 
     #[test]
     fn labels_all_non_empty() {
         let all = [
             ToolKind::Selection, ToolKind::DirectSelection, ToolKind::GroupSelection,
-            ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::Pencil, ToolKind::Text,
+            ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint,
+            ToolKind::Pencil, ToolKind::Text,
             ToolKind::TextOnPath, ToolKind::Line, ToolKind::Rect, ToolKind::Polygon,
         ];
         for t in &all {
@@ -240,8 +249,8 @@ mod tests {
 
     #[test]
     fn pen_slot_alternates() {
-        let alternates = [ToolKind::Pen, ToolKind::AddAnchorPoint];
-        assert_eq!(alternates.len(), 2);
+        let alternates = [ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint];
+        assert_eq!(alternates.len(), 3);
     }
 
     #[test]
@@ -250,7 +259,7 @@ mod tests {
         let slots: &[(usize, usize, &[ToolKind])] = &[
             (0, 0, &[ToolKind::Selection]),
             (0, 1, &[ToolKind::DirectSelection, ToolKind::GroupSelection]),
-            (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint]),
+            (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint]),
             (1, 1, &[ToolKind::Pencil]),
             (2, 0, &[ToolKind::Text, ToolKind::TextOnPath]),
             (2, 1, &[ToolKind::Line]),
@@ -270,11 +279,11 @@ mod tests {
         let shared = slots.iter().filter(|(_, _, tools)| tools.len() > 1).count();
         assert_eq!(shared, 4);
 
-        // All 11 tools appear exactly once
+        // All 12 tools appear exactly once
         let mut all_tools: Vec<ToolKind> = slots.iter()
             .flat_map(|(_, _, tools)| tools.iter().copied())
             .collect();
         all_tools.sort_by_key(|t| format!("{:?}", t));
-        assert_eq!(all_tools.len(), 11);
+        assert_eq!(all_tools.len(), 12);
     }
 }

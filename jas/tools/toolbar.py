@@ -15,6 +15,7 @@ class Tool(Enum):
     GROUP_SELECTION = auto()
     PEN = auto()
     ADD_ANCHOR_POINT = auto()
+    DELETE_ANCHOR_POINT = auto()
     PENCIL = auto()
     TEXT = auto()
     TEXT_PATH = auto()
@@ -80,6 +81,8 @@ class ToolButton(QToolButton):
             self._draw_pen_tool(painter)
         elif self.tool == Tool.ADD_ANCHOR_POINT:
             self._draw_add_anchor_point_tool(painter)
+        elif self.tool == Tool.DELETE_ANCHOR_POINT:
+            self._draw_delete_anchor_point_tool(painter)
         elif self.tool == Tool.PENCIL:
             self._draw_pencil_tool(painter)
         elif self.tool == Tool.TEXT:
@@ -232,6 +235,52 @@ class ToolButton(QToolButton):
         painter.drawPath(plus)
         painter.restore()
 
+    def _draw_delete_anchor_point_tool(self, painter):
+        # Delete Anchor Point icon from SVG (viewBox 0 0 256 256), scaled to 28x28.
+        s = 28.0 / 256.0
+        ox = (self.ICON_SIZE - 28) / 2.0
+        oy = (self.ICON_SIZE - 28) / 2.0
+        painter.save()
+        painter.translate(ox, oy)
+        painter.scale(s, s)
+        # Outer pen nib path + inner cutout (OddEvenFill)
+        outer = QPainterPath()
+        outer.moveTo(171.16, 209.05)
+        outer.lineTo(83.32, 256.0)
+        outer.cubicTo(79.37, 247.74, 75.66, 239.67, 72.34, 231.11)
+        outer.cubicTo(58.84, 196.29, 34.83, 177.34, 0.8, 161.2)
+        outer.lineTo(0.4, 106.59)
+        outer.lineTo(0.0, 6.21)
+        outer.cubicTo(0.0, 3.95, 2.53, 0.66, 4.05, 0.16)
+        outer.cubicTo(5.57, -0.34, 8.47, 0.37, 10.38, 1.67)
+        outer.lineTo(138.0, 87.83)
+        outer.cubicTo(137.83, 93.34, 137.19, 98.26, 136.44, 104.0)
+        outer.cubicTo(133.14, 129.08, 137.75, 154.95, 149.25, 177.57)
+        outer.lineTo(171.15, 209.05)
+        outer.closeSubpath()
+        # Inner cutout
+        outer.moveTo(126.23, 94.28)
+        outer.lineTo(23.74, 25.13)
+        outer.lineTo(64.38, 101.36)
+        outer.cubicTo(59.16, 109.38, 59.07, 117.72, 64.69, 123.85)
+        outer.cubicTo(70.79, 130.51, 79.99, 130.95, 87.74, 124.59)
+        outer.cubicTo(94.31, 120.05, 95.58, 112.34, 92.78, 105.71)
+        outer.cubicTo(90.23, 99.59, 83.64, 94.52, 75.2, 95.38)
+        outer.lineTo(23.73, 25.13)
+        outer.lineTo(126.23, 94.28)
+        outer.closeSubpath()
+        outer.setFillRule(Qt.FillRule.OddEvenFill)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#cccccc"))
+        painter.drawPath(outer)
+        # Minus sign (rotated rectangle from SVG)
+        painter.save()
+        painter.translate(-31.37, 110.38)
+        painter.rotate(-28)
+        painter.drawRect(158.95, 110.41, 93.43, 15.36)
+        painter.restore()
+        painter.restore()
+
     def _draw_pencil_tool(self, painter):
         painter.setPen(QPen(QColor("#cccccc"), 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -302,7 +351,7 @@ class ToolButton(QToolButton):
 # Tools that share the direct/group selection slot
 _ARROW_SLOT_TOOLS = {Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION}
 # Tools that share the pen/add-anchor-point slot
-_PEN_SLOT_TOOLS = {Tool.PEN, Tool.ADD_ANCHOR_POINT}
+_PEN_SLOT_TOOLS = {Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT}
 # Tools that share the text/text-path slot
 _TEXT_SLOT_TOOLS = {Tool.TEXT, Tool.TEXT_PATH}
 # Tools that share the rect/polygon slot
@@ -460,8 +509,9 @@ class Toolbar(QWidget):
 
     def _show_pen_slot_menu(self):
         menu = QMenu(self)
-        for tool in (Tool.PEN, Tool.ADD_ANCHOR_POINT):
-            label = "Pen" if tool == Tool.PEN else "Add Anchor Point"
+        for tool in (Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT):
+            label = {Tool.PEN: "Pen", Tool.ADD_ANCHOR_POINT: "Add Anchor Point",
+                     Tool.DELETE_ANCHOR_POINT: "Delete Anchor Point"}[tool]
             action = menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(tool == self._pen_slot_tool)
