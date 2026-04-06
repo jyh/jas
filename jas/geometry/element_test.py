@@ -121,7 +121,11 @@ class ElementTest(absltest.TestCase):
 
     def test_path_cubic_bezier(self):
         p = Path(d=(MoveTo(0, 0), CurveTo(5, 10, 15, 10, 20, 0)))
-        self.assertEqual(p.bounds(), (0, 0, 20, 10))
+        bx, by, bw, bh = p.bounds()
+        self.assertAlmostEqual(bx, 0)
+        self.assertAlmostEqual(by, 0)
+        self.assertAlmostEqual(bw, 20)
+        self.assertAlmostEqual(bh, 7.5)  # true Bezier extremum, not control point
 
     def test_path_smooth_curve_to(self):
         p = Path(d=(MoveTo(0, 0), CurveTo(1, 2, 3, 4, 5, 6), SmoothCurveTo(8, 9, 10, 12)))
@@ -129,11 +133,19 @@ class ElementTest(absltest.TestCase):
 
     def test_path_quad_to(self):
         p = Path(d=(MoveTo(0, 0), QuadTo(5, 10, 10, 0)))
-        self.assertEqual(p.bounds(), (0, 0, 10, 10))
+        bx, by, bw, bh = p.bounds()
+        self.assertAlmostEqual(bx, 0)
+        self.assertAlmostEqual(by, 0)
+        self.assertAlmostEqual(bw, 10)
+        self.assertAlmostEqual(bh, 5.0)  # true Bezier extremum, not control point
 
     def test_path_smooth_quad_to(self):
         p = Path(d=(MoveTo(0, 0), QuadTo(5, 10, 10, 0), SmoothQuadTo(20, 5)))
-        self.assertEqual(p.bounds(), (0, 0, 20, 10))
+        bx, by, bw, bh = p.bounds()
+        self.assertAlmostEqual(bx, 0)
+        self.assertAlmostEqual(by, 0)
+        self.assertAlmostEqual(bw, 20)
+        self.assertAlmostEqual(bh, 5.0)  # tight quadratic bounds
 
     def test_path_arc_to(self):
         p = Path(d=(MoveTo(0, 0), ArcTo(rx=25, ry=25, x_rotation=0, large_arc=True, sweep=False, x=50, y=0)))

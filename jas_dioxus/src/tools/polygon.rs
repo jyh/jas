@@ -137,3 +137,35 @@ impl CanvasTool for PolygonTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::model::Model;
+    use crate::geometry::element::Element;
+
+    #[test]
+    fn draw_polygon() {
+        let mut tool = PolygonTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 50.0, 50.0, false, false);
+        tool.on_release(&mut model, 100.0, 50.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Polygon(p) = &children[0] {
+            assert_eq!(p.points.len(), POLYGON_SIDES);
+        } else {
+            panic!("expected Polygon element");
+        }
+    }
+
+    #[test]
+    fn short_drag_no_polygon() {
+        let mut tool = PolygonTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 50.0, 50.0, false, false);
+        tool.on_release(&mut model, 50.0, 50.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 0);
+    }
+}

@@ -216,3 +216,88 @@ impl CanvasTool for SelectionTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::controller::Controller;
+    use crate::document::document::Document;
+    use crate::document::model::Model;
+    use crate::geometry::element::{Color, CommonProps, Element, Fill, LayerElem, RectElem};
+
+    fn make_model_with_rect() -> Model {
+        let rect = Element::Rect(RectElem {
+            x: 50.0,
+            y: 50.0,
+            width: 20.0,
+            height: 20.0,
+            rx: 0.0,
+            ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![rect],
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: Vec::new(),
+        };
+        Model::new(doc, None)
+    }
+
+    #[test]
+    fn marquee_select() {
+        let mut tool = SelectionTool::new();
+        let mut model = make_model_with_rect();
+        // Marquee covering the rect
+        tool.on_press(&mut model, 45.0, 45.0, false, false);
+        tool.on_release(&mut model, 75.0, 75.0, false, false);
+        assert!(!model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn marquee_miss() {
+        let mut tool = SelectionTool::new();
+        let mut model = make_model_with_rect();
+        // Marquee away from rect
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        tool.on_release(&mut model, 10.0, 10.0, false, false);
+        assert!(model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn click_selects_element() {
+        let mut tool = SelectionTool::new();
+        let mut model = make_model_with_rect();
+        // Click inside the rect's bounds
+        tool.on_press(&mut model, 55.0, 55.0, false, false);
+        tool.on_release(&mut model, 55.0, 55.0, false, false);
+        assert!(!model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn move_selection() {
+        let mut tool = SelectionTool::new();
+        let mut model = make_model_with_rect();
+        // First select the element
+        Controller::select_element(&mut model, &vec![0, 0]);
+        assert!(!model.document().selection.is_empty());
+        // Press on it, first move triggers drag threshold, second move applies delta
+        tool.on_press(&mut model, 60.0, 60.0, false, false);
+        tool.on_move(&mut model, 65.0, 65.0, false, true); // exceeds threshold, transitions to Moving
+        tool.on_move(&mut model, 70.0, 70.0, false, true); // applies dx=5, dy=5
+        tool.on_release(&mut model, 70.0, 70.0, false, false);
+        let elem = &model.document().layers[0].children().unwrap()[0];
+        if let Element::Rect(r) = elem {
+            assert_eq!(r.x, 60.0);
+            assert_eq!(r.y, 60.0);
+        } else {
+            panic!("expected Rect element");
+        }
+    }
+}

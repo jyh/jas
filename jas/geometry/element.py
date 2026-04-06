@@ -5,6 +5,7 @@ one with the desired changes. Element types and attributes follow the SVG 1.1
 specification.
 """
 
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -13,6 +14,7 @@ from typing import Tuple
 
 # Geometry constants
 FLATTEN_STEPS = 20  # line segments per Bezier curve when flattening paths
+APPROX_CHAR_WIDTH_FACTOR = 0.6  # average character width as a fraction of font size
 
 # SVG presentation attributes
 
@@ -83,7 +85,6 @@ class Transform:
 
     @staticmethod
     def rotate(angle_deg: float) -> "Transform":
-        import math
         rad = math.radians(angle_deg)
         cos_a = math.cos(rad)
         sin_a = math.sin(rad)
@@ -166,11 +167,11 @@ PathCommand = MoveTo | LineTo | CurveTo | SmoothCurveTo | QuadTo | SmoothQuadTo 
 
 def _inflate_bounds(bbox: Tuple[float, float, float, float],
                     stroke: "Stroke | None") -> Tuple[float, float, float, float]:
-    """Expand a bounding box by half the stroke width on all sides."""
+    """Expand bounding box (x, y, w, h) by half-stroke-width on each side."""
     if stroke is None:
         return bbox
     half = stroke.width / 2.0
-    return (bbox[0] - half, bbox[1] - half, bbox[2] + stroke.width, bbox[3] + stroke.width)
+    return (bbox[0] - half, bbox[1] - half, bbox[2] + 2 * half, bbox[3] + 2 * half)
 
 
 # SVG Elements
@@ -318,24 +319,112 @@ class Path(Element):
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
 
 
+def _cubic_extrema(p0: float, p1: float, p2: float, p3: float) -> list[float]:
+    """Return the t-values in (0,1) where a cubic Bezier is at an extremum.
+
+    The derivative of the cubic B(t) = (1-t)^3*p0 + 3(1-t)^2*t*p1 +
+    3(1-t)*t^2*p2 + t^3*p3 is a quadratic at^2 + bt + c where:
+      a = -3p0 + 9p1 - 9p2 + 3p3
+      b =  6p0 - 12p1 + 6p2
+      c = -3p0 + 3p1
+    """
+    a = -3*p0 + 9*p1 - 9*p2 + 3*p3
+    b = 6*p0 - 12*p1 + 6*p2
+    c = -3*p0 + 3*p1
+    ts: list[float] = []
+    if abs(a) < 1e-12:
+        if abs(b) > 1e-12:
+            t = -c / b
+            if 0 < t < 1:
+                ts.append(t)
+    else:
+        disc = b*b - 4*a*c
+        if disc >= 0:
+            sq = math.sqrt(disc)
+            for t in ((-b + sq) / (2*a), (-b - sq) / (2*a)):
+                if 0 < t < 1:
+                    ts.append(t)
+    return ts
+
+
+def _quadratic_extremum(p0: float, p1: float, p2: float) -> list[float]:
+    """Return the t-value in (0,1) where a quadratic Bezier is at an extremum."""
+    denom = p0 - 2*p1 + p2
+    if abs(denom) < 1e-12:
+        return []
+    t = (p0 - p1) / denom
+    return [t] if 0 < t < 1 else []
+
+
+def _cubic_eval(p0: float, p1: float, p2: float, p3: float, t: float) -> float:
+    """Evaluate cubic Bezier at parameter t."""
+    u = 1 - t
+    return u*u*u*p0 + 3*u*u*t*p1 + 3*u*t*t*p2 + t*t*t*p3
+
+
+def _quadratic_eval(p0: float, p1: float, p2: float, t: float) -> float:
+    """Evaluate quadratic Bezier at parameter t."""
+    u = 1 - t
+    return u*u*p0 + 2*u*t*p1 + t*t*p2
+
+
 def _path_bounds(d) -> Tuple[float, float, float, float]:
-    """Bounds from path command endpoints and control points."""
+    """Compute tight bounds by finding Bezier extrema."""
     xs: list[float] = []
     ys: list[float] = []
+    cx, cy = 0.0, 0.0  # current point
+    sx, sy = 0.0, 0.0  # subpath start (for ClosePath)
+    prev_x2, prev_y2 = 0.0, 0.0  # previous CurveTo control point (for Smooth)
+    prev_cmd = None
     for cmd in d:
         match cmd:
-            case MoveTo(x, y) | LineTo(x, y) | SmoothQuadTo(x, y):
+            case MoveTo(x, y):
                 xs.append(x); ys.append(y)
+                cx, cy = x, y
+                sx, sy = x, y
+            case LineTo(x, y):
+                xs.append(x); ys.append(y)
+                cx, cy = x, y
             case CurveTo(x1, y1, x2, y2, x, y):
-                xs.extend((x1, x2, x)); ys.extend((y1, y2, y))
+                # Endpoints
+                xs.extend((cx, x)); ys.extend((cy, y))
+                # Extrema
+                for t in _cubic_extrema(cx, x1, x2, x):
+                    xs.append(_cubic_eval(cx, x1, x2, x, t))
+                for t in _cubic_extrema(cy, y1, y2, y):
+                    ys.append(_cubic_eval(cy, y1, y2, y, t))
+                prev_x2, prev_y2 = x2, y2
+                cx, cy = x, y
             case SmoothCurveTo(x2, y2, x, y):
-                xs.extend((x2, x)); ys.extend((y2, y))
+                # Reflected control point
+                if isinstance(prev_cmd, (CurveTo, SmoothCurveTo)):
+                    rx1, ry1 = 2*cx - prev_x2, 2*cy - prev_y2
+                else:
+                    rx1, ry1 = cx, cy
+                xs.extend((cx, x)); ys.extend((cy, y))
+                for t in _cubic_extrema(cx, rx1, x2, x):
+                    xs.append(_cubic_eval(cx, rx1, x2, x, t))
+                for t in _cubic_extrema(cy, ry1, y2, y):
+                    ys.append(_cubic_eval(cy, ry1, y2, y, t))
+                prev_x2, prev_y2 = x2, y2
+                cx, cy = x, y
             case QuadTo(x1, y1, x, y):
-                xs.extend((x1, x)); ys.extend((y1, y))
-            case ArcTo(_, _, _, _, _, x, y):
+                xs.extend((cx, x)); ys.extend((cy, y))
+                for t in _quadratic_extremum(cx, x1, x):
+                    xs.append(_quadratic_eval(cx, x1, x, t))
+                for t in _quadratic_extremum(cy, y1, y):
+                    ys.append(_quadratic_eval(cy, y1, y, t))
+                cx, cy = x, y
+            case SmoothQuadTo(x, y):
                 xs.append(x); ys.append(y)
+                cx, cy = x, y
+            case ArcTo(_, _, _, _, _, x, y):
+                # TODO: compute true arc extrema
+                xs.append(x); ys.append(y)
+                cx, cy = x, y
             case ClosePath():
-                pass
+                cx, cy = sx, sy
+        prev_cmd = cmd
     if not xs:
         return (0, 0, 0, 0)
     min_x, min_y = min(xs), min(ys)
@@ -372,7 +461,7 @@ class Text(Element):
     def bounds(self) -> Tuple[float, float, float, float]:
         if self.is_area_text:
             return (self.x, self.y, self.width, self.height)
-        approx_width = len(self.content) * self.font_size * 0.6
+        approx_width = len(self.content) * self.font_size * APPROX_CHAR_WIDTH_FACTOR
         return (self.x, self.y - self.font_size, approx_width, self.font_size)
 
 
@@ -577,7 +666,6 @@ def _reflect_handle_keep_distance(ax: float, ay: float,
                                   ) -> tuple[float, float]:
     """Rotate the opposite handle to be collinear with (ax,ay)→(new_hx,new_hy),
     but preserve the opposite handle's original distance from the anchor."""
-    import math
     dist_new = math.hypot(new_hx - ax, new_hy - ay)
     dist_opp = math.hypot(opp_hx - ax, opp_hy - ay)
     if dist_new < 1e-6:
@@ -672,9 +760,8 @@ def control_points(elem: Element) -> list[tuple[float, float]]:
 # Path geometry utilities
 # ---------------------------------------------------------------------------
 
-def _flatten_path_commands(d: tuple) -> list[tuple[float, float]]:
+def flatten_path_commands(d: tuple) -> list[tuple[float, float]]:
     """Flatten path commands into a polyline by evaluating Bezier curves."""
-    import math
     pts: list[tuple[float, float]] = []
     cx, cy = 0.0, 0.0
     steps = FLATTEN_STEPS
@@ -715,7 +802,6 @@ def _flatten_path_commands(d: tuple) -> list[tuple[float, float]]:
 
 def _arc_lengths(pts: list[tuple[float, float]]) -> list[float]:
     """Compute cumulative arc lengths for a polyline."""
-    import math
     lengths = [0.0]
     for i in range(1, len(pts)):
         dx = pts[i][0] - pts[i - 1][0]
@@ -726,7 +812,7 @@ def _arc_lengths(pts: list[tuple[float, float]]) -> list[float]:
 
 def path_point_at_offset(d: tuple, t: float) -> tuple[float, float]:
     """Return the (x, y) point at fraction t (0..1) along the path."""
-    pts = _flatten_path_commands(d)
+    pts = flatten_path_commands(d)
     if len(pts) < 2:
         return pts[0] if pts else (0.0, 0.0)
     lengths = _arc_lengths(pts)
@@ -748,8 +834,7 @@ def path_point_at_offset(d: tuple, t: float) -> tuple[float, float]:
 
 def path_closest_offset(d: tuple, px: float, py: float) -> float:
     """Return the offset (0..1) of the closest point on the path to (px, py)."""
-    import math
-    pts = _flatten_path_commands(d)
+    pts = flatten_path_commands(d)
     if len(pts) < 2:
         return 0.0
     lengths = _arc_lengths(pts)
@@ -778,8 +863,7 @@ def path_closest_offset(d: tuple, px: float, py: float) -> float:
 
 def path_distance_to_point(d: tuple, px: float, py: float) -> float:
     """Return the minimum distance from point (px, py) to the path curve."""
-    import math
-    pts = _flatten_path_commands(d)
+    pts = flatten_path_commands(d)
     if len(pts) < 2:
         if pts:
             return math.sqrt((px - pts[0][0]) ** 2 + (py - pts[0][1]) ** 2)

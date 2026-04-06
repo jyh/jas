@@ -7,6 +7,9 @@
 /// Line segments per Bezier curve when flattening paths.
 pub const FLATTEN_STEPS: usize = 20;
 
+/// Average character width as a fraction of font size.
+pub const APPROX_CHAR_WIDTH_FACTOR: f64 = 0.6;
+
 // ---------------------------------------------------------------------------
 // SVG presentation attributes
 // ---------------------------------------------------------------------------
@@ -197,6 +200,7 @@ pub enum PathCommand {
 /// Axis-aligned bounding box (x, y, width, height).
 pub type Bounds = (f64, f64, f64, f64);
 
+/// Expand bounding box (x, y, w, h) by half-stroke-width on each side.
 fn inflate_bounds(bbox: Bounds, stroke: Option<&Stroke>) -> Bounds {
     match stroke {
         None => bbox,
@@ -205,8 +209,8 @@ fn inflate_bounds(bbox: Bounds, stroke: Option<&Stroke>) -> Bounds {
             (
                 bbox.0 - half,
                 bbox.1 - half,
-                bbox.2 + s.width,
-                bbox.3 + s.width,
+                bbox.2 + 2.0 * half,
+                bbox.3 + 2.0 * half,
             )
         }
     }
@@ -503,7 +507,7 @@ impl Element {
                 if e.is_area_text() {
                     (e.x, e.y, e.width, e.height)
                 } else {
-                    let approx_width = e.content.len() as f64 * e.font_size * 0.6;
+                    let approx_width = e.content.len() as f64 * e.font_size * APPROX_CHAR_WIDTH_FACTOR;
                     (e.x, e.y - e.font_size, approx_width, e.font_size)
                 }
             }
@@ -525,37 +529,123 @@ fn points_bounds(points: &[(f64, f64)], stroke: Option<&Stroke>) -> Bounds {
     inflate_bounds((min_x, min_y, max_x - min_x, max_y - min_y), stroke)
 }
 
+/// Return t-values in (0,1) where a cubic Bezier is at an extremum.
+fn cubic_extrema(p0: f64, p1: f64, p2: f64, p3: f64) -> Vec<f64> {
+    let a = -3.0 * p0 + 9.0 * p1 - 9.0 * p2 + 3.0 * p3;
+    let b = 6.0 * p0 - 12.0 * p1 + 6.0 * p2;
+    let c = -3.0 * p0 + 3.0 * p1;
+    let mut ts = Vec::new();
+    if a.abs() < 1e-12 {
+        if b.abs() > 1e-12 {
+            let t = -c / b;
+            if t > 0.0 && t < 1.0 {
+                ts.push(t);
+            }
+        }
+    } else {
+        let disc = b * b - 4.0 * a * c;
+        if disc >= 0.0 {
+            let sq = disc.sqrt();
+            for t in [(-b + sq) / (2.0 * a), (-b - sq) / (2.0 * a)] {
+                if t > 0.0 && t < 1.0 {
+                    ts.push(t);
+                }
+            }
+        }
+    }
+    ts
+}
+
+fn quadratic_extremum(p0: f64, p1: f64, p2: f64) -> Vec<f64> {
+    let denom = p0 - 2.0 * p1 + p2;
+    if denom.abs() < 1e-12 {
+        return vec![];
+    }
+    let t = (p0 - p1) / denom;
+    if t > 0.0 && t < 1.0 { vec![t] } else { vec![] }
+}
+
+fn cubic_eval(p0: f64, p1: f64, p2: f64, p3: f64, t: f64) -> f64 {
+    let u = 1.0 - t;
+    u * u * u * p0 + 3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t * p3
+}
+
+fn quadratic_eval(p0: f64, p1: f64, p2: f64, t: f64) -> f64 {
+    let u = 1.0 - t;
+    u * u * p0 + 2.0 * u * t * p1 + t * t * p2
+}
+
 fn path_bounds(d: &[PathCommand]) -> Bounds {
     let mut xs = Vec::new();
     let mut ys = Vec::new();
+    let (mut cx, mut cy) = (0.0, 0.0);
+    let (mut sx, mut sy) = (0.0, 0.0);
+    let (mut prev_x2, mut prev_y2) = (0.0, 0.0);
+    let mut prev_is_curve = false;
     for cmd in d {
         match cmd {
-            PathCommand::MoveTo { x, y }
-            | PathCommand::LineTo { x, y }
-            | PathCommand::SmoothQuadTo { x, y } => {
-                xs.push(*x);
-                ys.push(*y);
+            PathCommand::MoveTo { x, y } => {
+                xs.push(*x); ys.push(*y);
+                cx = *x; cy = *y; sx = *x; sy = *y;
             }
-            PathCommand::CurveTo {
-                x1, y1, x2, y2, x, y,
-            } => {
-                xs.extend_from_slice(&[*x1, *x2, *x]);
-                ys.extend_from_slice(&[*y1, *y2, *y]);
+            PathCommand::LineTo { x, y } => {
+                xs.push(*x); ys.push(*y);
+                cx = *x; cy = *y;
+            }
+            PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
+                xs.push(cx); xs.push(*x); ys.push(cy); ys.push(*y);
+                for t in cubic_extrema(cx, *x1, *x2, *x) {
+                    xs.push(cubic_eval(cx, *x1, *x2, *x, t));
+                }
+                for t in cubic_extrema(cy, *y1, *y2, *y) {
+                    ys.push(cubic_eval(cy, *y1, *y2, *y, t));
+                }
+                prev_x2 = *x2; prev_y2 = *y2;
+                cx = *x; cy = *y;
+                prev_is_curve = true;
+                continue;
             }
             PathCommand::SmoothCurveTo { x2, y2, x, y } => {
-                xs.extend_from_slice(&[*x2, *x]);
-                ys.extend_from_slice(&[*y2, *y]);
+                let (rx1, ry1) = if prev_is_curve {
+                    (2.0 * cx - prev_x2, 2.0 * cy - prev_y2)
+                } else {
+                    (cx, cy)
+                };
+                xs.push(cx); xs.push(*x); ys.push(cy); ys.push(*y);
+                for t in cubic_extrema(cx, rx1, *x2, *x) {
+                    xs.push(cubic_eval(cx, rx1, *x2, *x, t));
+                }
+                for t in cubic_extrema(cy, ry1, *y2, *y) {
+                    ys.push(cubic_eval(cy, ry1, *y2, *y, t));
+                }
+                prev_x2 = *x2; prev_y2 = *y2;
+                cx = *x; cy = *y;
+                prev_is_curve = true;
+                continue;
             }
             PathCommand::QuadTo { x1, y1, x, y } => {
-                xs.extend_from_slice(&[*x1, *x]);
-                ys.extend_from_slice(&[*y1, *y]);
+                xs.push(cx); xs.push(*x); ys.push(cy); ys.push(*y);
+                for t in quadratic_extremum(cx, *x1, *x) {
+                    xs.push(quadratic_eval(cx, *x1, *x, t));
+                }
+                for t in quadratic_extremum(cy, *y1, *y) {
+                    ys.push(quadratic_eval(cy, *y1, *y, t));
+                }
+                cx = *x; cy = *y;
+            }
+            PathCommand::SmoothQuadTo { x, y } => {
+                xs.push(*x); ys.push(*y);
+                cx = *x; cy = *y;
             }
             PathCommand::ArcTo { x, y, .. } => {
-                xs.push(*x);
-                ys.push(*y);
+                xs.push(*x); ys.push(*y);
+                cx = *x; cy = *y;
             }
-            PathCommand::ClosePath => {}
+            PathCommand::ClosePath => {
+                cx = sx; cy = sy;
+            }
         }
+        prev_is_curve = false;
     }
     if xs.is_empty() {
         return (0.0, 0.0, 0.0, 0.0);

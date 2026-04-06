@@ -112,11 +112,10 @@ impl AppState {
             None => return,
         };
         let canvas: HtmlCanvasElement = canvas_el.unchecked_into();
-        let ctx: CanvasRenderingContext2d = canvas
-            .get_context("2d")
-            .unwrap()
-            .unwrap()
-            .unchecked_into();
+        let ctx: CanvasRenderingContext2d = match canvas.get_context("2d") {
+            Ok(Some(ctx)) => ctx.unchecked_into(),
+            _ => return,
+        };
         let w = canvas.width() as f64;
         let h = canvas.height() as f64;
         let tab = self.tab();
@@ -137,9 +136,11 @@ fn clipboard_write(text: String) {
         let _ = wasm_bindgen_futures::JsFuture::from(promise);
         // Fire and forget — spawn to avoid blocking
         wasm_bindgen_futures::spawn_local(async move {
-            let _ = wasm_bindgen_futures::JsFuture::from(
-                web_sys::window().unwrap().navigator().clipboard().write_text(&text)
-            ).await;
+            if let Some(window) = web_sys::window() {
+                let _ = wasm_bindgen_futures::JsFuture::from(
+                    window.navigator().clipboard().write_text(&text)
+                ).await;
+            }
         });
     }
 }
@@ -276,10 +277,10 @@ fn download_file(filename: &str, content: &str) {
         Ok(u) => u,
         Err(_) => return,
     };
-    let a: web_sys::HtmlAnchorElement = document
-        .create_element("a")
-        .unwrap()
-        .unchecked_into();
+    let a: web_sys::HtmlAnchorElement = match document.create_element("a") {
+        Ok(el) => el.unchecked_into(),
+        Err(_) => return,
+    };
     a.set_href(&url);
     a.set_download(filename);
     a.click();
@@ -296,10 +297,10 @@ fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
         Some(d) => d,
         None => return,
     };
-    let input: web_sys::HtmlInputElement = document
-        .create_element("input")
-        .unwrap()
-        .unchecked_into();
+    let input: web_sys::HtmlInputElement = match document.create_element("input") {
+        Ok(el) => el.unchecked_into(),
+        Err(_) => return,
+    };
     input.set_type("file");
     input.set_attribute("accept", ".svg,image/svg+xml").ok();
 
@@ -316,7 +317,10 @@ fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
             None => return,
         };
         let filename = file.name();
-        let reader = web_sys::FileReader::new().unwrap();
+        let reader = match web_sys::FileReader::new() {
+            Ok(r) => r,
+            Err(_) => return,
+        };
         let reader2 = reader.clone();
         let app3 = app2.clone();
         let mut revision3 = revision2.clone();
@@ -764,7 +768,7 @@ pub fn App() -> Element {
                                 // Start long-press timer via setTimeout
                                 let slot_idx = si;
                                 let mut popup = popup_slot.clone();
-                                let window = web_sys::window().unwrap();
+                                let Some(window) = web_sys::window() else { return; };
                                 let cb = Closure::once(move || {
                                     popup.set(Some(slot_idx));
                                 });

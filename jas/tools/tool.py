@@ -9,13 +9,13 @@ controller, and canvas services without coupling tools to the widget.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
     from document.controller import Controller
     from document.document import Document
-    from geometry.element import Text
+    from geometry.element import Element, Text, TextPath
     from document.model import Model
 
 
@@ -31,19 +31,27 @@ POLYGON_SIDES = 5         # default number of sides for the polygon tool
 class ToolContext:
     """Facade passed to tools giving access to model, controller, and canvas services."""
 
-    def __init__(self, model: Model, controller: Controller,
-                 hit_test_selection, hit_test_handle, hit_test_text,
-                 hit_test_path_curve,
-                 request_update, start_text_edit, commit_text_edit):
+    def __init__(
+        self,
+        model: "Model",
+        controller: "Controller",
+        hit_test_selection: "Callable[[float, float], bool]",
+        hit_test_handle: "Callable[[float, float], tuple[tuple[int, ...], int, str] | None]",
+        hit_test_text: "Callable[[float, float], tuple[tuple[int, ...], Text] | None]",
+        hit_test_path_curve: "Callable[[float, float], tuple[tuple[int, ...], Element] | None]",
+        request_update: "Callable[[], None]",
+        start_text_edit: "Callable[[tuple[int, ...], Text | TextPath], None]",
+        commit_text_edit: "Callable[[], None]",
+    ):
         self.model = model
         self.controller = controller
-        self.hit_test_selection = hit_test_selection  # (x, y) -> bool
-        self.hit_test_handle = hit_test_handle        # (x, y) -> tuple | None
-        self.hit_test_text = hit_test_text            # (x, y) -> tuple | None
-        self.hit_test_path_curve = hit_test_path_curve  # (x, y) -> tuple | None
-        self.request_update = request_update           # () -> None
-        self.start_text_edit = start_text_edit         # (path, text_elem) -> None
-        self.commit_text_edit = commit_text_edit       # () -> None
+        self.hit_test_selection = hit_test_selection
+        self.hit_test_handle = hit_test_handle
+        self.hit_test_text = hit_test_text
+        self.hit_test_path_curve = hit_test_path_curve
+        self.request_update = request_update
+        self.start_text_edit = start_text_edit
+        self.commit_text_edit = commit_text_edit
 
     @property
     def document(self) -> Document:

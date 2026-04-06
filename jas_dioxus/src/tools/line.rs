@@ -24,6 +24,14 @@ impl LineTool {
     }
 }
 
+/// Check whether the tool is currently idle.
+#[cfg(test)]
+impl LineTool {
+    fn is_idle(&self) -> bool {
+        matches!(self.state, State::Idle)
+    }
+}
+
 impl CanvasTool for LineTool {
     fn on_press(&mut self, model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool) {
         model.snapshot();
@@ -79,5 +87,60 @@ impl CanvasTool for LineTool {
             ctx.line_to(cur_x, cur_y);
             ctx.stroke();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::model::Model;
+    use crate::geometry::element::Element;
+
+    #[test]
+    fn draw_line() {
+        let mut tool = LineTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_move(&mut model, 30.0, 40.0, false, true);
+        tool.on_release(&mut model, 50.0, 60.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Line(line) = &children[0] {
+            assert_eq!(line.x1, 10.0);
+            assert_eq!(line.y1, 20.0);
+            assert_eq!(line.x2, 50.0);
+            assert_eq!(line.y2, 60.0);
+        } else {
+            panic!("expected Line element");
+        }
+    }
+
+    #[test]
+    fn short_line_not_created() {
+        let mut tool = LineTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 0);
+    }
+
+    #[test]
+    fn idle_after_release() {
+        let mut tool = LineTool::new();
+        let mut model = Model::default();
+        assert!(tool.is_idle());
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        assert!(!tool.is_idle());
+        tool.on_release(&mut model, 50.0, 60.0, false, false);
+        assert!(tool.is_idle());
+    }
+
+    #[test]
+    fn move_without_press_is_noop() {
+        let mut tool = LineTool::new();
+        let mut model = Model::default();
+        tool.on_move(&mut model, 50.0, 60.0, false, true);
+        assert!(tool.is_idle());
     }
 }

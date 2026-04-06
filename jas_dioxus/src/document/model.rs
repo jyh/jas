@@ -22,6 +22,8 @@ pub struct Model {
     pub filename: String,
     undo_stack: Vec<Document>,
     redo_stack: Vec<Document>,
+    generation: u64,
+    saved_generation: u64,
 }
 
 impl Default for Model {
@@ -33,6 +35,8 @@ impl Default for Model {
             filename: fresh_filename(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            generation: 0,
+            saved_generation: 0,
         }
     }
 }
@@ -45,6 +49,8 @@ impl Model {
             filename: filename.unwrap_or_else(fresh_filename),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            generation: 0,
+            saved_generation: 0,
         }
     }
 
@@ -54,6 +60,7 @@ impl Model {
 
     pub fn set_document(&mut self, doc: Document) {
         self.document = doc;
+        self.generation += 1;
     }
 
     /// Save the current document state for undo.
@@ -70,6 +77,7 @@ impl Model {
         if let Some(prev) = self.undo_stack.pop() {
             self.redo_stack.push(self.document.clone());
             self.document = prev;
+            self.generation += 1;
         }
     }
 
@@ -78,6 +86,7 @@ impl Model {
         if let Some(next) = self.redo_stack.pop() {
             self.undo_stack.push(self.document.clone());
             self.document = next;
+            self.generation += 1;
         }
     }
 
@@ -90,13 +99,12 @@ impl Model {
     }
 
     pub fn is_modified(&self) -> bool {
-        // Simple pointer comparison won't work in Rust — compare structurally
-        // For performance, we could add a generation counter later
-        true // Conservative: always consider modified for now
+        self.generation != self.saved_generation
     }
 
     pub fn mark_saved(&mut self) {
         self.saved_document = self.document.clone();
+        self.saved_generation = self.generation;
     }
 }
 
@@ -196,5 +204,39 @@ mod tests {
         }
         // Internal: undo_stack should not exceed 100
         assert!(model.undo_stack.len() <= 100);
+    }
+
+    #[test]
+    fn is_modified_default_false() {
+        let model = Model::default();
+        assert!(!model.is_modified());
+    }
+
+    #[test]
+    fn is_modified_after_set_document() {
+        let mut model = Model::default();
+        model.set_document(Document::default());
+        assert!(model.is_modified());
+    }
+
+    #[test]
+    fn is_modified_false_after_mark_saved() {
+        let mut model = Model::default();
+        model.set_document(Document::default());
+        assert!(model.is_modified());
+        model.mark_saved();
+        assert!(!model.is_modified());
+    }
+
+    #[test]
+    fn is_modified_after_undo() {
+        let mut model = Model::default();
+        model.mark_saved();
+        model.snapshot();
+        model.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![] });
+        assert!(model.is_modified());
+        model.undo();
+        // After undo, generation differs from saved — still modified
+        assert!(model.is_modified());
     }
 }

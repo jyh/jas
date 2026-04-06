@@ -95,3 +95,56 @@ impl CanvasTool for RectTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::model::Model;
+    use crate::geometry::element::Element;
+
+    #[test]
+    fn draw_rect() {
+        let mut tool = RectTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 110.0, 70.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Rect(r) = &children[0] {
+            assert_eq!(r.x, 10.0);
+            assert_eq!(r.y, 20.0);
+            assert_eq!(r.width, 100.0);
+            assert_eq!(r.height, 50.0);
+        } else {
+            panic!("expected Rect element");
+        }
+    }
+
+    #[test]
+    fn zero_size_rect_not_created() {
+        let mut tool = RectTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 0);
+    }
+
+    #[test]
+    fn negative_drag_normalizes() {
+        let mut tool = RectTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 100.0, 80.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Rect(r) = &children[0] {
+            assert_eq!(r.x, 10.0);
+            assert_eq!(r.y, 20.0);
+            assert_eq!(r.width, 90.0);
+            assert_eq!(r.height, 60.0);
+        } else {
+            panic!("expected Rect element");
+        }
+    }
+}

@@ -1,8 +1,29 @@
 //! Immutable document model.
 //!
-//! A Document is an ordered list of Layers. Elements within the document are
-//! identified by their path: a vector of integer indices tracing the route
-//! from the document's layer list to the element.
+//! # Immutability contract
+//!
+//! A [`Document`] is treated as an immutable value: every mutation produces a
+//! new `Document` via `clone()` + in-place update rather than modifying the
+//! original.  This enables the undo/redo stack in [`Model`] to hold cheap
+//! snapshots (each snapshot is a previous `Document` value).
+//!
+//! Rust does not have a built-in "frozen" qualifier, so the contract is
+//! enforced by convention:
+//!
+//! - **Controller methods** receive a `&Model` (shared reference) and return a
+//!   new `Document`; they never hold a `&mut Document` to the live copy.
+//! - **Model** stores the canonical `Document` and only exposes `&Document`.
+//!   Callers obtain a mutated copy from the controller and hand it back via
+//!   [`Model::set_document`].
+//!
+//! The fields are `pub` for ergonomic construction, but production code should
+//! treat a `Document` as read-only once created.
+//!
+//! # Element addressing
+//!
+//! Elements within the document are identified by their *path*: a vector of
+//! integer indices tracing the route from the document's layer list to the
+//! element (e.g. `[0, 2, 1]` means layer 0 → child 2 → child 1).
 
 use std::collections::HashSet;
 
@@ -14,6 +35,11 @@ pub type ElementPath = Vec<usize>;
 
 /// Per-element selection state: which element and which of its control points
 /// are selected.
+///
+/// Equality and hashing are by **path only**, so two `ElementSelection` values
+/// with the same path but different control point sets are considered equal.
+/// This matches the Python (`frozenset` keyed by path) and OCaml (map keyed
+/// by path) implementations.
 #[derive(Debug, Clone)]
 pub struct ElementSelection {
     pub path: ElementPath,
@@ -34,10 +60,18 @@ impl std::hash::Hash for ElementSelection {
     }
 }
 
-/// A selection is a collection of ElementSelection entries (unique by path).
+/// A selection is an ordered collection of [`ElementSelection`] entries,
+/// unique by path.
+///
+/// A `Vec` is used rather than `HashSet` to preserve insertion order (which
+/// determines the visual stacking order of selection handles and the order
+/// of operations like group/paste).  Uniqueness by path is maintained by
+/// the controller's selection helpers (e.g. `toggle_selection`,
+/// `select_all`, `set_selection`).
 pub type Selection = Vec<ElementSelection>;
 
-/// The immutable document.
+/// The immutable document value (see [module-level docs](self) for the
+/// immutability contract).
 #[derive(Debug, Clone)]
 pub struct Document {
     pub layers: Vec<Element>,

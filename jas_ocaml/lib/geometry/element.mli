@@ -3,6 +3,9 @@
 (** Line segments per Bezier curve when flattening paths. *)
 val flatten_steps : int
 
+(** Average character width as a fraction of font size. *)
+val approx_char_width_factor : float
+
 (** RGBA color with components in [0, 1]. *)
 type color = {
   r : float;
