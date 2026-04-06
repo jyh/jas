@@ -3,6 +3,9 @@ import Foundation
 /// Line segments per Bezier curve when flattening paths.
 public let elementFlattenSteps = 20
 
+/// Average character width as a fraction of font size.
+public let approxCharWidthFactor = 0.6
+
 // MARK: - SVG presentation attributes
 
 /// RGBA color with components in [0, 1].
@@ -138,11 +141,11 @@ public enum PathCommand: Equatable {
 /// Bounding box as (x, y, width, height).
 public typealias BBox = (x: Double, y: Double, width: Double, height: Double)
 
-/// Expand a bounding box by half the stroke width on all sides.
+/// Expand bounding box (x, y, w, h) by half-stroke-width on each side.
 private func inflateBounds(_ bbox: BBox, _ stroke: Stroke?) -> BBox {
     guard let stroke = stroke else { return bbox }
     let half = stroke.width / 2.0
-    return (bbox.x - half, bbox.y - half, bbox.width + stroke.width, bbox.height + stroke.width)
+    return (bbox.x - half, bbox.y - half, bbox.width + 2 * half, bbox.height + 2 * half)
 }
 
 /// An SVG document element. All elements are immutable value types.
@@ -718,12 +721,87 @@ public struct Polygon: Equatable {
     }
 }
 
+/// Return t-values in (0,1) where a cubic Bezier is at an extremum.
+private func cubicExtrema(_ p0: Double, _ p1: Double, _ p2: Double, _ p3: Double) -> [Double] {
+    let a = -3*p0 + 9*p1 - 9*p2 + 3*p3
+    let b = 6*p0 - 12*p1 + 6*p2
+    let c = -3*p0 + 3*p1
+    if Swift.abs(a) < 1e-12 {
+        if Swift.abs(b) > 1e-12 {
+            let t = -c / b
+            return (t > 0 && t < 1) ? [t] : []
+        }
+        return []
+    }
+    let disc = b*b - 4*a*c
+    guard disc >= 0 else { return [] }
+    let sq = disc.squareRoot()
+    return [(-b + sq) / (2*a), (-b - sq) / (2*a)].filter { $0 > 0 && $0 < 1 }
+}
+
+private func quadraticExtremum(_ p0: Double, _ p1: Double, _ p2: Double) -> [Double] {
+    let denom = p0 - 2*p1 + p2
+    guard Swift.abs(denom) >= 1e-12 else { return [] }
+    let t = (p0 - p1) / denom
+    return (t > 0 && t < 1) ? [t] : []
+}
+
+private func cubicEval(_ p0: Double, _ p1: Double, _ p2: Double, _ p3: Double, _ t: Double) -> Double {
+    let u = 1 - t
+    return u*u*u*p0 + 3*u*u*t*p1 + 3*u*t*t*p2 + t*t*t*p3
+}
+
+private func quadraticEval(_ p0: Double, _ p1: Double, _ p2: Double, _ t: Double) -> Double {
+    let u = 1 - t
+    return u*u*p0 + 2*u*t*p1 + t*t*p2
+}
+
 /// SVG \<path\> element.
-/// Bounds from path command endpoints and control points.
+/// Compute tight bounds by finding Bezier extrema.
 func pathBounds(_ d: [PathCommand]) -> BBox {
-    let pts = d.flatMap(\.allPoints)
-    guard !pts.isEmpty else { return (0, 0, 0, 0) }
-    let xs = pts.map(\.0), ys = pts.map(\.1)
+    var xs: [Double] = [], ys: [Double] = []
+    var cx = 0.0, cy = 0.0
+    var sx = 0.0, sy = 0.0
+    var prevX2 = 0.0, prevY2 = 0.0
+    var prevIsCurve = false
+    for cmd in d {
+        switch cmd {
+        case .moveTo(let x, let y):
+            xs.append(x); ys.append(y)
+            cx = x; cy = y; sx = x; sy = y
+        case .lineTo(let x, let y):
+            xs.append(x); ys.append(y)
+            cx = x; cy = y
+        case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
+            xs.append(contentsOf: [cx, x]); ys.append(contentsOf: [cy, y])
+            for t in cubicExtrema(cx, x1, x2, x) { xs.append(cubicEval(cx, x1, x2, x, t)) }
+            for t in cubicExtrema(cy, y1, y2, y) { ys.append(cubicEval(cy, y1, y2, y, t)) }
+            prevX2 = x2; prevY2 = y2; cx = x; cy = y
+            prevIsCurve = true; continue
+        case .smoothCurveTo(let x2, let y2, let x, let y):
+            let (rx1, ry1) = prevIsCurve ? (2*cx - prevX2, 2*cy - prevY2) : (cx, cy)
+            xs.append(contentsOf: [cx, x]); ys.append(contentsOf: [cy, y])
+            for t in cubicExtrema(cx, rx1, x2, x) { xs.append(cubicEval(cx, rx1, x2, x, t)) }
+            for t in cubicExtrema(cy, ry1, y2, y) { ys.append(cubicEval(cy, ry1, y2, y, t)) }
+            prevX2 = x2; prevY2 = y2; cx = x; cy = y
+            prevIsCurve = true; continue
+        case .quadTo(let x1, let y1, let x, let y):
+            xs.append(contentsOf: [cx, x]); ys.append(contentsOf: [cy, y])
+            for t in quadraticExtremum(cx, x1, x) { xs.append(quadraticEval(cx, x1, x, t)) }
+            for t in quadraticExtremum(cy, y1, y) { ys.append(quadraticEval(cy, y1, y, t)) }
+            cx = x; cy = y
+        case .smoothQuadTo(let x, let y):
+            xs.append(x); ys.append(y)
+            cx = x; cy = y
+        case .arcTo(_, _, _, _, _, let x, let y):
+            xs.append(x); ys.append(y)
+            cx = x; cy = y
+        case .closePath:
+            cx = sx; cy = sy
+        }
+        prevIsCurve = false
+    }
+    guard !xs.isEmpty else { return (0, 0, 0, 0) }
     let minX = xs.min()!, minY = ys.min()!
     return (minX, minY, xs.max()! - minX, ys.max()! - minY)
 }
@@ -789,7 +867,7 @@ public struct Text: Equatable {
         if isAreaText {
             return (x, y, width, height)
         }
-        let approxWidth = Double(content.count) * fontSize * 0.6
+        let approxWidth = Double(content.count) * fontSize * approxCharWidthFactor
         return (x, y - fontSize, approxWidth, fontSize)
     }
 }

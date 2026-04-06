@@ -6,6 +6,9 @@
 (** Line segments per Bezier curve when flattening paths. *)
 let flatten_steps = 20
 
+(** Average character width as a fraction of font size. *)
+let approx_char_width_factor = 0.6
+
 (** RGBA color with components in [0, 1]. *)
 type color = {
   r : float;
@@ -172,29 +175,98 @@ let inflate_bounds (bx, by, bw, bh) stroke =
   | None -> (bx, by, bw, bh)
   | Some { stroke_width; _ } ->
     let half = stroke_width /. 2.0 in
-    (bx -. half, by -. half, bw +. stroke_width, bh +. stroke_width)
+    (bx -. half, by -. half, bw +. 2.0 *. half, bh +. 2.0 *. half)
+
+let cubic_extrema p0 p1 p2 p3 =
+  let a = -3.0 *. p0 +. 9.0 *. p1 -. 9.0 *. p2 +. 3.0 *. p3 in
+  let b = 6.0 *. p0 -. 12.0 *. p1 +. 6.0 *. p2 in
+  let c = -3.0 *. p0 +. 3.0 *. p1 in
+  if abs_float a < 1e-12 then
+    if abs_float b > 1e-12 then
+      let t = -. c /. b in
+      if t > 0.0 && t < 1.0 then [t] else []
+    else []
+  else
+    let disc = b *. b -. 4.0 *. a *. c in
+    if disc < 0.0 then []
+    else
+      let sq = sqrt disc in
+      let t1 = (-. b +. sq) /. (2.0 *. a) in
+      let t2 = (-. b -. sq) /. (2.0 *. a) in
+      List.filter (fun t -> t > 0.0 && t < 1.0) [t1; t2]
+
+let quadratic_extremum p0 p1 p2 =
+  let denom = p0 -. 2.0 *. p1 +. p2 in
+  if abs_float denom < 1e-12 then []
+  else
+    let t = (p0 -. p1) /. denom in
+    if t > 0.0 && t < 1.0 then [t] else []
+
+let cubic_eval p0 p1 p2 p3 t =
+  let u = 1.0 -. t in
+  u *. u *. u *. p0 +. 3.0 *. u *. u *. t *. p1 +. 3.0 *. u *. t *. t *. p2 +. t *. t *. t *. p3
+
+let quadratic_eval p0 p1 p2 t =
+  let u = 1.0 -. t in
+  u *. u *. p0 +. 2.0 *. u *. t *. p1 +. t *. t *. p2
 
 let path_cmd_bounds cmds =
-  let collect_endpoints =
-    List.fold_left (fun (xs, ys) cmd ->
-      match cmd with
-      | MoveTo (x, y) | LineTo (x, y) | SmoothQuadTo (x, y) ->
-        (x :: xs, y :: ys)
-      | CurveTo (x1, y1, x2, y2, x, y) ->
-        (x1 :: x2 :: x :: xs, y1 :: y2 :: y :: ys)
-      | SmoothCurveTo (x2, y2, x, y) ->
-        (x2 :: x :: xs, y2 :: y :: ys)
-      | QuadTo (x1, y1, x, y) ->
-        (x1 :: x :: xs, y1 :: y :: ys)
-      | ArcTo (_, _, _, _, _, x, y) ->
-        (x :: xs, y :: ys)
-      | ClosePath -> (xs, ys)
-    ) ([], [])
-  in
-  let (xs, ys) = collect_endpoints cmds in
-  match xs, ys with
+  let xs = ref [] and ys = ref [] in
+  let add_x x = xs := x :: !xs in
+  let add_y y = ys := y :: !ys in
+  let cx = ref 0.0 and cy = ref 0.0 in
+  let sx = ref 0.0 and sy = ref 0.0 in
+  let prev_x2 = ref 0.0 and prev_y2 = ref 0.0 in
+  let prev_cmd = ref None in
+  List.iter (fun cmd ->
+    (match cmd with
+    | MoveTo (x, y) ->
+      add_x x; add_y y;
+      cx := x; cy := y; sx := x; sy := y
+    | LineTo (x, y) ->
+      add_x x; add_y y;
+      cx := x; cy := y
+    | CurveTo (x1, y1, x2, y2, x, y) ->
+      add_x !cx; add_x x; add_y !cy; add_y y;
+      List.iter (fun t -> add_x (cubic_eval !cx x1 x2 x t))
+        (cubic_extrema !cx x1 x2 x);
+      List.iter (fun t -> add_y (cubic_eval !cy y1 y2 y t))
+        (cubic_extrema !cy y1 y2 y);
+      prev_x2 := x2; prev_y2 := y2;
+      cx := x; cy := y
+    | SmoothCurveTo (x2, y2, x, y) ->
+      let rx1, ry1 = match !prev_cmd with
+        | Some (CurveTo _) | Some (SmoothCurveTo _) ->
+          (2.0 *. !cx -. !prev_x2, 2.0 *. !cy -. !prev_y2)
+        | _ -> (!cx, !cy)
+      in
+      add_x !cx; add_x x; add_y !cy; add_y y;
+      List.iter (fun t -> add_x (cubic_eval !cx rx1 x2 x t))
+        (cubic_extrema !cx rx1 x2 x);
+      List.iter (fun t -> add_y (cubic_eval !cy ry1 y2 y t))
+        (cubic_extrema !cy ry1 y2 y);
+      prev_x2 := x2; prev_y2 := y2;
+      cx := x; cy := y
+    | QuadTo (x1, y1, x, y) ->
+      add_x !cx; add_x x; add_y !cy; add_y y;
+      List.iter (fun t -> add_x (quadratic_eval !cx x1 x t))
+        (quadratic_extremum !cx x1 x);
+      List.iter (fun t -> add_y (quadratic_eval !cy y1 y t))
+        (quadratic_extremum !cy y1 y);
+      cx := x; cy := y
+    | SmoothQuadTo (x, y) ->
+      add_x x; add_y y;
+      cx := x; cy := y
+    | ArcTo (_, _, _, _, _, x, y) ->
+      add_x x; add_y y;
+      cx := x; cy := y
+    | ClosePath ->
+      cx := !sx; cy := !sy);
+    prev_cmd := Some cmd
+  ) cmds;
+  match !xs, !ys with
   | [], [] -> (0.0, 0.0, 0.0, 0.0)
-  | _ ->
+  | xs, ys ->
     let min_f = List.fold_left min infinity in
     let max_f = List.fold_left max neg_infinity in
     let min_x = min_f xs and min_y = min_f ys in
@@ -242,7 +314,7 @@ let rec bounds = function
     if text_width > 0.0 && text_height > 0.0 then
       (x, y, text_width, text_height)
     else
-      let approx_width = float_of_int (String.length content) *. font_size *. 0.6 in
+      let approx_width = float_of_int (String.length content) *. font_size *. approx_char_width_factor in
       (x, y -. font_size, approx_width, font_size)
   | Group { children; _ } | Layer { children; _ } ->
     if Array.length children = 0 then (0.0, 0.0, 0.0, 0.0)

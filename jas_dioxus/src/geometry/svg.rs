@@ -19,6 +19,11 @@ fn pt(v: f64) -> f64 {
     v * PX_TO_PT
 }
 
+/// Parse a string as f64, returning `default` on failure.
+fn safe_f64(s: &str, default: f64) -> f64 {
+    s.parse::<f64>().unwrap_or(default)
+}
+
 fn fmt(v: f64) -> String {
     let s = format!("{:.4}", v);
     let s = s.trim_end_matches('0');
@@ -1015,7 +1020,7 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 }
             }
             let th = if tw > 0.0 {
-                let lines = (content.len() as f64 * fs * 0.6 / tw).ceil().max(1.0);
+                let lines = (content.len() as f64 * fs * super::element::APPROX_CHAR_WIDTH_FACTOR / tw).ceil().max(1.0);
                 lines * fs * 1.2
             } else { 0.0 };
 

@@ -560,7 +560,7 @@ private func parseElement(_ node: XMLNode) -> Element? {
         }
         var th = 0.0
         if tw > 0 {
-            let lines = max(1, Int(Double(content.count) * fs * 0.6 / tw) + 1)
+            let lines = max(1, Int(Double(content.count) * fs * approxCharWidthFactor / tw) + 1)
             th = Double(lines) * fs * 1.2
         }
         return .text(Text(

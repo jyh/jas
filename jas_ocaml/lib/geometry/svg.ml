@@ -515,11 +515,11 @@ let rec parse_element i =
                  let re = Str.regexp {|inline-size:[ ]*\([0-9.]+\)px|} in
                  ignore (Str.search_forward re style 0);
                  pt (float_of_string (Str.matched_group 1 style))
-               with Not_found -> 0.0)
+               with Not_found | Failure _ -> 0.0)
              | None -> 0.0
            in
            let th = if tw > 0.0 then
-             let lines = max 1 (int_of_float (float_of_int (String.length content) *. fs *. 0.6 /. tw) + 1) in
+             let lines = max 1 (int_of_float (float_of_int (String.length content) *. fs *. Element.approx_char_width_factor /. tw) + 1) in
              float_of_int lines *. fs *. 1.2
            else 0.0 in
            Some (Element.make_text ~font_family:ff ~font_size:fs ~font_weight:fw ~font_style:fst ~text_decoration:td ~text_width:tw ~text_height:th ~fill ~stroke ~opacity ~transform
@@ -572,7 +572,8 @@ and collect_text_or_textpath i =
       let start_offset =
         let len = String.length offset_str in
         if len > 0 && offset_str.[len - 1] = '%' then
-          float_of_string (String.sub offset_str 0 (len - 1)) /. 100.0
+          (try float_of_string (String.sub offset_str 0 (len - 1)) /. 100.0
+           with Failure _ -> 0.0)
         else
           (try float_of_string offset_str with _ -> 0.0)
       in

@@ -1,3 +1,9 @@
 (test
  (name toolbar_test)
+ (modules toolbar_test)
+ (libraries jas lablgtk3))
+
+(test
+ (name tool_interaction_test)
+ (modules tool_interaction_test)
  (libraries jas lablgtk3))

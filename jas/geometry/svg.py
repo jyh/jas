@@ -10,6 +10,7 @@ from xml.sax.saxutils import escape
 
 from document.document import Document
 from geometry.element import (
+    APPROX_CHAR_WIDTH_FACTOR,
     ArcTo, Circle, ClosePath, Color, CurveTo, Element, Ellipse, Fill,
     Group, Layer, Line, LineCap, LineJoin, LineTo, MoveTo, Path,
     PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
@@ -244,6 +245,16 @@ def _pt(v: float) -> float:
     return v * _PX_TO_PT
 
 
+def _safe_float(s: str | None, default: float = 0.0) -> float:
+    """Parse a string as float, returning default on failure."""
+    if s is None:
+        return default
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return default
+
+
 _NAMED_COLORS: dict[str, tuple[int, int, int]] = {
     "black": (0, 0, 0), "white": (255, 255, 255), "red": (255, 0, 0),
     "green": (0, 128, 0), "blue": (0, 0, 255), "yellow": (255, 255, 0),
@@ -317,7 +328,7 @@ def _parse_stroke(node: ET.Element) -> Stroke | None:
     c = _parse_color(val)
     if c is None:
         return None
-    width = float(node.get("stroke-width", "1")) * _PX_TO_PT
+    width = _safe_float(node.get("stroke-width"), 1.0) * _PX_TO_PT
     lc_str = node.get("stroke-linecap", "butt")
     lj_str = node.get("stroke-linejoin", "miter")
     lc = {"butt": LineCap.BUTT, "round": LineCap.ROUND, "square": LineCap.SQUARE}.get(lc_str, LineCap.BUTT)
@@ -351,7 +362,7 @@ def _parse_transform(node: ET.Element) -> Transform | None:
 
 
 def _parse_opacity(node: ET.Element) -> float:
-    return float(node.get("opacity", "1"))
+    return _safe_float(node.get("opacity"), 1.0)
 
 
 def _parse_points(s: str) -> tuple[tuple[float, float], ...]:
@@ -529,35 +540,35 @@ def _parse_element(node: ET.Element) -> Element | None:
 
     if tag == "line":
         return Line(
-            x1=_pt(float(node.get("x1", "0"))),
-            y1=_pt(float(node.get("y1", "0"))),
-            x2=_pt(float(node.get("x2", "0"))),
-            y2=_pt(float(node.get("y2", "0"))),
+            x1=_pt(_safe_float(node.get("x1"))),
+            y1=_pt(_safe_float(node.get("y1"))),
+            x2=_pt(_safe_float(node.get("x2"))),
+            y2=_pt(_safe_float(node.get("y2"))),
             stroke=stroke, opacity=opacity, transform=transform)
 
     if tag == "rect":
         return Rect(
-            x=_pt(float(node.get("x", "0"))),
-            y=_pt(float(node.get("y", "0"))),
-            width=_pt(float(node.get("width", "0"))),
-            height=_pt(float(node.get("height", "0"))),
-            rx=_pt(float(node.get("rx", "0"))),
-            ry=_pt(float(node.get("ry", "0"))),
+            x=_pt(_safe_float(node.get("x"))),
+            y=_pt(_safe_float(node.get("y"))),
+            width=_pt(_safe_float(node.get("width"))),
+            height=_pt(_safe_float(node.get("height"))),
+            rx=_pt(_safe_float(node.get("rx"))),
+            ry=_pt(_safe_float(node.get("ry"))),
             fill=fill, stroke=stroke, opacity=opacity, transform=transform)
 
     if tag == "circle":
         return Circle(
-            cx=_pt(float(node.get("cx", "0"))),
-            cy=_pt(float(node.get("cy", "0"))),
-            r=_pt(float(node.get("r", "0"))),
+            cx=_pt(_safe_float(node.get("cx"))),
+            cy=_pt(_safe_float(node.get("cy"))),
+            r=_pt(_safe_float(node.get("r"))),
             fill=fill, stroke=stroke, opacity=opacity, transform=transform)
 
     if tag == "ellipse":
         return Ellipse(
-            cx=_pt(float(node.get("cx", "0"))),
-            cy=_pt(float(node.get("cy", "0"))),
-            rx=_pt(float(node.get("rx", "0"))),
-            ry=_pt(float(node.get("ry", "0"))),
+            cx=_pt(_safe_float(node.get("cx"))),
+            cy=_pt(_safe_float(node.get("cy"))),
+            rx=_pt(_safe_float(node.get("rx"))),
+            ry=_pt(_safe_float(node.get("ry"))),
             fill=fill, stroke=stroke, opacity=opacity, transform=transform)
 
     if tag == "polyline":
@@ -577,7 +588,7 @@ def _parse_element(node: ET.Element) -> Element | None:
 
     if tag == "text":
         ff = node.get("font-family", "sans-serif")
-        fs = _pt(float(node.get("font-size", "16")))
+        fs = _pt(_safe_float(node.get("font-size"), 16.0))
         fw = node.get("font-weight", "normal")
         fst = node.get("font-style", "normal")
         td = node.get("text-decoration", "none")
@@ -591,9 +602,9 @@ def _parse_element(node: ET.Element) -> Element | None:
                 offset_str = child.get("startOffset", "0")
                 start_offset = 0.0
                 if offset_str.endswith("%"):
-                    start_offset = float(offset_str[:-1]) / 100.0
+                    start_offset = _safe_float(offset_str[:-1]) / 100.0
                 else:
-                    start_offset = float(offset_str)
+                    start_offset = _safe_float(offset_str)
                 return TextPath(
                     d=d, content=tp_content, start_offset=start_offset,
                     font_family=ff, font_size=fs,
@@ -610,11 +621,11 @@ def _parse_element(node: ET.Element) -> Element | None:
         # Estimate height from inline-size and content length
         th = 0.0
         if tw > 0:
-            lines = max(1, int(len(content) * fs * 0.6 / tw) + 1)
+            lines = max(1, int(len(content) * fs * APPROX_CHAR_WIDTH_FACTOR / tw) + 1)
             th = lines * fs * 1.2
         return Text(
-            x=_pt(float(node.get("x", "0"))),
-            y=_pt(float(node.get("y", "0"))),
+            x=_pt(_safe_float(node.get("x"))),
+            y=_pt(_safe_float(node.get("y"))),
             content=content, font_family=ff, font_size=fs,
             font_weight=fw, font_style=fst, text_decoration=td,
             width=tw, height=th,
