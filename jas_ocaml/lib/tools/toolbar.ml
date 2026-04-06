@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Pencil | Path_eraser | Text_tool | Text_path | Line | Rect | Polygon
+type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Pencil | Path_eraser | Smooth | Text_tool | Text_path | Line | Rect | Polygon
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -72,7 +72,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
          arrow_slot_tool <- t
        | Pen | Add_anchor_point | Delete_anchor_point ->
          pen_slot_tool <- t
-       | Pencil | Path_eraser ->
+       | Pencil | Path_eraser | Smooth ->
          pencil_slot_tool <- t
        | Text_tool | Text_path ->
          text_slot_tool <- t
@@ -604,6 +604,105 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.restore cr
       in
 
+      let draw_smooth_icon cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let s = 28.0 /. 256.0 in
+        Cairo.save cr;
+        Cairo.translate cr ox oy;
+        Cairo.scale cr s s;
+        (* Pencil body *)
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.move_to cr 70.89 227.68;
+        Cairo.line_to cr 4.52 255.09;
+        Cairo.curve_to cr 0.88 256.59 (-0.91) 248.43 (-0.16) 245.21;
+        Cairo.line_to cr 17.39 169.99;
+        Cairo.curve_to cr 24.75 160.38 31.97 152.72 39.68 143.64;
+        Cairo.line_to cr 131.03 36.05;
+        Cairo.line_to cr 144.21 21.29;
+        Cairo.curve_to cr 154.4 9.87 168.74 11.64 179.56 21.24;
+        Cairo.line_to cr 205.01 43.83;
+        Cairo.curve_to cr 214.73 52.45 213.09 65.99 204.99 75.55;
+        Cairo.line_to cr 174.64 111.37;
+        Cairo.line_to cr 86.01 216.71;
+        Cairo.curve_to cr 81.53 222.03 77.91 224.78 70.89 227.68;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        (* Gray facets *)
+        Cairo.set_source_rgb cr 0.235 0.235 0.235;
+        Cairo.move_to cr 66.39 191.49;
+        Cairo.curve_to cr 63.13 195.37 55.31 192.23 52.22 192.25;
+        Cairo.curve_to cr 50.62 187.3 49.74 184.33 49.59 179.38;
+        Cairo.line_to cr 145.52 66.15;
+        Cairo.curve_to cr 151.28 70.25 156.08 74.56 160.81 79.96;
+        Cairo.line_to cr 112.0 137.22;
+        Cairo.line_to cr 66.39 191.49;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        Cairo.move_to cr 194.82 68.3;
+        Cairo.curve_to cr 190.49 73.55 186.85 77.91 182.22 82.5;
+        Cairo.line_to cr 141.05 44.73;
+        Cairo.curve_to cr 147.58 35.76 157.41 18.57 169.33 28.72;
+        Cairo.line_to cr 192.63 48.55;
+        Cairo.curve_to cr 198.53 53.57 199.92 62.13 194.83 68.3;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        Cairo.move_to cr 32.69 171.62;
+        Cairo.curve_to cr 35.03 169.5 35.9 166.47 38.13 163.87;
+        Cairo.line_to cr 86.71 107.09;
+        Cairo.line_to cr 131.67 54.87;
+        Cairo.curve_to cr 134.96 55.93 137.97 58.23 139.63 61.75;
+        Cairo.line_to cr 44.81 173.16;
+        Cairo.curve_to cr 41.4 174.85 37.29 173.22 32.69 171.62;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        Cairo.move_to cr 74.85 208.97;
+        Cairo.curve_to cr 72.95 205.46 70.31 201.15 71.65 197.51;
+        Cairo.line_to cr 134.32 122.98;
+        Cairo.curve_to cr 138.19 118.38 141.65 114.55 145.53 109.99;
+        Cairo.line_to cr 166.6 85.22;
+        Cairo.curve_to cr 169.52 87.53 172.2 88.21 174.12 90.63;
+        Cairo.curve_to cr 167.84 101.81 159.75 109.64 151.85 119.0;
+        Cairo.line_to cr 83.45 199.98;
+        Cairo.curve_to cr 80.68 203.26 78.45 205.5 74.84 208.97;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        (* White tip highlight *)
+        Cairo.set_source_rgb cr 1.0 1.0 1.0;
+        Cairo.move_to cr 61.28 200.71;
+        Cairo.curve_to cr 64.24 205.11 65.93 209.9 66.93 215.37;
+        Cairo.line_to cr 35.72 228.83;
+        Cairo.line_to cr 20.11 215.85;
+        Cairo.line_to cr 26.48 181.11;
+        Cairo.curve_to cr 30.34 181.56 36.75 180.57 39.5 183.8;
+        Cairo.curve_to cr 43.15 188.1 42.2 194.89 45.63 199.46;
+        Cairo.curve_to cr 50.38 200.86 55.12 200.42 61.27 200.72;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        (* "S" lettering *)
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.move_to cr 210.2 175.94;
+        Cairo.curve_to cr 221.68 185.28 259.83 188.72 255.69 222.01;
+        Cairo.curve_to cr 254.5 231.57 248.08 241.8 237.42 246.05;
+        Cairo.curve_to cr 222.73 251.9 206.61 250.52 192.05 244.82;
+        Cairo.curve_to cr 192.52 240.14 193.6 236.89 195.16 233.15;
+        Cairo.curve_to cr 204.66 236.94 214.74 238.68 224.8 236.57;
+        Cairo.curve_to cr 233.48 234.75 238.62 228.4 239.23 220.41;
+        Cairo.curve_to cr 239.88 211.86 235.9 205.22 227.47 201.4;
+        Cairo.line_to cr 206.01 191.68;
+        Cairo.curve_to cr 194.41 186.43 187.58 176.16 187.67 163.79;
+        Cairo.curve_to cr 187.75 152.1 194.35 141.45 206.21 136.42;
+        Cairo.curve_to cr 220.61 130.31 237.7 132.02 251.7 139.29;
+        Cairo.curve_to cr 251.19 144.18 248.58 147.49 247.15 151.76;
+        Cairo.curve_to cr 233.82 143.01 205.83 143.47 204.03 159.51;
+        Cairo.curve_to cr 203.3 166.01 204.94 171.65 210.2 175.93;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        Cairo.restore cr
+      in
+
       (* Pen slot: draws pen or add-anchor-point depending on pen_slot_tool *)
       pen_btn#misc#connect#draw ~callback:(fun cr ->
         let alloc = pen_btn#misc#allocation in
@@ -652,6 +751,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         (match pencil_slot_tool with
          | Pencil -> draw_pencil_icon cr ~alloc
          | Path_eraser -> draw_path_eraser_icon cr ~alloc
+         | Smooth -> draw_smooth_icon cr ~alloc
          | _ -> ());
         (* Alternate triangle *)
         let ox = (bw -. 28.0) /. 2.0 in
@@ -936,6 +1036,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       in
       add_item "Pencil" Pencil;
       add_item "Path Eraser" Path_eraser;
+      add_item "Smooth" Smooth;
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
 
     method private show_text_slot_menu =

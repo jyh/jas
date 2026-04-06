@@ -1,7 +1,7 @@
 # Toolbar and Tools
 
 This document describes the toolbar layout, the CanvasTool interface, the
-ToolContext facade, and each of the fourteen tools.
+ToolContext facade, and each of the fifteen tools.
 
 ---
 
@@ -29,7 +29,7 @@ the button (500 ms) opens a popup menu to switch:
 |------|---------|------------|----------|
 | Arrow slot | Direct Selection | Group Selection | Row 0, Col 1 |
 | Pen slot | Pen | Add Anchor Point, Delete Anchor Point, Anchor Point | Row 1, Col 0 |
-| Pencil slot | Pencil | Path Eraser | Row 1, Col 1 |
+| Pencil slot | Pencil | Path Eraser, Smooth | Row 1, Col 1 |
 | Text slot | Text | Text on Path | Row 2, Col 0 |
 | Shape slot | Rect | Polygon | Row 3, Col 0 |
 
@@ -1112,6 +1112,229 @@ After any erasure, the document's selection is cleared.
   (2 px). The circle is always visible when the Path Eraser tool is active,
   whether or not the user is currently erasing. This provides constant
   visual feedback of the eraser's extent.
+
+---
+
+## Smooth Tool
+
+**Shortcut:** none (long-press on Pencil slot)
+**Shared slot:** Pencil slot (long-press on the Pencil button)
+
+Simplifies vector paths by reducing the number of anchor points while
+preserving the overall shape. The tool operates like a brush: the user
+drags it over a selected path, and the portion of the path within the
+tool's circular influence region is simplified in real time.
+
+Only selected, unlocked Path elements are affected. Non-path elements
+(rectangles, ellipses, text, etc.) and locked paths are skipped entirely.
+
+### Constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `SMOOTH_SIZE` | 100.0 pt | Radius of the circular influence region |
+| `SMOOTH_ERROR` | 8.0 pt | Maximum deviation allowed during curve re-fitting; higher values produce fewer, smoother segments |
+| `FLATTEN_STEPS` | 20 | Number of line segments used to approximate each Bezier curve during flattening |
+
+### Interaction
+
+| Action | Result |
+|--------|--------|
+| Press | Snapshot document; begin smoothing at cursor position |
+| Drag | Continue smoothing along the drag path |
+| Release | Stop smoothing |
+| Move without press | Update overlay circle position (no smoothing) |
+
+### States
+
+```
+                 on_press
+    IDLE ─────────────────> SMOOTHING
+                               │
+                            on_move: smooth_at(x, y)
+                               │
+                            on_release
+                               v
+                             IDLE
+```
+
+### Algorithm
+
+Each time the tool processes a cursor position (on press and on each drag
+move), it runs the following pipeline independently on every selected path
+in the document:
+
+**1. Flatten with command map**
+
+The path's command list (MoveTo, LineTo, CurveTo, QuadTo, etc.) is
+converted into a dense polyline of (x, y) sample points. Curves are
+subdivided into `FLATTEN_STEPS` (20) evenly-spaced samples using the
+de Casteljau / Bernstein polynomial evaluation:
+
+```
+Cubic:     B(t) = (1-t)³·P0 + 3(1-t)²t·P1 + 3(1-t)t²·P2 + t³·P3
+Quadratic: B(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
+```
+
+evaluated at t = 1/steps, 2/steps, …, 1. Linear commands (MoveTo, LineTo)
+produce exactly one sample point each. ClosePath produces no points.
+
+Alongside the flat point array, a parallel **command map** array is built:
+`cmd_map[i]` records the index of the original path command that produced
+flat point `i`. This mapping is the key data structure that allows the
+algorithm to trace polyline positions back to the original command list.
+
+**2. Hit detection**
+
+The flat points are scanned sequentially to find the **contiguous range**
+that lies within the tool's circular influence region (Euclidean distance
+≤ `SMOOTH_SIZE` from the cursor). The scan records `first_hit` and
+`last_hit` — the indices of the first and last flat points inside the
+circle:
+
+```
+for each flat point (px, py) at index i:
+    if (px - cx)² + (py - cy)² ≤ SMOOTH_SIZE²:
+        if first_hit not set: first_hit = i
+        last_hit = i
+```
+
+If no flat points fall within range, the path is unaffected and skipped.
+
+**3. Command mapping**
+
+The flat-point hit indices are mapped back to original command indices via
+the command map:
+
+```
+first_cmd = cmd_map[first_hit]
+last_cmd  = cmd_map[last_hit]
+```
+
+These define the inclusive range of original commands `[first_cmd, last_cmd]`
+that will be replaced by re-fitted curves.
+
+If `first_cmd == last_cmd`, the influence region only touches samples from
+a single command — there is nothing to merge or simplify, so the path is
+skipped. At least two commands must be affected for smoothing to produce
+any reduction.
+
+**4. Re-fit (Schneider curve fitting)**
+
+All flat points whose command index falls in `[first_cmd, last_cmd]` are
+collected into `range_flat`. The **start point** of `first_cmd` (the
+endpoint of the preceding command, or the origin for the first command) is
+prepended to form `points_to_fit`. This ensures the re-fitted curve begins
+exactly where the unaffected prefix of the path ends, maintaining
+geometric continuity.
+
+These points are passed to `fit_curve()`, which implements the **Schneider
+algorithm** ("An Algorithm for Automatically Fitting Digitized Curves",
+Graphics Gems I, 1990) — the same algorithm used by the Pencil Tool. The
+key parameter is `SMOOTH_ERROR` (8.0), the maximum allowed deviation
+between the fitted curve and the input points. Because this tolerance is
+substantially more generous than the Pencil Tool's `FIT_ERROR` (4.0), the
+fitter typically produces fewer Bezier segments than the original commands.
+That reduction in segment count is the simplification.
+
+The fitter returns a list of `(p1x, p1y, c1x, c1y, c2x, c2y, p2x, p2y)`
+tuples, each representing one cubic Bezier segment.
+
+**5. Reassembly**
+
+The original command list is reconstructed by splicing in three parts:
+
+```
+new_commands = prefix + refitted + suffix
+```
+
+| Part | Source | Content |
+|------|--------|---------|
+| Prefix | `commands[0 .. first_cmd)` | Original commands before the affected range — unchanged |
+| Refitted | `fit_curve()` output | CurveTo commands from step 4 |
+| Suffix | `commands(last_cmd .. end]` | Original commands after the affected range — unchanged |
+
+If the resulting total command count is **not** strictly less than the
+original, the replacement is discarded — the re-fit did not actually
+simplify the path. This guard prevents unnecessary mutations that would
+clutter the undo history without visual benefit.
+
+Otherwise the path element is replaced in the document with the new
+command list.
+
+**6. Document update**
+
+After all selected paths have been processed, if any paths were modified,
+the document is committed to the model and a canvas repaint is requested.
+
+### Cumulative effect
+
+The smoothing effect is **cumulative**: each drag pass removes more detail,
+producing progressively smoother curves. Repeatedly dragging over the same
+region continues to simplify until the path can be represented by a single
+Bezier segment spanning the entire affected region (or until the fitter
+can no longer reduce the command count at the given error tolerance).
+
+This cumulative property comes from the fact that each pass re-flattens
+the **current** path state (which already has fewer commands from the
+previous pass) and re-fits it. With fewer input points per command,
+adjacent commands become more similar and are more likely to be merged
+by the fitter.
+
+### Worked example
+
+Consider a path with 10 small CurveTo segments forming a wiggly line:
+
+```
+M(0,0) C(5,3,...) C(10,-2,...) C(15,4,...) ... C(90,1, 95,0, 100,0)
+```
+
+1. **Flatten:** 10 CurveTos × 20 samples = 200 flat points + 1 MoveTo
+   point = 201 points.
+
+2. **Hit detection:** With cursor at (50, 0), the circle of radius 100
+   covers nearly all 201 points. Suppose `first_hit = 5`, `last_hit = 195`.
+
+3. **Command mapping:** `first_cmd = 1` (the first CurveTo), `last_cmd = 9`
+   (the last CurveTo before the final one). 9 commands affected.
+
+4. **Re-fit:** The ~190 affected flat points, plus the start point (0, 0),
+   are fitted with `SMOOTH_ERROR = 8.0`. The fitter might produce 3 CurveTo
+   segments instead of the original 9.
+
+5. **Reassembly:**
+   ```
+   Prefix:   M(0,0)                          (1 command)
+   Refitted: C(...) C(...) C(...)            (3 commands)
+   Suffix:   C(90,1, 95,0, 100,0)           (1 command)
+   Total:    5 commands (was 11) → accepted
+   ```
+
+A second drag pass over the same region would flatten the 3 refitted
+CurveTos and might merge them into 1 or 2.
+
+### Overlay
+
+- **Cornflower-blue circle:** a semi-transparent circle
+  (`rgba(100, 149, 237, 0.4)`, 1 px stroke) centered at the cursor
+  position with radius `SMOOTH_SIZE` (100 pt). The circle is always
+  visible when the Smooth tool is active, whether or not the user is
+  currently smoothing. This provides constant visual feedback of the
+  tool's influence extent.
+
+### Differences from the Path Eraser
+
+Both tools operate on paths during a drag gesture, but they serve opposite
+purposes:
+
+| Aspect | Path Eraser | Smooth Tool |
+|--------|-------------|-------------|
+| Purpose | Remove path segments | Simplify path segments |
+| Result | Path is split or deleted | Path retains its shape with fewer anchor points |
+| Influence region | Small rectangle (2 px) | Large circle (100 pt) |
+| Scope | All paths in document | Only selected paths |
+| Algorithm | Liang-Barsky clipping + de Casteljau split | Flatten + Schneider re-fit |
+| Effect on command count | Splits: may increase | Always decreases (or no change) |
 
 ---
 

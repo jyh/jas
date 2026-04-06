@@ -119,6 +119,7 @@ func createTools() -> [Tool: CanvasTool] {
         .deleteAnchorPoint: DeleteAnchorPointTool(),
         .pencil: PencilTool(),
         .pathEraser: PathEraserTool(),
+        .smooth: SmoothTool(),
         .text: TextTool(),
         .textPath: TextPathTool(),
         .line: LineTool(),
