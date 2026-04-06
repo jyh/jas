@@ -2,8 +2,8 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import (
-    QBrush, QColor, QCursor, QPainter, QPainterPath, QPen, QTransform, QMouseEvent,
-    QPaintEvent,
+    QBrush, QColor, QCursor, QPainter, QPainterPath, QPen, QPixmap, QTransform,
+    QMouseEvent, QPaintEvent,
 )
 from PySide6.QtWidgets import QLineEdit, QTextEdit, QWidget
 
@@ -25,6 +25,54 @@ from document.model import Model
 from tools.tool import CanvasTool, ToolContext, HIT_RADIUS, HANDLE_DRAW_SIZE
 from tools.toolbar import Tool
 from tools import create_tools
+
+
+def _make_white_arrow_cursor() -> QCursor:
+    """Create a white (hollow) arrow cursor for the Direct Selection tool."""
+    pixmap = QPixmap(24, 24)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    path = QPainterPath()
+    path.moveTo(4, 1)
+    path.lineTo(4, 19)
+    path.lineTo(8, 15)
+    path.lineTo(12, 22)
+    path.lineTo(15, 20)
+    path.lineTo(11, 13)
+    path.lineTo(16, 13)
+    path.closeSubpath()
+    painter.setPen(QPen(QColor(0, 0, 0), 1.5))
+    painter.setBrush(QBrush(QColor(255, 255, 255)))
+    painter.drawPath(path)
+    painter.end()
+    return QCursor(pixmap, 4, 1)
+
+
+def _make_group_selection_cursor() -> QCursor:
+    """Create a white arrow + plus cursor for the Group Selection tool."""
+    pixmap = QPixmap(24, 24)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    path = QPainterPath()
+    path.moveTo(4, 1)
+    path.lineTo(4, 19)
+    path.lineTo(8, 15)
+    path.lineTo(12, 22)
+    path.lineTo(15, 20)
+    path.lineTo(11, 13)
+    path.lineTo(16, 13)
+    path.closeSubpath()
+    painter.setPen(QPen(QColor(0, 0, 0), 1.5))
+    painter.setBrush(QBrush(QColor(255, 255, 255)))
+    painter.drawPath(path)
+    # Plus sign
+    painter.setPen(QPen(QColor(0, 0, 0), 2))
+    painter.drawLine(17, 20, 23, 20)
+    painter.drawLine(20, 17, 20, 23)
+    painter.end()
+    return QCursor(pixmap, 4, 1)
 
 
 @dataclass(frozen=True)
@@ -522,7 +570,7 @@ class CanvasWidget(QWidget):
         )
         self.setMinimumSize(320, 240)
         self.setMouseTracking(True)
-        self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
+        self._update_cursor()
         model.on_document_changed(self._on_document_changed)
 
     @property
@@ -538,11 +586,26 @@ class CanvasWidget(QWidget):
         self._active_tool.deactivate(self._tool_ctx)
         self._current_tool_enum = tool
         self._active_tool.activate(self._tool_ctx)
+        self._update_cursor()
         # Preserve selection across tool changes
         if self._model.document.selection != saved_selection:
             from dataclasses import replace
             self._model.document = replace(self._model.document,
                                            selection=saved_selection)
+
+    def _update_cursor(self) -> None:
+        self.setCursor(self._cursor_for_tool(self._current_tool_enum))
+
+    @staticmethod
+    def _cursor_for_tool(tool: Tool) -> QCursor:
+        if tool == Tool.SELECTION:
+            return QCursor(Qt.CursorShape.ArrowCursor)
+        elif tool == Tool.DIRECT_SELECTION:
+            return _make_white_arrow_cursor()
+        elif tool == Tool.GROUP_SELECTION:
+            return _make_group_selection_cursor()
+        else:
+            return QCursor(Qt.CursorShape.CrossCursor)
 
     def _on_document_changed(self, document: Document) -> None:
         self.update()
