@@ -10,6 +10,7 @@ pub mod delete_anchor_point;
 pub mod anchor_point;
 pub mod pencil;
 pub mod path_eraser;
+pub mod smooth;
 pub mod polygon;
 pub mod text;
 pub mod text_path;

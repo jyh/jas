@@ -10,7 +10,7 @@ _app = QApplication.instance() or QApplication(sys.argv)
 
 from tools.toolbar import (
     Tool, Toolbar, ToolButton,
-    _ARROW_SLOT_TOOLS, _PEN_SLOT_TOOLS, _TEXT_SLOT_TOOLS, _SHAPE_SLOT_TOOLS,
+    _ARROW_SLOT_TOOLS, _PEN_SLOT_TOOLS, _PENCIL_SLOT_TOOLS, _TEXT_SLOT_TOOLS, _SHAPE_SLOT_TOOLS,
 )
 from tools.tool import (
     HIT_RADIUS, HANDLE_DRAW_SIZE, DRAG_THRESHOLD, PASTE_OFFSET,
@@ -23,12 +23,14 @@ class ToolEnumTest(absltest.TestCase):
     """Tests for the Tool enum."""
 
     def test_tool_count(self):
-        self.assertEqual(len(Tool), 11)
+        self.assertEqual(len(Tool), 14)
 
     def test_all_tools_present(self):
         expected = {
             "SELECTION", "DIRECT_SELECTION", "GROUP_SELECTION",
-            "PEN", "ADD_ANCHOR_POINT", "PENCIL", "TEXT", "TEXT_PATH",
+            "PEN", "ADD_ANCHOR_POINT", "DELETE_ANCHOR_POINT",
+            "PENCIL", "PATH_ERASER", "SMOOTH",
+            "TEXT", "TEXT_PATH",
             "LINE", "RECT", "POLYGON",
         }
         actual = {t.name for t in Tool}
@@ -84,19 +86,22 @@ class SharedSlotsTest(absltest.TestCase):
         self.assertEqual(_TEXT_SLOT_TOOLS, {Tool.TEXT, Tool.TEXT_PATH})
 
     def test_pen_slot_tools(self):
-        self.assertEqual(_PEN_SLOT_TOOLS, {Tool.PEN, Tool.ADD_ANCHOR_POINT})
+        self.assertEqual(_PEN_SLOT_TOOLS, {Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT})
+
+    def test_pencil_slot_tools(self):
+        self.assertEqual(_PENCIL_SLOT_TOOLS, {Tool.PENCIL, Tool.PATH_ERASER, Tool.SMOOTH})
 
     def test_shape_slot_tools(self):
         self.assertEqual(_SHAPE_SLOT_TOOLS, {Tool.RECT, Tool.POLYGON})
 
     def test_slot_tools_disjoint(self):
-        all_slots = [_ARROW_SLOT_TOOLS, _PEN_SLOT_TOOLS, _TEXT_SLOT_TOOLS, _SHAPE_SLOT_TOOLS]
+        all_slots = [_ARROW_SLOT_TOOLS, _PEN_SLOT_TOOLS, _PENCIL_SLOT_TOOLS, _TEXT_SLOT_TOOLS, _SHAPE_SLOT_TOOLS]
         for i in range(len(all_slots)):
             for j in range(i + 1, len(all_slots)):
                 self.assertFalse(all_slots[i] & all_slots[j])
 
     def test_all_slot_tools_in_enum(self):
-        all_slot = _ARROW_SLOT_TOOLS | _PEN_SLOT_TOOLS | _TEXT_SLOT_TOOLS | _SHAPE_SLOT_TOOLS
+        all_slot = _ARROW_SLOT_TOOLS | _PEN_SLOT_TOOLS | _PENCIL_SLOT_TOOLS | _TEXT_SLOT_TOOLS | _SHAPE_SLOT_TOOLS
         for tool in all_slot:
             self.assertIsInstance(tool, Tool)
 

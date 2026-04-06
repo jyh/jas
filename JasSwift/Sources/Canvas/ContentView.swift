@@ -13,6 +13,7 @@ public enum Tool: String, CaseIterable {
     case deleteAnchorPoint
     case pencil
     case pathEraser
+    case smooth
     case text
     case textPath
     case line
@@ -269,7 +270,7 @@ struct ToolbarPanel: View {
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $pencilSlotTool,
-                        alternates: [.pencil, .pathEraser]
+                        alternates: [.pencil, .pathEraser, .smooth]
                     )
                 }
                 HStack(spacing: 2) {
