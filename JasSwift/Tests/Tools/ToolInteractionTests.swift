@@ -628,3 +628,70 @@ private func makeClosedPath() -> Element {
     tool.onRelease(ctx, x: 0.5, y: 0.5, shift: false, alt: false)
     #expect(layerChildren(model).count == 1, "locked path should not be erased")
 }
+
+@Test func pathEraserSplitEndpointsHugEraser() {
+    // Horizontal path (0,0)→(100,0)→(200,0).
+    // Erase at x=50 with eraserSize=2 => eraser rect x=[48,52].
+    let tool = PathEraserTool()
+    let path: Element = .path(Path(
+        d: [.moveTo(0, 0), .lineTo(100, 0), .lineTo(200, 0)],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
+    ))
+    let layer = Layer(name: "L", children: [path])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    tool.onPress(ctx, x: 50.0, y: 0.0, shift: false, alt: false)
+    tool.onRelease(ctx, x: 50.0, y: 0.0, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 2, "should split into 2 parts")
+    // Part 1 should end near x=48.
+    if case .path(let pe) = children[0] {
+        let lastCmd = pe.d.last!
+        if let end = lastCmd.endpoint {
+            #expect(abs(end.0 - 48.0) < 0.5, "part1 end x=\(end.0) should be near 48")
+        }
+    }
+    // Part 2 should start near x=52.
+    if case .path(let pe) = children[1] {
+        if case .moveTo(let x, _) = pe.d[0] {
+            #expect(abs(x - 52.0) < 0.5, "part2 start x=\(x) should be near 52")
+        }
+    }
+}
+
+@Test func pathEraserSplitPreservesCurves() {
+    // Cubic curve from (0,0) to (200,0) arching upward.
+    let tool = PathEraserTool()
+    let path: Element = .path(Path(
+        d: [.moveTo(0, 0), .curveTo(x1: 50, y1: -100, x2: 150, y2: -100, x: 200, y: 0)],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
+    ))
+    let layer = Layer(name: "L", children: [path])
+    let doc = Document(layers: [layer])
+    let model = Model(document: doc)
+    let (ctx, _, _) = makeCtx(model: model)
+    tool.onPress(ctx, x: 100.0, y: -75.0, shift: false, alt: false)
+    tool.onRelease(ctx, x: 100.0, y: -75.0, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 2, "should split into 2 parts")
+    // Part 1 should end with curveTo.
+    if case .path(let pe) = children[0] {
+        let last = pe.d.last!
+        if case .curveTo = last {
+            // ok
+        } else {
+            Issue.record("part1 should end with curveTo, got \(last)")
+        }
+    }
+    // Part 2 should contain curveTo ending at (200, 0).
+    if case .path(let pe) = children[1] {
+        #expect(pe.d.count >= 2, "part2 should have at least 2 commands")
+        if case .curveTo(_, _, _, _, let x, let y) = pe.d[1] {
+            #expect(abs(x - 200.0) < 0.01, "curve should end at x=200, got \(x)")
+            #expect(abs(y - 0.0) < 0.01, "curve should end at y=0, got \(y)")
+        } else {
+            Issue.record("part2 should contain curveTo, got \(pe.d[1])")
+        }
+    }
+}

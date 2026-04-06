@@ -667,6 +667,77 @@ class PathEraserToolTest(absltest.TestCase):
         self.assertEqual(len(_layer_children(model)), 1,
                          "locked path should not be erased")
 
+    def test_split_endpoints_hug_eraser(self):
+        """Split endpoints should be at the eraser boundary, not at command boundaries."""
+        from tools.path_eraser import PathEraserTool
+        tool = PathEraserTool()
+        # Horizontal path (0,0)→(100,0)→(200,0).
+        # Erase at x=50 with ERASER_SIZE=2 => eraser rect x=[48,52].
+        path = Path(
+            d=(MoveTo(0, 0), LineTo(100, 0), LineTo(200, 0)),
+            stroke=Stroke(Color(0, 0, 0), 1.0),
+        )
+        layer = Layer(name="L", children=(path,))
+        doc = Document(layers=(layer,), selection=frozenset())
+        model = Model(document=doc)
+        ctx, model, ctrl = _make_ctx(model)
+        tool.on_press(ctx, 50.0, 0.0)
+        tool.on_release(ctx, 50.0, 0.0)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 2, "should split into 2 parts")
+        # Part 1 should end near x=48.
+        last_cmd = children[0].d[-1]
+        self.assertAlmostEqual(last_cmd.x, 48.0, delta=0.5,
+                               msg=f"part1 end x={last_cmd.x} should be near 48")
+        # Part 2 should start near x=52.
+        first_cmd = children[1].d[0]
+        self.assertIsInstance(first_cmd, MoveTo)
+        self.assertAlmostEqual(first_cmd.x, 52.0, delta=0.5,
+                               msg=f"part2 start x={first_cmd.x} should be near 52")
+
+    def test_split_preserves_curves(self):
+        """Splitting a cubic Bezier should produce CurveTo, not LineTo."""
+        from tools.path_eraser import PathEraserTool
+        tool = PathEraserTool()
+        # Cubic curve from (0,0) to (200,0) arching upward.
+        path = Path(
+            d=(MoveTo(0, 0), CurveTo(50, -100, 150, -100, 200, 0)),
+            stroke=Stroke(Color(0, 0, 0), 1.0),
+        )
+        layer = Layer(name="L", children=(path,))
+        doc = Document(layers=(layer,), selection=frozenset())
+        model = Model(document=doc)
+        ctx, model, ctrl = _make_ctx(model)
+        # Erase near the top of the arc.
+        tool.on_press(ctx, 100.0, -75.0)
+        tool.on_release(ctx, 100.0, -75.0)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 2, "should split into 2 parts")
+        # Both parts should end/contain CurveTo, not LineTo.
+        self.assertIsInstance(children[0].d[-1], CurveTo,
+                             f"part1 should end with CurveTo, got {type(children[0].d[-1])}")
+        self.assertGreaterEqual(len(children[1].d), 2)
+        self.assertIsInstance(children[1].d[1], CurveTo,
+                             f"part2 should contain CurveTo, got {type(children[1].d[1])}")
+        # The second part's CurveTo should end at the original endpoint (200, 0).
+        self.assertAlmostEqual(children[1].d[1].x, 200.0, delta=0.01)
+        self.assertAlmostEqual(children[1].d[1].y, 0.0, delta=0.01)
+
+    def test_de_casteljau_split_exact(self):
+        """De Casteljau split at t=0.5 on a symmetric curve gives the midpoint."""
+        from tools.path_eraser import _split_cubic_at
+        first, second = _split_cubic_at(
+            (0.0, 0.0), 0.0, 100.0, 100.0, 100.0, 100.0, 0.0, 0.5
+        )
+        self.assertAlmostEqual(first.x, 50.0, delta=0.01,
+                               msg=f"first half endpoint x={first.x}")
+        self.assertAlmostEqual(first.y, 75.0, delta=0.01,
+                               msg=f"first half endpoint y={first.y}")
+        self.assertAlmostEqual(second.x, 100.0, delta=0.01,
+                               msg=f"second half endpoint x={second.x}")
+        self.assertAlmostEqual(second.y, 0.0, delta=0.01,
+                               msg=f"second half endpoint y={second.y}")
+
 
 if __name__ == '__main__':
     absltest.main()

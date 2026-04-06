@@ -1,7 +1,7 @@
 # Toolbar and Tools
 
 This document describes the toolbar layout, the CanvasTool interface, the
-ToolContext facade, and each of the thirteen tools.
+ToolContext facade, and each of the fourteen tools.
 
 ---
 
@@ -22,13 +22,14 @@ via long-press menus.
 
 ### Shared slots
 
-Four toolbar positions are shared between alternate tools. Long-pressing
+Five toolbar positions are shared between alternate tools. Long-pressing
 the button (500 ms) opens a popup menu to switch:
 
 | Slot | Default | Alternates | Position |
 |------|---------|------------|----------|
 | Arrow slot | Direct Selection | Group Selection | Row 0, Col 1 |
 | Pen slot | Pen | Add Anchor Point, Delete Anchor Point, Anchor Point | Row 1, Col 0 |
+| Pencil slot | Pencil | Path Eraser | Row 1, Col 1 |
 | Text slot | Text | Text on Path | Row 2, Col 0 |
 | Shape slot | Rect | Polygon | Row 3, Col 0 |
 
@@ -50,6 +51,7 @@ alternates are available.
 | T | Text |
 | L | Line |
 | M | Rect |
+| Shift+E | Path Eraser |
 
 Group Selection, Text on Path, and Polygon have no keyboard shortcuts --
 they are accessed through the long-press menus.
@@ -915,6 +917,201 @@ Created polygons have a 1 px black stroke and no fill.
 ### Overlay
 
 - Dashed gray polygon outline.
+
+---
+
+## Path Eraser Tool
+
+**Shortcut:** Shift+E
+**Shared slot:** Pencil slot (long-press on the Pencil button)
+
+Splits and removes path segments by dragging an eraser across them. The
+eraser sweeps a rectangular hit region across the canvas. Paths it crosses
+are split into two sub-paths at the eraser boundary; small paths are
+deleted entirely. Closed paths become open; open paths become two separate
+paths.
+
+### Constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `ERASER_SIZE` | 2.0 px | Half-width of the eraser hit rectangle; also the radius of the overlay circle |
+| `FLATTEN_STEPS` | 20 | Number of line segments used to approximate each Bezier curve during flattening |
+
+### Interaction
+
+| Action | Result |
+|--------|--------|
+| Press | Snapshot document; begin erasing at cursor position |
+| Drag | Continue erasing along the drag path |
+| Release | Stop erasing |
+| Move without press | Update overlay circle position (no erasure) |
+| Release without press | No-op |
+
+### States
+
+```
+                 on_press
+    IDLE ─────────────────> ERASING
+                               │
+                            on_move: erase at (x, y)
+                               │
+                            on_release
+                               v
+                             IDLE
+```
+
+### Algorithm
+
+The eraser processes each path element in the document through six stages:
+
+**1. Flatten**
+
+The path's commands (`LineTo`, `CurveTo`, `QuadTo`, etc.) are flattened
+into a polyline of straight line segments. Each Bezier curve (cubic or
+quadratic) is approximated with `FLATTEN_STEPS` (20) line segments. Linear
+commands produce one segment each.
+
+**2. Hit detection**
+
+Walk the flattened segments to find the contiguous range that intersects
+the eraser rectangle. The eraser rectangle spans from `last_pos` to the
+current cursor position, expanded by `ERASER_SIZE` in each direction.
+Intersection is tested using Liang-Barsky line-rectangle clipping. The
+search stops after the first contiguous run of hits (gaps are not bridged).
+
+**3. Boundary intersection (Liang-Barsky)**
+
+Compute the exact **entry** and **exit** points where the path crosses the
+eraser boundary:
+
+- **Entry point:** On the first hit segment, compute the Liang-Barsky
+  `t_min` parameter (the smallest `t` at which the segment enters the
+  rectangle). If the segment's start point is already inside the
+  rectangle, `t_min = 0`. The entry point is
+  `lerp(seg_start, seg_end, t_min)`.
+
+- **Exit point:** On the last hit segment, compute the Liang-Barsky
+  `t_max` parameter (the largest `t` at which the segment is still inside
+  the rectangle). If the segment's end point is inside, `t_max = 1`. The
+  exit point is `lerp(seg_start, seg_end, t_max)`.
+
+These boundary points ensure that split endpoints "hug" the eraser edge
+rather than snapping to the nearest command boundary.
+
+**4. Map back to original commands (`flat_index_to_cmd_and_t`)**
+
+The flattened segment index and per-segment `t` value from step 3 are
+converted to a `(command_index, t_within_command)` pair:
+
+- For a `LineTo` command (1 flat segment): `t_command = t_segment`.
+- For a `CurveTo` or `QuadTo` command (N = 20 flat segments): flat
+  segment `j` within that command spans `t = [j/N, (j+1)/N]`, so
+  `t_command = (j + t_segment) / N`.
+- For `ClosePath` (1 flat segment): same as `LineTo`.
+
+This mapping is necessary because the flattened polyline loses the
+original command boundaries, but the splitting algorithms in step 5
+operate on the original commands.
+
+**5. Curve-preserving split (De Casteljau's algorithm)**
+
+When the entry or exit point falls within a Bezier curve command, the
+curve is split at the computed `t` parameter using De Casteljau's
+algorithm. This produces two sub-curves that together trace the exact same
+geometric curve as the original, avoiding the loss of shape that would
+occur if curves were replaced with straight lines.
+
+**Cubic Bezier splitting** (`split_cubic_at`):
+
+Given start point P0, control points P1, P2, endpoint P3, and parameter t:
+
+```
+Level 1:  A = lerp(P0, P1, t)    B = lerp(P1, P2, t)    C = lerp(P2, P3, t)
+Level 2:  D = lerp(A, B, t)      E = lerp(B, C, t)
+Level 3:  F = lerp(D, E, t)      ← point on curve at t
+
+First half:  CurveTo(A, D, F)    ← from P0 to F
+Second half: CurveTo(E, C, P3)   ← from F to P3
+```
+
+**Quadratic Bezier splitting** (`split_quad_at`):
+
+Given start point P0, control point Q, endpoint P1, and parameter t:
+
+```
+A = lerp(P0, Q, t)    B = lerp(Q, P1, t)    C = lerp(A, B, t)
+
+First half:  QuadTo(A, C)     ← from P0 to C
+Second half: QuadTo(B, P1)    ← from C to P1
+```
+
+For linear commands (`LineTo`, `ClosePath`), simple linear interpolation
+is used — the entry command ends at `lerp(start, end, t)` and the exit
+command goes to the original endpoint.
+
+The `entry_cmd` function produces the first-half sub-command (from the
+command's start to the entry point). The `exit_cmd` function produces the
+second-half sub-command (from the exit point to the command's endpoint).
+
+**6. Reassembly**
+
+The path is reassembled from the non-erased portions:
+
+**Open paths** produce two sub-paths:
+
+```
+Part 1: [original commands before entry cmd] + [entry_cmd(t_entry)]
+Part 2: [MoveTo(exit_point)] + [exit_cmd(t_exit)] + [remaining commands]
+```
+
+Part 1 contains everything from the original start up to and including the
+entry portion of the entry command. Part 2 starts at the exit point and
+contains the remaining portion of the exit command plus all subsequent
+commands.
+
+Either part is discarded if it contains fewer than 2 commands or consists
+only of a MoveTo.
+
+**Closed paths** produce a single open path:
+
+The path is "unwrapped" starting from the exit point, proceeding through
+all commands after the erased region, wrapping around past the original
+MoveTo (with a LineTo connecting back to the start), through commands
+before the erased region, and ending at the entry point.
+
+```
+Result: [MoveTo(exit_point)] + [exit_cmd] + [commands after exit]
+      + [LineTo(original_start)] + [commands before entry]
+      + [entry_cmd(t_entry)]
+```
+
+The `ClosePath` command is removed, converting the closed path to an open
+one.
+
+### Small path deletion
+
+Before splitting, the tool checks the path's bounding box. If both the
+width and height are smaller than `ERASER_SIZE * 2` (4 px), the entire
+path is deleted instead of split. This prevents creating tiny unusable
+path fragments.
+
+### Locked paths
+
+Paths with the `locked` flag set are skipped entirely — the eraser has no
+effect on them.
+
+### Selection
+
+After any erasure, the document's selection is cleared.
+
+### Overlay
+
+- **Red circle:** a semi-transparent red circle (`rgba(255, 0, 0, 0.5)`,
+  1 px stroke) centered at the cursor position with radius `ERASER_SIZE`
+  (2 px). The circle is always visible when the Path Eraser tool is active,
+  whether or not the user is currently erasing. This provides constant
+  visual feedback of the eraser's extent.
 
 ---
 

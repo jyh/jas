@@ -630,4 +630,80 @@ let () =
     let children = layer_children model in
     assert (Array.length children = 1));
 
+  run_test "path eraser: split endpoints hug eraser" (fun () ->
+    let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+    (* Horizontal path (0,0)→(100,0)→(200,0).
+       Erase at x=50 with eraser_size=2 => eraser rect x=[48,52]. *)
+    let path = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); LineTo (100.0, 0.0); LineTo (200.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
+    tool#on_release ctx 50.0 0.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 2);
+    (* Part 1 should end near x=48. *)
+    (match children.(0) with
+     | Path { d; _ } ->
+       let last = List.nth d (List.length d - 1) in
+       (match Jas.Path_eraser_tool.cmd_endpoint last with
+        | Some (x, _) -> assert (abs_float (x -. 48.0) < 0.5)
+        | None -> assert false)
+     | _ -> assert false);
+    (* Part 2 should start near x=52. *)
+    (match children.(1) with
+     | Path { d; _ } ->
+       (match List.hd d with
+        | MoveTo (x, _) -> assert (abs_float (x -. 52.0) < 0.5)
+        | _ -> assert false)
+     | _ -> assert false));
+
+  run_test "path eraser: split preserves curves" (fun () ->
+    let tool = new Jas.Path_eraser_tool.path_eraser_tool in
+    (* Cubic curve from (0,0) to (200,0) arching upward. *)
+    let path = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); CurveTo (50.0, -100.0, 150.0, -100.0, 200.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_press ctx 100.0 (-75.0) ~shift:false ~alt:false;
+    tool#on_release ctx 100.0 (-75.0) ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 2);
+    (* Part 1 should end with CurveTo. *)
+    (match children.(0) with
+     | Path { d; _ } ->
+       let last = List.nth d (List.length d - 1) in
+       (match last with CurveTo _ -> () | _ -> assert false)
+     | _ -> assert false);
+    (* Part 2 should contain CurveTo ending at (200, 0). *)
+    (match children.(1) with
+     | Path { d; _ } ->
+       assert (List.length d >= 2);
+       let second = List.nth d 1 in
+       (match second with
+        | CurveTo (_, _, _, _, x, y) ->
+          assert (abs_float (x -. 200.0) < 0.01);
+          assert (abs_float y < 0.01)
+        | _ -> assert false)
+     | _ -> assert false));
+
+  run_test "path eraser: de casteljau split exact" (fun () ->
+    (* Splitting at t=0.5 on a symmetric curve should give the midpoint. *)
+    let (first, second) = Jas.Path_eraser_tool.split_cubic_at
+      (0.0, 0.0) 0.0 100.0 100.0 100.0 100.0 0.0 0.5 in
+    (match first with
+     | CurveTo (_, _, _, _, x, y) ->
+       assert (abs_float (x -. 50.0) < 0.01);
+       assert (abs_float (y -. 75.0) < 0.01)
+     | _ -> assert false);
+    (match second with
+     | CurveTo (_, _, _, _, x, y) ->
+       assert (abs_float (x -. 100.0) < 0.01);
+       assert (abs_float y < 0.01)
+     | _ -> assert false));
+
   Printf.printf "All tool interaction tests passed.\n"
