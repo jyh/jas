@@ -1105,6 +1105,191 @@ pub fn move_path_handle(
     PathElem { d: new_cmds, ..elem.clone() }
 }
 
+/// Move a single handle without reflecting the opposite handle (cusp behavior).
+pub fn move_path_handle_independent(
+    elem: &PathElem,
+    anchor_idx: usize,
+    handle_type: &str,
+    dx: f64,
+    dy: f64,
+) -> PathElem {
+    let d = &elem.d;
+    let indices = cmd_indices_for_path(d);
+    if anchor_idx >= indices.len() {
+        return elem.clone();
+    }
+    let ci = indices[anchor_idx];
+
+    let mut new_cmds = d.clone();
+
+    if handle_type == "in" {
+        if let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[ci] {
+            new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: x2 + dx, y2: y2 + dy, x, y };
+        }
+    } else if handle_type == "out" {
+        if ci + 1 < d.len() {
+            if let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[ci + 1] {
+                new_cmds[ci + 1] = PathCommand::CurveTo { x1: x1 + dx, y1: y1 + dy, x2, y2, x, y };
+            }
+        }
+    }
+
+    PathElem { d: new_cmds, ..elem.clone() }
+}
+
+/// Set a path handle to an absolute position without affecting the opposite handle.
+pub fn set_path_handle_absolute(
+    elem: &PathElem,
+    anchor_idx: usize,
+    handle_type: &str,
+    hx: f64,
+    hy: f64,
+) -> PathElem {
+    let d = &elem.d;
+    let indices = cmd_indices_for_path(d);
+    if anchor_idx >= indices.len() {
+        return elem.clone();
+    }
+    let ci = indices[anchor_idx];
+
+    let mut new_cmds = d.clone();
+
+    if handle_type == "in" {
+        if let PathCommand::CurveTo { x1, y1, x: ex, y: ey, .. } = d[ci] {
+            new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: hx, y2: hy, x: ex, y: ey };
+        }
+    } else if handle_type == "out" {
+        if ci + 1 < d.len() {
+            if let PathCommand::CurveTo { x2, y2, x, y, .. } = d[ci + 1] {
+                new_cmds[ci + 1] = PathCommand::CurveTo { x1: hx, y1: hy, x2, y2, x, y };
+            }
+        }
+    }
+
+    PathElem { d: new_cmds, ..elem.clone() }
+}
+
+/// Convert a corner point (LineTo or CurveTo with collapsed handles) to a smooth
+/// point with symmetric handles pulled toward (hx, hy).
+/// The outgoing handle is placed at (hx, hy) and the incoming handle is reflected.
+pub fn convert_corner_to_smooth(
+    elem: &PathElem,
+    anchor_idx: usize,
+    hx: f64,
+    hy: f64,
+) -> PathElem {
+    let d = &elem.d;
+    let indices = cmd_indices_for_path(d);
+    if anchor_idx >= indices.len() {
+        return elem.clone();
+    }
+    let ci = indices[anchor_idx];
+    let cmd = &d[ci];
+
+    let (ax, ay) = match cmd {
+        PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => (*x, *y),
+        PathCommand::CurveTo { x, y, .. } => (*x, *y),
+        _ => return elem.clone(),
+    };
+
+    // Reflected handle: mirror (hx,hy) through (ax,ay)
+    let rhx = 2.0 * ax - hx;
+    let rhy = 2.0 * ay - hy;
+
+    let mut new_cmds = d.clone();
+
+    // Set incoming handle (x2,y2 on this command) to the reflected position
+    match new_cmds[ci] {
+        PathCommand::LineTo { x, y } => {
+            new_cmds[ci] = PathCommand::CurveTo { x1: x, y1: y, x2: rhx, y2: rhy, x, y };
+            // Also need to fix x1,y1: use the previous anchor's position
+            if ci > 0 {
+                let (px, py) = match d[ci - 1] {
+                    PathCommand::MoveTo { x, y }
+                    | PathCommand::LineTo { x, y }
+                    | PathCommand::CurveTo { x, y, .. } => (x, y),
+                    _ => (ax, ay),
+                };
+                if let PathCommand::CurveTo { ref mut x1, ref mut y1, .. } = new_cmds[ci] {
+                    *x1 = px;
+                    *y1 = py;
+                }
+            }
+        }
+        PathCommand::CurveTo { x1, y1, x, y, .. } => {
+            new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: rhx, y2: rhy, x, y };
+        }
+        PathCommand::MoveTo { .. } => {
+            // Can't set incoming handle on MoveTo, only outgoing
+        }
+        _ => {}
+    }
+
+    // Set outgoing handle (x1,y1 on the next command) to (hx,hy)
+    if ci + 1 < new_cmds.len() {
+        match new_cmds[ci + 1] {
+            PathCommand::LineTo { x, y } => {
+                // Need incoming handle for the next anchor too
+                let next_ci = ci + 1;
+                let (nx2, ny2) = if next_ci + 1 < d.len() {
+                    (x, y)
+                } else {
+                    (x, y)
+                };
+                new_cmds[ci + 1] = PathCommand::CurveTo { x1: hx, y1: hy, x2: nx2, y2: ny2, x, y };
+            }
+            PathCommand::CurveTo { x2, y2, x, y, .. } => {
+                new_cmds[ci + 1] = PathCommand::CurveTo { x1: hx, y1: hy, x2, y2, x, y };
+            }
+            _ => {}
+        }
+    }
+
+    PathElem { d: new_cmds, ..elem.clone() }
+}
+
+/// Convert a smooth point to a corner point by collapsing both handles to the anchor.
+pub fn convert_smooth_to_corner(
+    elem: &PathElem,
+    anchor_idx: usize,
+) -> PathElem {
+    let d = &elem.d;
+    let indices = cmd_indices_for_path(d);
+    if anchor_idx >= indices.len() {
+        return elem.clone();
+    }
+    let ci = indices[anchor_idx];
+    let cmd = &d[ci];
+
+    let (ax, ay) = match cmd {
+        PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => (*x, *y),
+        PathCommand::CurveTo { x, y, .. } => (*x, *y),
+        _ => return elem.clone(),
+    };
+
+    let mut new_cmds = d.clone();
+
+    // Collapse incoming handle (x2,y2) to anchor
+    if let PathCommand::CurveTo { x1, y1, x, y, .. } = new_cmds[ci] {
+        new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: ax, y2: ay, x, y };
+    }
+
+    // Collapse outgoing handle (x1,y1 of next command) to anchor
+    if ci + 1 < new_cmds.len() {
+        if let PathCommand::CurveTo { x2, y2, x, y, .. } = new_cmds[ci + 1] {
+            new_cmds[ci + 1] = PathCommand::CurveTo { x1: ax, y1: ay, x2, y2, x, y };
+        }
+    }
+
+    PathElem { d: new_cmds, ..elem.clone() }
+}
+
+/// Check whether a path anchor is a "smooth" point (has non-degenerate handles).
+pub fn is_smooth_point(d: &[PathCommand], anchor_idx: usize) -> bool {
+    let (h_in, h_out) = path_handle_positions(d, anchor_idx);
+    h_in.is_some() || h_out.is_some()
+}
+
 fn move_path_command_points(
     d: &[PathCommand],
     indices: &HashSet<usize>,
