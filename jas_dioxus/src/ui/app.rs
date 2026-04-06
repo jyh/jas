@@ -1110,6 +1110,7 @@ pub fn App() -> Element {
 
     rsx! {
         style { r#"
+            #main {{ height: 100%; }}
             .jas-menu-title:hover {{ background: #d0d0d0; }}
             .jas-menu-item:hover {{ background: #e8e8e8; }}
             .jas-tool-popup-item:hover {{ background: #606060 !important; }}
@@ -1162,12 +1163,12 @@ pub fn App() -> Element {
 
                 // Canvas area
                 div {
-                    style: "flex:1; position:relative; overflow:hidden;",
+                    style: "flex:1; position:relative; overflow:hidden; cursor:{active_tool.cursor_css()};",
                     canvas {
                         id: "jas-canvas",
                         width: "1200",
                         height: "800",
-                        style: "display:block; cursor:crosshair;",
+                        style: "display:block; width:100%; height:100%;",
                         onmousedown: on_mousedown,
                         onmousemove: on_mousemove,
                         onmouseup: on_mouseup,
