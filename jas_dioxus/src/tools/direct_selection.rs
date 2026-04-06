@@ -234,7 +234,7 @@ impl CanvasTool for DirectSelectionTool {
         };
     }
 
-    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _dragging: bool) {
+    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool, _dragging: bool) {
         match &mut self.state {
             State::Marquee { cur_x, cur_y, .. } => {
                 *cur_x = x;

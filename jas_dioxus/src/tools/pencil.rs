@@ -70,7 +70,7 @@ impl CanvasTool for PencilTool {
         self.points = vec![(x, y)];
     }
 
-    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _dragging: bool) {
+    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool, _dragging: bool) {
         if self.drawing {
             self.points.push((x, y));
         }

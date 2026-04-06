@@ -124,7 +124,7 @@ impl CanvasTool for SelectionTool {
         };
     }
 
-    fn on_move(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, dragging: bool) {
+    fn on_move(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, _alt: bool, dragging: bool) {
         self.shift_held = shift;
         match self.state {
             State::PendingDrag { start_x, start_y } => {
@@ -289,8 +289,8 @@ mod tests {
         assert!(!model.document().selection.is_empty());
         // Press on it, first move triggers drag threshold, second move applies delta
         tool.on_press(&mut model, 60.0, 60.0, false, false);
-        tool.on_move(&mut model, 65.0, 65.0, false, true); // exceeds threshold, transitions to Moving
-        tool.on_move(&mut model, 70.0, 70.0, false, true); // applies dx=5, dy=5
+        tool.on_move(&mut model, 65.0, 65.0, false, false, true); // exceeds threshold, transitions to Moving
+        tool.on_move(&mut model, 70.0, 70.0, false, false, true); // applies dx=5, dy=5
         tool.on_release(&mut model, 70.0, 70.0, false, false);
         let elem = &model.document().layers[0].children().unwrap()[0];
         if let Element::Rect(r) = &**elem {

@@ -87,6 +87,18 @@ def _make_pen_cursor() -> QCursor:
     return QCursor(pixmap, 1, 1)
 
 
+def _make_add_anchor_point_cursor() -> QCursor:
+    """Create an add anchor point cursor from the reference PNG bitmap."""
+    import os
+    png_path = os.path.join(os.path.dirname(__file__), "..", "..", "transcript", "icons", "add anchor point.png")
+    pixmap = QPixmap(png_path)
+    if pixmap.isNull():
+        return QCursor(Qt.CursorShape.CrossCursor)
+    pixmap = pixmap.scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    pixmap.setDevicePixelRatio(2.0)
+    return QCursor(pixmap, 1, 1)
+
+
 @dataclass(frozen=True)
 class BoundingBox:
     """Axis-aligned bounding box in px."""
@@ -618,6 +630,8 @@ class CanvasWidget(QWidget):
             return _make_group_selection_cursor()
         elif tool == Tool.PEN:
             return _make_pen_cursor()
+        elif tool == Tool.ADD_ANCHOR_POINT:
+            return _make_add_anchor_point_cursor()
         else:
             return QCursor(Qt.CursorShape.CrossCursor)
 

@@ -113,6 +113,7 @@ func createTools() -> [Tool: CanvasTool] {
         .directSelection: DirectSelectionTool(),
         .groupSelection: GroupSelectionTool(),
         .pen: PenTool(),
+        .addAnchorPoint: AddAnchorPointTool(),
         .pencil: PencilTool(),
         .text: TextTool(),
         .textPath: TextPathTool(),

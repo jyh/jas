@@ -160,7 +160,7 @@ impl CanvasTool for PenTool {
         self.points.push(PenPoint::new(x, y));
     }
 
-    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _dragging: bool) {
+    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool, _dragging: bool) {
         self.mouse_x = x;
         self.mouse_y = y;
 

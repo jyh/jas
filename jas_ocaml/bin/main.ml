@@ -62,6 +62,8 @@ let () =
       toolbar#select_tool Jas.Toolbar.Direct_selection; true
     end else if key = GdkKeysyms._p || key = GdkKeysyms._P then begin
       toolbar#select_tool Jas.Toolbar.Pen; true
+    end else if key = GdkKeysyms._plus || key = GdkKeysyms._equal then begin
+      toolbar#select_tool Jas.Toolbar.Add_anchor_point; true
     end else if key = GdkKeysyms._t || key = GdkKeysyms._T then begin
       toolbar#select_tool Jas.Toolbar.Text_tool; true
     end else if key = GdkKeysyms._backslash then begin

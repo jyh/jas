@@ -696,6 +696,8 @@ class CanvasNSView: NSView {
             return makeGroupSelectionCursor()
         case .pen:
             return makePenCursor()
+        case .addAnchorPoint:
+            return makeAddAnchorPointCursor()
         default:
             return NSCursor.crosshair
         }
@@ -767,6 +769,31 @@ class CanvasNSView: NSView {
         for path in candidates {
             if let orig = NSImage(contentsOfFile: path) {
                 // Draw at 32x32 pixels, set size to 16x16 points for @2x Retina
+                let pixelSize = NSSize(width: 32, height: 32)
+                let image = NSImage(size: pixelSize)
+                image.lockFocus()
+                orig.draw(in: NSRect(origin: .zero, size: pixelSize),
+                          from: NSRect(origin: .zero, size: orig.size),
+                          operation: .sourceOver, fraction: 1.0)
+                image.unlockFocus()
+                image.size = NSSize(width: 16, height: 16)
+                return NSCursor(image: image, hotSpot: NSPoint(x: 1, y: 1))
+            }
+        }
+        return NSCursor.crosshair
+    }
+
+    private func makeAddAnchorPointCursor() -> NSCursor {
+        let bundle = Bundle.main
+        let cwd = FileManager.default.currentDirectoryPath
+        let candidates = [
+            (cwd as NSString).appendingPathComponent("transcript/icons/add anchor point.png"),
+            (cwd as NSString).appendingPathComponent("../transcript/icons/add anchor point.png"),
+            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("transcript/icons/add anchor point.png") },
+            bundle.path(forResource: "add anchor point", ofType: "png"),
+        ].compactMap { $0 }
+        for path in candidates {
+            if let orig = NSImage(contentsOfFile: path) {
                 let pixelSize = NSSize(width: 32, height: 32)
                 let image = NSImage(size: pixelSize)
                 image.lockFocus()
@@ -1051,6 +1078,7 @@ class CanvasNSView: NSView {
             case "t": onToolChange?(.text)
             case "\\": onToolChange?(.line)
             case "m": onToolChange?(.rect)
+            case "=", "+": onToolChange?(.addAnchorPoint)
             default: super.keyDown(with: event)
             }
         }

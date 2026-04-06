@@ -21,6 +21,7 @@ use crate::tools::direct_selection::DirectSelectionTool;
 use crate::tools::group_selection::GroupSelectionTool;
 use crate::tools::line::LineTool;
 use crate::tools::pen::PenTool;
+use crate::tools::add_anchor_point::AddAnchorPointTool;
 use crate::tools::pencil::PencilTool;
 use crate::tools::polygon::PolygonTool;
 use crate::tools::rect::RectTool;
@@ -47,6 +48,7 @@ impl TabState {
         tools.insert(ToolKind::DirectSelection, Box::new(DirectSelectionTool::new()));
         tools.insert(ToolKind::GroupSelection, Box::new(GroupSelectionTool::new()));
         tools.insert(ToolKind::Pen, Box::new(PenTool::new()));
+        tools.insert(ToolKind::AddAnchorPoint, Box::new(AddAnchorPointTool::new()));
         tools.insert(ToolKind::Pencil, Box::new(PencilTool::new()));
         tools.insert(ToolKind::Text, Box::new(TextTool::new()));
         tools.insert(ToolKind::TextOnPath, Box::new(TextPathTool::new()));
@@ -380,7 +382,7 @@ fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
 const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (0, 0, &[ToolKind::Selection]),
     (0, 1, &[ToolKind::DirectSelection, ToolKind::GroupSelection]),
-    (1, 0, &[ToolKind::Pen]),
+    (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint]),
     (1, 1, &[ToolKind::Pencil]),
     (2, 0, &[ToolKind::Text, ToolKind::TextOnPath]),
     (2, 1, &[ToolKind::Line]),
@@ -410,6 +412,11 @@ fn toolbar_svg_icon(kind: ToolKind) -> String {
         ToolKind::Pen => {
             let _c = c;
             r##"<g transform="scale(0.109375)"><path d="M163.07,190.51l12.54,19.52-90.68,45.96-12.46-28.05C58.86,195.29,32.68,176.45.13,161.51L0,4.58C0,2.38,2.8-.28,4.11-.37s3.96.45,5.31,1.34l85.42,56.33,48.38,32.15c-7.29,34.58-4.05,71.59,19.86,101.06ZM61.7,49.58L23.48,24.2l42.08,78.11c7.48.17,14.18,2.89,17.49,8.79s3.87,13.16-.95,18.87c-6.36,7.54-17.67,8.57-24.72,3.04-7.83-6.14-9.41-16.13-2.86-24.95L12.09,30.4l.44,69.96-.29,54.31c25.62,11.65,46.88,28.2,61.53,51.84l64.8-33.24c-11.11-25.08-13.69-50.63-8.47-78.19L61.7,49.58Z" fill="rgb(204,204,204)"/><path d="M61.7,49.58l68.41,45.5c-5.22,27.56-2.64,53.1,8.47,78.19l-64.8,33.24c-14.66-23.64-35.91-40.19-61.53-51.84l.29-54.31-.44-69.96,42.43,77.66c-6.55,8.82-4.96,18.8,2.86,24.95,7.05,5.53,18.35,4.49,24.72-3.04,4.82-5.71,4.27-12.96.95-18.87s-10.01-8.62-17.49-8.79L23.48,24.2l38.22,25.38Z" fill="#3c3c3c"/></g>"##.to_string()
+        },
+        // Add Anchor Point (pen nib + plus sign, from SVG scaled 256→28)
+        ToolKind::AddAnchorPoint => {
+            let _c = c;
+            r##"<g transform="scale(0.109375)"><path d="M170.82,209.27l-88.08,46.73-10.99-25.31C60.04,197.72,31.98,175.62.51,162.2L.07,55.68,0,7.02C0,5.03.62,2.32,1.66,1.26S6.93-.46,8.2.39l130.44,88.12c-4.9,32.54-4.3,66.45,14.46,94.39l17.7,26.39Z" fill="rgb(204,204,204)"/><path d="M126.44,94.04c-2.22,11.75-2.88,21.93-2.47,32.64.52,16.1,3.8,30.8,11.11,46.23l-62.86,33.45c-14.38-22.81-34.23-39.94-60.13-51.08l-.62-125.03,41.81,77.76c-5.22,8.02-5.31,16.36.31,22.49,6.1,6.66,15.3,7.1,23.05,1.74,6.57-4.54,7.84-12.25,5.04-18.88s-8.7-11.19-17.14-10.35L22.85,24.63l103.56,69.4Z" fill="#3c3c3c"/><path d="M232.87,153.61c-3.47,3.11-8.74,5.8-13.86,7.8l-18.34-34.03-33.68,18.09-7.64-13.38,34.16-18.2-18.46-35.15,13.59-7.64,18.83,35.42,33.38-17.99,7.32,13.45-33.3,18.14,17.99,33.46Z" fill="rgb(204,204,204)"/></g>"##.to_string()
         },
         // Pencil
         ToolKind::Pencil => format!(
@@ -488,12 +495,13 @@ pub fn App() -> Element {
             let cy = coords.y;
             let mods = evt.data().modifiers();
             let shift = mods.shift();
+            let alt = mods.alt();
             let dragging = evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary);
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
                 if let Some(tab) = st.tab_mut() {
                     if let Some(tool) = tab.tools.get_mut(&kind) {
-                        tool.on_move(&mut tab.model, cx, cy, shift, dragging);
+                        tool.on_move(&mut tab.model, cx, cy, shift, alt, dragging);
                     }
                 }
             }));
@@ -702,6 +710,11 @@ pub fn App() -> Element {
                         st.set_tool(ToolKind::Pen);
                     }));
                 }
+                Key::Character(ref c) if c == "=" || c == "+" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.set_tool(ToolKind::AddAnchorPoint);
+                    }));
+                }
                 Key::Character(ref c) if c == "n" || c == "N" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         st.set_tool(ToolKind::Pencil);
@@ -738,6 +751,26 @@ pub fn App() -> Element {
                             tab.model.snapshot();
                             let new_doc = tab.model.document().delete_selection();
                             tab.model.set_document(new_doc);
+                        }
+                    }));
+                }
+                _ => {}
+            }
+        }
+    };
+
+    let on_keyup = {
+        let act = act.clone();
+        move |evt: Event<KeyboardData>| {
+            let key = evt.data().key();
+            match key {
+                Key::Character(ref c) if c == " " => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        let kind = st.active_tool;
+                        if let Some(tab) = st.tab_mut() {
+                            if let Some(tool) = tab.tools.get_mut(&kind) {
+                                tool.on_key_up(&mut tab.model, " ");
+                            }
                         }
                     }));
                 }
@@ -1180,6 +1213,7 @@ pub fn App() -> Element {
         div {
             tabindex: "0",
             onkeydown: on_keydown,
+            onkeyup: on_keyup,
             onmousedown: move |_| {
                 popup_slot.set(None);
             },

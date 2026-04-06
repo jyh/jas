@@ -178,4 +178,184 @@ let () =
       assert (y = 60.0)
     | _ -> assert false);
 
+  (* ---- Add Anchor Point tool ---- *)
+
+  run_test "add anchor point: click on path adds point" (fun () ->
+    let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+    let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path_elem|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
+    tool#on_release ctx 50.0 0.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    match children.(0) with
+    | Path { d; _ } ->
+      (* Original: MoveTo + 1 CurveTo = 2 commands *)
+      (* After split: MoveTo + 2 CurveTos = 3 commands *)
+      assert (List.length d = 3);
+      (match List.nth d 0 with MoveTo _ -> () | _ -> assert false);
+      (match List.nth d 1 with CurveTo _ -> () | _ -> assert false);
+      (match List.nth d 2 with CurveTo _ -> () | _ -> assert false)
+    | _ -> assert false);
+
+  run_test "add anchor point: click away from path does nothing" (fun () ->
+    let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+    let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path_elem|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_press ctx 50.0 100.0 ~shift:false ~alt:false;
+    tool#on_release ctx 50.0 100.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    match children.(0) with
+    | Path { d; _ } -> assert (List.length d = 2)
+    | _ -> assert false);
+
+  run_test "add anchor point: split preserves endpoints" (fun () ->
+    let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+    let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path_elem|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
+    tool#on_release ctx 50.0 0.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    match children.(0) with
+    | Path { d; _ } ->
+      (* First CurveTo endpoint near (50, 0) *)
+      (match List.nth d 1 with
+       | CurveTo (_, _, _, _, x, y) ->
+         assert (abs_float (x -. 50.0) < 1.0);
+         assert (abs_float y < 1.0)
+       | _ -> assert false);
+      (* Second CurveTo endpoint at (100, 0) *)
+      (match List.nth d 2 with
+       | CurveTo (_, _, _, _, x, y) ->
+         assert (abs_float (x -. 100.0) < 0.01);
+         assert (abs_float y < 0.01)
+       | _ -> assert false)
+    | _ -> assert false);
+
+  run_test "add anchor point: drag adjusts handles" (fun () ->
+    let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+    let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path_elem|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
+    tool#on_move ctx 50.0 20.0 ~shift:false ~dragging:true;
+    tool#on_release ctx 50.0 20.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    match children.(0) with
+    | Path { d; _ } ->
+      assert (List.length d = 3);
+      (* Outgoing handle (x1, y1 of second CurveTo) at drag position *)
+      (match List.nth d 2 with
+       | CurveTo (x1, y1, _, _, _, _) ->
+         assert (abs_float (x1 -. 50.0) < 0.01);
+         assert (abs_float (y1 -. 20.0) < 0.01)
+       | _ -> assert false);
+      (* Incoming handle (x2, y2 of first CurveTo) mirrored *)
+      (match List.nth d 1 with
+       | CurveTo (_, _, x2, y2, _, _) ->
+         assert (abs_float (x2 -. 50.0) < 0.01);
+         assert (abs_float (y2 -. (~-.20.0)) < 0.01)
+       | _ -> assert false)
+    | _ -> assert false);
+
+  run_test "add anchor point: cusp drag leaves incoming handle" (fun () ->
+    let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+    let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path_elem|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    (* Split the curve at midpoint *)
+    tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
+    tool#on_release ctx 50.0 0.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    (match children.(0) with
+     | Path { d; _ } ->
+       assert (List.length d = 3);
+       (* Record incoming handle before cusp update *)
+       let in_x2, in_y2 = match List.nth d 1 with
+         | CurveTo (_, _, x2, y2, _, _) -> (x2, y2)
+         | _ -> assert false
+       in
+       (* Apply cusp update directly *)
+       let new_cmds = Jas.Add_anchor_point_tool.update_handles d 1 50.0 0.0 50.0 20.0 true in
+       (* Outgoing handle at drag position *)
+       (match List.nth new_cmds 2 with
+        | CurveTo (x1, y1, _, _, _, _) ->
+          assert (abs_float (x1 -. 50.0) < 0.01);
+          assert (abs_float (y1 -. 20.0) < 0.01)
+        | _ -> assert false);
+       (* Incoming handle unchanged (cusp) *)
+       (match List.nth new_cmds 1 with
+        | CurveTo (_, _, x2, y2, _, _) ->
+          assert (abs_float (x2 -. in_x2) < 0.01);
+          assert (abs_float (y2 -. in_y2) < 0.01)
+        | _ -> assert false)
+     | _ -> assert false));
+
+  run_test "add anchor point: insert updates selection indices" (fun () ->
+    let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+    let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path_elem|] in
+    (* Select the path with all CPs (indices 0 and 1) *)
+    let sel = Jas.Document.PathMap.singleton [0; 0]
+      { Jas.Document.es_path = [0; 0]; es_control_points = [0; 1] } in
+    let doc = Jas.Document.make_document ~selection:sel [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
+    tool#on_release ctx 50.0 0.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    (match children.(0) with
+     | Path { d; _ } -> assert (List.length d = 3)
+     | _ -> assert false);
+    (* Selection should include all 3 CPs *)
+    let new_sel = model#document.Jas.Document.selection in
+    (match Jas.Document.PathMap.find_opt [0; 0] new_sel with
+     | Some es ->
+       let cps = List.sort compare es.Jas.Document.es_control_points in
+       assert (List.length cps = 3);
+       assert (List.nth cps 0 = 0);
+       assert (List.nth cps 1 = 1);
+       assert (List.nth cps 2 = 2)
+     | None -> assert false));
+
+  run_test "add anchor point: split line segment" (fun () ->
+    let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
+    let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+      [MoveTo (0.0, 0.0); LineTo (100.0, 0.0)] in
+    let layer = make_layer ~name:"L" [|path_elem|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    let (ctx, _model, _ctrl) = make_ctx ~model () in
+    tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
+    tool#on_release ctx 50.0 0.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    match children.(0) with
+    | Path { d; _ } ->
+      assert (List.length d = 3);
+      (match List.nth d 1 with LineTo _ -> () | _ -> assert false);
+      (match List.nth d 2 with LineTo _ -> () | _ -> assert false);
+      (match List.nth d 1 with
+       | LineTo (x, _) -> assert (abs_float (x -. 50.0) < 1.0)
+       | _ -> assert false)
+    | _ -> assert false);
+
   Printf.printf "All tool interaction tests passed.\n"

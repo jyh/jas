@@ -145,7 +145,7 @@ impl CanvasTool for TextPathTool {
         };
     }
 
-    fn on_move(&mut self, model: &mut Model, x: f64, y: f64, _shift: bool, _dragging: bool) {
+    fn on_move(&mut self, model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool, _dragging: bool) {
         match &mut self.state {
             State::OffsetDrag { path, preview } => {
                 if let Some(Element::TextPath(e)) = model.document().get_element(path) {

@@ -107,6 +107,72 @@ public struct ToolbarView {
                 let transformed = outer.applying(transform)
                 context.fill(transformed, with: .color(color), style: FillStyle(eoFill: true))
 
+            case .addAnchorPoint:
+                // Add anchor point icon from SVG (viewBox 0 0 256 256), scaled to 28x28
+                let s: CGFloat = 28.0 / 256.0
+                let transform = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: s, y: s)
+                // Pen nib outer path with inner cutout (eoFill)
+                var nib = SwiftUI.Path()
+                nib.move(to: CGPoint(x: 170.82, y: 209.27))
+                nib.addLine(to: CGPoint(x: 82.74, y: 256.0))
+                nib.addLine(to: CGPoint(x: 71.75, y: 230.69))
+                nib.addCurve(to: CGPoint(x: 0.51, y: 162.2),
+                    control1: CGPoint(x: 60.04, y: 197.72), control2: CGPoint(x: 31.98, y: 175.62))
+                nib.addLine(to: CGPoint(x: 0.07, y: 55.68))
+                nib.addLine(to: CGPoint(x: 0, y: 7.02))
+                nib.addCurve(to: CGPoint(x: 1.66, y: 1.26),
+                    control1: CGPoint(x: 0, y: 5.03), control2: CGPoint(x: 0.62, y: 2.32))
+                nib.addCurve(to: CGPoint(x: 8.2, y: 0.39),
+                    control1: CGPoint(x: 2.7, y: 0.2), control2: CGPoint(x: 6.93, y: -0.46))
+                nib.addLine(to: CGPoint(x: 138.64, y: 88.51))
+                nib.addCurve(to: CGPoint(x: 153.1, y: 182.9),
+                    control1: CGPoint(x: 133.74, y: 121.05), control2: CGPoint(x: 134.34, y: 149.06))
+                nib.addLine(to: CGPoint(x: 170.82, y: 209.27))
+                nib.closeSubpath()
+                // Inner cutout
+                nib.move(to: CGPoint(x: 126.44, y: 94.04))
+                nib.addLine(to: CGPoint(x: 22.84, y: 24.64))
+                nib.addLine(to: CGPoint(x: 64.53, y: 103.04))
+                nib.addCurve(to: CGPoint(x: 83.05, y: 111.1),
+                    control1: CGPoint(x: 73.04, y: 102.48), control2: CGPoint(x: 79.74, y: 105.2))
+                nib.addCurve(to: CGPoint(x: 82.1, y: 129.97),
+                    control1: CGPoint(x: 86.36, y: 117.0), control2: CGPoint(x: 86.92, y: 124.26))
+                nib.addCurve(to: CGPoint(x: 57.38, y: 133.01),
+                    control1: CGPoint(x: 75.74, y: 137.51), control2: CGPoint(x: 64.43, y: 138.54))
+                nib.addCurve(to: CGPoint(x: 54.52, y: 108.06),
+                    control1: CGPoint(x: 49.55, y: 126.87), control2: CGPoint(x: 47.97, y: 116.88))
+                nib.addLine(to: CGPoint(x: 12.09, y: 30.4))
+                nib.addLine(to: CGPoint(x: 12.53, y: 100.36))
+                nib.addLine(to: CGPoint(x: 12.24, y: 154.67))
+                nib.addCurve(to: CGPoint(x: 73.77, y: 206.51),
+                    control1: CGPoint(x: 37.86, y: 166.32), control2: CGPoint(x: 59.12, y: 182.87))
+                nib.addLine(to: CGPoint(x: 138.57, y: 173.27))
+                nib.addCurve(to: CGPoint(x: 130.1, y: 95.08),
+                    control1: CGPoint(x: 127.46, y: 148.19), control2: CGPoint(x: 124.88, y: 122.64))
+                nib.addLine(to: CGPoint(x: 126.44, y: 94.04))
+                nib.closeSubpath()
+                let nibTransformed = nib.applying(transform)
+                context.fill(nibTransformed, with: .color(color), style: FillStyle(eoFill: true))
+                // Plus sign (separate fill, not eoFill)
+                var plus = SwiftUI.Path()
+                plus.move(to: CGPoint(x: 232.87, y: 153.61))
+                plus.addCurve(to: CGPoint(x: 219.01, y: 161.41),
+                    control1: CGPoint(x: 229.4, y: 156.72), control2: CGPoint(x: 224.13, y: 159.31))
+                plus.addLine(to: CGPoint(x: 200.67, y: 127.38))
+                plus.addLine(to: CGPoint(x: 166.99, y: 145.47))
+                plus.addLine(to: CGPoint(x: 159.35, y: 132.09))
+                plus.addLine(to: CGPoint(x: 193.51, y: 113.89))
+                plus.addLine(to: CGPoint(x: 175.05, y: 78.74))
+                plus.addLine(to: CGPoint(x: 188.64, y: 71.1))
+                plus.addLine(to: CGPoint(x: 207.47, y: 106.52))
+                plus.addLine(to: CGPoint(x: 240.85, y: 88.53))
+                plus.addLine(to: CGPoint(x: 248.17, y: 101.98))
+                plus.addLine(to: CGPoint(x: 214.87, y: 120.12))
+                plus.addLine(to: CGPoint(x: 232.86, y: 153.58))
+                plus.closeSubpath()
+                let plusTransformed = plus.applying(transform)
+                context.fill(plusTransformed, with: .color(color))
+
             case .pencil:
                 var path = SwiftUI.Path()
                 // Pencil body (angled)
@@ -261,6 +327,7 @@ private struct ArrowSlotButton: View {
         case .directSelection: return "Direct Selection"
         case .groupSelection: return "Group Selection"
         case .pen: return "Pen"
+        case .addAnchorPoint: return "Add Anchor Point"
         case .pencil: return "Pencil"
         case .text: return "Text"
         case .textPath: return "Text on Path"
