@@ -754,17 +754,41 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
           _self#make_arrow_cursor 1.0 1.0 1.0 0.0 0.0 0.0 false
         | Toolbar.Group_selection ->
           _self#make_arrow_cursor 1.0 1.0 1.0 0.0 0.0 0.0 true
+        | Toolbar.Pen -> _self#make_pen_cursor
         | _ -> Gdk.Cursor.create `CROSSHAIR
       in
       let win = canvas_area#misc#window in
       if Gobject.get_oid win <> 0 then
         Gdk.Window.set_cursor win cursor
 
+    method private make_pen_cursor =
+      (* Load pen cursor from reference PNG bitmap, scaled to 32x32 *)
+      let candidates = [
+        "transcript/icons/pen tool.png";
+        "../transcript/icons/pen tool.png";
+        Filename.concat (Filename.concat
+          (Filename.dirname Sys.executable_name) "..")
+          "transcript/icons/pen tool.png";
+      ] in
+      let path = List.find Sys.file_exists candidates in
+      let orig = GdkPixbuf.from_file path in
+      let sz = 16 in
+      let pixbuf = GdkPixbuf.create ~width:sz ~height:sz
+        ~bits:(GdkPixbuf.get_bits_per_sample orig)
+        ~has_alpha:(GdkPixbuf.get_has_alpha orig) () in
+      GdkPixbuf.scale ~dest:pixbuf ~width:sz ~height:sz
+        ~scale_x:(float_of_int sz /. float_of_int (GdkPixbuf.get_width orig))
+        ~scale_y:(float_of_int sz /. float_of_int (GdkPixbuf.get_height orig))
+        ~interp:`BILINEAR orig;
+      Gdk.Cursor.create_from_pixbuf pixbuf ~x:1 ~y:1
+
     method private make_arrow_cursor fr fg fb sr sg sb with_plus =
-      (* Render arrow cursor from a 24x24 Cairo surface. *)
-      let size = 24 in
+      (* Render arrow cursor at 16x16. GDK Quartz doubles on Retina → ~32pt. *)
+      let size = 16 in
+      let s = 16.0 /. 24.0 in
       let surface = Cairo.Image.create Cairo.Image.ARGB32 ~w:size ~h:size in
       let cr = Cairo.create surface in
+      Cairo.scale cr s s;
       Cairo.move_to cr 4.0 1.0;
       Cairo.line_to cr 4.0 19.0;
       Cairo.line_to cr 8.0 15.0;
@@ -791,19 +815,19 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       Cairo.PNG.write surface tmp;
       let pixbuf = GdkPixbuf.from_file tmp in
       (try Sys.remove tmp with _ -> ());
-      Gdk.Cursor.create_from_pixbuf pixbuf ~x:4 ~y:1
+      Gdk.Cursor.create_from_pixbuf pixbuf ~x:3 ~y:1
 
     method private switch_tool =
       let new_tool_type = toolbar#current_tool in
       let saved_selection = current_doc.Document.selection in
       let ctx = _self#tool_context in
-      active_tool#deactivate ctx;
       if new_tool_type <> current_tool_type then begin
+        active_tool#deactivate ctx;
         current_tool_type <- new_tool_type;
         active_tool <- Tool_factory.create_tool new_tool_type;
+        active_tool#activate ctx;
+        _self#update_cursor;
       end;
-      active_tool#activate ctx;
-      _self#update_cursor;
       (* Preserve selection across tool changes *)
       let doc = current_doc in
       if doc.Document.selection <> saved_selection then

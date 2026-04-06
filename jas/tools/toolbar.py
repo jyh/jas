@@ -90,24 +90,24 @@ class ToolButton(QToolButton):
             self._draw_alternate_triangle(painter)
 
     def _draw_selection_arrow(self, painter):
-        """Filled arrow."""
+        """Black arrow with white border."""
         path = _draw_arrow_path()
-        painter.setPen(QPen(QColor("#cccccc"), 1.0))
-        painter.setBrush(QColor("#cccccc"))
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setBrush(QColor("#000000"))
         painter.drawPath(path)
 
     def _draw_direct_selection_arrow(self, painter):
-        """Outline arrow."""
+        """White arrow with black border."""
         path = _draw_arrow_path()
-        painter.setPen(QPen(QColor("#cccccc"), 1.0))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("#000000"), 1.0))
+        painter.setBrush(QColor("#ffffff"))
         painter.drawPath(path)
 
     def _draw_group_selection_arrow(self, painter):
-        """Outline arrow with a '+' badge."""
+        """White arrow with black border and '+' badge."""
         path = _draw_arrow_path()
-        painter.setPen(QPen(QColor("#cccccc"), 1.0))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("#000000"), 1.0))
+        painter.setBrush(QColor("#ffffff"))
         painter.drawPath(path)
         # Draw '+' in the lower-right
         painter.setPen(QPen(QColor("#cccccc"), 1.5))
@@ -125,21 +125,48 @@ class ToolButton(QToolButton):
         painter.drawRect(4, 4, self.ICON_SIZE - 8, self.ICON_SIZE - 8)
 
     def _draw_pen_tool(self, painter):
-        painter.setPen(QPen(QColor("#cccccc"), 1.5))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        path = QPainterPath()
-        # Fountain pen nib shape
-        path.moveTo(8, 24)
-        path.lineTo(10, 18)
-        path.lineTo(14, 4)
-        path.lineTo(18, 4)
-        path.lineTo(22, 18)
-        path.lineTo(24, 24)
-        path.lineTo(16, 20)
-        path.closeSubpath()
-        painter.drawPath(path)
-        # Center line (nib slit)
-        painter.drawLine(16, 10, 16, 20)
+        # Pen icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28.
+        s = 28.0 / 256.0  # 0.109375
+        ox = (self.ICON_SIZE - 28) / 2.0
+        oy = (self.ICON_SIZE - 28) / 2.0
+        painter.save()
+        painter.translate(ox, oy)
+        painter.scale(s, s)
+        # Outer path (icon color)
+        outer = QPainterPath()
+        outer.moveTo(163.07, 190.51)
+        outer.lineTo(175.61, 210.03)
+        outer.lineTo(84.93, 255.99)
+        outer.lineTo(72.47, 227.94)
+        outer.cubicTo(58.86, 195.29, 32.68, 176.45, 0.13, 161.51)
+        outer.lineTo(0, 4.58)
+        outer.cubicTo(0, 2.38, 2.8, -0.28, 4.11, -0.37)
+        outer.cubicTo(5.42, -0.46, 8.07, 0.08, 9.42, 0.97)
+        outer.lineTo(94.84, 57.3)
+        outer.lineTo(143.22, 89.45)
+        outer.cubicTo(135.93, 124.03, 139.17, 161.04, 163.08, 190.51)
+        outer.closeSubpath()
+        # Inner cutout
+        outer.moveTo(61.7, 49.58)
+        outer.lineTo(23.48, 24.2)
+        outer.lineTo(65.56, 102.31)
+        outer.cubicTo(73.04, 102.48, 79.74, 105.2, 83.05, 111.1)
+        outer.cubicTo(86.36, 117.0, 86.92, 124.26, 82.1, 129.97)
+        outer.cubicTo(75.74, 137.51, 64.43, 138.54, 57.38, 133.01)
+        outer.cubicTo(49.55, 126.87, 47.97, 116.88, 54.52, 108.06)
+        outer.lineTo(12.09, 30.4)
+        outer.lineTo(12.53, 100.36)
+        outer.lineTo(12.24, 154.67)
+        outer.cubicTo(37.86, 166.32, 59.12, 182.87, 73.77, 206.51)
+        outer.lineTo(138.57, 173.27)
+        outer.cubicTo(127.46, 148.19, 124.88, 122.64, 130.1, 95.08)
+        outer.lineTo(61.7, 49.58)
+        outer.closeSubpath()
+        outer.setFillRule(Qt.FillRule.OddEvenFill)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#cccccc"))
+        painter.drawPath(outer)
+        painter.restore()
 
     def _draw_pencil_tool(self, painter):
         painter.setPen(QPen(QColor("#cccccc"), 1.5))

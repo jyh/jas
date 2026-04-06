@@ -106,7 +106,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       ) |> ignore;
 
       (* Draw tool buttons *)
-      let draw_arrow cr ~filled ~alloc =
+      let arrow_path cr ~alloc =
         let bw = float_of_int alloc.Gtk.width in
         let bh = float_of_int alloc.Gtk.height in
         let ox = (bw -. 28.0) /. 2.0 in
@@ -118,24 +118,37 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.line_to cr (ox +. 18.0) (oy +. 24.0);
         Cairo.line_to cr (ox +. 13.0) (oy +. 16.0);
         Cairo.line_to cr (ox +. 20.0) (oy +. 16.0);
-        Cairo.Path.close cr;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
-        if filled then
-          Cairo.fill cr
-        else begin
-          Cairo.set_line_width cr 1.5;
-          Cairo.stroke cr
-        end
+        Cairo.Path.close cr
       in
 
+      (* Black arrow with white border *)
+      let draw_selection_arrow cr ~alloc =
+        arrow_path cr ~alloc;
+        Cairo.set_source_rgb cr 0.0 0.0 0.0;
+        Cairo.fill_preserve cr;
+        Cairo.set_source_rgb cr 1.0 1.0 1.0;
+        Cairo.set_line_width cr 1.0;
+        Cairo.stroke cr
+      in
+
+      (* White arrow with black border *)
+      let draw_direct_arrow cr ~alloc =
+        arrow_path cr ~alloc;
+        Cairo.set_source_rgb cr 1.0 1.0 1.0;
+        Cairo.fill_preserve cr;
+        Cairo.set_source_rgb cr 0.0 0.0 0.0;
+        Cairo.set_line_width cr 1.0;
+        Cairo.stroke cr
+      in
+
+      (* White arrow with black border + plus badge *)
       let draw_arrow_plus cr ~alloc =
-        draw_arrow cr ~filled:false ~alloc;
-        (* Draw '+' badge in lower-right *)
+        draw_direct_arrow cr ~alloc;
         let bw = float_of_int alloc.Gtk.width in
         let bh = float_of_int alloc.Gtk.height in
         let ox = (bw -. 28.0) /. 2.0 in
         let oy = (bh -. 28.0) /. 2.0 in
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.set_source_rgb cr 0.0 0.0 0.0;
         Cairo.set_line_width cr 1.5;
         Cairo.move_to cr (ox +. 20.0) (oy +. 20.0);
         Cairo.line_to cr (ox +. 27.0) (oy +. 20.0);
@@ -222,7 +235,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
           Cairo.fill cr
         end;
         (match arrow_slot_tool with
-        | Direct_selection -> draw_arrow cr ~filled:false ~alloc
+        | Direct_selection -> draw_direct_arrow cr ~alloc
         | Group_selection -> draw_arrow_plus cr ~alloc
         | _ -> ());
         (* Small triangle in lower-right indicating alternates *)
@@ -273,22 +286,43 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         let bh = float_of_int alloc.Gtk.height in
         let ox = (bw -. 28.0) /. 2.0 in
         let oy = (bh -. 28.0) /. 2.0 in
+        let s = 28.0 /. 256.0 in
+        Cairo.save cr;
+        Cairo.translate cr ox oy;
+        Cairo.scale cr s s;
         Cairo.set_source_rgb cr 0.8 0.8 0.8;
-        Cairo.set_line_width cr 1.5;
-        (* Fountain pen nib shape *)
-        Cairo.move_to cr (ox +. 8.0) (oy +. 24.0);
-        Cairo.line_to cr (ox +. 10.0) (oy +. 18.0);
-        Cairo.line_to cr (ox +. 14.0) (oy +. 4.0);
-        Cairo.line_to cr (ox +. 18.0) (oy +. 4.0);
-        Cairo.line_to cr (ox +. 22.0) (oy +. 18.0);
-        Cairo.line_to cr (ox +. 24.0) (oy +. 24.0);
-        Cairo.line_to cr (ox +. 16.0) (oy +. 20.0);
+        (* Outer path *)
+        Cairo.move_to cr 163.07 190.51;
+        Cairo.line_to cr 175.61 210.03;
+        Cairo.line_to cr 84.93 255.99;
+        Cairo.line_to cr 72.47 227.94;
+        Cairo.curve_to cr 58.86 195.29 32.68 176.45 0.13 161.51;
+        Cairo.line_to cr 0.0 4.58;
+        Cairo.curve_to cr 0.0 2.38 2.8 (-0.28) 4.11 (-0.37);
+        Cairo.curve_to cr 5.42 (-0.46) 8.07 0.08 9.42 0.97;
+        Cairo.line_to cr 94.84 57.3;
+        Cairo.line_to cr 143.22 89.45;
+        Cairo.curve_to cr 135.93 124.03 139.17 161.04 163.08 190.51;
         Cairo.Path.close cr;
-        Cairo.stroke cr;
-        (* Center line (nib slit) *)
-        Cairo.move_to cr (ox +. 16.0) (oy +. 10.0);
-        Cairo.line_to cr (ox +. 16.0) (oy +. 20.0);
-        Cairo.stroke cr
+        (* Inner cutout (hole) *)
+        Cairo.move_to cr 61.7 49.58;
+        Cairo.line_to cr 23.48 24.2;
+        Cairo.line_to cr 65.56 102.31;
+        Cairo.curve_to cr 73.04 102.48 79.74 105.2 83.05 111.1;
+        Cairo.curve_to cr 86.36 117.0 86.92 124.26 82.1 129.97;
+        Cairo.curve_to cr 75.74 137.51 64.43 138.54 57.38 133.01;
+        Cairo.curve_to cr 49.55 126.87 47.97 116.88 54.52 108.06;
+        Cairo.line_to cr 12.09 30.4;
+        Cairo.line_to cr 12.53 100.36;
+        Cairo.line_to cr 12.24 154.67;
+        Cairo.curve_to cr 37.86 166.32 59.12 182.87 73.77 206.51;
+        Cairo.line_to cr 138.57 173.27;
+        Cairo.curve_to cr 127.46 148.19 124.88 122.64 130.1 95.08;
+        Cairo.line_to cr 61.7 49.58;
+        Cairo.Path.close cr;
+        Cairo.set_fill_rule cr Cairo.EVEN_ODD;
+        Cairo.fill cr;
+        Cairo.restore cr
       in
 
       let draw_pencil_icon cr ~alloc =
@@ -346,7 +380,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.fill cr;
         true
       ) |> ignore;
-      draw_tool_button selection_btn Selection (draw_arrow ~filled:true);
+      draw_tool_button selection_btn Selection draw_selection_arrow;
       (* Arrow slot uses custom draw that checks arrow_slot_tool *)
       direct_btn#misc#connect#draw ~callback:(fun cr ->
         let alloc = direct_btn#misc#allocation in
