@@ -18,6 +18,7 @@ public enum Tool: String, CaseIterable {
     case textPath
     case line
     case rect
+    case roundedRect
     case polygon
 }
 
@@ -285,7 +286,7 @@ struct ToolbarPanel: View {
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $shapeSlotTool,
-                        alternates: [.rect, .polygon]
+                        alternates: [.rect, .roundedRect, .polygon]
                     )
                 }
             }

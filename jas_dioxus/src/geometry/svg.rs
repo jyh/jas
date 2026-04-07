@@ -1241,6 +1241,49 @@ mod tests {
     }
 
     #[test]
+    fn export_rounded_rect_has_rx_ry() {
+        let doc = make_doc(vec![Element::Rect(RectElem {
+            x: 10.0, y: 20.0, width: 100.0, height: 50.0,
+            rx: 10.0, ry: 10.0,
+            fill: Some(Fill::new(Color::WHITE)),
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            common: CommonProps::default(),
+        })]);
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("rx=\""), "expected rx attribute in: {svg}");
+        assert!(svg.contains("ry=\""), "expected ry attribute in: {svg}");
+    }
+
+    #[test]
+    fn export_plain_rect_omits_rx_ry() {
+        let doc = make_doc(vec![make_rect(10.0, 20.0, 30.0, 40.0)]);
+        let svg = document_to_svg(&doc);
+        assert!(!svg.contains("rx=\""), "plain rect should not emit rx: {svg}");
+        assert!(!svg.contains("ry=\""), "plain rect should not emit ry: {svg}");
+    }
+
+    #[test]
+    fn roundtrip_rounded_rect_preserves_rx_ry() {
+        let doc = make_doc(vec![Element::Rect(RectElem {
+            x: 10.0, y: 20.0, width: 100.0, height: 50.0,
+            rx: 10.0, ry: 10.0,
+            fill: Some(Fill::new(Color::WHITE)),
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            common: CommonProps::default(),
+        })]);
+        let svg = document_to_svg(&doc);
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        assert_eq!(children.len(), 1);
+        if let Element::Rect(r) = &*children[0] {
+            assert!(r.rx > 0.0, "expected rx > 0 after roundtrip, got {}", r.rx);
+            assert!(r.ry > 0.0, "expected ry > 0 after roundtrip, got {}", r.ry);
+        } else {
+            panic!("expected Rect, got {:?}", &*children[0]);
+        }
+    }
+
+    #[test]
     fn roundtrip_rect() {
         let doc = make_doc(vec![make_rect(10.0, 20.0, 30.0, 40.0)]);
         let svg = document_to_svg(&doc);

@@ -105,6 +105,55 @@ private func layerChildren(_ model: Model) -> [Element] {
     }
 }
 
+// MARK: - Rounded rect tool tests
+
+@Test func roundedRectToolDrawRoundedRect() {
+    let tool = RoundedRectTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    tool.onRelease(ctx, x: 110, y: 70, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 1)
+    if case .rect(let r) = children[0] {
+        #expect(r.x == 10)
+        #expect(r.y == 20)
+        #expect(r.width == 100)
+        #expect(r.height == 50)
+        #expect(r.rx == roundedRectRadius)
+        #expect(r.ry == roundedRectRadius)
+    } else {
+        Issue.record("Expected Rect element")
+    }
+}
+
+@Test func roundedRectToolZeroSizeNotCreated() {
+    let tool = RoundedRectTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 0)
+}
+
+@Test func roundedRectToolNegativeDragNormalizes() {
+    let tool = RoundedRectTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 100, y: 80, shift: false, alt: false)
+    tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 1)
+    if case .rect(let r) = children[0] {
+        #expect(r.x == 10)
+        #expect(r.y == 20)
+        #expect(r.width == 90)
+        #expect(r.height == 60)
+        #expect(r.rx == roundedRectRadius)
+        #expect(r.ry == roundedRectRadius)
+    } else {
+        Issue.record("Expected Rect element")
+    }
+}
+
 // MARK: - Polygon tool tests
 
 @Test func polygonToolDrawPolygon() {

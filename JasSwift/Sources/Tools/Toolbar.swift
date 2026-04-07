@@ -544,6 +544,15 @@ public struct ToolbarView {
                 let rect = CGRect(x: ox + 4, y: oy + 6, width: 20, height: 16)
                 context.stroke(SwiftUI.Path(rect), with: .color(color), lineWidth: 1.5)
 
+            case .roundedRect:
+                // Rounded Rectangle icon from SVG (viewBox 0 0 256 256), scaled to 28x28
+                let s: CGFloat = 28.0 / 256.0
+                let transform = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: s, y: s)
+                let rect = CGRect(x: 23.33, y: 58.26, width: 212.06, height: 139.47)
+                let path = SwiftUI.Path(roundedRect: rect, cornerSize: CGSize(width: 30, height: 30))
+                let transformed = path.applying(transform)
+                context.stroke(transformed, with: .color(color), lineWidth: 8.0 * s)
+
             case .polygon:
                 let cx = ox + 14.0, cy = oy + 14.0, r = 11.0
                 let n = 6
@@ -656,6 +665,7 @@ private struct ArrowSlotButton: View {
         case .text: return "Text"
         case .textPath: return "Text on Path"
         case .rect: return "Rectangle"
+        case .roundedRect: return "Rounded Rectangle"
         case .polygon: return "Polygon"
         default: return tool.rawValue
         }

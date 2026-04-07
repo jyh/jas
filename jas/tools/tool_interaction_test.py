@@ -116,6 +116,40 @@ class RectToolTest(absltest.TestCase):
         self.assertEqual(elem.height, 60)
 
 
+class RoundedRectToolTest(absltest.TestCase):
+    def test_draw_rounded_rect(self):
+        """Press-drag-release creates a Rect with rx/ry set to default radius."""
+        from tools.drawing import RoundedRectTool, ROUNDED_RECT_RADIUS
+        tool = RoundedRectTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 20)
+        tool.on_release(ctx, 110, 70)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 1)
+        elem = children[0]
+        self.assertIsInstance(elem, Rect)
+        self.assertEqual(elem.x, 10)
+        self.assertEqual(elem.y, 20)
+        self.assertEqual(elem.width, 100)
+        self.assertEqual(elem.height, 50)
+        self.assertEqual(elem.rx, ROUNDED_RECT_RADIUS)
+        self.assertEqual(elem.ry, ROUNDED_RECT_RADIUS)
+
+    def test_zero_size_not_created(self):
+        """Press and release at same point => no element created."""
+        from tools.drawing import RoundedRectTool
+        tool = RoundedRectTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 20)
+        tool.on_release(ctx, 10, 20)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 0)
+
+    def test_radius_default_is_ten(self):
+        from tools.drawing import ROUNDED_RECT_RADIUS
+        self.assertEqual(ROUNDED_RECT_RADIUS, 10.0)
+
+
 class SelectionToolTest(absltest.TestCase):
     def test_marquee_select(self):
         """Drag marquee over an element => element is selected."""

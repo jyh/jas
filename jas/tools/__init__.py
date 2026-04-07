@@ -4,7 +4,7 @@ from tools.tool import CanvasTool
 from tools.toolbar import Tool
 
 from tools.selection import SelectionTool, DirectSelectionTool, GroupSelectionTool
-from tools.drawing import LineTool, RectTool, PolygonTool
+from tools.drawing import LineTool, RectTool, RoundedRectTool, PolygonTool
 from tools.pen import PenTool
 from tools.add_anchor_point import AddAnchorPointTool
 from tools.delete_anchor_point import DeleteAnchorPointTool
@@ -31,5 +31,6 @@ def create_tools() -> dict[Tool, CanvasTool]:
         Tool.TEXT_PATH: TextPathTool(),
         Tool.LINE: LineTool(),
         Tool.RECT: RectTool(),
+        Tool.ROUNDED_RECT: RoundedRectTool(),
         Tool.POLYGON: PolygonTool(),
     }

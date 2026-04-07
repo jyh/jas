@@ -519,3 +519,17 @@ When an anchor point is deleted, the desired behavior is to select all the remai
 Let's add the Anchor Point tool to the toolbar in all apps. If the Anchor Point tool is dragged on a corner point, it converts smooth point, pulling out control handles. If the Anchor Point tool is clicked on a smooth point, it converts it to a corner point. If the Anchor Point tool dragged on a control handle, it breaks the connection with the other handle, creating a cusp point. The cursor image is just like the pen tool, but with a < sign to the right near the base. The svg file is in the file "assets/icons/anchor point.svg", and the png file is in the file "assets/icons/anchor point.png". Add it in the same way as the pen tool. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
 
 ![anchor point](anchor point.svg)
+
+## Line tool
+
+Let's update the the toolbar icon for the Line Segment tool. The mouse cursor remains crosshairs. The svg file is in the file "assets/icons/line.svg", and the png file is in the file "assets/icons/line.png". Add it in the same way as the pen tool. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
+
+![line](assets/icons/line.svg)
+
+Now let’s add a Rounded Rectangle tool. When this tool is selected, we draw a rounded rectangle on the canvas by clicking a corner of the rectangle, dragging, and where we release is the other corner of the rectangle, just like a regular rectangle. The tool should go in the same slot as the Rectangle too. The radius of rounded should be defined as a module parameter, let's initialize it to 10pt. The svg file is in the file "assets/icons/rounded rect.svg", and the png file is in the file "assets/icons/rounded rect.png". Add it in the same way as the Rectangle tool. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
+
+![rounded rect](assets/icons/rounded rect.svg)
+
+Let's add an Ellipse tool. When this tool is selected, we draw an ellipse on the canvas by clicking a corner of the bounding box of the ellipser, dragging, and where we release is the other corner of the bounding box of the ellipse. The tool should go in the same slot as the Rectangle too. The svg file is in the file "assets/icons/ellipse.svg", and the png file is in the file "assets/icons/ellipse.png". Add it in the same way as the Rectangle tool. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
+
+![ellipse](assets/icons/ellipse.svg)
