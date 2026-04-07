@@ -9,7 +9,7 @@ import AppKit
 
 @Test func toolEnumCases() {
     let tools = Tool.allCases
-    #expect(tools.count == 15)
+    #expect(tools.count == 16)
     #expect(tools.contains(.selection))
     #expect(tools.contains(.directSelection))
     #expect(tools.contains(.groupSelection))
@@ -22,6 +22,7 @@ import AppKit
     #expect(tools.contains(.rect))
     #expect(tools.contains(.roundedRect))
     #expect(tools.contains(.polygon))
+    #expect(tools.contains(.star))
 }
 
 @Test func contentViewInitializes() {

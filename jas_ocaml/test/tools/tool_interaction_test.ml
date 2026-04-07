@@ -153,6 +153,45 @@ let () =
       assert (ry = Jas.Drawing_tool.rounded_rect_radius)
     | _ -> assert false);
 
+  (* ---- Star tool ---- *)
+
+  run_test "star tool: draw star" (fun () ->
+    let tool = new Jas.Drawing_tool.star_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_release ctx 110.0 120.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    match children.(0) with
+    | Polygon { points; _ } ->
+      assert (List.length points = 2 * Jas.Drawing_tool.star_points)
+    | _ -> assert false);
+
+  run_test "star tool: zero-size not created" (fun () ->
+    let tool = new Jas.Drawing_tool.star_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 0));
+
+  run_test "star tool: first vertex at top" (fun () ->
+    let tool = new Jas.Drawing_tool.star_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 0.0 0.0 ~shift:false ~alt:false;
+    tool#on_release ctx 100.0 100.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    match children.(0) with
+    | Polygon { points; _ } ->
+      let (x, y) = List.hd points in
+      assert (abs_float (x -. 50.0) < 1e-9);
+      assert (abs_float y < 1e-9)
+    | _ -> assert false);
+
+  run_test "star tool: default points is 5" (fun () ->
+    assert (Jas.Drawing_tool.star_points = 5)
+  );
+
   (* ---- Polygon tool ---- *)
 
   run_test "polygon tool: draw polygon" (fun () ->

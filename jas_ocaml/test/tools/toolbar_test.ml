@@ -12,11 +12,11 @@ let () =
   let all_tools : Jas.Toolbar.tool list = [
     Selection; Direct_selection; Group_selection;
     Pen; Add_anchor_point; Pencil; Text_tool; Text_path;
-    Line; Rect; Rounded_rect; Polygon;
+    Line; Rect; Rounded_rect; Polygon; Star;
   ] in
 
-  run_test "all 12 tool variants exist" (fun () ->
-    assert (List.length all_tools = 12)
+  run_test "all 13 tool variants exist" (fun () ->
+    assert (List.length all_tools = 13)
   );
 
   run_test "tool equality" (fun () ->
@@ -100,6 +100,11 @@ let () =
   run_test "shape slot alternate: polygon" (fun () ->
     tb#select_tool Jas.Toolbar.Polygon;
     assert (tb#current_tool = Jas.Toolbar.Polygon)
+  );
+
+  run_test "shape slot alternate: star" (fun () ->
+    tb#select_tool Jas.Toolbar.Star;
+    assert (tb#current_tool = Jas.Toolbar.Star)
   );
 
   run_test "cycle through all tools" (fun () ->

@@ -154,6 +154,48 @@ private func layerChildren(_ model: Model) -> [Element] {
     }
 }
 
+// MARK: - Star tool tests
+
+@Test func starToolDrawStar() {
+    let tool = StarTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    tool.onRelease(ctx, x: 110, y: 120, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 1)
+    if case .polygon(let p) = children[0] {
+        #expect(p.points.count == 2 * starPoints)
+    } else {
+        Issue.record("Expected Polygon element")
+    }
+}
+
+@Test func starToolZeroSizeNotCreated() {
+    let tool = StarTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 0)
+}
+
+@Test func starToolFirstVertexAtTop() {
+    let tool = StarTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
+    tool.onRelease(ctx, x: 100, y: 100, shift: false, alt: false)
+    if case .polygon(let p) = layerChildren(model)[0] {
+        #expect(abs(p.points[0].0 - 50.0) < 1e-9)
+        #expect(abs(p.points[0].1 - 0.0) < 1e-9)
+    } else {
+        Issue.record("Expected Polygon element")
+    }
+}
+
+@Test func starToolDefaultPointsIsFive() {
+    #expect(starPoints == 5)
+}
+
 // MARK: - Polygon tool tests
 
 @Test func polygonToolDrawPolygon() {

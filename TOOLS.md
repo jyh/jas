@@ -884,6 +884,37 @@ Created rectangles have a 1 px black stroke and no fill.
 
 ---
 
+## Rounded Rectangle Tool
+
+**Shortcut:** none (long-press on Rect slot)
+**Shared slot:** Shape slot (Rect, Rounded Rect, Polygon, Star)
+
+Creates Rect elements with rounded corners by press-drag-release.
+
+### Constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `ROUNDED_RECT_RADIUS` | 10.0 px | Corner radius applied to created rectangles |
+
+### Interaction
+
+| Action | Result |
+|--------|--------|
+| Press | Record start point, snapshot document |
+| Drag | Update end point; show dashed preview rectangle |
+| Release | Create a Rect element with `rx = ry = ROUNDED_RECT_RADIUS`. Coordinates normalized so `x, y` is top-left and `width, height` are positive. |
+| Shift-drag | Constrain to 45-degree angles |
+
+Zero-size drags (width or height = 0) are rejected. Created rectangles
+have a 1 px black stroke and no fill.
+
+### Overlay
+
+- Dashed gray rectangle from press point to current cursor (normalized).
+
+---
+
 ## Polygon Tool
 
 **Shortcut:** none (long-press on Rect slot)
@@ -917,6 +948,54 @@ Created polygons have a 1 px black stroke and no fill.
 ### Overlay
 
 - Dashed gray polygon outline.
+
+---
+
+## Star Tool
+
+**Shortcut:** none (long-press on Rect slot)
+**Shared slot:** Shape slot (Rect, Rounded Rect, Polygon, Star)
+
+Creates star-shaped Polygon elements inscribed in the dragged-out
+bounding box.
+
+### Constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `STAR_POINTS` | 5 | Number of outer points (tips) on the star |
+| `STAR_INNER_RATIO` | 0.4 | Ratio of inner radius to outer radius |
+
+### Interaction
+
+| Action | Result |
+|--------|--------|
+| Press | Record start point, snapshot document |
+| Drag | Update end point; show dashed preview star |
+| Release | Create a Polygon element with `2 * STAR_POINTS` vertices |
+| Shift-drag | Constrain to 45-degree angles |
+
+Zero-size drags (width or height = 0) are rejected. Created stars have
+a 1 px black stroke and no fill.
+
+### Star geometry
+
+The press and release points define the corners of the star's bounding
+box. The star is inscribed in the ellipse fitting that bounding box:
+
+1. Compute center `(cx, cy)` as the midpoint of the bounding box.
+2. Outer radii are `rx_outer = |dx| / 2`, `ry_outer = |dy| / 2`.
+3. Inner radii are `rx_inner = rx_outer * STAR_INNER_RATIO`,
+   `ry_inner = ry_outer * STAR_INNER_RATIO`.
+4. Generate `2 * STAR_POINTS` vertices at equal angular intervals
+   starting from `theta0 = -pi/2` (top center). Even-indexed vertices
+   use the outer radii, odd-indexed vertices use the inner radii.
+
+The first vertex is always at the top center `(cx, cy - ry_outer)`.
+
+### Overlay
+
+- Dashed gray star outline.
 
 ---
 

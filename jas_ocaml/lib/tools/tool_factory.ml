@@ -9,6 +9,7 @@ let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
   | Toolbar.Rect -> (new Drawing_tool.rect_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Rounded_rect -> (new Drawing_tool.rounded_rect_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Polygon -> (new Drawing_tool.polygon_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Star -> (new Drawing_tool.star_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Pen -> (new Pen_tool.pen_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Add_anchor_point -> (new Add_anchor_point_tool.add_anchor_point_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Delete_anchor_point -> (new Delete_anchor_point_tool.delete_anchor_point_tool :> Canvas_tool.canvas_tool)

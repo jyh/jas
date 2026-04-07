@@ -25,6 +25,7 @@ class Tool(Enum):
     RECT = auto()
     ROUNDED_RECT = auto()
     POLYGON = auto()
+    STAR = auto()
 
 
 def _draw_arrow_path() -> QPainterPath:
@@ -100,6 +101,8 @@ class ToolButton(QToolButton):
             self._draw_text_path_tool(painter)
         elif self.tool == Tool.POLYGON:
             self._draw_polygon_tool(painter)
+        elif self.tool == Tool.STAR:
+            self._draw_star_tool(painter)
 
         if self.has_alternates:
             self._draw_alternate_triangle(painter)
@@ -629,6 +632,26 @@ class ToolButton(QToolButton):
         path.closeSubpath()
         painter.drawPath(path)
 
+    def _draw_star_tool(self, painter):
+        # Star icon from SVG (viewBox 0 0 256 256), scaled to 28x28.
+        from PySide6.QtCore import QPointF
+        s = 28.0 / 256.0
+        ox = (self.ICON_SIZE - 28) / 2.0
+        oy = (self.ICON_SIZE - 28) / 2.0
+        painter.save()
+        painter.translate(ox, oy)
+        painter.scale(s, s)
+        painter.setPen(QPen(QColor("#cccccc"), 8))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        pts = [
+            (128, 50.18), (145.47, 103.95), (202.01, 103.95),
+            (156.27, 137.18), (173.74, 190.95), (128, 157.72),
+            (82.26, 190.95), (99.73, 137.18), (53.99, 103.95),
+            (110.53, 103.95),
+        ]
+        painter.drawPolygon([QPointF(x, y) for x, y in pts])
+        painter.restore()
+
     def _draw_alternate_triangle(self, painter):
         """Small filled triangle in the lower-right corner indicating alternates."""
         tri = QPainterPath()
@@ -651,7 +674,7 @@ _PENCIL_SLOT_TOOLS = {Tool.PENCIL, Tool.PATH_ERASER, Tool.SMOOTH}
 # Tools that share the text/text-path slot
 _TEXT_SLOT_TOOLS = {Tool.TEXT, Tool.TEXT_PATH}
 # Tools that share the rect/polygon slot
-_SHAPE_SLOT_TOOLS = {Tool.RECT, Tool.ROUNDED_RECT, Tool.POLYGON}
+_SHAPE_SLOT_TOOLS = {Tool.RECT, Tool.ROUNDED_RECT, Tool.POLYGON, Tool.STAR}
 _LONG_PRESS_MS = LONG_PRESS_MS
 
 
@@ -718,6 +741,8 @@ class Toolbar(QWidget):
         self.button_group.addButton(self.buttons[Tool.POLYGON])
         self.buttons[Tool.ROUNDED_RECT] = ToolButton(Tool.ROUNDED_RECT, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.ROUNDED_RECT])
+        self.buttons[Tool.STAR] = ToolButton(Tool.STAR, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.STAR])
         self.buttons[Tool.PATH_ERASER] = ToolButton(Tool.PATH_ERASER, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.PATH_ERASER])
         self.buttons[Tool.SMOOTH] = ToolButton(Tool.SMOOTH, has_alternates=True)
@@ -868,10 +893,11 @@ class Toolbar(QWidget):
 
     def _show_shape_slot_menu(self):
         menu = QMenu(self)
-        for tool in (Tool.RECT, Tool.ROUNDED_RECT, Tool.POLYGON):
+        for tool in (Tool.RECT, Tool.ROUNDED_RECT, Tool.POLYGON, Tool.STAR):
             label = {Tool.RECT: "Rectangle",
                      Tool.ROUNDED_RECT: "Rounded Rectangle",
-                     Tool.POLYGON: "Polygon"}[tool]
+                     Tool.POLYGON: "Polygon",
+                     Tool.STAR: "Star"}[tool]
             action = menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(tool == self._shape_slot_tool)
