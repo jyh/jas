@@ -78,8 +78,13 @@ class virtual selection_tool_base = object (self)
         Cairo.set_dash cr [| 4.0; 4.0 |];
         Document.PathMap.iter (fun _path (es : Document.element_selection) ->
           let elem = Document.get_element ctx.model#document es.es_path in
-          let moved = Element.move_control_points elem es.es_control_points dx dy in
-          ctx.draw_element_overlay cr moved es.es_control_points
+          let n = Element.control_point_count elem in
+          let cps = Document.selection_kind_to_sorted es.es_kind ~total:n in
+          let is_all = match es.es_kind with
+            | Document.SelKindAll -> true
+            | _ -> false in
+          let moved = Element.move_control_points ~is_all elem cps dx dy in
+          ctx.draw_element_overlay cr moved cps
         ) ctx.model#document.Document.selection;
         Cairo.set_dash cr [||]
       end else begin
@@ -180,7 +185,9 @@ class direct_selection_tool = object (self)
              Cairo.set_source_rgb cr 0.0 0.47 1.0;
              Cairo.set_line_width cr 1.0;
              Cairo.set_dash cr [| 4.0; 4.0 |];
-             ctx.draw_element_overlay cr moved es.es_control_points;
+             let n = Element.control_point_count moved in
+             let cps = Document.selection_kind_to_sorted es.es_kind ~total:n in
+             ctx.draw_element_overlay cr moved cps;
              Cairo.set_dash cr [||]
            | None -> ())
         | _ -> ())

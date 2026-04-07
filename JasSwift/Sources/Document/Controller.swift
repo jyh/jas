@@ -44,13 +44,13 @@ public class Controller {
                                 opacity: target.opacity, transform: target.transform)
         var layers = doc.layers
         layers[idx] = newLayer
-        let n = element.controlPointCount
-        let es = ElementSelection(path: [idx, childIdx],
-                                  controlPoints: Set(0..<n))
+        let es = ElementSelection.all([idx, childIdx])
         model.document = Document(layers: layers, selectedLayer: idx,
                                      selection: [es])
     }
 
+    /// XOR two selections per element. See the Rust port for the semantic
+    /// table; mixed `.all` / `.partial` cases collapse to `.all`.
     private func toggleSelection(_ current: Selection, _ newSel: Selection) -> Selection {
         let currentByPath = Dictionary(current.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
         let newByPath = Dictionary(newSel.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
@@ -63,12 +63,22 @@ public class Controller {
         for (path, es) in newByPath where currentByPath[path] == nil {
             result.insert(es)
         }
-        // Elements in both: toggle CPs (symmetric difference)
+        // Elements in both: XOR.
         for (path, curEs) in currentByPath {
             guard let newEs = newByPath[path] else { continue }
-            let toggledCPs = curEs.controlPoints.symmetricDifference(newEs.controlPoints)
-            if !toggledCPs.isEmpty {
-                result.insert(ElementSelection(path: path, controlPoints: toggledCPs))
+            switch (curEs.kind, newEs.kind) {
+            case (.all, .all):
+                // Cancel out — element drops out of selection.
+                continue
+            case (.partial(let a), .partial(let b)):
+                let xor = a.symmetricDifference(b)
+                if !xor.isEmpty {
+                    result.insert(ElementSelection(path: path, kind: .partial(xor)))
+                }
+            default:
+                // Mixed `.all` / `.partial` — keep `.all` to preserve
+                // pre-refactor behavior for this rare case.
+                result.insert(ElementSelection.all(path))
             }
         }
         return result
@@ -83,17 +93,14 @@ public class Controller {
                 if case .group(let g) = child {
                     let anyHit = g.children.contains { elementIntersectsRect($0, x, y, width, height) }
                     if anyHit {
-                        selection.insert(ElementSelection(path: [li, ci],
-                                                          controlPoints: allCPs(child)))
+                        selection.insert(ElementSelection.all([li, ci]))
                         for gi in 0..<g.children.count {
-                            selection.insert(ElementSelection(path: [li, ci, gi],
-                                                              controlPoints: allCPs(g.children[gi])))
+                            selection.insert(ElementSelection.all([li, ci, gi]))
                         }
                     }
                 } else {
                     if elementIntersectsRect(child, x, y, width, height) {
-                        selection.insert(ElementSelection(path: [li, ci],
-                                                          controlPoints: allCPs(child)))
+                        selection.insert(ElementSelection.all([li, ci]))
                     }
                 }
             }
@@ -116,7 +123,7 @@ public class Controller {
                 for (i, child) in v.children.enumerated() { check(path + [i], child) }
             default:
                 if elementIntersectsRect(elem, x, y, width, height) {
-                    selection.insert(ElementSelection(path: path, controlPoints: allCPs(elem)))
+                    selection.insert(ElementSelection.all(path))
                 }
             }
         }
@@ -142,12 +149,15 @@ public class Controller {
                 for (i, child) in v.children.enumerated() { check(path + [i], child) }
             default:
                 let cps = elem.controlPointPositions
-                let hitCPs: Set<Int> = Set(cps.enumerated().compactMap { (i, pt) in
+                let hitCPs: [Int] = cps.enumerated().compactMap { (i, pt) in
                     pointInRect(pt.0, pt.1, x, y, width, height) ? i : nil
-                })
-                let hit = !hitCPs.isEmpty || elementIntersectsRect(elem, x, y, width, height)
-                if hit {
-                    selection.insert(ElementSelection(path: path, controlPoints: hitCPs))
+                }
+                if !hitCPs.isEmpty {
+                    selection.insert(ElementSelection.partial(path, hitCPs))
+                } else if elementIntersectsRect(elem, x, y, width, height) {
+                    // Marquee covers the body but no CPs — pick the
+                    // element as a whole.
+                    selection.insert(ElementSelection.all(path))
                 }
             }
         }
@@ -175,28 +185,25 @@ public class Controller {
             let parentPath = Array(path.dropLast())
             let parent = doc.getElement(parentPath)
             if case .group(let g) = parent {
-                var selection: Selection = [
-                    ElementSelection(path: parentPath, controlPoints: allCPs(parent))
-                ]
+                var selection: Selection = [ElementSelection.all(parentPath)]
                 for i in 0..<g.children.count {
-                    selection.insert(ElementSelection(path: parentPath + [i],
-                                                      controlPoints: allCPs(g.children[i])))
+                    selection.insert(ElementSelection.all(parentPath + [i]))
                 }
                 model.document = Document(layers: doc.layers,
                                              selectedLayer: doc.selectedLayer, selection: selection)
                 return
             }
         }
+        let _ = elem
         model.document = Document(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer,
-                                     selection: [ElementSelection(path: path,
-                                                                   controlPoints: allCPs(elem))])
+                                     selection: [ElementSelection.all(path)])
     }
 
     public func selectControlPoint(path: ElementPath, index: Int) {
         guard !path.isEmpty else { fatalError("Path must be non-empty") }
         let doc = model.document
-        let es = ElementSelection(path: path, controlPoints: [index])
+        let es = ElementSelection.partial(path, [index])
         model.document = Document(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: [es])
     }
@@ -219,7 +226,7 @@ public class Controller {
         var doc = model.document
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = elem.moveControlPoints(es.controlPoints, dx: dx, dy: dy)
+            let newElem = elem.moveControlPoints(es.kind, dx: dx, dy: dy)
             doc = doc.replaceElement(es.path, with: newElem)
         }
         model.document = doc
@@ -293,9 +300,8 @@ public class Controller {
         let newDoc = Document(layers: newLayers, selectedLayer: doc.selectedLayer, selection: [])
         var newSelection: Selection = []
         for path in lockedPaths {
-            let elem = newDoc.getElement(path)
-            let n = elem.controlPointCount
-            newSelection.insert(ElementSelection(path: path, controlPoints: Set(0..<n)))
+            let _ = newDoc.getElement(path)
+            newSelection.insert(ElementSelection.all(path))
         }
         model.document = Document(layers: newLayers,
                                      selectedLayer: doc.selectedLayer, selection: newSelection)
@@ -308,12 +314,12 @@ public class Controller {
         let sortedSels = doc.selection.sorted { $0.path.lexicographicallyPrecedes($1.path) }.reversed()
         for es in sortedSels {
             let elem = doc.getElement(es.path)
-            let copied = elem.moveControlPoints(es.controlPoints, dx: dx, dy: dy)
+            let copied = elem.moveControlPoints(es.kind, dx: dx, dy: dy)
             doc = doc.insertElementAfter(es.path, element: copied)
             var copyPath = es.path
             copyPath[copyPath.count - 1] += 1
-            let allCPs = Set(0..<copied.controlPointCount)
-            newSelection.insert(ElementSelection(path: copyPath, controlPoints: allCPs))
+            // Copying always selects the new element as a whole.
+            newSelection.insert(ElementSelection.all(copyPath))
         }
         model.document = Document(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: newSelection)

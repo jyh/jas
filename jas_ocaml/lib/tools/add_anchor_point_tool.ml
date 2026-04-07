@@ -421,17 +421,23 @@ class add_anchor_point_tool = object (_self)
              | _ -> elem
            in
            let new_doc = Document.replace_element doc path new_elem in
-           (* Update selection: shift CP indices after the insertion point *)
+           (* Update selection: shift CP indices after the insertion
+              point. If the previous selection was `SelKindAll`, the
+              new anchor is automatically included. *)
            let new_anchor_idx = first_new_idx in
            let new_doc = match Document.get_element_selection doc.Document.selection path with
              | Some es ->
-               let shifted = List.map (fun cp ->
-                 if cp >= new_anchor_idx then cp + 1 else cp
-               ) es.Document.es_control_points in
-               let shifted = if List.mem new_anchor_idx shifted then shifted
-                             else new_anchor_idx :: shifted in
+               let new_kind = match es.Document.es_kind with
+                 | Document.SelKindAll -> Document.SelKindAll
+                 | Document.SelKindPartial s ->
+                   let shifted = List.map (fun cp ->
+                     if cp >= new_anchor_idx then cp + 1 else cp
+                   ) (Document.SortedCps.to_list s) in
+                   let shifted = new_anchor_idx :: shifted in
+                   Document.SelKindPartial (Document.SortedCps.from_list shifted)
+               in
                let new_sel = Document.PathMap.add path
-                 { Document.es_path = path; es_control_points = shifted }
+                 { Document.es_path = path; es_kind = new_kind }
                  new_doc.Document.selection in
                { new_doc with Document.selection = new_sel }
              | None -> new_doc

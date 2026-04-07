@@ -1,5 +1,9 @@
 # Jas prompts
 
+This document lists the prompts that were used to construct the vector application. 
+
+Claude, do not modify this file.
+
 # Overall
 
 ## Requirements
@@ -427,11 +431,11 @@ Let’s add support for the pencil tool. You can see the tool highlighted in the
 
 # Locking
 
-# Layers and elements can be locked, which means they cannot be selected. Add a flag to each element that indicates whether it is locked. Add a Lock item to the Object menu, which locks the elements in the selection (and deselects them). Add an “Unlock All” item to the Object menu that unlocks all elements.
+Layers and elements can be locked, which means they cannot be selected. Add a flag to each element that indicates whether it is locked. Add a Lock item to the Object menu, which locks the elements in the selection (and deselects them). Add an “Unlock All” item to the Object menu that unlocks all elements.
 
 After “Unlock All”, the current selection is cleared, and all of the newly unlocked elements are selected.
 
-# When a Group is locked, all elements in the Group are locked. When a Group is unlocked, all elements in the Group are unlocked.
+When a Group is locked, all elements in the Group are locked. When a Group is unlocked, all elements in the Group are unlocked.
 
 # Grouping
 
@@ -571,3 +575,24 @@ Before we begin, do you understand these instructions? Do you have any clarifica
 # Review
 
 Review the entire codebase and evaluate it for clarity, maintainability, efficiency, complexity, safety, test coverage, pattern consistency, conformity with style conventions, functional equivalence across languages, and anything else of importance. Make suggestions for improvements, ranking them in priority from high to low, and giving each a number. Be ready for a deep dive into any of the suggestions.
+
+# Control points optimization
+
+In a selection, I'm thinking that it might be better to represent the control point sets with bit vectors, rather than lists or sets of integers. This could be a more efficient representation, and also prevent bugs with duplicate integers in a control point set. Consider this idea. What do you think? What suggestions do you have?
+
+...After discussion, we settled on SelectionKind == All | Partial of SortedVec<u16>, since most selections include all control points...
+
+# Visibility
+
+Layers and elements can have 3 visibility mode: preview, outline, or invisible. 
+- preview: the element is fully drawn
+- outline: the element's stroke and fill are ignored. It is drawn as if it had a stroke of size 0, stroke color black, and no fill. Hit detection does not consider the fill or stroke width. Text is an exception. Text in outline mode is drawn the same as preview.
+- invisible: the element is not displayed and it cannot be selected.
+
+These three values are ordered from maximum visibility (preview) to minimum (invisible). The visibility of a Group or Layer caps the visibility of the elements in the group. If the group is invisible, then all of its elements are invisible.
+
+Add a flag to each element that indicates its visiblity state.
+
+Add a Hide item to the Object menu, which sets the visibility of elements in the selection to invisible (and deselects them). Add an “Show All” item to the Object menu that sets the visibility of all hidden elements to preview.
+
+After “Show All”, the current selection is cleared, and all of the newly shown elements are selected.

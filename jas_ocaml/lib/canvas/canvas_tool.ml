@@ -84,6 +84,20 @@ let paste_offset = 24.0       (* translation in pt applied when pasting *)
 let long_press_ms = 500       (* milliseconds before a press becomes a long-press *)
 let polygon_sides = 5         (* default number of sides for the polygon tool *)
 
+(** Whether to draw the blue bounding-box outline + corner-square
+    handles around bbox-shape selected elements (Rect, Circle,
+    Ellipse, Group, ...). Per-vertex/anchor squares for cp-shape
+    elements (Line, Polyline, Polygon, Path) and Bezier handle
+    decoration on Path anchors are drawn regardless. Text and
+    Text_path selections never draw the bbox or its corner squares.
+    Default: false (uncluttered canvas).
+
+    Lives in [Canvas_tool] so both the canvas overlay (which
+    references it from [Canvas_subwindow]) and individual tools
+    (which need it for the type-tool point-text bbox) can read it
+    without creating a tools→canvas dependency cycle. *)
+let show_selection_bbox = false
+
 let regular_polygon_points x1 y1 x2 y2 n =
   let ex = x2 -. x1 and ey = y2 -. y1 in
   let s = sqrt (ex *. ex +. ey *. ey) in

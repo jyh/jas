@@ -12,7 +12,7 @@ class ToolContext {
     let hitTestText: (NSPoint) -> (ElementPath, Text)?
     let hitTestPathCurve: (Double, Double) -> (ElementPath, Element)?
     let requestUpdate: () -> Void
-    let drawElementOverlayFn: (CGContext, Element, Set<Int>) -> Void
+    let drawElementOverlayFn: (CGContext, Element, SelectionKind) -> Void
 
     init(model: Model,
          controller: Controller,
@@ -21,7 +21,7 @@ class ToolContext {
          hitTestText: @escaping (NSPoint) -> (ElementPath, Text)?,
          hitTestPathCurve: @escaping (Double, Double) -> (ElementPath, Element)?,
          requestUpdate: @escaping () -> Void,
-         drawElementOverlay: @escaping (CGContext, Element, Set<Int>) -> Void) {
+         drawElementOverlay: @escaping (CGContext, Element, SelectionKind) -> Void) {
         self.model = model
         self.controller = controller
         self.hitTestSelection = hitTestSelection

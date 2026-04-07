@@ -6,11 +6,11 @@ private func sel(_ paths: ElementPath...) -> Selection {
     Set(paths.map { ElementSelection(path: $0) })
 }
 
-/// Helper: create a Selection with all control points for elements in a document.
+/// Helper: create a Selection with each path selected as a whole.
 private func selAllCPs(_ doc: Document, _ paths: ElementPath...) -> Selection {
     Set(paths.map { p in
-        let elem = doc.getElement(p)
-        return ElementSelection(path: p, controlPoints: Set(0..<elem.controlPointCount))
+        let _ = doc.getElement(p)
+        return ElementSelection.all(p)
     })
 }
 
@@ -218,15 +218,15 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(ctrl.document.selection.count == 1)
     let es = ctrl.document.selection.first!
     #expect(es.path == [0, 0])
-    #expect(es.controlPoints == [1])
+    #expect(es.kind == .partial(SortedCps([1])))
 }
 
 @Test func defaultElementSelectionFlags() {
     let ctrl = makeSelectionCtrl()
     ctrl.selectElement([0, 0])
     let es = ctrl.document.selection.first!
-    // Rect has 4 control points
-    #expect(es.controlPoints == [0, 1, 2, 3])
+    // selectElement marks the element as a whole.
+    #expect(es.kind == .all)
 }
 
 // MARK: - Direct selection tests
@@ -251,17 +251,19 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(ctrl.document.selection.count == 1)
     let es = ctrl.document.selection.first!
     #expect(es.path == [0, 0])
-    #expect(es.controlPoints == [0])
+    #expect(es.kind == .partial(SortedCps([0])))
 }
 
-@Test func directSelectRectNoCPsWhenNoneInRect() {
+@Test func directSelectRectNoCPsWhenLineCrossesButNoneInRect() {
+    // The marquee covers the line's body (it crosses through (40,40)–(60,60))
+    // but neither endpoint is inside, so the line is selected as a whole.
     let line = Element.line(Line(x1: 0, y1: 0, x2: 100, y2: 100))
     let layer = Layer(name: "L0", children: [line])
     let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.directSelectRect(x: 40, y: 40, width: 20, height: 20)
     #expect(ctrl.document.selection.count == 1)
     let es = ctrl.document.selection.first!
-    #expect(es.controlPoints.isEmpty)
+    #expect(es.kind == .all)
 }
 
 @Test func directSelectRectMissesElement() {
@@ -293,7 +295,7 @@ private func makeMarqueeCtrl() -> Controller {
     ctrl.groupSelectRect(x: -5, y: -5, width: 10, height: 10)
     #expect(ctrl.document.selection.count == 1)
     let es = ctrl.document.selection.first!
-    #expect(es.controlPoints == [0, 1, 2, 3])
+    #expect(es.kind == .all)
 }
 
 @Test func groupSelectRectMissesElement() {
@@ -347,15 +349,15 @@ private func makeMarqueeCtrl() -> Controller {
     // Direct select top-left corner CP 0 at (0,0)
     ctrl.directSelectRect(x: -1, y: -1, width: 2, height: 2)
     let sel0 = ctrl.document.selection.first { $0.path == [0, 0] }!
-    #expect(sel0.controlPoints == [0])
+    #expect(sel0.kind == .partial(SortedCps([0])))
     // Shift-direct-select top-right corner CP 1 at (10,0) — should add CP
     ctrl.directSelectRect(x: 9, y: -1, width: 2, height: 2, extend: true)
     let sel1 = ctrl.document.selection.first { $0.path == [0, 0] }!
-    #expect(sel1.controlPoints == [0, 1])
+    #expect(sel1.kind == .partial(SortedCps([0, 1])))
     // Shift-direct-select top-left again — should remove CP 0, keep CP 1
     ctrl.directSelectRect(x: -1, y: -1, width: 2, height: 2, extend: true)
     let sel2 = ctrl.document.selection.first { $0.path == [0, 0] }!
-    #expect(sel2.controlPoints == [1])
+    #expect(sel2.kind == .partial(SortedCps([1])))
 }
 
 @Test func extendGroupSelect() {
@@ -413,7 +415,7 @@ private func makeMarqueeCtrl() -> Controller {
 
 @Test func moveLineBothCPs() {
     let line = Element.line(Line(x1: 10, y1: 20, x2: 30, y2: 40))
-    let moved = line.moveControlPoints([0, 1], dx: 5, dy: -3)
+    let moved = line.moveControlPoints(.all, dx: 5, dy: -3)
     if case .line(let v) = moved {
         #expect(v.x1 == 15); #expect(v.y1 == 17)
         #expect(v.x2 == 35); #expect(v.y2 == 37)
@@ -422,7 +424,7 @@ private func makeMarqueeCtrl() -> Controller {
 
 @Test func moveLineOneCP() {
     let line = Element.line(Line(x1: 0, y1: 0, x2: 10, y2: 10))
-    let moved = line.moveControlPoints([1], dx: 5, dy: 5)
+    let moved = line.moveControlPoints(.partial(SortedCps([1])), dx: 5, dy: 5)
     if case .line(let v) = moved {
         #expect(v.x1 == 0); #expect(v.y1 == 0)
         #expect(v.x2 == 15); #expect(v.y2 == 15)
@@ -431,7 +433,7 @@ private func makeMarqueeCtrl() -> Controller {
 
 @Test func moveRectAllCPs() {
     let rect = Element.rect(Rect(x: 10, y: 20, width: 30, height: 40))
-    let moved = rect.moveControlPoints([0, 1, 2, 3], dx: 5, dy: -5)
+    let moved = rect.moveControlPoints(.all, dx: 5, dy: -5)
     if case .rect(let v) = moved {
         #expect(v.x == 15); #expect(v.y == 15)
         #expect(v.width == 30); #expect(v.height == 40)
@@ -440,7 +442,7 @@ private func makeMarqueeCtrl() -> Controller {
 
 @Test func moveRectOneCorner() {
     let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
-    let moved = rect.moveControlPoints([2], dx: 5, dy: 5)
+    let moved = rect.moveControlPoints(.partial(SortedCps([2])), dx: 5, dy: 5)
     if case .polygon(let v) = moved {
         #expect(v.points.count == 4)
         #expect(v.points[0] == (0, 0))
@@ -452,7 +454,7 @@ private func makeMarqueeCtrl() -> Controller {
 
 @Test func moveCircleAllCPs() {
     let circle = Element.circle(Circle(cx: 50, cy: 50, r: 10))
-    let moved = circle.moveControlPoints([0, 1, 2, 3], dx: 10, dy: -10)
+    let moved = circle.moveControlPoints(.all, dx: 10, dy: -10)
     if case .circle(let v) = moved {
         #expect(v.cx == 60); #expect(v.cy == 40); #expect(v.r == 10)
     } else { Issue.record("Expected circle") }
@@ -460,7 +462,7 @@ private func makeMarqueeCtrl() -> Controller {
 
 @Test func moveEllipseAllCPs() {
     let ellipse = Element.ellipse(Ellipse(cx: 50, cy: 50, rx: 20, ry: 10))
-    let moved = ellipse.moveControlPoints([0, 1, 2, 3], dx: -5, dy: 5)
+    let moved = ellipse.moveControlPoints(.all, dx: -5, dy: 5)
     if case .ellipse(let v) = moved {
         #expect(v.cx == 45); #expect(v.cy == 55)
         #expect(v.rx == 20); #expect(v.ry == 10)
@@ -473,7 +475,7 @@ private func makeMarqueeCtrl() -> Controller {
     let line = Element.line(Line(x1: 10, y1: 20, x2: 30, y2: 40))
     let layer = Layer(children: [line])
     let doc = Document(layers: [layer],
-                          selection: [ElementSelection(path: [0, 0], controlPoints: [0, 1])])
+                          selection: [ElementSelection.all([0, 0])])
     let ctrl = Controller(model: Model(document: doc))
     ctrl.moveSelection(dx: 5, dy: -3)
     if case .line(let v) = ctrl.document.layers[0].children[0] {
@@ -486,7 +488,7 @@ private func makeMarqueeCtrl() -> Controller {
     let rect = Element.rect(Rect(x: 0, y: 0, width: 20, height: 10))
     let layer = Layer(children: [rect])
     let doc = Document(layers: [layer],
-                          selection: [ElementSelection(path: [0, 0], controlPoints: [0, 1, 2, 3])])
+                          selection: [ElementSelection.all([0, 0])])
     let ctrl = Controller(model: Model(document: doc))
     ctrl.moveSelection(dx: 10, dy: 10)
     if case .rect(let v) = ctrl.document.layers[0].children[0] {
@@ -499,7 +501,7 @@ private func makeMarqueeCtrl() -> Controller {
     let line = Element.line(Line(x1: 0, y1: 0, x2: 10, y2: 10))
     let layer = Layer(children: [line])
     let doc = Document(layers: [layer],
-                          selection: [ElementSelection(path: [0, 0], controlPoints: [0])])
+                          selection: [ElementSelection.partial([0, 0], [0])])
     let ctrl = Controller(model: Model(document: doc))
     ctrl.moveSelection(dx: 5, dy: 5)
     if case .line(let v) = ctrl.document.layers[0].children[0] {
@@ -514,8 +516,8 @@ private func makeMarqueeCtrl() -> Controller {
     let layer = Layer(children: [line, rect])
     let doc = Document(layers: [layer],
                           selection: [
-                              ElementSelection(path: [0, 0], controlPoints: [0, 1]),
-                              ElementSelection(path: [0, 1], controlPoints: [0, 1, 2, 3]),
+                              ElementSelection.all([0, 0]),
+                              ElementSelection.all([0, 1]),
                           ])
     let ctrl = Controller(model: Model(document: doc))
     ctrl.moveSelection(dx: 3, dy: 4)

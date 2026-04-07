@@ -252,18 +252,18 @@ public enum Element: Equatable {
         }
     }
 
-    public func moveControlPoints(_ indices: Set<Int>, dx: Double, dy: Double) -> Element {
+    public func moveControlPoints(_ kind: SelectionKind, dx: Double, dy: Double) -> Element {
         switch self {
         case .line(let v):
             return .line(Line(
-                x1: v.x1 + (indices.contains(0) ? dx : 0),
-                y1: v.y1 + (indices.contains(0) ? dy : 0),
-                x2: v.x2 + (indices.contains(1) ? dx : 0),
-                y2: v.y2 + (indices.contains(1) ? dy : 0),
+                x1: v.x1 + (kind.contains(0) ? dx : 0),
+                y1: v.y1 + (kind.contains(0) ? dy : 0),
+                x2: v.x2 + (kind.contains(1) ? dx : 0),
+                y2: v.y2 + (kind.contains(1) ? dy : 0),
                 stroke: v.stroke, opacity: v.opacity, transform: v.transform,
                 locked: v.locked))
         case .rect(let v):
-            if indices.count >= 4 {
+            if kind.isAll(total: 4) {
                 return .rect(Rect(x: v.x + dx, y: v.y + dy, width: v.width, height: v.height,
                                      rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
                                      opacity: v.opacity, transform: v.transform,
@@ -271,7 +271,7 @@ public enum Element: Equatable {
             }
             var pts = [(v.x, v.y), (v.x + v.width, v.y),
                        (v.x + v.width, v.y + v.height), (v.x, v.y + v.height)]
-            for i in 0..<4 where indices.contains(i) {
+            for i in 0..<4 where kind.contains(i) {
                 pts[i] = (pts[i].0 + dx, pts[i].1 + dy)
             }
             return .polygon(Polygon(points: pts,
@@ -279,7 +279,7 @@ public enum Element: Equatable {
                                        opacity: v.opacity, transform: v.transform,
                                        locked: v.locked))
         case .circle(let v):
-            if indices.count >= 4 {
+            if kind.isAll(total: 4) {
                 return .circle(Circle(cx: v.cx + dx, cy: v.cy + dy, r: v.r,
                                          fill: v.fill, stroke: v.stroke,
                                          opacity: v.opacity, transform: v.transform,
@@ -287,7 +287,7 @@ public enum Element: Equatable {
             }
             var cps = [(v.cx, v.cy - v.r), (v.cx + v.r, v.cy),
                        (v.cx, v.cy + v.r), (v.cx - v.r, v.cy)]
-            for i in 0..<4 where indices.contains(i) {
+            for i in 0..<4 where kind.contains(i) {
                 cps[i] = (cps[i].0 + dx, cps[i].1 + dy)
             }
             let ncx = (cps[1].0 + cps[3].0) / 2
@@ -298,7 +298,7 @@ public enum Element: Equatable {
                                      opacity: v.opacity, transform: v.transform,
                                      locked: v.locked))
         case .ellipse(let v):
-            if indices.count >= 4 {
+            if kind.isAll(total: 4) {
                 return .ellipse(Ellipse(cx: v.cx + dx, cy: v.cy + dy, rx: v.rx, ry: v.ry,
                                            fill: v.fill, stroke: v.stroke,
                                            opacity: v.opacity, transform: v.transform,
@@ -306,7 +306,7 @@ public enum Element: Equatable {
             }
             var cps = [(v.cx, v.cy - v.ry), (v.cx + v.rx, v.cy),
                        (v.cx, v.cy + v.ry), (v.cx - v.rx, v.cy)]
-            for i in 0..<4 where indices.contains(i) {
+            for i in 0..<4 where kind.contains(i) {
                 cps[i] = (cps[i].0 + dx, cps[i].1 + dy)
             }
             let ncx = (cps[1].0 + cps[3].0) / 2
@@ -318,7 +318,7 @@ public enum Element: Equatable {
                                        locked: v.locked))
         case .polygon(let v):
             let newPoints = v.points.enumerated().map { (i, pt) in
-                indices.contains(i) ? (pt.0 + dx, pt.1 + dy) : pt
+                kind.contains(i) ? (pt.0 + dx, pt.1 + dy) : pt
             }
             return .polygon(Polygon(points: newPoints,
                                        fill: v.fill, stroke: v.stroke,
@@ -334,7 +334,7 @@ public enum Element: Equatable {
                 default:
                     break
                 }
-                if indices.contains(anchorIdx) {
+                if kind.contains(anchorIdx) {
                     switch cmds[ci] {
                     case .moveTo(let x, let y):
                         cmds[ci] = .moveTo(x + dx, y + dy)
@@ -369,7 +369,7 @@ public enum Element: Equatable {
                 default:
                     break
                 }
-                if indices.contains(anchorIdx) {
+                if kind.contains(anchorIdx) {
                     switch cmds[ci] {
                     case .moveTo(let x, let y):
                         cmds[ci] = .moveTo(x + dx, y + dy)

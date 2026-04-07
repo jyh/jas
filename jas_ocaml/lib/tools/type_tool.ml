@@ -420,22 +420,29 @@ class type_tool = object (_self)
           end
         ) lay.lines
       end;
-      (* Editing element bounding box: synthesize via tr *)
-      let bw, bh =
-        if tr.tr_text_width > 0.0 && tr.tr_text_height > 0.0 then
-          (max tr.tr_text_width 1.0, max tr.tr_text_height 1.0)
-        else
-          let lines = String.split_on_char '\n'
-            (if tr.tr_content = "" then " " else tr.tr_content) in
-          let max_chars = List.fold_left (fun a l -> max a (String.length l)) 0 lines in
-          let max_chars = max max_chars 1 in
-          (float_of_int max_chars *. tr.tr_font_size *. 0.55,
-           float_of_int (List.length lines) *. tr.tr_font_size)
-      in
-      Cairo.set_source_rgba cr 0.0 0.47 0.84 0.6;
-      Cairo.set_line_width cr 1.0;
-      Cairo.rectangle cr tr.tr_x tr.tr_y ~w:bw ~h:bh;
-      Cairo.stroke cr;
+      (* Editing element bounding box.
+         - Area text always shows the box (the user explicitly
+           dragged out a width × height and needs to see it).
+         - Point text shows the box only when
+           Canvas_tool.show_selection_bbox is true. *)
+      let is_area = tr.tr_text_width > 0.0 && tr.tr_text_height > 0.0 in
+      if is_area || Canvas_tool.show_selection_bbox then begin
+        let bw, bh =
+          if is_area then
+            (max tr.tr_text_width 1.0, max tr.tr_text_height 1.0)
+          else
+            let lines = String.split_on_char '\n'
+              (if tr.tr_content = "" then " " else tr.tr_content) in
+            let max_chars = List.fold_left (fun a l -> max a (String.length l)) 0 lines in
+            let max_chars = max max_chars 1 in
+            (float_of_int max_chars *. tr.tr_font_size *. 0.55,
+             float_of_int (List.length lines) *. tr.tr_font_size)
+        in
+        Cairo.set_source_rgba cr 0.0 0.47 0.84 0.6;
+        Cairo.set_line_width cr 1.0;
+        Cairo.rectangle cr tr.tr_x tr.tr_y ~w:bw ~h:bh;
+        Cairo.stroke cr
+      end;
       if cursor_visible (Text_edit.blink_epoch_ms s) then begin
         let (cx, cy, ch) = Text_layout.cursor_xy lay (Text_edit.insertion s) in
         let color = match tr.tr_fill with

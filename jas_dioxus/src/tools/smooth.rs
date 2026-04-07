@@ -460,10 +460,7 @@ mod tests {
     fn select_first(model: &mut Model) {
         let doc = model.document().clone();
         let mut new_doc = doc.clone();
-        new_doc.selection = vec![ElementSelection {
-            path: vec![0, 0],
-            control_points: HashSet::new(),
-        }];
+        new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
         model.set_document(new_doc);
     }
 

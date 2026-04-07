@@ -288,8 +288,7 @@ public struct JasCommands: Commands {
                                 children: l.children.map { translateElement($0, dx: dx, dy: dy) },
                                 opacity: l.opacity, transform: l.transform, locked: l.locked))
         default:
-            let n = elem.controlPointCount
-            return elem.moveControlPoints(Set(0..<n), dx: dx, dy: dy)
+            return elem.moveControlPoints(.all, dx: dx, dy: dy)
         }
     }
 
@@ -325,11 +324,9 @@ public struct JasCommands: Commands {
                 let idx = targetIdx ?? doc.selectedLayer
                 // Record paths for pasted elements (appended at end)
                 let base = newLayers[idx].children.count
-                for (j, child) in children.enumerated() {
+                for (j, _) in children.enumerated() {
                     let path: ElementPath = [idx, base + j]
-                    let n = child.controlPointCount
-                    newSelection.insert(ElementSelection(path: path,
-                                                          controlPoints: Set(0..<n)))
+                    newSelection.insert(ElementSelection.all(path))
                 }
                 newLayers[idx] = Layer(name: newLayers[idx].name,
                                           children: newLayers[idx].children + children,
@@ -343,9 +340,7 @@ public struct JasCommands: Commands {
             let elem = Element.text(Text(x: offset, y: offset + 16.0, content: text))
             let idx = doc.selectedLayer
             let path: ElementPath = [idx, doc.layers[idx].children.count]
-            let n = elem.controlPointCount
-            newSelection.insert(ElementSelection(path: path,
-                                                  controlPoints: Set(0..<n)))
+            newSelection.insert(ElementSelection.all(path))
             var newLayers = doc.layers
             newLayers[idx] = Layer(name: newLayers[idx].name,
                                       children: newLayers[idx].children + [elem],
@@ -385,9 +380,8 @@ public struct JasCommands: Commands {
                             opacity: layer.opacity, transform: layer.transform)
         var newLayers = newDoc.layers
         newLayers[layerIdx] = newLayer
-        let n = group.controlPointCount
-        let newSelection: Selection = [ElementSelection(
-            path: insertPath, controlPoints: Set(0..<n))]
+        let _ = group.controlPointCount
+        let newSelection: Selection = [ElementSelection.all(insertPath)]
         model.document = Document(layers: newLayers,
                                   selectedLayer: newDoc.selectedLayer,
                                   selection: newSelection)
@@ -439,10 +433,8 @@ public struct JasCommands: Commands {
             let childIdx = (gpath.count > 1 ? gpath[1] : 0) + offset
             for j in 0..<nChildren {
                 let path: ElementPath = [layerIdx, childIdx + j]
-                let elem = newDoc.getElement(path)
-                let n = elem.controlPointCount
-                newSelection.insert(ElementSelection(path: path,
-                                                      controlPoints: Set(0..<n)))
+                let _ = newDoc.getElement(path)
+                newSelection.insert(ElementSelection.all(path))
             }
             offset += nChildren - 1
         }

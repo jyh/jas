@@ -110,7 +110,15 @@ pub fn segments_of_element(elem: &Element) -> Vec<(f64, f64, f64, f64)> {
     }
 }
 
-pub fn all_cps(elem: &Element) -> HashSet<usize> {
+/// Return a `HashSet` containing every CP index of `elem`.
+///
+/// This used to be the canonical "select the whole element" helper
+/// in the days when selection state was a raw CP set. Now that the
+/// selection has an explicit `SelectionKind::All` variant, new code
+/// should prefer `ElementSelection::all(path)` or
+/// `SelectionKind::All` instead. This helper is kept for a few
+/// hit-test callers that still need an explicit index set.
+pub fn all_cp_indices(elem: &Element) -> HashSet<usize> {
     (0..control_point_count(elem)).collect()
 }
 

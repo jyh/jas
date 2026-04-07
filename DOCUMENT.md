@@ -57,34 +57,47 @@ after structural changes (insertions, deletions, reordering).
 
 ## Selection
 
-A **Selection** is a set of **ElementSelection** entries. Each entry pairs
-an element path with a set of selected control point indices:
+A **Selection** is a set of **ElementSelection** entries. Each entry
+pairs an element path with a **SelectionKind**:
 
 ```
 ElementSelection
-  path:            ElementPath
-  control_points:  set of int
+  path:  ElementPath
+  kind:  SelectionKind
+
+SelectionKind = All
+              | Partial(SortedCps)
 ```
 
-Equality and hashing are by **path only**. This means the selection set
-behaves as a path-keyed map, where each element can appear at most once but
-with a varying set of selected control points.
+Equality and hashing are by **path only** — the selection set behaves
+as a path-keyed map where each element can appear at most once.
 
-An empty `control_points` set means the element itself is selected but no
-specific control points are highlighted (used when an element is part of a
-group selection). A full set means all control points are selected.
+The two `SelectionKind` cases capture two distinct user intents:
+
+- **`All`** — the element is selected as a whole. Drag-move translates
+  the primitive in place; Rect stays a Rect, Circle stays a Circle.
+  This is what the Selection and Group Selection tools produce.
+- **`Partial(SortedCps)`** — only the listed control points are
+  selected (Direct Selection). Drag-move drags only those CPs and may
+  convert Rect/Circle/Ellipse to a Polygon when the resulting shape is
+  no longer axis-aligned. `SortedCps` is sorted, de-duplicated, and
+  small (`u16`-wide indices).
+
+Empty `Partial` is dropped from the map entirely — there is no
+"selected element with no CPs" state.
 
 ### Three selection modes
 
 | Mode | Behavior |
 |------|----------|
-| **Selection** | Select elements whose bounding box intersects the marquee. Groups are selected as a whole (all children, all CPs). |
-| **Group Selection** | Traverse into groups. Select individual elements with all their CPs. |
-| **Direct Selection** | Select only the individual control points that fall within the marquee. |
+| **Selection** | Marquee selects elements whose bounding box intersects. Groups are selected as a whole. Result: `kind = All`. |
+| **Group Selection** | Traverses into groups; selects individual elements. Result: `kind = All`. |
+| **Direct Selection** | Selects individual control points that fall within the marquee. Result: `kind = Partial(...)`, or `kind = All` when the marquee crosses the body but no CPs. |
 
-Shift-click or Shift-marquee toggles selection at the control-point level
-using symmetric difference: CPs present in both the current and new selection
-are deselected; CPs present in only one are kept.
+Shift-click or Shift-marquee XORs the new selection against the
+existing selection per element: two `All`s cancel out; two `Partial`s
+XOR their CP sets via `SortedCps.symmetric_difference`; mixed
+All/Partial collapses to `All`.
 
 ---
 
@@ -493,7 +506,7 @@ Functions:
 
 - `control_point_count(elem)` -- number of CPs
 - `control_points(elem)` -- list of `(x, y)` positions
-- `move_control_points(elem, indices, dx, dy)` -- return a new element with the specified CPs translated
+- `move_control_points(elem, kind, dx, dy)` -- return a new element with the CPs covered by `kind` translated. `SelectionKind::All` translates the primitive in place; `Partial(s)` may convert Rect/Circle/Ellipse to a Polygon.
 
 When all CPs of a shape are moved together, the element translates rigidly.
 When a subset of CPs are moved on shapes like Rect or Circle, the element

@@ -34,17 +34,143 @@ use crate::geometry::element::{Element, LayerElem, CommonProps};
 /// Each integer is a child index at that level of the tree.
 pub type ElementPath = Vec<usize>;
 
-/// Per-element selection state: which element and which of its control points
-/// are selected.
+/// Sorted, de-duplicated collection of control-point indices.
 ///
-/// Equality and hashing are by **path only**, so two `ElementSelection` values
-/// with the same path but different control point sets are considered equal.
-/// This matches the Python (`frozenset` keyed by path) and OCaml (map keyed
-/// by path) implementations.
+/// Invariant: the backing vector is sorted ascending and contains no
+/// duplicates. All constructors and mutators preserve it, so callers
+/// can rely on deterministic iteration order and cheap membership
+/// checks via binary search. `u16` is wide enough for any realistic
+/// anchor count and keeps the common case (a handful of CPs) small.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct SortedCps(Vec<u16>);
+
+impl SortedCps {
+    pub fn new() -> Self { Self(Vec::new()) }
+
+    /// Build a sorted-unique `SortedCps` from any iterator of `usize` CP indices.
+    pub fn from_iter(iter: impl IntoIterator<Item = usize>) -> Self {
+        let mut v: Vec<u16> = iter.into_iter().map(|i| i as u16).collect();
+        v.sort_unstable();
+        v.dedup();
+        Self(v)
+    }
+
+    pub fn single(i: usize) -> Self { Self(vec![i as u16]) }
+
+    pub fn contains(&self, i: usize) -> bool {
+        let i = i as u16;
+        self.0.binary_search(&i).is_ok()
+    }
+
+    pub fn len(&self) -> usize { self.0.len() }
+    pub fn is_empty(&self) -> bool { self.0.is_empty() }
+
+    /// Iterate CP indices in ascending order.
+    pub fn iter(&self) -> impl Iterator<Item = usize> + '_ {
+        self.0.iter().map(|&i| i as usize)
+    }
+
+    /// Insert `i`; no-op if already present.
+    pub fn insert(&mut self, i: usize) {
+        let i = i as u16;
+        if let Err(pos) = self.0.binary_search(&i) {
+            self.0.insert(pos, i);
+        }
+    }
+
+    /// Symmetric difference (XOR) of two sorted sets.
+    pub fn symmetric_difference(&self, other: &Self) -> Self {
+        let mut out: Vec<u16> = Vec::with_capacity(self.0.len() + other.0.len());
+        let (mut a, mut b) = (0usize, 0usize);
+        while a < self.0.len() && b < other.0.len() {
+            match self.0[a].cmp(&other.0[b]) {
+                std::cmp::Ordering::Less    => { out.push(self.0[a]); a += 1; }
+                std::cmp::Ordering::Greater => { out.push(other.0[b]); b += 1; }
+                std::cmp::Ordering::Equal   => { a += 1; b += 1; }
+            }
+        }
+        out.extend_from_slice(&self.0[a..]);
+        out.extend_from_slice(&other.0[b..]);
+        Self(out)
+    }
+}
+
+/// Per-element selection state: either the element is fully selected
+/// (bounding-box selection) or only a subset of its control points are
+/// selected (Direct Selection).
+///
+/// Collapsing "fully selected" into an explicit `All` variant removes
+/// the old convention where an empty or full CP set meant "selected
+/// element", which was ambiguous with "no CPs hit by the marquee".
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SelectionKind {
+    /// The element as a whole is selected. Drag-move translates the
+    /// element; its bounding-box handles are shown.
+    All,
+    /// Only the listed CPs are selected (Direct Selection). Drag-move
+    /// moves just those CPs and may convert the element to a polygon.
+    Partial(SortedCps),
+}
+
+impl SelectionKind {
+    /// True if control-point index `i` is selected. `All` contains every
+    /// index; `Partial(s)` checks against the sorted vector.
+    pub fn contains(&self, i: usize) -> bool {
+        match self {
+            SelectionKind::All => true,
+            SelectionKind::Partial(s) => s.contains(i),
+        }
+    }
+
+    /// Number of selected CPs. Callers supply `total` so `All` can
+    /// answer without knowing it at construction time.
+    pub fn count(&self, total: usize) -> usize {
+        match self {
+            SelectionKind::All => total,
+            SelectionKind::Partial(s) => s.len(),
+        }
+    }
+
+    /// True when every CP of an element with `total` CPs is selected.
+    pub fn is_all(&self, total: usize) -> bool {
+        match self {
+            SelectionKind::All => true,
+            SelectionKind::Partial(s) => s.len() == total,
+        }
+    }
+
+    /// Return an explicit set of selected CPs for an element with
+    /// `total` CPs. Useful at API boundaries that still want a listing.
+    pub fn to_sorted(&self, total: usize) -> SortedCps {
+        match self {
+            SelectionKind::All => SortedCps::from_iter(0..total),
+            SelectionKind::Partial(s) => s.clone(),
+        }
+    }
+}
+
+/// Per-element selection entry: which element, and how it is selected.
+///
+/// Equality and hashing are by **path only**, so two `ElementSelection`
+/// values with the same path but different `kind`s are considered
+/// equal. This matches the other three ports (map keyed by path).
 #[derive(Debug, Clone)]
 pub struct ElementSelection {
     pub path: ElementPath,
-    pub control_points: HashSet<usize>,
+    pub kind: SelectionKind,
+}
+
+impl ElementSelection {
+    /// Convenience: build an `All` selection entry for `path`.
+    pub fn all(path: ElementPath) -> Self {
+        Self { path, kind: SelectionKind::All }
+    }
+
+    /// Convenience: build a `Partial` selection entry for `path` from
+    /// any iterator of CP indices.
+    pub fn partial(path: ElementPath, cps: impl IntoIterator<Item = usize>) -> Self {
+        Self { path, kind: SelectionKind::Partial(SortedCps::from_iter(cps)) }
+    }
 }
 
 impl PartialEq for ElementSelection {
@@ -383,7 +509,7 @@ mod tests {
             make_rect(0.0, 0.0, 10.0, 10.0),
             make_line(0.0, 0.0, 5.0, 5.0),
         ]);
-        let sel = vec![ElementSelection { path: vec![0, 0], control_points: HashSet::new() }];
+        let sel = vec![ElementSelection::all(vec![0, 0])];
         let doc = Document { layers: vec![layer], selected_layer: 0, selection: sel };
         let doc2 = doc.delete_selection();
         assert!(doc2.selection.is_empty());
@@ -413,5 +539,72 @@ mod tests {
             assert!(matches!(&*l.children[0], Element::Rect(_)));
             assert!(matches!(&*l.children[1], Element::Line(_)));
         }
+    }
+
+    // ---- SortedCps / SelectionKind invariants ----
+
+    #[test]
+    fn sorted_cps_dedupes_and_sorts_on_construction() {
+        let s = SortedCps::from_iter([3usize, 1, 4, 1, 5, 9, 2, 6, 5, 3]);
+        let v: Vec<usize> = s.iter().collect();
+        assert_eq!(v, vec![1, 2, 3, 4, 5, 6, 9]);
+        assert_eq!(s.len(), 7);
+    }
+
+    #[test]
+    fn sorted_cps_insert_is_idempotent() {
+        let mut s = SortedCps::from_iter([1usize, 3, 5]);
+        s.insert(3);
+        s.insert(2);
+        s.insert(2);
+        let v: Vec<usize> = s.iter().collect();
+        assert_eq!(v, vec![1, 2, 3, 5]);
+    }
+
+    #[test]
+    fn sorted_cps_contains_uses_binary_search() {
+        let s = SortedCps::from_iter([0usize, 2, 4, 6, 8]);
+        for &i in &[0, 2, 4, 6, 8] {
+            assert!(s.contains(i));
+        }
+        for &i in &[1, 3, 5, 7, 9] {
+            assert!(!s.contains(i));
+        }
+    }
+
+    #[test]
+    fn sorted_cps_xor_is_set_symmetric_difference() {
+        let a = SortedCps::from_iter([1usize, 2, 3, 4]);
+        let b = SortedCps::from_iter([3usize, 4, 5, 6]);
+        let xor: Vec<usize> = a.symmetric_difference(&b).iter().collect();
+        assert_eq!(xor, vec![1, 2, 5, 6]);
+    }
+
+    #[test]
+    fn selection_kind_all_contains_every_index() {
+        let k = SelectionKind::All;
+        for i in 0..1000 {
+            assert!(k.contains(i));
+        }
+        assert_eq!(k.count(7), 7);
+        assert!(k.is_all(7));
+    }
+
+    #[test]
+    fn selection_kind_partial_full_is_all_for_count() {
+        let k = SelectionKind::Partial(SortedCps::from_iter(0usize..4));
+        assert!(k.is_all(4));
+        assert!(!k.is_all(5));
+        assert_eq!(k.count(99), 4);
+    }
+
+    #[test]
+    fn selection_kind_to_sorted_round_trips() {
+        let all = SelectionKind::All;
+        let v: Vec<usize> = all.to_sorted(5).iter().collect();
+        assert_eq!(v, vec![0, 1, 2, 3, 4]);
+        let part = SelectionKind::Partial(SortedCps::from_iter([2usize, 0]));
+        let v2: Vec<usize> = part.to_sorted(99).iter().collect();
+        assert_eq!(v2, vec![0, 2]);
     }
 }

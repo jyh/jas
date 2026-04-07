@@ -532,44 +532,54 @@ class Layer(Group):
     name: str = "Layer"
 
 
-def move_control_points(elem: Element, indices: frozenset[int],
-                        dx: float, dy: float) -> Element:
-    """Return a new element with the specified control points moved by (dx, dy)."""
+def move_control_points(elem: Element, kind, dx: float, dy: float) -> Element:
+    """Return a new element with the specified control points moved by (dx, dy).
+
+    `kind` is a `SelectionKind` (`.all` or `.partial(SortedCps)`). For
+    Rect/Circle/Ellipse, `.all` translates the primitive in place;
+    `.partial` (even if it covers every CP) converts to a polygon for
+    Rect, since "I selected each CP individually" is a different intent
+    than "I selected the element as a whole".
+    """
     from dataclasses import replace
+    from document.document import (
+        selection_kind_contains as _contains,
+        selection_kind_is_all as _is_all,
+    )
     match elem:
         case Line(x1=x1, y1=y1, x2=x2, y2=y2):
             return replace(elem,
-                x1=x1 + dx if 0 in indices else x1,
-                y1=y1 + dy if 0 in indices else y1,
-                x2=x2 + dx if 1 in indices else x2,
-                y2=y2 + dy if 1 in indices else y2)
+                x1=x1 + dx if _contains(kind, 0) else x1,
+                y1=y1 + dy if _contains(kind, 0) else y1,
+                x2=x2 + dx if _contains(kind, 1) else x2,
+                y2=y2 + dy if _contains(kind, 1) else y2)
         case Rect(x=x, y=y, width=w, height=h):
-            if indices >= frozenset({0, 1, 2, 3}):
+            if _is_all(kind, 4):
                 return replace(elem, x=x + dx, y=y + dy)
             pts = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
             for i in range(4):
-                if i in indices:
+                if _contains(kind, i):
                     pts[i] = (pts[i][0] + dx, pts[i][1] + dy)
             return Polygon(points=tuple(pts),
                            fill=elem.fill, stroke=elem.stroke,
                            opacity=elem.opacity, transform=elem.transform)
         case Circle(cx=cx, cy=cy, r=r):
-            if indices >= frozenset({0, 1, 2, 3}):
+            if _is_all(kind, 4):
                 return replace(elem, cx=cx + dx, cy=cy + dy)
             cps = [(cx, cy - r), (cx + r, cy), (cx, cy + r), (cx - r, cy)]
             for i in range(4):
-                if i in indices:
+                if _contains(kind, i):
                     cps[i] = (cps[i][0] + dx, cps[i][1] + dy)
             ncx = (cps[1][0] + cps[3][0]) / 2
             ncy = (cps[0][1] + cps[2][1]) / 2
             nr = max(abs(cps[1][0] - ncx), abs(cps[0][1] - ncy))
             return replace(elem, cx=ncx, cy=ncy, r=nr)
         case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry):
-            if indices >= frozenset({0, 1, 2, 3}):
+            if _is_all(kind, 4):
                 return replace(elem, cx=cx + dx, cy=cy + dy)
             cps = [(cx, cy - ry), (cx + rx, cy), (cx, cy + ry), (cx - rx, cy)]
             for i in range(4):
-                if i in indices:
+                if _contains(kind, i):
                     cps[i] = (cps[i][0] + dx, cps[i][1] + dy)
             ncx = (cps[1][0] + cps[3][0]) / 2
             ncy = (cps[0][1] + cps[2][1]) / 2
@@ -578,7 +588,7 @@ def move_control_points(elem: Element, indices: frozenset[int],
         case Polygon(points=pts):
             new_pts = list(pts)
             for i in range(len(new_pts)):
-                if i in indices:
+                if _contains(kind, i):
                     new_pts[i] = (new_pts[i][0] + dx, new_pts[i][1] + dy)
             return replace(elem, points=tuple(new_pts))
         case Path(d=d) | TextPath(d=d):
@@ -588,7 +598,7 @@ def move_control_points(elem: Element, indices: frozenset[int],
             for ci, cmd in enumerate(d):
                 if isinstance(cmd, ClosePath):
                     continue
-                if anchor_idx in indices:
+                if _contains(kind, anchor_idx):
                     match cmd:
                         case MoveTo(x, y):
                             new_cmds[ci] = MoveTo(x + dx, y + dy)

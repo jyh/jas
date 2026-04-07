@@ -435,53 +435,66 @@ and rounded_rect cr x y w h rx ry =
 
 let handle_size = Canvas_tool.handle_draw_size
 
+(* Selection-bbox display flag lives in [Canvas_tool] so the type
+   tools can read it without a tools→canvas dependency cycle. *)
+let show_selection_bbox = Canvas_tool.show_selection_bbox
+
 let control_points (elem : Element.element) =
   Element.control_points elem
 
 let draw_element_overlay cr (elem : Element.element) (selected_cps : int list) =
   let open Element in
+  (* Text/Text_path selections never get the outline or corner squares. *)
+  match elem with
+  | Text _ | Text_path _ -> ()
+  | _ ->
   Cairo.set_source_rgb cr 0.0 0.47 1.0;
   Cairo.set_line_width cr 1.0;
   Cairo.set_dash cr [||];
-  begin match elem with
-  | Line { x1; y1; x2; y2; _ } ->
-    Cairo.move_to cr x1 y1;
-    Cairo.line_to cr x2 y2;
-    Cairo.stroke cr
-  | Rect { x; y; width; height; rx; ry; _ } ->
-    if rx > 0.0 || ry > 0.0 then
-      rounded_rect cr x y width height rx ry
-    else
-      Cairo.rectangle cr x y ~w:width ~h:height;
-    Cairo.stroke cr
-  | Circle { cx; cy; r; _ } ->
-    Cairo.arc cr cx cy ~r ~a1:0.0 ~a2:(2.0 *. Float.pi);
-    Cairo.stroke cr
-  | Ellipse { cx; cy; rx; ry; _ } ->
-    Cairo.save cr;
-    Cairo.translate cr cx cy;
-    Cairo.scale cr rx ry;
-    Cairo.arc cr 0.0 0.0 ~r:1.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
-    Cairo.restore cr;
-    Cairo.stroke cr
-  | Polyline { points; _ } ->
-    draw_points cr points false;
-    Cairo.stroke cr
-  | Polygon { points; _ } ->
-    draw_points cr points true;
-    Cairo.stroke cr
-  | Path { d; _ } | Text_path { d; _ } ->
-    build_path cr d;
-    Cairo.stroke cr
-  | _ ->
-    let (bx, by, bw, bh) = Element.bounds elem in
-    Cairo.rectangle cr bx by ~w:bw ~h:bh;
-    Cairo.stroke cr
+  let cp_shape = match elem with
+    | Line _ | Polyline _ | Polygon _ | Path _ -> true
+    | _ -> false
+  in
+  if show_selection_bbox then begin
+    match elem with
+    | Line { x1; y1; x2; y2; _ } ->
+      Cairo.move_to cr x1 y1;
+      Cairo.line_to cr x2 y2;
+      Cairo.stroke cr
+    | Rect { x; y; width; height; rx; ry; _ } ->
+      if rx > 0.0 || ry > 0.0 then
+        rounded_rect cr x y width height rx ry
+      else
+        Cairo.rectangle cr x y ~w:width ~h:height;
+      Cairo.stroke cr
+    | Circle { cx; cy; r; _ } ->
+      Cairo.arc cr cx cy ~r ~a1:0.0 ~a2:(2.0 *. Float.pi);
+      Cairo.stroke cr
+    | Ellipse { cx; cy; rx; ry; _ } ->
+      Cairo.save cr;
+      Cairo.translate cr cx cy;
+      Cairo.scale cr rx ry;
+      Cairo.arc cr 0.0 0.0 ~r:1.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
+      Cairo.restore cr;
+      Cairo.stroke cr
+    | Polyline { points; _ } ->
+      draw_points cr points false;
+      Cairo.stroke cr
+    | Polygon { points; _ } ->
+      draw_points cr points true;
+      Cairo.stroke cr
+    | Path { d; _ } ->
+      build_path cr d;
+      Cairo.stroke cr
+    | _ ->
+      let (bx, by, bw, bh) = Element.bounds elem in
+      Cairo.rectangle cr bx by ~w:bw ~h:bh;
+      Cairo.stroke cr
   end;
-  (* Draw Bezier handles for selected path control points *)
+  (* Draw Bezier handles for selected path control points (always). *)
   let handle_circle_radius = 3.0 in
   (match elem with
-   | Path { d; _ } | Text_path { d; _ } when selected_cps <> [] ->
+   | Path { d; _ } when selected_cps <> [] ->
      let anchors = control_points elem in
      List.iter (fun cp_idx ->
        let ax, ay = try List.nth anchors cp_idx with _ -> (0.0, 0.0) in
@@ -514,18 +527,22 @@ let draw_element_overlay cr (elem : Element.element) (selected_cps : int list) =
        end
      ) selected_cps
    | _ -> ());
-  (* Draw handles *)
-  let half = handle_size /. 2.0 in
-  List.iteri (fun i (px, py) ->
-    Cairo.rectangle cr (px -. half) (py -. half) ~w:handle_size ~h:handle_size;
-    if List.mem i selected_cps then
-      Cairo.set_source_rgb cr 0.0 0.47 1.0
-    else
-      Cairo.set_source_rgb cr 1.0 1.0 1.0;
-    Cairo.fill_preserve cr;
-    Cairo.set_source_rgb cr 0.0 0.47 1.0;
-    Cairo.stroke cr
-  ) (control_points elem)
+  (* Draw control-point squares.
+     - cp-shape: always (per-vertex/anchor handles are draggable).
+     - bbox-shape: only when show_selection_bbox. *)
+  if cp_shape || show_selection_bbox then begin
+    let half = handle_size /. 2.0 in
+    List.iteri (fun i (px, py) ->
+      Cairo.rectangle cr (px -. half) (py -. half) ~w:handle_size ~h:handle_size;
+      if List.mem i selected_cps then
+        Cairo.set_source_rgb cr 0.0 0.47 1.0
+      else
+        Cairo.set_source_rgb cr 1.0 1.0 1.0;
+      Cairo.fill_preserve cr;
+      Cairo.set_source_rgb cr 0.0 0.47 1.0;
+      Cairo.stroke cr
+    ) (control_points elem)
+  end
 
 let draw_selection_overlays cr (doc : Document.document) =
   let open Document in
@@ -567,7 +584,9 @@ let draw_selection_overlays cr (doc : Document.document) =
         | Element.Path { transform; _ } | Element.Text { transform; _ }
         | Element.Text_path { transform; _ }
         | Element.Group { transform; _ } | Element.Layer { transform; _ } -> transform);
-      draw_element_overlay cr !node es.es_control_points;
+      let n = Element.control_point_count !node in
+      let cps = Document.selection_kind_to_sorted es.es_kind ~total:n in
+      draw_element_overlay cr !node cps;
       Cairo.restore cr
   ) doc.selection
 
@@ -621,10 +640,12 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       Document.PathMap.exists (fun _path (es : Document.element_selection) ->
         let elem = Document.get_element current_doc es.es_path in
         let cps = Element.control_points elem in
+        let n = List.length cps in
+        let indices = Document.selection_kind_to_sorted es.es_kind ~total:n in
         List.exists (fun i ->
           let (cpx, cpy) = List.nth cps i in
           abs_float (px -. cpx) <= hit_radius && abs_float (py -. cpy) <= hit_radius
-        ) es.es_control_points
+        ) indices
       ) current_doc.Document.selection
 
     method private hit_test_path_curve px py =
@@ -666,6 +687,8 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
           let elem = Document.get_element current_doc es.es_path in
           (match elem with
            | Element.Path { d; _ } ->
+             let n = Element.control_point_count elem in
+             let indices = Document.selection_kind_to_sorted es.es_kind ~total:n in
              List.fold_left (fun acc2 cp_idx ->
                match acc2 with
                | Some _ -> acc2
@@ -681,7 +704,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
                       && abs_float (py -. hy) <= hit_radius ->
                       Some (es.es_path, cp_idx, "out")
                     | _ -> None)
-             ) None es.es_control_points
+             ) None indices
            | _ -> None)
       ) current_doc.Document.selection None
 

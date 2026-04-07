@@ -117,10 +117,6 @@ public func segmentsOfElement(_ elem: Element) -> [(Double, Double, Double, Doub
     }
 }
 
-public func allCPs(_ elem: Element) -> Set<Int> {
-    Set(0..<elem.controlPointCount)
-}
-
 // TODO: This ignores the element's transform. If an element has a non-identity
 // transform, its visual position differs from its raw coordinates. To fix,
 // inverse-transform the selection rect into the element's local coordinate

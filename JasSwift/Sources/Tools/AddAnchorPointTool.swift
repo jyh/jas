@@ -474,15 +474,24 @@ final class AddAnchorPointTool: CanvasTool {
                                                 locked: pe.locked))
                 var newDoc = doc.replaceElement(path, with: newElem)
 
-                // Update selection: shift CP indices after the insertion point
+                // Update selection: shift CP indices after the insertion
+                // point and add the new anchor. If the previous selection
+                // was `.all`, the new anchor is automatically included.
                 let newAnchorIdx = ins.firstNewIdx
                 if let oldSel = doc.getElementSelection(path) {
-                    var shifted = Set<Int>()
-                    for cp in oldSel.controlPoints {
-                        shifted.insert(cp >= newAnchorIdx ? cp + 1 : cp)
+                    let newKind: SelectionKind
+                    switch oldSel.kind {
+                    case .all:
+                        newKind = .all
+                    case .partial(let s):
+                        var shifted: [Int] = []
+                        for cp in s.toArray() {
+                            shifted.append(cp >= newAnchorIdx ? cp + 1 : cp)
+                        }
+                        shifted.append(newAnchorIdx)
+                        newKind = .partial(SortedCps(shifted))
                     }
-                    shifted.insert(newAnchorIdx)
-                    let newSelEntry = ElementSelection(path: path, controlPoints: shifted)
+                    let newSelEntry = ElementSelection(path: path, kind: newKind)
                     var newSelection = newDoc.selection.filter { $0.path != path }
                     newSelection.insert(newSelEntry)
                     newDoc = Document(layers: newDoc.layers, selectedLayer: newDoc.selectedLayer,

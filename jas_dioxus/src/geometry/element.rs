@@ -851,35 +851,35 @@ pub fn flatten_path_commands(d: &[PathCommand]) -> Vec<(f64, f64)> {
 // Move control points
 // ---------------------------------------------------------------------------
 
-use std::collections::HashSet;
+use crate::document::document::SelectionKind;
 
 /// Return a new element with the specified control points moved by (dx, dy).
+///
+/// `kind == SelectionKind::All` translates the whole element in-place
+/// (preserving its primitive type). `Partial(s)` moves only the listed
+/// CPs and may convert Rect/Circle/Ellipse into a Polygon when the
+/// resulting shape is no longer axis-aligned.
 pub fn move_control_points(
     elem: &Element,
-    indices: &HashSet<usize>,
+    kind: &SelectionKind,
     dx: f64,
     dy: f64,
 ) -> Element {
     match elem {
         Element::Line(e) => {
             let mut new = e.clone();
-            if indices.contains(&0) {
+            if kind.contains(0) {
                 new.x1 += dx;
                 new.y1 += dy;
             }
-            if indices.contains(&1) {
+            if kind.contains(1) {
                 new.x2 += dx;
                 new.y2 += dy;
             }
             Element::Line(new)
         }
         Element::Rect(e) => {
-            if indices.len() >= 4
-                && indices.contains(&0)
-                && indices.contains(&1)
-                && indices.contains(&2)
-                && indices.contains(&3)
-            {
+            if kind.is_all(4) {
                 let mut new = e.clone();
                 new.x += dx;
                 new.y += dy;
@@ -893,7 +893,7 @@ pub fn move_control_points(
                     (e.x, e.y + e.height),
                 ];
                 for i in 0..4 {
-                    if indices.contains(&i) {
+                    if kind.contains(i) {
                         pts[i].0 += dx;
                         pts[i].1 += dy;
                     }
@@ -907,7 +907,7 @@ pub fn move_control_points(
             }
         }
         Element::Circle(e) => {
-            if indices.len() >= 4 {
+            if kind.is_all(4) {
                 let mut new = e.clone();
                 new.cx += dx;
                 new.cy += dy;
@@ -920,7 +920,7 @@ pub fn move_control_points(
                     (e.cx - e.r, e.cy),
                 ];
                 for i in 0..4 {
-                    if indices.contains(&i) {
+                    if kind.contains(i) {
                         cps[i].0 += dx;
                         cps[i].1 += dy;
                     }
@@ -936,7 +936,7 @@ pub fn move_control_points(
             }
         }
         Element::Ellipse(e) => {
-            if indices.len() >= 4 {
+            if kind.is_all(4) {
                 let mut new = e.clone();
                 new.cx += dx;
                 new.cy += dy;
@@ -949,7 +949,7 @@ pub fn move_control_points(
                     (e.cx - e.rx, e.cy),
                 ];
                 for i in 0..4 {
-                    if indices.contains(&i) {
+                    if kind.contains(i) {
                         cps[i].0 += dx;
                         cps[i].1 += dy;
                     }
@@ -965,7 +965,7 @@ pub fn move_control_points(
         Element::Polygon(e) => {
             let mut new_pts = e.points.clone();
             for i in 0..new_pts.len() {
-                if indices.contains(&i) {
+                if kind.contains(i) {
                     new_pts[i].0 += dx;
                     new_pts[i].1 += dy;
                 }
@@ -976,14 +976,14 @@ pub fn move_control_points(
             })
         }
         Element::Path(e) => {
-            let new_d = move_path_command_points(&e.d, indices, dx, dy);
+            let new_d = move_path_command_points(&e.d, kind, dx, dy);
             Element::Path(PathElem {
                 d: new_d,
                 ..e.clone()
             })
         }
         Element::TextPath(e) => {
-            let new_d = move_path_command_points(&e.d, indices, dx, dy);
+            let new_d = move_path_command_points(&e.d, kind, dx, dy);
             Element::TextPath(TextPathElem {
                 d: new_d,
                 ..e.clone()
@@ -1312,7 +1312,7 @@ pub fn is_smooth_point(d: &[PathCommand], anchor_idx: usize) -> bool {
 
 fn move_path_command_points(
     d: &[PathCommand],
-    indices: &HashSet<usize>,
+    kind: &SelectionKind,
     dx: f64,
     dy: f64,
 ) -> Vec<PathCommand> {
@@ -1322,7 +1322,7 @@ fn move_path_command_points(
         if matches!(d[ci], PathCommand::ClosePath) {
             continue;
         }
-        if indices.contains(&anchor_idx) {
+        if kind.contains(anchor_idx) {
             match d[ci] {
                 PathCommand::MoveTo { x, y } => {
                     new_cmds[ci] = PathCommand::MoveTo {

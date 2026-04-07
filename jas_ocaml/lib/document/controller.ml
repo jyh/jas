@@ -6,7 +6,17 @@
 
 let point_in_rect = Hit_test.point_in_rect
 let element_intersects_rect = Hit_test.element_intersects_rect
-let all_cps = Hit_test.all_cps
+
+(* Move helper: collapse a SelectionKind into the (is_all, indices)
+   pair that [Element.move_control_points] consumes. *)
+let move_kind elem (kind : Document.selection_kind) dx dy =
+  let n = Element.control_point_count elem in
+  match kind with
+  | Document.SelKindAll ->
+    Element.move_control_points ~is_all:true elem (List.init n Fun.id) dx dy
+  | Document.SelKindPartial s ->
+    let indices = Document.SortedCps.to_list s in
+    Element.move_control_points elem indices dx dy
 
 class controller ?(model = Model.create ()) () =
   object (self)
@@ -44,32 +54,35 @@ class controller ?(model = Model.create ()) () =
           | _ -> l
         else l
       ) doc.Document.layers in
-      let n = Element.control_point_count elem in
       let path = [idx; child_idx] in
-      let es = Document.make_element_selection
-        ~control_points:(List.init n Fun.id) path in
+      let es = Document.element_selection_all path in
       let sel = Document.PathMap.singleton path es in
       model#set_document { doc with Document.layers = new_layers;
                                     Document.selection = sel }
 
     method private toggle_selection current new_sel =
-      (* Toggle at the control-point level.
-         For elements in both sets, toggle individual CPs (symmetric difference).
-         If no CPs remain, remove the element. *)
-      let merged = Document.PathMap.merge (fun _path cur nw ->
+      (* XOR per element. Two `SelKindAll`s cancel out; two
+         `SelKindPartial`s XOR their CP sets; mixed kinds collapse to
+         `SelKindAll`. *)
+      Document.PathMap.merge (fun _path cur nw ->
         match cur, nw with
         | Some cur_es, Some new_es ->
-          let cur_set = List.sort_uniq compare cur_es.Document.es_control_points in
-          let new_set = List.sort_uniq compare new_es.Document.es_control_points in
-          let toggled = List.filter (fun cp -> not (List.mem cp new_set)) cur_set
-                      @ List.filter (fun cp -> not (List.mem cp cur_set)) new_set in
-          if toggled = [] then None
-          else Some { cur_es with Document.es_control_points = toggled }
+          (match cur_es.Document.es_kind, new_es.Document.es_kind with
+           | Document.SelKindAll, Document.SelKindAll ->
+             (* cancel out *)
+             None
+           | Document.SelKindPartial a, Document.SelKindPartial b ->
+             let xor = Document.SortedCps.symmetric_difference a b in
+             if Document.SortedCps.is_empty xor then None
+             else Some { cur_es with Document.es_kind =
+               Document.SelKindPartial xor }
+           | _ ->
+             (* mixed All/Partial -> keep All *)
+             Some (Document.element_selection_all cur_es.Document.es_path))
         | None, Some v -> Some v
         | Some v, None -> Some v
         | None, None -> None
-      ) current new_sel in
-      merged
+      ) current new_sel
 
     method select_rect ?(extend=false) x y w h =
       let doc = model#document in
@@ -81,25 +94,25 @@ class controller ?(model = Model.create ()) () =
             if Element.is_locked child then ()
             else
             match child with
-            | Element.Group { children = gc; _ } as grp ->
+            | Element.Group { children = gc; _ } ->
               let any_hit = Array.exists (fun c ->
                 element_intersects_rect c x y w h
               ) gc in
               if any_hit then begin
                 let grp_path = [li; ci] in
                 selection := Document.PathMap.add grp_path
-                  (Document.make_element_selection ~control_points:(all_cps grp) grp_path) !selection;
-                Array.iteri (fun gi gc_elem ->
+                  (Document.element_selection_all grp_path) !selection;
+                Array.iteri (fun gi _gc_elem ->
                   let path = [li; ci; gi] in
                   selection := Document.PathMap.add path
-                    (Document.make_element_selection ~control_points:(all_cps gc_elem) path) !selection
+                    (Document.element_selection_all path) !selection
                 ) gc
               end
             | _ ->
               if element_intersects_rect child x y w h then
                 let path = [li; ci] in
                 selection := Document.PathMap.add path
-                  (Document.make_element_selection ~control_points:(all_cps child) path) !selection
+                  (Document.element_selection_all path) !selection
           ) children
         | _ -> ()
       ) doc.Document.layers;
@@ -118,7 +131,7 @@ class controller ?(model = Model.create ()) () =
         | _ ->
           if element_intersects_rect elem x y w h then
             selection := Document.PathMap.add path
-              (Document.make_element_selection ~control_points:(all_cps elem) path) !selection
+              (Document.element_selection_all path) !selection
       in
       Array.iteri (fun li layer -> check [li] layer) doc.Document.layers;
       let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
@@ -139,10 +152,14 @@ class controller ?(model = Model.create ()) () =
             List.mapi (fun i (px, py) -> (i, px, py)) cps
             |> List.filter (fun (_i, px, py) -> point_in_rect px py x y w h)
             |> List.map (fun (i, _, _) -> i) in
-          let hit = hit_cps <> [] || element_intersects_rect elem x y w h in
-          if hit then
+          if hit_cps <> [] then
             selection := Document.PathMap.add path
-              (Document.make_element_selection ~control_points:hit_cps path) !selection
+              (Document.element_selection_partial path hit_cps) !selection
+          else if element_intersects_rect elem x y w h then
+            (* Marquee crosses the body but no CPs — pick the element
+               as a whole. *)
+            selection := Document.PathMap.add path
+              (Document.element_selection_all path) !selection
       in
       Array.iteri (fun li layer -> check [li] layer) doc.Document.layers;
       let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
@@ -163,32 +180,29 @@ class controller ?(model = Model.create ()) () =
         if List.length path >= 2 then
           let parent = Document.get_element doc parent_path in
           match parent with
-          | Element.Group { children; _ } as grp ->
+          | Element.Group { children; _ } ->
             let selection = Document.PathMap.singleton parent_path
-              (Document.make_element_selection ~control_points:(all_cps grp) parent_path) in
+              (Document.element_selection_all parent_path) in
             let selection = Array.fold_left (fun acc i ->
               let p = parent_path @ [i] in
-              let elem = children.(i) in
               Document.PathMap.add p
-                (Document.make_element_selection ~control_points:(all_cps elem) p) acc
+                (Document.element_selection_all p) acc
             ) selection (Array.init (Array.length children) Fun.id) in
             model#set_document { doc with Document.selection = selection }
           | _ ->
-            let elem = Document.get_element doc path in
             model#set_document { doc with Document.selection =
               Document.PathMap.singleton path
-                (Document.make_element_selection ~control_points:(all_cps elem) path) }
+                (Document.element_selection_all path) }
         else
-          let elem = Document.get_element doc path in
           model#set_document { doc with Document.selection =
             Document.PathMap.singleton path
-              (Document.make_element_selection ~control_points:(all_cps elem) path) }
+              (Document.element_selection_all path) }
 
     method select_control_point (path : Document.element_path) (index : int) =
       match path with
       | [] -> failwith "path must be non-empty"
       | _ ->
-        let es = Document.make_element_selection ~control_points:[index] path in
+        let es = Document.element_selection_partial path [index] in
         model#set_document { model#document with Document.selection =
           Document.PathMap.singleton path es }
 
@@ -256,10 +270,8 @@ class controller ?(model = Model.create ()) () =
       ) doc.Document.layers in
       let new_doc = { doc with Document.layers = new_layers } in
       let new_sel = List.fold_left (fun acc path ->
-        let elem = Document.get_element new_doc path in
-        let n = Element.control_point_count elem in
         Document.PathMap.add path
-          (Document.make_element_selection ~control_points:(List.init n Fun.id) path) acc
+          (Document.element_selection_all path) acc
       ) Document.PathMap.empty !locked_paths in
       model#set_document { new_doc with Document.selection = new_sel }
 
@@ -267,7 +279,7 @@ class controller ?(model = Model.create ()) () =
       let doc = model#document in
       let new_doc = Document.PathMap.fold (fun path es acc ->
         let elem = Document.get_element acc path in
-        let new_elem = Element.move_control_points elem es.Document.es_control_points dx dy in
+        let new_elem = move_kind elem es.Document.es_kind dx dy in
         Document.replace_element acc path new_elem
       ) doc.Document.selection doc in
       model#set_document new_doc
@@ -279,15 +291,14 @@ class controller ?(model = Model.create ()) () =
         |> List.sort (fun (a, _) (b, _) -> compare b a) in
       let (new_doc, new_sel) = List.fold_left (fun (acc_doc, acc_sel) (_path, es) ->
         let elem = Document.get_element acc_doc es.Document.es_path in
-        let copied = Element.move_control_points elem es.Document.es_control_points dx dy in
+        let copied = move_kind elem es.Document.es_kind dx dy in
         let doc' = Document.insert_element_after acc_doc es.Document.es_path copied in
         let copy_path = match List.rev es.Document.es_path with
           | last :: rest -> List.rev ((last + 1) :: rest)
           | [] -> failwith "empty path"
         in
-        let all_cps = List.init (Element.control_point_count copied) Fun.id in
-        let copy_es = Document.make_element_selection
-          ~control_points:all_cps copy_path in
+        (* Copying always selects the new element as a whole. *)
+        let copy_es = Document.element_selection_all copy_path in
         (doc', Document.PathMap.add copy_path copy_es acc_sel)
       ) (doc, Document.PathMap.empty) sorted_sels in
       model#set_document { new_doc with Document.selection = new_sel }

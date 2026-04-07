@@ -305,27 +305,70 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element) {
 // Draw selection overlays
 // ---------------------------------------------------------------------------
 
+/// Whether to draw the blue bounding-box outline around each selected
+/// element. Control-point handles are drawn regardless. Defaults to
+/// `false` so the bbox does not clutter the canvas during normal
+/// selection; flip to `true` to get the old behavior back.
+pub const SHOW_SELECTION_BBOX: bool = false;
+
 fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
     ctx.set_stroke_style_str("rgba(0, 120, 215, 0.8)");
     ctx.set_line_width(1.0);
 
     for es in &doc.selection {
         if let Some(elem) = doc.get_element(&es.path) {
-            // Draw bounding box
-            let (bx, by, bw, bh) = elem.bounds();
-            ctx.stroke_rect(bx, by, bw, bh);
+            // Two visual conventions:
+            //
+            // - **CP-shape elements** (Path, TextPath, Polygon,
+            //   Polyline, Line): always draw the control-point
+            //   squares because the user can grab and drag them
+            //   directly. No bounding box.
+            //
+            // - **Bounding-box-shape elements** (Rect, Circle,
+            //   Ellipse, Text, TextPath, Group, Layer): the "control
+            //   points" are bounding-box corners. Drawing them as
+            //   little squares without the bounding box itself is
+            //   confusing, so we draw both — the bbox outline and
+            //   the corner squares — only when SHOW_SELECTION_BBOX
+            //   is true. When false (the default) the canvas stays
+            //   uncluttered and the user relies on the existing
+            //   element rendering to tell what's selected.
+            let cp_shape = matches!(
+                elem,
+                Element::Line(_)
+                    | Element::Polyline(_)
+                    | Element::Polygon(_)
+                    | Element::Path(_)
+            );
 
-            // Draw control points
-            let cps = control_points(elem);
-            let half = HANDLE_DRAW_SIZE / 2.0;
-            for (i, &(px, py)) in cps.iter().enumerate() {
-                if es.control_points.contains(&i) {
-                    ctx.set_fill_style_str("rgba(0, 120, 215, 0.8)");
-                } else {
-                    ctx.set_fill_style_str("white");
+            if cp_shape {
+                // Always draw the per-vertex/anchor squares.
+                let cps = control_points(elem);
+                let half = HANDLE_DRAW_SIZE / 2.0;
+                for (i, &(px, py)) in cps.iter().enumerate() {
+                    if es.kind.contains(i) {
+                        ctx.set_fill_style_str("rgba(0, 120, 215, 0.8)");
+                    } else {
+                        ctx.set_fill_style_str("white");
+                    }
+                    ctx.fill_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
+                    ctx.stroke_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
                 }
-                ctx.fill_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
-                ctx.stroke_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
+            } else if SHOW_SELECTION_BBOX {
+                // Bbox-shape element AND the user opted in.
+                let (bx, by, bw, bh) = elem.bounds();
+                ctx.stroke_rect(bx, by, bw, bh);
+                let cps = control_points(elem);
+                let half = HANDLE_DRAW_SIZE / 2.0;
+                for (i, &(px, py)) in cps.iter().enumerate() {
+                    if es.kind.contains(i) {
+                        ctx.set_fill_style_str("rgba(0, 120, 215, 0.8)");
+                    } else {
+                        ctx.set_fill_style_str("white");
+                    }
+                    ctx.fill_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
+                    ctx.stroke_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
+                }
             }
         }
     }

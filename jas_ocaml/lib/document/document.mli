@@ -9,10 +9,35 @@ type element_path = int list
 (** A set of element paths. *)
 module PathSet : Set.S with type elt = element_path
 
+(** Sorted, de-duplicated collection of control-point indices. *)
+module SortedCps : sig
+  type t
+  val empty : t
+  val from_list : int list -> t
+  val single : int -> t
+  val mem : int -> t -> bool
+  val to_list : t -> int list
+  val length : t -> int
+  val is_empty : t -> bool
+  val insert : int -> t -> t
+  val symmetric_difference : t -> t -> t
+end
+
+(** Selection kind: either the element is fully selected (`SelKindAll`)
+    or only a subset of its CPs are selected (`SelKindPartial`). *)
+type selection_kind =
+  | SelKindAll
+  | SelKindPartial of SortedCps.t
+
+val selection_kind_contains : selection_kind -> int -> bool
+val selection_kind_count : selection_kind -> total:int -> int
+val selection_kind_is_all : selection_kind -> total:int -> bool
+val selection_kind_to_sorted : selection_kind -> total:int -> int list
+
 (** Per-element selection state. *)
 type element_selection = {
   es_path : element_path;
-  es_control_points : int list;
+  es_kind : selection_kind;
 }
 
 (** A map from element path to its selection state. *)
@@ -32,6 +57,13 @@ val make_document :
   ?selected_layer:int -> ?selection:selection ->
   Element.element array -> document
 
+(** Convenience: build a fully-selected entry. *)
+val element_selection_all : element_path -> element_selection
+
+(** Convenience: build a partial entry from a CP index list. *)
+val element_selection_partial : element_path -> int list -> element_selection
+
+(** Legacy constructor: empty CP list -> SelKindAll, otherwise SelKindPartial. *)
 val make_element_selection :
   ?control_points:int list -> element_path -> element_selection
 

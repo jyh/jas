@@ -191,7 +191,13 @@ val move_path_handle : path_command list -> int -> string -> float -> float ->
   path_command list
 val control_point_count : element -> int
 val control_points : element -> (float * float) list
-val move_control_points : element -> int list -> float -> float -> element
+
+val move_control_points :
+  ?is_all:bool -> element -> int list -> float -> float -> element
+(** Move the listed control points by [(dx, dy)]. Pass [~is_all:true]
+    to indicate that the element is selected as a whole — this lets
+    Rect/Circle/Ellipse translate in place instead of converting to a
+    Polygon. *)
 
 (** {2 Path geometry utilities} *)
 

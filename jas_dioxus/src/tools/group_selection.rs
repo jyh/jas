@@ -3,23 +3,28 @@
 //! Like the Selection tool but traverses into groups, so elements
 //! inside groups can be individually selected and moved.
 
-use std::collections::HashSet;
-
 use web_sys::CanvasRenderingContext2d;
 
 use crate::document::controller::Controller;
 use crate::document::document::{ElementPath, ElementSelection};
 use crate::document::model::Model;
-use crate::geometry::element::{control_point_count, control_points, move_control_points, Element};
+use crate::geometry::element::Element;
 
-use super::tool::{CanvasTool, DRAG_THRESHOLD, HIT_RADIUS};
+use super::tool::{CanvasTool, DRAG_THRESHOLD};
 
 #[derive(Debug, Clone, PartialEq)]
 enum State {
     Idle,
     PendingDrag { start_x: f64, start_y: f64 },
     Marquee { start_x: f64, start_y: f64, cur_x: f64, cur_y: f64 },
-    Moving { start_x: f64, start_y: f64, cur_x: f64, cur_y: f64, copied: bool },
+    /// Live-edit drag (matches Selection / DirectSelection): the
+    /// document mutates on every move, no dashed ghost.
+    Moving {
+        last_x: f64,
+        last_y: f64,
+        snapshotted: bool,
+        copied: bool,
+    },
 }
 
 pub struct GroupSelectionTool {
@@ -105,20 +110,12 @@ impl CanvasTool for GroupSelectionTool {
                 let mut sel = doc.selection.clone();
                 if let Some(pos) = sel.iter().position(|es| es.path == path) {
                     sel.remove(pos);
-                } else if let Some(elem) = doc.get_element(&path) {
-                    let n = control_point_count(elem);
-                    sel.push(ElementSelection {
-                        path: path.clone(),
-                        control_points: (0..n).collect(),
-                    });
+                } else {
+                    sel.push(ElementSelection::all(path.clone()));
                 }
                 Controller::set_selection(model, sel);
-            } else if let Some(elem) = model.document().get_element(&path) {
-                let n = control_point_count(elem);
-                Controller::set_selection(model, vec![ElementSelection {
-                    path: path.clone(),
-                    control_points: (0..n).collect(),
-                }]);
+            } else if model.document().get_element(&path).is_some() {
+                Controller::set_selection(model, vec![ElementSelection::all(path.clone())]);
             }
             self.state = State::PendingDrag { start_x: x, start_y: y };
             return;
@@ -128,23 +125,31 @@ impl CanvasTool for GroupSelectionTool {
         self.state = State::Marquee { start_x: x, start_y: y, cur_x: x, cur_y: y };
     }
 
-    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool, _dragging: bool) {
+    fn on_move(&mut self, model: &mut Model, x: f64, y: f64, _shift: bool, alt: bool, _dragging: bool) {
         match &mut self.state {
             State::PendingDrag { start_x, start_y } => {
                 let dist = ((x - *start_x).powi(2) + (y - *start_y).powi(2)).sqrt();
                 if dist > DRAG_THRESHOLD {
+                    model.snapshot();
                     self.state = State::Moving {
-                        start_x: *start_x,
-                        start_y: *start_y,
-                        cur_x: x,
-                        cur_y: y,
+                        last_x: *start_x,
+                        last_y: *start_y,
+                        snapshotted: true,
                         copied: false,
                     };
                 }
             }
-            State::Moving { cur_x, cur_y, .. } => {
-                *cur_x = x;
-                *cur_y = y;
+            State::Moving { last_x, last_y, copied, .. } => {
+                let dx = x - *last_x;
+                let dy = y - *last_y;
+                if alt && !*copied {
+                    Controller::copy_selection(model, dx, dy);
+                    *copied = true;
+                } else {
+                    Controller::move_selection(model, dx, dy);
+                }
+                *last_x = x;
+                *last_y = y;
             }
             State::Marquee { cur_x, cur_y, .. } => {
                 *cur_x = x;
@@ -154,21 +159,11 @@ impl CanvasTool for GroupSelectionTool {
         }
     }
 
-    fn on_release(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, alt: bool) {
+    fn on_release(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, _alt: bool) {
         let state = std::mem::replace(&mut self.state, State::Idle);
         match state {
-            State::Moving { start_x, start_y, copied, .. } => {
-                let dx = x - start_x;
-                let dy = y - start_y;
-                if dx.abs() > 1.0 || dy.abs() > 1.0 {
-                    model.snapshot();
-                    if alt {
-                        Controller::copy_selection(model, dx, dy);
-                    } else {
-                        Controller::move_selection(model, dx, dy);
-                    }
-                }
-            }
+            // Moving: live-edited in on_move; nothing to do here.
+            State::Moving { .. } => {}
             State::Marquee { start_x, start_y, .. } => {
                 let rx = start_x.min(x);
                 let ry = start_y.min(y);
@@ -190,38 +185,18 @@ impl CanvasTool for GroupSelectionTool {
         }
     }
 
-    fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
-        match &self.state {
-            State::Marquee { start_x, start_y, cur_x, cur_y } => {
-                let rx = start_x.min(*cur_x);
-                let ry = start_y.min(*cur_y);
-                let rw = (cur_x - start_x).abs();
-                let rh = (cur_y - start_y).abs();
-                ctx.set_stroke_style_str("rgba(0, 120, 215, 0.8)");
-                ctx.set_fill_style_str("rgba(0, 120, 215, 0.1)");
-                ctx.set_line_width(1.0);
-                ctx.fill_rect(rx, ry, rw, rh);
-                ctx.stroke_rect(rx, ry, rw, rh);
-            }
-            State::Moving { start_x, start_y, cur_x, cur_y, .. } => {
-                let dx = cur_x - start_x;
-                let dy = cur_y - start_y;
-                if dx.abs() > 1.0 || dy.abs() > 1.0 {
-                    let doc = model.document();
-                    ctx.set_stroke_style_str("rgba(0, 120, 215, 0.5)");
-                    ctx.set_line_width(1.0);
-                    ctx.set_line_dash(&js_sys::Array::of2(&4.0.into(), &4.0.into()).into()).ok();
-                    for es in &doc.selection {
-                        if let Some(elem) = doc.get_element(&es.path) {
-                            let moved = move_control_points(elem, &es.control_points, dx, dy);
-                            let (bx, by, bw, bh) = moved.bounds();
-                            ctx.stroke_rect(bx, by, bw, bh);
-                        }
-                    }
-                    ctx.set_line_dash(&js_sys::Array::new().into()).ok();
-                }
-            }
-            _ => {}
+    fn draw_overlay(&self, _model: &Model, ctx: &CanvasRenderingContext2d) {
+        // Only the marquee needs an overlay; moves are live edits.
+        if let State::Marquee { start_x, start_y, cur_x, cur_y } = &self.state {
+            let rx = start_x.min(*cur_x);
+            let ry = start_y.min(*cur_y);
+            let rw = (cur_x - start_x).abs();
+            let rh = (cur_y - start_y).abs();
+            ctx.set_stroke_style_str("rgba(0, 120, 215, 0.8)");
+            ctx.set_fill_style_str("rgba(0, 120, 215, 0.1)");
+            ctx.set_line_width(1.0);
+            ctx.fill_rect(rx, ry, rw, rh);
+            ctx.stroke_rect(rx, ry, rw, rh);
         }
     }
 }

@@ -152,11 +152,10 @@ class delete_anchor_point_tool = object (_self)
            | _ -> elem
          in
          let new_doc = Document.replace_element doc path new_elem in
-         (* Select all remaining control points *)
-         let cp_count = Element.control_point_count new_elem in
-         let all_cps = List.init cp_count Fun.id in
+         (* Select the path as a whole after the deletion. *)
+         let _ = Element.control_point_count new_elem in
          let new_sel = Document.PathMap.add path
-           (Document.make_element_selection ~control_points:all_cps path)
+           (Document.element_selection_all path)
            new_doc.Document.selection in
          ctx.model#set_document { new_doc with Document.selection = new_sel };
          ctx.request_update ()

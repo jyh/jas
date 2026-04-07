@@ -340,8 +340,7 @@ class SelectionToolTest(absltest.TestCase):
         rect = Rect(x=50, y=50, width=20, height=20,
                     fill=Fill(Color(0, 0, 0)), stroke=None)
         layer = Layer(name="L", children=(rect,))
-        sel = frozenset({ElementSelection(
-            path=(0, 0), control_points=frozenset(range(4)))})
+        sel = frozenset({ElementSelection.all((0, 0))})
         doc = Document(layers=(layer,), selection=sel)
         model = Model(document=doc)
         # Hit test returns True when clicking on selection
@@ -523,10 +522,10 @@ class AddAnchorPointToolTest(absltest.TestCase):
             d=(MoveTo(0, 0), CurveTo(33, 0, 67, 0, 100, 0)),
             stroke=Stroke(Color(0, 0, 0), 1.0),
         )
+        from document.document import _SelectionAll
         layer = Layer(name="L", children=(path_elem,))
-        # Select the path with all CPs (indices 0 and 1)
-        sel = frozenset({ElementSelection(
-            path=(0, 0), control_points=frozenset({0, 1}))})
+        # Select the path as a whole.
+        sel = frozenset({ElementSelection.all((0, 0))})
         doc = Document(layers=(layer,), selection=sel)
         model = Model(document=doc)
         ctx, model, ctrl = _make_ctx(model)
@@ -537,10 +536,10 @@ class AddAnchorPointToolTest(absltest.TestCase):
         # Path now has 3 anchors (indices 0, 1, 2)
         path = _layer_children(model)[0]
         self.assertEqual(len(path.d), 3)
-        # Selection should have shifted: old {0,1} -> {0, 1(new), 2(was 1)}
+        # Selection was `.all` and stays `.all` — the new anchor is included.
         es = model.document.get_element_selection((0, 0))
         self.assertIsNotNone(es)
-        self.assertEqual(es.control_points, frozenset({0, 1, 2}))
+        self.assertIsInstance(es.kind, _SelectionAll)
 
     def test_split_line_segment(self):
         """Splitting a LineTo segment produces two LineTos."""

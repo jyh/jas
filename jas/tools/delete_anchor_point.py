@@ -141,11 +141,9 @@ class DeleteAnchorPointTool(CanvasTool):
         if new_cmds is not None:
             new_elem = dataclasses.replace(pe, d=new_cmds)
             doc = ctx.model.document.replace_element(elem_path, new_elem)
-            # Select all remaining control points
-            cp_count = control_point_count(new_elem)
-            all_cps = frozenset(range(cp_count))
-            new_sel_entry = ElementSelection(
-                path=elem_path, control_points=all_cps)
+            # Select the path as a whole after the deletion.
+            _ = control_point_count(new_elem)
+            new_sel_entry = ElementSelection.all(elem_path)
             new_selection = frozenset(
                 (new_sel_entry if es.path == elem_path else es)
                 for es in doc.selection

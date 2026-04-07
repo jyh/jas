@@ -619,16 +619,26 @@ impl CanvasTool for AddAnchorPointTool {
                 });
                 let mut doc = model.document().replace_element(&path, new_elem);
 
-                // Update selection: shift CP indices after the insertion point
+                // Update selection: shift CP indices after the insertion
+                // point and add the new anchor. If the previous selection
+                // was `All`, the new anchor is automatically included.
                 let new_anchor_idx = ins.first_new_idx;
                 if let Some(old_sel) = model.document().get_element_selection(&path) {
-                    let mut shifted: HashSet<usize> = old_sel.control_points.iter().map(|&cp| {
-                        if cp >= new_anchor_idx { cp + 1 } else { cp }
-                    }).collect();
-                    shifted.insert(new_anchor_idx);
+                    let new_kind = match &old_sel.kind {
+                        crate::document::document::SelectionKind::All =>
+                            crate::document::document::SelectionKind::All,
+                        crate::document::document::SelectionKind::Partial(s) => {
+                            let shifted: Vec<usize> = s.iter()
+                                .map(|cp| if cp >= new_anchor_idx { cp + 1 } else { cp })
+                                .chain(std::iter::once(new_anchor_idx))
+                                .collect();
+                            crate::document::document::SelectionKind::Partial(
+                                crate::document::document::SortedCps::from_iter(shifted))
+                        }
+                    };
                     let new_sel_entry = ElementSelection {
                         path: path.clone(),
-                        control_points: shifted,
+                        kind: new_kind,
                     };
                     doc.selection.retain(|es| es.path != path);
                     doc.selection.push(new_sel_entry);

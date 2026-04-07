@@ -2,19 +2,31 @@ import AppKit
 import Foundation
 
 // MARK: - Selection state
+//
+// The selection tools use a live-edit model: the press records where
+// the drag started, and on the first `onMove` past `dragThreshold`
+// the document is snapshotted once and mutated per-move thereafter.
+// No dashed ghost — the actual element re-renders on each frame.
 
 enum SelectionToolState {
     case idle
-    case marquee    // drag-to-select rectangle
-    case moving     // drag-to-move selection
+    case marquee(start: (Double, Double), cur: (Double, Double))
+    /// Press happened on a selectable target; first move past
+    /// `dragThreshold` will transition to `.moving`.
+    case pendingMove(start: (Double, Double))
+    /// Live drag in progress. `last` is the previous mouse position
+    /// so each move applies an incremental delta.
+    case moving(last: (Double, Double), copied: Bool)
 }
 
 // MARK: - Selection tool base
 
 class SelectionToolBase: CanvasTool {
     var state: SelectionToolState = .idle
-    var dragStart: (Double, Double)?
-    var dragEnd: (Double, Double)?
+    /// `alt` modifier captured at press time. The CanvasTool protocol
+    /// passes alt to onPress and onRelease but not onMove, so we
+    /// remember it here for the duration of the live drag.
+    var altHeldAtPress: Bool = false
 
     func selectRect(_ ctx: ToolContext, x: Double, y: Double, w: Double, h: Double, extend: Bool) {
         fatalError("Subclasses must implement selectRect")
@@ -25,67 +37,90 @@ class SelectionToolBase: CanvasTool {
     }
 
     func onPress(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
+        altHeldAtPress = alt
         if checkHandleHit(ctx, x: x, y: y) { return }
-        dragStart = (x, y)
-        dragEnd = (x, y)
         let pt = NSPoint(x: x, y: y)
-        state = ctx.hitTestSelection(pt) ? .moving : .marquee
+        if ctx.hitTestSelection(pt) {
+            state = .pendingMove(start: (x, y))
+        } else {
+            state = .marquee(start: (x, y), cur: (x, y))
+        }
     }
 
     func onMove(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, dragging: Bool) {
-        guard state != .idle else { return }
-        var fx = x, fy = y
-        if shift, let s = dragStart {
-            (fx, fy) = constrainAngle(s.0, s.1, x, y)
+        switch state {
+        case .idle:
+            break
+        case .pendingMove(let start):
+            let dist = hypot(x - start.0, y - start.1)
+            if dist > dragThreshold {
+                ctx.snapshot()
+                state = .moving(last: start, copied: false)
+                // Recurse with the same coordinates so the per-move
+                // delta below applies the cumulative drag.
+                onMove(ctx, x: x, y: y, shift: shift, dragging: dragging)
+            }
+        case .moving(let last, let copied):
+            var fx = x, fy = y
+            if shift {
+                // shift constrains to the original press direction;
+                // approximate it by passing the prior position as the
+                // anchor. (Live edits make perfect angle-constraint
+                // hard to express; this is a reasonable compromise.)
+                (fx, fy) = constrainAngle(last.0, last.1, x, y)
+            }
+            let dx = fx - last.0, dy = fy - last.1
+            if altHeldAtPress && !copied {
+                ctx.controller.copySelection(dx: dx, dy: dy)
+                state = .moving(last: (fx, fy), copied: true)
+            } else {
+                ctx.controller.moveSelection(dx: dx, dy: dy)
+                state = .moving(last: (fx, fy), copied: copied)
+            }
+            ctx.requestUpdate()
+        case .marquee(let start, _):
+            state = .marquee(start: start, cur: (x, y))
+            ctx.requestUpdate()
         }
-        dragEnd = (fx, fy)
-        ctx.requestUpdate()
     }
 
     func onRelease(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
-        guard state != .idle, let (sx, sy) = dragStart else { return }
-        var fx = x, fy = y
-        if shift && state == .moving {
-            (fx, fy) = constrainAngle(sx, sy, x, y)
-        }
         let wasState = state
         state = .idle
-        dragStart = nil
-        dragEnd = nil
-        if wasState == .moving {
-            let dx = fx - sx, dy = fy - sy
-            if dx != 0 || dy != 0 {
-                ctx.snapshot()
-                if alt {
-                    ctx.controller.copySelection(dx: dx, dy: dy)
-                } else {
-                    ctx.controller.moveSelection(dx: dx, dy: dy)
-                }
-            }
+        switch wasState {
+        case .moving:
+            // Live-edited in onMove; nothing more to do.
             ctx.requestUpdate()
-            return
+        case .pendingMove:
+            // Press without significant movement on a selectable —
+            // selection already happened in onPress (via the
+            // subclass's hitTestSelection). Nothing to do.
+            break
+        case .marquee(let start, _):
+            let (sx, sy) = start
+            let rw = abs(x - sx)
+            let rh = abs(y - sy)
+            if rw > 1.0 || rh > 1.0 {
+                ctx.snapshot()
+                selectRect(ctx,
+                           x: min(sx, x), y: min(sy, y),
+                           w: rw, h: rh,
+                           extend: shift)
+            } else if !shift {
+                // Click on empty canvas — clear the selection.
+                ctx.controller.setSelection([])
+            }
+        case .idle:
+            break
         }
-        ctx.snapshot()
-        selectRect(ctx,
-                   x: min(sx, fx), y: min(sy, fy),
-                   w: abs(fx - sx), h: abs(fy - sy),
-                   extend: shift)
     }
 
     func drawOverlay(_ ctx: ToolContext, _ cgCtx: CGContext) {
-        guard state != .idle, let (sx, sy) = dragStart, let (ex, ey) = dragEnd else { return }
-        if state == .moving {
-            let dx = ex - sx, dy = ey - sy
-            cgCtx.setStrokeColor(toolSelectionColor)
-            cgCtx.setLineWidth(1.0)
-            cgCtx.setLineDash(phase: 0, lengths: [4, 4])
-            for es in ctx.document.selection {
-                let elem = ctx.document.getElement(es.path)
-                let moved = elem.moveControlPoints(es.controlPoints, dx: dx, dy: dy)
-                ctx.drawElementOverlayFn(cgCtx, moved, es.controlPoints)
-            }
-            cgCtx.setLineDash(phase: 0, lengths: [])
-        } else {
+        // Only the marquee needs an overlay; live moves render the
+        // updated element on the next frame.
+        if case .marquee(let start, let cur) = state {
+            let (sx, sy) = start
+            let (ex, ey) = cur
             cgCtx.setStrokeColor(CGColor(gray: 0.4, alpha: 1.0))
             cgCtx.setLineWidth(1.0)
             cgCtx.setLineDash(phase: 0, lengths: [4, 4])
@@ -117,9 +152,16 @@ class GroupSelectionTool: SelectionToolBase {
 // MARK: - Direct selection tool
 
 class DirectSelectionTool: SelectionToolBase {
-    var handleDrag: (path: ElementPath, anchorIdx: Int, handleType: String)?
-    var handleDragStart: (Double, Double)?
-    var handleDragEnd: (Double, Double)?
+    /// Live Bezier-handle drag. Snapshotted once on press; mutated
+    /// per move (no dashed ghost).
+    private struct HandleDrag {
+        let path: ElementPath
+        let anchorIdx: Int
+        let handleType: String
+        var lastX: Double
+        var lastY: Double
+    }
+    private var handleDrag: HandleDrag?
 
     override func selectRect(_ ctx: ToolContext, x: Double, y: Double, w: Double, h: Double, extend: Bool) {
         ctx.controller.directSelectRect(x: x, y: y, width: w, height: h, extend: extend)
@@ -128,17 +170,23 @@ class DirectSelectionTool: SelectionToolBase {
     override func checkHandleHit(_ ctx: ToolContext, x: Double, y: Double) -> Bool {
         let pt = NSPoint(x: x, y: y)
         if let hit = ctx.hitTestHandle(pt) {
-            handleDrag = hit
-            handleDragStart = (x, y)
-            handleDragEnd = (x, y)
+            ctx.snapshot()
+            handleDrag = HandleDrag(path: hit.path, anchorIdx: hit.anchorIdx,
+                                    handleType: hit.handleType, lastX: x, lastY: y)
             return true
         }
         return false
     }
 
     override func onMove(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, dragging: Bool) {
-        if handleDrag != nil {
-            handleDragEnd = (x, y)
+        if var hd = handleDrag {
+            let dx = x - hd.lastX
+            let dy = y - hd.lastY
+            ctx.controller.movePathHandle(hd.path, anchorIdx: hd.anchorIdx,
+                                          handleType: hd.handleType, dx: dx, dy: dy)
+            hd.lastX = x
+            hd.lastY = y
+            handleDrag = hd
             ctx.requestUpdate()
             return
         }
@@ -146,16 +194,8 @@ class DirectSelectionTool: SelectionToolBase {
     }
 
     override func onRelease(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
-        if let hd = handleDrag, let (sx, sy) = handleDragStart {
-            let dx = x - sx, dy = y - sy
+        if handleDrag != nil {
             handleDrag = nil
-            handleDragStart = nil
-            handleDragEnd = nil
-            if dx != 0 || dy != 0 {
-                ctx.snapshot()
-                ctx.controller.movePathHandle(hd.path, anchorIdx: hd.anchorIdx,
-                                              handleType: hd.handleType, dx: dx, dy: dy)
-            }
             ctx.requestUpdate()
             return
         }
@@ -163,22 +203,8 @@ class DirectSelectionTool: SelectionToolBase {
     }
 
     override func drawOverlay(_ ctx: ToolContext, _ cgCtx: CGContext) {
-        if let hd = handleDrag, let (sx, sy) = handleDragStart, let (ex, ey) = handleDragEnd {
-            let dx = ex - sx, dy = ey - sy
-            let elem = ctx.document.getElement(hd.path)
-            if case .path(let v) = elem {
-                let newD = movePathHandle(v.d, anchorIdx: hd.anchorIdx, handleType: hd.handleType, dx: dx, dy: dy)
-                let moved = Element.path(Path(d: newD, fill: v.fill, stroke: v.stroke,
-                                                  opacity: v.opacity, transform: v.transform))
-                if let es = ctx.document.selection.first(where: { $0.path == hd.path }) {
-                    cgCtx.setStrokeColor(toolSelectionColor)
-                    cgCtx.setLineWidth(1.0)
-                    cgCtx.setLineDash(phase: 0, lengths: [4, 4])
-                    ctx.drawElementOverlayFn(cgCtx, moved, es.controlPoints)
-                    cgCtx.setLineDash(phase: 0, lengths: [])
-                }
-            }
-        }
+        // Live edits — no ghost. Marquee overlay still comes from
+        // the base class.
         super.drawOverlay(ctx, cgCtx)
     }
 }

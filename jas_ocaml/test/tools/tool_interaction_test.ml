@@ -388,14 +388,14 @@ let () =
         | _ -> assert false)
      | _ -> assert false));
 
-  run_test "add anchor point: insert updates selection indices" (fun () ->
+  run_test "add anchor point: insert keeps `all` selection" (fun () ->
     let tool = new Jas.Add_anchor_point_tool.add_anchor_point_tool in
     let path_elem = make_path ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
       [MoveTo (0.0, 0.0); CurveTo (33.0, 0.0, 67.0, 0.0, 100.0, 0.0)] in
     let layer = make_layer ~name:"L" [|path_elem|] in
-    (* Select the path with all CPs (indices 0 and 1) *)
+    (* Select the path as a whole. *)
     let sel = Jas.Document.PathMap.singleton [0; 0]
-      { Jas.Document.es_path = [0; 0]; es_control_points = [0; 1] } in
+      (Jas.Document.element_selection_all [0; 0]) in
     let doc = Jas.Document.make_document ~selection:sel [|layer|] in
     let model = Jas.Model.create ~document:doc () in
     let (ctx, _model, _ctrl) = make_ctx ~model () in
@@ -405,15 +405,11 @@ let () =
     (match children.(0) with
      | Path { d; _ } -> assert (List.length d = 3)
      | _ -> assert false);
-    (* Selection should include all 3 CPs *)
+    (* Selection was `SelKindAll` and stays so — the new anchor is included. *)
     let new_sel = model#document.Jas.Document.selection in
     (match Jas.Document.PathMap.find_opt [0; 0] new_sel with
      | Some es ->
-       let cps = List.sort compare es.Jas.Document.es_control_points in
-       assert (List.length cps = 3);
-       assert (List.nth cps 0 = 0);
-       assert (List.nth cps 1 = 1);
-       assert (List.nth cps 2 = 2)
+       assert (es.Jas.Document.es_kind = Jas.Document.SelKindAll)
      | None -> assert false));
 
   run_test "add anchor point: split line segment" (fun () ->
