@@ -14,8 +14,6 @@ private func makeCtx(model: Model? = nil) -> (ToolContext, Model, Controller) {
         hitTestText: { _ in nil },
         hitTestPathCurve: { _, _ in nil },
         requestUpdate: {},
-        startTextEdit: { _, _ in },
-        commitTextEdit: {},
         drawElementOverlay: { _, _, _ in }
     )
     return (ctx, m, ctrl)
@@ -258,8 +256,6 @@ private func layerChildren(_ model: Model) -> [Element] {
         hitTestText: { _ in nil },
         hitTestPathCurve: { _, _ in nil },
         requestUpdate: {},
-        startTextEdit: { _, _ in },
-        commitTextEdit: {},
         drawElementOverlay: { _, _, _ in }
     )
     tool.onPress(ctx, x: 60, y: 60, shift: false, alt: false)
@@ -954,8 +950,6 @@ private func makeClosedPath() -> Element {
         hitTestText: { _ in nil },
         hitTestPathCurve: { _, _ in ([0, 0], .path(pathElem)) },
         requestUpdate: {},
-        startTextEdit: { _, _ in },
-        commitTextEdit: {},
         drawElementOverlay: { _, _, _ in }
     )
     tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)

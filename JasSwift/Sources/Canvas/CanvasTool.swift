@@ -12,8 +12,6 @@ class ToolContext {
     let hitTestText: (NSPoint) -> (ElementPath, Text)?
     let hitTestPathCurve: (Double, Double) -> (ElementPath, Element)?
     let requestUpdate: () -> Void
-    let startTextEdit: (ElementPath, Element) -> Void
-    let commitTextEdit: () -> Void
     let drawElementOverlayFn: (CGContext, Element, Set<Int>) -> Void
 
     init(model: Model,
@@ -23,8 +21,6 @@ class ToolContext {
          hitTestText: @escaping (NSPoint) -> (ElementPath, Text)?,
          hitTestPathCurve: @escaping (Double, Double) -> (ElementPath, Element)?,
          requestUpdate: @escaping () -> Void,
-         startTextEdit: @escaping (ElementPath, Element) -> Void,
-         commitTextEdit: @escaping () -> Void,
          drawElementOverlay: @escaping (CGContext, Element, Set<Int>) -> Void) {
         self.model = model
         self.controller = controller
@@ -33,8 +29,6 @@ class ToolContext {
         self.hitTestText = hitTestText
         self.hitTestPathCurve = hitTestPathCurve
         self.requestUpdate = requestUpdate
-        self.startTextEdit = startTextEdit
-        self.commitTextEdit = commitTextEdit
         self.drawElementOverlayFn = drawElementOverlay
     }
 

@@ -138,8 +138,12 @@ let rec element_svg indent (elem : Element.element) =
     let fw_attr = if font_weight <> "normal" then Printf.sprintf " font-weight=\"%s\"" font_weight else "" in
     let fs_attr = if font_style <> "normal" then Printf.sprintf " font-style=\"%s\"" font_style else "" in
     let td_attr = if text_decoration <> "none" then Printf.sprintf " text-decoration=\"%s\"" text_decoration else "" in
+    (* SVG `y` is the baseline of the first line; internally `y` is the
+       *top* of the layout box, so add the ascent (0.8 *. font_size,
+       matching [Text_layout]). *)
+    let svg_y = y +. font_size *. 0.8 in
     Printf.sprintf "%s<text x=\"%s\" y=\"%s\" font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s%s%s%s>%s</text>"
-      indent (fmt (px x)) (fmt (px y)) (escape_xml font_family) (fmt (px font_size))
+      indent (fmt (px x)) (fmt (px svg_y)) (escape_xml font_family) (fmt (px font_size))
       fw_attr fs_attr td_attr
       area_attrs (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
       (transform_attr transform) (escape_xml content)
@@ -522,9 +526,12 @@ let rec parse_element i =
              let lines = max 1 (int_of_float (float_of_int (String.length content) *. fs *. Element.approx_char_width_factor /. tw) + 1) in
              float_of_int lines *. fs *. 1.2
            else 0.0 in
+           (* SVG `y` is the baseline of the first line; convert to the
+              layout-box top by subtracting the ascent (0.8 *. fs). *)
+           let svg_y = pt (get_attr_f attrs "y" 0.0) in
            Some (Element.make_text ~font_family:ff ~font_size:fs ~font_weight:fw ~font_style:fst ~text_decoration:td ~text_width:tw ~text_height:th ~fill ~stroke ~opacity ~transform
              (pt (get_attr_f attrs "x" 0.0))
-             (pt (get_attr_f attrs "y" 0.0))
+             (svg_y -. fs *. 0.8)
              content))
       | "g" ->
         let children = parse_children i in

@@ -29,8 +29,6 @@ def _make_ctx(model: Model | None = None) -> tuple[ToolContext, Model, Controlle
         hit_test_text=lambda x, y: None,
         hit_test_path_curve=lambda x, y: None,
         request_update=lambda: None,
-        start_text_edit=lambda path, elem: None,
-        commit_text_edit=lambda: None,
     )
     return ctx, model, ctrl
 
@@ -291,18 +289,18 @@ class TypeToolTest(absltest.TestCase):
         from tools.type_tool import TypeTool
         tool = TypeTool()
         ctx, model, ctrl = _make_ctx()
-        self.assertIsNone(tool._drag_start)
+        self.assertIsNone(tool._drag)
         tool.on_press(ctx, 10, 20)
-        self.assertIsNotNone(tool._drag_start)
+        self.assertIsNotNone(tool._drag)
         tool.on_release(ctx, 50, 60)
-        self.assertIsNone(tool._drag_start)
+        self.assertIsNone(tool._drag)
 
     def test_move_without_press_is_noop(self):
         from tools.type_tool import TypeTool
         tool = TypeTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_move(ctx, 50, 60, dragging=True)
-        self.assertIsNone(tool._drag_start)
+        self.assertIsNone(tool._drag)
 
 
 class SelectionToolTest(absltest.TestCase):

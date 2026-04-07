@@ -282,7 +282,6 @@ constructs a **ToolContext** facade that bundles:
 - `hit_test_text(x, y)` -- is the point over a text element?
 - `hit_test_path_curve(x, y)` -- is the point over a path curve?
 - `request_update()` -- schedule a canvas repaint
-- `start_text_edit(path, elem)` / `commit_text_edit()` -- text editing lifecycle
 
 This decouples tools from the UI framework.
 

@@ -18,8 +18,6 @@ type tool_context = {
   hit_test_text : float -> float -> (int list * Element.element) option;
   hit_test_path_curve : float -> float -> (int list * Element.element) option;
   request_update : unit -> unit;
-  start_text_edit : int list -> Element.element -> unit;
-  commit_text_edit : unit -> unit;
   draw_element_overlay : Cairo.context -> Element.element -> int list -> unit;
 }
 

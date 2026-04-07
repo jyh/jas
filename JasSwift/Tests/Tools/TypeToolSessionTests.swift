@@ -18,8 +18,6 @@ private func makeCtx(_ model: Model = Model(),
         hitTestText: hitTestText,
         hitTestPathCurve: hitTestPathCurve,
         requestUpdate: {},
-        startTextEdit: { _, _ in },
-        commitTextEdit: {},
         drawElementOverlay: { _, _, _ in }
     )
     return (ctx, model, ctrl)
@@ -61,9 +59,9 @@ private func makeCtx(_ model: Model = Model(),
 }
 
 @Test func typeToolClickOnExistingTextStartsSession() {
-    // Seed a Text element. Point text uses (x, y) as the baseline, so the
-    // visible bbox is (0, -16, ~27, 16). Click within that box.
-    let existing = Text(x: 0, y: 16, content: "hello",
+    // Seed a Text element. (x, y) is the top of the layout box, so the
+    // visible bbox is (0, 0, ~27, 16). Click within that box.
+    let existing = Text(x: 0, y: 0, content: "hello",
                         fill: Fill(color: Color(r: 0, g: 0, b: 0)))
     let layer = Layer(name: "L", children: [.text(existing)])
     let model = Model()

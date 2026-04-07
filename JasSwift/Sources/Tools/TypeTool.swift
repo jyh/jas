@@ -9,17 +9,8 @@ import Foundation
 // drag extends the selection and standard editing keys flow through
 // `onKeyEvent`.
 
-private let blinkHalfPeriodMs: Double = 530.0
-
-private func nowMs() -> Double {
-    Date().timeIntervalSince1970 * 1000.0
-}
-
-private func cursorVisible(_ epochMs: Double) -> Bool {
-    let elapsed = max(0, nowMs() - epochMs)
-    let phase = Int(elapsed / blinkHalfPeriodMs)
-    return phase % 2 == 0
-}
+private func nowMs() -> Double { textEditNowMs() }
+private func cursorVisible(_ epochMs: Double) -> Bool { textEditCursorVisible(epochMs) }
 
 private struct TextRender {
     let x: Double
@@ -32,10 +23,10 @@ private struct TextRender {
     let content: String
 }
 
-/// Editing-overlay bounds for a Text element. Swift renders point text
-/// with `(x, y)` as the *baseline* (glyphs grow upward), so the visible
-/// box for non-area text starts at `y - fontSize`. Area text uses
-/// `(x, y, width, height)` directly.
+/// Editing-overlay bounds for a Text element. `(x, y)` is the *top* of
+/// the layout box (the baseline is `y + 0.8 * fontSize`); for area text
+/// the bounds come from `(width, height)` directly, for point text from
+/// the rendered line widths and the line count.
 private func textDrawBounds(_ elem: Element) -> (Double, Double, Double, Double) {
     guard case .text(let t) = elem else { return (0, 0, 0, 0) }
     if t.width > 0 && t.height > 0 {
@@ -43,11 +34,14 @@ private func textDrawBounds(_ elem: Element) -> (Double, Double, Double, Double)
     }
     let raw = t.content.isEmpty ? " " : t.content
     let lines = raw.split(separator: "\n", omittingEmptySubsequences: false)
-    var maxChars = 1
-    for l in lines { maxChars = max(maxChars, l.count) }
-    let w = Double(maxChars) * t.fontSize * 0.55
+    var maxW: Double = 0
+    for l in lines {
+        let w = renderedTextWidth(String(l), family: t.fontFamily,
+                                  weight: t.fontWeight, style: t.fontStyle, size: t.fontSize)
+        if w > maxW { maxW = w }
+    }
     let h = Double(lines.count) * t.fontSize
-    return (t.x, t.y - t.fontSize, w, h)
+    return (t.x, t.y, max(maxW, 1), h)
 }
 
 private func inBox(_ b: (Double, Double, Double, Double), _ x: Double, _ y: Double) -> Bool {
@@ -80,17 +74,18 @@ private func hitTestText(_ doc: Document, _ x: Double, _ y: Double) -> (ElementP
     return result
 }
 
+/// Drag-to-create state machine. Sealed so "dragging without a start"
+/// is unrepresentable.
+private enum DragState {
+    case idle
+    case dragging(startX: Double, startY: Double, curX: Double, curY: Double)
+}
+
 class TypeTool: CanvasTool {
-    private var dragStart: (Double, Double)?
-    private var dragEnd: (Double, Double)?
+    private var state: DragState = .idle
     private var session: TextEditSession?
     private var didSnapshot = false
     private var hoverText = false
-    private var pointerInsideEdited = false
-    /// Wall-clock timestamp (ms) of the last mouse move; the pointer is
-    /// hidden over the edited text only after a short idle interval, so
-    /// the user always has feedback while moving.
-    private var lastMoveMs: Double = 0
 
     /// Public test accessor.
     var currentSession: TextEditSession? { session }
@@ -111,8 +106,7 @@ class TypeTool: CanvasTool {
 
     private func cursorAt(_ ctx: ToolContext, _ x: Double, _ y: Double) -> Int {
         guard let (tr, lay) = buildLayout(ctx) else { return 0 }
-        let originY = (tr.textWidth > 0 && tr.textHeight > 0) ? tr.y : tr.y - tr.fontSize
-        return lay.hitTest(x - tr.x, y - originY)
+        return lay.hitTest(x - tr.x, y - tr.y)
     }
 
     private func ensureSnapshot(_ ctx: ToolContext) {
@@ -157,9 +151,7 @@ class TypeTool: CanvasTool {
     private func endSession() {
         session = nil
         didSnapshot = false
-        dragStart = nil
-        dragEnd = nil
-        pointerInsideEdited = false
+        state = .idle
     }
 
     func onPress(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
@@ -172,7 +164,6 @@ class TypeTool: CanvasTool {
                     s.setInsertion(cursor, extend: false)
                     s.dragActive = true
                     s.blinkEpochMs = nowMs()
-                    pointerInsideEdited = true
                     ctx.requestUpdate()
                     return
                 }
@@ -186,17 +177,14 @@ class TypeTool: CanvasTool {
                 s2.setInsertion(cursor, extend: false)
                 s2.dragActive = true
                 s2.blinkEpochMs = nowMs()
-                pointerInsideEdited = true
                 ctx.requestUpdate()
             }
         } else {
-            dragStart = (x, y)
-            dragEnd = (x, y)
+            state = .dragging(startX: x, startY: y, curX: x, curY: y)
         }
     }
 
     func onMove(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, dragging: Bool) {
-        lastMoveMs = nowMs()
         if let s = session, s.dragActive, dragging {
             let cursor = cursorAt(ctx, x, y)
             s.setInsertion(cursor, extend: true)
@@ -204,21 +192,14 @@ class TypeTool: CanvasTool {
             ctx.requestUpdate()
             return
         }
-        if dragStart != nil {
-            dragEnd = (x, y)
+        if case .dragging(let sx, let sy, _, _) = state {
+            state = .dragging(startX: sx, startY: sy, curX: x, curY: y)
             ctx.requestUpdate()
         }
-        if let s = session {
-            hoverText = false
-            if pathIsValid(ctx.document, s.path) {
-                let elem = ctx.document.getElement(s.path)
-                pointerInsideEdited = inBox(textDrawBounds(elem), x, y)
-            } else {
-                pointerInsideEdited = false
-            }
-        } else {
+        if session == nil {
             hoverText = hitTestText(ctx.document, x, y) != nil
-            pointerInsideEdited = false
+        } else {
+            hoverText = false
         }
     }
 
@@ -226,14 +207,12 @@ class TypeTool: CanvasTool {
         if let s = session {
             s.dragActive = false
             s.blinkEpochMs = nowMs()
-            dragStart = nil
-            dragEnd = nil
+            state = .idle
             ctx.requestUpdate()
             return
         }
-        guard let (sx, sy) = dragStart else { return }
-        dragStart = nil
-        dragEnd = nil
+        guard case .dragging(let sx, let sy, _, _) = state else { return }
+        state = .idle
         let w = abs(x - sx)
         let h = abs(y - sy)
         if w > dragThreshold || h > dragThreshold {
@@ -241,7 +220,6 @@ class TypeTool: CanvasTool {
         } else {
             beginSessionNew(ctx, x: sx, y: sy, w: 0, h: 0)
         }
-        pointerInsideEdited = true
         ctx.requestUpdate()
     }
 
@@ -260,13 +238,9 @@ class TypeTool: CanvasTool {
     func isEditing() -> Bool { session != nil }
 
     func cursorOverride() -> String? {
-        if session != nil {
-            // While editing, always use the system I-beam. When the
-            // pointer has been idle inside the edited text for a moment,
-            // hide it so the rendered caret is not occluded.
-            if pointerInsideEdited && nowMs() - lastMoveMs > 600 { return "none" }
-            return "ibeam"
-        }
+        // While an edit session is active or the pointer is hovering an
+        // unlocked Text element, switch to the system I-beam.
+        if session != nil { return "ibeam" }
         if hoverText { return "ibeam" }
         return nil
     }
@@ -356,7 +330,7 @@ class TypeTool: CanvasTool {
 
     func drawOverlay(_ ctx: ToolContext, _ cgCtx: CGContext) {
         // Drag-create rect preview
-        if session == nil, let (sx, sy) = dragStart, let (ex, ey) = dragEnd {
+        if session == nil, case .dragging(let sx, let sy, let ex, let ey) = state {
             cgCtx.setStrokeColor(CGColor(gray: 0.4, alpha: 1.0))
             cgCtx.setLineWidth(1.0)
             cgCtx.setLineDash(phase: 0, lengths: [4, 4])
@@ -369,10 +343,10 @@ class TypeTool: CanvasTool {
 
         guard let s = session, let (tr, lay) = buildLayout(ctx) else { return }
 
-        // Layout-local origin: area text uses (x, y); point text uses
-        // (x, y - fontSize) because the element y is the baseline.
+        // Layout-local origin: `(x, y)` is the top of the layout box for
+        // both point text and area text.
         let originX = tr.x
-        let originY = (tr.textWidth > 0 && tr.textHeight > 0) ? tr.y : tr.y - tr.fontSize
+        let originY = tr.y
 
         // Selection highlight
         if s.hasSelection {

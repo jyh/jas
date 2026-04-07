@@ -514,21 +514,23 @@ impl Element {
                     // bounding box must therefore extend *downward* from
                     // e.y, not upward. Hard line breaks in the content
                     // grow the box vertically and the width is the widest
-                    // line.
+                    // line, measured with the real font (via the shared
+                    // hidden-canvas measurer in-browser, falling back to
+                    // a 0.55*font_size stub on host/cargo-test).
                     let lines: Vec<&str> = if e.content.is_empty() {
                         vec![""]
                     } else {
                         e.content.split('\n').collect()
                     };
-                    let max_chars = lines
+                    let font = crate::tools::text_measure::font_string(
+                        &e.font_style, &e.font_weight, e.font_size, &e.font_family);
+                    let measure = crate::tools::text_measure::make_measurer(&font, e.font_size);
+                    let max_width = lines
                         .iter()
-                        .map(|l| l.chars().count())
-                        .max()
-                        .unwrap_or(0);
-                    let approx_width =
-                        max_chars as f64 * e.font_size * APPROX_CHAR_WIDTH_FACTOR;
+                        .map(|l| measure(l))
+                        .fold(0.0_f64, f64::max);
                     let height = lines.len() as f64 * e.font_size;
-                    (e.x, e.y, approx_width, height)
+                    (e.x, e.y, max_width, height)
                 }
             }
             Element::TextPath(e) => inflate_bounds(path_bounds(&e.d), e.stroke.as_ref()),
@@ -1640,6 +1642,37 @@ mod tests {
         let e = point_text("", 0.0, 0.0, 18.0);
         let (_, _, _, h) = e.bounds();
         assert_eq!(h, 18.0);
+    }
+
+    #[test]
+    fn point_text_bounds_width_matches_real_measurer_not_stub() {
+        // Regression: the selection bounding box used to derive its
+        // width from a fixed 0.6*font_size per-character stub
+        // (APPROX_CHAR_WIDTH_FACTOR), which made the blue selection box
+        // noticeably wider than the rendered glyphs. It must now come
+        // from the same measurer the renderer and editor use.
+        //
+        // On host (cargo test) the measurer falls back to 0.55*font_size,
+        // so we can pin the width to that value and verify it is not
+        // using the old 0.6 stub.
+        let font_size = 16.0;
+        let content = "hello";
+        let e = point_text(content, 0.0, 0.0, font_size);
+        let (_, _, w, _) = e.bounds();
+        let expected = content.chars().count() as f64 * font_size * 0.55;
+        assert!(
+            (w - expected).abs() < 1e-9,
+            "expected w = {expected} (0.55*font_size per char, matching \
+             the shared measurer), got {w}"
+        );
+        // And it must *not* equal the old stub based on APPROX_CHAR_WIDTH_FACTOR.
+        let old_stub = content.chars().count() as f64 * font_size * APPROX_CHAR_WIDTH_FACTOR;
+        assert!(
+            (w - old_stub).abs() > 1e-6,
+            "width ({w}) matches the old APPROX_CHAR_WIDTH_FACTOR stub \
+             ({old_stub}); bounds() is still using the stub instead of \
+             the real measurer"
+        );
     }
 
     // --- Control points tests ---

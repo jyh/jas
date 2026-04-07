@@ -2,3 +2,12 @@
 *.lock
 bazel*
 [xyz]
+
+# Local editor / agent scratch
+transcript/
+.claude/settings.json
+
+# OCaml / dune build artifacts that sometimes leak into the repo root
+*.cmi
+*.cmx
+*.o

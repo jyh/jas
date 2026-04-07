@@ -360,36 +360,24 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
         }
         ctx.saveGState()
         // Both point and area text are rendered as one CTLine per visual
-        // line so the same drawing code works in the NSView's flipped
-        // coordinate system. For area text we run the editor's own
-        // word-wrap layout to figure out where the lines break.
+        // line in the NSView's flipped coordinate system. The element's
+        // (x, y) is the *top* of the layout box; the baseline is
+        // `y + 0.8 * fontSize` (the same ascent the editor uses). Per-line
+        // y advances by `fontSize`.
         ctx.textMatrix = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
-        if v.isAreaText {
-            let measure = makeMeasurer(family: v.fontFamily, weight: v.fontWeight,
-                                       style: v.fontStyle, size: v.fontSize)
-            let lay = layoutText(v.content, maxWidth: v.width,
-                                 fontSize: v.fontSize, measure: measure)
-            let chars = Array(v.content)
-            for (i, line) in lay.lines.enumerated() {
-                let segChars = chars[line.start..<line.end]
-                let segStr = String(segChars)
-                let lineStr = NSAttributedString(string: segStr, attributes: attrs)
-                let ctLine = CTLineCreateWithAttributedString(lineStr)
-                ctx.textPosition = CGPoint(x: v.x,
-                                           y: v.y + v.fontSize * 0.8 + Double(i) * v.fontSize)
-                CTLineDraw(ctLine, ctx)
-            }
-        } else {
-            // Point text: split on "\n" and draw each line at
-            // (x, y + i * fontSize). CTLineCreateWithAttributedString
-            // itself ignores newline characters.
-            let segments = v.content.split(separator: "\n", omittingEmptySubsequences: false)
-            for (i, seg) in segments.enumerated() {
-                let lineStr = NSAttributedString(string: String(seg), attributes: attrs)
-                let line = CTLineCreateWithAttributedString(lineStr)
-                ctx.textPosition = CGPoint(x: v.x, y: v.y + Double(i) * v.fontSize)
-                CTLineDraw(line, ctx)
-            }
+        let measure = makeMeasurer(family: v.fontFamily, weight: v.fontWeight,
+                                   style: v.fontStyle, size: v.fontSize)
+        let maxW = v.isAreaText ? v.width : 0.0
+        let lay = layoutText(v.content, maxWidth: maxW,
+                             fontSize: v.fontSize, measure: measure)
+        let chars = Array(v.content)
+        for line in lay.lines {
+            let segChars = chars[line.start..<line.end]
+            let segStr = String(segChars)
+            let lineStr = NSAttributedString(string: segStr, attributes: attrs)
+            let ctLine = CTLineCreateWithAttributedString(lineStr)
+            ctx.textPosition = CGPoint(x: v.x, y: v.y + line.baselineY)
+            CTLineDraw(ctLine, ctx)
         }
         ctx.restoreGState()
 
@@ -725,10 +713,6 @@ class CanvasNSView: NSView {
     // Tool system
     let tools: [Tool: CanvasTool] = createTools()
 
-    // Inline text editing state (managed by canvas, exposed via context)
-    private var textEditor: NSTextField?
-    private var editingPath: ElementPath?
-
     // Blink timer that drives caret animation while a tool is editing.
     private var blinkTimer: Timer?
 
@@ -863,19 +847,22 @@ class CanvasNSView: NSView {
         return NSCursor(image: image, hotSpot: NSPoint(x: 4, y: 1))
     }
 
-    private func makePenCursor() -> NSCursor {
-        // Load pen cursor from reference PNG bitmap, scaled to 32x32
+    /// Load a 32×32 PNG from `assets/icons/<name>.png`, scale it down to a
+    /// 16-pt @2x Retina cursor, and return an NSCursor with the given
+    /// hot spot. Returns `fallback` if the file cannot be located.
+    private func loadCursor(_ name: String, hotSpot: NSPoint, fallback: NSCursor) -> NSCursor {
         let bundle = Bundle.main
         let cwd = FileManager.default.currentDirectoryPath
-        let candidates = [
-            (cwd as NSString).appendingPathComponent("assets/icons/pen tool.png"),
-            (cwd as NSString).appendingPathComponent("../assets/icons/pen tool.png"),
-            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/pen tool.png") },
-            bundle.path(forResource: "pen tool", ofType: "png"),
+        let rel = "assets/icons/\(name).png"
+        let candidates: [String] = [
+            (cwd as NSString).appendingPathComponent(rel),
+            (cwd as NSString).appendingPathComponent("../\(rel)"),
+            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent(rel) },
+            bundle.path(forResource: name, ofType: "png"),
         ].compactMap { $0 }
         for path in candidates {
             if let orig = NSImage(contentsOfFile: path) {
-                // Draw at 32x32 pixels, set size to 16x16 points for @2x Retina
+                // Draw at 32×32 pixels, set size to 16×16 points for @2x Retina.
                 let pixelSize = NSSize(width: 32, height: 32)
                 let image = NSImage(size: pixelSize)
                 image.lockFocus()
@@ -884,161 +871,38 @@ class CanvasNSView: NSView {
                           operation: .sourceOver, fraction: 1.0)
                 image.unlockFocus()
                 image.size = NSSize(width: 16, height: 16)
-                return NSCursor(image: image, hotSpot: NSPoint(x: 1, y: 1))
+                return NSCursor(image: image, hotSpot: hotSpot)
             }
         }
-        return NSCursor.crosshair
+        return fallback
+    }
+
+    private func makePenCursor() -> NSCursor {
+        loadCursor("pen tool", hotSpot: NSPoint(x: 1, y: 1), fallback: NSCursor.crosshair)
     }
 
     private func makeAddAnchorPointCursor() -> NSCursor {
-        let bundle = Bundle.main
-        let cwd = FileManager.default.currentDirectoryPath
-        let candidates = [
-            (cwd as NSString).appendingPathComponent("assets/icons/add anchor point.png"),
-            (cwd as NSString).appendingPathComponent("../assets/icons/add anchor point.png"),
-            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/add anchor point.png") },
-            bundle.path(forResource: "add anchor point", ofType: "png"),
-        ].compactMap { $0 }
-        for path in candidates {
-            if let orig = NSImage(contentsOfFile: path) {
-                let pixelSize = NSSize(width: 32, height: 32)
-                let image = NSImage(size: pixelSize)
-                image.lockFocus()
-                orig.draw(in: NSRect(origin: .zero, size: pixelSize),
-                          from: NSRect(origin: .zero, size: orig.size),
-                          operation: .sourceOver, fraction: 1.0)
-                image.unlockFocus()
-                image.size = NSSize(width: 16, height: 16)
-                return NSCursor(image: image, hotSpot: NSPoint(x: 1, y: 1))
-            }
-        }
-        return NSCursor.crosshair
+        loadCursor("add anchor point", hotSpot: NSPoint(x: 1, y: 1), fallback: NSCursor.crosshair)
     }
 
     private func makePencilCursor() -> NSCursor {
-        let bundle = Bundle.main
-        let cwd = FileManager.default.currentDirectoryPath
-        let candidates = [
-            (cwd as NSString).appendingPathComponent("assets/icons/pencil tool.png"),
-            (cwd as NSString).appendingPathComponent("../assets/icons/pencil tool.png"),
-            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/pencil tool.png") },
-            bundle.path(forResource: "pencil tool", ofType: "png"),
-        ].compactMap { $0 }
-        for path in candidates {
-            if let orig = NSImage(contentsOfFile: path) {
-                let pixelSize = NSSize(width: 32, height: 32)
-                let image = NSImage(size: pixelSize)
-                image.lockFocus()
-                orig.draw(in: NSRect(origin: .zero, size: pixelSize),
-                          from: NSRect(origin: .zero, size: orig.size),
-                          operation: .sourceOver, fraction: 1.0)
-                image.unlockFocus()
-                image.size = NSSize(width: 16, height: 16)
-                return NSCursor(image: image, hotSpot: NSPoint(x: 1, y: 15))
-            }
-        }
-        return NSCursor.crosshair
+        loadCursor("pencil tool", hotSpot: NSPoint(x: 1, y: 15), fallback: NSCursor.crosshair)
     }
 
     private func makePathEraserCursor() -> NSCursor {
-        let bundle = Bundle.main
-        let cwd = FileManager.default.currentDirectoryPath
-        let candidates = [
-            (cwd as NSString).appendingPathComponent("assets/icons/path eraser tool.png"),
-            (cwd as NSString).appendingPathComponent("../assets/icons/path eraser tool.png"),
-            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/path eraser tool.png") },
-            bundle.path(forResource: "path eraser tool", ofType: "png"),
-        ].compactMap { $0 }
-        for path in candidates {
-            if let orig = NSImage(contentsOfFile: path) {
-                let pixelSize = NSSize(width: 32, height: 32)
-                let image = NSImage(size: pixelSize)
-                image.lockFocus()
-                orig.draw(in: NSRect(origin: .zero, size: pixelSize),
-                          from: NSRect(origin: .zero, size: orig.size),
-                          operation: .sourceOver, fraction: 1.0)
-                image.unlockFocus()
-                image.size = NSSize(width: 16, height: 16)
-                return NSCursor(image: image, hotSpot: NSPoint(x: 1, y: 15))
-            }
-        }
-        return NSCursor.crosshair
+        loadCursor("path eraser tool", hotSpot: NSPoint(x: 1, y: 15), fallback: NSCursor.crosshair)
     }
 
     private func makeTypeCursor() -> NSCursor {
-        let bundle = Bundle.main
-        let cwd = FileManager.default.currentDirectoryPath
-        let candidates = [
-            (cwd as NSString).appendingPathComponent("assets/icons/type cursor.png"),
-            (cwd as NSString).appendingPathComponent("../assets/icons/type cursor.png"),
-            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/type cursor.png") },
-            bundle.path(forResource: "type cursor", ofType: "png"),
-        ].compactMap { $0 }
-        for path in candidates {
-            if let orig = NSImage(contentsOfFile: path) {
-                let pixelSize = NSSize(width: 32, height: 32)
-                let image = NSImage(size: pixelSize)
-                image.lockFocus()
-                orig.draw(in: NSRect(origin: .zero, size: pixelSize),
-                          from: NSRect(origin: .zero, size: orig.size),
-                          operation: .sourceOver, fraction: 1.0)
-                image.unlockFocus()
-                image.size = NSSize(width: 16, height: 16)
-                return NSCursor(image: image, hotSpot: NSPoint(x: 8, y: 8))
-            }
-        }
-        return NSCursor.iBeam
+        loadCursor("type cursor", hotSpot: NSPoint(x: 8, y: 8), fallback: NSCursor.iBeam)
     }
 
     private func makeTypeOnPathCursor() -> NSCursor {
-        let bundle = Bundle.main
-        let cwd = FileManager.default.currentDirectoryPath
-        let candidates = [
-            (cwd as NSString).appendingPathComponent("assets/icons/type on a path cursor.png"),
-            (cwd as NSString).appendingPathComponent("../assets/icons/type on a path cursor.png"),
-            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/type on a path cursor.png") },
-            bundle.path(forResource: "type on a path cursor", ofType: "png"),
-        ].compactMap { $0 }
-        for path in candidates {
-            if let orig = NSImage(contentsOfFile: path) {
-                let pixelSize = NSSize(width: 32, height: 32)
-                let image = NSImage(size: pixelSize)
-                image.lockFocus()
-                orig.draw(in: NSRect(origin: .zero, size: pixelSize),
-                          from: NSRect(origin: .zero, size: orig.size),
-                          operation: .sourceOver, fraction: 1.0)
-                image.unlockFocus()
-                image.size = NSSize(width: 16, height: 16)
-                // Hot spot near the I-beam center for the 16x16 cursor.
-                return NSCursor(image: image, hotSpot: NSPoint(x: 8, y: 6))
-            }
-        }
-        return NSCursor.iBeam
+        loadCursor("type on a path cursor", hotSpot: NSPoint(x: 8, y: 6), fallback: NSCursor.iBeam)
     }
 
     private func makeDeleteAnchorPointCursor() -> NSCursor {
-        let bundle = Bundle.main
-        let cwd = FileManager.default.currentDirectoryPath
-        let candidates = [
-            (cwd as NSString).appendingPathComponent("assets/icons/delete anchor point.png"),
-            (cwd as NSString).appendingPathComponent("../assets/icons/delete anchor point.png"),
-            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/delete anchor point.png") },
-            bundle.path(forResource: "delete anchor point", ofType: "png"),
-        ].compactMap { $0 }
-        for path in candidates {
-            if let orig = NSImage(contentsOfFile: path) {
-                let pixelSize = NSSize(width: 32, height: 32)
-                let image = NSImage(size: pixelSize)
-                image.lockFocus()
-                orig.draw(in: NSRect(origin: .zero, size: pixelSize),
-                          from: NSRect(origin: .zero, size: orig.size),
-                          operation: .sourceOver, fraction: 1.0)
-                image.unlockFocus()
-                image.size = NSSize(width: 16, height: 16)
-                return NSCursor(image: image, hotSpot: NSPoint(x: 1, y: 1))
-            }
-        }
-        return NSCursor.crosshair
+        loadCursor("delete anchor point", hotSpot: NSPoint(x: 1, y: 1), fallback: NSCursor.crosshair)
     }
 
     var activeTool: CanvasTool {
@@ -1056,8 +920,6 @@ class CanvasNSView: NSView {
             hitTestText: { [weak self] pos in self?.hitTestText(pos) },
             hitTestPathCurve: { [weak self] x, y in self?.hitTestPathCurve(x, y) },
             requestUpdate: { [weak self] in self?.needsDisplay = true },
-            startTextEdit: { [weak self] path, elem in self?.startTextEdit(path: path, elem: elem) },
-            commitTextEdit: { [weak self] in self?.commitTextEdit() },
             drawElementOverlay: { ctx, elem, cps in drawElementOverlay(ctx, elem, selectedCPs: cps) }
         )
     }
@@ -1173,94 +1035,6 @@ class CanvasNSView: NSView {
             }
         }
         return nil
-    }
-
-    // MARK: - Text editing
-
-    private func startTextEdit(path: ElementPath, elem: Element) {
-        commitTextEdit()
-        editingPath = path
-        let bx, by, bw, bh: Double
-        let content: String
-        let fontFamily: String
-        let fontSize: Double
-        var isArea = false
-        switch elem {
-        case .text(let textElem):
-            content = textElem.content
-            fontFamily = textElem.fontFamily
-            fontSize = textElem.fontSize
-            if textElem.isAreaText {
-                isArea = true
-                bx = textElem.x; by = textElem.y
-                bw = textElem.width; bh = textElem.height
-            } else {
-                bx = textElem.x; by = textElem.y - textElem.fontSize
-                bw = max(Double(textElem.content.count) * textElem.fontSize * 0.6 + 20, 100)
-                bh = textElem.fontSize + 4
-            }
-        case .textPath(let tp):
-            content = tp.content
-            fontFamily = tp.fontFamily
-            fontSize = tp.fontSize
-            let (px, py) = pathPointAtOffset(tp.d, t: tp.startOffset)
-            bx = px; by = py - tp.fontSize - 4
-            bw = max(200, Double(tp.content.count) * tp.fontSize * 0.7)
-            bh = tp.fontSize + 8
-        default:
-            return
-        }
-        let editor = NSTextField(frame: NSRect(x: bx, y: by, width: bw, height: bh))
-        editor.stringValue = content
-        editor.font = NSFont(name: fontFamily, size: fontSize)
-            ?? NSFont.systemFont(ofSize: fontSize)
-        editor.isBordered = true
-        editor.backgroundColor = .white
-        editor.focusRingType = .exterior
-        if isArea {
-            editor.usesSingleLineMode = false
-            editor.cell?.wraps = true
-            editor.cell?.isScrollable = false
-        }
-        editor.target = self
-        editor.action = #selector(textEditorAction(_:))
-        addSubview(editor)
-        editor.selectText(nil)
-        window?.makeFirstResponder(editor)
-        textEditor = editor
-    }
-
-    @objc private func textEditorAction(_ sender: NSTextField) {
-        commitTextEdit()
-    }
-
-    func commitTextEdit() {
-        guard let editor = textEditor, let path = editingPath else { return }
-        let newText = editor.stringValue
-        let elem = document.getElement(path)
-        switch elem {
-        case .text(let v) where v.content != newText:
-            let newElem = Element.text(Text(
-                x: v.x, y: v.y, content: newText,
-                fontFamily: v.fontFamily, fontSize: v.fontSize,
-                width: v.width, height: v.height,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform
-            ))
-            controller?.model.document = document.replaceElement(path, with: newElem)
-        case .textPath(let v) where v.content != newText:
-            let newElem = Element.textPath(TextPath(
-                d: v.d, content: newText, startOffset: v.startOffset,
-                fontFamily: v.fontFamily, fontSize: v.fontSize,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform
-            ))
-            controller?.model.document = document.replaceElement(path, with: newElem)
-        default: break
-        }
-        editor.removeFromSuperview()
-        textEditor = nil
-        editingPath = nil
     }
 
     // MARK: - Pen tool backward-compatibility

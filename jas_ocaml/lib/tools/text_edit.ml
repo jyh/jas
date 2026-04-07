@@ -21,7 +21,7 @@ type t = {
 }
 
 let create ~path ~target ~content ~insertion =
-  let n = String.length content in
+  let n = Text_layout.utf8_char_count content in
   let ins = min insertion n in
   {
     path; target; content;
@@ -71,21 +71,27 @@ let redo t =
     t.insertion <- nxt.s_insertion;
     t.anchor <- nxt.s_anchor
 
+let char_count t = Text_layout.utf8_char_count t.content
+
+(* Replace a char-indexed range [lo..hi) with [ins]. *)
+let splice t lo hi ins =
+  let lo_b = Text_layout.char_to_byte t.content lo in
+  let hi_b = Text_layout.char_to_byte t.content hi in
+  let before = String.sub t.content 0 lo_b in
+  let after = String.sub t.content hi_b (String.length t.content - hi_b) in
+  t.content <- before ^ ins ^ after
+
 let delete_selection_inner t =
   let (lo, hi) = selection_range t in
-  let before = String.sub t.content 0 lo in
-  let after = String.sub t.content hi (String.length t.content - hi) in
-  t.content <- before ^ after;
+  splice t lo hi "";
   t.insertion <- lo;
   t.anchor <- lo
 
 let insert t text =
   snapshot t;
   if has_selection t then delete_selection_inner t;
-  let before = String.sub t.content 0 t.insertion in
-  let after = String.sub t.content t.insertion (String.length t.content - t.insertion) in
-  t.content <- before ^ text ^ after;
-  t.insertion <- t.insertion + String.length text;
+  splice t t.insertion t.insertion text;
+  t.insertion <- t.insertion + Text_layout.utf8_char_count text;
   t.anchor <- t.insertion
 
 let backspace t =
@@ -94,9 +100,7 @@ let backspace t =
     delete_selection_inner t
   end else if t.insertion > 0 then begin
     snapshot t;
-    let before = String.sub t.content 0 (t.insertion - 1) in
-    let after = String.sub t.content t.insertion (String.length t.content - t.insertion) in
-    t.content <- before ^ after;
+    splice t (t.insertion - 1) t.insertion "";
     t.insertion <- t.insertion - 1;
     t.anchor <- t.insertion
   end
@@ -105,28 +109,26 @@ let delete_forward t =
   if has_selection t then begin
     snapshot t;
     delete_selection_inner t
-  end else if t.insertion < String.length t.content then begin
+  end else if t.insertion < char_count t then begin
     snapshot t;
-    let before = String.sub t.content 0 t.insertion in
-    let after = String.sub t.content (t.insertion + 1) (String.length t.content - t.insertion - 1) in
-    t.content <- before ^ after;
+    splice t t.insertion (t.insertion + 1) "";
     t.anchor <- t.insertion
   end
 
 let set_insertion t pos ~extend =
-  let n = String.length t.content in
+  let n = char_count t in
   t.insertion <- max 0 (min pos n);
   if not extend then t.anchor <- t.insertion
 
 let select_all t =
   t.anchor <- 0;
-  t.insertion <- String.length t.content
+  t.insertion <- char_count t
 
 let copy_selection t =
   if not (has_selection t) then None
   else
     let (lo, hi) = selection_range t in
-    Some (String.sub t.content lo (hi - lo))
+    Some (Text_layout.utf8_sub t.content lo (hi - lo))
 
 let apply_to_document t doc =
   try

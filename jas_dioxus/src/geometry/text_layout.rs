@@ -61,6 +61,11 @@ pub struct LineInfo {
     pub height: f64,
     /// Maximum right edge of the visible glyphs on this line.
     pub width: f64,
+    /// Index range into `TextLayout::glyphs` for this line. Finalized
+    /// after layout so `cursor_xy`/`hit_test`/etc. can slice in O(line)
+    /// instead of walking the whole glyph vector.
+    pub glyph_start: usize,
+    pub glyph_end: usize,
 }
 
 /// Result of laying out a string into wrapped lines.
@@ -100,6 +105,9 @@ pub fn layout(
     let mut line_start_char = 0usize;
     let mut x = 0.0f64;
 
+    // `glyph_start`/`glyph_end` are filled in below as a single pass
+    // after layout — easier than threading the running glyph count
+    // through every push_line call.
     let push_line = |lines: &mut Vec<LineInfo>,
                      line_no: usize,
                      start: usize,
@@ -115,6 +123,8 @@ pub fn layout(
             baseline_y: top + ascent,
             height: line_height,
             width: line_width,
+            glyph_start: 0,
+            glyph_end: 0,
         });
     };
 
@@ -230,6 +240,18 @@ pub fn layout(
         push_line(&mut lines, 0, 0, 0, false, 0.0);
     }
 
+    // Fill glyph_start/glyph_end for each line by scanning the glyph
+    // vector once. Glyphs are emitted in line order so a single sweep
+    // suffices.
+    let mut gi = 0usize;
+    for (li, line) in lines.iter_mut().enumerate() {
+        line.glyph_start = gi;
+        while gi < glyphs.len() && glyphs[gi].line == li {
+            gi += 1;
+        }
+        line.glyph_end = gi;
+    }
+
     TextLayout {
         glyphs,
         lines,
@@ -252,18 +274,14 @@ impl TextLayout {
         if cursor == line_info.start {
             return (0.0, baseline_y, height);
         }
+        let line_glyphs = &self.glyphs[line_info.glyph_start..line_info.glyph_end];
         if cursor >= line_info.end {
             // Place cursor after the last visible glyph on this line.
-            let last = self
-                .glyphs
-                .iter()
-                .filter(|g| g.line == line)
-                .last();
-            let x = last.map(|g| g.right).unwrap_or(0.0);
+            let x = line_glyphs.last().map(|g| g.right).unwrap_or(0.0);
             return (x, baseline_y, height);
         }
         // Cursor sits before the glyph at index `cursor`.
-        if let Some(g) = self.glyphs.iter().find(|g| g.idx == cursor) {
+        if let Some(g) = line_glyphs.iter().find(|g| g.idx == cursor) {
             return (g.x, baseline_y, height);
         }
         (0.0, baseline_y, height)
@@ -309,10 +327,9 @@ impl TextLayout {
             }
         }
         let line = &self.lines[line_no];
-        let glyphs_on_line: Vec<&Glyph> = self
-            .glyphs
+        let glyphs_on_line: Vec<&Glyph> = self.glyphs[line.glyph_start..line.glyph_end]
             .iter()
-            .filter(|g| g.line == line_no && !g.is_trailing_space)
+            .filter(|g| !g.is_trailing_space)
             .collect();
         if glyphs_on_line.is_empty() {
             return line.start;
@@ -363,10 +380,9 @@ impl TextLayout {
 
     fn cursor_at_line_x(&self, line_no: usize, target_x: f64) -> usize {
         let line = &self.lines[line_no];
-        let glyphs_on_line: Vec<&Glyph> = self
-            .glyphs
+        let glyphs_on_line: Vec<&Glyph> = self.glyphs[line.glyph_start..line.glyph_end]
             .iter()
-            .filter(|g| g.line == line_no && !g.is_trailing_space)
+            .filter(|g| !g.is_trailing_space)
             .collect();
         if glyphs_on_line.is_empty() {
             return line.start;

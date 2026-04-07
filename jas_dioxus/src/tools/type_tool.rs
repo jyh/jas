@@ -24,12 +24,9 @@ use crate::geometry::text_layout::{layout, TextLayout};
 
 use super::tool::{CanvasTool, KeyMods, DRAG_THRESHOLD};
 use super::text_edit::{
-    empty_text_elem, EditTarget, TextEditSession,
+    empty_text_elem, EditTarget, TextEditSession, BLINK_HALF_PERIOD_MS,
 };
 use super::text_measure::{font_string, make_measurer};
-
-/// Cursor blink half-period in milliseconds.
-const BLINK_HALF_PERIOD_MS: f64 = 530.0;
 
 #[derive(Debug, Clone, Copy)]
 enum State {
@@ -49,16 +46,9 @@ pub struct TypeTool {
     /// We snapshot lazily on the first content-modifying operation so that
     /// merely clicking into a text element does not pollute the undo stack.
     did_snapshot: bool,
-    /// Last mouse position; used by [`cursor_css_override`] to decide
-    /// between text-insertion and default cursors.
-    last_mouse: (f64, f64),
-    /// Cached: is `last_mouse` over an unlocked Text element?
+    /// True iff the last pointer position is over an unlocked Text element.
+    /// Drives the I-beam hover cursor when no session is active.
     hover_text: bool,
-    /// While editing, true iff `last_mouse` is inside the bounds of the
-    /// element currently being edited. Used to hide the system cursor
-    /// only over the active edit area; outside it the OS cursor is
-    /// restored so the user can still see where they're pointing.
-    pointer_inside_edited: bool,
 }
 
 impl TypeTool {
@@ -67,9 +57,7 @@ impl TypeTool {
             state: State::Idle,
             session: None,
             did_snapshot: false,
-            last_mouse: (0.0, 0.0),
             hover_text: false,
-            pointer_inside_edited: false,
         }
     }
 
@@ -243,7 +231,6 @@ impl TypeTool {
         self.session = None;
         self.did_snapshot = false;
         self.state = State::Idle;
-        self.pointer_inside_edited = false;
     }
 
     /// Insert clipboard text into the active session, if any. Returns true
@@ -366,8 +353,6 @@ impl CanvasTool for TypeTool {
                 s.set_insertion(cursor, false);
                 s.drag_active = true;
                 s.blink_epoch_ms = now_ms();
-                self.pointer_inside_edited = true;
-                self.last_mouse = (x, y);
                 return;
             }
             // Click outside the editing element: end the session and fall
@@ -384,8 +369,6 @@ impl CanvasTool for TypeTool {
             s.set_insertion(cursor, false);
             s.drag_active = true;
             s.blink_epoch_ms = now_ms();
-            self.pointer_inside_edited = true;
-            self.last_mouse = (x, y);
             return;
         }
 
@@ -407,8 +390,6 @@ impl CanvasTool for TypeTool {
         _alt: bool,
         dragging: bool,
     ) {
-        self.last_mouse = (x, y);
-
         // While editing and dragging: extend selection.
         if let Some(session) = &mut self.session {
             if session.drag_active && dragging {
@@ -434,19 +415,10 @@ impl CanvasTool for TypeTool {
         }
 
         // Update hover state for cursor display.
-        if let Some(session) = self.session.as_ref() {
+        if self.session.is_some() {
             self.hover_text = false;
-            self.pointer_inside_edited = if let Some(Element::Text(t)) =
-                model.document().get_element(&session.path)
-            {
-                let (bx, by, bw, bh) = text_draw_bounds(t);
-                x >= bx && x <= bx + bw && y >= by && y <= by + bh
-            } else {
-                false
-            };
         } else {
             self.hover_text = Self::hit_test_text(model, x, y).is_some();
-            self.pointer_inside_edited = false;
         }
     }
 
@@ -471,10 +443,6 @@ impl CanvasTool for TypeTool {
             } else {
                 self.begin_session_new(model, start_x, start_y, 0.0, 0.0);
             }
-            // The release point is, by construction, inside the new
-            // element's bounds — hide the OS cursor accordingly.
-            self.pointer_inside_edited = true;
-            self.last_mouse = (x, y);
         }
         self.state = State::Idle;
     }
@@ -719,11 +687,34 @@ impl CanvasTool for TypeTool {
             }
         }
 
-        // Editing-element bounding box (so users see where the box ends).
+        // Editing-element bounding box. For area text we honor the
+        // explicit (width, height); for point text we derive both from
+        // the actual layout, but we re-measure the full line text
+        // (instead of summing per-glyph widths) so that kerning is
+        // accounted for and the overlay hugs the rendered glyphs.
         ctx.set_stroke_style_str("rgba(0,120,215,0.6)");
         ctx.set_line_width(1.0);
-        let (bx, by, bw, bh) = text_draw_bounds(&t);
-        ctx.stroke_rect(bx, by, bw, bh);
+        let (bw, bh) = if t.is_area_text() {
+            (t.width.max(1.0), t.height.max(1.0))
+        } else {
+            let font = font_string(&t.font_style, &t.font_weight, t.font_size, &t.font_family);
+            let measure = make_measurer(&font, t.font_size);
+            let chars: Vec<char> = t.content.chars().collect();
+            let mut max_w = 0.0_f64;
+            for line in &lay.lines {
+                let s: String = chars[line.start..line.end]
+                    .iter()
+                    .filter(|c| **c != '\n')
+                    .collect();
+                let w = measure(&s);
+                if w > max_w {
+                    max_w = w;
+                }
+            }
+            let h = (lay.lines.len() as f64) * t.font_size;
+            (max_w.max(t.font_size * 0.5), h.max(t.font_size))
+        };
+        ctx.stroke_rect(t.x, t.y, bw, bh);
 
         // Caret (only if no selection or anchor==insertion, but we always
         // draw it at the insertion edge — even with a selection — so the

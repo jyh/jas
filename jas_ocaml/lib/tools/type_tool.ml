@@ -93,9 +93,7 @@ class type_tool = object (_self)
   val mutable drag_end : (float * float) option = None
   val mutable session : Text_edit.t option = None
   val mutable did_snapshot : bool = false
-  val mutable last_mouse : float * float = (0.0, 0.0)
   val mutable hover_text : bool = false
-  val mutable pointer_inside_edited : bool = false
 
   method private build_layout (ctx : Canvas_tool.tool_context) =
     match session with
@@ -173,7 +171,6 @@ class type_tool = object (_self)
     did_snapshot <- false;
     drag_start <- None;
     drag_end <- None;
-    pointer_inside_edited <- false
 
   method has_session = session <> None
   method get_session = session
@@ -192,8 +189,6 @@ class type_tool = object (_self)
          Text_edit.set_insertion s cursor ~extend:false;
          Text_edit.set_drag_active s true;
          Text_edit.set_blink_epoch_ms s (now_ms ());
-         pointer_inside_edited <- true;
-         last_mouse <- (x, y);
          ctx.request_update ()
        end else begin
          _self#end_session ();
@@ -206,8 +201,6 @@ class type_tool = object (_self)
                Text_edit.set_insertion s cursor ~extend:false;
                Text_edit.set_drag_active s true;
                Text_edit.set_blink_epoch_ms s (now_ms ());
-               pointer_inside_edited <- true;
-               last_mouse <- (x, y);
                ctx.request_update ()
              | None -> ())
           | None ->
@@ -224,8 +217,6 @@ class type_tool = object (_self)
              Text_edit.set_insertion s cursor ~extend:false;
              Text_edit.set_drag_active s true;
              Text_edit.set_blink_epoch_ms s (now_ms ());
-             pointer_inside_edited <- true;
-             last_mouse <- (x, y);
              ctx.request_update ()
            | None -> ())
         | None ->
@@ -234,29 +225,21 @@ class type_tool = object (_self)
 
   method on_move (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(dragging : bool) =
     ignore shift;
-    last_mouse <- (x, y);
-    (match session with
-     | Some s when Text_edit.drag_active s && dragging ->
-       let cursor = _self#cursor_at ctx x y in
-       Text_edit.set_insertion s cursor ~extend:true;
-       Text_edit.set_blink_epoch_ms s (now_ms ());
-       ctx.request_update ()
-     | _ ->
-       (if drag_start <> None then begin
-         drag_end <- Some (x, y);
-         ctx.request_update ()
-       end);
-       (match session with
-        | Some s ->
-          hover_text <- false;
-          let elem = Document.get_element ctx.model#document (Text_edit.path s) in
-          (match elem with
-           | Element.Text _ ->
-             pointer_inside_edited <- in_box (text_draw_bounds elem) x y
-           | _ -> pointer_inside_edited <- false)
-        | None ->
-          hover_text <- (hit_test_text ctx.model#document x y) <> None;
-          pointer_inside_edited <- false))
+    match session with
+    | Some s when Text_edit.drag_active s && dragging ->
+      let cursor = _self#cursor_at ctx x y in
+      Text_edit.set_insertion s cursor ~extend:true;
+      Text_edit.set_blink_epoch_ms s (now_ms ());
+      ctx.request_update ()
+    | _ ->
+      (if drag_start <> None then begin
+        drag_end <- Some (x, y);
+        ctx.request_update ()
+      end);
+      if session = None then
+        hover_text <- (hit_test_text ctx.model#document x y) <> None
+      else
+        hover_text <- false
 
   method on_release (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
     ignore (shift, alt);
@@ -279,8 +262,6 @@ class type_tool = object (_self)
           _self#begin_session_new ctx (min sx x) (min sy y) w h
         else
           _self#begin_session_new ctx sx sy 0.0 0.0;
-        pointer_inside_edited <- true;
-        last_mouse <- (x, y);
         ctx.request_update ()
 
   method on_double_click (ctx : Canvas_tool.tool_context) (_x : float) (_y : float) =

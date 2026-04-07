@@ -127,4 +127,40 @@ let () =
     assert (Jas.Text_edit.content s = "X");
     assert (Jas.Text_edit.insertion s = 1));
 
+  (* UTF-8 multibyte handling. 'é' is 2 bytes in UTF-8 but a single
+     Unicode scalar; the editor must speak in chars throughout. *)
+  run_test "insert before multibyte char advances by one" (fun () ->
+    let s = session "aéb" in
+    Jas.Text_edit.set_insertion s 2 ~extend:false;
+    Jas.Text_edit.insert s "X";
+    assert (Jas.Text_edit.content s = "aéXb");
+    assert (Jas.Text_edit.insertion s = 3));
+
+  run_test "backspace removes one multibyte char" (fun () ->
+    let s = session "aéb" in
+    Jas.Text_edit.set_insertion s 2 ~extend:false;
+    Jas.Text_edit.backspace s;
+    (* "ab", caret at 1 *)
+    assert (Jas.Text_edit.content s = "ab");
+    assert (Jas.Text_edit.insertion s = 1));
+
+  run_test "delete_forward removes one multibyte char" (fun () ->
+    let s = session "aéb" in
+    Jas.Text_edit.set_insertion s 1 ~extend:false;
+    Jas.Text_edit.delete_forward s;
+    assert (Jas.Text_edit.content s = "ab"));
+
+  run_test "copy_selection across multibyte" (fun () ->
+    let s = session "aéb" in
+    Jas.Text_edit.set_insertion s 0 ~extend:false;
+    Jas.Text_edit.set_insertion s 2 ~extend:true;
+    assert (Jas.Text_edit.copy_selection s = Some "aé"));
+
+  run_test "select all then insert with multibyte content" (fun () ->
+    let s = session "aébc" in
+    Jas.Text_edit.set_insertion s 1 ~extend:false;
+    Jas.Text_edit.set_insertion s 3 ~extend:true;
+    Jas.Text_edit.backspace s;
+    assert (Jas.Text_edit.content s = "ac"));
+
   Printf.printf "All text_edit tests passed.\n"

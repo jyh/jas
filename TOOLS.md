@@ -96,8 +96,6 @@ ToolContext
   hit_test_text          (x, y) -> (path, text_element)?
   hit_test_path_curve    (x, y) -> (path, element)?
   request_update()       schedule a canvas repaint
-  start_text_edit        (path, element) -> begin text editing
-  commit_text_edit       () -> finalize text editing
 ```
 
 This decouples tools from the UI framework and makes tools testable with
@@ -774,15 +772,19 @@ Point text vs. area text:
 The drag must exceed `DRAG_THRESHOLD` (4 px) to create area text; otherwise
 it is treated as a click.
 
-New text elements are created with the content "Lorem Ipsum", black fill,
-and 16 pt sans-serif font.
+New text elements are created with empty content, black fill, and 16 pt
+sans-serif font, then the canvas enters an in-place editing session
+(see `text_edit` below).
 
 ### Text editing lifecycle
 
-1. `start_text_edit(path, element)` -- canvas enters inline editing mode.
-2. User types; canvas updates the text content in real time.
-3. `commit_text_edit()` -- called when the tool is deactivated or another
-   element is clicked, finalizing the text.
+The type tools own a `TextEditSession` for the duration of the edit.
+The session holds the content, insertion/anchor cursor (in *char*
+indices), per-session undo/redo stacks, and a blink-epoch timestamp.
+Mouse and keyboard events are routed to the session by the tool. A
+single document-undo snapshot is taken on the first content-changing
+op so the entire session collapses to one undo step. The session ends
+on Escape, click outside, or tool change.
 
 ### Overlay
 

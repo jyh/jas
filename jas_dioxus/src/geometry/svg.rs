@@ -246,10 +246,14 @@ fn element_svg(elem: &Element, indent: &str) -> String {
             let td_attr = if e.text_decoration != "none" {
                 format!(" text-decoration=\"{}\"", e.text_decoration)
             } else { String::new() };
+            // SVG `y` is the baseline of the first line; internally
+            // `e.y` is the *top* of the layout box, so add the ascent
+            // (0.8 * font_size, the same value `text_layout` uses).
+            let svg_y = e.y + e.font_size * 0.8;
             format!(
                 "{}<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}>{}</text>\n",
                 indent,
-                fmt(px(e.x)), fmt(px(e.y)),
+                fmt(px(e.x)), fmt(px(svg_y)),
                 escape_xml(&e.font_family), fmt(px(e.font_size)),
                 fw_attr, fst_attr, td_attr,
                 area_attrs,
@@ -1025,9 +1029,12 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 lines * fs * 1.2
             } else { 0.0 };
 
+            // SVG `y` is the baseline of the first line; convert it to
+            // the layout-box top by subtracting the ascent (0.8 * fs).
+            let svg_y = pt(get_f(node, "y", 0.0));
             Some(Element::Text(TextElem {
                 x: pt(get_f(node, "x", 0.0)),
-                y: pt(get_f(node, "y", 0.0)),
+                y: svg_y - fs * 0.8,
                 content, font_family: ff, font_size: fs,
                 font_weight: fw, font_style: fst, text_decoration: td,
                 width: tw, height: th,
@@ -1346,6 +1353,33 @@ mod tests {
         assert!(matches!(&*children[0], Element::Group(_)));
         let group_children = children[0].children().unwrap();
         assert_eq!(group_children.len(), 2);
+    }
+
+    #[test]
+    fn roundtrip_text_preserves_y_as_top() {
+        // Internally `e.y` is the top of the layout box. Round-tripping
+        // through SVG (which uses the baseline as `y`) must put us back
+        // at the same top-of-box position.
+        let t = TextElem {
+            x: 10.0, y: 20.0, content: "Hi".into(),
+            font_family: "sans-serif".into(), font_size: 16.0,
+            font_weight: "normal".into(), font_style: "normal".into(),
+            text_decoration: "none".into(),
+            width: 0.0, height: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+        };
+        let doc = make_doc(vec![Element::Text(t)]);
+        let svg = document_to_svg(&doc);
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        if let Element::Text(t2) = &*children[0] {
+            assert!((t2.y - 20.0).abs() < 1e-3, "got y = {}", t2.y);
+            assert!((t2.x - 10.0).abs() < 1e-3, "got x = {}", t2.x);
+        } else {
+            panic!("expected Text");
+        }
+        assert!(svg.contains("<text"));
     }
 
     #[test]

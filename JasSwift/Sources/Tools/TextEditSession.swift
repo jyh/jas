@@ -1,5 +1,20 @@
 import Foundation
 
+/// Cursor blink half-period in milliseconds (matches the macOS default).
+public let textEditBlinkHalfPeriodMs: Double = 530.0
+
+/// Wall-clock milliseconds since the Unix epoch. Shared by the type tools.
+public func textEditNowMs() -> Double {
+    Date().timeIntervalSince1970 * 1000.0
+}
+
+/// Whether the caret is currently visible given a `blinkEpochMs` reset point.
+public func textEditCursorVisible(_ epochMs: Double) -> Bool {
+    let elapsed = max(0, textEditNowMs() - epochMs)
+    let phase = Int(elapsed / textEditBlinkHalfPeriodMs)
+    return phase % 2 == 0
+}
+
 // MARK: - In-place text editing session
 //
 // Mirrors the design of `text_edit.rs` / `.ml` / `.py`. The session is the
@@ -49,6 +64,9 @@ public final class TextEditSession {
     private func snapshot() {
         undoStack.append(EditSnapshot(content: content, insertion: insertion, anchor: anchor))
         redoStack.removeAll()
+        // Bound the stack. `removeFirst` on a Swift Array is O(n) but the
+        // cap is small (200) and the cap is hit at most once per edit, so
+        // this is negligible compared to one character render.
         if undoStack.count > 200 { undoStack.removeFirst() }
     }
 
@@ -146,22 +164,9 @@ public final class TextEditSession {
         let elem = doc.getElement(path)
         switch (target, elem) {
         case (.text, .text(let t)):
-            let new = Text(x: t.x, y: t.y, content: content,
-                           fontFamily: t.fontFamily, fontSize: t.fontSize,
-                           fontWeight: t.fontWeight, fontStyle: t.fontStyle,
-                           textDecoration: t.textDecoration,
-                           width: t.width, height: t.height,
-                           fill: t.fill, stroke: t.stroke,
-                           opacity: t.opacity, transform: t.transform, locked: t.locked)
-            return doc.replaceElement(path, with: .text(new))
+            return doc.replaceElement(path, with: .text(t.with(content: content)))
         case (.textPath, .textPath(let tp)):
-            let new = TextPath(d: tp.d, content: content, startOffset: tp.startOffset,
-                               fontFamily: tp.fontFamily, fontSize: tp.fontSize,
-                               fontWeight: tp.fontWeight, fontStyle: tp.fontStyle,
-                               textDecoration: tp.textDecoration,
-                               fill: tp.fill, stroke: tp.stroke,
-                               opacity: tp.opacity, transform: tp.transform, locked: tp.locked)
-            return doc.replaceElement(path, with: .textPath(new))
+            return doc.replaceElement(path, with: .textPath(tp.with(content: content)))
         default:
             return nil
         }

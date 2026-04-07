@@ -28,6 +28,11 @@ public struct LineInfo {
     public let baselineY: Double
     public let height: Double
     public let width: Double
+    /// Index range into `TextLayout.glyphs` for this line. Filled in
+    /// at the end of `layoutText` so cursor/hit_test can slice in
+    /// O(line) instead of filtering the whole glyph vector.
+    public var glyphStart: Int = 0
+    public var glyphEnd: Int = 0
 }
 
 public struct TextLayout {
@@ -38,7 +43,10 @@ public struct TextLayout {
 }
 
 private func isSpaceChar(_ c: Character) -> Bool {
-    c == " " || c == "\t"
+    // Match Rust's `char::is_whitespace` (Unicode-aware). Any Character
+    // whose scalars are all whitespace counts; \n is handled separately
+    // as a hard break before this is consulted.
+    c != "\n" && c.unicodeScalars.allSatisfy { $0.properties.isWhitespace }
 }
 
 /// Run word-wrap layout on `content`. `maxWidth <= 0` disables wrapping.
@@ -144,6 +152,14 @@ public func layoutText(_ content: String,
         lines.append(LineInfo(start: 0, end: 0, hardBreak: false,
                               top: 0, baselineY: ascent, height: lineHeight, width: 0))
     }
+    // Sweep glyphs once to fill line glyph ranges. Glyphs are emitted
+    // in line order so a single pass suffices.
+    var gi = 0
+    for li in 0..<lines.count {
+        lines[li].glyphStart = gi
+        while gi < glyphs.count && glyphs[gi].line == li { gi += 1 }
+        lines[li].glyphEnd = gi
+    }
     return TextLayout(glyphs: glyphs, lines: lines, fontSize: fontSize, charCount: n)
 }
 
@@ -171,19 +187,19 @@ public extension TextLayout {
         let h = line.height
         let by = line.baselineY
         if cur == line.start { return (0, by, h) }
+        let lineGlyphs = glyphs[line.glyphStart..<line.glyphEnd]
         if cur >= line.end {
-            var lastRight: Double = 0
-            for g in glyphs where g.line == lineNo { lastRight = g.right }
-            return (lastRight, by, h)
+            return (lineGlyphs.last?.right ?? 0, by, h)
         }
-        for g in glyphs where g.idx == cur {
+        for g in lineGlyphs where g.idx == cur {
             return (g.x, by, h)
         }
         return (0, by, h)
     }
 
     func glyphsOnLine(_ lineNo: Int) -> [TextGlyph] {
-        glyphs.filter { $0.line == lineNo && !$0.isTrailingSpace }
+        let l = lines[lineNo]
+        return glyphs[l.glyphStart..<l.glyphEnd].filter { !$0.isTrailingSpace }
     }
 
     /// Map a (x, y) point in layout-local coordinates to a char cursor.

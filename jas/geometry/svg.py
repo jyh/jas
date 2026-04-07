@@ -189,7 +189,11 @@ def _element_svg(elem: Element, indent: str) -> str:
             fw_attr = f' font-weight="{fw}"' if fw != "normal" else ""
             fst_attr = f' font-style="{fst}"' if fst != "normal" else ""
             td_attr = f' text-decoration="{td}"' if td != "none" else ""
-            return (f'{indent}<text x="{_fmt(_px(x))}" y="{_fmt(_px(y))}"'
+            # SVG `y` is the baseline of the first line; internally `y`
+            # is the *top* of the layout box, so add the ascent (0.8 *
+            # font_size, the same value `text_layout` uses).
+            svg_y = y + fs * 0.8
+            return (f'{indent}<text x="{_fmt(_px(x))}" y="{_fmt(_px(svg_y))}"'
                     f' font-family="{escape(ff)}" font-size="{_fmt(_px(fs))}"'
                     f'{fw_attr}{fst_attr}{td_attr}'
                     f'{area_attrs}'
@@ -623,9 +627,12 @@ def _parse_element(node: ET.Element) -> Element | None:
         if tw > 0:
             lines = max(1, int(len(content) * fs * APPROX_CHAR_WIDTH_FACTOR / tw) + 1)
             th = lines * fs * 1.2
+        # SVG `y` is the baseline of the first line; convert it to the
+        # layout-box top by subtracting the ascent (0.8 * fs).
+        svg_y = _pt(_safe_float(node.get("y")))
         return Text(
             x=_pt(_safe_float(node.get("x"))),
-            y=_pt(_safe_float(node.get("y"))),
+            y=svg_y - fs * 0.8,
             content=content, font_family=ff, font_size=fs,
             font_weight=fw, font_style=fst, text_decoration=td,
             width=tw, height=th,

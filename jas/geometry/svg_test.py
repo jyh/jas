@@ -131,6 +131,21 @@ class SvgTest(absltest.TestCase):
         self.assertIn('font-family="Arial"', svg)
         self.assertIn('>Hello</text>', svg)
 
+    def test_text_y_round_trip_preserves_top(self):
+        # Internally `text.y` is the top of the layout box. Round-tripping
+        # through SVG (where `y` is the baseline) must put us back at the
+        # same top-of-box position.
+        layer = Layer(children=(
+            Text(x=10, y=20, content="Hi", font_family="Arial",
+                 font_size=16, fill=Fill(color=Color(0, 0, 0))),
+        ))
+        svg = document_to_svg(Document(layers=(layer,)))
+        from geometry.svg import svg_to_document
+        doc2 = svg_to_document(svg)
+        t2 = doc2.layers[0].children[0]
+        self.assertAlmostEqual(t2.y, 20.0, places=3)
+        self.assertAlmostEqual(t2.x, 10.0, places=3)
+
     def test_text_escaping(self):
         layer = Layer(children=(
             Text(x=0, y=0, content="<b>&amp;</b>"),

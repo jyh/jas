@@ -143,7 +143,11 @@ private func elementSvg(_ elem: Element, indent: String) -> String {
         let fwAttr = v.fontWeight != "normal" ? " font-weight=\"\(v.fontWeight)\"" : ""
         let fsAttr = v.fontStyle != "normal" ? " font-style=\"\(v.fontStyle)\"" : ""
         let tdAttr = v.textDecoration != "none" ? " text-decoration=\"\(v.textDecoration)\"" : ""
-        return "\(indent)<text x=\"\(fmt(px(v.x)))\" y=\"\(fmt(px(v.y)))\"" +
+        // SVG `y` is the baseline of the first line; internally `v.y`
+        // is the *top* of the layout box, so add the ascent (0.8 *
+        // fontSize, the same value `text_layout` uses).
+        let svgY = v.y + v.fontSize * 0.8
+        return "\(indent)<text x=\"\(fmt(px(v.x)))\" y=\"\(fmt(px(svgY)))\"" +
             " font-family=\"\(escapeXml(v.fontFamily))\" font-size=\"\(fmt(px(v.fontSize)))\"" +
             "\(fwAttr)\(fsAttr)\(tdAttr)" +
             "\(areaAttrs)" +
@@ -563,8 +567,11 @@ private func parseElement(_ node: XMLNode) -> Element? {
             let lines = max(1, Int(Double(content.count) * fs * approxCharWidthFactor / tw) + 1)
             th = Double(lines) * fs * 1.2
         }
+        // SVG `y` is the baseline of the first line; convert to the
+        // layout-box top by subtracting the ascent (0.8 * fs).
+        let svgY = toPt(attrF(elem, "y"))
         return .text(Text(
-            x: toPt(attrF(elem, "x")), y: toPt(attrF(elem, "y")),
+            x: toPt(attrF(elem, "x")), y: svgY - fs * 0.8,
             content: content, fontFamily: ff, fontSize: fs,
             fontWeight: fw, fontStyle: fst, textDecoration: td,
             width: tw, height: th,
