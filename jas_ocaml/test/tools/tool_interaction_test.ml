@@ -22,7 +22,7 @@ let make_ctx ?model () =
     hit_test_text = (fun _x _y -> None);
     hit_test_path_curve = (fun _x _y -> None);
     request_update = (fun () -> ());
-    draw_element_overlay = (fun _cr _elem _cps -> ());
+    draw_element_overlay = (fun _cr _elem ~is_partial:_ _cps -> ());
   } in
   (ctx, model, ctrl)
 
@@ -245,7 +245,7 @@ let () =
       hit_test_text = (fun _x _y -> None);
       hit_test_path_curve = (fun _x _y -> None);
       request_update = (fun () -> ());
-      draw_element_overlay = (fun _cr _elem _cps -> ());
+      draw_element_overlay = (fun _cr _elem ~is_partial:_ _cps -> ());
     } in
     tool#on_press ctx 60.0 60.0 ~shift:false ~alt:false;
     tool#on_move ctx 70.0 70.0 ~shift:false ~dragging:true;
@@ -870,7 +870,7 @@ let () =
       hit_test_text = (fun _ _ -> Some ([0; 0], existing));
       hit_test_path_curve = (fun _ _ -> None);
       request_update = (fun () -> ());
-      draw_element_overlay = (fun _ _ _ -> ());
+      draw_element_overlay = (fun _ _ ~is_partial:_ _ -> ());
     } in
     tool#on_press ctx 5.0 5.0 ~shift:false ~alt:false;
     tool#on_release ctx 5.0 5.0 ~shift:false ~alt:false;
@@ -967,7 +967,7 @@ let () =
       hit_test_text = (fun _ _ -> None);
       hit_test_path_curve = (fun _ _ -> Some ([0; 0], path_elem));
       request_update = (fun () -> ());
-      draw_element_overlay = (fun _ _ _ -> ());
+      draw_element_overlay = (fun _ _ ~is_partial:_ _ -> ());
     } in
     tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
     tool#on_release ctx 50.0 0.0 ~shift:false ~alt:false;
@@ -1017,7 +1017,7 @@ let () =
       hit_test_text = (fun _ _ -> None);
       hit_test_path_curve = (fun _ _ -> Some ([0; 0], path_elem));
       request_update = (fun () -> ());
-      draw_element_overlay = (fun _ _ _ -> ());
+      draw_element_overlay = (fun _ _ ~is_partial:_ _ -> ());
     } in
     tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
     tool#on_release ctx 50.0 0.0 ~shift:false ~alt:false;

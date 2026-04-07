@@ -34,10 +34,21 @@ The two cases capture two distinct user intents:
 
 `Partial(SortedCps[0..n))` (every CP listed individually) is *not* the
 same as `All`: the user picked CPs one at a time and expects per-CP
-manipulation, not whole-element translation. Likewise an empty
-`Partial` is dropped from the selection map entirely (the element is
-no longer selected) — there is no "selected element with no CPs"
-state.
+manipulation, not whole-element translation.
+
+`Partial(empty)` **is** a legal, retained state — it means "the
+element is selected, but zero control points are individually
+highlighted". This is what the Direct Selection marquee produces when
+it crosses an element's body without catching any of its CPs, and it
+is also the result of toggling off the last remaining CP of a
+`Partial` via shift-click. Move/drag on `Partial(empty)` is a no-op
+(there are no CPs to move, and we must not fall through to a polygon
+conversion that would silently change the primitive type).
+
+`All` XOR `All` still drops the element from the selection map —
+that is the element-level deselect gesture (shift-click an
+already-fully-selected element). `Partial(a)` XOR `Partial(b)` keeps
+the element even when the XOR is empty.
 
 ### SortedCps invariants
 

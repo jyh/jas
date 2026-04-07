@@ -280,9 +280,13 @@ class DirectSelectionControllerTest(absltest.TestCase):
         # Only CP 0 (top-left at 0,0) should be selected
         self.assertEqual(es.kind, _SelectionPartial(SortedCps.from_iter([0])))
 
-    def test_direct_select_rect_picks_whole_element_when_body_hit_but_no_cps(self):
-        """If the marquee crosses the body but hits no CPs, the element is selected as a whole."""
-        from document.document import _SelectionAll
+    def test_direct_select_rect_body_only_yields_partial_empty(self):
+        """If the marquee crosses the body but hits no CPs, the element is
+        selected with ``_SelectionPartial(empty)`` — not ``.all``. The
+        Direct Selection tool must not promote "body intersects" to
+        "every CP selected".
+        """
+        from document.document import _SelectionPartial
         # Line from (0,0) to (100,100) — CPs at endpoints
         line = Line(x1=0, y1=0, x2=100, y2=100)
         layer = Layer(children=(line,), name="L0")
@@ -292,7 +296,8 @@ class DirectSelectionControllerTest(absltest.TestCase):
         sel = ctrl.document.selection
         self.assertEqual(len(sel), 1)
         es = next(iter(sel))
-        self.assertIsInstance(es.kind, _SelectionAll)
+        self.assertIsInstance(es.kind, _SelectionPartial)
+        self.assertEqual(len(es.kind.cps), 0)
 
     def test_direct_select_rect_misses_element(self):
         """Direct selection marquee outside all elements selects nothing."""
@@ -314,6 +319,40 @@ class DirectSelectionControllerTest(absltest.TestCase):
         paths = _sel_paths(ctrl.document.selection)
         self.assertIn((0, 0, 0), paths)
         self.assertIn((0, 0, 1), paths)
+
+    def test_toggle_selection_partial_xor_empty_keeps_element(self):
+        """XOR of identical Partial CP sets yields ``Partial(empty)`` —
+        the element must stay in the selection, not be dropped."""
+        from document.document import _SelectionPartial, SortedCps
+        rect = Rect(x=0, y=0, width=10, height=10)
+        layer = Layer(children=(rect,), name="L0")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        a = frozenset({ElementSelection.partial((0, 0), [0, 1])})
+        b = frozenset({ElementSelection.partial((0, 0), [0, 1])})
+        result = Controller._toggle_selection(a, b)
+        self.assertEqual(len(result), 1)
+        es = next(iter(result))
+        self.assertEqual(es.path, (0, 0))
+        self.assertIsInstance(es.kind, _SelectionPartial)
+        self.assertEqual(es.kind.cps, SortedCps.from_iter([]))
+
+    def test_toggle_selection_all_xor_all_still_drops(self):
+        """Two ``.all`` entries still cancel out — this is the element-
+        level deselect gesture (shift-click an already-fully-selected
+        element)."""
+        a = frozenset({ElementSelection.all((0, 0))})
+        b = frozenset({ElementSelection.all((0, 0))})
+        self.assertEqual(Controller._toggle_selection(a, b), frozenset())
+
+    def test_move_control_points_partial_empty_is_noop(self):
+        """``move_control_points`` with ``Partial(empty)`` must return
+        the element unchanged. Without the guard, Rect would silently
+        convert to a Polygon (since is_all(4) is False)."""
+        from document.document import selection_partial
+        rect = Rect(x=1, y=2, width=10, height=20)
+        moved = move_control_points(rect, selection_partial([]), 5.0, 7.0)
+        self.assertEqual(moved, rect)
+        self.assertIsInstance(moved, Rect)
 
 
 class GroupSelectionControllerTest(absltest.TestCase):

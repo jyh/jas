@@ -610,15 +610,19 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
     //   squares represent draggable per-vertex/anchor handles, so
     //   they are always shown.
     // - For "bbox-shape" elements (Rect, Circle, Ellipse, Group, ...)
-    //   the squares represent bounding-box corner handles. Drawing
-    //   them without the bbox itself is confusing, so they appear
-    //   only when `showSelectionBBox` is true.
+    //   the squares represent bounding-box corner handles. They are
+    //   drawn when the kind is `.partial(*)` (including empty) —
+    //   the Direct Selection tool needs the user to see the
+    //   grabbable handles even when none are highlighted — or when
+    //   `showSelectionBBox` is on.
     let cpShape: Bool
     switch elem {
     case .line, .polyline, .polygon, .path: cpShape = true
     default: cpShape = false
     }
-    if cpShape || showSelectionBBox {
+    let isPartial: Bool
+    if case .partial = kind { isPartial = true } else { isPartial = false }
+    if cpShape || isPartial || showSelectionBBox {
         let half = handleSize / 2
         for (i, (px, py)) in elem.controlPointPositions.enumerated() {
             let r = CGRect(x: px - half, y: py - half, width: handleSize, height: handleSize)

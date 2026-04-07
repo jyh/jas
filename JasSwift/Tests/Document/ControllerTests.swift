@@ -254,16 +254,19 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(es.kind == .partial(SortedCps([0])))
 }
 
-@Test func directSelectRectNoCPsWhenLineCrossesButNoneInRect() {
-    // The marquee covers the line's body (it crosses through (40,40)–(60,60))
-    // but neither endpoint is inside, so the line is selected as a whole.
+@Test func directSelectRectBodyOnlyYieldsPartialEmpty() {
+    // The marquee covers the line's body (it crosses through
+    // (40,40)–(60,60)) but neither endpoint is inside. The Direct
+    // Selection tool must not promote "body intersects" to "every CP
+    // selected" (which is what `.all` would mean) — the element is
+    // selected with an empty CP set instead.
     let line = Element.line(Line(x1: 0, y1: 0, x2: 100, y2: 100))
     let layer = Layer(name: "L0", children: [line])
     let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.directSelectRect(x: 40, y: 40, width: 20, height: 20)
     #expect(ctrl.document.selection.count == 1)
     let es = ctrl.document.selection.first!
-    #expect(es.kind == .all)
+    #expect(es.kind == .partial(SortedCps([])))
 }
 
 @Test func directSelectRectMissesElement() {
@@ -272,6 +275,21 @@ private func makeMarqueeCtrl() -> Controller {
     let ctrl = Controller(model: Model(document: Document(layers: [layer])))
     ctrl.directSelectRect(x: 200, y: 200, width: 10, height: 10)
     #expect(ctrl.document.selection.isEmpty)
+}
+
+@Test func moveControlPointsPartialEmptyIsNoop() {
+    // `moveControlPoints` on a Rect with `.partial([])` must return
+    // the element unchanged — no position change and critically no
+    // primitive-type change. Prior to the guard, the Rect would
+    // fall through to the polygon-conversion branch (since
+    // `isAll(4)` is false for an empty set) and be silently
+    // converted to a Polygon at its original coordinates.
+    let rect = Element.rect(Rect(x: 1, y: 2, width: 10, height: 20))
+    let moved = rect.moveControlPoints(.partial(SortedCps([])), dx: 5, dy: 7)
+    #expect(moved == rect)
+    if case .rect = moved {} else {
+        Issue.record("expected rect to stay a Rect, got \(moved)")
+    }
 }
 
 // MARK: - Group selection tests

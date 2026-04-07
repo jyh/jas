@@ -557,6 +557,7 @@ def _draw_element_overlay(painter: QPainter, elem: Element,
     no CPs highlighted".
     """
     from document.document import (
+        _SelectionPartial,
         selection_kind_contains as _contains,
         selection_kind_to_sorted as _to_sorted,
         selection_partial,
@@ -621,8 +622,16 @@ def _draw_element_overlay(painter: QPainter, elem: Element,
 
     # Draw control-point squares.
     # cp-shape: always (per-vertex/anchor squares are draggable).
-    # bbox-shape: only when SHOW_SELECTION_BBOX (corner handles).
-    if cp_shape or SHOW_SELECTION_BBOX:
+    # bbox-shape: when the kind is `Partial(*)` (including empty) —
+    #   the Direct Selection tool needs the user to see the grabbable
+    #   handles even when none are highlighted — or when
+    #   SHOW_SELECTION_BBOX is on.
+    draw_cp_squares = (
+        cp_shape
+        or isinstance(kind, _SelectionPartial)
+        or SHOW_SELECTION_BBOX
+    )
+    if draw_cp_squares:
         half = _HANDLE_SIZE / 2
         painter.setPen(QPen(_SELECTION_COLOR, 1.0))
         for i, (px, py) in enumerate(_control_points(elem)):

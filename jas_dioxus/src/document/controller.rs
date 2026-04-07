@@ -134,9 +134,17 @@ impl Controller {
                     kind: SelectionKind::Partial(SortedCps::from_iter(hit_cps)),
                 });
             } else if element_intersects_rect(elem, x, y, width, height) {
-                // The marquee covers the element's body but none of its
-                // control points — select the element as a whole.
-                entries.push(ElementSelection::all(path.clone()));
+                // The marquee covers the element's body but none of
+                // its control points. Select the element with an
+                // empty CP set — the Direct Selection tool must not
+                // promote "body intersects" to "every CP selected",
+                // which would be the effect of `All`. The user sees
+                // the element's handles in the unselected style and
+                // can still drag the whole element by its body.
+                entries.push(ElementSelection::partial(
+                    path.clone(),
+                    std::iter::empty::<usize>(),
+                ));
             }
         }
 
@@ -494,8 +502,12 @@ fn unlock_element(elem: &Element) -> Element {
 ///
 /// - Elements appearing in only one input pass through unchanged.
 /// - Elements appearing in both inputs have their selected CP sets
-///   XORed; if the result is empty, the element is dropped.
-/// - Two `All` selections cancel out (the element is dropped).
+///   XORed. If the result is empty the element stays selected as
+///   `Partial(empty)` — "element selected, no individual CPs
+///   highlighted" — rather than being dropped.
+/// - Two `All` selections cancel out (the element *is* dropped — this
+///   is the element-level deselect gesture, distinct from removing
+///   the last CP of a `Partial`).
 /// - `All` XOR `Partial(s)` becomes `Partial` of the *complement* of
 ///   `s` against the element's CP count, which we don't have here, so
 ///   we conservatively treat it as `All` (this preserves the
@@ -527,13 +539,13 @@ fn toggle_selection(current: &Selection, new: &Selection) -> Selection {
                     // Cancel out — element drops out of the selection.
                 }
                 (SelectionKind::Partial(a), SelectionKind::Partial(b)) => {
+                    // Keep the element even when xor is empty: the
+                    // element stays selected with zero highlighted CPs.
                     let xor = a.symmetric_difference(b);
-                    if !xor.is_empty() {
-                        result.push(ElementSelection {
-                            path: cur.path.clone(),
-                            kind: SelectionKind::Partial(xor),
-                        });
-                    }
+                    result.push(ElementSelection {
+                        path: cur.path.clone(),
+                        kind: SelectionKind::Partial(xor),
+                    });
                 }
                 _ => {
                     // Mixed All/Partial — keep `All` to preserve the
@@ -744,5 +756,104 @@ mod tests {
         Controller::copy_selection(&mut model, 10.0, 10.0);
         let new_count = model.document().layers[0].children().unwrap().len();
         assert_eq!(new_count, orig_count + 1);
+    }
+
+    // ---- Partial(empty) is a legal retained state ----
+
+    #[test]
+    fn toggle_selection_partial_xor_to_empty_keeps_element() {
+        // XOR of identical Partial CP sets yields Partial(empty).
+        // The element must stay in the selection, not be dropped.
+        use crate::document::document::SortedCps;
+        let current: Selection = vec![ElementSelection::partial(vec![0, 0], [0usize, 1])];
+        let new: Selection = vec![ElementSelection::partial(vec![0, 0], [0usize, 1])];
+        let result = toggle_selection(&current, &new);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].path, vec![0, 0]);
+        match &result[0].kind {
+            SelectionKind::Partial(s) => assert_eq!(*s, SortedCps::from_iter(Vec::<usize>::new())),
+            _ => panic!("expected Partial(empty), got {:?}", result[0].kind),
+        }
+    }
+
+    #[test]
+    fn toggle_selection_all_xor_all_still_drops_element() {
+        // Element-level deselect gesture: shift-click an element that is
+        // already fully selected. This must still drop the element.
+        let current: Selection = vec![ElementSelection::all(vec![0, 0])];
+        let new: Selection = vec![ElementSelection::all(vec![0, 0])];
+        let result = toggle_selection(&current, &new);
+        assert!(result.is_empty(), "expected All XOR All to drop, got {:?}", result);
+    }
+
+    #[test]
+    fn direct_select_rect_body_only_yields_partial_empty() {
+        // Direct selection marquee over an element's body but missing
+        // every control point must yield `Partial(empty)` — the
+        // element is selected but no CPs are highlighted. The old
+        // behavior promoted body-hit to `All`, which effectively
+        // "selected every CP", contradicting the Direct Selection
+        // contract.
+        use crate::document::document::SortedCps;
+        let mut model = setup_model();
+        // Rect is at (0,0) 10x10; a marquee strictly inside the body
+        // (e.g. 3..7 x 3..7) misses all four corners but intersects
+        // the rect's interior.
+        Controller::direct_select_rect(&mut model, 3.0, 3.0, 4.0, 4.0, false);
+        let sel = &model.document().selection;
+        let rect_entry = sel.iter().find(|es| es.path == vec![0, 0])
+            .expect("rect should be in selection");
+        match &rect_entry.kind {
+            SelectionKind::Partial(s) => {
+                assert_eq!(*s, SortedCps::from_iter(Vec::<usize>::new()),
+                    "expected Partial(empty), got {:?}", s);
+            }
+            other => panic!("expected Partial(empty), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn move_selection_on_partial_empty_is_noop() {
+        // With kind = Partial(empty), move_selection must not change
+        // the element — not its position, and critically not its
+        // primitive type. Prior to the guard in move_control_points,
+        // a Rect with Partial(empty) would be silently converted to
+        // a Polygon at its original coordinates.
+        use crate::document::document::SortedCps;
+        let mut model = setup_model();
+        Controller::set_selection(
+            &mut model,
+            vec![ElementSelection {
+                path: vec![0, 0],
+                kind: SelectionKind::Partial(SortedCps::from_iter(Vec::<usize>::new())),
+            }],
+        );
+        Controller::move_selection(&mut model, 5.0, 7.0);
+        let elem = model.document().get_element(&vec![0, 0]).unwrap();
+        match elem {
+            Element::Rect(r) => {
+                assert_eq!(r.x, 0.0);
+                assert_eq!(r.y, 0.0);
+                assert_eq!(r.width, 10.0);
+                assert_eq!(r.height, 10.0);
+            }
+            other => panic!("expected Rect to remain a Rect, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn toggle_selection_partial_xor_nonempty_unchanged() {
+        // Sanity check that non-empty XOR still works.
+        use crate::document::document::SortedCps;
+        let current: Selection = vec![ElementSelection::partial(vec![0, 0], [0usize, 1, 2])];
+        let new: Selection = vec![ElementSelection::partial(vec![0, 0], [1usize])];
+        let result = toggle_selection(&current, &new);
+        assert_eq!(result.len(), 1);
+        match &result[0].kind {
+            SelectionKind::Partial(s) => {
+                assert_eq!(*s, SortedCps::from_iter([0usize, 2]));
+            }
+            _ => panic!("expected Partial"),
+        }
     }
 }

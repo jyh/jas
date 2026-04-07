@@ -119,25 +119,6 @@ impl DirectSelectionTool {
         None
     }
 
-    /// Check if (x,y) is within the bounding box of any selected element.
-    fn hit_test_selected_bounds(model: &Model, x: f64, y: f64) -> bool {
-        let doc = model.document();
-        for es in &doc.selection {
-            if let Some(elem) = doc.get_element(&es.path) {
-                let cps = control_points(elem);
-                for &(px, py) in &cps {
-                    if ((x - px).powi(2) + (y - py).powi(2)).sqrt() < HIT_RADIUS {
-                        return true;
-                    }
-                }
-                let (bx, by, bw, bh) = elem.bounds();
-                if x >= bx && x <= bx + bw && y >= by && y <= by + bh {
-                    return true;
-                }
-            }
-        }
-        false
-    }
 }
 
 fn hit_test_cp_recursive(
@@ -187,14 +168,10 @@ impl CanvasTool for DirectSelectionTool {
             return;
         }
 
-        // 2. Check if clicking on any element's control point. This
-        // runs *before* the "clicking on a selected element's bounds"
-        // check below so that clicking on a different (unselected) CP
-        // of an already-selected element switches the selection to
-        // that CP rather than dragging the existing one.
-        //
-        // If the CP is already in the current selection, we fall
-        // through to step 3, which drags the whole existing selection.
+        // 2. Check if clicking on any element's control point. The
+        // Direct Selection tool treats a CP hit as "directly on a
+        // selectable object"; everything else (empty space, element
+        // body/fill without a CP hit) starts a new marquee.
         if let Some((path, cp_idx)) = Self::hit_test_control_point(model, x, y) {
             let already_selected = model.document().selection.iter()
                 .any(|es| es.path == path && es.kind.contains(cp_idx));
@@ -216,14 +193,13 @@ impl CanvasTool for DirectSelectionTool {
                         } else {
                             cps.push(cp_idx);
                         }
-                        if cps.is_empty() {
-                            sel.remove(pos);
-                        } else {
-                            sel[pos] = ElementSelection {
-                                path: path.clone(),
-                                kind: SelectionKind::Partial(SortedCps::from_iter(cps)),
-                            };
-                        }
+                        // Empty CP set is a legal state: "element
+                        // selected, no CPs highlighted". Keep the
+                        // entry rather than removing it.
+                        sel[pos] = ElementSelection {
+                            path: path.clone(),
+                            kind: SelectionKind::Partial(SortedCps::from_iter(cps)),
+                        };
                     } else {
                         sel.push(ElementSelection::partial(path.clone(), [cp_idx]));
                     }
@@ -232,24 +208,9 @@ impl CanvasTool for DirectSelectionTool {
                     // Replace the selection with just this CP.
                     Controller::select_control_point(model, &path, cp_idx);
                 }
-                self.state = State::Moving {
-                    start_x: x,
-                    start_y: y,
-                    last_x: x,
-                    last_y: y,
-                    snapshotted: false,
-                    copied: false,
-                };
-                return;
             }
-            // CP is already in the selection — fall through to step 3
-            // so the press starts a drag of the whole existing
-            // selection (the typical "click an already-selected CP and
-            // move all selected CPs together" gesture).
-        }
-
-        // 3. Check if clicking on a selected element's control point or bounds
-        if Self::hit_test_selected_bounds(model, x, y) {
+            // Whether the CP was already selected or we just selected
+            // it, the press starts a drag of the (current) selection.
             self.state = State::Moving {
                 start_x: x,
                 start_y: y,
@@ -261,7 +222,11 @@ impl CanvasTool for DirectSelectionTool {
             return;
         }
 
-        // 4. Start marquee
+        // 3. No CP hit — start a new marquee. We deliberately do NOT
+        // fall back to a "hit inside the bbox of a selected element"
+        // check: with the Direct Selection tool, a drag that begins on
+        // empty space or on a body/fill without a CP hit must marquee,
+        // never move the existing selection.
         self.state = State::Marquee {
             start_x: x,
             start_y: y,
@@ -528,6 +493,103 @@ mod tests {
                 assert_eq!(points[3], (0.0, 10.0));
             }
             other => panic!("expected Polygon, got {:?}", other),
+        }
+    }
+
+    fn make_model_with_big_rect() -> Model {
+        // Rect at (0,0) 100x100 — big enough that the center (50,50)
+        // is well outside HIT_RADIUS (=8) of any corner.
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 100.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(rect)],
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: Vec::new(),
+        };
+        Model::new(doc, None)
+    }
+
+    #[test]
+    fn press_inside_body_without_cp_hit_starts_marquee_not_move() {
+        // With the Direct Selection tool, a press in empty space OR
+        // inside the body/fill of a selected element (but not on a
+        // CP) must start a new marquee selection, not drag the
+        // existing selection.
+        let mut tool = DirectSelectionTool::new();
+        let mut model = make_model_with_big_rect();
+
+        // Pre-select the whole rect (Partial with all CPs). The
+        // press point (50,50) is the rect center, far from every
+        // corner, so no CP hit-test will match.
+        Controller::set_selection(
+            &mut model,
+            vec![ElementSelection {
+                path: vec![0, 0],
+                kind: SelectionKind::Partial(SortedCps::from_iter([0usize, 1, 2, 3])),
+            }],
+        );
+
+        // Press at the rect's center.
+        tool.on_press(&mut model, 50.0, 50.0, false, false);
+
+        // Tool must now be in Marquee state, not Moving.
+        match &tool.state {
+            State::Marquee { .. } => {}
+            other => panic!("expected Marquee, got {:?}", other),
+        }
+
+        // Drag a small marquee and release: because we pressed on
+        // empty-ish space, the release with a tiny/no drag and no
+        // shift must clear the selection (the existing empty-release
+        // behavior of the marquee branch).
+        tool.on_release(&mut model, 50.0, 50.0, false, false);
+        assert!(
+            model.document().selection.is_empty(),
+            "click in body without CP hit should clear selection, got {:?}",
+            model.document().selection
+        );
+
+        // And the rect must remain an unmodified Rect — in
+        // particular not converted to a Polygon.
+        let elem = &*model.document().layers[0].children().unwrap()[0];
+        assert!(matches!(elem, Element::Rect(_)),
+            "rect must stay a Rect, got {:?}", elem);
+    }
+
+    #[test]
+    fn shift_click_last_selected_cp_leaves_partial_empty() {
+        // Shift-toggling the single remaining CP must not drop the
+        // element from the selection. Instead the element stays
+        // selected with `Partial(empty)` — "selected, no CPs
+        // individually highlighted".
+        let mut tool = DirectSelectionTool::new();
+        let mut model = make_model_with_rect();
+
+        // Pre-select only CP 0.
+        Controller::select_control_point(&mut model, &vec![0, 0], 0);
+
+        // Shift-click on CP 0 again — removes it from the selection.
+        tool.on_press(&mut model, 0.0, 0.0, /*shift=*/true, false);
+        tool.on_release(&mut model, 0.0, 0.0, /*shift=*/true, false);
+
+        // Element must still be in the selection, with kind = Partial(empty).
+        let sel = &model.document().selection;
+        assert_eq!(sel.len(), 1, "element must remain selected");
+        assert_eq!(sel[0].path, vec![0, 0]);
+        match &sel[0].kind {
+            SelectionKind::Partial(s) => {
+                assert!(s.is_empty(), "expected Partial(empty), got {:?}", s);
+            }
+            other => panic!("expected Partial(empty), got {:?}", other),
         }
     }
 }

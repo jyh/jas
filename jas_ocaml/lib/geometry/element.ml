@@ -568,8 +568,17 @@ let control_points = function
     For primitives that can collapse to a translation (Rect, Circle,
     Ellipse), the is-all case translates in place; otherwise the
     primitive is converted to a Polygon (Rect) or its bounding-box
-    representation (Circle, Ellipse). *)
+    representation (Circle, Ellipse).
+
+    [Partial []] — [is_all=false] with an empty [indices] list,
+    meaning "element selected, no CPs highlighted" — is a no-op:
+    [elem] is returned unchanged. Without this guard, the
+    Rect/Circle/Ellipse branches would fall through to their
+    polygon-conversion path and silently change the primitive type
+    without any visible movement. *)
 let move_control_points ?(is_all = false) elem indices dx dy =
+  if (not is_all) && indices = [] then elem
+  else
   let mem i = List.mem i indices in
   match elem with
   | Line r ->

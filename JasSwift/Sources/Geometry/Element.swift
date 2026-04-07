@@ -253,6 +253,15 @@ public enum Element: Equatable {
     }
 
     public func moveControlPoints(_ kind: SelectionKind, dx: Double, dy: Double) -> Element {
+        // `.partial([])` — "element selected, no CPs highlighted" —
+        // is a no-op: return unchanged. Without this guard, the
+        // Rect/Circle/Ellipse branches would fall through to their
+        // polygon-conversion path (since `isAll` is false for an
+        // empty set) and silently change the primitive type without
+        // any visible movement.
+        if case .partial(let cps) = kind, cps.isEmpty {
+            return self
+        }
         switch self {
         case .line(let v):
             return .line(Line(

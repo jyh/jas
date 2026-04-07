@@ -83,8 +83,12 @@ The two `SelectionKind` cases capture two distinct user intents:
   no longer axis-aligned. `SortedCps` is sorted, de-duplicated, and
   small (`u16`-wide indices).
 
-Empty `Partial` is dropped from the map entirely — there is no
-"selected element with no CPs" state.
+`Partial(empty)` is a legal, retained state — "element selected,
+zero CPs individually highlighted". The Direct Selection marquee
+produces it when it crosses an element's body without catching any
+CPs, and shift-click produces it when the last selected CP is
+toggled off. Move/drag on `Partial(empty)` is a no-op. `All` XOR
+`All` still drops the element (the element-level deselect gesture).
 
 ### Three selection modes
 
