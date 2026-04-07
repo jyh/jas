@@ -167,15 +167,21 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       in
 
       let draw_line_icon cr ~alloc =
+        (* Line icon from SVG (viewBox 0 0 256 256), scaled to 28x28 *)
         let bw = float_of_int alloc.Gtk.width in
         let bh = float_of_int alloc.Gtk.height in
         let ox = (bw -. 28.0) /. 2.0 in
         let oy = (bh -. 28.0) /. 2.0 in
+        let s = 28.0 /. 256.0 in
+        Cairo.save cr;
+        Cairo.translate cr ox oy;
+        Cairo.scale cr s s;
         Cairo.set_source_rgb cr 0.8 0.8 0.8;
-        Cairo.set_line_width cr 2.0;
-        Cairo.move_to cr (ox +. 4.0) (oy +. 24.0);
-        Cairo.line_to cr (ox +. 24.0) (oy +. 4.0);
-        Cairo.stroke cr
+        Cairo.set_line_width cr 8.0;
+        Cairo.move_to cr 30.79 232.04;
+        Cairo.line_to cr 231.78 31.05;
+        Cairo.stroke cr;
+        Cairo.restore cr
       in
 
       let draw_tool_button area tool_id draw_icon =

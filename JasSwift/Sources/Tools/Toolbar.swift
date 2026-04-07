@@ -531,10 +531,14 @@ public struct ToolbarView {
                 context.stroke(wavePath, with: .color(color), lineWidth: 1.0)
 
             case .line:
+                // Line icon from SVG (viewBox 0 0 256 256), scaled to 28x28
+                let s: CGFloat = 28.0 / 256.0
+                let transform = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: s, y: s)
                 var path = SwiftUI.Path()
-                path.move(to: CGPoint(x: ox + 4, y: oy + 24))
-                path.addLine(to: CGPoint(x: ox + 24, y: oy + 4))
-                context.stroke(path, with: .color(color), lineWidth: 2.0)
+                path.move(to: CGPoint(x: 30.79, y: 232.04))
+                path.addLine(to: CGPoint(x: 231.78, y: 31.05))
+                let transformed = path.applying(transform)
+                context.stroke(transformed, with: .color(color), lineWidth: 8.0 * s)
 
             case .rect:
                 let rect = CGRect(x: ox + 4, y: oy + 6, width: 20, height: 16)

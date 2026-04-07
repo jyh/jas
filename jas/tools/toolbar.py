@@ -127,10 +127,16 @@ class ToolButton(QToolButton):
         painter.drawLine(23.5, 16.5, 23.5, 23.5)
 
     def _draw_line_tool(self, painter):
-        painter.setPen(QPen(QColor("#cccccc"), 1.5))
-        painter.drawLine(4, self.ICON_SIZE - 4, self.ICON_SIZE - 4, 4)
-        painter.drawEllipse(1, self.ICON_SIZE - 6, 6, 6)
-        painter.drawEllipse(self.ICON_SIZE - 7, 1, 6, 6)
+        # Line icon from SVG (viewBox 0 0 256 256), scaled to 28x28.
+        s = 28.0 / 256.0
+        ox = (self.ICON_SIZE - 28) / 2.0
+        oy = (self.ICON_SIZE - 28) / 2.0
+        painter.save()
+        painter.translate(ox, oy)
+        painter.scale(s, s)
+        painter.setPen(QPen(QColor("#cccccc"), 8))
+        painter.drawLine(30.79, 232.04, 231.78, 31.05)
+        painter.restore()
 
     def _draw_rect_tool(self, painter):
         painter.setPen(QPen(QColor("#cccccc"), 1.5))

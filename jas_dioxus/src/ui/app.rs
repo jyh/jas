@@ -457,9 +457,11 @@ fn toolbar_svg_icon(kind: ToolKind) -> String {
         // T + wavy path
         ToolKind::TextOnPath => format!(
             r#"<text x="2" y="18" font-family="sans-serif" font-size="14" font-weight="bold" fill="{c}">T</text><path d="M12,20 C16,8 22,24 26,12" fill="none" stroke="{c}" stroke-width="1"/>"#),
-        // Diagonal line with endpoint dots
-        ToolKind::Line => format!(
-            r#"<line x1="4" y1="24" x2="24" y2="4" stroke="{c}" stroke-width="1.5"/><circle cx="4" cy="24" r="3" fill="none" stroke="{c}" stroke-width="1.5"/><circle cx="24" cy="4" r="3" fill="none" stroke="{c}" stroke-width="1.5"/>"#),
+        // Line segment (from SVG, scaled from 256→28)
+        ToolKind::Line => {
+            let _c = c;
+            r##"<g transform="scale(0.109375)"><line x1="30.79" y1="232.04" x2="231.78" y2="31.05" fill="none" stroke="rgb(204,204,204)" stroke-miterlimit="10" stroke-width="8"/></g>"##.to_string()
+        },
         // Rectangle
         ToolKind::Rect => format!(
             r#"<rect x="4" y="4" width="20" height="20" fill="none" stroke="{c}" stroke-width="1.5"/>"#),
