@@ -310,17 +310,39 @@ let rec bounds = function
     inflate_bounds (path_cmd_bounds d) stroke
   | Text_path { d; stroke; _ } ->
     inflate_bounds (path_cmd_bounds d) stroke
-  | Text { x; y; content; font_size; text_width; text_height; _ } ->
+  | Text { x; y; content; font_family; font_size; font_weight; font_style;
+           text_width; text_height; _ } ->
     if text_width > 0.0 && text_height > 0.0 then
       (x, y, text_width, text_height)
     else
+      (* Measure each line with Cairo (matching the renderer and editor)
+         so the selection bounding box hugs the real glyphs instead of
+         the 0.6 * font_size character-width stub. Falls back to the
+         stub if Cairo cannot be initialized (which shouldn't happen in
+         practice, but keeps bounds computations total). *)
       let lines = if content = "" then [""]
         else String.split_on_char '\n' content in
-      let max_chars = List.fold_left
-        (fun a l -> max a (String.length l)) 0 lines in
-      let approx_width = float_of_int max_chars *. font_size *. approx_char_width_factor in
+      let measure =
+        try
+          let surf = Cairo.Image.create Cairo.Image.ARGB32 ~w:1 ~h:1 in
+          let cr = Cairo.create surf in
+          let slant = if font_style = "italic" || font_style = "oblique"
+                      then Cairo.Italic else Cairo.Upright in
+          let weight = if font_weight = "bold"
+                       then Cairo.Bold else Cairo.Normal in
+          Cairo.select_font_face cr font_family ~slant ~weight;
+          Cairo.set_font_size cr font_size;
+          fun s ->
+            if s = "" then 0.0
+            else (Cairo.text_extents cr s).Cairo.x_advance
+        with _ ->
+          fun s ->
+            float_of_int (String.length s) *. font_size *. approx_char_width_factor
+      in
+      let max_width = List.fold_left
+        (fun acc l -> max acc (measure l)) 0.0 lines in
       let height = float_of_int (List.length lines) *. font_size in
-      (x, y, approx_width, height)
+      (x, y, max_width, height)
   | Group { children; _ } | Layer { children; _ } ->
     if Array.length children = 0 then (0.0, 0.0, 0.0, 0.0)
     else

@@ -4,7 +4,18 @@
     string and produces glyphs and lines. Used by both rendering and the
     type tool for hit-testing and cursor placement.
 
-    Indices are byte indices (assumes ASCII content for now). *)
+    All indices ([start], [end_], [idx], cursor positions) are *char*
+    (Unicode scalar value) indices, not byte indices. Strings are
+    decoded as UTF-8. *)
+
+(** Number of Unicode scalar values in a UTF-8 string. *)
+val utf8_char_count : string -> int
+
+(** Byte index of the [k]-th char. Returns [String.length s] if out of range. *)
+val char_to_byte : string -> int -> int
+
+(** Substring from char index [k] spanning [n] chars (UTF-8 safe). *)
+val utf8_sub : string -> int -> int -> string
 
 type glyph = {
   idx : int;
@@ -25,6 +36,8 @@ type line_info = {
   baseline_y : float;
   height : float;
   width : float;
+  mutable glyph_start : int;
+  mutable glyph_end : int;
 }
 
 type t = {

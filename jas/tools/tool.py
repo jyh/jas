@@ -40,8 +40,6 @@ class ToolContext:
         hit_test_text: "Callable[[float, float], tuple[tuple[int, ...], Text] | None]",
         hit_test_path_curve: "Callable[[float, float], tuple[tuple[int, ...], Element] | None]",
         request_update: "Callable[[], None]",
-        start_text_edit: "Callable[[tuple[int, ...], Text | TextPath], None]",
-        commit_text_edit: "Callable[[], None]",
     ):
         self.model = model
         self.controller = controller
@@ -50,8 +48,6 @@ class ToolContext:
         self.hit_test_text = hit_test_text
         self.hit_test_path_curve = hit_test_path_curve
         self.request_update = request_update
-        self.start_text_edit = start_text_edit
-        self.commit_text_edit = commit_text_edit
 
     @property
     def document(self) -> Document:

@@ -38,6 +38,11 @@ class LineInfo:
     baseline_y: float
     height: float
     width: float
+    # Index range into `TextLayout.glyphs` for this line. Filled in at
+    # the end of `layout()` so cursor/hit_test can slice in O(line)
+    # rather than filtering the whole glyph list.
+    glyph_start: int = 0
+    glyph_end: int = 0
 
 
 @dataclass
@@ -53,16 +58,13 @@ class TextLayout:
         line = self.lines[line_no]
         height = line.height
         baseline_y = line.baseline_y
+        line_glyphs = self.glyphs[line.glyph_start:line.glyph_end]
         if cursor == line.start:
             return (0.0, baseline_y, height)
         if cursor >= line.end:
-            last = None
-            for g in self.glyphs:
-                if g.line == line_no:
-                    last = g
-            x = last.right if last else 0.0
+            x = line_glyphs[-1].right if line_glyphs else 0.0
             return (x, baseline_y, height)
-        for g in self.glyphs:
+        for g in line_glyphs:
             if g.idx == cursor:
                 return (g.x, baseline_y, height)
         return (0.0, baseline_y, height)
@@ -88,8 +90,8 @@ class TextLayout:
                 line_no = i
                 break
         line = self.lines[line_no]
-        glyphs_on_line = [g for g in self.glyphs
-                          if g.line == line_no and not g.is_trailing_space]
+        glyphs_on_line = [g for g in self.glyphs[line.glyph_start:line.glyph_end]
+                          if not g.is_trailing_space]
         if not glyphs_on_line:
             return line.start
         if x <= glyphs_on_line[0].x:
@@ -119,8 +121,8 @@ class TextLayout:
 
     def _cursor_at_line_x(self, line_no: int, target_x: float) -> int:
         line = self.lines[line_no]
-        glyphs_on_line = [g for g in self.glyphs
-                          if g.line == line_no and not g.is_trailing_space]
+        glyphs_on_line = [g for g in self.glyphs[line.glyph_start:line.glyph_end]
+                          if not g.is_trailing_space]
         if not glyphs_on_line:
             return line.start
         if target_x <= glyphs_on_line[0].x:
@@ -223,6 +225,15 @@ def layout(content: str, max_width: float, font_size: float,
     push_line(line_start_char, n, False, x)
     if not lines:
         push_line(0, 0, False, 0.0)
+
+    # Fill glyph_start/glyph_end for each line by sweeping the glyph
+    # list once. Glyphs are emitted in line order.
+    gi = 0
+    for li, line in enumerate(lines):
+        line.glyph_start = gi
+        while gi < len(glyphs) and glyphs[gi].line == li:
+            gi += 1
+        line.glyph_end = gi
 
     return TextLayout(glyphs=glyphs, lines=lines, font_size=font_size, char_count=n)
 

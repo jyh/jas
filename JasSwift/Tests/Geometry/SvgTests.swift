@@ -334,6 +334,23 @@ private func roundtrip(_ doc: Document) -> Document {
     }
 }
 
+@Test func svgRoundTripTextYPreservesTop() {
+    // Internally `Text.y` is the top of the layout box. Round-tripping
+    // through SVG (where `y` is the baseline) must put us back at the
+    // same top-of-box position.
+    let doc = Document(layers: [Layer(children: [
+        .text(Text(x: 10, y: 20, content: "Hi", fontFamily: "Arial",
+                      fontSize: 16, fill: Fill(color: Color(r: 0, g: 0, b: 0))))
+    ])])
+    let doc2 = roundtrip(doc)
+    if case .text(let v) = doc2.layers[0].children[0] {
+        #expect(abs(v.y - 20.0) < 1e-3)
+        #expect(abs(v.x - 10.0) < 1e-3)
+    } else {
+        Issue.record("Expected text")
+    }
+}
+
 @Test func svgImportOpacity() {
     let doc = Document(layers: [Layer(children: [
         .rect(Rect(x: 0, y: 0, width: 72, height: 72, opacity: 0.5))

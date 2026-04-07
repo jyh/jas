@@ -166,7 +166,7 @@ import Testing
     let t = Text(x: 10, y: 30, content: "Hello")
     let b = t.bounds
     #expect(b.x == 10)
-    #expect(b.y == 14)  // y - fontSize
+    #expect(b.y == 30)  // y is the top of the layout box
     #expect(b.width > 0)
     #expect(b.height == 16)
 }

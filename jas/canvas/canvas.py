@@ -657,8 +657,6 @@ class CanvasWidget(QWidget):
             hit_test_text=self._hit_test_text,
             hit_test_path_curve=self._hit_test_path_curve,
             request_update=self.update,
-            start_text_edit=self._start_text_edit,
-            commit_text_edit=self._commit_text_edit,
         )
         self.setMinimumSize(320, 240)
         self.setMouseTracking(True)
@@ -808,15 +806,6 @@ class CanvasWidget(QWidget):
                             if dist <= threshold:
                                 return ((li, ci, gi), gc)
         return None
-
-    def _start_text_edit(self, path: tuple[int, ...], text_elem: Text | TextPath) -> None:
-        """No-op: text editing is now handled in-place by the type tools.
-        Kept on the ToolContext for API stability."""
-        return
-
-    def _commit_text_edit(self) -> None:
-        """No-op: see _start_text_edit."""
-        return
 
     # -- Event dispatch to active tool --
 

@@ -889,15 +889,27 @@ public struct Text: Equatable {
 
     public var isAreaText: Bool { width > 0 && height > 0 }
 
+    /// Return a copy of this Text with the given fields replaced. Used by
+    /// `TextEditSession.applyToDocument` so the field list lives in one
+    /// place.
+    public func with(content: String) -> Text {
+        Text(x: x, y: y, content: content,
+             fontFamily: fontFamily, fontSize: fontSize,
+             fontWeight: fontWeight, fontStyle: fontStyle,
+             textDecoration: textDecoration,
+             width: width, height: height,
+             fill: fill, stroke: stroke,
+             opacity: opacity, transform: transform, locked: locked)
+    }
+
     public var bounds: BBox {
         if isAreaText {
             return (x, y, width, height)
         }
-        // Point text: width is the widest "\n"-separated line measured
-        // with the real font; height is fontSize × line count. Splitting
-        // on "\n" keeps the box from growing horizontally across hard
-        // breaks, and using the real measurer keeps it from being wider
-        // than the rendered glyphs.
+        // Point text: `y` is the *top* of the layout box (the baseline is
+        // `y + 0.8*fontSize`, matching `text_layout`'s ascent). Width is
+        // the widest "\n"-separated line measured with the real font;
+        // height is fontSize × line count.
         let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
         var maxW: Double = 0
         for l in lines {
@@ -906,7 +918,7 @@ public struct Text: Equatable {
             if w > maxW { maxW = w }
         }
         let height = Double(max(lines.count, 1)) * fontSize
-        return (x, y - fontSize, maxW, height)
+        return (x, y, maxW, height)
     }
 }
 
@@ -944,6 +956,16 @@ public struct TextPath: Equatable {
 
     public var bounds: BBox {
         return inflateBounds(pathBounds(d), stroke)
+    }
+
+    /// Return a copy of this TextPath with `content` replaced.
+    public func with(content: String) -> TextPath {
+        TextPath(d: d, content: content, startOffset: startOffset,
+                 fontFamily: fontFamily, fontSize: fontSize,
+                 fontWeight: fontWeight, fontStyle: fontStyle,
+                 textDecoration: textDecoration,
+                 fill: fill, stroke: stroke,
+                 opacity: opacity, transform: transform, locked: locked)
     }
 }
 

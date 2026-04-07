@@ -23,11 +23,12 @@ use crate::geometry::measure::{path_closest_offset, path_distance_to_point, path
 use crate::geometry::path_text_layout::{layout_path_text, PathTextLayout};
 
 use super::tool::{CanvasTool, KeyMods, DRAG_THRESHOLD, HIT_RADIUS};
-use super::text_edit::{empty_text_path_elem, EditTarget, TextEditSession};
+use super::text_edit::{
+    empty_text_path_elem, EditTarget, TextEditSession, BLINK_HALF_PERIOD_MS,
+};
 use super::text_measure::{font_string, make_measurer};
 
 const OFFSET_HANDLE_RADIUS: f64 = 5.0;
-const BLINK_HALF_PERIOD_MS: f64 = 530.0;
 
 #[derive(Debug, Clone)]
 enum State {
@@ -49,13 +50,8 @@ pub struct TypeOnPathTool {
     state: State,
     session: Option<TextEditSession>,
     did_snapshot: bool,
-    last_mouse: (f64, f64),
     hover_textpath: bool,
     hover_path: bool,
-    /// While editing, true iff `last_mouse` is close to the run of glyphs
-    /// of the element currently being edited. Used to hide the OS cursor
-    /// only over the active text run.
-    pointer_inside_edited: bool,
 }
 
 impl TypeOnPathTool {
@@ -64,10 +60,8 @@ impl TypeOnPathTool {
             state: State::Idle,
             session: None,
             did_snapshot: false,
-            last_mouse: (0.0, 0.0),
             hover_textpath: false,
             hover_path: false,
-            pointer_inside_edited: false,
         }
     }
 
@@ -218,7 +212,6 @@ impl TypeOnPathTool {
         self.session = None;
         self.did_snapshot = false;
         self.state = State::Idle;
-        self.pointer_inside_edited = false;
     }
 
     pub fn paste_text(&mut self, model: &mut Model, text: &str) -> bool {
@@ -250,33 +243,6 @@ impl TypeOnPathTool {
         None
     }
 
-    /// Distance test: is `(x, y)` close enough to any glyph of the
-    /// element being edited that the OS cursor should be hidden?
-    fn pointer_near_edited_glyphs(&self, model: &Model, x: f64, y: f64) -> bool {
-        let Some((_, lay)) = self.build_layout(model) else { return false; };
-        if lay.glyphs.is_empty() {
-            // No glyphs yet (empty content): anchor on the path start.
-            if let Some(s) = self.session.as_ref() {
-                if let Some(Element::TextPath(tp)) = model.document().get_element(&s.path) {
-                    if let Some(PathCommand::MoveTo { x: px, y: py }) = tp.d.first() {
-                        let dx = x - px;
-                        let dy = y - py;
-                        return (dx * dx + dy * dy).sqrt() <= lay.font_size;
-                    }
-                }
-            }
-            return false;
-        }
-        let pad = lay.font_size;
-        for g in &lay.glyphs {
-            let dx = x - g.cx;
-            let dy = y - g.cy;
-            if (dx * dx + dy * dy).sqrt() <= pad {
-                return true;
-            }
-        }
-        false
-    }
 }
 
 fn now_ms() -> f64 {
@@ -350,8 +316,6 @@ impl CanvasTool for TypeOnPathTool {
                 s.set_insertion(cursor, false);
                 s.drag_active = true;
                 s.blink_epoch_ms = now_ms();
-                self.last_mouse = (x, y);
-                self.pointer_inside_edited = true;
                 return;
             }
             self.end_session();
@@ -373,14 +337,10 @@ impl CanvasTool for TypeOnPathTool {
                     s.set_insertion(cursor, false);
                     s.drag_active = true;
                     s.blink_epoch_ms = now_ms();
-                    self.last_mouse = (x, y);
-                    self.pointer_inside_edited = true;
                 }
                 Element::Path(pe) => {
                     let click_offset = path_closest_offset(&pe.d, x, y);
                     self.begin_session_convert_path(model, path, pe.d.clone(), click_offset);
-                    self.last_mouse = (x, y);
-                    self.pointer_inside_edited = true;
                 }
                 _ => {}
             }
@@ -406,7 +366,6 @@ impl CanvasTool for TypeOnPathTool {
         _alt: bool,
         dragging: bool,
     ) {
-        self.last_mouse = (x, y);
 
         if let Some(session) = &mut self.session {
             if session.drag_active && dragging {
@@ -456,11 +415,9 @@ impl CanvasTool for TypeOnPathTool {
             let hit = Self::hit_test_path_curve(model, x, y);
             self.hover_textpath = matches!(hit.as_ref().map(|(_, e)| e), Some(Element::TextPath(_)));
             self.hover_path = matches!(hit.as_ref().map(|(_, e)| e), Some(Element::Path(_)));
-            self.pointer_inside_edited = false;
         } else {
             self.hover_textpath = false;
             self.hover_path = false;
-            self.pointer_inside_edited = self.pointer_near_edited_glyphs(model, x, y);
         }
     }
 
@@ -517,8 +474,6 @@ impl CanvasTool for TypeOnPathTool {
                     ]
                 };
                 self.begin_session_new_curve(model, d);
-                self.last_mouse = (x, y);
-                self.pointer_inside_edited = true;
             }
             State::Idle => {}
         }

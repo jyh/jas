@@ -242,6 +242,21 @@ let () =
       assert (font_family = "Arial")
     | _ -> assert false);
 
+  run_test "round-trip text y is preserved as top-of-box" (fun () ->
+    (* Internally [text.y] is the top of the layout box. Round-tripping
+       through SVG (where [y] is the baseline) must put us back at the
+       same top-of-box position. *)
+    let doc = make_document [|make_layer [|
+      make_text ~fill:(Some (make_fill (make_color 0.0 0.0 0.0)))
+        ~font_family:"Arial" ~font_size:16.0 10.0 20.0 "Hi"
+    |]|] in
+    let doc2 = roundtrip doc in
+    match (children_of doc2.Jas.Document.layers.(0)).(0) with
+    | Text { x; y; _ } ->
+      assert (abs_float (x -. 10.0) < 1e-3);
+      assert (abs_float (y -. 20.0) < 1e-3)
+    | _ -> assert false);
+
   run_test "round-trip opacity" (fun () ->
     let doc = make_document [|make_layer [|
       make_rect ~opacity:0.5 0.0 0.0 72.0 72.0

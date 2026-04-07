@@ -1,4 +1,76 @@
-(** Pure word-wrap text layout. See [text_layout.mli]. *)
+(** Pure word-wrap text layout. See [text_layout.mli].
+
+    Strings are treated as UTF-8 byte sequences but all indices exposed
+    by this module — [start], [end_], [idx], [insertion], [anchor] — are
+    *char* (Unicode scalar value) indices, not byte indices. Helpers
+    below convert between the two when slicing into the byte string. *)
+
+(* ------------------------------------------------------------------ *)
+(* UTF-8 helpers                                                       *)
+(* ------------------------------------------------------------------ *)
+
+let utf8_char_count s =
+  let n = String.length s in
+  let i = ref 0 and c = ref 0 in
+  while !i < n do
+    let d = String.get_utf_8_uchar s !i in
+    let len = Uchar.utf_decode_length d in
+    i := !i + (if len <= 0 then 1 else len);
+    incr c
+  done;
+  !c
+
+(** Byte index of the [k]-th char (0-based). Returns [String.length s] if
+    [k >= utf8_char_count s]. *)
+let char_to_byte s k =
+  let n = String.length s in
+  let i = ref 0 and c = ref 0 in
+  while !i < n && !c < k do
+    let d = String.get_utf_8_uchar s !i in
+    let len = Uchar.utf_decode_length d in
+    i := !i + (if len <= 0 then 1 else len);
+    incr c
+  done;
+  !i
+
+(** Substring from char index [k] to char index [k + n]. *)
+let utf8_sub s k n =
+  let bi = char_to_byte s k in
+  let bj = char_to_byte s (k + n) in
+  String.sub s bi (bj - bi)
+
+(** Iterate Unicode chars (as Uchar.t) one by one. *)
+let utf8_iteri f s =
+  let n = String.length s in
+  let i = ref 0 and c = ref 0 in
+  while !i < n do
+    let d = String.get_utf_8_uchar s !i in
+    let len = Uchar.utf_decode_length d in
+    let len = if len <= 0 then 1 else len in
+    let u = Uchar.utf_decode_uchar d in
+    f !c u;
+    i := !i + len;
+    incr c
+  done
+
+(* Whitespace test mirroring Rust's [char::is_whitespace] (Unicode-aware). *)
+let uchar_is_whitespace u =
+  if not (Uchar.is_valid (Uchar.to_int u)) then false
+  else
+    let i = Uchar.to_int u in
+    (* Common ASCII whitespace plus NBSP and a few line separators. *)
+    i = 0x09 || i = 0x0A || i = 0x0B || i = 0x0C || i = 0x0D
+    || i = 0x20 || i = 0x85 || i = 0xA0
+    || i = 0x1680
+    || (i >= 0x2000 && i <= 0x200A)
+    || i = 0x2028 || i = 0x2029
+    || i = 0x202F || i = 0x205F || i = 0x3000
+
+let uchar_is_newline u = Uchar.to_int u = 0x0A  (* '\n' *)
+
+(* ------------------------------------------------------------------ *)
+(* Layout                                                              *)
+(* ------------------------------------------------------------------ *)
 
 type glyph = {
   idx : int;
@@ -19,6 +91,8 @@ type line_info = {
   baseline_y : float;
   height : float;
   width : float;
+  mutable glyph_start : int;
+  mutable glyph_end : int;
 }
 
 type t = {
@@ -28,14 +102,29 @@ type t = {
   char_count : int;
 }
 
-let is_space c = c = ' ' || c = '\t'
-
 let layout content max_width font_size measure =
   let line_height = font_size in
   let ascent = font_size *. 0.8 in
+  (* Decode content once into a char array. *)
+  let chars =
+    let acc = ref [] in
+    utf8_iteri (fun _ u -> acc := u :: !acc) content;
+    Array.of_list (List.rev !acc)
+  in
+  (* `uchar_str u` returns the UTF-8 byte string for a single char. *)
+  let uchar_str u =
+    let b = Buffer.create 4 in
+    Buffer.add_utf_8_uchar b u;
+    Buffer.contents b
+  in
+  let chars_str lo hi =
+    let b = Buffer.create (4 * (hi - lo)) in
+    for k = lo to hi - 1 do Buffer.add_utf_8_uchar b chars.(k) done;
+    Buffer.contents b
+  in
   let glyphs = ref [] in
   let lines = ref [] in
-  let n = String.length content in
+  let n = Array.length chars in
   let idx = ref 0 in
   let line_no = ref 0 in
   let line_start_char = ref 0 in
@@ -47,6 +136,7 @@ let layout content max_width font_size measure =
       start; end_; hard_break;
       top; baseline_y = top +. ascent;
       height = line_height; width = line_width;
+      glyph_start = 0; glyph_end = 0;
     } :: !lines
   in
 
@@ -60,26 +150,26 @@ let layout content max_width font_size measure =
   in
 
   while !idx < n do
-    let c = content.[!idx] in
-    if c = '\n' then begin
+    let c = chars.(!idx) in
+    if uchar_is_newline c then begin
       push_line !line_start_char !idx true !x;
       incr line_no;
       line_start_char := !idx + 1;
       x := 0.0;
       incr idx
     end else begin
-      let is_ws = is_space c in
+      let is_ws = uchar_is_whitespace c in
       let end_ = ref (!idx + 1) in
-      while !end_ < n && content.[!end_] <> '\n'
-            && (is_space content.[!end_] = is_ws) do
+      while !end_ < n && not (uchar_is_newline chars.(!end_))
+            && (uchar_is_whitespace chars.(!end_) = is_ws) do
         incr end_
       done;
-      let token = String.sub content !idx (!end_ - !idx) in
+      let token = chars_str !idx !end_ in
       let token_w = measure token in
       if is_ws then begin
-        for k = 0 to String.length token - 1 do
-          let cw = measure (String.make 1 token.[k]) in
-          add_glyph (!idx + k) !line_no !x cw;
+        for k = !idx to !end_ - 1 do
+          let cw = measure (uchar_str chars.(k)) in
+          add_glyph k !line_no !x cw;
           x := !x +. cw
         done;
         idx := !end_
@@ -87,7 +177,7 @@ let layout content max_width font_size measure =
         if max_width > 0.0 && !x +. token_w > max_width && !x > 0.0 then begin
           (* Mark trailing whitespace glyphs on current line as trailing *)
           List.iter (fun g ->
-            if g.line = !line_no && is_space content.[g.idx] then
+            if g.line = !line_no && uchar_is_whitespace chars.(g.idx) then
               g.is_trailing_space <- true
           ) !glyphs;
           push_line !line_start_char !idx false !x;
@@ -97,22 +187,22 @@ let layout content max_width font_size measure =
         end;
         if max_width > 0.0 && token_w > max_width && !x = 0.0 then begin
           (* Char-by-char break *)
-          for k = 0 to String.length token - 1 do
-            let cw = measure (String.make 1 token.[k]) in
+          for k = !idx to !end_ - 1 do
+            let cw = measure (uchar_str chars.(k)) in
             if !x +. cw > max_width && !x > 0.0 then begin
-              push_line !line_start_char (!idx + k) false !x;
+              push_line !line_start_char k false !x;
               incr line_no;
-              line_start_char := !idx + k;
+              line_start_char := k;
               x := 0.0
             end;
-            add_glyph (!idx + k) !line_no !x cw;
+            add_glyph k !line_no !x cw;
             x := !x +. cw
           done
         end else begin
           let cur_x = ref !x in
-          for k = 0 to String.length token - 1 do
-            let cw = measure (String.make 1 token.[k]) in
-            add_glyph (!idx + k) !line_no !cur_x cw;
+          for k = !idx to !end_ - 1 do
+            let cw = measure (uchar_str chars.(k)) in
+            add_glyph k !line_no !cur_x cw;
             cur_x := !cur_x +. cw
           done;
           x := !cur_x
@@ -125,11 +215,22 @@ let layout content max_width font_size measure =
   let lines_arr = Array.of_list (List.rev !lines) in
   let lines_arr = if Array.length lines_arr = 0 then
       [| { start = 0; end_ = 0; hard_break = false;
-           top = 0.0; baseline_y = ascent; height = line_height; width = 0.0 } |]
+           top = 0.0; baseline_y = ascent; height = line_height; width = 0.0;
+           glyph_start = 0; glyph_end = 0 } |]
     else lines_arr
   in
+  let glyphs_arr = Array.of_list (List.rev !glyphs) in
+  (* Sweep glyphs once to fill line glyph ranges. *)
+  let gi = ref 0 in
+  Array.iteri (fun li line ->
+    line.glyph_start <- !gi;
+    while !gi < Array.length glyphs_arr && glyphs_arr.(!gi).line = li do
+      incr gi
+    done;
+    line.glyph_end <- !gi
+  ) lines_arr;
   {
-    glyphs = Array.of_list (List.rev !glyphs);
+    glyphs = glyphs_arr;
     lines = lines_arr;
     font_size; char_count = n;
   }
@@ -159,26 +260,30 @@ let cursor_xy t cursor =
   if cursor = line.start then (0.0, baseline_y, height)
   else if cursor >= line.end_ then begin
     let last = ref None in
-    Array.iter (fun g -> if g.line = line_no then last := Some g) t.glyphs;
+    for i = line.glyph_start to line.glyph_end - 1 do
+      last := Some t.glyphs.(i)
+    done;
     let x = match !last with Some g -> g.right | None -> 0.0 in
     (x, baseline_y, height)
   end else begin
     let result = ref (0.0, baseline_y, height) in
     let found = ref false in
-    Array.iter (fun g ->
-      if not !found && g.idx = cursor then begin
-        result := (g.x, baseline_y, height);
+    for i = line.glyph_start to line.glyph_end - 1 do
+      if not !found && t.glyphs.(i).idx = cursor then begin
+        result := (t.glyphs.(i).x, baseline_y, height);
         found := true
       end
-    ) t.glyphs;
+    done;
     !result
   end
 
 let glyphs_on_line t line_no =
+  let line = t.lines.(line_no) in
   let result = ref [] in
-  Array.iter (fun g ->
-    if g.line = line_no && not g.is_trailing_space then result := g :: !result
-  ) t.glyphs;
+  for i = line.glyph_start to line.glyph_end - 1 do
+    let g = t.glyphs.(i) in
+    if not g.is_trailing_space then result := g :: !result
+  done;
   List.rev !result
 
 let hit_test t x y =

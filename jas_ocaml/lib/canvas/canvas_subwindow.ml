@@ -585,10 +585,6 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
   object (_self)
     val mutable current_doc = model#document
     val hit_radius = Canvas_tool.hit_radius
-    (* Inline text editing state *)
-    val mutable text_editor : GEdit.entry option = None
-    val mutable text_popup : GWindow.window option = None
-    val mutable editing_path : int list option = None
     (* Active tool and tool instances *)
     val mutable active_tool : Canvas_tool.canvas_tool = Tool_factory.create_tool Toolbar.Selection
     val mutable current_tool_type : Toolbar.tool = Toolbar.Selection
@@ -689,64 +685,6 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
            | _ -> None)
       ) current_doc.Document.selection None
 
-    method private commit_text_edit =
-      match text_editor, text_popup, editing_path with
-      | Some entry, Some popup, Some path ->
-        let new_text = entry#text in
-        let doc = current_doc in
-        (try
-          let old_elem = Document.get_element doc path in
-          (match old_elem with
-           | Element.Text t when t.content <> new_text ->
-             let new_elem = Element.Text { t with content = new_text } in
-             model#set_document (Document.replace_element doc path new_elem)
-           | Element.Text_path t when t.content <> new_text ->
-             let new_elem = Element.Text_path { t with content = new_text } in
-             model#set_document (Document.replace_element doc path new_elem)
-           | _ -> ())
-        with _ -> ());
-        popup#destroy ();
-        text_editor <- None;
-        text_popup <- None;
-        editing_path <- None
-      | _ -> ()
-
-    method private make_text_popup ~x ~y ~bw ~bh ~content ~font_size ~font_family =
-      let popup = GWindow.window ~kind:`POPUP ~decorated:false () in
-      let entry = GEdit.entry ~packing:popup#add () in
-      entry#set_text content;
-      let font_desc = GPango.font_description_from_string
-        (Printf.sprintf "%s %d" font_family (int_of_float font_size)) in
-      entry#misc#modify_font font_desc;
-      entry#misc#set_size_request ~width:bw ~height:bh ();
-      let (cx, cy) = Gdk.Window.get_origin (canvas_area#misc#window) in
-      popup#move ~x:(cx + x) ~y:(cy + y);
-      entry#connect#activate ~callback:(fun () -> _self#commit_text_edit) |> ignore;
-      popup#show ();
-      entry#misc#grab_focus ();
-      entry#select_region ~start:0 ~stop:(String.length content);
-      text_editor <- Some entry;
-      text_popup <- Some popup
-
-    method private start_text_edit path text_elem =
-      _self#commit_text_edit;
-      editing_path <- Some path;
-      match text_elem with
-      | Element.Text { x = tx; y = ty; content; font_size; font_family; _ } ->
-        let bw = max (int_of_float (float_of_int (String.length content) *. font_size *. 0.6) + 20) 100 in
-        _self#make_text_popup
-          ~x:(int_of_float tx) ~y:(int_of_float (ty -. font_size))
-          ~bw ~bh:(int_of_float font_size + 4)
-          ~content ~font_size ~font_family
-      | Element.Text_path { d; content; start_offset; font_size; font_family; _ } ->
-        let (px, py) = Element.path_point_at_offset d start_offset in
-        let bw = max (int_of_float (float_of_int (String.length content) *. font_size *. 0.7) + 20) 200 in
-        _self#make_text_popup
-          ~x:(int_of_float px) ~y:(int_of_float (py -. font_size -. 4.0))
-          ~bw ~bh:(int_of_float font_size + 8)
-          ~content ~font_size ~font_family
-      | _ -> ()
-
     method private tool_context : Canvas_tool.tool_context = {
       Canvas_tool.model = model;
       controller = controller;
@@ -755,8 +693,6 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       hit_test_text = (fun x y -> _self#hit_test_text x y);
       hit_test_path_curve = (fun x y -> _self#hit_test_path_curve x y);
       request_update = (fun () -> canvas_area#misc#queue_draw ());
-      start_text_edit = (fun path elem -> _self#start_text_edit path elem);
-      commit_text_edit = (fun () -> _self#commit_text_edit);
       draw_element_overlay = draw_element_overlay;
     }
 

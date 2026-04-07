@@ -22,8 +22,6 @@ let make_ctx ?model () =
     hit_test_text = (fun _x _y -> None);
     hit_test_path_curve = (fun _x _y -> None);
     request_update = (fun () -> ());
-    start_text_edit = (fun _path _elem -> ());
-    commit_text_edit = (fun () -> ());
     draw_element_overlay = (fun _cr _elem _cps -> ());
   } in
   (ctx, model, ctrl)
@@ -247,8 +245,6 @@ let () =
       hit_test_text = (fun _x _y -> None);
       hit_test_path_curve = (fun _x _y -> None);
       request_update = (fun () -> ());
-      start_text_edit = (fun _path _elem -> ());
-      commit_text_edit = (fun () -> ());
       draw_element_overlay = (fun _cr _elem _cps -> ());
     } in
     tool#on_press ctx 60.0 60.0 ~shift:false ~alt:false;
@@ -878,8 +874,6 @@ let () =
       hit_test_text = (fun _ _ -> Some ([0; 0], existing));
       hit_test_path_curve = (fun _ _ -> None);
       request_update = (fun () -> ());
-      start_text_edit = (fun _ _ -> ());
-      commit_text_edit = (fun () -> ());
       draw_element_overlay = (fun _ _ _ -> ());
     } in
     tool#on_press ctx 5.0 5.0 ~shift:false ~alt:false;
@@ -977,8 +971,6 @@ let () =
       hit_test_text = (fun _ _ -> None);
       hit_test_path_curve = (fun _ _ -> Some ([0; 0], path_elem));
       request_update = (fun () -> ());
-      start_text_edit = (fun _ _ -> ());
-      commit_text_edit = (fun () -> ());
       draw_element_overlay = (fun _ _ _ -> ());
     } in
     tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
@@ -1029,8 +1021,6 @@ let () =
       hit_test_text = (fun _ _ -> None);
       hit_test_path_curve = (fun _ _ -> Some ([0; 0], path_elem));
       request_update = (fun () -> ());
-      start_text_edit = (fun _ _ -> ());
-      commit_text_edit = (fun () -> ());
       draw_element_overlay = (fun _ _ _ -> ());
     } in
     tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;

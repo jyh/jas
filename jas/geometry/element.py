@@ -461,14 +461,27 @@ class Text(Element):
     def bounds(self) -> Tuple[float, float, float, float]:
         if self.is_area_text:
             return (self.x, self.y, self.width, self.height)
-        # Treat self.y as the top of the run (matching the in-place editor's
-        # rendering of e.x, e.y at the layout origin). For multi-line content
-        # the box grows downward; the widest line determines width.
+        # Treat self.y as the top of the run (matching the in-place
+        # editor's rendering of (e.x, e.y) at the layout origin). Width
+        # is the widest "\n"-separated line measured with the real font
+        # (Qt's QFontMetricsF) so the selection bbox hugs the rendered
+        # glyphs instead of a 0.6 * font_size stub. Falls back to the
+        # stub if QtGui is unavailable (no DOM / headless test env).
         lines = self.content.split('\n') if self.content else [""]
-        max_chars = max(len(l) for l in lines) if lines else 0
-        approx_width = max_chars * self.font_size * APPROX_CHAR_WIDTH_FACTOR
+        try:
+            from PySide6.QtGui import QFont, QFontMetricsF
+            font = QFont(self.font_family, int(self.font_size))
+            if self.font_weight == "bold":
+                font.setBold(True)
+            if self.font_style == "italic":
+                font.setItalic(True)
+            fm = QFontMetricsF(font)
+            max_width = max((fm.horizontalAdvance(l) for l in lines), default=0.0)
+        except Exception:
+            max_chars = max((len(l) for l in lines), default=0)
+            max_width = max_chars * self.font_size * APPROX_CHAR_WIDTH_FACTOR
         height = len(lines) * self.font_size
-        return (self.x, self.y, approx_width, height)
+        return (self.x, self.y, max_width, height)
 
 
 @dataclass(frozen=True)

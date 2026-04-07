@@ -69,10 +69,8 @@ class TypeOnPathTool(CanvasTool):
         # Edit session
         self.session: Optional[TextEditSession] = None
         self._did_snapshot = False
-        self._last_mouse: tuple[float, float] = (0.0, 0.0)
         self._hover_textpath = False
         self._hover_path = False
-        self._pointer_inside_edited = False
 
     # ---- helpers ----
 
@@ -171,7 +169,6 @@ class TypeOnPathTool(CanvasTool):
         self._drag_start = None
         self._drag_end = None
         self._control = None
-        self._pointer_inside_edited = False
 
     def _find_offset_handle(self, ctx: ToolContext, x: float, y: float
                              ) -> Optional[tuple[tuple, float]]:
@@ -184,23 +181,6 @@ class TypeOnPathTool(CanvasTool):
                         and abs(y - hy) <= _OFFSET_HANDLE_RADIUS + 2):
                     return (es.path, elem.start_offset)
         return None
-
-    def _pointer_near_edited_glyphs(self, ctx: ToolContext, x: float, y: float) -> bool:
-        built = self._build_layout(ctx)
-        if built is None:
-            return False
-        tp, lay = built
-        if not lay.glyphs:
-            if tp.d:
-                first = tp.d[0]
-                if isinstance(first, MoveTo):
-                    return math.hypot(x - first.x, y - first.y) <= lay.font_size
-            return False
-        pad = lay.font_size
-        for g in lay.glyphs:
-            if math.hypot(x - g.cx, y - g.cy) <= pad:
-                return True
-        return False
 
     # ---- CanvasTool API ----
 
@@ -218,8 +198,6 @@ class TypeOnPathTool(CanvasTool):
                 self.session.set_insertion(cursor, False)
                 self.session.drag_active = True
                 self.session.blink_epoch_ms = _now_ms()
-                self._last_mouse = (x, y)
-                self._pointer_inside_edited = True
                 ctx.request_update()
                 return
             self._end_session()
@@ -240,15 +218,11 @@ class TypeOnPathTool(CanvasTool):
                 self.session.set_insertion(cursor, False)
                 self.session.drag_active = True
                 self.session.blink_epoch_ms = _now_ms()
-                self._last_mouse = (x, y)
-                self._pointer_inside_edited = True
                 ctx.request_update()
                 return
             if isinstance(elem, Path):
                 click_offset = path_closest_offset(elem.d, x, y)
                 self._begin_session_convert_path(ctx, path, elem.d, click_offset)
-                self._last_mouse = (x, y)
-                self._pointer_inside_edited = True
                 ctx.request_update()
                 return
 
@@ -258,7 +232,6 @@ class TypeOnPathTool(CanvasTool):
 
     def on_move(self, ctx: ToolContext, x: float, y: float,
                 shift: bool = False, dragging: bool = False) -> None:
-        self._last_mouse = (x, y)
 
         if self.session is not None and self.session.drag_active and dragging:
             cursor = self._cursor_at(ctx, x, y)
@@ -289,11 +262,9 @@ class TypeOnPathTool(CanvasTool):
             hit = self._hit_test_path_curve(ctx, x, y)
             self._hover_textpath = hit is not None and isinstance(hit[1], TextPath)
             self._hover_path = hit is not None and isinstance(hit[1], Path)
-            self._pointer_inside_edited = False
         else:
             self._hover_textpath = False
             self._hover_path = False
-            self._pointer_inside_edited = self._pointer_near_edited_glyphs(ctx, x, y)
 
     def on_release(self, ctx: ToolContext, x: float, y: float,
                    shift: bool = False, alt: bool = False) -> None:
@@ -336,8 +307,6 @@ class TypeOnPathTool(CanvasTool):
             d = (MoveTo(sx, sy), LineTo(x, y))
         self._control = None
         self._begin_session_new_curve(ctx, d)
-        self._last_mouse = (x, y)
-        self._pointer_inside_edited = True
         ctx.request_update()
 
     def on_double_click(self, ctx: ToolContext, x: float, y: float) -> None:

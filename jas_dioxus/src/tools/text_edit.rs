@@ -180,9 +180,15 @@
 //!   clipboard write) are cfg-gated to host-safe stubs so the same
 //!   tests run under `cargo test` on macOS/Linux.
 
+use std::collections::VecDeque;
+
 use crate::document::document::{Document, ElementPath};
 use crate::geometry::element::{Element, TextElem, TextPathElem};
 use crate::geometry::text_layout::ordered_range;
+
+/// Cursor blink half-period in milliseconds (matches the macOS default).
+/// Shared by [`crate::tools::type_tool`] and [`crate::tools::type_on_path`].
+pub const BLINK_HALF_PERIOD_MS: f64 = 530.0;
 
 /// Snapshot saved on the per-session undo stack.
 #[derive(Debug, Clone, PartialEq)]
@@ -214,8 +220,9 @@ pub struct TextEditSession {
     /// Wall-clock timestamp (ms) when the cursor was last reset; used to
     /// drive the blink animation.
     pub blink_epoch_ms: f64,
-    undo: Vec<EditSnapshot>,
-    redo: Vec<EditSnapshot>,
+    /// Use a `VecDeque` so the O(n) cap eviction (`pop_front`) is O(1).
+    undo: VecDeque<EditSnapshot>,
+    redo: VecDeque<EditSnapshot>,
 }
 
 impl TextEditSession {
@@ -230,8 +237,8 @@ impl TextEditSession {
             anchor: insertion,
             drag_active: false,
             blink_epoch_ms,
-            undo: Vec::new(),
-            redo: Vec::new(),
+            undo: VecDeque::new(),
+            redo: VecDeque::new(),
         }
     }
 
@@ -244,21 +251,21 @@ impl TextEditSession {
     }
 
     fn snapshot(&mut self) {
-        self.undo.push(EditSnapshot {
+        self.undo.push_back(EditSnapshot {
             content: self.content.clone(),
             insertion: self.insertion,
             anchor: self.anchor,
         });
         self.redo.clear();
-        // Cap to avoid unbounded growth.
+        // Cap to avoid unbounded growth. `VecDeque::pop_front` is O(1).
         if self.undo.len() > 200 {
-            self.undo.remove(0);
+            self.undo.pop_front();
         }
     }
 
     pub fn undo(&mut self) {
-        if let Some(prev) = self.undo.pop() {
-            self.redo.push(EditSnapshot {
+        if let Some(prev) = self.undo.pop_back() {
+            self.redo.push_back(EditSnapshot {
                 content: self.content.clone(),
                 insertion: self.insertion,
                 anchor: self.anchor,
@@ -270,8 +277,8 @@ impl TextEditSession {
     }
 
     pub fn redo(&mut self) {
-        if let Some(next) = self.redo.pop() {
-            self.undo.push(EditSnapshot {
+        if let Some(next) = self.redo.pop_back() {
+            self.undo.push_back(EditSnapshot {
                 content: self.content.clone(),
                 insertion: self.insertion,
                 anchor: self.anchor,

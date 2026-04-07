@@ -10,12 +10,28 @@ single `apply_to_document` that materializes a new Document.
 from __future__ import annotations
 
 import dataclasses
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional
 
 from geometry.element import Color, Fill, Text, TextPath
 from geometry.text_layout import ordered_range
+
+
+# Cursor blink half-period in milliseconds (matches the macOS default).
+# Shared by TypeTool and TypeOnPathTool.
+BLINK_HALF_PERIOD_MS = 530.0
+
+
+def now_ms() -> float:
+    return time.monotonic() * 1000.0
+
+
+def cursor_visible(epoch_ms: float) -> bool:
+    elapsed = max(0.0, now_ms() - epoch_ms)
+    phase = int(elapsed / BLINK_HALF_PERIOD_MS)
+    return phase % 2 == 0
 
 
 class EditTarget(Enum):

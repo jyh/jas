@@ -19,32 +19,21 @@ See `jas_dioxus/src/tools/text_edit.rs` for the full design notes.
 from __future__ import annotations
 
 import dataclasses
-import time
 from typing import TYPE_CHECKING, Optional
 
 from geometry.element import (
     Color, Element, Fill, Group, Layer, Text, Stroke,
 )
 from geometry.text_layout import layout as _layout, TextLayout
-from tools.text_edit import EditTarget, TextEditSession, empty_text_elem
+from tools.text_edit import (
+    EditTarget, TextEditSession, empty_text_elem,
+    BLINK_HALF_PERIOD_MS, now_ms as _now_ms, cursor_visible as _cursor_visible,
+)
 from tools.text_measure import make_measurer
 from tools.tool import CanvasTool, KeyMods, ToolContext, DRAG_THRESHOLD
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
-
-
-BLINK_HALF_PERIOD_MS = 530.0
-
-
-def _now_ms() -> float:
-    return time.monotonic() * 1000.0
-
-
-def _cursor_visible(epoch_ms: float) -> bool:
-    elapsed = max(0.0, _now_ms() - epoch_ms)
-    phase = int(elapsed / BLINK_HALF_PERIOD_MS)
-    return phase % 2 == 0
 
 
 def _text_draw_bounds(t: Text) -> tuple[float, float, float, float]:
@@ -82,17 +71,22 @@ def _selection_color(t: Text) -> "QColor":
     return QColor(135, 206, 250, 115)
 
 
+@dataclasses.dataclass
+class _Dragging:
+    start_x: float
+    start_y: float
+    cur_x: float
+    cur_y: float
+
+
 class TypeTool(CanvasTool):
     def __init__(self):
-        # drag-to-create state when no session is active
-        self._drag_start: Optional[tuple[float, float]] = None
-        self._drag_end: Optional[tuple[float, float]] = None
+        # Drag-to-create state machine. None == idle.
+        self._drag: Optional[_Dragging] = None
         # active edit session, if any
         self.session: Optional[TextEditSession] = None
         self._did_snapshot = False
-        self._last_mouse: tuple[float, float] = (0.0, 0.0)
         self._hover_text = False
-        self._pointer_inside_edited = False
 
     # ---- helpers ----
 
@@ -184,9 +178,7 @@ class TypeTool(CanvasTool):
     def _end_session(self) -> None:
         self.session = None
         self._did_snapshot = False
-        self._drag_start = None
-        self._drag_end = None
-        self._pointer_inside_edited = False
+        self._drag = None
 
     # ---- CanvasTool API ----
 
@@ -206,8 +198,6 @@ class TypeTool(CanvasTool):
                 self.session.set_insertion(cursor, False)
                 self.session.drag_active = True
                 self.session.blink_epoch_ms = _now_ms()
-                self._pointer_inside_edited = True
-                self._last_mouse = (x, y)
                 ctx.request_update()
                 return
             self._end_session()
@@ -220,55 +210,40 @@ class TypeTool(CanvasTool):
             self.session.set_insertion(cursor, False)
             self.session.drag_active = True
             self.session.blink_epoch_ms = _now_ms()
-            self._pointer_inside_edited = True
-            self._last_mouse = (x, y)
             ctx.request_update()
             return
 
-        self._drag_start = (x, y)
-        self._drag_end = (x, y)
+        self._drag = _Dragging(start_x=x, start_y=y, cur_x=x, cur_y=y)
 
     def on_move(self, ctx: ToolContext, x: float, y: float,
                 shift: bool = False, dragging: bool = False) -> None:
-        self._last_mouse = (x, y)
         if self.session is not None and self.session.drag_active and dragging:
             cursor = self._cursor_at(ctx, x, y)
             self.session.set_insertion(cursor, True)
             self.session.blink_epoch_ms = _now_ms()
             ctx.request_update()
             return
-        if self._drag_start is not None:
-            self._drag_end = (x, y)
+        if self._drag is not None:
+            self._drag.cur_x = x
+            self._drag.cur_y = y
             ctx.request_update()
-        if self.session is not None:
-            self._hover_text = False
-            try:
-                elem = ctx.document.get_element(self.session.path)
-            except (IndexError, KeyError):
-                elem = None
-            if isinstance(elem, Text):
-                bx, by, bw, bh = _text_draw_bounds(elem)
-                self._pointer_inside_edited = bx <= x <= bx + bw and by <= y <= by + bh
-            else:
-                self._pointer_inside_edited = False
-        else:
+        if self.session is None:
             self._hover_text = self._hit_test_text(ctx, x, y) is not None
-            self._pointer_inside_edited = False
+        else:
+            self._hover_text = False
 
     def on_release(self, ctx: ToolContext, x: float, y: float,
                    shift: bool = False, alt: bool = False) -> None:
         if self.session is not None:
             self.session.drag_active = False
             self.session.blink_epoch_ms = _now_ms()
-            self._drag_start = None
-            self._drag_end = None
+            self._drag = None
             ctx.request_update()
             return
-        if self._drag_start is None:
+        if self._drag is None:
             return
-        sx, sy = self._drag_start
-        self._drag_start = None
-        self._drag_end = None
+        sx, sy = self._drag.start_x, self._drag.start_y
+        self._drag = None
         w = abs(x - sx)
         h = abs(y - sy)
         if w > DRAG_THRESHOLD or h > DRAG_THRESHOLD:
@@ -276,8 +251,6 @@ class TypeTool(CanvasTool):
             self._begin_session_new(ctx, bx, by, w, h)
         else:
             self._begin_session_new(ctx, sx, sy, 0.0, 0.0)
-        self._pointer_inside_edited = True
-        self._last_mouse = (x, y)
         ctx.request_update()
 
     def on_double_click(self, ctx: ToolContext, x: float, y: float) -> None:
@@ -428,9 +401,9 @@ class TypeTool(CanvasTool):
         from PySide6.QtGui import QBrush, QColor, QPen
 
         # Drag-create preview rectangle.
-        if self.session is None and self._drag_start is not None and self._drag_end is not None:
-            sx, sy = self._drag_start
-            ex, ey = self._drag_end
+        if self.session is None and self._drag is not None:
+            sx, sy = self._drag.start_x, self._drag.start_y
+            ex, ey = self._drag.cur_x, self._drag.cur_y
             pen = QPen(QColor(100, 100, 100), 1.0, Qt.PenStyle.DashLine)
             painter.setPen(pen)
             painter.setBrush(QBrush())

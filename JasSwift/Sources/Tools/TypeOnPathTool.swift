@@ -10,17 +10,9 @@ import Foundation
 // keys are routed via `onKeyEvent`.
 
 private let offsetHandleRadius: Double = 5.0
-private let blinkHalfPeriodMs: Double = 530.0
 
-private func nowMs() -> Double {
-    Date().timeIntervalSince1970 * 1000.0
-}
-
-private func cursorVisible(_ epochMs: Double) -> Bool {
-    let elapsed = max(0, nowMs() - epochMs)
-    let phase = Int(elapsed / blinkHalfPeriodMs)
-    return phase % 2 == 0
-}
+private func nowMs() -> Double { textEditNowMs() }
+private func cursorVisible(_ epochMs: Double) -> Bool { textEditCursorVisible(epochMs) }
 
 private struct PathRender {
     let d: [PathCommand]
