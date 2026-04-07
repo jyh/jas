@@ -269,7 +269,20 @@ CanvasTool
   draw_overlay(ctx, painter)
   activate(ctx)
   deactivate(ctx)
+
+  # Optional in-place text editing surface (default: no-op).
+  captures_keyboard() -> bool       # tool wants exclusive key input
+  is_editing() -> bool              # tool owns an active editing session
+  cursor_css_override() -> str?     # override the default tool cursor
+  paste_text(ctx, text) -> bool     # paste plain text into a session
+  on_key_event(ctx, key, mods) -> bool   # JS-style key events
 ```
+
+The optional text editing methods are implemented by the Type and
+Type-on-Path tools. While `captures_keyboard()` is true the canvas
+routes *all* key events through `on_key_event` first (so Cmd+Z, etc.
+go to the per-session undo stack instead of the document undo stack).
+A blink timer drives caret animation while `is_editing()` is true.
 
 ### ToolContext
 
@@ -305,8 +318,13 @@ POLYGON_SIDES       = 5         default sides for polygon tool
 | **Direct Selection** | Select individual control points within a marquee. Drag Bezier handles directly. |
 | **Pen** | Click to place anchor points, drag to create Bezier handles. Builds a Path element. Double-click or Escape to finish. |
 | **Pencil** | Freehand drawing: samples mouse points during drag, fits Bezier curves to the stroke. |
-| **Text** | Click to place a text element. Double-click existing text to edit. |
-| **Type on a Path** | Like Pen, but attaches editable text that flows along the resulting path. |
+| **Path Eraser** | Drag through paths to split them, preserving curve shape on either side. |
+| **Smooth** | Drag along a path to smooth its anchor points. |
+| **Add Anchor Point** | Click on a path to add a smooth anchor point that preserves the curve shape. |
+| **Delete Anchor Point** | Click an anchor point to remove it. |
+| **Anchor Point** | Convert smooth/corner/cusp anchor types by clicking or dragging on points and handles. |
+| **Type** | Click on empty canvas to start a new text element; click on existing text to enter an in-place editing session. Drag to create an area-text box. |
+| **Type on a Path** | Drag a curve to create a TextPath; click on an existing Path to convert it. Editing happens in place along the path. |
 | **Line** | Press-drag-release to create a Line element. |
 | **Rect** | Press-drag-release to create a Rect element. Coordinates normalized for any drag direction. |
 | **Polygon** | Press-drag-release to create a regular polygon. First edge defined by drag vector. |
@@ -379,18 +397,28 @@ document/
   model        # Model with undo/redo stacks
   controller   # Controller with selection and mutation operations
 geometry/
-  element      # Element types, PathCommand, bounds, control points
-  hit_test     # Pure geometric query functions
-  svg          # SVG import/export
-  measure      # Unit types and text-on-path measurement
+  element           # Element types, PathCommand, bounds, control points
+  hit_test          # Pure geometric query functions
+  svg               # SVG import/export (text y converts ascent <-> top)
+  measure           # Unit types and text-on-path measurement
+  text_layout       # Pure word-wrap layout, glyph index, hit-test (UTF-8)
+  path_text_layout  # Arc-length glyph placement for text-on-path
+  fit_curve         # Bezier curve fitting (used by Pencil)
 tools/
-  tool         # CanvasTool interface, ToolContext, constants
-  selection    # Selection, Group Selection, Direct Selection tools
-  drawing      # Line, Rect, Polygon tools
-  pen          # Pen tool (Bezier path creation)
-  pencil       # Pencil tool (freehand with curve fitting)
-  text         # Text tool
-  type_on_path # Type on a Path tool
+  tool              # CanvasTool interface, ToolContext, constants
+  selection         # Selection, Group Selection, Direct Selection tools
+  drawing           # Line, Rect, Polygon, Star, Rounded-Rect, Ellipse
+  pen               # Pen tool (Bezier path creation)
+  pencil            # Pencil tool (freehand with curve fitting)
+  path_eraser       # Path Eraser tool
+  smooth            # Smooth tool
+  add_anchor_point  # Add Anchor Point tool
+  delete_anchor_point  # Delete Anchor Point tool
+  anchor_point      # Anchor Point tool (convert smooth/corner/cusp)
+  text_edit         # Shared in-place edit session, undo/redo, blink clock
+  text_measure      # Real-font measurer used by renderer + editor
+  type_tool         # Type tool with in-place editing session
+  type_on_path      # Type on a Path tool with in-place editing session
 canvas/
   canvas       # Canvas view, rendering, hit-test callbacks, tool dispatch
   toolbar      # Tool selection UI

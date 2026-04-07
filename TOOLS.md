@@ -751,19 +751,23 @@ The resulting Path element has:
 
 ---
 
-## Text Tool
+## Type Tool
 
 **Shortcut:** T
 
-Places and edits text elements.
+Places and edits text elements with a fully native in-place editor.
 
 ### Interaction
 
 | Action | Result |
 |--------|--------|
-| Click on empty space | Create a point text element at the click position |
-| Click on existing text | Enter text editing mode for that element |
-| Drag | Create an area text element with the dragged rectangle as bounds |
+| Click on empty space | Create an empty point text element and immediately enter an editing session |
+| Click on existing text | Enter an editing session for that element with the caret at the click position |
+| Drag | Create an empty area text element with the dragged rectangle as bounds and enter an editing session |
+| Mouse drag inside the editing element | Extend the selection |
+| Standard editing keys | Routed to the session: arrows, Home/End, Backspace, Delete, Cmd+A/C/X/V/Z, Cmd+Shift+Z |
+| Escape | End the editing session |
+| Click outside the edited element | End the editing session |
 
 Point text vs. area text:
 - **Point text** (`width = 0, height = 0`): single-line text at a point.
@@ -789,6 +793,10 @@ on Escape, click outside, or tool change.
 ### Overlay
 
 - Dashed gray rectangle during drag (area text preview).
+- Blue editing-element bounding box hugging the rendered glyphs (the
+  width is computed from the platform font measurer, not a stub).
+- Per-line selection highlights in light blue.
+- Blinking text caret at the insertion point in the element's color.
 
 ---
 

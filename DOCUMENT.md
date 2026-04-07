@@ -287,7 +287,7 @@ SVG `<text>`. A text element placed at a point or within a rectangular area.
 
 ```
 Text
-  x, y:              float       anchor point (baseline origin)
+  x, y:              float       top-left of the layout box
   content:           string      the text content
   font_family:       string      e.g. "sans-serif", "serif", "monospace"
   font_size:         float       in points
@@ -299,14 +299,24 @@ Text
   stroke:            Stroke?      text outline
 ```
 
-**Point text** (`width = 0, height = 0`): single-line text at `(x, y)`.
-**Area text** (`width > 0, height > 0`): text wraps within the rectangle
-`(x, y, width, height)`.
+`(x, y)` is the *top* of the layout box. The first line's baseline
+is at `y + 0.8 * font_size` (the ascent used by `text_layout`). On
+SVG export the baseline-relative `y` attribute is computed as
+`y + 0.8 * font_size`; on import the ascent is subtracted so files
+round-trip stably.
+
+**Point text** (`width = 0, height = 0`): single-line text starting at
+`(x, y)`. Hard newlines (`\n`) wrap to additional lines.
+**Area text** (`width > 0, height > 0`): text word-wraps within the
+rectangle `(x, y, width, height)`.
 
 **Control points:** 4 -- bounding box corners.
 
-**Bounds:** for area text, the specified rectangle. For point text,
-approximated as `(x, y - font_size, content_length * font_size * 0.6, font_size)`.
+**Bounds:** for area text, the specified rectangle `(x, y, width,
+height)`. For point text, the height is `lines * font_size` and the
+width is the widest line measured with the platform font measurer
+(NSAttributedString / Cairo / QFontMetricsF / canvas measureText).
+The selection bounding box hugs the rendered glyphs.
 
 ---
 
@@ -514,8 +524,10 @@ the endpoints gives the tight axis-aligned bounds.
 
 **Group/Layer bounds:** union of all children's bounding boxes.
 
-**Text bounds:** area text uses its specified rectangle. Point text uses
-an approximation: `width = content_length * font_size * 0.6`.
+**Text bounds:** area text uses its specified rectangle. Point text
+measures the widest `\n`-separated line with the platform font
+measurer (the same one the renderer and the in-place editor use), and
+the height is `lines * font_size`.
 
 ---
 
