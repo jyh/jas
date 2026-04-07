@@ -566,6 +566,25 @@ public struct ToolbarView {
                 }
                 path.closeSubpath()
                 context.stroke(path, with: .color(color), lineWidth: 1.5)
+
+            case .star:
+                // Star icon from SVG (viewBox 0 0 256 256), scaled to 28x28
+                let s: CGFloat = 28.0 / 256.0
+                let transform = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: s, y: s)
+                let pts: [(CGFloat, CGFloat)] = [
+                    (128, 50.18), (145.47, 103.95), (202.01, 103.95),
+                    (156.27, 137.18), (173.74, 190.95), (128, 157.72),
+                    (82.26, 190.95), (99.73, 137.18), (53.99, 103.95),
+                    (110.53, 103.95),
+                ]
+                var path = SwiftUI.Path()
+                path.move(to: CGPoint(x: pts[0].0, y: pts[0].1))
+                for i in 1..<pts.count {
+                    path.addLine(to: CGPoint(x: pts[i].0, y: pts[i].1))
+                }
+                path.closeSubpath()
+                let transformed = path.applying(transform)
+                context.stroke(transformed, with: .color(color), lineWidth: 8.0 * s)
             }
         }
     }
@@ -667,6 +686,7 @@ private struct ArrowSlotButton: View {
         case .rect: return "Rectangle"
         case .roundedRect: return "Rounded Rectangle"
         case .polygon: return "Polygon"
+        case .star: return "Star"
         default: return tool.rawValue
         }
     }

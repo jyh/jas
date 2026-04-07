@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Pencil | Path_eraser | Smooth | Text_tool | Text_path | Line | Rect | Rounded_rect | Polygon
+type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Pencil | Path_eraser | Smooth | Text_tool | Text_path | Line | Rect | Rounded_rect | Polygon | Star
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -76,7 +76,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
          pencil_slot_tool <- t
        | Text_tool | Text_path ->
          text_slot_tool <- t
-       | Rect | Rounded_rect | Polygon ->
+       | Rect | Rounded_rect | Polygon | Star ->
          shape_slot_tool <- t
        | _ -> ());
       self#redraw_all
@@ -239,6 +239,34 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.curve_to cr x y x y (x +. r) y;
         Cairo.Path.close cr;
         Cairo.stroke cr;
+        Cairo.restore cr
+      in
+
+      let draw_star_icon cr ~alloc =
+        (* Star icon from SVG (viewBox 0 0 256 256), scaled to 28x28 *)
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let s = 28.0 /. 256.0 in
+        Cairo.save cr;
+        Cairo.translate cr ox oy;
+        Cairo.scale cr s s;
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.set_line_width cr 8.0;
+        let pts = [
+          (128.0, 50.18); (145.47, 103.95); (202.01, 103.95);
+          (156.27, 137.18); (173.74, 190.95); (128.0, 157.72);
+          (82.26, 190.95); (99.73, 137.18); (53.99, 103.95);
+          (110.53, 103.95);
+        ] in
+        (match pts with
+         | (fx, fy) :: rest ->
+           Cairo.move_to cr fx fy;
+           List.iter (fun (px, py) -> Cairo.line_to cr px py) rest;
+           Cairo.Path.close cr;
+           Cairo.stroke cr
+         | [] -> ());
         Cairo.restore cr
       in
 
@@ -856,6 +884,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
          | Rect -> draw_rect_icon cr ~alloc
          | Rounded_rect -> draw_rounded_rect_icon cr ~alloc
          | Polygon -> draw_polygon_icon cr ~alloc
+         | Star -> draw_star_icon cr ~alloc
          | _ -> ());
         (* Alternate triangle *)
         let ox = (bw -. 28.0) /. 2.0 in
@@ -1104,6 +1133,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       add_item "Rectangle" Rect;
       add_item "Rounded Rectangle" Rounded_rect;
       add_item "Polygon" Polygon;
+      add_item "Star" Star;
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
   end
 

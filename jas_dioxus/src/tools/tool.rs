@@ -35,6 +35,7 @@ pub enum ToolKind {
     Rect,
     RoundedRect,
     Polygon,
+    Star,
 }
 
 impl ToolKind {
@@ -56,6 +57,7 @@ impl ToolKind {
             ToolKind::Rect => "Rectangle (M)",
             ToolKind::RoundedRect => "Rounded Rectangle",
             ToolKind::Polygon => "Polygon",
+            ToolKind::Star => "Star",
         }
     }
 
@@ -130,7 +132,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tool_kind_has_sixteen_variants() {
+    fn tool_kind_has_seventeen_variants() {
         let all = [
             ToolKind::Selection,
             ToolKind::DirectSelection,
@@ -148,8 +150,9 @@ mod tests {
             ToolKind::Rect,
             ToolKind::RoundedRect,
             ToolKind::Polygon,
+            ToolKind::Star,
         ];
-        assert_eq!(all.len(), 16);
+        assert_eq!(all.len(), 17);
     }
 
     #[test]
@@ -182,12 +185,12 @@ mod tests {
             ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint,
             ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::PathEraser,
             ToolKind::Smooth, ToolKind::Text, ToolKind::TextOnPath, ToolKind::Line,
-            ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon,
+            ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
         ];
         for t in &all {
             set.insert(*t);
         }
-        assert_eq!(set.len(), 16);
+        assert_eq!(set.len(), 17);
     }
 
     #[test]
@@ -197,7 +200,7 @@ mod tests {
             ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint,
             ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::PathEraser,
             ToolKind::Smooth, ToolKind::Text, ToolKind::TextOnPath, ToolKind::Line,
-            ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon,
+            ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
         ];
         for t in &all {
             assert!(!t.label().is_empty(), "{:?} has empty label", t);
@@ -283,8 +286,8 @@ mod tests {
 
     #[test]
     fn shape_slot_alternates() {
-        let alternates = [ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon];
-        assert_eq!(alternates.len(), 3);
+        let alternates = [ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star];
+        assert_eq!(alternates.len(), 4);
     }
 
     #[test]
@@ -309,7 +312,7 @@ mod tests {
             (1, 1, &[ToolKind::Pencil, ToolKind::PathEraser, ToolKind::Smooth]),
             (2, 0, &[ToolKind::Text, ToolKind::TextOnPath]),
             (2, 1, &[ToolKind::Line]),
-            (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon]),
+            (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star]),
         ];
         assert_eq!(slots.len(), 7);
 
@@ -325,11 +328,11 @@ mod tests {
         let shared = slots.iter().filter(|(_, _, tools)| tools.len() > 1).count();
         assert_eq!(shared, 5);
 
-        // All 16 tools appear exactly once
+        // All 17 tools appear exactly once
         let mut all_tools: Vec<ToolKind> = slots.iter()
             .flat_map(|(_, _, tools)| tools.iter().copied())
             .collect();
         all_tools.sort_by_key(|t| format!("{:?}", t));
-        assert_eq!(all_tools.len(), 16);
+        assert_eq!(all_tools.len(), 17);
     }
 }

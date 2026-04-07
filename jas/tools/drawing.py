@@ -19,6 +19,12 @@ _POLYGON_SIDES = POLYGON_SIDES
 # Default corner radius (in points) for new rounded rectangles.
 ROUNDED_RECT_RADIUS = 10.0
 
+# Default number of points (outer vertices) for new stars.
+STAR_POINTS = 5
+
+# Ratio of inner radius to outer radius for stars.
+_STAR_INNER_RATIO = 0.4
+
 
 def _constrain_angle(sx: float, sy: float, ex: float, ey: float) -> tuple[float, float]:
     dx = ex - sx
@@ -29,6 +35,27 @@ def _constrain_angle(sx: float, sy: float, ex: float, ey: float) -> tuple[float,
     angle = math.atan2(dy, dx)
     snapped = round(angle / (math.pi / 4)) * (math.pi / 4)
     return (sx + dist * math.cos(snapped), sy + dist * math.sin(snapped))
+
+
+def _star_points(sx: float, sy: float, ex: float, ey: float,
+                 n: int) -> list[tuple[float, float]]:
+    """Vertices of a star inscribed in the bounding box. The star has ``n``
+    outer vertices alternating with ``n`` inner vertices, for ``2 * n`` total.
+    The first outer vertex is at the top of the box."""
+    cx = (sx + ex) / 2
+    cy = (sy + ey) / 2
+    rx_outer = abs(ex - sx) / 2
+    ry_outer = abs(ey - sy) / 2
+    rx_inner = rx_outer * _STAR_INNER_RATIO
+    ry_inner = ry_outer * _STAR_INNER_RATIO
+    theta0 = -math.pi / 2
+    pts = []
+    for k in range(2 * n):
+        angle = theta0 + math.pi * k / n
+        rx = rx_outer if k % 2 == 0 else rx_inner
+        ry = ry_outer if k % 2 == 0 else ry_inner
+        pts.append((cx + rx * math.cos(angle), cy + ry * math.sin(angle)))
+    return pts
 
 
 def _regular_polygon_points(x1: float, y1: float, x2: float, y2: float,
@@ -140,6 +167,23 @@ class RoundedRectTool(DrawingToolBase):
         rect = QRectF(QPointF(sx, sy), QPointF(ex, ey)).normalized()
         r = min(ROUNDED_RECT_RADIUS, rect.width() / 2.0, rect.height() / 2.0)
         painter.drawRoundedRect(rect, r, r)
+
+
+class StarTool(DrawingToolBase):
+    """Star tool. Draws a star inscribed in the dragged bounding box."""
+
+    def _create_element(self, sx, sy, ex, ey):
+        if abs(ex - sx) <= 0 or abs(ey - sy) <= 0:
+            return None
+        pts = _star_points(sx, sy, ex, ey, STAR_POINTS)
+        return Polygon(points=tuple(pts),
+                       stroke=Stroke(color=Color(0, 0, 0), width=1.0))
+
+    def _draw_preview(self, painter, sx, sy, ex, ey):
+        from PySide6.QtCore import QPointF
+        pts = _star_points(sx, sy, ex, ey, STAR_POINTS)
+        if pts:
+            painter.drawPolygon([QPointF(x, y) for x, y in pts])
 
 
 class PolygonTool(DrawingToolBase):

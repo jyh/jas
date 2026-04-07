@@ -10,7 +10,7 @@ from document.controller import Controller
 from document.document import Document, ElementSelection, ElementPath
 from document.model import Model
 from geometry.element import (
-    Color, CurveTo, Element, Fill, Layer, Line, LineTo, MoveTo, Path, Rect, Stroke,
+    Color, CurveTo, Element, Fill, Layer, Line, LineTo, MoveTo, Path, Polygon, Rect, Stroke,
     control_point_count,
 )
 from tools.tool import ToolContext
@@ -148,6 +148,60 @@ class RoundedRectToolTest(absltest.TestCase):
     def test_radius_default_is_ten(self):
         from tools.drawing import ROUNDED_RECT_RADIUS
         self.assertEqual(ROUNDED_RECT_RADIUS, 10.0)
+
+
+class StarToolTest(absltest.TestCase):
+    def test_draw_star(self):
+        """Press-drag-release creates a Polygon with 2 * STAR_POINTS vertices."""
+        from tools.drawing import StarTool, STAR_POINTS
+        tool = StarTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 20)
+        tool.on_release(ctx, 110, 120)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 1)
+        elem = children[0]
+        self.assertIsInstance(elem, Polygon)
+        self.assertEqual(len(elem.points), 2 * STAR_POINTS)
+
+    def test_zero_size_not_created(self):
+        """Press and release at same point => no element created."""
+        from tools.drawing import StarTool
+        tool = StarTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 20)
+        tool.on_release(ctx, 10, 20)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 0)
+
+    def test_first_vertex_at_top(self):
+        """First vertex of the star should be at the top center of the box."""
+        from tools.drawing import StarTool
+        tool = StarTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 0, 0)
+        tool.on_release(ctx, 100, 100)
+        elem = _layer_children(model)[0]
+        x, y = elem.points[0]
+        self.assertAlmostEqual(x, 50.0)
+        self.assertAlmostEqual(y, 0.0)
+
+    def test_negative_drag_normalizes(self):
+        """A drag from a high to a low corner still produces a valid star."""
+        from tools.drawing import StarTool
+        tool = StarTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 100, 100)
+        tool.on_release(ctx, 0, 0)
+        elem = _layer_children(model)[0]
+        self.assertEqual(len(elem.points), 10)
+        x, y = elem.points[0]
+        self.assertAlmostEqual(x, 50.0)
+        self.assertAlmostEqual(y, 0.0)
+
+    def test_star_points_default_is_five(self):
+        from tools.drawing import STAR_POINTS
+        self.assertEqual(STAR_POINTS, 5)
 
 
 class SelectionToolTest(absltest.TestCase):

@@ -28,6 +28,7 @@ use crate::tools::pencil::PencilTool;
 use crate::tools::path_eraser::PathEraserTool;
 use crate::tools::smooth::SmoothTool;
 use crate::tools::polygon::PolygonTool;
+use crate::tools::star::StarTool;
 use crate::tools::rect::RectTool;
 use crate::tools::rounded_rect::RoundedRectTool;
 use crate::tools::selection::SelectionTool;
@@ -64,6 +65,7 @@ impl TabState {
         tools.insert(ToolKind::Rect, Box::new(RectTool::new()));
         tools.insert(ToolKind::RoundedRect, Box::new(RoundedRectTool::new()));
         tools.insert(ToolKind::Polygon, Box::new(PolygonTool::new()));
+        tools.insert(ToolKind::Star, Box::new(StarTool::new()));
         tools.insert(ToolKind::Line, Box::new(LineTool::new()));
         Self { model, tools, clipboard: Vec::new() }
     }
@@ -396,7 +398,7 @@ const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (1, 1, &[ToolKind::Pencil, ToolKind::PathEraser, ToolKind::Smooth]),
     (2, 0, &[ToolKind::Text, ToolKind::TextOnPath]),
     (2, 1, &[ToolKind::Line]),
-    (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon]),
+    (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star]),
 ];
 
 /// Long-press threshold in milliseconds.
@@ -475,6 +477,11 @@ fn toolbar_svg_icon(kind: ToolKind) -> String {
         // Hexagon (cx=14, cy=14, r=11, 6 sides, -90° start)
         ToolKind::Polygon => format!(
             r#"<path d="M14,3 L23.5,8.5 L23.5,19.5 L14,25 L4.5,19.5 L4.5,8.5 Z" fill="none" stroke="{c}" stroke-width="1.5"/>"#),
+        // Star (from SVG, scaled from 256→28)
+        ToolKind::Star => {
+            let _c = c;
+            r##"<g transform="scale(0.109375)"><polygon points="128 50.18 145.47 103.95 202.01 103.95 156.27 137.18 173.74 190.95 128 157.72 82.26 190.95 99.73 137.18 53.99 103.95 110.53 103.95 128 50.18" fill="none" stroke="rgb(204,204,204)" stroke-miterlimit="10" stroke-width="8"/></g>"##.to_string()
+        },
     }
 }
 
