@@ -480,19 +480,26 @@ class AddAnchorPointTool(CanvasTool):
                 new_elem = dataclasses.replace(pe, d=ins.commands)
                 doc = ctx.model.document.replace_element(elem_path, new_elem)
 
-                # Update selection: shift CP indices after the insertion point
+                # Update selection: shift CP indices after the insertion
+                # point. If the previous selection was `.all`, the new
+                # anchor is automatically included.
                 new_anchor_idx = ins.first_new_idx
                 old_sel = ctx.model.document.get_element_selection(elem_path)
                 if old_sel is not None:
-                    shifted = set()
-                    for cp in old_sel.control_points:
-                        if cp >= new_anchor_idx:
-                            shifted.add(cp + 1)
-                        else:
-                            shifted.add(cp)
-                    shifted.add(new_anchor_idx)
-                    new_sel_entry = ElementSelection(
-                        path=elem_path, control_points=frozenset(shifted))
+                    from document.document import (
+                        _SelectionAll, _SelectionPartial,
+                        SortedCps as _SortedCps,
+                    )
+                    if isinstance(old_sel.kind, _SelectionAll):
+                        new_sel_entry = ElementSelection.all(elem_path)
+                    else:
+                        shifted = []
+                        for cp in old_sel.kind.cps:
+                            shifted.append(cp + 1 if cp >= new_anchor_idx else cp)
+                        shifted.append(new_anchor_idx)
+                        new_sel_entry = ElementSelection(
+                            path=elem_path,
+                            kind=_SelectionPartial(_SortedCps.from_iter(shifted)))
                     new_selection = frozenset(
                         (new_sel_entry if es.path == elem_path else es)
                         for es in doc.selection

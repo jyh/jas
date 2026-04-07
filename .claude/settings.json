@@ -40,7 +40,16 @@
       "Bash(./cursor_test)",
       "Bash(ocamlfind ocamlopt:*)",
       "Bash(dune clean:*)",
-      "Bash(cargo build:*)"
+      "Bash(cargo build:*)",
+      "Bash(python -m pytest tools/ geometry/ -q)",
+      "Bash(python -m pytest -q)",
+      "Bash(wc -l jas/canvas/*.py jas_ocaml/lib/canvas/*.ml JasSwift/Sources/Canvas/*.swift jas_dioxus/src/canvas/*.rs jas/geometry/*.py jas_ocaml/lib/geometry/*.ml JasSwift/Sources/Geometry/*.swift jas_dioxus/src/geometry/*.rs)",
+      "Bash(wc -l jas_dioxus/src/document/*.rs jas/document/*.py jas_ocaml/lib/document/*.ml JasSwift/Sources/Document/*.swift)",
+      "Bash(find jas_dioxus -name \"*.rs\" -exec grep -l \"#\\\\[test\\\\]\\\\|#\\\\[cfg\\(test\\)\\\\]\" {} \\\\;)",
+      "Bash(PYTHONPATH=. python -m pytest -x)",
+      "Bash(PYTHONPATH=. python __main__.py)",
+      "Bash(ls /Users/jyh/projects/claude/jas/jas/*.py)",
+      "Bash(PYTHONPATH=. python jas_app.py)"
     ],
     "additionalDirectories": [
       "/tmp"

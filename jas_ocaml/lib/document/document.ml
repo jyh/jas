@@ -18,10 +18,71 @@ module PathSet = Set.Make(struct
   let compare = compare
 end)
 
+(** Sorted, de-duplicated list of control-point indices.
+
+    The wrapper enforces the invariant: the backing list is sorted
+    ascending and contains no duplicates. All constructors and
+    operations preserve it. *)
+module SortedCps = struct
+  type t = int list  (* sorted, unique *)
+
+  let empty : t = []
+
+  let from_list (xs : int list) : t =
+    List.sort_uniq compare xs
+
+  let single i : t = [i]
+
+  let mem i (s : t) = List.mem i s
+
+  let to_list (s : t) : int list = s
+
+  let length (s : t) = List.length s
+
+  let is_empty (s : t) = s = []
+
+  let insert i (s : t) : t =
+    if List.mem i s then s else from_list (i :: s)
+
+  let symmetric_difference (a : t) (b : t) : t =
+    let in_a_only = List.filter (fun x -> not (List.mem x b)) a in
+    let in_b_only = List.filter (fun x -> not (List.mem x a)) b in
+    from_list (in_a_only @ in_b_only)
+end
+
+(** Per-element selection kind: either the element is fully selected
+    (`SelKindAll`) or only a subset of its CPs are selected
+    (`SelKindPartial of SortedCps.t`). *)
+type selection_kind =
+  | SelKindAll
+  | SelKindPartial of SortedCps.t
+
+let selection_kind_contains kind i =
+  match kind with
+  | SelKindAll -> true
+  | SelKindPartial s -> SortedCps.mem i s
+
+let selection_kind_count kind ~total =
+  match kind with
+  | SelKindAll -> total
+  | SelKindPartial s -> SortedCps.length s
+
+let selection_kind_is_all kind ~total =
+  match kind with
+  | SelKindAll -> true
+  | SelKindPartial s -> SortedCps.length s = total
+
+let selection_kind_to_sorted kind ~total =
+  match kind with
+  | SelKindAll ->
+    let rec range i n = if i >= n then [] else i :: range (i + 1) n in
+    range 0 total
+  | SelKindPartial s -> SortedCps.to_list s
+
 (** Per-element selection state. *)
 type element_selection = {
   es_path : element_path;
-  es_control_points : int list;
+  es_kind : selection_kind;
 }
 
 (** A selection is a map from element path to its selection state. *)
@@ -42,8 +103,18 @@ type document = {
 let make_document ?(selected_layer = 0) ?(selection = PathMap.empty) layers =
   { layers; selected_layer; selection }
 
+(** Build a fully-selected entry for [path]. *)
+let element_selection_all path =
+  { es_path = path; es_kind = SelKindAll }
+
+(** Build a partial entry for [path] from a list of CP indices. *)
+let element_selection_partial path cps =
+  { es_path = path; es_kind = SelKindPartial (SortedCps.from_list cps) }
+
+(** Legacy constructor kept for compatibility with existing call sites. *)
 let make_element_selection ?(control_points = []) path =
-  { es_path = path; es_control_points = control_points }
+  if control_points = [] then element_selection_all path
+  else element_selection_partial path control_points
 
 (** Return the set of all element paths in the selection. *)
 let selected_paths sel =

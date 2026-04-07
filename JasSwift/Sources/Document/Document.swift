@@ -7,14 +7,152 @@ import Foundation
 /// `[0, 2, 1]` → layers[0].children[2] (a group), child 1.
 public typealias ElementPath = [Int]
 
-/// Per-element selection state: which element and which of its control points
-/// are selected.
+/// Sorted, de-duplicated collection of control-point indices.
+///
+/// Invariant: the backing array is sorted ascending and contains no
+/// duplicates. All constructors and mutators preserve it, so callers
+/// can rely on deterministic iteration order and binary-search
+/// membership checks.
+public struct SortedCps: Equatable, Hashable {
+    private var indices: [UInt16]
+
+    public init() { self.indices = [] }
+
+    /// Build a sorted-unique `SortedCps` from any sequence of `Int` CP indices.
+    public init<S: Sequence>(_ seq: S) where S.Element == Int {
+        var v = seq.map { UInt16($0) }
+        v.sort()
+        // Drop adjacent duplicates.
+        var dedup: [UInt16] = []
+        dedup.reserveCapacity(v.count)
+        for x in v {
+            if dedup.last != x { dedup.append(x) }
+        }
+        self.indices = dedup
+    }
+
+    public static func single(_ i: Int) -> SortedCps {
+        var s = SortedCps()
+        s.indices = [UInt16(i)]
+        return s
+    }
+
+    public func contains(_ i: Int) -> Bool {
+        let v = UInt16(i)
+        var lo = 0, hi = indices.count
+        while lo < hi {
+            let mid = (lo + hi) >> 1
+            if indices[mid] < v { lo = mid + 1 }
+            else if indices[mid] > v { hi = mid }
+            else { return true }
+        }
+        return false
+    }
+
+    public var count: Int { indices.count }
+    public var isEmpty: Bool { indices.isEmpty }
+
+    /// Iterate CP indices in ascending order.
+    public func toArray() -> [Int] { indices.map { Int($0) } }
+
+    /// Insert `i`; no-op if already present.
+    public mutating func insert(_ i: Int) {
+        let v = UInt16(i)
+        var lo = 0, hi = indices.count
+        while lo < hi {
+            let mid = (lo + hi) >> 1
+            if indices[mid] < v { lo = mid + 1 }
+            else if indices[mid] > v { hi = mid }
+            else { return }
+        }
+        indices.insert(v, at: lo)
+    }
+
+    /// Symmetric difference (XOR) of two sorted sets.
+    public func symmetricDifference(_ other: SortedCps) -> SortedCps {
+        var out: [UInt16] = []
+        out.reserveCapacity(indices.count + other.indices.count)
+        var a = 0, b = 0
+        while a < indices.count && b < other.indices.count {
+            if indices[a] < other.indices[b] { out.append(indices[a]); a += 1 }
+            else if indices[a] > other.indices[b] { out.append(other.indices[b]); b += 1 }
+            else { a += 1; b += 1 }
+        }
+        out.append(contentsOf: indices[a...].dropFirst(0))
+        out.append(contentsOf: other.indices[b...].dropFirst(0))
+        var result = SortedCps()
+        result.indices = out
+        return result
+    }
+}
+
+/// Per-element selection state: either the element is fully selected
+/// (`all`) or only a subset of its control points are selected
+/// (`partial`).
+public enum SelectionKind: Equatable, Hashable {
+    case all
+    case partial(SortedCps)
+
+    /// True if control-point index `i` is selected. `.all` contains
+    /// every index; `.partial(s)` checks against the sorted vector.
+    public func contains(_ i: Int) -> Bool {
+        switch self {
+        case .all: return true
+        case .partial(let s): return s.contains(i)
+        }
+    }
+
+    /// Number of selected CPs. The caller supplies `total` so `.all`
+    /// can answer without knowing it at construction time.
+    public func count(total: Int) -> Int {
+        switch self {
+        case .all: return total
+        case .partial(let s): return s.count
+        }
+    }
+
+    /// True when every CP of an element with `total` CPs is selected.
+    public func isAll(total: Int) -> Bool {
+        switch self {
+        case .all: return true
+        case .partial(let s): return s.count == total
+        }
+    }
+
+    /// Return an explicit set of selected CPs for an element with
+    /// `total` CPs.
+    public func toSorted(total: Int) -> SortedCps {
+        switch self {
+        case .all: return SortedCps(0..<total)
+        case .partial(let s): return s
+        }
+    }
+}
+
+/// Per-element selection entry: which element, and how it is selected.
+///
+/// Equality and hashing are by **path only**, so two `ElementSelection`
+/// values with the same path but different `kind`s are considered
+/// equal — `Selection` is effectively a path-keyed map.
 public struct ElementSelection: Equatable, Hashable {
     public let path: ElementPath
-    public let controlPoints: Set<Int>
+    public let kind: SelectionKind
 
-    public init(path: ElementPath, controlPoints: Set<Int> = []) {
-        self.path = path; self.controlPoints = controlPoints
+    public init(path: ElementPath, kind: SelectionKind = .all) {
+        self.path = path
+        self.kind = kind
+    }
+
+    /// Convenience: build an `.all` selection entry for `path`.
+    public static func all(_ path: ElementPath) -> ElementSelection {
+        ElementSelection(path: path, kind: .all)
+    }
+
+    /// Convenience: build a `.partial` selection entry for `path` from
+    /// any sequence of CP indices.
+    public static func partial<S: Sequence>(_ path: ElementPath, _ cps: S) -> ElementSelection
+    where S.Element == Int {
+        ElementSelection(path: path, kind: .partial(SortedCps(cps)))
     }
 
     // Hash/equality by path only so Selection behaves as a path-keyed collection
@@ -26,9 +164,9 @@ public struct ElementSelection: Equatable, Hashable {
         lhs.path == rhs.path
     }
 
-    /// Full equality including control points (for tests).
+    /// Full equality including selection kind (for tests).
     public func exactlyEquals(_ other: ElementSelection) -> Bool {
-        path == other.path && controlPoints == other.controlPoints
+        path == other.path && kind == other.kind
     }
 }
 

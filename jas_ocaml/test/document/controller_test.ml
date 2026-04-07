@@ -189,13 +189,15 @@ let () =
   run_test "select_control_point selects one CP" (fun () ->
     cp_ctrl#select_control_point [0; 0] 1;
     let cp_es = Jas.Document.PathMap.find [0; 0] cp_ctrl#document.Jas.Document.selection in
-    assert (cp_es.Jas.Document.es_control_points = [1]));
+    match cp_es.Jas.Document.es_kind with
+    | Jas.Document.SelKindPartial s ->
+      assert (Jas.Document.SortedCps.to_list s = [1])
+    | _ -> assert false);
 
-  run_test "default element selection has all control points" (fun () ->
+  run_test "default element selection is `all`" (fun () ->
     cp_ctrl#select_element [0; 0];
     let def_es = Jas.Document.PathMap.find [0; 0] cp_ctrl#document.Jas.Document.selection in
-    (* Line has 2 control points *)
-    assert (def_es.Jas.Document.es_control_points = [0; 1]));
+    assert (def_es.Jas.Document.es_kind = Jas.Document.SelKindAll));
 
   (* === Direct selection tests === *)
 
@@ -217,18 +219,21 @@ let () =
     let ds_rctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:ds_rdoc ()) () in
     ds_rctrl#direct_select_rect (-5.0) (-5.0) 10.0 10.0;
     let ds_res = Jas.Document.PathMap.find [0; 0] ds_rctrl#document.Jas.Document.selection in
-    assert (ds_res.Jas.Document.es_control_points = [0]));
+    match ds_res.Jas.Document.es_kind with
+    | Jas.Document.SelKindPartial s ->
+      assert (Jas.Document.SortedCps.to_list s = [0])
+    | _ -> assert false);
 
-  (* ds_dctrl is shared across two tests: "no CPs when none in rect" and "misses element" *)
+  (* ds_dctrl is shared across two tests *)
   let ds_dline = make_line 0.0 0.0 100.0 100.0 in
   let ds_dlayer = make_layer ~name:"L0" [|ds_dline|] in
   let ds_ddoc = Jas.Document.make_document [|ds_dlayer|] in
   let ds_dctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:ds_ddoc ()) () in
 
-  run_test "direct_select_rect: no CPs when none in rect" (fun () ->
+  run_test "direct_select_rect: picks whole element when body hit but no CPs" (fun () ->
     ds_dctrl#direct_select_rect 40.0 40.0 20.0 20.0;
     let ds_dres = Jas.Document.PathMap.find [0; 0] ds_dctrl#document.Jas.Document.selection in
-    assert (ds_dres.Jas.Document.es_control_points = []));
+    assert (ds_dres.Jas.Document.es_kind = Jas.Document.SelKindAll));
 
   run_test "direct_select_rect: misses element" (fun () ->
     ds_dctrl#direct_select_rect 200.0 200.0 10.0 10.0;
@@ -253,10 +258,10 @@ let () =
   let gs_rdoc = Jas.Document.make_document [|gs_rlayer|] in
   let gs_rctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:gs_rdoc ()) () in
 
-  run_test "group_select_rect: selects all control points" (fun () ->
+  run_test "group_select_rect: selects element as a whole" (fun () ->
     gs_rctrl#group_select_rect (-5.0) (-5.0) 10.0 10.0;
     let gs_res = Jas.Document.PathMap.find [0; 0] gs_rctrl#document.Jas.Document.selection in
-    assert (gs_res.Jas.Document.es_control_points = [0; 1; 2; 3]));
+    assert (gs_res.Jas.Document.es_kind = Jas.Document.SelKindAll));
 
   run_test "group_select_rect: misses element" (fun () ->
     gs_rctrl#group_select_rect 200.0 200.0 10.0 10.0;
@@ -283,6 +288,11 @@ let () =
     assert (Jas.Document.PathMap.mem [0; 1] ext_ctrl#document.Jas.Document.selection));
 
   run_test "extend direct select toggles CPs, not entire elements" (fun () ->
+    let kind_to_cps k =
+      match k with
+      | Jas.Document.SelKindPartial s -> Jas.Document.SortedCps.to_list s
+      | Jas.Document.SelKindAll -> assert false
+    in
     let cp_rect2 = make_rect 0.0 0.0 10.0 10.0 in
     let cp_layer2 = make_layer ~name:"L0" [|cp_rect2|] in
     let cp_doc2 = Jas.Document.make_document [|cp_layer2|] in
@@ -290,15 +300,15 @@ let () =
     (* Direct select top-left corner CP 0 at (0,0) *)
     cp_ctrl2#direct_select_rect (-1.0) (-1.0) 2.0 2.0;
     let es0 = Jas.Document.PathMap.find [0; 0] cp_ctrl2#document.Jas.Document.selection in
-    assert (List.sort compare es0.Jas.Document.es_control_points = [0]);
+    assert (kind_to_cps es0.Jas.Document.es_kind = [0]);
     (* Shift-direct-select top-right corner CP 1 at (10,0) — should add CP *)
     cp_ctrl2#direct_select_rect ~extend:true 9.0 (-1.0) 2.0 2.0;
     let es1 = Jas.Document.PathMap.find [0; 0] cp_ctrl2#document.Jas.Document.selection in
-    assert (List.sort compare es1.Jas.Document.es_control_points = [0; 1]);
+    assert (kind_to_cps es1.Jas.Document.es_kind = [0; 1]);
     (* Shift-direct-select top-left again — should remove CP 0, keep CP 1 *)
     cp_ctrl2#direct_select_rect ~extend:true (-1.0) (-1.0) 2.0 2.0;
     let es2 = Jas.Document.PathMap.find [0; 0] cp_ctrl2#document.Jas.Document.selection in
-    assert (List.sort compare es2.Jas.Document.es_control_points = [1]));
+    assert (kind_to_cps es2.Jas.Document.es_kind = [1]));
 
   (* === Control point positions tests === *)
 
@@ -322,7 +332,7 @@ let () =
 
   run_test "move line both CPs" (fun () ->
     let mv_line = make_line 10.0 20.0 30.0 40.0 in
-    let mv_line2 = Jas.Element.move_control_points mv_line [0; 1] 5.0 (-3.0) in
+    let mv_line2 = Jas.Element.move_control_points ~is_all:true mv_line [0; 1] 5.0 (-3.0) in
     (match mv_line2 with
      | Line { x1; y1; x2; y2; _ } ->
        assert (x1 = 15.0); assert (y1 = 17.0);
@@ -340,7 +350,7 @@ let () =
 
   run_test "move rect all CPs — translate" (fun () ->
     let mv_rect = make_rect 10.0 20.0 30.0 40.0 in
-    let mv_rect2 = Jas.Element.move_control_points mv_rect [0; 1; 2; 3] 5.0 (-5.0) in
+    let mv_rect2 = Jas.Element.move_control_points ~is_all:true mv_rect [0; 1; 2; 3] 5.0 (-5.0) in
     (match mv_rect2 with
      | Rect { x; y; width; height; _ } ->
        assert (x = 15.0); assert (y = 15.0);
@@ -349,7 +359,7 @@ let () =
 
   run_test "move circle all CPs — translate" (fun () ->
     let mv_circle = make_circle 50.0 50.0 10.0 in
-    let mv_circle2 = Jas.Element.move_control_points mv_circle [0; 1; 2; 3] 10.0 (-10.0) in
+    let mv_circle2 = Jas.Element.move_control_points ~is_all:true mv_circle [0; 1; 2; 3] 10.0 (-10.0) in
     (match mv_circle2 with
      | Circle { cx; cy; r; _ } ->
        assert (cx = 60.0); assert (cy = 40.0); assert (r = 10.0)
@@ -361,7 +371,7 @@ let () =
     let ms_line = make_line 10.0 20.0 30.0 40.0 in
     let ms_layer = make_layer [|ms_line|] in
     let ms_sel = Jas.Document.PathMap.singleton [0; 0]
-      (Jas.Document.make_element_selection ~control_points:[0; 1] [0; 0]) in
+      (Jas.Document.element_selection_all [0; 0]) in
     let ms_doc = Jas.Document.make_document ~selection:ms_sel [|ms_layer|] in
     let ms_model = Jas.Model.create ~document:ms_doc () in
     let ms_ctrl = Jas.Controller.create ~model:ms_model () in
@@ -377,7 +387,7 @@ let () =
     let ms_line2 = make_line 0.0 0.0 10.0 10.0 in
     let ms_layer2 = make_layer [|ms_line2|] in
     let ms_sel2 = Jas.Document.PathMap.singleton [0; 0]
-      (Jas.Document.make_element_selection ~control_points:[0] [0; 0]) in
+      (Jas.Document.element_selection_partial [0; 0] [0]) in
     let ms_doc2 = Jas.Document.make_document ~selection:ms_sel2 [|ms_layer2|] in
     let ms_model2 = Jas.Model.create ~document:ms_doc2 () in
     let ms_ctrl2 = Jas.Controller.create ~model:ms_model2 () in
@@ -394,7 +404,7 @@ let () =
   let cp_rect3 = make_rect 10.0 20.0 30.0 40.0 in
   let cp_layer3 = make_layer ~name:"L0" [|cp_rect3|] in
   let cp_sel3 = Jas.Document.PathMap.singleton [0; 0]
-    (Jas.Document.make_element_selection ~control_points:[0; 1; 2; 3] [0; 0]) in
+    (Jas.Document.element_selection_all [0; 0]) in
   let cp_doc3 = Jas.Document.make_document ~selection:cp_sel3 [|cp_layer3|] in
   let cp_model3 = Jas.Model.create ~document:cp_doc3 () in
   let cp_ctrl3 = Jas.Controller.create ~model:cp_model3 () in

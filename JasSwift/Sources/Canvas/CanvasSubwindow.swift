@@ -491,54 +491,71 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
 private let selectionColor = CGColor(red: 0, green: 0.47, blue: 1.0, alpha: 1.0)
 private let handleSize: CGFloat = handleDrawSize
 
+/// Whether to draw the blue bounding-box outline + corner-square
+/// handles around each selected element. Control-point handles for
+/// path/textPath anchors are still drawn regardless. Defaults to
+/// `false` so the selection bbox doesn't clutter the canvas; flip to
+/// `true` to get the old behavior back.
+public let showSelectionBBox: Bool = false
+
 /// Draw an element's selection overlay (outline + control handles).
-/// Internal so tools can call it via the ToolContext.
-func drawElementOverlay(_ ctx: CGContext, _ elem: Element, selectedCPs: Set<Int> = []) {
+/// Internal so tools can call it via the ToolContext. `kind` decides
+/// which control points are highlighted (and gets handle decoration);
+/// pass `.partial(SortedCps())` for "outline but no highlighted CPs".
+func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind = .partial(SortedCps())) {
+    // Text and TextPath selections never get the outline + corner
+    // squares — the editing overlay (caret, area-text bbox) is
+    // sufficient and the squares would clutter the rendered glyphs.
+    if case .text = elem { return }
+    if case .textPath = elem { return }
+
     ctx.setStrokeColor(selectionColor)
     ctx.setLineWidth(1.0)
     ctx.setLineDash(phase: 0, lengths: [])
 
-    switch elem {
-    case .line(let v):
-        ctx.move(to: CGPoint(x: v.x1, y: v.y1))
-        ctx.addLine(to: CGPoint(x: v.x2, y: v.y2))
-        ctx.strokePath()
-    case .rect(let v):
-        if v.rx > 0 || v.ry > 0 {
-            let path = CGPath(roundedRect: CGRect(x: v.x, y: v.y, width: v.width, height: v.height),
-                              cornerWidth: v.rx, cornerHeight: v.ry, transform: nil)
-            ctx.addPath(path)
-        } else {
-            ctx.addRect(CGRect(x: v.x, y: v.y, width: v.width, height: v.height))
+    // Gate the bounding-box outline for non-text elements behind the
+    // showSelectionBBox flag. Bezier handle decoration on path
+    // anchors is drawn unconditionally below.
+    if showSelectionBBox {
+        switch elem {
+        case .line(let v):
+            ctx.move(to: CGPoint(x: v.x1, y: v.y1))
+            ctx.addLine(to: CGPoint(x: v.x2, y: v.y2))
+            ctx.strokePath()
+        case .rect(let v):
+            if v.rx > 0 || v.ry > 0 {
+                let path = CGPath(roundedRect: CGRect(x: v.x, y: v.y, width: v.width, height: v.height),
+                                  cornerWidth: v.rx, cornerHeight: v.ry, transform: nil)
+                ctx.addPath(path)
+            } else {
+                ctx.addRect(CGRect(x: v.x, y: v.y, width: v.width, height: v.height))
+            }
+            ctx.strokePath()
+        case .circle(let v):
+            ctx.addEllipse(in: CGRect(x: v.cx - v.r, y: v.cy - v.r, width: v.r * 2, height: v.r * 2))
+            ctx.strokePath()
+        case .ellipse(let v):
+            ctx.addEllipse(in: CGRect(x: v.cx - v.rx, y: v.cy - v.ry, width: v.rx * 2, height: v.ry * 2))
+            ctx.strokePath()
+        case .polyline(let v):
+            guard !v.points.isEmpty else { break }
+            ctx.move(to: CGPoint(x: v.points[0].0, y: v.points[0].1))
+            for i in 1..<v.points.count { ctx.addLine(to: CGPoint(x: v.points[i].0, y: v.points[i].1)) }
+            ctx.strokePath()
+        case .polygon(let v):
+            guard !v.points.isEmpty else { break }
+            ctx.move(to: CGPoint(x: v.points[0].0, y: v.points[0].1))
+            for i in 1..<v.points.count { ctx.addLine(to: CGPoint(x: v.points[i].0, y: v.points[i].1)) }
+            ctx.closePath()
+            ctx.strokePath()
+        case .path(let v):
+            buildPath(ctx, v.d)
+            ctx.strokePath()
+        default:
+            let b = elem.bounds
+            ctx.addRect(CGRect(x: b.x, y: b.y, width: b.width, height: b.height))
+            ctx.strokePath()
         }
-        ctx.strokePath()
-    case .circle(let v):
-        ctx.addEllipse(in: CGRect(x: v.cx - v.r, y: v.cy - v.r, width: v.r * 2, height: v.r * 2))
-        ctx.strokePath()
-    case .ellipse(let v):
-        ctx.addEllipse(in: CGRect(x: v.cx - v.rx, y: v.cy - v.ry, width: v.rx * 2, height: v.ry * 2))
-        ctx.strokePath()
-    case .polyline(let v):
-        guard !v.points.isEmpty else { break }
-        ctx.move(to: CGPoint(x: v.points[0].0, y: v.points[0].1))
-        for i in 1..<v.points.count { ctx.addLine(to: CGPoint(x: v.points[i].0, y: v.points[i].1)) }
-        ctx.strokePath()
-    case .polygon(let v):
-        guard !v.points.isEmpty else { break }
-        ctx.move(to: CGPoint(x: v.points[0].0, y: v.points[0].1))
-        for i in 1..<v.points.count { ctx.addLine(to: CGPoint(x: v.points[i].0, y: v.points[i].1)) }
-        ctx.closePath()
-        ctx.strokePath()
-    case .path(let v):
-        buildPath(ctx, v.d)
-        ctx.strokePath()
-    case .textPath(let v):
-        buildPath(ctx, v.d)
-        ctx.strokePath()
-    default:
-        let b = elem.bounds
-        ctx.addRect(CGRect(x: b.x, y: b.y, width: b.width, height: b.height))
-        ctx.strokePath()
     }
 
     // Draw Bezier handles for selected path control points
@@ -549,9 +566,10 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, selectedCPs: Set<Int>
     case .textPath(let v): pathD = v.d
     default: pathD = nil
     }
-    if let d = pathD, !selectedCPs.isEmpty {
+    let cpHighlight = kind.toSorted(total: elem.controlPointCount).toArray()
+    if let d = pathD, !cpHighlight.isEmpty {
         let anchors = elem.controlPointPositions
-        for cpIdx in selectedCPs {
+        for cpIdx in cpHighlight {
             guard cpIdx < anchors.count else { continue }
             let (ax, ay) = anchors[cpIdx]
             let (hIn, hOut) = pathHandlePositions(d, anchorIdx: cpIdx)
@@ -586,18 +604,33 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, selectedCPs: Set<Int>
         }
     }
 
-    // Draw handles
-    let half = handleSize / 2
-    for (i, (px, py)) in elem.controlPointPositions.enumerated() {
-        let r = CGRect(x: px - half, y: py - half, width: handleSize, height: handleSize)
-        if selectedCPs.contains(i) {
-            ctx.setFillColor(selectionColor)
-        } else {
-            ctx.setFillColor(.white)
+    // Draw control-point squares.
+    //
+    // - For "CP-shape" elements (Line, Polyline, Polygon, Path) the
+    //   squares represent draggable per-vertex/anchor handles, so
+    //   they are always shown.
+    // - For "bbox-shape" elements (Rect, Circle, Ellipse, Group, ...)
+    //   the squares represent bounding-box corner handles. Drawing
+    //   them without the bbox itself is confusing, so they appear
+    //   only when `showSelectionBBox` is true.
+    let cpShape: Bool
+    switch elem {
+    case .line, .polyline, .polygon, .path: cpShape = true
+    default: cpShape = false
+    }
+    if cpShape || showSelectionBBox {
+        let half = handleSize / 2
+        for (i, (px, py)) in elem.controlPointPositions.enumerated() {
+            let r = CGRect(x: px - half, y: py - half, width: handleSize, height: handleSize)
+            if kind.contains(i) {
+                ctx.setFillColor(selectionColor)
+            } else {
+                ctx.setFillColor(.white)
+            }
+            ctx.fill(r)
+            ctx.setStrokeColor(selectionColor)
+            ctx.stroke(r)
         }
-        ctx.fill(r)
-        ctx.setStrokeColor(selectionColor)
-        ctx.stroke(r)
     }
 }
 
@@ -642,7 +675,7 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document) {
         case .group(let v): applyTransform(ctx, v.transform)
         case .layer(let v): applyTransform(ctx, v.transform)
         }
-        drawElementOverlay(ctx, node, selectedCPs: es.controlPoints)
+        drawElementOverlay(ctx, node, kind: es.kind)
         ctx.restoreGState()
     }
 }
@@ -920,7 +953,7 @@ class CanvasNSView: NSView {
             hitTestText: { [weak self] pos in self?.hitTestText(pos) },
             hitTestPathCurve: { [weak self] x, y in self?.hitTestPathCurve(x, y) },
             requestUpdate: { [weak self] in self?.needsDisplay = true },
-            drawElementOverlay: { ctx, elem, cps in drawElementOverlay(ctx, elem, selectedCPs: cps) }
+            drawElementOverlay: { ctx, elem, kind in drawElementOverlay(ctx, elem, kind: kind) }
         )
     }
 
@@ -958,7 +991,7 @@ class CanvasNSView: NSView {
             let elem = document.getElement(es.path)
             let cps = elem.controlPointPositions
             for (i, (px, py)) in cps.enumerated() {
-                if es.controlPoints.contains(i) {
+                if es.kind.contains(i) {
                     if abs(pos.x - px) <= hitRadius && abs(pos.y - py) <= hitRadius {
                         return true
                     }
@@ -972,7 +1005,7 @@ class CanvasNSView: NSView {
         for es in document.selection {
             let elem = document.getElement(es.path)
             guard case .path(let v) = elem else { continue }
-            for cpIdx in es.controlPoints {
+            for cpIdx in es.kind.toSorted(total: elem.controlPointCount).toArray() {
                 let (hIn, hOut) = pathHandlePositions(v.d, anchorIdx: cpIdx)
                 if let (hx, hy) = hIn {
                     if abs(pos.x - hx) <= hitRadius && abs(pos.y - hy) <= hitRadius {

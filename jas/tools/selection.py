@@ -10,7 +10,7 @@ from geometry.element import (
     Path, control_points as element_control_points, move_control_points,
     path_handle_positions, move_path_handle,
 )
-from tools.tool import CanvasTool, ToolContext
+from tools.tool import CanvasTool, ToolContext, DRAG_THRESHOLD
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
@@ -29,17 +29,27 @@ def _constrain_angle(sx: float, sy: float, ex: float, ey: float) -> tuple[float,
 
 class _SelectionState(Enum):
     IDLE = auto()
-    MARQUEE = auto()      # drag-to-select rectangle
-    MOVING = auto()       # drag-to-move selection
+    MARQUEE = auto()       # drag-to-select rectangle
+    PENDING_MOVE = auto()  # press on selectable, waiting for first drag
+    MOVING = auto()        # live drag (mutating per move)
 
 
 class SelectionToolBase(CanvasTool):
-    """Base class for selection tools with shared drag/move behavior."""
+    """Base class for selection tools with shared drag/move behavior.
+
+    Uses a live-edit model: the press records the start, and the
+    first `on_move` past `DRAG_THRESHOLD` snapshots once and
+    mutates the document per move. No dashed ghost — the actual
+    element re-renders on each frame.
+    """
 
     def __init__(self):
         self._state: _SelectionState = _SelectionState.IDLE
         self._drag_start: tuple[float, float] | None = None
-        self._drag_end: tuple[float, float] | None = None
+        self._marquee_cur: tuple[float, float] | None = None
+        self._last: tuple[float, float] | None = None
+        self._copied: bool = False
+        self._alt_held: bool = False
 
     def _select_rect(self, ctx: ToolContext, x: float, y: float,
                      w: float, h: float, extend: bool) -> None:
@@ -51,68 +61,85 @@ class SelectionToolBase(CanvasTool):
 
     def on_press(self, ctx: ToolContext, x: float, y: float,
                  shift: bool = False, alt: bool = False) -> None:
+        self._alt_held = alt
         if self._check_handle_hit(ctx, x, y):
             return
         self._drag_start = (x, y)
-        self._drag_end = (x, y)
         if ctx.hit_test_selection(x, y):
-            self._state = _SelectionState.MOVING
+            self._state = _SelectionState.PENDING_MOVE
         else:
             self._state = _SelectionState.MARQUEE
+            self._marquee_cur = (x, y)
 
     def on_move(self, ctx: ToolContext, x: float, y: float,
                 shift: bool = False, dragging: bool = False) -> None:
-        if self._state != _SelectionState.IDLE:
+        if self._state == _SelectionState.IDLE:
+            return
+        if self._state == _SelectionState.PENDING_MOVE:
+            sx, sy = self._drag_start
+            if math.hypot(x - sx, y - sy) > DRAG_THRESHOLD:
+                ctx.snapshot()
+                self._state = _SelectionState.MOVING
+                self._last = self._drag_start
+                self._copied = False
+                self.on_move(ctx, x, y, shift=shift, dragging=dragging)
+            return
+        if self._state == _SelectionState.MOVING:
+            lx, ly = self._last
+            fx, fy = x, y
             if shift:
-                x, y = _constrain_angle(*self._drag_start, x, y)
-            self._drag_end = (x, y)
+                fx, fy = _constrain_angle(lx, ly, x, y)
+            dx, dy = fx - lx, fy - ly
+            if self._alt_held and not self._copied:
+                ctx.controller.copy_selection(dx, dy)
+                self._copied = True
+            else:
+                ctx.controller.move_selection(dx, dy)
+            self._last = (fx, fy)
             ctx.request_update()
+            return
+        # MARQUEE
+        self._marquee_cur = (x, y)
+        ctx.request_update()
 
     def on_release(self, ctx: ToolContext, x: float, y: float,
                    shift: bool = False, alt: bool = False) -> None:
-        if self._state == _SelectionState.IDLE:
-            return
-        sx, sy = self._drag_start
-        if shift and self._state == _SelectionState.MOVING:
-            x, y = _constrain_angle(sx, sy, x, y)
         was_state = self._state
         self._state = _SelectionState.IDLE
+        start = self._drag_start
         self._drag_start = None
-        self._drag_end = None
+        self._marquee_cur = None
+        self._last = None
         if was_state == _SelectionState.MOVING:
-            dx, dy = x - sx, y - sy
-            if dx != 0 or dy != 0:
-                ctx.snapshot()
-                if alt:
-                    ctx.controller.copy_selection(dx, dy)
-                else:
-                    ctx.controller.move_selection(dx, dy)
             ctx.request_update()
             return
-        ctx.snapshot()
-        self._select_rect(ctx,
-                          min(sx, x), min(sy, y),
-                          abs(x - sx), abs(y - sy),
-                          extend=shift)
+        if was_state == _SelectionState.PENDING_MOVE:
+            # Press without significant movement on a selectable —
+            # selection already happened in on_press; nothing to do.
+            return
+        if was_state == _SelectionState.MARQUEE and start is not None:
+            sx, sy = start
+            rw = abs(x - sx)
+            rh = abs(y - sy)
+            if rw > 1.0 or rh > 1.0:
+                ctx.snapshot()
+                self._select_rect(ctx,
+                                  min(sx, x), min(sy, y),
+                                  rw, rh,
+                                  extend=shift)
+            elif not shift:
+                # Click on empty canvas — clear the selection.
+                ctx.controller.set_selection(frozenset())
 
     def draw_overlay(self, ctx: ToolContext, painter: QPainter) -> None:
         from PySide6.QtCore import QPointF, QRectF, Qt
         from PySide6.QtGui import QBrush, QColor, QPen
-        if self._state == _SelectionState.IDLE:
-            return
-        sx, sy = self._drag_start
-        ex, ey = self._drag_end
-        if self._state == _SelectionState.MOVING:
-            dx, dy = ex - sx, ey - sy
-            from canvas.canvas import _SELECTION_COLOR, _draw_element_overlay
-            for es in ctx.document.selection:
-                elem = ctx.document.get_element(es.path)
-                moved = move_control_points(elem, es.control_points, dx, dy)
-                pen = QPen(_SELECTION_COLOR, 1.0, Qt.PenStyle.DashLine)
-                painter.setPen(pen)
-                painter.setBrush(QBrush())
-                _draw_element_overlay(painter, moved, es.control_points)
-        else:
+        # Only the marquee needs an overlay; live moves render the
+        # updated element on the next frame.
+        if self._state == _SelectionState.MARQUEE \
+                and self._drag_start is not None and self._marquee_cur is not None:
+            sx, sy = self._drag_start
+            ex, ey = self._marquee_cur
             pen = QPen(QColor(100, 100, 100), 1.0, Qt.PenStyle.DashLine)
             painter.setPen(pen)
             painter.setBrush(QBrush())
@@ -132,9 +159,8 @@ class GroupSelectionTool(SelectionToolBase):
 class DirectSelectionTool(SelectionToolBase):
     def __init__(self):
         super().__init__()
-        self._handle_drag: tuple[tuple[int, ...], int, str] | None = None
-        self._handle_drag_start: tuple[float, float] | None = None
-        self._handle_drag_end: tuple[float, float] | None = None
+        # Live Bezier-handle drag. (path, anchor_idx, handle_type, last_x, last_y)
+        self._handle_drag: tuple[tuple[int, ...], int, str, float, float] | None = None
 
     def _select_rect(self, ctx, x, y, w, h, extend):
         ctx.controller.direct_select_rect(x, y, w, h, extend=extend)
@@ -142,51 +168,29 @@ class DirectSelectionTool(SelectionToolBase):
     def _check_handle_hit(self, ctx, x, y):
         hit = ctx.hit_test_handle(x, y)
         if hit is not None:
-            self._handle_drag = hit
-            self._handle_drag_start = (x, y)
-            self._handle_drag_end = (x, y)
+            ctx.snapshot()
+            path, anchor_idx, handle_type = hit
+            self._handle_drag = (path, anchor_idx, handle_type, x, y)
             return True
         return False
 
     def on_move(self, ctx, x, y, shift=False, dragging=False):
         if self._handle_drag is not None:
-            self._handle_drag_end = (x, y)
+            path, anchor_idx, handle_type, lx, ly = self._handle_drag
+            dx, dy = x - lx, y - ly
+            ctx.controller.move_path_handle(path, anchor_idx, handle_type, dx, dy)
+            self._handle_drag = (path, anchor_idx, handle_type, x, y)
             ctx.request_update()
             return
         super().on_move(ctx, x, y, shift, dragging)
 
     def on_release(self, ctx, x, y, shift=False, alt=False):
         if self._handle_drag is not None:
-            sx, sy = self._handle_drag_start
-            path, anchor_idx, handle_type = self._handle_drag
-            dx, dy = x - sx, y - sy
             self._handle_drag = None
-            self._handle_drag_start = None
-            self._handle_drag_end = None
-            if dx != 0 or dy != 0:
-                ctx.snapshot()
-                ctx.controller.move_path_handle(path, anchor_idx, handle_type, dx, dy)
             ctx.request_update()
             return
         super().on_release(ctx, x, y, shift, alt)
 
     def draw_overlay(self, ctx, painter):
-        if self._handle_drag is not None and self._handle_drag_start is not None and self._handle_drag_end is not None:
-            from PySide6.QtCore import Qt
-            from PySide6.QtGui import QBrush, QPen
-            from canvas.canvas import _SELECTION_COLOR, _draw_element_overlay
-            sx, sy = self._handle_drag_start
-            ex, ey = self._handle_drag_end
-            path, anchor_idx, handle_type = self._handle_drag
-            dx, dy = ex - sx, ey - sy
-            elem = ctx.document.get_element(path)
-            if isinstance(elem, Path):
-                moved = move_path_handle(elem, anchor_idx, handle_type, dx, dy)
-                for es in ctx.document.selection:
-                    if es.path == path:
-                        pen = QPen(_SELECTION_COLOR, 1.0, Qt.PenStyle.DashLine)
-                        painter.setPen(pen)
-                        painter.setBrush(QBrush())
-                        _draw_element_overlay(painter, moved, es.control_points)
-                        break
+        # Live edits — no ghost. Marquee overlay still comes from base.
         super().draw_overlay(ctx, painter)

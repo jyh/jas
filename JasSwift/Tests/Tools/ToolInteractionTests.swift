@@ -422,8 +422,8 @@ private func layerChildren(_ model: Model) -> [Element] {
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
     ))
     let layer = Layer(name: "L", children: [pathElem])
-    // Select the path with all CPs (indices 0 and 1)
-    let sel: Selection = [ElementSelection(path: [0, 0], controlPoints: [0, 1])]
+    // Select the path as a whole.
+    let sel: Selection = [ElementSelection.all([0, 0])]
     let doc = Document(layers: [layer], selection: sel)
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
@@ -436,10 +436,11 @@ private func layerChildren(_ model: Model) -> [Element] {
     } else {
         Issue.record("Expected Path element")
     }
-    // Selection should have shifted: {0,1} -> {0, 1(new), 2(was 1)}
+    // Selection was `.all` and should remain so — the new anchor is
+    // implicitly included.
     let es = model.document.getElementSelection([0, 0])
     #expect(es != nil)
-    #expect(es!.controlPoints == [0, 1, 2])
+    #expect(es!.kind == .all)
 }
 
 @Test func addAnchorPointSpaceRepositionsAnchor() {

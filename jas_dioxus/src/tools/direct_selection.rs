@@ -6,19 +6,24 @@
 //!   MOVING   — dragging selected control points
 //!   HANDLE   — dragging a Bezier handle
 
-use std::collections::HashSet;
-
 use web_sys::CanvasRenderingContext2d;
 
 use crate::document::controller::Controller;
 use crate::document::document::{ElementPath, ElementSelection};
 use crate::document::model::Model;
 use crate::geometry::element::{
-    control_points, move_control_points, move_path_handle, path_handle_positions, Element,
-    PathElem,
+    control_point_count, control_points, path_handle_positions, Element,
 };
 
-use super::tool::{CanvasTool, DRAG_THRESHOLD, HANDLE_DRAW_SIZE, HIT_RADIUS};
+use super::tool::{CanvasTool, DRAG_THRESHOLD, HIT_RADIUS};
+
+/// Look up the number of control points of the element at `path`.
+/// Returns 0 if the path doesn't resolve.
+fn elem_cp_count(model: &Model, path: &[usize]) -> usize {
+    model.document().get_element(&path.to_vec())
+        .map(control_point_count)
+        .unwrap_or(0)
+}
 
 #[derive(Debug, Clone, PartialEq)]
 enum State {
@@ -29,17 +34,26 @@ enum State {
         cur_x: f64,
         cur_y: f64,
     },
+    /// Moving control points. The press starts here in `pending`
+    /// state; the first `on_move` past `DRAG_THRESHOLD` snapshots the
+    /// document and mutates it live on every subsequent move (matching
+    /// the Selection tool — no dashed ghost). `last_x/last_y` are the
+    /// previous mouse position so each move applies a per-tick delta.
     Moving {
         start_x: f64,
         start_y: f64,
-        cur_x: f64,
-        cur_y: f64,
+        last_x: f64,
+        last_y: f64,
+        snapshotted: bool,
+        copied: bool,
     },
+    /// Dragging a Bezier handle. Same live-edit pattern as `Moving`.
     Handle {
         start_x: f64,
         start_y: f64,
-        cur_x: f64,
-        cur_y: f64,
+        last_x: f64,
+        last_y: f64,
+        snapshotted: bool,
         path: ElementPath,
         anchor_idx: usize,
         handle_type: String, // "in" or "out"
@@ -163,8 +177,9 @@ impl CanvasTool for DirectSelectionTool {
             self.state = State::Handle {
                 start_x: x,
                 start_y: y,
-                cur_x: x,
-                cur_y: y,
+                last_x: x,
+                last_y: y,
+                snapshotted: false,
                 path,
                 anchor_idx,
                 handle_type,
@@ -172,55 +187,76 @@ impl CanvasTool for DirectSelectionTool {
             return;
         }
 
-        // 2. Check if clicking on a selected element's control point or bounds
+        // 2. Check if clicking on any element's control point. This
+        // runs *before* the "clicking on a selected element's bounds"
+        // check below so that clicking on a different (unselected) CP
+        // of an already-selected element switches the selection to
+        // that CP rather than dragging the existing one.
+        //
+        // If the CP is already in the current selection, we fall
+        // through to step 3, which drags the whole existing selection.
+        if let Some((path, cp_idx)) = Self::hit_test_control_point(model, x, y) {
+            let already_selected = model.document().selection.iter()
+                .any(|es| es.path == path && es.kind.contains(cp_idx));
+            if !already_selected || shift {
+                model.snapshot();
+                if shift {
+                    // Toggle this CP in selection. The XOR is computed via
+                    // the per-CP `Vec<usize>` form so it works whether the
+                    // existing entry is `All` or `Partial`.
+                    use crate::document::document::{SelectionKind, SortedCps};
+                    let doc = model.document();
+                    let mut sel = doc.selection.clone();
+                    if let Some(pos) = sel.iter().position(|es| es.path == path) {
+                        let es = &sel[pos];
+                        let total = elem_cp_count(model, &path);
+                        let mut cps: Vec<usize> = es.kind.to_sorted(total).iter().collect();
+                        if let Some(p) = cps.iter().position(|&i| i == cp_idx) {
+                            cps.remove(p);
+                        } else {
+                            cps.push(cp_idx);
+                        }
+                        if cps.is_empty() {
+                            sel.remove(pos);
+                        } else {
+                            sel[pos] = ElementSelection {
+                                path: path.clone(),
+                                kind: SelectionKind::Partial(SortedCps::from_iter(cps)),
+                            };
+                        }
+                    } else {
+                        sel.push(ElementSelection::partial(path.clone(), [cp_idx]));
+                    }
+                    Controller::set_selection(model, sel);
+                } else {
+                    // Replace the selection with just this CP.
+                    Controller::select_control_point(model, &path, cp_idx);
+                }
+                self.state = State::Moving {
+                    start_x: x,
+                    start_y: y,
+                    last_x: x,
+                    last_y: y,
+                    snapshotted: false,
+                    copied: false,
+                };
+                return;
+            }
+            // CP is already in the selection — fall through to step 3
+            // so the press starts a drag of the whole existing
+            // selection (the typical "click an already-selected CP and
+            // move all selected CPs together" gesture).
+        }
+
+        // 3. Check if clicking on a selected element's control point or bounds
         if Self::hit_test_selected_bounds(model, x, y) {
             self.state = State::Moving {
                 start_x: x,
                 start_y: y,
-                cur_x: x,
-                cur_y: y,
-            };
-            return;
-        }
-
-        // 3. Check if clicking on any element's control point
-        if let Some((path, cp_idx)) = Self::hit_test_control_point(model, x, y) {
-            model.snapshot();
-            if shift {
-                // Toggle this CP in selection
-                let doc = model.document();
-                let mut sel = doc.selection.clone();
-                if let Some(pos) = sel.iter().position(|es| es.path == path) {
-                    let es = &sel[pos];
-                    let mut cps = es.control_points.clone();
-                    if cps.contains(&cp_idx) {
-                        cps.remove(&cp_idx);
-                    } else {
-                        cps.insert(cp_idx);
-                    }
-                    if cps.is_empty() {
-                        sel.remove(pos);
-                    } else {
-                        sel[pos] = ElementSelection {
-                            path: path.clone(),
-                            control_points: cps,
-                        };
-                    }
-                } else {
-                    sel.push(ElementSelection {
-                        path: path.clone(),
-                        control_points: [cp_idx].into_iter().collect(),
-                    });
-                }
-                Controller::set_selection(model, sel);
-            } else {
-                Controller::select_control_point(model, &path, cp_idx);
-            }
-            self.state = State::Moving {
-                start_x: x,
-                start_y: y,
-                cur_x: x,
-                cur_y: y,
+                last_x: x,
+                last_y: y,
+                snapshotted: false,
+                copied: false,
             };
             return;
         }
@@ -234,25 +270,68 @@ impl CanvasTool for DirectSelectionTool {
         };
     }
 
-    fn on_move(&mut self, _model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool, _dragging: bool) {
+    fn on_move(&mut self, model: &mut Model, x: f64, y: f64, _shift: bool, alt: bool, _dragging: bool) {
         match &mut self.state {
             State::Marquee { cur_x, cur_y, .. } => {
                 *cur_x = x;
                 *cur_y = y;
             }
-            State::Moving { cur_x, cur_y, .. } => {
-                *cur_x = x;
-                *cur_y = y;
+            State::Moving {
+                start_x,
+                start_y,
+                last_x,
+                last_y,
+                snapshotted,
+                copied,
+            } => {
+                let dist = ((x - *start_x).powi(2) + (y - *start_y).powi(2)).sqrt();
+                if !*snapshotted {
+                    if dist <= DRAG_THRESHOLD {
+                        return;
+                    }
+                    model.snapshot();
+                    *snapshotted = true;
+                }
+                let dx = x - *last_x;
+                let dy = y - *last_y;
+                if alt && !*copied {
+                    Controller::copy_selection(model, dx, dy);
+                    *copied = true;
+                } else {
+                    Controller::move_selection(model, dx, dy);
+                }
+                *last_x = x;
+                *last_y = y;
             }
-            State::Handle { cur_x, cur_y, .. } => {
-                *cur_x = x;
-                *cur_y = y;
+            State::Handle {
+                start_x,
+                start_y,
+                last_x,
+                last_y,
+                snapshotted,
+                path,
+                anchor_idx,
+                handle_type,
+            } => {
+                let dist = ((x - *start_x).powi(2) + (y - *start_y).powi(2)).sqrt();
+                if !*snapshotted {
+                    if dist <= 0.5 {
+                        return;
+                    }
+                    model.snapshot();
+                    *snapshotted = true;
+                }
+                let dx = x - *last_x;
+                let dy = y - *last_y;
+                Controller::move_path_handle(model, path, *anchor_idx, handle_type, dx, dy);
+                *last_x = x;
+                *last_y = y;
             }
             State::Idle => {}
         }
     }
 
-    fn on_release(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, alt: bool) {
+    fn on_release(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, _alt: bool) {
         let state = std::mem::replace(&mut self.state, State::Idle);
         match state {
             State::Marquee {
@@ -269,36 +348,9 @@ impl CanvasTool for DirectSelectionTool {
                     Controller::set_selection(model, Vec::new());
                 }
             }
-            State::Moving {
-                start_x, start_y, ..
-            } => {
-                let dx = x - start_x;
-                let dy = y - start_y;
-                if dx.abs() > 1.0 || dy.abs() > 1.0 {
-                    model.snapshot();
-                    if alt {
-                        Controller::copy_selection(model, dx, dy);
-                    } else {
-                        Controller::move_selection(model, dx, dy);
-                    }
-                }
-            }
-            State::Handle {
-                start_x,
-                start_y,
-                path,
-                anchor_idx,
-                handle_type,
-                ..
-            } => {
-                let dx = x - start_x;
-                let dy = y - start_y;
-                if dx.abs() > 0.5 || dy.abs() > 0.5 {
-                    model.snapshot();
-                    Controller::move_path_handle(model, &path, anchor_idx, &handle_type, dx, dy);
-                }
-            }
-            State::Idle => {}
+            // Moving and Handle: the live edit was applied incrementally
+            // in `on_move`, so the document is already up to date.
+            State::Moving { .. } | State::Handle { .. } | State::Idle => {}
         }
     }
 
@@ -332,107 +384,150 @@ impl CanvasTool for DirectSelectionTool {
             }
         }
 
-        // Draw state-specific overlays
-        match &self.state {
-            State::Marquee {
-                start_x,
-                start_y,
-                cur_x,
-                cur_y,
-            } => {
-                let rx = start_x.min(*cur_x);
-                let ry = start_y.min(*cur_y);
-                let rw = (cur_x - start_x).abs();
-                let rh = (cur_y - start_y).abs();
-                ctx.set_stroke_style_str("rgba(0, 120, 215, 0.8)");
-                ctx.set_fill_style_str("rgba(0, 120, 215, 0.1)");
-                ctx.set_line_width(1.0);
-                ctx.fill_rect(rx, ry, rw, rh);
-                ctx.stroke_rect(rx, ry, rw, rh);
-            }
-            State::Moving {
-                start_x,
-                start_y,
-                cur_x,
-                cur_y,
-            } => {
-                let dx = cur_x - start_x;
-                let dy = cur_y - start_y;
-                if dx.abs() > 1.0 || dy.abs() > 1.0 {
-                    // Draw ghost of moved elements
-                    ctx.set_stroke_style_str("rgba(0, 120, 215, 0.5)");
-                    ctx.set_line_width(1.0);
-                    ctx.set_line_dash(&js_sys::Array::of2(&4.0.into(), &4.0.into()).into())
-                        .ok();
-                    for es in &doc.selection {
-                        if let Some(elem) = doc.get_element(&es.path) {
-                            let moved = move_control_points(elem, &es.control_points, dx, dy);
-                            let (bx, by, bw, bh) = moved.bounds();
-                            ctx.stroke_rect(bx, by, bw, bh);
-                        }
-                    }
-                    ctx.set_line_dash(&js_sys::Array::new().into()).ok();
-                }
-            }
-            State::Handle {
-                start_x,
-                start_y,
-                cur_x,
-                cur_y,
-                path,
-                anchor_idx,
-                handle_type,
-            } => {
-                let dx = cur_x - start_x;
-                let dy = cur_y - start_y;
-                if let Some(Element::Path(pe)) = doc.get_element(path) {
-                    let moved_pe = move_path_handle(pe, *anchor_idx, handle_type, dx, dy);
-                    // Draw the preview path
-                    ctx.set_stroke_style_str("rgba(0, 120, 215, 0.5)");
-                    ctx.set_line_width(1.0);
-                    ctx.set_line_dash(&js_sys::Array::of2(&4.0.into(), &4.0.into()).into())
-                        .ok();
-                    ctx.begin_path();
-                    for cmd in &moved_pe.d {
-                        match cmd {
-                            crate::geometry::element::PathCommand::MoveTo { x, y } => {
-                                ctx.move_to(*x, *y)
-                            }
-                            crate::geometry::element::PathCommand::LineTo { x, y } => {
-                                ctx.line_to(*x, *y)
-                            }
-                            crate::geometry::element::PathCommand::CurveTo {
-                                x1, y1, x2, y2, x, y,
-                            } => ctx.bezier_curve_to(*x1, *y1, *x2, *y2, *x, *y),
-                            crate::geometry::element::PathCommand::ClosePath => ctx.close_path(),
-                            _ => {}
-                        }
-                    }
-                    ctx.stroke();
-                    ctx.set_line_dash(&js_sys::Array::new().into()).ok();
+        // The Marquee state is the only one that needs an overlay —
+        // the live edits in `Moving` and `Handle` already render the
+        // updated element on the next frame.
+        if let State::Marquee {
+            start_x,
+            start_y,
+            cur_x,
+            cur_y,
+        } = &self.state
+        {
+            let rx = start_x.min(*cur_x);
+            let ry = start_y.min(*cur_y);
+            let rw = (cur_x - start_x).abs();
+            let rh = (cur_y - start_y).abs();
+            ctx.set_stroke_style_str("rgba(0, 120, 215, 0.8)");
+            ctx.set_fill_style_str("rgba(0, 120, 215, 0.1)");
+            ctx.set_line_width(1.0);
+            ctx.fill_rect(rx, ry, rw, rh);
+            ctx.stroke_rect(rx, ry, rw, rh);
+        }
+    }
+}
 
-                    // Draw moved handle positions
-                    let anchors = control_points(&Element::Path(moved_pe.clone()));
-                    if let Some(&(ax, ay)) = anchors.get(*anchor_idx) {
-                        let (h_in, h_out) = path_handle_positions(&moved_pe.d, *anchor_idx);
-                        for h in [h_in, h_out].iter().flatten() {
-                            ctx.set_stroke_style_str("rgba(0,120,255,0.8)");
-                            ctx.set_line_width(1.0);
-                            ctx.begin_path();
-                            ctx.move_to(ax, ay);
-                            ctx.line_to(h.0, h.1);
-                            ctx.stroke();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::document::{Document, SelectionKind, SortedCps};
+    use crate::geometry::element::{
+        Color, CommonProps, Fill, LayerElem, PolygonElem, RectElem,
+    };
 
-                            ctx.set_fill_style_str("white");
-                            ctx.begin_path();
-                            ctx.arc(h.0, h.1, 3.0, 0.0, std::f64::consts::TAU).ok();
-                            ctx.fill();
-                            ctx.stroke();
-                        }
-                    }
-                }
+    fn make_model_with_rect() -> Model {
+        // Rect at (0, 0) 10x10. Control-point indices and positions:
+        //   0 = (0, 0)   top-left
+        //   1 = (10, 0)  top-right
+        //   2 = (10, 10) bottom-right
+        //   3 = (0, 10)  bottom-left
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            name: "L".to_string(),
+            children: vec![std::rc::Rc::new(rect)],
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: Vec::new(),
+        };
+        Model::new(doc, None)
+    }
+
+    #[test]
+    fn click_unselected_cp_switches_selection_and_moves_only_that_cp() {
+        // Regression: pressing on a different (unselected) CP of the
+        // already-selected element used to fall through to the
+        // "click on selected element bounds" branch and drag the
+        // existing partial selection. The new behavior is to switch
+        // the selection to the clicked CP and drag *that*.
+        let mut tool = DirectSelectionTool::new();
+        let mut model = make_model_with_rect();
+
+        // Pre-select only CP 0 (top-left at 0,0).
+        Controller::select_control_point(&mut model, &vec![0, 0], 0);
+        let es = model.document().selection.first().unwrap();
+        assert_eq!(es.kind, SelectionKind::Partial(SortedCps::from_iter([0])));
+
+        // Press on CP 1 (top-right at 10,0) and drag it down by 5.
+        // CP 1 is *not* in the selection — the press should switch
+        // the selection to {1} and move only CP 1.
+        tool.on_press(&mut model, 10.0, 0.0, false, false);
+        tool.on_move(&mut model, 10.0, 5.0, false, false, true);
+        tool.on_release(&mut model, 10.0, 5.0, false, false);
+
+        // Selection should now be {1}, not {0}.
+        let es = model.document().selection.first().unwrap();
+        assert_eq!(
+            es.kind,
+            SelectionKind::Partial(SortedCps::from_iter([1])),
+            "click on unselected CP should replace selection with that CP"
+        );
+
+        // The rect was converted to a polygon by the partial CP move.
+        // CP 1 (top-right) should now be at (10, 5); CP 0 (top-left)
+        // should be unchanged at (0, 0). If the old behavior had run,
+        // CP 0 — the previously selected CP — would have moved instead.
+        let layer = model.document().layers[0].children().unwrap();
+        let elem = &*layer[0];
+        match elem {
+            Element::Polygon(PolygonElem { points, .. }) => {
+                assert_eq!(points[0], (0.0, 0.0), "CP 0 should not have moved");
+                assert_eq!(points[1], (10.0, 5.0), "CP 1 should have moved to (10, 5)");
+                assert_eq!(points[2], (10.0, 10.0));
+                assert_eq!(points[3], (0.0, 10.0));
             }
-            State::Idle => {}
+            other => panic!("expected Polygon after partial-CP move, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn click_already_selected_cp_drags_whole_selection() {
+        // Companion to the test above: pressing on a CP that *is*
+        // already in the selection drags the whole existing selection,
+        // not just that CP. This is the "click an already-selected CP
+        // and move all selected CPs together" gesture.
+        let mut tool = DirectSelectionTool::new();
+        let mut model = make_model_with_rect();
+
+        // Select CPs 0 and 1 (both top corners).
+        Controller::set_selection(
+            &mut model,
+            vec![ElementSelection {
+                path: vec![0, 0],
+                kind: SelectionKind::Partial(SortedCps::from_iter([0, 1])),
+            }],
+        );
+
+        // Press on CP 0 — already in the selection — and drag down 5.
+        // Both CPs 0 and 1 should move together.
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        tool.on_move(&mut model, 0.0, 5.0, false, false, true);
+        tool.on_release(&mut model, 0.0, 5.0, false, false);
+
+        // Selection should still be {0, 1}.
+        let es = model.document().selection.first().unwrap();
+        assert_eq!(
+            es.kind,
+            SelectionKind::Partial(SortedCps::from_iter([0, 1])),
+            "press on already-selected CP must preserve the existing selection"
+        );
+
+        let layer = model.document().layers[0].children().unwrap();
+        match &*layer[0] {
+            Element::Polygon(PolygonElem { points, .. }) => {
+                assert_eq!(points[0], (0.0, 5.0), "CP 0 moved");
+                assert_eq!(points[1], (10.0, 5.0), "CP 1 also moved");
+                assert_eq!(points[2], (10.0, 10.0));
+                assert_eq!(points[3], (0.0, 10.0));
+            }
+            other => panic!("expected Polygon, got {:?}", other),
         }
     }
 }

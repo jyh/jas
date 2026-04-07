@@ -72,6 +72,10 @@ val long_press_ms : int
 (** Number of sides for the polygon tool. *)
 val polygon_sides : int
 
+(** Whether to draw the blue bounding-box outline + corner-square
+    handles around bbox-shape selected elements. *)
+val show_selection_bbox : bool
+
 (** Compute regular polygon vertices. *)
 val regular_polygon_points : float -> float -> float -> float -> int -> (float * float) list
 

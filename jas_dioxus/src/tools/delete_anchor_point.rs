@@ -243,13 +243,9 @@ impl CanvasTool for DeleteAnchorPointTool {
                     });
                     let mut doc = model.document().replace_element(&path, new_elem.clone());
                     // Select all remaining control points
-                    let cp_count = control_point_count(&new_elem);
-                    let all_cps: HashSet<usize> = (0..cp_count).collect();
+                    let _cp_count = control_point_count(&new_elem);
                     doc.selection.retain(|es| es.path != path);
-                    doc.selection.push(ElementSelection {
-                        path: path.clone(),
-                        control_points: all_cps,
-                    });
+                    doc.selection.push(ElementSelection::all(path.clone()));
                     model.set_document(doc);
                 }
                 None => {

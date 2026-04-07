@@ -212,10 +212,7 @@ impl TypeTool {
         } else {
             return;
         };
-        doc.selection = vec![ElementSelection {
-            path: path.clone(),
-            control_points: std::collections::HashSet::new(),
-        }];
+        doc.selection = vec![ElementSelection::all(path.clone())];
         model.set_document(doc);
         self.session = Some(TextEditSession::new(
             path,
@@ -687,16 +684,26 @@ impl CanvasTool for TypeTool {
             }
         }
 
-        // Editing-element bounding box. For area text we honor the
-        // explicit (width, height); for point text we derive both from
-        // the actual layout, but we re-measure the full line text
-        // (instead of summing per-glyph widths) so that kerning is
-        // accounted for and the overlay hugs the rendered glyphs.
-        ctx.set_stroke_style_str("rgba(0,120,215,0.6)");
-        ctx.set_line_width(1.0);
-        let (bw, bh) = if t.is_area_text() {
-            (t.width.max(1.0), t.height.max(1.0))
-        } else {
+        // Editing-element bounding box.
+        //
+        // - Area text always shows the box: the user explicitly
+        //   dragged out a `width × height` rectangle and needs to see
+        //   its extent while editing inside it.
+        // - Point text shows the box only when SHOW_SELECTION_BBOX is
+        //   true (the same flag that gates the selection-overlay
+        //   bounding boxes). The caret, selection highlight, and
+        //   rendered glyphs still draw regardless.
+        //
+        // For area text we honor the explicit (width, height); for
+        // point text we re-measure each line with the real font (so
+        // kerning is accounted for) and use the widest line.
+        if t.is_area_text() {
+            ctx.set_stroke_style_str("rgba(0,120,215,0.6)");
+            ctx.set_line_width(1.0);
+            ctx.stroke_rect(t.x, t.y, t.width.max(1.0), t.height.max(1.0));
+        } else if crate::canvas::render::SHOW_SELECTION_BBOX {
+            ctx.set_stroke_style_str("rgba(0,120,215,0.6)");
+            ctx.set_line_width(1.0);
             let font = font_string(&t.font_style, &t.font_weight, t.font_size, &t.font_family);
             let measure = make_measurer(&font, t.font_size);
             let chars: Vec<char> = t.content.chars().collect();
@@ -712,9 +719,10 @@ impl CanvasTool for TypeTool {
                 }
             }
             let h = (lay.lines.len() as f64) * t.font_size;
-            (max_w.max(t.font_size * 0.5), h.max(t.font_size))
-        };
-        ctx.stroke_rect(t.x, t.y, bw, bh);
+            let bw = max_w.max(t.font_size * 0.5);
+            let bh = h.max(t.font_size);
+            ctx.stroke_rect(t.x, t.y, bw, bh);
+        }
 
         // Caret (only if no selection or anchor==insertion, but we always
         // draw it at the insertion edge — even with a selection — so the

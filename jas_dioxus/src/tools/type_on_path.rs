@@ -194,10 +194,7 @@ impl TypeOnPathTool {
         } else {
             return;
         };
-        doc.selection = vec![ElementSelection {
-            path: path.clone(),
-            control_points: std::collections::HashSet::new(),
-        }];
+        doc.selection = vec![ElementSelection::all(path.clone())];
         model.set_document(doc);
         self.session = Some(TextEditSession::new(
             path,

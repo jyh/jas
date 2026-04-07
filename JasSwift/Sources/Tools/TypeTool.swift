@@ -368,24 +368,32 @@ class TypeTool: CanvasTool {
             }
         }
 
-        // Editing element bounding box. For area text use the explicit
-        // (width, height); for point text derive both from the actual
-        // layout (max line width × line count × fontSize) so the box
-        // hugs the real rendered glyphs instead of a stub estimate.
-        let bw: Double
-        let bh: Double
-        if tr.textWidth > 0 && tr.textHeight > 0 {
-            bw = max(tr.textWidth, 1)
-            bh = max(tr.textHeight, 1)
-        } else {
-            var maxW: Double = 0
-            for l in lay.lines { maxW = max(maxW, l.width) }
-            bw = max(maxW, tr.fontSize * 0.5)
-            bh = max(Double(lay.lines.count) * tr.fontSize, tr.fontSize)
+        // Editing element bounding box.
+        //
+        // - Area text always shows the box: the user explicitly
+        //   dragged out a (width, height) and needs to see its extent
+        //   while editing.
+        // - Point text shows the box only when `showSelectionBBox` is
+        //   true (the same flag the canvas selection overlay uses).
+        //   The caret, selection highlight, and rendered glyphs all
+        //   draw regardless.
+        let isArea = tr.textWidth > 0 && tr.textHeight > 0
+        if isArea || showSelectionBBox {
+            let bw: Double
+            let bh: Double
+            if isArea {
+                bw = max(tr.textWidth, 1)
+                bh = max(tr.textHeight, 1)
+            } else {
+                var maxW: Double = 0
+                for l in lay.lines { maxW = max(maxW, l.width) }
+                bw = max(maxW, tr.fontSize * 0.5)
+                bh = max(Double(lay.lines.count) * tr.fontSize, tr.fontSize)
+            }
+            cgCtx.setStrokeColor(CGColor(red: 0.0, green: 0.47, blue: 0.84, alpha: 0.6))
+            cgCtx.setLineWidth(1.0)
+            cgCtx.stroke(CGRect(x: originX, y: originY, width: bw, height: bh))
         }
-        cgCtx.setStrokeColor(CGColor(red: 0.0, green: 0.47, blue: 0.84, alpha: 0.6))
-        cgCtx.setLineWidth(1.0)
-        cgCtx.stroke(CGRect(x: originX, y: originY, width: bw, height: bh))
 
         // Caret
         if cursorVisible(s.blinkEpochMs) {

@@ -93,16 +93,12 @@ impl CanvasTool for SelectionTool {
             if shift {
                 // Toggle in selection
                 let doc = model.document();
-                let elem = doc.get_element(&path).unwrap();
+                let _elem = doc.get_element(&path).unwrap();
                 let mut sel = doc.selection.clone();
                 if let Some(pos) = sel.iter().position(|es| es.path == path) {
                     sel.remove(pos);
                 } else {
-                    let n = control_point_count(elem);
-                    sel.push(ElementSelection {
-                        path: path.clone(),
-                        control_points: (0..n).collect(),
-                    });
+                    sel.push(ElementSelection::all(path.clone()));
                 }
                 Controller::set_selection(model, sel);
             } else {
@@ -278,6 +274,37 @@ mod tests {
         tool.on_press(&mut model, 55.0, 55.0, false, false);
         tool.on_release(&mut model, 55.0, 55.0, false, false);
         assert!(!model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn click_on_empty_canvas_clears_selection() {
+        let mut tool = SelectionTool::new();
+        let mut model = make_model_with_rect();
+        // Pre-select the rect.
+        Controller::select_element(&mut model, &vec![0, 0]);
+        assert!(!model.document().selection.is_empty());
+        // Click (press+release at same point) on empty canvas, no shift.
+        tool.on_press(&mut model, 5.0, 5.0, false, false);
+        tool.on_release(&mut model, 5.0, 5.0, false, false);
+        assert!(
+            model.document().selection.is_empty(),
+            "selection should be cleared after click on empty canvas"
+        );
+    }
+
+    #[test]
+    fn shift_click_on_empty_canvas_keeps_selection() {
+        let mut tool = SelectionTool::new();
+        let mut model = make_model_with_rect();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        assert!(!model.document().selection.is_empty());
+        // Shift+click on empty canvas — selection is preserved.
+        tool.on_press(&mut model, 5.0, 5.0, true, false);
+        tool.on_release(&mut model, 5.0, 5.0, true, false);
+        assert!(
+            !model.document().selection.is_empty(),
+            "shift-click on empty canvas should not clear the selection"
+        );
     }
 
     #[test]

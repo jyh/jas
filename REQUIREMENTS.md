@@ -1,17 +1,4 @@
-# Jas prompts
-
-# Overall
-
-## Requirements
-
-Read the attached documents. Describe the requirements for an application like Adobe Illustrator. Give extensive detail. There should be enough detail to be able to reimplement an application like Illustrator solely from your requirements without any other instructions. Be specific, and be sure to cover everything.
-
-* Describe the parts of the UI like windows, toolbars, menus, etc.  
-* Describe keyboard shortcuts.  
-* Describe the important concepts, like objects, paths, layers, artboards, selections, masks, etc.  
-* Describe the objectives of the creative professional.
-
-## Response
+# Requirements
 
 The software must be built as a vector-based environment where all visual elements are defined by mathematical paths rather than pixels. This architecture ensures "resolution independence," allowing designs to scale from business cards to billboards without loss of quality .
 

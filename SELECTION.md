@@ -8,26 +8,54 @@ testing, and the operations that act on selections.
 ## Selection State
 
 The selection is part of the immutable Document. It is a set of
-**ElementSelection** entries, each pairing an element path with a set of
-selected control point indices:
+**ElementSelection** entries, each pairing an element path with a
+**SelectionKind**:
 
 ```
 ElementSelection
-  path:            ElementPath         position in the document tree
-  control_points:  set of int          which CPs are selected
+  path:  ElementPath         position in the document tree
+  kind:  SelectionKind       how the element is selected
+
+SelectionKind = All
+              | Partial(SortedCps)
 ```
 
 Equality and hashing are by **path only**. The collection behaves as a
-path-keyed map: each element path can appear at most once, but with a
-varying set of selected control points.
+path-keyed map: each element path can appear at most once.
 
-### What control_points means
+### SelectionKind: All vs Partial
 
-| control_points value | Meaning |
-|----------------------|---------|
-| All CPs for the element | Element is fully selected (typical case) |
-| A strict subset | Only those control points are selected (Direct Selection) |
-| Empty set | Element is part of a group selection but has no individual CPs highlighted |
+The two cases capture two distinct user intents:
+
+| kind | Meaning | How dragging behaves |
+|------|---------|----------------------|
+| `All` | The element is selected as a whole — bounding-box selection, the typical Selection Tool result. | Move/copy translates the primitive in place; Rect stays a Rect, Circle stays a Circle. |
+| `Partial(s)` | Only the listed control points are selected (Direct Selection). `s` is a `SortedCps` — sorted, de-duplicated, fixed-width. | Move drags only the listed CPs; Rect/Circle/Ellipse may convert to a Polygon when the resulting shape is no longer axis-aligned. |
+
+`Partial(SortedCps[0..n))` (every CP listed individually) is *not* the
+same as `All`: the user picked CPs one at a time and expects per-CP
+manipulation, not whole-element translation. Likewise an empty
+`Partial` is dropped from the selection map entirely (the element is
+no longer selected) — there is no "selected element with no CPs"
+state.
+
+### SortedCps invariants
+
+`SortedCps` is a sorted, de-duplicated container of control-point
+indices. It guarantees:
+
+- **Sorted ascending** — iteration is deterministic; `Set` ordering
+  ambiguity is gone.
+- **No duplicates** — by construction; the underlying type can no
+  longer represent two copies of the same index.
+- **Width-bounded** — `u16` (Rust), `UInt16` (Swift), or plain `int`
+  (Python/OCaml) — small enough to keep the common case (a handful of
+  CPs) tiny without sacrificing range.
+- **Cheap operations** — `contains` is binary search; `XOR`/union are
+  linear merges over two sorted runs.
+
+The wrapper exists in all four ports under the same name (`SortedCps`)
+with the same invariants and the same operations.
 
 ### Language representations
 
@@ -37,6 +65,12 @@ varying set of selected control points.
 | OCaml    | `PathMap.t` (map keyed by `int list`) | Structural equality |
 | Rust     | `Vec<ElementSelection>` | Ordered by insertion; uniqueness by convention |
 | Swift    | `Set<ElementSelection>` | Path-only `Hashable` conformance |
+
+In all four ports:
+- `SelectionKind` is a tagged sum type (Rust/Swift `enum`, OCaml
+  variant, Python tagged dataclass pair).
+- `ElementSelection.all(path)` and `.partial(path, cps)` are the
+  canonical constructors.
 
 ---
 
@@ -61,11 +95,11 @@ for each layer:
   for each child:
     if child is a Group:
       if any group-child intersects rect:
-        select the Group (all CPs)
-        select every child of the Group (all CPs)
+        select the Group (kind: All)
+        select every child of the Group (kind: All)
     else:
       if child intersects rect:
-        select child (all CPs)
+        select child (kind: All)
 ```
 
 This is the standard selection behavior. Dragging over a group selects the
@@ -86,7 +120,7 @@ recursive check(path, elem):
       check(path + child_index, child)
   else:
     if elem intersects rect:
-      select elem (all CPs)
+      select elem (kind: All)
 ```
 
 ### Direct Selection Tool
@@ -94,8 +128,8 @@ recursive check(path, elem):
 **Controller method:** `direct_select_rect(x, y, width, height, extend)`
 
 Selects individual **control points** rather than whole elements. Traverses
-into groups like Group Selection, but only the CPs that fall within the
-marquee rectangle are marked as selected.
+into groups like Group Selection. The element ends up in the selection
+in one of two ways:
 
 ```
 recursive check(path, elem):
@@ -103,10 +137,14 @@ recursive check(path, elem):
     for each child:
       check(path + child_index, child)
   else:
-    hit_cps = { i for i, (px, py) in control_points(elem)
-                if point_in_rect(px, py, rect) }
-    if hit_cps or elem intersects rect:
-      select elem with hit_cps
+    hit_cps = [ i for i, (px, py) in control_points(elem)
+                if point_in_rect(px, py, rect) ]
+    if hit_cps non-empty:
+      select elem with kind: Partial(SortedCps(hit_cps))
+    else if elem intersects rect:
+      # The marquee crosses the body but no CPs — pick the element
+      # as a whole.
+      select elem with kind: All
 ```
 
 This enables moving individual vertices of a polygon, individual anchor
@@ -122,24 +160,33 @@ opposite handle's distance from the anchor.
 
 ## Selection Toggle (Shift)
 
-When Shift is held, the new selection is **toggled** against the existing
-selection at the control-point level using symmetric difference:
+When Shift is held, the new selection is **XORed** against the
+existing selection per element:
 
 ```
 _toggle_selection(current, new):
   for elements only in current:  keep as-is
   for elements only in new:      keep as-is
   for elements in both:
-    toggled_cps = current.control_points XOR new.control_points
-    if toggled_cps is non-empty:  keep element with toggled_cps
-    if toggled_cps is empty:      remove element from selection
+    match (current.kind, new.kind):
+      (All,        All)        -> drop element            # cancel out
+      (Partial(a), Partial(b)) -> let xor = a XOR b
+                                  if xor non-empty: keep with Partial(xor)
+                                  else:             drop element
+      _                        -> keep with All           # mixed -> All
 ```
+
+The XOR for `Partial(a) XOR Partial(b)` is the set symmetric
+difference computed via the `SortedCps.symmetric_difference` linear
+merge.
 
 This means:
 - Shift-marquee over an unselected element adds it.
 - Shift-marquee over an already-selected element deselects it.
 - Shift-marquee over a partially selected element (Direct Selection)
   toggles individual control points.
+- Mixing All and Partial via Shift collapses to All for that
+  element — the rare case that doesn't appear in normal use.
 
 ---
 

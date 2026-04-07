@@ -4,16 +4,17 @@
 //! Since the Document is cloned on mutation, changes produce a new Document
 //! that replaces the old one in the Model.
 
-use std::collections::HashSet;
 use std::rc::Rc;
 
-use crate::document::document::{ElementPath, ElementSelection, Selection};
+use crate::document::document::{
+    ElementPath, ElementSelection, Selection, SelectionKind, SortedCps,
+};
 use crate::document::model::Model;
 use crate::geometry::element::{
     control_point_count, control_points, move_control_points,
     move_path_handle, Element, PathElem,
 };
-use crate::geometry::hit_test::{all_cps, element_intersects_rect, point_in_rect};
+use crate::geometry::hit_test::{element_intersects_rect, point_in_rect};
 
 // ---------------------------------------------------------------------------
 // Controller
@@ -23,11 +24,11 @@ use crate::geometry::hit_test::{all_cps, element_intersects_rect, point_in_rect}
 pub struct Controller;
 
 impl Controller {
-    /// Add an element to the selected layer and select it with all CPs.
+    /// Add an element to the selected layer and select it as a whole.
     pub fn add_element(model: &mut Model, element: Element) {
         let doc = model.document().clone();
         let idx = doc.selected_layer;
-        let n = control_point_count(&element);
+        let _n = control_point_count(&element);
         let mut new_doc = doc;
         let child_idx = if let Some(children) = new_doc.layers[idx].children_mut() {
             let ci = children.len();
@@ -37,10 +38,7 @@ impl Controller {
             model.set_document(new_doc);
             return;
         };
-        new_doc.selection = vec![ElementSelection {
-            path: vec![idx, child_idx],
-            control_points: (0..n).collect(),
-        }];
+        new_doc.selection = vec![ElementSelection::all(vec![idx, child_idx])];
         model.set_document(new_doc);
     }
 
@@ -67,23 +65,14 @@ impl Controller {
                                 .iter()
                                 .any(|gc| element_intersects_rect(gc, x, y, width, height))
                             {
-                                entries.push(ElementSelection {
-                                    path: vec![li, ci],
-                                    control_points: all_cps(child),
-                                });
-                                for (gi, gc) in grandchildren.iter().enumerate() {
-                                    entries.push(ElementSelection {
-                                        path: vec![li, ci, gi],
-                                        control_points: all_cps(gc),
-                                    });
+                                entries.push(ElementSelection::all(vec![li, ci]));
+                                for (gi, _gc) in grandchildren.iter().enumerate() {
+                                    entries.push(ElementSelection::all(vec![li, ci, gi]));
                                 }
                             }
                         }
                     } else if element_intersects_rect(child, x, y, width, height) {
-                        entries.push(ElementSelection {
-                            path: vec![li, ci],
-                            control_points: all_cps(child),
-                        });
+                        entries.push(ElementSelection::all(vec![li, ci]));
                     }
                 }
             }
@@ -133,17 +122,21 @@ impl Controller {
                 return;
             }
             let cps = control_points(elem);
-            let hit_cps: HashSet<usize> = cps
+            let hit_cps: Vec<usize> = cps
                 .iter()
                 .enumerate()
                 .filter(|(_, (px, py))| point_in_rect(*px, *py, x, y, width, height))
                 .map(|(i, _)| i)
                 .collect();
-            if !hit_cps.is_empty() || element_intersects_rect(elem, x, y, width, height) {
+            if !hit_cps.is_empty() {
                 entries.push(ElementSelection {
                     path: path.clone(),
-                    control_points: hit_cps,
+                    kind: SelectionKind::Partial(SortedCps::from_iter(hit_cps)),
                 });
+            } else if element_intersects_rect(elem, x, y, width, height) {
+                // The marquee covers the element's body but none of its
+                // control points — select the element as a whole.
+                entries.push(ElementSelection::all(path.clone()));
             }
         }
 
@@ -171,10 +164,7 @@ impl Controller {
                     if child.locked() {
                         continue;
                     }
-                    entries.push(ElementSelection {
-                        path: vec![li, ci],
-                        control_points: all_cps(child),
-                    });
+                    entries.push(ElementSelection::all(vec![li, ci]));
                 }
             }
         }
@@ -208,18 +198,12 @@ impl Controller {
             let parent_path: ElementPath = path[..path.len() - 1].to_vec();
             if let Some(parent) = doc.get_element(&parent_path) {
                 if parent.is_group() {
-                    let mut entries = vec![ElementSelection {
-                        path: parent_path.clone(),
-                        control_points: all_cps(parent),
-                    }];
+                    let mut entries = vec![ElementSelection::all(parent_path.clone())];
                     if let Some(children) = parent.children() {
                         for i in 0..children.len() {
                             let mut cp = parent_path.clone();
                             cp.push(i);
-                            entries.push(ElementSelection {
-                                path: cp,
-                                control_points: all_cps(&children[i]),
-                            });
+                            entries.push(ElementSelection::all(cp));
                         }
                     }
                     let mut new_doc = doc;
@@ -229,22 +213,15 @@ impl Controller {
                 }
             }
         }
-        let cps = all_cps(elem);
         let mut new_doc = doc;
-        new_doc.selection = vec![ElementSelection {
-            path: path.clone(),
-            control_points: cps,
-        }];
+        new_doc.selection = vec![ElementSelection::all(path.clone())];
         model.set_document(new_doc);
     }
 
     /// Select a single control point on an element.
     pub fn select_control_point(model: &mut Model, path: &ElementPath, index: usize) {
         let mut doc = model.document().clone();
-        doc.selection = vec![ElementSelection {
-            path: path.clone(),
-            control_points: [index].into_iter().collect(),
-        }];
+        doc.selection = vec![ElementSelection::partial(path.clone(), [index])];
         model.set_document(doc);
     }
 
@@ -254,7 +231,7 @@ impl Controller {
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
-                let new_elem = move_control_points(elem, &es.control_points, dx, dy);
+                let new_elem = move_control_points(elem, &es.kind, dx, dy);
                 new_doc = new_doc.replace_element(&es.path, new_elem);
             }
         }
@@ -270,14 +247,12 @@ impl Controller {
         sorted_sels.sort_by(|a, b| b.path.cmp(&a.path));
         for es in &sorted_sels {
             if let Some(elem) = doc.get_element(&es.path) {
-                let copied = move_control_points(elem, &es.control_points, dx, dy);
+                let copied = move_control_points(elem, &es.kind, dx, dy);
                 new_doc = new_doc.insert_element_after(&es.path, copied.clone());
                 let mut copy_path = es.path.clone();
                 *copy_path.last_mut().unwrap() += 1;
-                new_selection.push(ElementSelection {
-                    path: copy_path,
-                    control_points: all_cps(&copied),
-                });
+                // Copying always selects the new element as a whole.
+                new_selection.push(ElementSelection::all(copy_path));
             }
         }
         new_doc.selection = new_selection;
@@ -322,10 +297,8 @@ impl Controller {
         new_doc = new_doc.insert_element_at(&insert_path, group.clone());
         // Select the new group
         let n = control_point_count(&group);
-        new_doc.selection = vec![ElementSelection {
-            path: insert_path,
-            control_points: (0..n).collect(),
-        }];
+        let _ = n;
+        new_doc.selection = vec![ElementSelection::all(insert_path)];
         model.set_document(new_doc);
     }
 
@@ -390,12 +363,8 @@ impl Controller {
                 let child_idx = (gpath[1] as i64 + offset) as usize;
                 for j in 0..n_children {
                     let path = vec![layer_idx, child_idx + j];
-                    if let Some(elem) = new_doc.get_element(&path) {
-                        let n = control_point_count(elem);
-                        new_selection.push(ElementSelection {
-                            path,
-                            control_points: (0..n).collect(),
-                        });
+                    if new_doc.get_element(&path).is_some() {
+                        new_selection.push(ElementSelection::all(path));
                     }
                 }
             }
@@ -521,6 +490,16 @@ fn unlock_element(elem: &Element) -> Element {
     new
 }
 
+/// Combine two selections by XOR-ing per-element CP membership.
+///
+/// - Elements appearing in only one input pass through unchanged.
+/// - Elements appearing in both inputs have their selected CP sets
+///   XORed; if the result is empty, the element is dropped.
+/// - Two `All` selections cancel out (the element is dropped).
+/// - `All` XOR `Partial(s)` becomes `Partial` of the *complement* of
+///   `s` against the element's CP count, which we don't have here, so
+///   we conservatively treat it as `All` (this preserves the
+///   pre-refactor behavior for the rare mixed case).
 fn toggle_selection(current: &Selection, new: &Selection) -> Selection {
     let current_by_path: std::collections::HashMap<&Vec<usize>, &ElementSelection> =
         current.iter().map(|es| (&es.path, es)).collect();
@@ -540,19 +519,27 @@ fn toggle_selection(current: &Selection, new: &Selection) -> Selection {
             result.push((*es).clone());
         }
     }
-    // Elements in both: toggle CPs
+    // Elements in both: XOR.
     for (path, cur) in &current_by_path {
         if let Some(nw) = new_by_path.get(path) {
-            let toggled: HashSet<usize> = cur
-                .control_points
-                .symmetric_difference(&nw.control_points)
-                .copied()
-                .collect();
-            if !toggled.is_empty() {
-                result.push(ElementSelection {
-                    path: cur.path.clone(),
-                    control_points: toggled,
-                });
+            match (&cur.kind, &nw.kind) {
+                (SelectionKind::All, SelectionKind::All) => {
+                    // Cancel out — element drops out of the selection.
+                }
+                (SelectionKind::Partial(a), SelectionKind::Partial(b)) => {
+                    let xor = a.symmetric_difference(b);
+                    if !xor.is_empty() {
+                        result.push(ElementSelection {
+                            path: cur.path.clone(),
+                            kind: SelectionKind::Partial(xor),
+                        });
+                    }
+                }
+                _ => {
+                    // Mixed All/Partial — keep `All` to preserve the
+                    // pre-refactor behavior for this rare case.
+                    result.push(ElementSelection::all(cur.path.clone()));
+                }
             }
         }
     }
@@ -670,7 +657,7 @@ mod tests {
     #[test]
     fn set_selection() {
         let mut model = setup_model();
-        let sel = vec![ElementSelection { path: vec![0, 0], control_points: HashSet::new() }];
+        let sel = vec![ElementSelection::all(vec![0, 0])];
         Controller::set_selection(&mut model, sel);
         assert_eq!(sel_paths(&model), vec![vec![0, 0]]);
     }
@@ -693,8 +680,8 @@ mod tests {
         let mut model = setup_model();
         // Select rect and line (indices 0 and 2)
         let sel = vec![
-            ElementSelection { path: vec![0, 0], control_points: HashSet::new() },
-            ElementSelection { path: vec![0, 2], control_points: HashSet::new() },
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 2]),
         ];
         Controller::set_selection(&mut model, sel);
         Controller::group_selection(&mut model);

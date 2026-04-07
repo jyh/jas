@@ -561,18 +561,26 @@ let control_points = function
     let (bx, by, bw, bh) = bounds elem in
     [(bx, by); (bx +. bw, by); (bx +. bw, by +. bh); (bx, by +. bh)]
 
-let move_control_points elem indices dx dy =
+(** Move the listed control points by [(dx, dy)].
+
+    [is_all_for_total ~total] should be true when *every* CP of the
+    primitive is selected as part of an "element-as-a-whole" intent.
+    For primitives that can collapse to a translation (Rect, Circle,
+    Ellipse), the is-all case translates in place; otherwise the
+    primitive is converted to a Polygon (Rect) or its bounding-box
+    representation (Circle, Ellipse). *)
+let move_control_points ?(is_all = false) elem indices dx dy =
   let mem i = List.mem i indices in
   match elem with
   | Line r ->
     Line { r with
-      x1 = r.x1 +. (if mem 0 then dx else 0.0);
-      y1 = r.y1 +. (if mem 0 then dy else 0.0);
-      x2 = r.x2 +. (if mem 1 then dx else 0.0);
-      y2 = r.y2 +. (if mem 1 then dy else 0.0);
+      x1 = r.x1 +. (if is_all || mem 0 then dx else 0.0);
+      y1 = r.y1 +. (if is_all || mem 0 then dy else 0.0);
+      x2 = r.x2 +. (if is_all || mem 1 then dx else 0.0);
+      y2 = r.y2 +. (if is_all || mem 1 then dy else 0.0);
     }
   | Rect r ->
-    if List.length indices >= 4 then
+    if is_all then
       Rect { r with x = r.x +. dx; y = r.y +. dy }
     else
       let pts = [| (r.x, r.y); (r.x +. r.width, r.y);
@@ -587,7 +595,7 @@ let move_control_points elem indices dx dy =
                 opacity = r.opacity; transform = r.transform;
                 locked = r.locked }
   | Circle r ->
-    if List.length indices >= 4 then
+    if is_all then
       Circle { r with cx = r.cx +. dx; cy = r.cy +. dy }
     else
       let cps = [| (r.cx, r.cy -. r.r); (r.cx +. r.r, r.cy);
@@ -602,7 +610,7 @@ let move_control_points elem indices dx dy =
       let nr = max (abs_float (fst cps.(1) -. ncx)) (abs_float (snd cps.(0) -. ncy)) in
       Circle { r with cx = ncx; cy = ncy; r = nr }
   | Ellipse r ->
-    if List.length indices >= 4 then
+    if is_all then
       Ellipse { r with cx = r.cx +. dx; cy = r.cy +. dy }
     else
       let cps = [| (r.cx, r.cy -. r.ry); (r.cx +. r.rx, r.cy);

@@ -127,11 +127,6 @@ def segments_of_element(elem: Element) -> list[tuple[float, float, float, float]
             return []
 
 
-def all_cps(elem: Element) -> frozenset[int]:
-    """Return a frozenset of all control point indices for an element."""
-    return frozenset(range(control_point_count(elem)))
-
-
 def element_intersects_rect(elem: Element,
                             rx: float, ry: float, rw: float, rh: float) -> bool:
     """Test whether the visible drawn portion of elem intersects the selection rect.

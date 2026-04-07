@@ -234,11 +234,7 @@ fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64
                         for child in children {
                             let translated = translate_element(child, offset, offset);
                             let path = vec![idx, base + j];
-                            let n = control_point_count(&translated);
-                            new_selection.push(ElementSelection {
-                                path,
-                                control_points: (0..n).collect(),
-                            });
+                            new_selection.push(ElementSelection::all(path));
                             if let Some(layer_children) = doc.layers[idx].children_mut() {
                                 layer_children.push(Rc::new(translated));
                             }
@@ -268,11 +264,7 @@ fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64
         for (j, elem) in tab.clipboard.iter().enumerate() {
             let translated = translate_element(elem, offset, offset);
             let path = vec![idx, base + j];
-            let n = control_point_count(&translated);
-            new_selection.push(ElementSelection {
-                path,
-                control_points: (0..n).collect(),
-            });
+            new_selection.push(ElementSelection::all(path));
             if let Some(children) = doc.layers[idx].children_mut() {
                 children.push(Rc::new(translated));
             }

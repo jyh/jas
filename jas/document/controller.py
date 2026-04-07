@@ -7,14 +7,18 @@ that replaces the old one in the Model.
 
 from dataclasses import replace
 
-from document.document import Document, ElementPath, ElementSelection, Selection
+from document.document import (
+    Document, ElementPath, ElementSelection, Selection,
+    SelectionKind, _SelectionAll, _SelectionPartial,
+    selection_all, selection_partial,
+)
 from geometry.element import (
     Element, Group, Layer, Path,
     control_point_count, control_points, move_control_points,
     move_path_handle as _move_path_handle,
 )
 from geometry.hit_test import (
-    all_cps, element_intersects_rect, point_in_rect,
+    element_intersects_rect, point_in_rect,
 )
 from document.model import Model
 
@@ -64,19 +68,20 @@ class Controller:
         child_idx = len(layer.children)
         new_layer = replace(layer, children=layer.children + (element,))
         new_layers = doc.layers[:idx] + (new_layer,) + doc.layers[idx + 1:]
-        n = control_point_count(element)
-        es = ElementSelection(path=(idx, child_idx),
-                              control_points=frozenset(range(n)))
+        es = ElementSelection.all((idx, child_idx))
         self._model.document = replace(doc, layers=new_layers,
                                        selection=frozenset({es}))
 
     @staticmethod
     def _toggle_selection(current: Selection, new: Selection) -> Selection:
-        """Toggle at the control-point level.
+        """XOR two selections per element.
 
-        For elements only in one set, keep them as-is.
-        For elements in both sets, toggle individual control points
-        (symmetric difference).  If no CPs remain, remove the element.
+        - Elements appearing in only one input pass through unchanged.
+        - Two ``.all`` selections cancel out.
+        - Two ``.partial`` selections XOR their CP sets; an empty result
+          drops the element.
+        - Mixed ``.all``/``.partial`` collapses to ``.all`` (preserving
+          the pre-refactor behavior for this rare case).
         """
         current_by_path = {es.path: es for es in current}
         new_by_path = {es.path: es for es in new}
@@ -89,13 +94,21 @@ class Controller:
         for path, es in new_by_path.items():
             if path not in current_by_path:
                 result.add(es)
-        # Elements in both: toggle CPs
+        # Elements in both: XOR.
         for path in current_by_path.keys() & new_by_path.keys():
-            cur = current_by_path[path]
-            nw = new_by_path[path]
-            toggled_cps = cur.control_points ^ nw.control_points
-            if toggled_cps:
-                result.add(ElementSelection(path=path, control_points=toggled_cps))
+            cur = current_by_path[path].kind
+            nw = new_by_path[path].kind
+            if isinstance(cur, _SelectionAll) and isinstance(nw, _SelectionAll):
+                # Cancel out — element drops out of selection.
+                continue
+            if isinstance(cur, _SelectionPartial) and isinstance(nw, _SelectionPartial):
+                xor = cur.cps.symmetric_difference(nw.cps)
+                if xor:
+                    result.add(ElementSelection(
+                        path=path, kind=_SelectionPartial(xor)))
+            else:
+                # Mixed All/Partial — keep `.all`.
+                result.add(ElementSelection.all(path))
         return frozenset(result)
 
     def select_rect(self, x: float, y: float, width: float, height: float,
@@ -114,18 +127,12 @@ class Controller:
                 if isinstance(child, Group) and not isinstance(child, Layer):
                     if any(element_intersects_rect(gc, x, y, width, height)
                            for gc in child.children):
-                        entries.append(ElementSelection(
-                            path=(li, ci),
-                            control_points=all_cps(child)))
+                        entries.append(ElementSelection.all((li, ci)))
                         for gi, gc in enumerate(child.children):
-                            entries.append(ElementSelection(
-                                path=(li, ci, gi),
-                                control_points=all_cps(gc)))
+                            entries.append(ElementSelection.all((li, ci, gi)))
                 else:
                     if element_intersects_rect(child, x, y, width, height):
-                        entries.append(ElementSelection(
-                            path=(li, ci),
-                            control_points=all_cps(child)))
+                        entries.append(ElementSelection.all((li, ci)))
         new_sel = frozenset(entries)
         if extend:
             new_sel = self._toggle_selection(doc.selection, new_sel)
@@ -148,9 +155,7 @@ class Controller:
                     _check(path + (i,), child)
                 return
             if element_intersects_rect(elem, x, y, width, height):
-                entries.append(ElementSelection(
-                    path=path,
-                    control_points=all_cps(elem)))
+                entries.append(ElementSelection.all(path))
 
         for li, layer in enumerate(doc.layers):
             _check((li,), layer)
@@ -178,14 +183,16 @@ class Controller:
                 return
             # Find which control points are inside the rect
             cps = control_points(elem)
-            hit_cps = frozenset(
+            hit_cps = [
                 i for i, (px, py) in enumerate(cps)
                 if point_in_rect(px, py, x, y, width, height)
-            )
-            if hit_cps or element_intersects_rect(elem, x, y, width, height):
-                entries.append(ElementSelection(
-                    path=path,
-                    control_points=hit_cps))
+            ]
+            if hit_cps:
+                entries.append(ElementSelection.partial(path, hit_cps))
+            elif element_intersects_rect(elem, x, y, width, height):
+                # Marquee crosses the body but no CPs — pick the
+                # element as a whole.
+                entries.append(ElementSelection.all(path))
 
         for li, layer in enumerate(doc.layers):
             _check((li,), layer)
@@ -216,20 +223,15 @@ class Controller:
             parent_path = path[:-1]
             parent = doc.get_element(parent_path)
             if isinstance(parent, Group) and not isinstance(parent, Layer):
-                entries = [
-                    ElementSelection(path=parent_path,
-                                     control_points=all_cps(parent)),
-                ]
+                entries = [ElementSelection.all(parent_path)]
                 entries.extend(
-                    ElementSelection(path=parent_path + (i,),
-                                     control_points=all_cps(parent.children[i]))
+                    ElementSelection.all(parent_path + (i,))
                     for i in range(len(parent.children))
                 )
                 self._model.document = replace(doc, selection=frozenset(entries))
                 return
         self._model.document = replace(
-            doc, selection=frozenset({ElementSelection(path=path,
-                                                       control_points=all_cps(elem))})
+            doc, selection=frozenset({ElementSelection.all(path)})
         )
 
     def select_control_point(self, path: ElementPath, index: int) -> None:
@@ -241,10 +243,7 @@ class Controller:
             raise ValueError("Path must be non-empty")
         self._model.document = replace(
             self._model.document,
-            selection=frozenset({
-                ElementSelection(path=path,
-                                 control_points=frozenset({index}))
-            }),
+            selection=frozenset({ElementSelection.partial(path, [index])}),
         )
 
     def move_selection(self, dx: float, dy: float) -> None:
@@ -253,7 +252,7 @@ class Controller:
         new_doc = doc
         for es in doc.selection:
             elem = doc.get_element(es.path)
-            new_elem = move_control_points(elem, es.control_points, dx, dy)
+            new_elem = move_control_points(elem, es.kind, dx, dy)
             new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.document = new_doc
 
@@ -266,13 +265,12 @@ class Controller:
         sorted_sels = sorted(doc.selection, key=lambda es: es.path, reverse=True)
         for es in sorted_sels:
             elem = doc.get_element(es.path)
-            copied = move_control_points(elem, es.control_points, dx, dy)
+            copied = move_control_points(elem, es.kind, dx, dy)
             new_doc = new_doc.insert_element_after(es.path, copied)
             # The copy is at path with last index incremented by 1
             copy_path = es.path[:-1] + (es.path[-1] + 1,)
-            all_cps = frozenset(range(control_point_count(copied)))
-            new_selection.add(ElementSelection(path=copy_path,
-                                               control_points=all_cps))
+            # Copying always selects the new element as a whole.
+            new_selection.add(ElementSelection.all(copy_path))
         self._model.document = replace(
             new_doc, selection=frozenset(new_selection))
 
@@ -330,10 +328,7 @@ class Controller:
         new_selection: set[ElementSelection] = set()
         new_doc = replace(doc, layers=new_layers)
         for path, _ in unlocked_paths:
-            elem = new_doc.get_element(path)
-            n = control_point_count(elem)
-            new_selection.add(ElementSelection(
-                path=path, control_points=frozenset(range(n))))
+            new_selection.add(ElementSelection.all(path))
         self._model.document = replace(new_doc, selection=frozenset(new_selection))
 
     def move_path_handle(self, path: ElementPath, anchor_idx: int,

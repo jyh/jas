@@ -538,47 +538,72 @@ def _control_points(elem: Element) -> list[tuple[float, float]]:
     return element_control_points(elem)
 
 
-def _draw_element_overlay(painter: QPainter, elem: Element,
-                          selected_cps: frozenset[int] = frozenset()) -> None:
-    """Draw the selection overlay (blue outline + handles) for one element.
+# Whether to draw the blue bounding-box outline + corner-square
+# handles around bbox-shape selected elements (Rect, Circle, Ellipse,
+# Group, ...). Per-vertex/anchor handles for cp-shape elements
+# (Line, Polyline, Polygon, Path) and Bezier handle decoration on
+# Path anchors are drawn regardless. Text and TextPath selections
+# never draw the bbox or its corner squares — the editing overlay is
+# sufficient. Default: False (uncluttered canvas).
+SHOW_SELECTION_BBOX = False
 
-    selected_cps is the set of control-point indices that should be
-    filled blue; the rest are filled white.
+
+def _draw_element_overlay(painter: QPainter, elem: Element,
+                          kind=None) -> None:
+    """Draw the selection overlay (outline + control handles) for one element.
+
+    `kind` is a `SelectionKind`. CPs whose index is in `kind` are
+    filled blue; the rest are filled white. Defaults to "outline only,
+    no CPs highlighted".
     """
+    from document.document import (
+        selection_kind_contains as _contains,
+        selection_kind_to_sorted as _to_sorted,
+        selection_partial,
+    )
+    if kind is None:
+        kind = selection_partial([])
+
+    # Text selections show no outline or corner squares.
+    if isinstance(elem, (Text, TextPath)):
+        return
+
     pen = QPen(_SELECTION_COLOR, 1.0)
     painter.setPen(pen)
     painter.setBrush(QBrush())
 
-    match elem:
-        case Line(x1=x1, y1=y1, x2=x2, y2=y2):
-            painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
-        case Rect(x=x, y=y, width=w, height=h, rx=rx, ry=ry):
-            if rx > 0 or ry > 0:
-                painter.drawRoundedRect(QRectF(x, y, w, h), rx, ry)
-            else:
-                painter.drawRect(QRectF(x, y, w, h))
-        case Circle(cx=cx, cy=cy, r=r):
-            painter.drawEllipse(QPointF(cx, cy), r, r)
-        case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry):
-            painter.drawEllipse(QPointF(cx, cy), rx, ry)
-        case Polygon(points=points):
-            if points:
-                painter.drawPolygon([QPointF(x, y) for x, y in points])
-        case Polyline(points=points):
-            if points:
-                painter.drawPolyline([QPointF(x, y) for x, y in points])
-        case Path(d=d):
-            painter.drawPath(_build_path(d))
-        case TextPath(d=d):
-            painter.drawPath(_build_path(d))
-        case _:
-            bx, by, bw, bh = elem.bounds()
-            painter.drawRect(QRectF(bx, by, bw, bh))
+    cp_shape = isinstance(elem, (Line, Polyline, Polygon, Path))
 
-    # Draw Bezier handles for selected path control points
-    if isinstance(elem, (Path, TextPath)) and selected_cps:
+    if SHOW_SELECTION_BBOX:
+        match elem:
+            case Line(x1=x1, y1=y1, x2=x2, y2=y2):
+                painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+            case Rect(x=x, y=y, width=w, height=h, rx=rx, ry=ry):
+                if rx > 0 or ry > 0:
+                    painter.drawRoundedRect(QRectF(x, y, w, h), rx, ry)
+                else:
+                    painter.drawRect(QRectF(x, y, w, h))
+            case Circle(cx=cx, cy=cy, r=r):
+                painter.drawEllipse(QPointF(cx, cy), r, r)
+            case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry):
+                painter.drawEllipse(QPointF(cx, cy), rx, ry)
+            case Polygon(points=points):
+                if points:
+                    painter.drawPolygon([QPointF(x, y) for x, y in points])
+            case Polyline(points=points):
+                if points:
+                    painter.drawPolyline([QPointF(x, y) for x, y in points])
+            case Path(d=d):
+                painter.drawPath(_build_path(d))
+            case _:
+                bx, by, bw, bh = elem.bounds()
+                painter.drawRect(QRectF(bx, by, bw, bh))
+
+    # Draw Bezier handles for selected path control points (always).
+    cp_highlight = list(_to_sorted(kind, len(_control_points(elem))))
+    if isinstance(elem, Path) and cp_highlight:
         anchors = _control_points(elem)
-        for cp_idx in selected_cps:
+        for cp_idx in cp_highlight:
             if cp_idx >= len(anchors):
                 continue
             ax, ay = anchors[cp_idx]
@@ -594,15 +619,18 @@ def _draw_element_overlay(painter: QPainter, elem: Element,
                 painter.drawEllipse(QPointF(*h_out),
                                     _HANDLE_CIRCLE_RADIUS, _HANDLE_CIRCLE_RADIUS)
 
-    # Draw handles
-    half = _HANDLE_SIZE / 2
-    painter.setPen(QPen(_SELECTION_COLOR, 1.0))
-    for i, (px, py) in enumerate(_control_points(elem)):
-        if i in selected_cps:
-            painter.setBrush(QBrush(_SELECTION_COLOR))
-        else:
-            painter.setBrush(QBrush(QColor("white")))
-        painter.drawRect(QRectF(px - half, py - half, _HANDLE_SIZE, _HANDLE_SIZE))
+    # Draw control-point squares.
+    # cp-shape: always (per-vertex/anchor squares are draggable).
+    # bbox-shape: only when SHOW_SELECTION_BBOX (corner handles).
+    if cp_shape or SHOW_SELECTION_BBOX:
+        half = _HANDLE_SIZE / 2
+        painter.setPen(QPen(_SELECTION_COLOR, 1.0))
+        for i, (px, py) in enumerate(_control_points(elem)):
+            if _contains(kind, i):
+                painter.setBrush(QBrush(_SELECTION_COLOR))
+            else:
+                painter.setBrush(QBrush(QColor("white")))
+            painter.drawRect(QRectF(px - half, py - half, _HANDLE_SIZE, _HANDLE_SIZE))
 
 
 def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:
@@ -627,7 +655,7 @@ def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:
             node = node.children[path[-1]]
         # Apply the selected element's own transform
         _apply_transform(painter, getattr(node, 'transform', None))
-        _draw_element_overlay(painter, node, es.control_points)
+        _draw_element_overlay(painter, node, es.kind)
         painter.restore()
 
 
@@ -749,26 +777,30 @@ class CanvasWidget(QWidget):
         return QSize(int(self._bbox.width), int(self._bbox.height))
 
     def _hit_test_selection(self, x: float, y: float) -> bool:
+        from document.document import selection_kind_contains as _contains
         doc = self._model.document
         r = self._HIT_RADIUS
         for es in doc.selection:
             elem = doc.get_element(es.path)
             cps = element_control_points(elem)
             for i, (px, py) in enumerate(cps):
-                if i in es.control_points:
+                if _contains(es.kind, i):
                     if abs(x - px) <= r and abs(y - py) <= r:
                         return True
         return False
 
     def _hit_test_handle(self, x: float, y: float
                          ) -> tuple[tuple[int, ...], int, str] | None:
+        from document.document import selection_kind_to_sorted as _to_sorted
         doc = self._model.document
         r = self._HIT_RADIUS
         for es in doc.selection:
             elem = doc.get_element(es.path)
             if not isinstance(elem, Path):
                 continue
-            for cp_idx in es.control_points:
+            from geometry.element import control_point_count
+            n = control_point_count(elem)
+            for cp_idx in _to_sorted(es.kind, n):
                 h_in, h_out = path_handle_positions(elem.d, cp_idx)
                 if h_in is not None:
                     if abs(x - h_in[0]) <= r and abs(y - h_in[1]) <= r:

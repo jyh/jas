@@ -156,10 +156,9 @@ final class DeleteAnchorPointTool: CanvasTool {
                                             opacity: pe.opacity, transform: pe.transform,
                                             locked: pe.locked))
             var newDoc = doc.replaceElement(path, with: newElem)
-            // Select all remaining control points
-            let cpCount = newElem.controlPointCount
-            let allCps = Set(0..<cpCount)
-            let newSelEntry = ElementSelection(path: path, controlPoints: allCps)
+            // Select the element as a whole after the deletion.
+            let _ = newElem.controlPointCount
+            let newSelEntry = ElementSelection.all(path)
             var newSelection = newDoc.selection.filter { $0.path != path }
             newSelection.insert(newSelEntry)
             newDoc = Document(layers: newDoc.layers, selectedLayer: newDoc.selectedLayer,

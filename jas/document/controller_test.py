@@ -233,20 +233,21 @@ class SelectionControllerTest(absltest.TestCase):
         self.assertIn((0, 1, 1), paths)
 
     def test_select_control_point(self):
-        """Selecting a control point creates an ElementSelection with that cp."""
+        """Selecting a control point creates a partial ElementSelection."""
+        from document.document import _SelectionPartial, SortedCps
         self.ctrl.select_control_point((0, 0), 1)
         sel = self.ctrl.document.selection
         self.assertEqual(len(sel), 1)
         es = next(iter(sel))
         self.assertEqual(es.path, (0, 0))
-        self.assertEqual(es.control_points, frozenset({1}))
+        self.assertEqual(es.kind, _SelectionPartial(SortedCps.from_iter([1])))
 
     def test_default_element_selection_flags(self):
-        """select_element produces entries with all control points."""
+        """select_element produces an `.all` entry."""
+        from document.document import _SelectionAll
         self.ctrl.select_element((0, 0))
         es = next(iter(self.ctrl.document.selection))
-        # Rect has 4 control points
-        self.assertEqual(es.control_points, frozenset({0, 1, 2, 3}))
+        self.assertIsInstance(es.kind, _SelectionAll)
 
 
 class DirectSelectionControllerTest(absltest.TestCase):
@@ -265,6 +266,7 @@ class DirectSelectionControllerTest(absltest.TestCase):
 
     def test_direct_select_rect_selects_only_hit_cps(self):
         """Only control points inside the marquee are selected."""
+        from document.document import _SelectionPartial, SortedCps
         # Rect at (0,0) 100x100 — CPs are corners: (0,0), (100,0), (100,100), (0,100)
         rect = Rect(x=0, y=0, width=100, height=100)
         layer = Layer(children=(rect,), name="L0")
@@ -276,10 +278,11 @@ class DirectSelectionControllerTest(absltest.TestCase):
         es = next(iter(sel))
         self.assertEqual(es.path, (0, 0))
         # Only CP 0 (top-left at 0,0) should be selected
-        self.assertEqual(es.control_points, frozenset({0}))
+        self.assertEqual(es.kind, _SelectionPartial(SortedCps.from_iter([0])))
 
-    def test_direct_select_rect_no_cps_when_none_in_rect(self):
-        """If the element intersects but no CPs are in the rect, no CPs are selected."""
+    def test_direct_select_rect_picks_whole_element_when_body_hit_but_no_cps(self):
+        """If the marquee crosses the body but hits no CPs, the element is selected as a whole."""
+        from document.document import _SelectionAll
         # Line from (0,0) to (100,100) — CPs at endpoints
         line = Line(x1=0, y1=0, x2=100, y2=100)
         layer = Layer(children=(line,), name="L0")
@@ -289,7 +292,7 @@ class DirectSelectionControllerTest(absltest.TestCase):
         sel = ctrl.document.selection
         self.assertEqual(len(sel), 1)
         es = next(iter(sel))
-        self.assertEqual(es.control_points, frozenset())
+        self.assertIsInstance(es.kind, _SelectionAll)
 
     def test_direct_select_rect_misses_element(self):
         """Direct selection marquee outside all elements selects nothing."""
@@ -328,7 +331,8 @@ class GroupSelectionControllerTest(absltest.TestCase):
         self.assertNotIn((0, 0, 1), paths)
 
     def test_group_select_rect_selects_all_cps(self):
-        """Group selection always selects all control points."""
+        """Group selection always selects elements as a whole."""
+        from document.document import _SelectionAll
         rect = Rect(x=0, y=0, width=100, height=100)
         layer = Layer(children=(rect,), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))
@@ -336,7 +340,7 @@ class GroupSelectionControllerTest(absltest.TestCase):
         sel = ctrl.document.selection
         self.assertEqual(len(sel), 1)
         es = next(iter(sel))
-        self.assertEqual(es.control_points, frozenset({0, 1, 2, 3}))
+        self.assertIsInstance(es.kind, _SelectionAll)
 
     def test_group_select_rect_misses_element(self):
         """Group selection marquee outside all elements selects nothing."""
@@ -400,6 +404,7 @@ class ExtendSelectionTest(absltest.TestCase):
 
     def test_extend_direct_select_toggles_cps(self):
         """Shift-direct-select toggles control points, not entire elements."""
+        from document.document import _SelectionPartial, SortedCps
         # Rect at (0,0) size 10x10 — CPs at (0,0), (10,0), (10,10), (0,10)
         rect = Rect(x=0, y=0, width=10, height=10)
         layer = Layer(children=(rect,), name="L0")
@@ -408,17 +413,17 @@ class ExtendSelectionTest(absltest.TestCase):
         ctrl.direct_select_rect(-1, -1, 2, 2)
         sel = list(ctrl.document.selection)
         self.assertEqual(len(sel), 1)
-        self.assertEqual(sel[0].control_points, frozenset({0}))
+        self.assertEqual(sel[0].kind, _SelectionPartial(SortedCps.from_iter([0])))
         # Shift-direct-select top-right corner CP 1 at (10,0) — should add CP
         ctrl.direct_select_rect(9, -1, 2, 2, extend=True)
         sel = list(ctrl.document.selection)
         self.assertEqual(len(sel), 1)
-        self.assertEqual(sel[0].control_points, frozenset({0, 1}))
+        self.assertEqual(sel[0].kind, _SelectionPartial(SortedCps.from_iter([0, 1])))
         # Shift-direct-select top-left again — should remove CP 0, keep CP 1
         ctrl.direct_select_rect(-1, -1, 2, 2, extend=True)
         sel = list(ctrl.document.selection)
         self.assertEqual(len(sel), 1)
-        self.assertEqual(sel[0].control_points, frozenset({1}))
+        self.assertEqual(sel[0].kind, _SelectionPartial(SortedCps.from_iter([1])))
 
     def test_extend_group_select(self):
         """Shift works with group_select_rect too."""
@@ -456,27 +461,35 @@ class ControlPointPositionsTest(absltest.TestCase):
 
 class MoveControlPointsTest(absltest.TestCase):
 
+    def _all(self):
+        from document.document import selection_all
+        return selection_all()
+
+    def _partial(self, cps):
+        from document.document import selection_partial
+        return selection_partial(cps)
+
     def test_move_line_both_cps(self):
         line = Line(x1=10, y1=20, x2=30, y2=40)
-        moved = move_control_points(line, frozenset({0, 1}), 5.0, -3.0)
+        moved = move_control_points(line, self._all(), 5.0, -3.0)
         self.assertEqual((moved.x1, moved.y1), (15.0, 17.0))
         self.assertEqual((moved.x2, moved.y2), (35.0, 37.0))
 
     def test_move_line_one_cp(self):
         line = Line(x1=0, y1=0, x2=10, y2=10)
-        moved = move_control_points(line, frozenset({1}), 5.0, 5.0)
+        moved = move_control_points(line, self._partial([1]), 5.0, 5.0)
         self.assertEqual((moved.x1, moved.y1), (0, 0))
         self.assertEqual((moved.x2, moved.y2), (15.0, 15.0))
 
     def test_move_rect_all_cps(self):
         rect = Rect(x=10, y=20, width=30, height=40)
-        moved = move_control_points(rect, frozenset({0, 1, 2, 3}), 5.0, -5.0)
+        moved = move_control_points(rect, self._all(), 5.0, -5.0)
         self.assertEqual((moved.x, moved.y, moved.width, moved.height),
                          (15.0, 15.0, 30.0, 40.0))
 
     def test_move_rect_one_corner(self):
         rect = Rect(x=0, y=0, width=10, height=10)
-        moved = move_control_points(rect, frozenset({2}), 5.0, 5.0)
+        moved = move_control_points(rect, self._partial([2]), 5.0, 5.0)
         # CP2 is bottom-right (10,10) → (15,15); partial CP move converts to Polygon
         self.assertIsInstance(moved, Polygon)
         self.assertEqual(moved.points,
@@ -484,12 +497,12 @@ class MoveControlPointsTest(absltest.TestCase):
 
     def test_move_circle_all_cps(self):
         circle = Circle(cx=50, cy=50, r=10)
-        moved = move_control_points(circle, frozenset({0, 1, 2, 3}), 10.0, -10.0)
+        moved = move_control_points(circle, self._all(), 10.0, -10.0)
         self.assertEqual((moved.cx, moved.cy, moved.r), (60.0, 40.0, 10.0))
 
     def test_move_ellipse_all_cps(self):
         ellipse = Ellipse(cx=50, cy=50, rx=20, ry=10)
-        moved = move_control_points(ellipse, frozenset({0, 1, 2, 3}), -5.0, 5.0)
+        moved = move_control_points(ellipse, self._all(), -5.0, 5.0)
         self.assertEqual((moved.cx, moved.cy, moved.rx, moved.ry),
                          (45.0, 55.0, 20.0, 10.0))
 
@@ -500,8 +513,7 @@ class MoveSelectionTest(absltest.TestCase):
         line = Line(x1=10, y1=20, x2=30, y2=40)
         layer = Layer(children=(line,))
         doc = Document(layers=(layer,),
-                       selection=frozenset({ElementSelection(
-                           path=(0, 0), control_points=frozenset({0, 1}))}))
+                       selection=frozenset({ElementSelection.all((0, 0))}))
         ctrl = Controller(model=Model(document=doc))
         ctrl.move_selection(5.0, -3.0)
         moved = ctrl.document.layers[0].children[0]
@@ -512,8 +524,7 @@ class MoveSelectionTest(absltest.TestCase):
         rect = Rect(x=0, y=0, width=20, height=10)
         layer = Layer(children=(rect,))
         doc = Document(layers=(layer,),
-                       selection=frozenset({ElementSelection(
-                           path=(0, 0), control_points=frozenset({0, 1, 2, 3}))}))
+                       selection=frozenset({ElementSelection.all((0, 0))}))
         ctrl = Controller(model=Model(document=doc))
         ctrl.move_selection(10.0, 10.0)
         moved = ctrl.document.layers[0].children[0]
@@ -525,8 +536,7 @@ class MoveSelectionTest(absltest.TestCase):
         line = Line(x1=0, y1=0, x2=10, y2=10)
         layer = Layer(children=(line,))
         doc = Document(layers=(layer,),
-                       selection=frozenset({ElementSelection(
-                           path=(0, 0), control_points=frozenset({0}))}))
+                       selection=frozenset({ElementSelection.partial((0, 0), [0])}))
         ctrl = Controller(model=Model(document=doc))
         ctrl.move_selection(5.0, 5.0)
         moved = ctrl.document.layers[0].children[0]
@@ -539,8 +549,8 @@ class MoveSelectionTest(absltest.TestCase):
         layer = Layer(children=(line, rect))
         doc = Document(layers=(layer,),
                        selection=frozenset({
-                           ElementSelection(path=(0, 0), control_points=frozenset({0, 1})),
-                           ElementSelection(path=(0, 1), control_points=frozenset({0, 1, 2, 3})),
+                           ElementSelection.all((0, 0)),
+                           ElementSelection.all((0, 1)),
                        }))
         ctrl = Controller(model=Model(document=doc))
         ctrl.move_selection(3.0, 4.0)
@@ -554,14 +564,8 @@ class MoveSelectionTest(absltest.TestCase):
 class CopySelectionTest(absltest.TestCase):
 
     def _sel_all_cps(self, doc, *paths):
-        """Create selection with all control points for each path."""
-        sels = set()
-        for p in paths:
-            elem = doc.get_element(p)
-            n = control_point_count(elem)
-            sels.add(ElementSelection(path=p,
-                                      control_points=frozenset(range(n))))
-        return frozenset(sels)
+        """Create selection with each path selected as a whole."""
+        return frozenset(ElementSelection.all(p) for p in paths)
 
     def test_copy_selection_duplicates_element(self):
         """copy_selection creates a copy offset from the original."""

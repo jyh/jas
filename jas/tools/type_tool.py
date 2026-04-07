@@ -36,6 +36,14 @@ if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
 
 
+def _show_selection_bbox() -> bool:
+    """Indirection to canvas.SHOW_SELECTION_BBOX so the type tool can
+    consult it without a hard import-time dependency on the canvas
+    module (which transitively imports Qt)."""
+    from canvas.canvas import SHOW_SELECTION_BBOX
+    return SHOW_SELECTION_BBOX
+
+
 def _text_draw_bounds(t: Text) -> tuple[float, float, float, float]:
     """Bounding box used to hit-test a Text element. Both point and area
     text are treated as having `e.y` at their top edge."""
@@ -443,10 +451,16 @@ class TypeTool(CanvasTool):
                                         x_hi - x_lo, line.height))
 
         # Editing-element bounding box.
-        painter.setPen(QPen(QColor(0, 120, 215, 153), 1.0))
-        painter.setBrush(QBrush())
-        bx, by, bw, bh = _text_draw_bounds(t)
-        painter.drawRect(QRectF(bx, by, bw, bh))
+        # - Area text always shows the box (the user explicitly
+        #   dragged out a width × height and needs to see it).
+        # - Point text shows the box only when canvas.SHOW_SELECTION_BBOX
+        #   is true (the same flag the canvas selection overlay uses).
+        is_area = t.is_area_text
+        if is_area or _show_selection_bbox():
+            painter.setPen(QPen(QColor(0, 120, 215, 153), 1.0))
+            painter.setBrush(QBrush())
+            bx, by, bw, bh = _text_draw_bounds(t)
+            painter.drawRect(QRectF(bx, by, bw, bh))
 
         # Caret.
         if _cursor_visible(self.session.blink_epoch_ms):

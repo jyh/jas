@@ -115,15 +115,10 @@ impl AnchorPointTool {
         None
     }
 
-    fn select_all_cps(model: &mut Model, path: &[usize], elem: &Element) {
-        let cp_count = control_point_count(elem);
-        let all_cps: HashSet<usize> = (0..cp_count).collect();
+    fn select_all_cps(model: &mut Model, path: &[usize], _elem: &Element) {
         let mut doc = model.document().clone();
         doc.selection.retain(|es| es.path != path);
-        doc.selection.push(ElementSelection {
-            path: path.to_vec(),
-            control_points: all_cps,
-        });
+        doc.selection.push(ElementSelection::all(path.to_vec()));
         model.set_document(doc);
     }
 }
