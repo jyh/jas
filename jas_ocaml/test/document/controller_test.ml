@@ -230,14 +230,29 @@ let () =
   let ds_ddoc = Jas.Document.make_document [|ds_dlayer|] in
   let ds_dctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:ds_ddoc ()) () in
 
-  run_test "direct_select_rect: picks whole element when body hit but no CPs" (fun () ->
+  run_test "direct_select_rect: body hit without CPs yields SelKindPartial []" (fun () ->
+    (* The Direct Selection tool must not promote "body intersects"
+       to "every CP selected" (which is what [SelKindAll] would
+       mean). Instead the element is selected with an empty CP set. *)
     ds_dctrl#direct_select_rect 40.0 40.0 20.0 20.0;
     let ds_dres = Jas.Document.PathMap.find [0; 0] ds_dctrl#document.Jas.Document.selection in
-    assert (ds_dres.Jas.Document.es_kind = Jas.Document.SelKindAll));
+    match ds_dres.Jas.Document.es_kind with
+    | Jas.Document.SelKindPartial s ->
+      assert (Jas.Document.SortedCps.to_list s = [])
+    | _ -> assert false);
 
   run_test "direct_select_rect: misses element" (fun () ->
     ds_dctrl#direct_select_rect 200.0 200.0 10.0 10.0;
     assert (Jas.Document.PathMap.is_empty ds_dctrl#document.Jas.Document.selection));
+
+  run_test "move_control_points: Partial [] is a noop" (fun () ->
+    (* Without the guard, a Rect with [Partial []] would silently
+       convert to a Polygon at its original coordinates (because
+       is_all=false drops into the polygon-conversion branch with no
+       indices to move). *)
+    let r = make_rect 1.0 2.0 10.0 20.0 in
+    let moved = Jas.Element.move_control_points ~is_all:false r [] 5.0 7.0 in
+    assert (moved = r));
 
   (* === Group selection tests === *)
 

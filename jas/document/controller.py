@@ -77,9 +77,13 @@ class Controller:
         """XOR two selections per element.
 
         - Elements appearing in only one input pass through unchanged.
-        - Two ``.all`` selections cancel out.
-        - Two ``.partial`` selections XOR their CP sets; an empty result
-          drops the element.
+        - Two ``.all`` selections cancel out — this is the
+          element-level deselect gesture (shift-click an already-fully-
+          selected element).
+        - Two ``.partial`` selections XOR their CP sets. If the result
+          is empty the element stays selected as ``.partial(empty)`` —
+          "element selected, no individual CPs highlighted" — rather
+          than being dropped.
         - Mixed ``.all``/``.partial`` collapses to ``.all`` (preserving
           the pre-refactor behavior for this rare case).
         """
@@ -102,10 +106,10 @@ class Controller:
                 # Cancel out — element drops out of selection.
                 continue
             if isinstance(cur, _SelectionPartial) and isinstance(nw, _SelectionPartial):
+                # Keep the element even when the XOR is empty.
                 xor = cur.cps.symmetric_difference(nw.cps)
-                if xor:
-                    result.add(ElementSelection(
-                        path=path, kind=_SelectionPartial(xor)))
+                result.add(ElementSelection(
+                    path=path, kind=_SelectionPartial(xor)))
             else:
                 # Mixed All/Partial — keep `.all`.
                 result.add(ElementSelection.all(path))
@@ -190,9 +194,11 @@ class Controller:
             if hit_cps:
                 entries.append(ElementSelection.partial(path, hit_cps))
             elif element_intersects_rect(elem, x, y, width, height):
-                # Marquee crosses the body but no CPs — pick the
-                # element as a whole.
-                entries.append(ElementSelection.all(path))
+                # Marquee crosses the body but no CPs. Select the
+                # element with an empty CP set — the Direct Selection
+                # tool must not promote "body intersects" to "every CP
+                # selected" (which is what `.all` would mean).
+                entries.append(ElementSelection.partial(path, ()))
 
         for li, layer in enumerate(doc.layers):
             _check((li,), layer)

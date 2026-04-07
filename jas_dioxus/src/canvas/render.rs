@@ -4,7 +4,7 @@
 
 use web_sys::CanvasRenderingContext2d;
 
-use crate::document::document::Document;
+use crate::document::document::{Document, SelectionKind};
 use crate::geometry::element::*;
 use crate::geometry::measure::path_point_at_offset;
 use crate::tools::tool::HANDLE_DRAW_SIZE;
@@ -343,6 +343,22 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
 
             if cp_shape {
                 // Always draw the per-vertex/anchor squares.
+                let cps = control_points(elem);
+                let half = HANDLE_DRAW_SIZE / 2.0;
+                for (i, &(px, py)) in cps.iter().enumerate() {
+                    if es.kind.contains(i) {
+                        ctx.set_fill_style_str("rgba(0, 120, 215, 0.8)");
+                    } else {
+                        ctx.set_fill_style_str("white");
+                    }
+                    ctx.fill_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
+                    ctx.stroke_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
+                }
+            } else if matches!(es.kind, SelectionKind::Partial(_)) {
+                // Bbox-shape element with a Partial(*) selection
+                // (including Partial(empty)): draw the bbox-corner
+                // squares so the user can see the grabbable handles,
+                // colored per `contains(i)`. No bbox outline.
                 let cps = control_points(elem);
                 let half = HANDLE_DRAW_SIZE / 2.0;
                 for (i, &(px, py)) in cps.iter().enumerate() {

@@ -61,9 +61,14 @@ class controller ?(model = Model.create ()) () =
                                     Document.selection = sel }
 
     method private toggle_selection current new_sel =
-      (* XOR per element. Two `SelKindAll`s cancel out; two
-         `SelKindPartial`s XOR their CP sets; mixed kinds collapse to
-         `SelKindAll`. *)
+      (* XOR per element.
+         - Two [SelKindAll]s cancel out — element-level deselect
+           gesture (shift-click an already-fully-selected element).
+         - Two [SelKindPartial]s XOR their CP sets. If the result is
+           empty, the element stays selected as [SelKindPartial []]
+           ("element selected, no CPs highlighted") rather than being
+           dropped.
+         - Mixed kinds collapse to [SelKindAll]. *)
       Document.PathMap.merge (fun _path cur nw ->
         match cur, nw with
         | Some cur_es, Some new_es ->
@@ -72,9 +77,9 @@ class controller ?(model = Model.create ()) () =
              (* cancel out *)
              None
            | Document.SelKindPartial a, Document.SelKindPartial b ->
+             (* Keep the element even when the XOR is empty. *)
              let xor = Document.SortedCps.symmetric_difference a b in
-             if Document.SortedCps.is_empty xor then None
-             else Some { cur_es with Document.es_kind =
+             Some { cur_es with Document.es_kind =
                Document.SelKindPartial xor }
            | _ ->
              (* mixed All/Partial -> keep All *)
@@ -156,10 +161,13 @@ class controller ?(model = Model.create ()) () =
             selection := Document.PathMap.add path
               (Document.element_selection_partial path hit_cps) !selection
           else if element_intersects_rect elem x y w h then
-            (* Marquee crosses the body but no CPs — pick the element
-               as a whole. *)
+            (* Marquee crosses the body but no CPs. Select the
+               element with an empty CP set — the Direct Selection
+               tool must not promote "body intersects" to "every CP
+               selected" (which is what `element_selection_all` would
+               mean). *)
             selection := Document.PathMap.add path
-              (Document.element_selection_all path) !selection
+              (Document.element_selection_partial path []) !selection
       in
       Array.iteri (fun li layer -> check [li] layer) doc.Document.layers;
       let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in

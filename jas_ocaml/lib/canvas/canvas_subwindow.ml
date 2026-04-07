@@ -442,7 +442,7 @@ let show_selection_bbox = Canvas_tool.show_selection_bbox
 let control_points (elem : Element.element) =
   Element.control_points elem
 
-let draw_element_overlay cr (elem : Element.element) (selected_cps : int list) =
+let draw_element_overlay cr (elem : Element.element) ~(is_partial : bool) (selected_cps : int list) =
   let open Element in
   (* Text/Text_path selections never get the outline or corner squares. *)
   match elem with
@@ -529,8 +529,11 @@ let draw_element_overlay cr (elem : Element.element) (selected_cps : int list) =
    | _ -> ());
   (* Draw control-point squares.
      - cp-shape: always (per-vertex/anchor handles are draggable).
-     - bbox-shape: only when show_selection_bbox. *)
-  if cp_shape || show_selection_bbox then begin
+     - bbox-shape: when the kind is [Partial _] (including empty) —
+       the Direct Selection tool needs the user to see the grabbable
+       handles even when none are highlighted — or when
+       [show_selection_bbox] is on. *)
+  if cp_shape || is_partial || show_selection_bbox then begin
     let half = handle_size /. 2.0 in
     List.iteri (fun i (px, py) ->
       Cairo.rectangle cr (px -. half) (py -. half) ~w:handle_size ~h:handle_size;
@@ -586,7 +589,11 @@ let draw_selection_overlays cr (doc : Document.document) =
         | Element.Group { transform; _ } | Element.Layer { transform; _ } -> transform);
       let n = Element.control_point_count !node in
       let cps = Document.selection_kind_to_sorted es.es_kind ~total:n in
-      draw_element_overlay cr !node cps;
+      let is_partial = match es.es_kind with
+        | Document.SelKindPartial _ -> true
+        | Document.SelKindAll -> false
+      in
+      draw_element_overlay cr !node ~is_partial cps;
       Cairo.restore cr
   ) doc.selection
 

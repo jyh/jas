@@ -9,7 +9,7 @@ type tool_context = {
   hit_test_text : float -> float -> (int list * Element.element) option;
   hit_test_path_curve : float -> float -> (int list * Element.element) option;
   request_update : unit -> unit;
-  draw_element_overlay : Cairo.context -> Element.element -> int list -> unit;
+  draw_element_overlay : Cairo.context -> Element.element -> is_partial:bool -> int list -> unit;
 }
 
 (** Keyboard modifier state used by [on_key_event]. *)

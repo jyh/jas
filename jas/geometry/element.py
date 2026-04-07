@@ -540,12 +540,21 @@ def move_control_points(elem: Element, kind, dx: float, dy: float) -> Element:
     `.partial` (even if it covers every CP) converts to a polygon for
     Rect, since "I selected each CP individually" is a different intent
     than "I selected the element as a whole".
+
+    `.partial(empty)` — "element selected, no CPs highlighted" — is a
+    no-op: the element is returned unchanged. Without this guard, the
+    Rect/Circle/Ellipse branches would fall through to their polygon-
+    conversion path (since ``is_all`` is false for an empty set) and
+    silently change the primitive type without any visible movement.
     """
     from dataclasses import replace
     from document.document import (
+        _SelectionPartial,
         selection_kind_contains as _contains,
         selection_kind_is_all as _is_all,
     )
+    if isinstance(kind, _SelectionPartial) and len(kind.cps) == 0:
+        return elem
     match elem:
         case Line(x1=x1, y1=y1, x2=x2, y2=y2):
             return replace(elem,

@@ -71,10 +71,13 @@ public class Controller {
                 // Cancel out — element drops out of selection.
                 continue
             case (.partial(let a), .partial(let b)):
+                // Keep the element even when the XOR is empty — it
+                // stays selected as `.partial([])` ("element
+                // selected, no CPs highlighted"). `.all` XOR `.all`
+                // still drops above; that is the element-level
+                // deselect gesture.
                 let xor = a.symmetricDifference(b)
-                if !xor.isEmpty {
-                    result.insert(ElementSelection(path: path, kind: .partial(xor)))
-                }
+                result.insert(ElementSelection(path: path, kind: .partial(xor)))
             default:
                 // Mixed `.all` / `.partial` — keep `.all` to preserve
                 // pre-refactor behavior for this rare case.
@@ -155,9 +158,12 @@ public class Controller {
                 if !hitCPs.isEmpty {
                     selection.insert(ElementSelection.partial(path, hitCPs))
                 } else if elementIntersectsRect(elem, x, y, width, height) {
-                    // Marquee covers the body but no CPs — pick the
-                    // element as a whole.
-                    selection.insert(ElementSelection.all(path))
+                    // Marquee covers the body but no CPs. Select the
+                    // element with an empty CP set — the Direct
+                    // Selection tool must not promote "body
+                    // intersects" to "every CP selected" (which is
+                    // what `.all` would mean).
+                    selection.insert(ElementSelection.partial(path, []))
                 }
             }
         }

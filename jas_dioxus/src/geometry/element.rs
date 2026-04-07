@@ -859,12 +859,23 @@ use crate::document::document::SelectionKind;
 /// (preserving its primitive type). `Partial(s)` moves only the listed
 /// CPs and may convert Rect/Circle/Ellipse into a Polygon when the
 /// resulting shape is no longer axis-aligned.
+///
+/// `Partial(empty)` — "element selected, no CPs highlighted" — is a
+/// no-op: the element is returned unchanged. Without this guard, the
+/// Rect/Circle/Ellipse branches would fall through to their polygon-
+/// conversion path (since `is_all(n)` is false for an empty set) and
+/// silently change the primitive type without any visible movement.
 pub fn move_control_points(
     elem: &Element,
     kind: &SelectionKind,
     dx: f64,
     dy: f64,
 ) -> Element {
+    if let SelectionKind::Partial(s) = kind {
+        if s.is_empty() {
+            return elem.clone();
+        }
+    }
     match elem {
         Element::Line(e) => {
             let mut new = e.clone();
