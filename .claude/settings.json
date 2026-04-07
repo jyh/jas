@@ -35,7 +35,15 @@
       "Bash(rustup target:*)",
       "Bash(rustc --version)",
       "Bash(cargo check:*)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Read(//Users/jyh/.opam/5.4.1/lib/lablgtk3/**)",
+      "Bash(./cursor_test)",
+      "Bash(ocamlfind ocamlopt:*)",
+      "Bash(dune clean:*)",
+      "Bash(cargo build:*)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
     ]
   }
 }
