@@ -78,7 +78,7 @@ def _make_group_selection_cursor() -> QCursor:
 def _make_pen_cursor() -> QCursor:
     """Create a pen cursor from the reference PNG bitmap."""
     import os
-    png_path = os.path.join(os.path.dirname(__file__), "..", "..", "transcript", "icons", "pen tool.png")
+    png_path = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons", "pen tool.png")
     pixmap = QPixmap(png_path)
     if pixmap.isNull():
         return QCursor(Qt.CursorShape.CrossCursor)
@@ -90,7 +90,7 @@ def _make_pen_cursor() -> QCursor:
 def _make_add_anchor_point_cursor() -> QCursor:
     """Create an add anchor point cursor from the reference PNG bitmap."""
     import os
-    png_path = os.path.join(os.path.dirname(__file__), "..", "..", "transcript", "icons", "add anchor point.png")
+    png_path = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons", "add anchor point.png")
     pixmap = QPixmap(png_path)
     if pixmap.isNull():
         return QCursor(Qt.CursorShape.CrossCursor)
@@ -102,7 +102,7 @@ def _make_add_anchor_point_cursor() -> QCursor:
 def _make_delete_anchor_point_cursor() -> QCursor:
     """Create a delete anchor point cursor from the reference PNG bitmap."""
     import os
-    png_path = os.path.join(os.path.dirname(__file__), "..", "..", "transcript", "icons", "delete anchor point.png")
+    png_path = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons", "delete anchor point.png")
     pixmap = QPixmap(png_path)
     if pixmap.isNull():
         return QCursor(Qt.CursorShape.CrossCursor)
@@ -114,7 +114,7 @@ def _make_delete_anchor_point_cursor() -> QCursor:
 def _make_pencil_cursor() -> QCursor:
     """Create a pencil cursor from the reference PNG bitmap."""
     import os
-    png_path = os.path.join(os.path.dirname(__file__), "..", "..", "transcript", "icons", "pencil tool.png")
+    png_path = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons", "pencil tool.png")
     pixmap = QPixmap(png_path)
     if pixmap.isNull():
         return QCursor(Qt.CursorShape.CrossCursor)
@@ -126,7 +126,7 @@ def _make_pencil_cursor() -> QCursor:
 def _make_path_eraser_cursor() -> QCursor:
     """Create a path eraser cursor from the reference PNG bitmap."""
     import os
-    png_path = os.path.join(os.path.dirname(__file__), "..", "..", "transcript", "icons", "path eraser tool.png")
+    png_path = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons", "path eraser tool.png")
     pixmap = QPixmap(png_path)
     if pixmap.isNull():
         return QCursor(Qt.CursorShape.CrossCursor)

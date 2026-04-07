@@ -633,7 +633,7 @@ Bezier path.
 ### Cursor and icon
 
 The cursor and toolbar icon are rendered from a detailed SVG pencil image
-(`transcript/icons/pencil tool.svg`, viewBox 0 0 256 256). The pencil
+(`assets/icons/pencil tool.svg`, viewBox 0 0 256 256). The pencil
 points to the lower-left; the cursor hotspot is at the tip
 (approximately pixel 1,23 in a 24×24 cursor image). The toolbar icon is
 scaled to 28×28 using a `scale(28/256)` transform and rendered with three

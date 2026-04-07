@@ -767,9 +767,9 @@ class CanvasNSView: NSView {
         let bundle = Bundle.main
         let cwd = FileManager.default.currentDirectoryPath
         let candidates = [
-            (cwd as NSString).appendingPathComponent("transcript/icons/pen tool.png"),
-            (cwd as NSString).appendingPathComponent("../transcript/icons/pen tool.png"),
-            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("transcript/icons/pen tool.png") },
+            (cwd as NSString).appendingPathComponent("assets/icons/pen tool.png"),
+            (cwd as NSString).appendingPathComponent("../assets/icons/pen tool.png"),
+            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/pen tool.png") },
             bundle.path(forResource: "pen tool", ofType: "png"),
         ].compactMap { $0 }
         for path in candidates {
@@ -793,9 +793,9 @@ class CanvasNSView: NSView {
         let bundle = Bundle.main
         let cwd = FileManager.default.currentDirectoryPath
         let candidates = [
-            (cwd as NSString).appendingPathComponent("transcript/icons/add anchor point.png"),
-            (cwd as NSString).appendingPathComponent("../transcript/icons/add anchor point.png"),
-            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("transcript/icons/add anchor point.png") },
+            (cwd as NSString).appendingPathComponent("assets/icons/add anchor point.png"),
+            (cwd as NSString).appendingPathComponent("../assets/icons/add anchor point.png"),
+            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/add anchor point.png") },
             bundle.path(forResource: "add anchor point", ofType: "png"),
         ].compactMap { $0 }
         for path in candidates {
@@ -818,9 +818,9 @@ class CanvasNSView: NSView {
         let bundle = Bundle.main
         let cwd = FileManager.default.currentDirectoryPath
         let candidates = [
-            (cwd as NSString).appendingPathComponent("transcript/icons/pencil tool.png"),
-            (cwd as NSString).appendingPathComponent("../transcript/icons/pencil tool.png"),
-            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("transcript/icons/pencil tool.png") },
+            (cwd as NSString).appendingPathComponent("assets/icons/pencil tool.png"),
+            (cwd as NSString).appendingPathComponent("../assets/icons/pencil tool.png"),
+            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/pencil tool.png") },
             bundle.path(forResource: "pencil tool", ofType: "png"),
         ].compactMap { $0 }
         for path in candidates {
@@ -843,9 +843,9 @@ class CanvasNSView: NSView {
         let bundle = Bundle.main
         let cwd = FileManager.default.currentDirectoryPath
         let candidates = [
-            (cwd as NSString).appendingPathComponent("transcript/icons/path eraser tool.png"),
-            (cwd as NSString).appendingPathComponent("../transcript/icons/path eraser tool.png"),
-            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("transcript/icons/path eraser tool.png") },
+            (cwd as NSString).appendingPathComponent("assets/icons/path eraser tool.png"),
+            (cwd as NSString).appendingPathComponent("../assets/icons/path eraser tool.png"),
+            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/path eraser tool.png") },
             bundle.path(forResource: "path eraser tool", ofType: "png"),
         ].compactMap { $0 }
         for path in candidates {
@@ -868,9 +868,9 @@ class CanvasNSView: NSView {
         let bundle = Bundle.main
         let cwd = FileManager.default.currentDirectoryPath
         let candidates = [
-            (cwd as NSString).appendingPathComponent("transcript/icons/delete anchor point.png"),
-            (cwd as NSString).appendingPathComponent("../transcript/icons/delete anchor point.png"),
-            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("transcript/icons/delete anchor point.png") },
+            (cwd as NSString).appendingPathComponent("assets/icons/delete anchor point.png"),
+            (cwd as NSString).appendingPathComponent("../assets/icons/delete anchor point.png"),
+            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/delete anchor point.png") },
             bundle.path(forResource: "delete anchor point", ofType: "png"),
         ].compactMap { $0 }
         for path in candidates {

@@ -767,11 +767,11 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
     method private make_pen_cursor =
       (* Load pen cursor from reference PNG bitmap, scaled to 32x32 *)
       let candidates = [
-        "transcript/icons/pen tool.png";
-        "../transcript/icons/pen tool.png";
+        "assets/icons/pen tool.png";
+        "../assets/icons/pen tool.png";
         Filename.concat (Filename.concat
           (Filename.dirname Sys.executable_name) "..")
-          "transcript/icons/pen tool.png";
+          "assets/icons/pen tool.png";
       ] in
       let path = List.find Sys.file_exists candidates in
       let orig = GdkPixbuf.from_file path in
@@ -787,11 +787,11 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
 
     method private make_add_anchor_point_cursor =
       let candidates = [
-        "transcript/icons/add anchor point.png";
-        "../transcript/icons/add anchor point.png";
+        "assets/icons/add anchor point.png";
+        "../assets/icons/add anchor point.png";
         Filename.concat (Filename.concat
           (Filename.dirname Sys.executable_name) "..")
-          "transcript/icons/add anchor point.png";
+          "assets/icons/add anchor point.png";
       ] in
       let path = List.find Sys.file_exists candidates in
       let orig = GdkPixbuf.from_file path in
@@ -807,11 +807,11 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
 
     method private make_pencil_cursor =
       let candidates = [
-        "transcript/icons/pencil tool.png";
-        "../transcript/icons/pencil tool.png";
+        "assets/icons/pencil tool.png";
+        "../assets/icons/pencil tool.png";
         Filename.concat (Filename.concat
           (Filename.dirname Sys.executable_name) "..")
-          "transcript/icons/pencil tool.png";
+          "assets/icons/pencil tool.png";
       ] in
       let path = List.find Sys.file_exists candidates in
       let orig = GdkPixbuf.from_file path in
@@ -827,11 +827,11 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
 
     method private make_path_eraser_cursor =
       let candidates = [
-        "transcript/icons/path eraser tool.png";
-        "../transcript/icons/path eraser tool.png";
+        "assets/icons/path eraser tool.png";
+        "../assets/icons/path eraser tool.png";
         Filename.concat (Filename.concat
           (Filename.dirname Sys.executable_name) "..")
-          "transcript/icons/path eraser tool.png";
+          "assets/icons/path eraser tool.png";
       ] in
       let path = List.find Sys.file_exists candidates in
       let orig = GdkPixbuf.from_file path in
