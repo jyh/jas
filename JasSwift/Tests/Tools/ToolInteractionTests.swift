@@ -786,3 +786,55 @@ private func makeClosedPath() -> Element {
         }
     }
 }
+
+// MARK: - Type tool tests
+
+@Test func typeToolDragCreatesAreaText() {
+    let tool = TypeTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    tool.onMove(ctx, x: 60, y: 70, shift: false, dragging: true)
+    tool.onRelease(ctx, x: 110, y: 80, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 1)
+    if case .text(let t) = children[0] {
+        #expect(abs(t.x - 10.0) < 0.01)
+        #expect(abs(t.y - 20.0) < 0.01)
+        #expect(t.width > 0.0)
+        #expect(t.height > 0.0)
+    } else {
+        Issue.record("expected text element")
+    }
+}
+
+@Test func typeToolClickCreatesPointText() {
+    let tool = TypeTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 50, y: 60, shift: false, alt: false)
+    tool.onRelease(ctx, x: 50, y: 60, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 1)
+    if case .text(let t) = children[0] {
+        #expect(abs(t.x - 50.0) < 0.01)
+        #expect(abs(t.y - 60.0) < 0.01)
+    } else {
+        Issue.record("expected text element")
+    }
+}
+
+@Test func typeToolTinyDragTreatedAsClick() {
+    let tool = TypeTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 5, y: 5, shift: false, alt: false)
+    tool.onRelease(ctx, x: 6, y: 6, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 1)
+}
+
+@Test func typeToolMoveWithoutPressIsNoop() {
+    let tool = TypeTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onMove(ctx, x: 100, y: 100, shift: false, dragging: false)
+    let children = layerChildren(model)
+    #expect(children.isEmpty)
+}

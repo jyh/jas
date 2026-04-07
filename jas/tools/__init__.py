@@ -11,7 +11,7 @@ from tools.delete_anchor_point import DeleteAnchorPointTool
 from tools.pencil import PencilTool
 from tools.path_eraser import PathEraserTool
 from tools.smooth import SmoothTool
-from tools.text import TextTool
+from tools.type_tool import TypeTool
 from tools.text_path import TextPathTool
 
 
@@ -27,7 +27,7 @@ def create_tools() -> dict[Tool, CanvasTool]:
         Tool.PENCIL: PencilTool(),
         Tool.PATH_ERASER: PathEraserTool(),
         Tool.SMOOTH: SmoothTool(),
-        Tool.TEXT: TextTool(),
+        Tool.TYPE: TypeTool(),
         Tool.TEXT_PATH: TextPathTool(),
         Tool.LINE: LineTool(),
         Tool.RECT: RectTool(),

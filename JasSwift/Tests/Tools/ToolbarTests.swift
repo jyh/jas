@@ -16,7 +16,7 @@ import Testing
     #expect(tools.contains(.addAnchorPoint))
     #expect(tools.contains(.deleteAnchorPoint))
     #expect(tools.contains(.pencil))
-    #expect(tools.contains(.text))
+    #expect(tools.contains(.typeTool))
     #expect(tools.contains(.textPath))
     #expect(tools.contains(.line))
     #expect(tools.contains(.rect))
@@ -72,9 +72,9 @@ import Testing
 }
 
 @Test func textSlotAlternates() {
-    let alternates: [Tool] = [.text, .textPath]
+    let alternates: [Tool] = [.typeTool, .textPath]
     #expect(alternates.count == 2)
-    #expect(alternates.contains(.text))
+    #expect(alternates.contains(.typeTool))
     #expect(alternates.contains(.textPath))
 }
 
@@ -132,9 +132,9 @@ import Testing
 @Test func toolbarPanelDefaultSlots() {
     // Default visible tools in shared slots
     let defaultArrow: Tool = .directSelection
-    let defaultText: Tool = .text
+    let defaultText: Tool = .typeTool
     let defaultShape: Tool = .rect
     #expect(defaultArrow == .directSelection)
-    #expect(defaultText == .text)
+    #expect(defaultText == .typeTool)
     #expect(defaultShape == .rect)
 }

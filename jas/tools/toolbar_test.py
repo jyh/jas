@@ -30,7 +30,7 @@ class ToolEnumTest(absltest.TestCase):
             "SELECTION", "DIRECT_SELECTION", "GROUP_SELECTION",
             "PEN", "ADD_ANCHOR_POINT", "DELETE_ANCHOR_POINT",
             "PENCIL", "PATH_ERASER", "SMOOTH",
-            "TEXT", "TEXT_PATH",
+            "TYPE", "TEXT_PATH",
             "LINE", "RECT", "ROUNDED_RECT", "POLYGON", "STAR",
         }
         actual = {t.name for t in Tool}
@@ -83,7 +83,7 @@ class SharedSlotsTest(absltest.TestCase):
         self.assertEqual(_ARROW_SLOT_TOOLS, {Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION})
 
     def test_text_slot_tools(self):
-        self.assertEqual(_TEXT_SLOT_TOOLS, {Tool.TEXT, Tool.TEXT_PATH})
+        self.assertEqual(_TEXT_SLOT_TOOLS, {Tool.TYPE, Tool.TEXT_PATH})
 
     def test_pen_slot_tools(self):
         self.assertEqual(_PEN_SLOT_TOOLS, {Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT})
@@ -153,7 +153,7 @@ class ToolbarLayoutTest(absltest.TestCase):
         toolbar = Toolbar()
         # Grid has 7 slots: selection, direct, pen, pencil, text, line, rect
         visible = [Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.PEN,
-                   Tool.PENCIL, Tool.TEXT, Tool.LINE, Tool.RECT]
+                   Tool.PENCIL, Tool.TYPE, Tool.LINE, Tool.RECT]
         for tool in visible:
             self.assertIn(tool, toolbar.buttons)
 

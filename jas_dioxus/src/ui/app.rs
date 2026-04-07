@@ -32,7 +32,7 @@ use crate::tools::star::StarTool;
 use crate::tools::rect::RectTool;
 use crate::tools::rounded_rect::RoundedRectTool;
 use crate::tools::selection::SelectionTool;
-use crate::tools::text::TextTool;
+use crate::tools::type_tool::TypeTool;
 use crate::tools::text_path::TextPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind, PASTE_OFFSET};
 
@@ -60,7 +60,7 @@ impl TabState {
         tools.insert(ToolKind::Pencil, Box::new(PencilTool::new()));
         tools.insert(ToolKind::PathEraser, Box::new(PathEraserTool::new()));
         tools.insert(ToolKind::Smooth, Box::new(SmoothTool::new()));
-        tools.insert(ToolKind::Text, Box::new(TextTool::new()));
+        tools.insert(ToolKind::Type, Box::new(TypeTool::new()));
         tools.insert(ToolKind::TextOnPath, Box::new(TextPathTool::new()));
         tools.insert(ToolKind::Rect, Box::new(RectTool::new()));
         tools.insert(ToolKind::RoundedRect, Box::new(RoundedRectTool::new()));
@@ -396,7 +396,7 @@ const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (0, 1, &[ToolKind::DirectSelection, ToolKind::GroupSelection]),
     (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint, ToolKind::AnchorPoint]),
     (1, 1, &[ToolKind::Pencil, ToolKind::PathEraser, ToolKind::Smooth]),
-    (2, 0, &[ToolKind::Text, ToolKind::TextOnPath]),
+    (2, 0, &[ToolKind::Type, ToolKind::TextOnPath]),
     (2, 1, &[ToolKind::Line]),
     (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star]),
 ];
@@ -455,9 +455,11 @@ fn toolbar_svg_icon(kind: ToolKind) -> String {
             let _c = c;
             r##"<g transform="scale(0.109375)"><path d="M70.89,227.68L4.52,255.09c-3.64,1.5-5.43-6.66-4.68-9.88l17.55-75.22c7.36-9.61,14.58-17.27,22.29-26.35l91.35-107.59,13.18-14.76c10.19-11.42,24.53-9.65,35.35-.05l25.45,22.59c9.72,8.62,8.08,22.16-.02,31.72l-30.35,35.82-88.63,105.34c-4.48,5.32-8.1,8.07-15.12,10.97Z" fill="rgb(204,204,204)"/><path d="M66.39,191.49c-3.26,3.88-11.08.74-14.17.76-1.6-4.95-2.48-7.92-2.63-12.87l95.93-113.23c5.76,4.1,10.56,8.41,15.29,13.81l-48.81,57.26-45.61,54.27Z" fill="#3c3c3c"/><path d="M194.82,68.3c-4.33,5.25-7.97,9.61-12.6,14.2l-41.17-37.77c6.53-8.97,16.36-26.16,28.28-16.01l23.3,19.83c5.9,5.02,7.29,13.58,2.2,19.76Z" fill="#3c3c3c"/><path d="M32.69,171.62c2.34-2.12,3.21-5.15,5.44-7.75l48.58-56.78,44.96-52.22c3.29,1.06,6.3,3.36,7.96,6.88l-94.82,111.41c-3.41,1.69-7.52.06-12.12-1.54Z" fill="#3c3c3c"/><path d="M74.85,208.97c-1.9-3.51-4.54-7.82-3.2-11.46l62.67-74.53c3.87-4.6,7.33-8.43,11.21-12.99l21.07-24.77c2.92,2.31,5.6,2.99,7.52,5.41-6.28,11.18-14.37,19.01-22.27,28.37l-68.4,80.98c-2.77,3.28-5,5.52-8.61,8.99Z" fill="#3c3c3c"/><path d="M61.28,200.71c2.96,4.4,4.65,9.19,5.65,14.66l-31.21,13.46-15.61-12.98,6.37-34.74c3.86.45,10.27-.54,13.02,2.69,3.65,4.3,2.7,11.09,6.13,15.66,4.75,1.4,9.49.96,15.64,1.26Z" fill="white"/><path d="M210.2,175.94c11.48,9.34,49.63,12.78,45.49,46.07-1.19,9.56-7.61,19.79-18.27,24.04-14.69,5.85-30.81,4.47-45.37-1.23.47-4.68,1.55-7.93,3.11-11.67,9.5,3.79,19.58,5.53,29.64,3.42,8.68-1.82,13.82-8.17,14.43-16.16.65-8.55-3.33-15.19-11.76-19.01l-21.46-9.72c-11.6-5.25-18.43-15.52-18.34-27.89.08-11.69,6.68-22.34,18.54-27.37,14.4-6.11,31.49-4.4,45.49,2.87-.51,4.89-3.12,8.2-4.55,12.47-13.33-8.75-41.32-8.29-43.12,7.75-.73,6.5.91,12.14,6.17,16.42Z" fill="rgb(204,204,204)"/><path d="M183.23,206.16c1.36-3.22,8.17-1.51,11.39-.84,2.35,18.66-5.1,40.07-25.23,43.67-12.58,2.25-25.25-.94-32.47-11.28-6.04-8.66-10.11-20.45-8.36-31.26.55-3.39,10.52-3.41,12.41-.91,2.42,5.85,1.22,13.66,4.25,19.58,3.34,6.52,9.26,10.96,16.14,11.19,7.35.25,13.54-4.25,17.24-10.96,3.2-5.82,2.05-12.38,4.64-19.2Z" fill="rgb(204,204,204)"/></g>"##.to_string()
         },
-        // T letter
-        ToolKind::Text => format!(
-            r#"<text x="4" y="22" font-family="sans-serif" font-size="18" font-weight="bold" fill="{c}">T</text>"#),
+        // Type tool — T glyph from assets/icons/type.svg, scaled from 256→28
+        ToolKind::Type => {
+            let _c = c;
+            r##"<g transform="scale(0.109375)"><path d="M156.78,197.66l-56.03-.18c-3.93-3.08-4.04-16.09.02-18.64,4.02-2.53,15.24,1.59,16.75-3.47l.29-96.22c-13.59-1.73-25.59-1.5-38.2-.19l-1.84,18.33c-6.36,1.3-11.83,1.26-18.54-.07-.74-13-1.05-25.04.15-38.87h137.24c1.18,13.75.97,25.84.13,38.9-6.65,1.37-12.09,1.27-18.54,0l-1.83-18.28c-12.65-1.26-24.67-1.46-38.15.18v97.73s18.59,1.88,18.59,1.88c1.2,5.78,1.58,10.49-.04,18.91Z" fill="rgb(204,204,204)"/></g>"##.to_string()
+        },
         // T + wavy path
         ToolKind::TextOnPath => format!(
             r#"<text x="2" y="18" font-family="sans-serif" font-size="14" font-weight="bold" fill="{c}">T</text><path d="M12,20 C16,8 22,24 26,12" fill="none" stroke="{c}" stroke-width="1"/>"#),
@@ -785,7 +787,7 @@ pub fn App() -> Element {
                 }
                 Key::Character(ref c) if c == "t" || c == "T" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.set_tool(ToolKind::Text);
+                        st.set_tool(ToolKind::Type);
                     }));
                 }
                 Key::Character(ref c) if c == "l" || c == "L" => {

@@ -120,7 +120,7 @@ func createTools() -> [Tool: CanvasTool] {
         .pencil: PencilTool(),
         .pathEraser: PathEraserTool(),
         .smooth: SmoothTool(),
-        .text: TextTool(),
+        .typeTool: TypeTool(),
         .textPath: TextPathTool(),
         .line: LineTool(),
         .rect: RectTool(),

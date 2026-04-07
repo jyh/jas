@@ -11,7 +11,7 @@ let () =
   (* All 10 tool variants exist *)
   let all_tools : Jas.Toolbar.tool list = [
     Selection; Direct_selection; Group_selection;
-    Pen; Add_anchor_point; Pencil; Text_tool; Text_path;
+    Pen; Add_anchor_point; Pencil; Type_tool; Text_path;
     Line; Rect; Rounded_rect; Polygon; Star;
   ] in
 
@@ -22,7 +22,7 @@ let () =
   run_test "tool equality" (fun () ->
     assert (Jas.Toolbar.Selection = Jas.Toolbar.Selection);
     assert (Jas.Toolbar.Direct_selection <> Jas.Toolbar.Selection);
-    assert (Jas.Toolbar.Text_path <> Jas.Toolbar.Text_tool);
+    assert (Jas.Toolbar.Text_path <> Jas.Toolbar.Type_tool);
     assert (Jas.Toolbar.Polygon <> Jas.Toolbar.Rect)
   );
 
@@ -52,9 +52,9 @@ let () =
     assert (tb#current_tool = Jas.Toolbar.Pencil)
   );
 
-  run_test "select text tool" (fun () ->
-    tb#select_tool Jas.Toolbar.Text_tool;
-    assert (tb#current_tool = Jas.Toolbar.Text_tool)
+  run_test "select type tool" (fun () ->
+    tb#select_tool Jas.Toolbar.Type_tool;
+    assert (tb#current_tool = Jas.Toolbar.Type_tool)
   );
 
   run_test "select line tool" (fun () ->
@@ -77,9 +77,9 @@ let () =
     assert (tb#current_tool = Jas.Toolbar.Add_anchor_point)
   );
 
-  run_test "text slot alternate: text tool" (fun () ->
-    tb#select_tool Jas.Toolbar.Text_tool;
-    assert (tb#current_tool = Jas.Toolbar.Text_tool)
+  run_test "text slot alternate: type tool" (fun () ->
+    tb#select_tool Jas.Toolbar.Type_tool;
+    assert (tb#current_tool = Jas.Toolbar.Type_tool)
   );
 
   run_test "text slot alternate: text path" (fun () ->

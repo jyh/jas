@@ -19,7 +19,7 @@ class Tool(Enum):
     PENCIL = auto()
     PATH_ERASER = auto()
     SMOOTH = auto()
-    TEXT = auto()
+    TYPE = auto()
     TEXT_PATH = auto()
     LINE = auto()
     RECT = auto()
@@ -95,8 +95,8 @@ class ToolButton(QToolButton):
             self._draw_path_eraser_tool(painter)
         elif self.tool == Tool.SMOOTH:
             self._draw_smooth_tool(painter)
-        elif self.tool == Tool.TEXT:
-            self._draw_text_tool(painter)
+        elif self.tool == Tool.TYPE:
+            self._draw_type_tool(painter)
         elif self.tool == Tool.TEXT_PATH:
             self._draw_text_path_tool(painter)
         elif self.tool == Tool.POLYGON:
@@ -595,11 +595,37 @@ class ToolButton(QToolButton):
         painter.drawPath(s_path)
         painter.restore()
 
-    def _draw_text_tool(self, painter):
-        painter.setPen(QPen(QColor("#cccccc"), 1.5))
-        font = QFont("sans-serif", 18, QFont.Weight.Bold)
-        painter.setFont(font)
-        painter.drawText(4, 22, "T")
+    def _draw_type_tool(self, painter):
+        # Type icon from assets/icons/type.svg (viewBox 0 0 256 256), scaled to 28x28.
+        s = 28.0 / 256.0
+        ox = (self.ICON_SIZE - 28) / 2.0
+        oy = (self.ICON_SIZE - 28) / 2.0
+        painter.save()
+        painter.translate(ox, oy)
+        painter.scale(s, s)
+        path = QPainterPath()
+        path.moveTo(156.78, 197.66)
+        path.lineTo(100.75, 197.48)
+        path.cubicTo(96.82, 194.4, 96.71, 181.39, 100.77, 178.84)
+        path.cubicTo(104.79, 176.31, 116.01, 180.43, 117.52, 175.37)
+        path.lineTo(117.81, 79.15)
+        path.cubicTo(104.22, 77.42, 92.22, 77.65, 79.61, 78.96)
+        path.lineTo(77.77, 97.29)
+        path.cubicTo(71.41, 98.59, 65.94, 98.55, 59.23, 97.22)
+        path.cubicTo(58.49, 84.22, 58.18, 72.18, 59.38, 58.35)
+        path.lineTo(196.62, 58.35)
+        path.cubicTo(197.80, 72.10, 197.59, 84.19, 196.75, 97.25)
+        path.cubicTo(190.10, 98.62, 184.66, 98.52, 178.21, 97.25)
+        path.lineTo(176.38, 78.97)
+        path.cubicTo(163.73, 77.71, 151.71, 77.51, 138.23, 79.15)
+        path.lineTo(138.23, 176.88)
+        path.lineTo(156.82, 178.76)
+        path.cubicTo(158.02, 184.54, 158.40, 189.25, 156.78, 197.67)
+        path.closeSubpath()
+        painter.setPen(QPen(QColor("#cccccc"), 0))
+        painter.setBrush(QColor("#cccccc"))
+        painter.drawPath(path)
+        painter.restore()
 
     def _draw_text_path_tool(self, painter):
         painter.setPen(QPen(QColor("#cccccc"), 1.5))
@@ -672,7 +698,7 @@ _PEN_SLOT_TOOLS = {Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT}
 # Tools that share the pencil/path-eraser slot
 _PENCIL_SLOT_TOOLS = {Tool.PENCIL, Tool.PATH_ERASER, Tool.SMOOTH}
 # Tools that share the text/text-path slot
-_TEXT_SLOT_TOOLS = {Tool.TEXT, Tool.TEXT_PATH}
+_TEXT_SLOT_TOOLS = {Tool.TYPE, Tool.TEXT_PATH}
 # Tools that share the rect/polygon slot
 _SHAPE_SLOT_TOOLS = {Tool.RECT, Tool.ROUNDED_RECT, Tool.POLYGON, Tool.STAR}
 _LONG_PRESS_MS = LONG_PRESS_MS
@@ -691,7 +717,7 @@ class Toolbar(QWidget):
         # Which tool is visible in the shared pen slot
         self._pen_slot_tool = Tool.PEN
         # Which tool is visible in the shared text slot
-        self._text_slot_tool = Tool.TEXT
+        self._text_slot_tool = Tool.TYPE
         # Which tool is visible in the shared pencil slot
         self._pencil_slot_tool = Tool.PENCIL
         # Which tool is visible in the shared shape slot
@@ -717,7 +743,7 @@ class Toolbar(QWidget):
             (Tool.DIRECT_SELECTION, 0, 1),
             (Tool.PEN, 1, 0),
             (Tool.PENCIL, 1, 1),
-            (Tool.TEXT, 2, 0),
+            (Tool.TYPE, 2, 0),
             (Tool.LINE, 2, 1),
             (Tool.RECT, 3, 0),
         ]
@@ -797,7 +823,7 @@ class Toolbar(QWidget):
         pencil_btn.released.connect(self._on_pencil_slot_released)
 
         # Install press/release handling on the text slot button
-        text_btn = self.buttons[Tool.TEXT]
+        text_btn = self.buttons[Tool.TYPE]
         text_btn.pressed.connect(self._on_text_slot_pressed)
         text_btn.released.connect(self._on_text_slot_released)
 
@@ -882,13 +908,13 @@ class Toolbar(QWidget):
 
     def _show_text_slot_menu(self):
         menu = QMenu(self)
-        for tool in (Tool.TEXT, Tool.TEXT_PATH):
-            label = "Text" if tool == Tool.TEXT else "Text on Path"
+        for tool in (Tool.TYPE, Tool.TEXT_PATH):
+            label = "Type" if tool == Tool.TYPE else "Text on Path"
             action = menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(tool == self._text_slot_tool)
             action.triggered.connect(lambda checked, t=tool: self._switch_text_slot(t))
-        btn = self.buttons[Tool.TEXT]
+        btn = self.buttons[Tool.TYPE]
         menu.exec(btn.mapToGlobal(QPoint(0, btn.height())))
 
     def _show_shape_slot_menu(self):
@@ -940,7 +966,7 @@ class Toolbar(QWidget):
         if tool == self._text_slot_tool:
             return
         self._text_slot_tool = tool
-        text_btn = self.buttons[Tool.TEXT]
+        text_btn = self.buttons[Tool.TYPE]
         text_btn.tool = tool
         text_btn.update()
         self.select_tool(tool)
@@ -975,7 +1001,7 @@ class Toolbar(QWidget):
             pencil_btn.update()
             self._pencil_slot_tool = tool
         elif tool in _TEXT_SLOT_TOOLS:
-            text_btn = self.buttons[Tool.TEXT]
+            text_btn = self.buttons[Tool.TYPE]
             text_btn.tool = tool
             text_btn.setChecked(True)
             text_btn.update()

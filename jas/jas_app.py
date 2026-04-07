@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("-"), self,
                   lambda: self.toolbar.select_tool(Tool.DELETE_ANCHOR_POINT))
         QShortcut(QKeySequence("T"), self,
-                  lambda: self.toolbar.select_tool(Tool.TEXT))
+                  lambda: self.toolbar.select_tool(Tool.TYPE))
         QShortcut(QKeySequence("\\"), self,
                   lambda: self.toolbar.select_tool(Tool.LINE))
         QShortcut(QKeySequence("M"), self,

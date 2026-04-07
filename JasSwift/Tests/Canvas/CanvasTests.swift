@@ -16,7 +16,7 @@ import AppKit
     #expect(tools.contains(.pen))
     #expect(tools.contains(.addAnchorPoint))
     #expect(tools.contains(.pencil))
-    #expect(tools.contains(.text))
+    #expect(tools.contains(.typeTool))
     #expect(tools.contains(.textPath))
     #expect(tools.contains(.line))
     #expect(tools.contains(.rect))

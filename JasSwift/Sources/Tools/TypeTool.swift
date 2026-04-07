@@ -1,9 +1,9 @@
 import AppKit
 import Foundation
 
-// MARK: - Text tool
+// MARK: - Type tool
 
-class TextTool: CanvasTool {
+class TypeTool: CanvasTool {
     var dragStart: (Double, Double)?
     var dragEnd: (Double, Double)?
 

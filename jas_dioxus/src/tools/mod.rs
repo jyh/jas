@@ -14,5 +14,5 @@ pub mod path_eraser;
 pub mod smooth;
 pub mod polygon;
 pub mod star;
-pub mod text;
+pub mod type_tool;
 pub mod text_path;
