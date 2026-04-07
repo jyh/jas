@@ -706,6 +706,8 @@ class CanvasNSView: NSView {
             return makePathEraserCursor()
         case .typeTool:
             return makeTypeCursor()
+        case .typeOnPath:
+            return makeTypeOnPathCursor()
         default:
             return NSCursor.crosshair
         }
@@ -886,6 +888,32 @@ class CanvasNSView: NSView {
                 image.unlockFocus()
                 image.size = NSSize(width: 16, height: 16)
                 return NSCursor(image: image, hotSpot: NSPoint(x: 8, y: 8))
+            }
+        }
+        return NSCursor.iBeam
+    }
+
+    private func makeTypeOnPathCursor() -> NSCursor {
+        let bundle = Bundle.main
+        let cwd = FileManager.default.currentDirectoryPath
+        let candidates = [
+            (cwd as NSString).appendingPathComponent("assets/icons/type on a path cursor.png"),
+            (cwd as NSString).appendingPathComponent("../assets/icons/type on a path cursor.png"),
+            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/type on a path cursor.png") },
+            bundle.path(forResource: "type on a path cursor", ofType: "png"),
+        ].compactMap { $0 }
+        for path in candidates {
+            if let orig = NSImage(contentsOfFile: path) {
+                let pixelSize = NSSize(width: 32, height: 32)
+                let image = NSImage(size: pixelSize)
+                image.lockFocus()
+                orig.draw(in: NSRect(origin: .zero, size: pixelSize),
+                          from: NSRect(origin: .zero, size: orig.size),
+                          operation: .sourceOver, fraction: 1.0)
+                image.unlockFocus()
+                image.size = NSSize(width: 16, height: 16)
+                // Hot spot near the I-beam center for the 16x16 cursor.
+                return NSCursor(image: image, hotSpot: NSPoint(x: 8, y: 6))
             }
         }
         return NSCursor.iBeam

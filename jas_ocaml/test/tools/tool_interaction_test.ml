@@ -835,4 +835,93 @@ let () =
     let children = layer_children model in
     assert (Array.length children = 0));
 
+  (* ---- Type-on-path tool ---- *)
+
+  run_test "type-on-path tool: drag creates curved TextPath" (fun () ->
+    let tool = new Jas.Type_on_path_tool.type_on_path_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+    tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    match children.(0) with
+    | Text_path { d; content; _ } ->
+      assert (content = "Lorem Ipsum");
+      (* First command MoveTo at start, second CurveTo to end *)
+      (match d with
+       | [MoveTo (sx, sy); CurveTo (_, _, _, _, ex, ey)] ->
+         assert (sx = 10.0 && sy = 20.0);
+         assert (ex = 50.0 && ey = 60.0)
+       | _ -> assert false)
+    | _ -> assert false);
+
+  run_test "type-on-path tool: press+release without move creates LineTo" (fun () ->
+    let tool = new Jas.Type_on_path_tool.type_on_path_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    match children.(0) with
+    | Text_path { d; _ } ->
+      (match d with
+       | [MoveTo (10.0, 20.0); LineTo (50.0, 60.0)] -> ()
+       | _ -> assert false)
+    | _ -> assert false);
+
+  run_test "type-on-path tool: tiny drag without path hit is noop" (fun () ->
+    let tool = new Jas.Type_on_path_tool.type_on_path_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_release ctx 11.0 21.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 0));
+
+  run_test "type-on-path tool: click on existing path converts to TextPath" (fun () ->
+    let tool = new Jas.Type_on_path_tool.type_on_path_tool in
+    let path_elem = Jas.Element.make_path
+      ~stroke:(Some Jas.Element.{ stroke_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
+                                   stroke_width = 1.0; stroke_linecap = Butt; stroke_linejoin = Miter })
+      [MoveTo (0.0, 0.0); LineTo (100.0, 0.0)] in
+    let model = Jas.Model.create () in
+    let layer = Jas.Element.make_layer ~name:"L" [| path_elem |] in
+    model#set_document
+      { Jas.Document.layers = [| layer |]; selected_layer = 0;
+        selection = Jas.Document.PathMap.empty };
+    let ctrl = Jas.Controller.create ~model () in
+    let ctx : Jas.Canvas_tool.tool_context = {
+      model;
+      controller = ctrl;
+      hit_test_selection = (fun _ _ -> false);
+      hit_test_handle = (fun _ _ -> None);
+      hit_test_text = (fun _ _ -> None);
+      hit_test_path_curve = (fun _ _ -> Some ([0; 0], path_elem));
+      request_update = (fun () -> ());
+      start_text_edit = (fun _ _ -> ());
+      commit_text_edit = (fun () -> ());
+      draw_element_overlay = (fun _ _ _ -> ());
+    } in
+    tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
+    tool#on_release ctx 50.0 0.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    match children.(0) with
+    | Text_path _ -> ()
+    | _ -> assert false);
+
+  run_test "type-on-path tool: move without press is noop" (fun () ->
+    let tool = new Jas.Type_on_path_tool.type_on_path_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+    let children = layer_children model in
+    assert (Array.length children = 0));
+
+  run_test "type-on-path tool: press records undo snapshot" (fun () ->
+    let tool = new Jas.Type_on_path_tool.type_on_path_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    assert (not model#can_undo);
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    assert model#can_undo);
+
   Printf.printf "All tool interaction tests passed.\n"

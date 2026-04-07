@@ -1,11 +1,11 @@
 import AppKit
 import Foundation
 
-// MARK: - Text-on-path tool
+// MARK: - Type-on-path tool
 
 private let offsetHandleRadius = 5.0
 
-class TextPathTool: CanvasTool {
+class TypeOnPathTool: CanvasTool {
     var dragStart: (Double, Double)?
     var dragEnd: (Double, Double)?
     var controlPt: (Double, Double)?

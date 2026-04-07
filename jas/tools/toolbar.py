@@ -20,7 +20,7 @@ class Tool(Enum):
     PATH_ERASER = auto()
     SMOOTH = auto()
     TYPE = auto()
-    TEXT_PATH = auto()
+    TYPE_ON_PATH = auto()
     LINE = auto()
     RECT = auto()
     ROUNDED_RECT = auto()
@@ -97,8 +97,8 @@ class ToolButton(QToolButton):
             self._draw_smooth_tool(painter)
         elif self.tool == Tool.TYPE:
             self._draw_type_tool(painter)
-        elif self.tool == Tool.TEXT_PATH:
-            self._draw_text_path_tool(painter)
+        elif self.tool == Tool.TYPE_ON_PATH:
+            self._draw_type_on_path_tool(painter)
         elif self.tool == Tool.POLYGON:
             self._draw_polygon_tool(painter)
         elif self.tool == Tool.STAR:
@@ -627,18 +627,54 @@ class ToolButton(QToolButton):
         painter.drawPath(path)
         painter.restore()
 
-    def _draw_text_path_tool(self, painter):
-        painter.setPen(QPen(QColor("#cccccc"), 1.5))
-        font = QFont("sans-serif", 14, QFont.Weight.Bold)
-        painter.setFont(font)
-        painter.drawText(2, 18, "T")
-        # Draw a small wavy path
-        path = QPainterPath()
-        path.moveTo(12, 20)
-        path.cubicTo(16, 8, 22, 24, 26, 12)
-        painter.setPen(QPen(QColor("#cccccc"), 1.0))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawPath(path)
+    def _draw_type_on_path_tool(self, painter):
+        # Type on a Path icon from assets/icons/type on a path.svg
+        # (viewBox 0 0 256 256), scaled to 28x28.
+        s = 28.0 / 256.0
+        ox = (self.ICON_SIZE - 28) / 2.0
+        oy = (self.ICON_SIZE - 28) / 2.0
+        painter.save()
+        painter.translate(ox, oy)
+        painter.scale(s, s)
+        painter.setPen(QPen(QColor("#cccccc"), 0))
+        painter.setBrush(QColor("#cccccc"))
+        # Caret/insertion-point glyph (top stroke).
+        path1 = QPainterPath()
+        path1.moveTo(146.65, 143.92)
+        path1.cubicTo(146.90, 149.81, 136.63, 147.47, 133.15, 143.77)
+        path1.lineTo(115.23, 124.75)
+        path1.cubicTo(112.23, 121.57, 114.91, 117.25, 116.23, 114.81)
+        path1.cubicTo(117.93, 111.69, 124.83, 117.32, 126.72, 115.88)
+        path1.cubicTo(141.92, 103.01, 156.13, 87.44, 170.36, 72.51)
+        path1.cubicTo(173.34, 69.38, 167.59, 65.27, 165.59, 63.83)
+        path1.cubicTo(159.29, 59.29, 144.76, 74.47, 146.36, 57.74)
+        path1.cubicTo(146.98, 51.26, 159.88, 39.14, 166.61, 44.99)
+        path1.cubicTo(184.78, 60.79, 201.40, 78.14, 217.12, 95.93)
+        path1.cubicTo(219.01, 102.34, 205.42, 115.82, 199.03, 115.42)
+        path1.cubicTo(189.98, 114.86, 201.34, 101.38, 197.33, 95.66)
+        path1.cubicTo(195.60, 93.19, 189.73, 87.53, 186.13, 91.11)
+        path1.lineTo(146.09, 130.89)
+        path1.lineTo(146.65, 143.92)
+        path1.closeSubpath()
+        painter.drawPath(path1)
+        # Underlying curve glyph.
+        path2 = QPainterPath()
+        path2.moveTo(194.00, 177.67)
+        path2.cubicTo(196.66, 188.47, 189.71, 199.52, 182.32, 203.63)
+        path2.cubicTo(158.52, 216.88, 137.39, 188.98, 120.34, 168.89)
+        path2.cubicTo(105.40, 151.28, 88.87, 136.25, 72.65, 119.71)
+        path2.cubicTo(68.96, 115.94, 63.09, 114.70, 59.42, 116.74)
+        path2.cubicTo(47.24, 123.50, 54.88, 134.76, 45.63, 135.65)
+        path2.cubicTo(27.42, 135.43, 43.44, 109.53, 51.73, 106.74)
+        path2.cubicTo(59.80, 102.36, 72.46, 102.18, 79.04, 108.46)
+        path2.cubicTo(93.71, 122.48, 107.83, 135.56, 120.81, 150.92)
+        path2.cubicTo(133.49, 165.91, 147.03, 179.29, 161.34, 192.68)
+        path2.cubicTo(165.16, 196.26, 172.01, 194.09, 175.80, 192.54)
+        path2.cubicTo(180.32, 190.70, 180.63, 184.50, 181.52, 178.11)
+        path2.cubicTo(181.97, 174.91, 193.13, 174.16, 194.00, 177.67)
+        path2.closeSubpath()
+        painter.drawPath(path2)
+        painter.restore()
 
     def _draw_polygon_tool(self, painter):
         import math
@@ -698,7 +734,7 @@ _PEN_SLOT_TOOLS = {Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT}
 # Tools that share the pencil/path-eraser slot
 _PENCIL_SLOT_TOOLS = {Tool.PENCIL, Tool.PATH_ERASER, Tool.SMOOTH}
 # Tools that share the text/text-path slot
-_TEXT_SLOT_TOOLS = {Tool.TYPE, Tool.TEXT_PATH}
+_TEXT_SLOT_TOOLS = {Tool.TYPE, Tool.TYPE_ON_PATH}
 # Tools that share the rect/polygon slot
 _SHAPE_SLOT_TOOLS = {Tool.RECT, Tool.ROUNDED_RECT, Tool.POLYGON, Tool.STAR}
 _LONG_PRESS_MS = LONG_PRESS_MS
@@ -761,8 +797,8 @@ class Toolbar(QWidget):
         self.button_group.addButton(self.buttons[Tool.ADD_ANCHOR_POINT])
         self.buttons[Tool.DELETE_ANCHOR_POINT] = ToolButton(Tool.DELETE_ANCHOR_POINT, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.DELETE_ANCHOR_POINT])
-        self.buttons[Tool.TEXT_PATH] = ToolButton(Tool.TEXT_PATH, has_alternates=True)
-        self.button_group.addButton(self.buttons[Tool.TEXT_PATH])
+        self.buttons[Tool.TYPE_ON_PATH] = ToolButton(Tool.TYPE_ON_PATH, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.TYPE_ON_PATH])
         self.buttons[Tool.POLYGON] = ToolButton(Tool.POLYGON, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.POLYGON])
         self.buttons[Tool.ROUNDED_RECT] = ToolButton(Tool.ROUNDED_RECT, has_alternates=True)
@@ -908,8 +944,8 @@ class Toolbar(QWidget):
 
     def _show_text_slot_menu(self):
         menu = QMenu(self)
-        for tool in (Tool.TYPE, Tool.TEXT_PATH):
-            label = "Type" if tool == Tool.TYPE else "Text on Path"
+        for tool in (Tool.TYPE, Tool.TYPE_ON_PATH):
+            label = "Type" if tool == Tool.TYPE else "Type on a Path"
             action = menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(tool == self._text_slot_tool)

@@ -30,7 +30,7 @@ pub enum ToolKind {
     PathEraser,
     Smooth,
     Type,
-    TextOnPath,
+    TypeOnPath,
     Line,
     Rect,
     RoundedRect,
@@ -52,7 +52,7 @@ impl ToolKind {
             ToolKind::PathEraser => "Path Eraser (Shift+E)",
             ToolKind::Smooth => "Smooth",
             ToolKind::Type => "Type (T)",
-            ToolKind::TextOnPath => "Text on Path",
+            ToolKind::TypeOnPath => "Type on a Path",
             ToolKind::Line => "Line (L)",
             ToolKind::Rect => "Rectangle (M)",
             ToolKind::RoundedRect => "Rounded Rectangle",
@@ -92,6 +92,9 @@ impl ToolKind {
             ToolKind::Smooth => "crosshair",
             ToolKind::Type => {
                 "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 256 256'%3E%3Cpath d='M177.43,198.77c-19.17,2.05-18.23-10.69-25.79-13.06-14.07.97-17.57,23.76-40.47,9.57-8.04-18.45,10.13-.12,27.33-16.72,5.39-5.63,8.79-14.52,4.25-23.05-5.62-2.92-13.78-3.46-10.58-13.03l11.87-2.02.17-73.52c-20.19-23.25-20-9.66-32.95-14.5-8.46-12.81,19.52-19.77,30.97-3.62,1.79,2.53,4.94,4.59,7.6,4.66s5.67-2.1,7.43-4.8c9.19-14.13,30-7.43,30.15-7.01,1.03,2.96.87,5.74.79,8.48-2.27,8.17-27.84-4.84-30.64,18.44,0,0-.29,72.04-.29,72.04,12.66.4,12.18,11.68,2.44,15.03-5.96,4.42-2.79,17.68,1.19,22.73,13.95,17.7,30.47-3.87,27.16,17.25-.71,4.56-6.29,2.67-10.62,3.13Z' fill='%23222'/%3E%3Cpath d='M63.75,59.55c7.7,7.89-28.2,6.2-30.62,7.79C23.46,73.65-.01,103.79,0,90.77L.09,2.01c0-4.91,7.97.46,10.09,2.64l53.58,54.91Z' fill='%23222'/%3E%3C/svg%3E\") 12 12, text"
+            }
+            ToolKind::TypeOnPath => {
+                "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 256 256'%3E%3Cpath d='M135.85,137.39c-8.19,7.1-1.99,18.23,2.57,23.51,14.07,16.31,34.34-2.29,28.61,16.49-1.22,4-5.84,3.21-9.89,3.72-23.95,2.98-19-12.91-30.09-13.37-8.33-.34-7.32,16.07-27.75,13.35-4.32-.57-10.05,1.55-10.59-3.2-2.45-21.48,12.89.82,27.23-17.17,4.07-5.11,7.2-18.31,1.22-22.74-4.45-3.3-7.66-2.21-7.07-8.66.37-4.04,3.22-5.47,9.12-6.88.62-22.84,1.21-47.69,0-71.36-.67-13.17-15.66-17.38-26.22-15.53-6.32,1.1-4.76-6.92-4.36-9.83.66-4.72,6.35-2.5,10.64-3.1,20.38-2.85,18.74,13.72,27.77,13.26,11.36-.58,5.56-15.89,30.1-13.34,3.95.41,8.81.13,9.79,3.62.69,2.49,2.36,10.07-3.74,9.2-11.8-1.68-28.92,3.28-29.95,18.14-1.54,22.08-.72,47.87-.02,68.96,1.95,2.12,9.23.96,11.03,2.18,2.31,1.56.75,5.62.83,8.48.12,4.29-6.16,1.61-9.23,4.26Z' fill='%23222'/%3E%3Cpath d='M255.09,45.27c3.18,10.12-1.4,15.38-10.68,12.14-2.51-1.15-2.88-7.29-.43-11.13,1.59-2.49,9.09-1.84,11.11-1Z' fill='%23222'/%3E%3Cpath d='M231.22,67.94c1.08-2.16,8.92-1.42,10.7.18,2.08,1.87,2.39,7.45.73,10.4-1.71,3.04-6.16,1.36-8.55,1.41-4.47.08-5.09-7.53-2.87-11.99Z' fill='%23222'/%3E%3Cpath d='M209.12,90.01c1.13-2.14,8.94-1.42,10.72.19,2.08,1.87,2.38,7.44.73,10.41-1.69,3.04-6.24,1.36-8.63,1.4-4.01.08-5.18-7.52-2.82-12Z' fill='%23222'/%3E%3Cpath d='M191.19,101.33c4.22-.24,7.84.37,8.02,3.04.36,5.24.09,9.7-2.88,9.94-4.39.36-11.8,2.35-10.54-2.66s-1.34-9.94,5.4-10.32Z' fill='%23222'/%3E%3Cpath d='M164.96,112.1c1.12-2.15,8.91-1.4,10.7.19,2.09,1.85,2.37,7.46.73,10.4-1.7,3.06-6.21,1.35-8.59,1.41-4.22.1-5.17-7.53-2.85-12Z' fill='%23222'/%3E%3Cpath d='M76.54,134.39c1.19-2.42,9.01-1.62,10.79-.02,2.07,1.87,2.39,7.46.73,10.4s-6.19,1.34-8.56,1.43c-4.52.18-4.84-7.98-2.96-11.81Z' fill='%23222'/%3E%3Cpath d='M58.69,145.5c4.21-.23,7.83.35,8.02,3.06.36,5.12.1,9.68-2.85,9.91-4.32.34-12,2.52-10.6-2.68s-1.34-9.92,5.43-10.3Z' fill='%23222'/%3E%3Cpath d='M32.38,156.36c1.23-2.3,8.99-1.51,10.77.09,2.08,1.87,2.38,7.44.73,10.41s-6.2,1.33-8.7,1.42c-3.86.14-5.04-7.76-2.81-11.92Z' fill='%23222'/%3E%3Cpath d='M10.27,178.59c1.18-2.47,9.04-1.67,10.8-.05,2.06,1.88,2.4,7.46.72,10.4s-6.14,1.37-8.54,1.44c-4.66.13-4.79-8-2.99-11.78Z' fill='%23222'/%3E%3Cpath d='M12.23,199.88c2.65,9.88-.59,15.01-9.9,12.41-2.89-1.29-2.98-7.78-.88-11.47,1.4-2.45,8.86-1.8,10.77-.94Z' fill='%23222'/%3E%3C/svg%3E\") 12 9, text"
             }
             _ => "crosshair",
         }
@@ -148,7 +151,7 @@ mod tests {
             ToolKind::PathEraser,
             ToolKind::Smooth,
             ToolKind::Type,
-            ToolKind::TextOnPath,
+            ToolKind::TypeOnPath,
             ToolKind::Line,
             ToolKind::Rect,
             ToolKind::RoundedRect,
@@ -162,7 +165,7 @@ mod tests {
     fn tool_kind_equality() {
         assert_eq!(ToolKind::Selection, ToolKind::Selection);
         assert_ne!(ToolKind::Selection, ToolKind::DirectSelection);
-        assert_ne!(ToolKind::Type, ToolKind::TextOnPath);
+        assert_ne!(ToolKind::Type, ToolKind::TypeOnPath);
         assert_ne!(ToolKind::Rect, ToolKind::Polygon);
     }
 
@@ -187,7 +190,7 @@ mod tests {
             ToolKind::Selection, ToolKind::DirectSelection, ToolKind::GroupSelection,
             ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint,
             ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::PathEraser,
-            ToolKind::Smooth, ToolKind::Type, ToolKind::TextOnPath, ToolKind::Line,
+            ToolKind::Smooth, ToolKind::Type, ToolKind::TypeOnPath, ToolKind::Line,
             ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
         ];
         for t in &all {
@@ -202,7 +205,7 @@ mod tests {
             ToolKind::Selection, ToolKind::DirectSelection, ToolKind::GroupSelection,
             ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint,
             ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::PathEraser,
-            ToolKind::Smooth, ToolKind::Type, ToolKind::TextOnPath, ToolKind::Line,
+            ToolKind::Smooth, ToolKind::Type, ToolKind::TypeOnPath, ToolKind::Line,
             ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
         ];
         for t in &all {
@@ -250,6 +253,36 @@ mod tests {
     }
 
     #[test]
+    fn type_on_path_label_is_type_on_a_path() {
+        // Renamed from "Text on Path" to "Type on a Path"; ensure the
+        // user-facing label no longer leaks the old name.
+        assert_eq!(ToolKind::TypeOnPath.label(), "Type on a Path");
+        assert!(!ToolKind::TypeOnPath.label().contains("Text"));
+    }
+
+    #[test]
+    fn type_on_path_cursor_uses_text_fallback() {
+        // The Type-on-Path tool's CSS cursor should fall back to the
+        // system 'text' (I-beam) cursor rather than 'crosshair'.
+        let css = ToolKind::TypeOnPath.cursor_css();
+        assert!(css.ends_with(", text"), "cursor css = {}", css);
+    }
+
+    #[test]
+    fn type_on_path_cursor_embeds_svg_data_url() {
+        let css = ToolKind::TypeOnPath.cursor_css();
+        assert!(css.contains("data:image/svg+xml"));
+        assert!(css.contains("svg"));
+    }
+
+    #[test]
+    fn type_on_path_cursor_has_explicit_hot_spot() {
+        // Hot spot is "12 9" — near the I-beam center for the 24x24 cursor.
+        let css = ToolKind::TypeOnPath.cursor_css();
+        assert!(css.contains("\") 12 9,"), "cursor css = {}", css);
+    }
+
+    #[test]
     fn shortcuts_for_primary_tools() {
         assert_eq!(ToolKind::Selection.shortcut(), Some("v"));
         assert_eq!(ToolKind::DirectSelection.shortcut(), Some("a"));
@@ -264,7 +297,7 @@ mod tests {
     fn shortcuts_none_for_alternates() {
         assert_eq!(ToolKind::GroupSelection.shortcut(), None);
         assert_eq!(ToolKind::Smooth.shortcut(), None);
-        assert_eq!(ToolKind::TextOnPath.shortcut(), None);
+        assert_eq!(ToolKind::TypeOnPath.shortcut(), None);
         assert_eq!(ToolKind::Polygon.shortcut(), None);
     }
 
@@ -313,7 +346,7 @@ mod tests {
 
     #[test]
     fn text_slot_alternates() {
-        let alternates = [ToolKind::Type, ToolKind::TextOnPath];
+        let alternates = [ToolKind::Type, ToolKind::TypeOnPath];
         assert_eq!(alternates.len(), 2);
     }
 
@@ -343,7 +376,7 @@ mod tests {
             (0, 1, &[ToolKind::DirectSelection, ToolKind::GroupSelection]),
             (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint, ToolKind::AnchorPoint]),
             (1, 1, &[ToolKind::Pencil, ToolKind::PathEraser, ToolKind::Smooth]),
-            (2, 0, &[ToolKind::Type, ToolKind::TextOnPath]),
+            (2, 0, &[ToolKind::Type, ToolKind::TypeOnPath]),
             (2, 1, &[ToolKind::Line]),
             (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star]),
         ];

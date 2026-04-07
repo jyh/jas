@@ -34,7 +34,7 @@ py_library(
         "tools/pencil.py",
         "tools/selection.py",
         "tools/text.py",
-        "tools/text_path.py",
+        "tools/type_on_path.py",
         "tools/tool.py",
         "tools/toolbar.py",
     ],

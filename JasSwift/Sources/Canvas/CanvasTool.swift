@@ -121,7 +121,7 @@ func createTools() -> [Tool: CanvasTool] {
         .pathEraser: PathEraserTool(),
         .smooth: SmoothTool(),
         .typeTool: TypeTool(),
-        .textPath: TextPathTool(),
+        .typeOnPath: TypeOnPathTool(),
         .line: LineTool(),
         .rect: RectTool(),
         .roundedRect: RoundedRectTool(),

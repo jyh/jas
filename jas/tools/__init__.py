@@ -12,7 +12,7 @@ from tools.pencil import PencilTool
 from tools.path_eraser import PathEraserTool
 from tools.smooth import SmoothTool
 from tools.type_tool import TypeTool
-from tools.text_path import TextPathTool
+from tools.type_on_path import TypeOnPathTool
 
 
 def create_tools() -> dict[Tool, CanvasTool]:
@@ -28,7 +28,7 @@ def create_tools() -> dict[Tool, CanvasTool]:
         Tool.PATH_ERASER: PathEraserTool(),
         Tool.SMOOTH: SmoothTool(),
         Tool.TYPE: TypeTool(),
-        Tool.TEXT_PATH: TextPathTool(),
+        Tool.TYPE_ON_PATH: TypeOnPathTool(),
         Tool.LINE: LineTool(),
         Tool.RECT: RectTool(),
         Tool.ROUNDED_RECT: RoundedRectTool(),

@@ -897,5 +897,121 @@ class PathEraserToolTest(absltest.TestCase):
                                msg=f"second half endpoint y={second.y}")
 
 
+class TypeOnPathToolTest(absltest.TestCase):
+    def test_new_tool_is_idle(self):
+        from tools.type_on_path import TypeOnPathTool
+        tool = TypeOnPathTool()
+        self.assertIsNone(tool._drag_start)
+        self.assertIsNone(tool._control)
+        self.assertFalse(tool._offset_dragging)
+
+    def test_press_starts_drag_create(self):
+        from tools.type_on_path import TypeOnPathTool
+        tool = TypeOnPathTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 12, 34)
+        self.assertEqual(tool._drag_start, (12, 34))
+        self.assertEqual(tool._drag_end, (12, 34))
+        # No control point yet — only set once dist > DRAG_THRESHOLD.
+        self.assertIsNone(tool._control)
+
+    def test_move_after_press_sets_control_point(self):
+        from tools.type_on_path import TypeOnPathTool
+        tool = TypeOnPathTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 20)
+        tool.on_move(ctx, 50, 60, dragging=True)
+        self.assertEqual(tool._drag_end, (50, 60))
+        # Distance ≈ 56 > DRAG_THRESHOLD, so a control point is set.
+        self.assertIsNotNone(tool._control)
+
+    def test_tiny_move_does_not_set_control_point(self):
+        from tools.type_on_path import TypeOnPathTool
+        tool = TypeOnPathTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 20)
+        tool.on_move(ctx, 11, 21, dragging=True)
+        self.assertIsNone(tool._control)
+
+    def test_move_without_press_is_noop(self):
+        from tools.type_on_path import TypeOnPathTool
+        tool = TypeOnPathTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_move(ctx, 50, 60, dragging=True)
+        self.assertIsNone(tool._drag_start)
+        self.assertIsNone(tool._control)
+
+    def test_drag_creates_textpath_with_curve(self):
+        """Drag larger than DRAG_THRESHOLD creates a TextPath with a CurveTo."""
+        from tools.type_on_path import TypeOnPathTool
+        from geometry.element import TextPath
+        tool = TypeOnPathTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 20)
+        tool.on_move(ctx, 50, 60, dragging=True)
+        tool.on_release(ctx, 50, 60)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 1)
+        elem = children[0]
+        self.assertIsInstance(elem, TextPath)
+        self.assertEqual(elem.content, "Lorem Ipsum")
+        # First command is MoveTo at start, second is CurveTo to end.
+        self.assertIsInstance(elem.d[0], MoveTo)
+        self.assertEqual((elem.d[0].x, elem.d[0].y), (10, 20))
+        self.assertIsInstance(elem.d[1], CurveTo)
+        self.assertEqual((elem.d[1].x, elem.d[1].y), (50, 60))
+
+    def test_drag_without_move_creates_line_textpath(self):
+        """Press and release without intermediate move => LineTo segment."""
+        from tools.type_on_path import TypeOnPathTool
+        from geometry.element import TextPath
+        tool = TypeOnPathTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 20)
+        tool.on_release(ctx, 50, 60)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 1)
+        elem = children[0]
+        self.assertIsInstance(elem, TextPath)
+        self.assertIsInstance(elem.d[0], MoveTo)
+        self.assertIsInstance(elem.d[1], LineTo)
+
+    def test_click_on_path_converts_to_textpath(self):
+        """Click without drag on a Path converts it to a TextPath."""
+        from tools.type_on_path import TypeOnPathTool
+        from geometry.element import TextPath
+        tool = TypeOnPathTool()
+        ctx, model, ctrl = _make_ctx()
+        existing = Path(
+            d=(MoveTo(0, 0), LineTo(100, 0)),
+            stroke=Stroke(Color(0, 0, 0), 1.0),
+        )
+        ctx.hit_test_path_curve = lambda x, y: ((0, 0), existing)
+        layer = Layer(name="L", children=(existing,))
+        model.document = Document(layers=(layer,), selection=frozenset())
+        tool.on_press(ctx, 50, 0)
+        tool.on_release(ctx, 50, 0)
+        elem = _layer_children(model)[0]
+        self.assertIsInstance(elem, TextPath)
+
+    def test_idle_after_release(self):
+        from tools.type_on_path import TypeOnPathTool
+        tool = TypeOnPathTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 20)
+        tool.on_release(ctx, 50, 60)
+        self.assertIsNone(tool._drag_start)
+        self.assertIsNone(tool._drag_end)
+        self.assertIsNone(tool._control)
+
+    def test_press_takes_snapshot(self):
+        from tools.type_on_path import TypeOnPathTool
+        tool = TypeOnPathTool()
+        ctx, model, ctrl = _make_ctx()
+        self.assertFalse(model.can_undo)
+        tool.on_press(ctx, 10, 20)
+        self.assertTrue(model.can_undo, "press should record an undo snapshot")
+
+
 if __name__ == '__main__':
     absltest.main()

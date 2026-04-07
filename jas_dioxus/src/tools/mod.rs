@@ -15,4 +15,4 @@ pub mod smooth;
 pub mod polygon;
 pub mod star;
 pub mod type_tool;
-pub mod text_path;
+pub mod type_on_path;

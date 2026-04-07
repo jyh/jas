@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Pencil | Path_eraser | Smooth | Type_tool | Text_path | Line | Rect | Rounded_rect | Polygon | Star
+type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Pencil | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -74,7 +74,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
          pen_slot_tool <- t
        | Pencil | Path_eraser | Smooth ->
          pencil_slot_tool <- t
-       | Type_tool | Text_path ->
+       | Type_tool | Type_on_path ->
          text_slot_tool <- t
        | Rect | Rounded_rect | Polygon | Star ->
          shape_slot_tool <- t
@@ -354,23 +354,53 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.restore cr
       in
 
-      let draw_text_path_icon cr ~alloc =
+      let draw_type_on_path_icon cr ~alloc =
+        (* Type-on-a-Path icon from assets/icons/type on a path.svg
+           (viewBox 0 0 256 256), scaled to 28x28 *)
         let bw = float_of_int alloc.Gtk.width in
         let bh = float_of_int alloc.Gtk.height in
         let ox = (bw -. 28.0) /. 2.0 in
         let oy = (bh -. 28.0) /. 2.0 in
+        let s = 28.0 /. 256.0 in
+        Cairo.save cr;
+        Cairo.translate cr ox oy;
+        Cairo.scale cr s s;
         Cairo.set_source_rgb cr 0.8 0.8 0.8;
-        Cairo.select_font_face cr "Sans" ~weight:Cairo.Bold;
-        Cairo.set_font_size cr 16.0;
-        Cairo.move_to cr (ox +. 2.0) (oy +. 18.0);
-        Cairo.show_text cr "T";
-        (* Wavy path *)
-        Cairo.set_line_width cr 1.0;
-        Cairo.move_to cr (ox +. 12.0) (oy +. 20.0);
-        Cairo.curve_to cr (ox +. 16.0) (oy +. 8.0)
-                          (ox +. 22.0) (oy +. 24.0)
-                          (ox +. 26.0) (oy +. 12.0);
-        Cairo.stroke cr
+        (* Caret/insertion-point glyph (top stroke) *)
+        Cairo.move_to cr 146.65 143.92;
+        Cairo.curve_to cr 146.90 149.81 136.63 147.47 133.15 143.77;
+        Cairo.line_to cr 115.23 124.75;
+        Cairo.curve_to cr 112.23 121.57 114.91 117.25 116.23 114.81;
+        Cairo.curve_to cr 117.93 111.69 124.83 117.32 126.72 115.88;
+        Cairo.curve_to cr 141.92 103.01 156.13 87.44 170.36 72.51;
+        Cairo.curve_to cr 173.34 69.38 167.59 65.27 165.59 63.83;
+        Cairo.curve_to cr 159.29 59.29 144.76 74.47 146.36 57.74;
+        Cairo.curve_to cr 146.98 51.26 159.88 39.14 166.61 44.99;
+        Cairo.curve_to cr 184.78 60.79 201.40 78.14 217.12 95.93;
+        Cairo.curve_to cr 219.01 102.34 205.42 115.82 199.03 115.42;
+        Cairo.curve_to cr 189.98 114.86 201.34 101.38 197.33 95.66;
+        Cairo.curve_to cr 195.60 93.19 189.73 87.53 186.13 91.11;
+        Cairo.line_to cr 146.09 130.89;
+        Cairo.line_to cr 146.65 143.92;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        (* Underlying curve glyph *)
+        Cairo.move_to cr 194.00 177.67;
+        Cairo.curve_to cr 196.66 188.47 189.71 199.52 182.32 203.63;
+        Cairo.curve_to cr 158.52 216.88 137.39 188.98 120.34 168.89;
+        Cairo.curve_to cr 105.40 151.28 88.87 136.25 72.65 119.71;
+        Cairo.curve_to cr 68.96 115.94 63.09 114.70 59.42 116.74;
+        Cairo.curve_to cr 47.24 123.50 54.88 134.76 45.63 135.65;
+        Cairo.curve_to cr 27.42 135.43 43.44 109.53 51.73 106.74;
+        Cairo.curve_to cr 59.80 102.36 72.46 102.18 79.04 108.46;
+        Cairo.curve_to cr 93.71 122.48 107.83 135.56 120.81 150.92;
+        Cairo.curve_to cr 133.49 165.91 147.03 179.29 161.34 192.68;
+        Cairo.curve_to cr 165.16 196.26 172.01 194.09 175.80 192.54;
+        Cairo.curve_to cr 180.32 190.70 180.63 184.50 181.52 178.11;
+        Cairo.curve_to cr 181.97 174.91 193.13 174.16 194.00 177.67;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        Cairo.restore cr
       in
 
       let draw_pen_icon cr ~alloc =
@@ -865,7 +895,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         end;
         (match text_slot_tool with
          | Type_tool -> draw_type_icon cr ~alloc
-         | Text_path -> draw_text_path_icon cr ~alloc
+         | Type_on_path -> draw_type_on_path_icon cr ~alloc
          | _ -> ());
         (* Alternate triangle *)
         let ox = (bw -. 28.0) /. 2.0 in
@@ -1137,7 +1167,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         ) |> ignore
       in
       add_item "Type" Type_tool;
-      add_item "Text on Path" Text_path;
+      add_item "Type on a Path" Type_on_path;
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
 
     method private show_shape_slot_menu =
