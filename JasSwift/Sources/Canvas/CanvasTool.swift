@@ -124,6 +124,7 @@ func createTools() -> [Tool: CanvasTool] {
         .textPath: TextPathTool(),
         .line: LineTool(),
         .rect: RectTool(),
+        .roundedRect: RoundedRectTool(),
         .polygon: PolygonTool(),
     ]
 }

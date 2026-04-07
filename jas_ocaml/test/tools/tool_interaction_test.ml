@@ -109,6 +109,50 @@ let () =
       assert (height = 60.0)
     | _ -> assert false);
 
+  (* ---- Rounded rect tool ---- *)
+
+  run_test "rounded rect tool: draw rounded rect" (fun () ->
+    let tool = new Jas.Drawing_tool.rounded_rect_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_release ctx 110.0 70.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    match children.(0) with
+    | Rect { x; y; width; height; rx; ry; _ } ->
+      assert (x = 10.0);
+      assert (y = 20.0);
+      assert (width = 100.0);
+      assert (height = 50.0);
+      assert (rx = Jas.Drawing_tool.rounded_rect_radius);
+      assert (ry = Jas.Drawing_tool.rounded_rect_radius)
+    | _ -> assert false);
+
+  run_test "rounded rect tool: zero-size not created" (fun () ->
+    let tool = new Jas.Drawing_tool.rounded_rect_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 0));
+
+  run_test "rounded rect tool: negative drag normalizes" (fun () ->
+    let tool = new Jas.Drawing_tool.rounded_rect_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 100.0 80.0 ~shift:false ~alt:false;
+    tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    match children.(0) with
+    | Rect { x; y; width; height; rx; ry; _ } ->
+      assert (x = 10.0);
+      assert (y = 20.0);
+      assert (width = 90.0);
+      assert (height = 60.0);
+      assert (rx = Jas.Drawing_tool.rounded_rect_radius);
+      assert (ry = Jas.Drawing_tool.rounded_rect_radius)
+    | _ -> assert false);
+
   (* ---- Polygon tool ---- *)
 
   run_test "polygon tool: draw polygon" (fun () ->

@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Pencil | Path_eraser | Smooth | Text_tool | Text_path | Line | Rect | Polygon
+type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Pencil | Path_eraser | Smooth | Text_tool | Text_path | Line | Rect | Rounded_rect | Polygon
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -76,7 +76,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
          pencil_slot_tool <- t
        | Text_tool | Text_path ->
          text_slot_tool <- t
-       | Rect | Polygon ->
+       | Rect | Rounded_rect | Polygon ->
          shape_slot_tool <- t
        | _ -> ());
       self#redraw_all
@@ -211,6 +211,35 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.set_line_width cr 1.5;
         Cairo.rectangle cr (ox +. 4.0) (oy +. 6.0) ~w:20.0 ~h:16.0;
         Cairo.stroke cr
+      in
+
+      let draw_rounded_rect_icon cr ~alloc =
+        (* Rounded rect icon from SVG (viewBox 0 0 256 256), scaled to 28x28 *)
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let s = 28.0 /. 256.0 in
+        Cairo.save cr;
+        Cairo.translate cr ox oy;
+        Cairo.scale cr s s;
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.set_line_width cr 8.0;
+        let x = 23.33 and y = 58.26 in
+        let w = 212.06 and h = 139.47 in
+        let r = 30.0 in
+        Cairo.move_to cr (x +. r) y;
+        Cairo.line_to cr (x +. w -. r) y;
+        Cairo.curve_to cr (x +. w) y (x +. w) y (x +. w) (y +. r);
+        Cairo.line_to cr (x +. w) (y +. h -. r);
+        Cairo.curve_to cr (x +. w) (y +. h) (x +. w) (y +. h) (x +. w -. r) (y +. h);
+        Cairo.line_to cr (x +. r) (y +. h);
+        Cairo.curve_to cr x (y +. h) x (y +. h) x (y +. h -. r);
+        Cairo.line_to cr x (y +. r);
+        Cairo.curve_to cr x y x y (x +. r) y;
+        Cairo.Path.close cr;
+        Cairo.stroke cr;
+        Cairo.restore cr
       in
 
       let draw_polygon_icon cr ~alloc =
@@ -825,6 +854,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         end;
         (match shape_slot_tool with
          | Rect -> draw_rect_icon cr ~alloc
+         | Rounded_rect -> draw_rounded_rect_icon cr ~alloc
          | Polygon -> draw_polygon_icon cr ~alloc
          | _ -> ());
         (* Alternate triangle *)
@@ -1072,6 +1102,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         ) |> ignore
       in
       add_item "Rectangle" Rect;
+      add_item "Rounded Rectangle" Rounded_rect;
       add_item "Polygon" Polygon;
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
   end

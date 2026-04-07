@@ -29,6 +29,7 @@ use crate::tools::path_eraser::PathEraserTool;
 use crate::tools::smooth::SmoothTool;
 use crate::tools::polygon::PolygonTool;
 use crate::tools::rect::RectTool;
+use crate::tools::rounded_rect::RoundedRectTool;
 use crate::tools::selection::SelectionTool;
 use crate::tools::text::TextTool;
 use crate::tools::text_path::TextPathTool;
@@ -61,6 +62,7 @@ impl TabState {
         tools.insert(ToolKind::Text, Box::new(TextTool::new()));
         tools.insert(ToolKind::TextOnPath, Box::new(TextPathTool::new()));
         tools.insert(ToolKind::Rect, Box::new(RectTool::new()));
+        tools.insert(ToolKind::RoundedRect, Box::new(RoundedRectTool::new()));
         tools.insert(ToolKind::Polygon, Box::new(PolygonTool::new()));
         tools.insert(ToolKind::Line, Box::new(LineTool::new()));
         Self { model, tools, clipboard: Vec::new() }
@@ -394,7 +396,7 @@ const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (1, 1, &[ToolKind::Pencil, ToolKind::PathEraser, ToolKind::Smooth]),
     (2, 0, &[ToolKind::Text, ToolKind::TextOnPath]),
     (2, 1, &[ToolKind::Line]),
-    (3, 0, &[ToolKind::Rect, ToolKind::Polygon]),
+    (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon]),
 ];
 
 /// Long-press threshold in milliseconds.
@@ -465,6 +467,11 @@ fn toolbar_svg_icon(kind: ToolKind) -> String {
         // Rectangle
         ToolKind::Rect => format!(
             r#"<rect x="4" y="4" width="20" height="20" fill="none" stroke="{c}" stroke-width="1.5"/>"#),
+        // Rounded Rectangle (from SVG, scaled from 256→28)
+        ToolKind::RoundedRect => {
+            let _c = c;
+            r##"<g transform="scale(0.109375)"><rect x="23.33" y="58.26" width="212.06" height="139.47" rx="30" ry="30" fill="none" stroke="rgb(204,204,204)" stroke-miterlimit="10" stroke-width="8"/></g>"##.to_string()
+        },
         // Hexagon (cx=14, cy=14, r=11, 6 sides, -90° start)
         ToolKind::Polygon => format!(
             r#"<path d="M14,3 L23.5,8.5 L23.5,19.5 L14,25 L4.5,19.5 L4.5,8.5 Z" fill="none" stroke="{c}" stroke-width="1.5"/>"#),

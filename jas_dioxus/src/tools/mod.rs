@@ -3,6 +3,7 @@ pub mod selection;
 pub mod direct_selection;
 pub mod group_selection;
 pub mod rect;
+pub mod rounded_rect;
 pub mod line;
 pub mod pen;
 pub mod add_anchor_point;

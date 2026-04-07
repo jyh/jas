@@ -9,7 +9,7 @@ import AppKit
 
 @Test func toolEnumCases() {
     let tools = Tool.allCases
-    #expect(tools.count == 14)
+    #expect(tools.count == 15)
     #expect(tools.contains(.selection))
     #expect(tools.contains(.directSelection))
     #expect(tools.contains(.groupSelection))
@@ -20,6 +20,7 @@ import AppKit
     #expect(tools.contains(.textPath))
     #expect(tools.contains(.line))
     #expect(tools.contains(.rect))
+    #expect(tools.contains(.roundedRect))
     #expect(tools.contains(.polygon))
 }
 

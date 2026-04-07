@@ -112,11 +112,37 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element) {
         Element::Rect(e) => {
             apply_fill(ctx, e.fill.as_ref());
             apply_stroke(ctx, e.stroke.as_ref());
-            if e.fill.is_some() {
-                ctx.fill_rect(e.x, e.y, e.width, e.height);
-            }
-            if e.stroke.is_some() {
-                ctx.stroke_rect(e.x, e.y, e.width, e.height);
+            if e.rx > 0.0 || e.ry > 0.0 {
+                let rx = e.rx.max(0.0).min(e.width / 2.0);
+                let ry = e.ry.max(0.0).min(e.height / 2.0);
+                let x = e.x;
+                let y = e.y;
+                let w = e.width;
+                let h = e.height;
+                ctx.begin_path();
+                ctx.move_to(x + rx, y);
+                ctx.line_to(x + w - rx, y);
+                ctx.quadratic_curve_to(x + w, y, x + w, y + ry);
+                ctx.line_to(x + w, y + h - ry);
+                ctx.quadratic_curve_to(x + w, y + h, x + w - rx, y + h);
+                ctx.line_to(x + rx, y + h);
+                ctx.quadratic_curve_to(x, y + h, x, y + h - ry);
+                ctx.line_to(x, y + ry);
+                ctx.quadratic_curve_to(x, y, x + rx, y);
+                ctx.close_path();
+                if e.fill.is_some() {
+                    ctx.fill();
+                }
+                if e.stroke.is_some() {
+                    ctx.stroke();
+                }
+            } else {
+                if e.fill.is_some() {
+                    ctx.fill_rect(e.x, e.y, e.width, e.height);
+                }
+                if e.stroke.is_some() {
+                    ctx.stroke_rect(e.x, e.y, e.width, e.height);
+                }
             }
         }
         Element::Circle(e) => {

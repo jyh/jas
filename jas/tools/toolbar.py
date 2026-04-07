@@ -23,6 +23,7 @@ class Tool(Enum):
     TEXT_PATH = auto()
     LINE = auto()
     RECT = auto()
+    ROUNDED_RECT = auto()
     POLYGON = auto()
 
 
@@ -79,6 +80,8 @@ class ToolButton(QToolButton):
             self._draw_line_tool(painter)
         elif self.tool == Tool.RECT:
             self._draw_rect_tool(painter)
+        elif self.tool == Tool.ROUNDED_RECT:
+            self._draw_rounded_rect_tool(painter)
         elif self.tool == Tool.PEN:
             self._draw_pen_tool(painter)
         elif self.tool == Tool.ADD_ANCHOR_POINT:
@@ -141,6 +144,20 @@ class ToolButton(QToolButton):
     def _draw_rect_tool(self, painter):
         painter.setPen(QPen(QColor("#cccccc"), 1.5))
         painter.drawRect(4, 4, self.ICON_SIZE - 8, self.ICON_SIZE - 8)
+
+    def _draw_rounded_rect_tool(self, painter):
+        # Rounded Rectangle icon from SVG (viewBox 0 0 256 256), scaled to 28x28.
+        from PySide6.QtCore import QRectF
+        s = 28.0 / 256.0
+        ox = (self.ICON_SIZE - 28) / 2.0
+        oy = (self.ICON_SIZE - 28) / 2.0
+        painter.save()
+        painter.translate(ox, oy)
+        painter.scale(s, s)
+        painter.setPen(QPen(QColor("#cccccc"), 8))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(23.33, 58.26, 212.06, 139.47), 30.0, 30.0)
+        painter.restore()
 
     def _draw_pen_tool(self, painter):
         # Pen icon from SVG paths (viewBox 0 0 256 256), scaled to 28x28.
@@ -634,7 +651,7 @@ _PENCIL_SLOT_TOOLS = {Tool.PENCIL, Tool.PATH_ERASER, Tool.SMOOTH}
 # Tools that share the text/text-path slot
 _TEXT_SLOT_TOOLS = {Tool.TEXT, Tool.TEXT_PATH}
 # Tools that share the rect/polygon slot
-_SHAPE_SLOT_TOOLS = {Tool.RECT, Tool.POLYGON}
+_SHAPE_SLOT_TOOLS = {Tool.RECT, Tool.ROUNDED_RECT, Tool.POLYGON}
 _LONG_PRESS_MS = LONG_PRESS_MS
 
 
@@ -699,6 +716,8 @@ class Toolbar(QWidget):
         self.button_group.addButton(self.buttons[Tool.TEXT_PATH])
         self.buttons[Tool.POLYGON] = ToolButton(Tool.POLYGON, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.POLYGON])
+        self.buttons[Tool.ROUNDED_RECT] = ToolButton(Tool.ROUNDED_RECT, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.ROUNDED_RECT])
         self.buttons[Tool.PATH_ERASER] = ToolButton(Tool.PATH_ERASER, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.PATH_ERASER])
         self.buttons[Tool.SMOOTH] = ToolButton(Tool.SMOOTH, has_alternates=True)
@@ -849,8 +868,10 @@ class Toolbar(QWidget):
 
     def _show_shape_slot_menu(self):
         menu = QMenu(self)
-        for tool in (Tool.RECT, Tool.POLYGON):
-            label = "Rectangle" if tool == Tool.RECT else "Polygon"
+        for tool in (Tool.RECT, Tool.ROUNDED_RECT, Tool.POLYGON):
+            label = {Tool.RECT: "Rectangle",
+                     Tool.ROUNDED_RECT: "Rounded Rectangle",
+                     Tool.POLYGON: "Polygon"}[tool]
             action = menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(tool == self._shape_slot_tool)
