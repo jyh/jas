@@ -191,6 +191,7 @@ let flatten_with_cmd_map cmds =
   (Array.of_list (List.rev !pts), Array.of_list (List.rev !cmap))
 
 class smooth_tool = object (_self)
+  inherit Canvas_tool.default_methods
   val mutable smoothing = false
   val mutable last_pos = (0.0, 0.0)
 

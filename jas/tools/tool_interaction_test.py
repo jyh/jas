@@ -205,8 +205,8 @@ class StarToolTest(absltest.TestCase):
 
 
 class TypeToolTest(absltest.TestCase):
-    def test_drag_creates_area_text(self):
-        """Drag larger than DRAG_THRESHOLD creates an area Text element."""
+    def test_drag_creates_empty_area_text_and_session(self):
+        """Drag larger than DRAG_THRESHOLD creates an empty area Text and starts an editing session."""
         from tools.type_tool import TypeTool
         from geometry.element import Text
         tool = TypeTool()
@@ -221,10 +221,11 @@ class TypeToolTest(absltest.TestCase):
         self.assertEqual(elem.y, 20)
         self.assertEqual(elem.width, 100)
         self.assertEqual(elem.height, 50)
-        self.assertEqual(elem.content, "Lorem Ipsum")
+        self.assertEqual(elem.content, "")
+        self.assertIsNotNone(tool.session)
 
-    def test_click_creates_point_text(self):
-        """Click without drag (and without text under cursor) creates point text."""
+    def test_click_creates_empty_point_text(self):
+        """Click without drag creates an empty point text and starts an editing session."""
         from tools.type_tool import TypeTool
         from geometry.element import Text
         tool = TypeTool()
@@ -237,26 +238,56 @@ class TypeToolTest(absltest.TestCase):
         self.assertIsInstance(elem, Text)
         self.assertEqual(elem.x, 30)
         self.assertEqual(elem.y, 40)
+        self.assertEqual(elem.content, "")
+        self.assertIsNotNone(tool.session)
 
-    def test_click_on_existing_text_starts_edit(self):
-        """Click on existing text triggers start_text_edit instead of new text."""
+    def test_click_on_existing_text_starts_session(self):
+        """Click on existing text starts an in-place editing session on it."""
         from tools.type_tool import TypeTool
         from geometry.element import Text
-        edit_calls = []
-        ctx, model, ctrl = _make_ctx()
+        # Place an existing Text in the model so the tool's recursive
+        # hit-test (which walks the document) finds it.
         existing = Text(x=0, y=0, content="hello",
                         fill=Fill(Color(0, 0, 0)))
-        ctx.hit_test_text = lambda x, y: ((0, 0), existing)
-        ctx.start_text_edit = lambda path, elem: edit_calls.append((path, elem))
+        layer = Layer(name="L", children=(existing,))
+        model = Model(document=Document(layers=(layer,)))
+        ctx, model, ctrl = _make_ctx(model)
         tool = TypeTool()
         tool.on_press(ctx, 5, 5)
         tool.on_release(ctx, 5, 5)
-        self.assertEqual(len(edit_calls), 1)
         # No new element added
-        self.assertEqual(len(_layer_children(model)), 0)
+        self.assertEqual(len(_layer_children(model)), 1)
+        self.assertIsNotNone(tool.session)
+        self.assertEqual(tool.session.content, "hello")
 
-    def test_idle_after_release(self):
-        """Tool returns to idle state after release."""
+    def test_typing_into_session_updates_model(self):
+        """Keystrokes inside an open session are reflected in the model."""
+        from tools.type_tool import TypeTool
+        from tools.tool import KeyMods
+        from geometry.element import Text
+        tool = TypeTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 10)
+        tool.on_release(ctx, 10, 10)
+        tool.on_key_event(ctx, "a", KeyMods())
+        tool.on_key_event(ctx, "b", KeyMods())
+        elem = _layer_children(model)[0]
+        self.assertEqual(elem.content, "ab")
+
+    def test_escape_ends_session_keeps_element(self):
+        from tools.type_tool import TypeTool
+        from tools.tool import KeyMods
+        tool = TypeTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 10)
+        tool.on_release(ctx, 10, 10)
+        tool.on_key_event(ctx, "Escape", KeyMods())
+        self.assertIsNone(tool.session)
+        # Empty element remains in the document.
+        self.assertEqual(len(_layer_children(model)), 1)
+
+    def test_idle_after_drag_release(self):
+        """After drag-create the tool is in an editing session, drag state is None."""
         from tools.type_tool import TypeTool
         tool = TypeTool()
         ctx, model, ctrl = _make_ctx()
@@ -942,7 +973,7 @@ class TypeOnPathToolTest(absltest.TestCase):
         self.assertIsNone(tool._control)
 
     def test_drag_creates_textpath_with_curve(self):
-        """Drag larger than DRAG_THRESHOLD creates a TextPath with a CurveTo."""
+        """Drag creates an empty TextPath with a CurveTo and starts an editing session."""
         from tools.type_on_path import TypeOnPathTool
         from geometry.element import TextPath
         tool = TypeOnPathTool()
@@ -954,45 +985,42 @@ class TypeOnPathToolTest(absltest.TestCase):
         self.assertEqual(len(children), 1)
         elem = children[0]
         self.assertIsInstance(elem, TextPath)
-        self.assertEqual(elem.content, "Lorem Ipsum")
-        # First command is MoveTo at start, second is CurveTo to end.
+        self.assertEqual(elem.content, "")
         self.assertIsInstance(elem.d[0], MoveTo)
         self.assertEqual((elem.d[0].x, elem.d[0].y), (10, 20))
         self.assertIsInstance(elem.d[1], CurveTo)
         self.assertEqual((elem.d[1].x, elem.d[1].y), (50, 60))
-
-    def test_drag_without_move_creates_line_textpath(self):
-        """Press and release without intermediate move => LineTo segment."""
-        from tools.type_on_path import TypeOnPathTool
-        from geometry.element import TextPath
-        tool = TypeOnPathTool()
-        ctx, model, ctrl = _make_ctx()
-        tool.on_press(ctx, 10, 20)
-        tool.on_release(ctx, 50, 60)
-        children = _layer_children(model)
-        self.assertEqual(len(children), 1)
-        elem = children[0]
-        self.assertIsInstance(elem, TextPath)
-        self.assertIsInstance(elem.d[0], MoveTo)
-        self.assertIsInstance(elem.d[1], LineTo)
+        self.assertIsNotNone(tool.session)
 
     def test_click_on_path_converts_to_textpath(self):
-        """Click without drag on a Path converts it to a TextPath."""
+        """Click without drag on a Path converts it to an empty TextPath
+        and starts an editing session."""
         from tools.type_on_path import TypeOnPathTool
         from geometry.element import TextPath
         tool = TypeOnPathTool()
-        ctx, model, ctrl = _make_ctx()
         existing = Path(
             d=(MoveTo(0, 0), LineTo(100, 0)),
             stroke=Stroke(Color(0, 0, 0), 1.0),
         )
-        ctx.hit_test_path_curve = lambda x, y: ((0, 0), existing)
         layer = Layer(name="L", children=(existing,))
-        model.document = Document(layers=(layer,), selection=frozenset())
+        model = Model(document=Document(layers=(layer,)))
+        ctx, model, ctrl = _make_ctx(model)
         tool.on_press(ctx, 50, 0)
         tool.on_release(ctx, 50, 0)
         elem = _layer_children(model)[0]
         self.assertIsInstance(elem, TextPath)
+        self.assertEqual(elem.content, "")
+        self.assertIsNotNone(tool.session)
+
+    def test_click_on_empty_canvas_does_nothing(self):
+        """A click (no drag) on empty canvas does NOT create a TextPath."""
+        from tools.type_on_path import TypeOnPathTool
+        tool = TypeOnPathTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 20)
+        tool.on_release(ctx, 10, 20)
+        self.assertEqual(len(_layer_children(model)), 0)
+        self.assertIsNone(tool.session)
 
     def test_idle_after_release(self):
         from tools.type_on_path import TypeOnPathTool
@@ -1003,14 +1031,6 @@ class TypeOnPathToolTest(absltest.TestCase):
         self.assertIsNone(tool._drag_start)
         self.assertIsNone(tool._drag_end)
         self.assertIsNone(tool._control)
-
-    def test_press_takes_snapshot(self):
-        from tools.type_on_path import TypeOnPathTool
-        tool = TypeOnPathTool()
-        ctx, model, ctrl = _make_ctx()
-        self.assertFalse(model.can_undo)
-        tool.on_press(ctx, 10, 20)
-        self.assertTrue(model.can_undo, "press should record an undo snapshot")
 
 
 if __name__ == '__main__':

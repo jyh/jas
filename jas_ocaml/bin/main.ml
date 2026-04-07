@@ -56,6 +56,14 @@ let () =
   (* Keyboard shortcuts: V = Selection, A = Direct Selection, \ = Line *)
   main_window#event#connect#key_press ~callback:(fun ev ->
     let key = GdkEvent.Key.keyval ev in
+    (* If a tool is in an editing session (e.g. type tool), give it first
+       chance at the full key event before any global shortcuts fire. *)
+    let editing_handled = match !active_canvas with
+      | Some c when c#tool_is_editing -> c#forward_key_event ev
+      | _ -> false
+    in
+    if editing_handled then true
+    else
     (* Forward to active tool first (e.g. Space for anchor repositioning) *)
     let tool_handled = match !active_canvas with
       | Some c -> c#forward_key key

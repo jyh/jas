@@ -1,0 +1,221 @@
+import Testing
+@testable import JasLib
+
+// Mirrors `text_edit_test.py`, `text_edit_test.ml`, and the unit tests
+// in `jas_dioxus/src/tools/text_edit.rs`.
+
+private func session(_ content: String) -> TextEditSession {
+    TextEditSession(path: [0, 0], target: .text, content: content, insertion: 0)
+}
+
+@Test func newSessionHasCaretAtInsertion() {
+    let s = TextEditSession(path: [0, 0], target: .text, content: "abc", insertion: 2)
+    #expect(s.insertion == 2)
+    #expect(s.anchor == 2)
+    #expect(!s.hasSelection)
+}
+
+@Test func insertAtCaretAdvancesPosition() {
+    let s = session("hello")
+    s.setInsertion(5, extend: false)
+    s.insert(" world")
+    #expect(s.content == "hello world")
+    #expect(s.insertion == 11)
+}
+
+@Test func insertReplacesSelection() {
+    let s = session("hello")
+    s.setInsertion(0, extend: false)
+    s.setInsertion(5, extend: true)
+    s.insert("hi")
+    #expect(s.content == "hi")
+    #expect(s.insertion == 2)
+    #expect(!s.hasSelection)
+}
+
+@Test func backspaceDeletesCharBeforeCursor() {
+    let s = session("hello")
+    s.setInsertion(5, extend: false)
+    s.backspace()
+    #expect(s.content == "hell")
+    #expect(s.insertion == 4)
+}
+
+@Test func backspaceAtStartIsNoop() {
+    let s = session("hi")
+    s.setInsertion(0, extend: false)
+    s.backspace()
+    #expect(s.content == "hi")
+}
+
+@Test func backspaceWithSelectionDeletesRange() {
+    let s = session("hello")
+    s.setInsertion(1, extend: false)
+    s.setInsertion(4, extend: true)
+    s.backspace()
+    #expect(s.content == "ho")
+    #expect(s.insertion == 1)
+}
+
+@Test func deleteForwardRemovesCharAfter() {
+    let s = session("hello")
+    s.setInsertion(0, extend: false)
+    s.deleteForward()
+    #expect(s.content == "ello")
+}
+
+@Test func deleteForwardAtEndIsNoop() {
+    let s = session("hi")
+    s.setInsertion(2, extend: false)
+    s.deleteForward()
+    #expect(s.content == "hi")
+}
+
+@Test func selectAllExtendsToFullContent() {
+    let s = session("hello")
+    s.selectAll()
+    let (lo, hi) = s.selectionRange
+    #expect(lo == 0 && hi == 5)
+}
+
+@Test func copySelectionReturnsSubstring() {
+    let s = session("hello")
+    s.setInsertion(1, extend: false)
+    s.setInsertion(4, extend: true)
+    #expect(s.copySelection() == "ell")
+}
+
+@Test func copyWithNoSelectionReturnsNil() {
+    let s = session("hello")
+    #expect(s.copySelection() == nil)
+}
+
+@Test func undoRestoresPreviousState() {
+    let s = session("")
+    s.insert("a")
+    s.insert("b")
+    #expect(s.content == "ab")
+    s.undo()
+    #expect(s.content == "a")
+    s.undo()
+    #expect(s.content == "")
+}
+
+@Test func redoReplaysUndoneState() {
+    let s = session("")
+    s.insert("a")
+    s.undo()
+    s.redo()
+    #expect(s.content == "a")
+}
+
+@Test func newEditClearsRedo() {
+    let s = session("")
+    s.insert("a")
+    s.undo()
+    s.insert("b")
+    s.redo()
+    #expect(s.content == "b")
+}
+
+@Test func setInsertionClampsPastEnd() {
+    let s = session("hi")
+    s.setInsertion(99, extend: false)
+    #expect(s.insertion == 2)
+    #expect(s.anchor == 2)
+}
+
+@Test func extendSelectionKeepsAnchor() {
+    let s = session("hello")
+    s.setInsertion(2, extend: false)
+    s.setInsertion(4, extend: true)
+    #expect(s.hasSelection)
+    #expect(s.anchor == 2)
+    #expect(s.insertion == 4)
+    let (lo, hi) = s.selectionRange
+    #expect(lo == 2 && hi == 4)
+}
+
+@Test func reverseSelectionOrdersRange() {
+    let s = session("hello")
+    s.setInsertion(4, extend: false)
+    s.setInsertion(1, extend: true)
+    let (lo, hi) = s.selectionRange
+    #expect(lo == 1 && hi == 4)
+}
+
+@Test func selectAllThenInsertReplacesEverything() {
+    let s = session("hello")
+    s.selectAll()
+    s.insert("X")
+    #expect(s.content == "X")
+    #expect(s.insertion == 1)
+    #expect(!s.hasSelection)
+}
+
+@Test func multiUndoRedoWalksHistory() {
+    let s = session("")
+    s.insert("a")
+    s.insert("b")
+    s.insert("c")
+    #expect(s.content == "abc")
+    s.undo(); s.undo()
+    #expect(s.content == "a")
+    s.redo()
+    #expect(s.content == "ab")
+    s.redo()
+    #expect(s.content == "abc")
+}
+
+@Test func undoAtBottomOfStackIsNoop() {
+    let s = session("hi")
+    s.undo()
+    #expect(s.content == "hi")
+}
+
+@Test func deleteForwardWithSelectionDeletesRange() {
+    let s = session("hello")
+    s.setInsertion(1, extend: false)
+    s.setInsertion(4, extend: true)
+    s.deleteForward()
+    #expect(s.content == "ho")
+}
+
+// Multibyte (Swift Character) handling — Swift uses extended grapheme
+// clusters, so 'é' is a single Character regardless of underlying bytes.
+
+@Test func insertHandlesMultibyteContent() {
+    let s = session("aéb")
+    s.setInsertion(2, extend: false)
+    s.insert("X")
+    #expect(s.content == "aéXb")
+}
+
+@Test func copySelectionHandlesMultibyte() {
+    let s = session("aéb")
+    s.setInsertion(0, extend: false)
+    s.setInsertion(2, extend: true)
+    #expect(s.copySelection() == "aé")
+}
+
+// MARK: - applyToDocument
+
+@Test func applyToDocumentReturnsNilOnStalePath() {
+    let s = session("X")
+    let doc = Document()  // empty: path [0, 0] does not resolve
+    #expect(s.applyToDocument(doc) == nil)
+}
+
+@Test func applyToDocumentWritesContentBack() {
+    let layer = Layer(name: "L", children: [.text(emptyTextElem(x: 0, y: 0, width: 0, height: 0))])
+    let doc = Document(layers: [layer])
+    let s = session("")
+    s.insert("hi")
+    let newDoc = s.applyToDocument(doc)
+    #expect(newDoc != nil)
+    if let nd = newDoc, case .text(let t) = nd.layers[0].children[0] {
+        #expect(t.content == "hi")
+    } else {
+        Issue.record("Expected text element with updated content")
+    }
+}

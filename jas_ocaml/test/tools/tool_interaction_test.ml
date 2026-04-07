@@ -835,6 +835,86 @@ let () =
     let children = layer_children model in
     assert (Array.length children = 0));
 
+  run_test "type tool: drag creates empty area text and session" (fun () ->
+    let tool = new Jas.Type_tool.type_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_release ctx 110.0 70.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    (match children.(0) with
+     | Text { content; _ } -> assert (content = "")
+     | _ -> assert false);
+    assert (tool#is_editing ()));
+
+  run_test "type tool: click creates empty point text and session" (fun () ->
+    let tool = new Jas.Type_tool.type_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 30.0 40.0 ~shift:false ~alt:false;
+    tool#on_release ctx 30.0 40.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    (match children.(0) with
+     | Text { content; _ } -> assert (content = "")
+     | _ -> assert false);
+    assert (tool#is_editing ()));
+
+  run_test "type tool: click on existing text starts session" (fun () ->
+    let tool = new Jas.Type_tool.type_tool in
+    let existing = Jas.Element.make_text
+      ~fill:(Some Jas.Element.{ fill_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 } })
+      0.0 0.0 "hello" in
+    let model = Jas.Model.create () in
+    let layer = Jas.Element.make_layer ~name:"L" [| existing |] in
+    model#set_document
+      { Jas.Document.layers = [| layer |]; selected_layer = 0;
+        selection = Jas.Document.PathMap.empty };
+    let ctrl = Jas.Controller.create ~model () in
+    let ctx : Jas.Canvas_tool.tool_context = {
+      model;
+      controller = ctrl;
+      hit_test_selection = (fun _ _ -> false);
+      hit_test_handle = (fun _ _ -> None);
+      hit_test_text = (fun _ _ -> Some ([0; 0], existing));
+      hit_test_path_curve = (fun _ _ -> None);
+      request_update = (fun () -> ());
+      start_text_edit = (fun _ _ -> ());
+      commit_text_edit = (fun () -> ());
+      draw_element_overlay = (fun _ _ _ -> ());
+    } in
+    tool#on_press ctx 5.0 5.0 ~shift:false ~alt:false;
+    tool#on_release ctx 5.0 5.0 ~shift:false ~alt:false;
+    assert (Array.length (layer_children model) = 1);
+    assert (tool#is_editing ());
+    match tool#get_session with
+    | Some s -> assert (Jas.Text_edit.content s = "hello")
+    | None -> assert false);
+
+  run_test "type tool: typing into session updates model" (fun () ->
+    let tool = new Jas.Type_tool.type_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 10.0 ~shift:false ~alt:false;
+    tool#on_release ctx 10.0 10.0 ~shift:false ~alt:false;
+    let mods : Jas.Canvas_tool.key_mods =
+      { shift = false; ctrl = false; alt = false; meta = false } in
+    assert (tool#on_key_event ctx "a" mods);
+    assert (tool#on_key_event ctx "b" mods);
+    let children = layer_children model in
+    match children.(0) with
+    | Text { content; _ } -> assert (content = "ab")
+    | _ -> assert false);
+
+  run_test "type tool: escape ends session keeps element" (fun () ->
+    let tool = new Jas.Type_tool.type_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 10.0 ~shift:false ~alt:false;
+    tool#on_release ctx 10.0 10.0 ~shift:false ~alt:false;
+    let mods : Jas.Canvas_tool.key_mods =
+      { shift = false; ctrl = false; alt = false; meta = false } in
+    assert (tool#on_key_event ctx "Escape" mods);
+    assert (not (tool#is_editing ()));
+    assert (Array.length (layer_children model) = 1));
+
   (* ---- Type-on-path tool ---- *)
 
   run_test "type-on-path tool: drag creates curved TextPath" (fun () ->
@@ -846,8 +926,7 @@ let () =
     let children = layer_children model in
     assert (Array.length children = 1);
     match children.(0) with
-    | Text_path { d; content; _ } ->
-      assert (content = "Lorem Ipsum");
+    | Text_path { d; _ } ->
       (* First command MoveTo at start, second CurveTo to end *)
       (match d with
        | [MoveTo (sx, sy); CurveTo (_, _, _, _, ex, ey)] ->
@@ -917,11 +996,91 @@ let () =
     let children = layer_children model in
     assert (Array.length children = 0));
 
-  run_test "type-on-path tool: press records undo snapshot" (fun () ->
+  run_test "type-on-path tool: drag creates empty TextPath and session" (fun () ->
+    let tool = new Jas.Type_on_path_tool.type_on_path_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+    tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    (match children.(0) with
+     | Text_path { content; _ } -> assert (content = "")
+     | _ -> assert false);
+    assert (tool#is_editing ()));
+
+  run_test "type-on-path tool: click on existing path starts session" (fun () ->
+    let tool = new Jas.Type_on_path_tool.type_on_path_tool in
+    let path_elem = Jas.Element.make_path
+      ~stroke:(Some Jas.Element.{ stroke_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
+                                   stroke_width = 1.0; stroke_linecap = Butt; stroke_linejoin = Miter })
+      [MoveTo (0.0, 0.0); LineTo (100.0, 0.0)] in
+    let model = Jas.Model.create () in
+    let layer = Jas.Element.make_layer ~name:"L" [| path_elem |] in
+    model#set_document
+      { Jas.Document.layers = [| layer |]; selected_layer = 0;
+        selection = Jas.Document.PathMap.empty };
+    let ctrl = Jas.Controller.create ~model () in
+    let ctx : Jas.Canvas_tool.tool_context = {
+      model;
+      controller = ctrl;
+      hit_test_selection = (fun _ _ -> false);
+      hit_test_handle = (fun _ _ -> None);
+      hit_test_text = (fun _ _ -> None);
+      hit_test_path_curve = (fun _ _ -> Some ([0; 0], path_elem));
+      request_update = (fun () -> ());
+      start_text_edit = (fun _ _ -> ());
+      commit_text_edit = (fun () -> ());
+      draw_element_overlay = (fun _ _ _ -> ());
+    } in
+    tool#on_press ctx 50.0 0.0 ~shift:false ~alt:false;
+    tool#on_release ctx 50.0 0.0 ~shift:false ~alt:false;
+    (match (layer_children model).(0) with
+     | Text_path { content; _ } -> assert (content = "")
+     | _ -> assert false);
+    assert (tool#is_editing ()));
+
+  run_test "type-on-path tool: click on empty canvas does nothing" (fun () ->
+    let tool = new Jas.Type_on_path_tool.type_on_path_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
+    assert (Array.length (layer_children model) = 0);
+    assert (not (tool#is_editing ())));
+
+  run_test "type-on-path tool: typing into session updates model" (fun () ->
+    let tool = new Jas.Type_on_path_tool.type_on_path_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+    tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
+    let mods : Jas.Canvas_tool.key_mods =
+      { shift = false; ctrl = false; alt = false; meta = false } in
+    assert (tool#on_key_event ctx "H" mods);
+    assert (tool#on_key_event ctx "i" mods);
+    match (layer_children model).(0) with
+    | Text_path { content; _ } -> assert (content = "Hi")
+    | _ -> assert false);
+
+  run_test "type-on-path tool: escape ends session" (fun () ->
+    let tool = new Jas.Type_on_path_tool.type_on_path_tool in
+    let (ctx, _model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+    tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
+    assert (tool#is_editing ());
+    let mods : Jas.Canvas_tool.key_mods =
+      { shift = false; ctrl = false; alt = false; meta = false } in
+    assert (tool#on_key_event ctx "Escape" mods);
+    assert (not (tool#is_editing ())));
+
+  run_test "type-on-path tool: drag-create records undo snapshot" (fun () ->
     let tool = new Jas.Type_on_path_tool.type_on_path_tool in
     let (ctx, model, _ctrl) = make_ctx () in
     assert (not model#can_undo);
     tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+    tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
     assert model#can_undo);
 
   Printf.printf "All tool interaction tests passed.\n"

@@ -62,6 +62,22 @@ class ToolContext:
         self.model.snapshot()
 
 
+class KeyMods:
+    """Modifier-key state passed to `on_key_event`."""
+    __slots__ = ("shift", "ctrl", "alt", "meta")
+
+    def __init__(self, shift: bool = False, ctrl: bool = False,
+                 alt: bool = False, meta: bool = False):
+        self.shift = shift
+        self.ctrl = ctrl
+        self.alt = alt
+        self.meta = meta
+
+    def cmd(self) -> bool:
+        """True if the platform 'command' modifier is held (Cmd on macOS, Ctrl elsewhere)."""
+        return self.meta or self.ctrl
+
+
 class CanvasTool(ABC):
     """Interface for canvas interaction tools."""
 
@@ -87,6 +103,38 @@ class CanvasTool(ABC):
         return False
 
     def on_key_release(self, ctx: ToolContext, key: int) -> bool:
+        return False
+
+    def on_key_event(self, ctx: ToolContext, key: str, mods: "KeyMods") -> bool:
+        """High-level keyboard event used by tools that capture text input.
+
+        `key` is a JavaScript-style key name (e.g. ``"a"``, ``"Escape"``,
+        ``"ArrowLeft"``). Tools that handle this should return True to
+        suppress further dispatch.
+        """
+        return False
+
+    def captures_keyboard(self) -> bool:
+        """Return True while this tool wants exclusive keyboard input
+        (e.g. an active in-place text edit session). The canvas widget
+        routes ALL keys to `on_key_event` while this is True."""
+        return False
+
+    def cursor_css_override(self) -> str | None:
+        """Optional override of the canvas cursor while this tool is active.
+        Returns ``"none"`` to hide the OS cursor (used by the type tools
+        while editing so the rendered caret isn't occluded), a Qt cursor
+        name string, or None to fall through to the default."""
+        return None
+
+    def is_editing(self) -> bool:
+        """True while this tool owns an in-place text editing session.
+        The canvas widget uses this to drive the caret-blink timer."""
+        return False
+
+    def paste_text(self, ctx: ToolContext, text: str) -> bool:
+        """Insert clipboard plain text into the active session, if any.
+        Returns True if handled."""
         return False
 
     @abstractmethod

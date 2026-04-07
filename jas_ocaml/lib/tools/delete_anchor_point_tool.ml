@@ -136,6 +136,7 @@ let delete_anchor_from_path d anchor_idx =
     end
 
 class delete_anchor_point_tool = object (_self)
+  inherit Canvas_tool.default_methods
   method on_press (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
     ignore shift; ignore alt;
     let doc = ctx.model#document in

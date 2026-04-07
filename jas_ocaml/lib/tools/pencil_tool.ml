@@ -3,6 +3,7 @@
 let fit_error = 4.0
 
 class pencil_tool = object (_self)
+  inherit Canvas_tool.default_methods
   val mutable points : (float * float) list = []
   val mutable drawing = false
 

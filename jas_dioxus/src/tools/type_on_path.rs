@@ -631,13 +631,10 @@ impl CanvasTool for TypeOnPathTool {
     fn captures_keyboard(&self) -> bool { self.session.is_some() }
 
     fn cursor_css_override(&self) -> Option<String> {
+        // While editing, always use the system I-beam ("text" in CSS).
+        // Matches the Swift / OCaml / Python ports.
         if self.session.is_some() {
-            // Hide the OS cursor only while it's actually over the
-            // text-on-path being edited; outside, restore the default
-            // cursor so the user can see where they're pointing.
-            if self.pointer_inside_edited {
-                return Some("none".to_string());
-            }
+            return Some("text".to_string());
         }
         if self.hover_textpath || self.hover_path {
             return Some(
@@ -919,19 +916,22 @@ mod tests {
         let mut model = model_with_textpath("hi");
         tool.on_press(&mut model, 50.0, 100.0, false, false);
         tool.on_release(&mut model, 50.0, 100.0, false, false);
-        assert_eq!(tool.cursor_css_override().as_deref(), Some("none"));
+        // While editing, the override is the system I-beam ("text").
+        assert_eq!(tool.cursor_css_override().as_deref(), Some("text"));
     }
 
     #[test]
-    fn cursor_restored_when_pointer_leaves_edited_textpath() {
+    fn cursor_is_system_ibeam_throughout_textpath_session() {
         let mut tool = TypeOnPathTool::new();
         let mut model = model_with_textpath("hi");
         tool.on_press(&mut model, 50.0, 100.0, false, false);
         tool.on_release(&mut model, 50.0, 100.0, false, false);
-        assert_eq!(tool.cursor_css_override().as_deref(), Some("none"));
-        // Path runs y=100 from x=0 to 200; move far away in y.
+        assert_eq!(tool.cursor_css_override().as_deref(), Some("text"));
+        // Path runs y=100 from x=0 to 200; move far away in y. The
+        // system I-beam stays put — the previous "restore default
+        // cursor when outside the path" behavior was dropped.
         tool.on_move(&mut model, 50.0, 1000.0, false, false, false);
-        assert_eq!(tool.cursor_css_override(), None);
+        assert_eq!(tool.cursor_css_override().as_deref(), Some("text"));
     }
 
     #[test]

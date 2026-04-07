@@ -328,6 +328,7 @@ let split_path_at_eraser cmds (hit : eraser_hit) is_closed =
   end
 
 class path_eraser_tool = object (_self)
+  inherit Canvas_tool.default_methods
   val mutable erasing = false
   val mutable last_pos = (0.0, 0.0)
 

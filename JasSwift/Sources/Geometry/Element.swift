@@ -1,4 +1,30 @@
 import Foundation
+#if canImport(AppKit)
+import AppKit
+#endif
+
+/// Measure the rendered width of `s` for the given font using AppKit when
+/// available, falling back to the deterministic stub used by tests on
+/// host platforms without a real font.
+func renderedTextWidth(_ s: String, family: String, weight: String, style: String, size: Double) -> Double {
+    if s.isEmpty { return 0 }
+    #if canImport(AppKit)
+    var traits: NSFontDescriptor.SymbolicTraits = []
+    if weight == "bold" { traits.insert(.bold) }
+    if style == "italic" { traits.insert(.italic) }
+    let baseFont = NSFont(name: family, size: CGFloat(size)) ?? NSFont.systemFont(ofSize: CGFloat(size))
+    let font: NSFont
+    if !traits.isEmpty {
+        let desc = baseFont.fontDescriptor.withSymbolicTraits(traits)
+        font = NSFont(descriptor: desc, size: CGFloat(size)) ?? baseFont
+    } else {
+        font = baseFont
+    }
+    return Double(NSAttributedString(string: s, attributes: [.font: font]).size().width)
+    #else
+    return Double(s.count) * size * approxCharWidthFactor
+    #endif
+}
 
 /// Line segments per Bezier curve when flattening paths.
 public let elementFlattenSteps = 20
@@ -867,8 +893,20 @@ public struct Text: Equatable {
         if isAreaText {
             return (x, y, width, height)
         }
-        let approxWidth = Double(content.count) * fontSize * approxCharWidthFactor
-        return (x, y - fontSize, approxWidth, fontSize)
+        // Point text: width is the widest "\n"-separated line measured
+        // with the real font; height is fontSize × line count. Splitting
+        // on "\n" keeps the box from growing horizontally across hard
+        // breaks, and using the real measurer keeps it from being wider
+        // than the rendered glyphs.
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+        var maxW: Double = 0
+        for l in lines {
+            let w = renderedTextWidth(String(l), family: fontFamily,
+                                      weight: fontWeight, style: fontStyle, size: fontSize)
+            if w > maxW { maxW = w }
+        }
+        let height = Double(max(lines.count, 1)) * fontSize
+        return (x, y - fontSize, maxW, height)
     }
 }
 

@@ -90,7 +90,12 @@ let () =
   run_test "text bounds" (fun () ->
     let txt = make_text 10.0 30.0 "Hello" in
     let (x, y, w, h) = bounds txt in
-    assert (x = 10.0 && y = 14.0 && w > 0.0 && h = 16.0));
+    assert (x = 10.0 && y = 30.0 && w > 0.0 && h = 16.0));
+
+  run_test "text bounds multi-line" (fun () ->
+    let txt = make_text 0.0 0.0 "ab\ncde" in
+    let (_, _, _, h) = bounds txt in
+    assert (h = 32.0));
 
   run_test "text attributes" (fun () ->
     let txt2 = make_text ~font_family:"monospace" ~font_size:24.0 0.0 0.0 "Hi" in

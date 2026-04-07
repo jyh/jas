@@ -314,8 +314,13 @@ let rec bounds = function
     if text_width > 0.0 && text_height > 0.0 then
       (x, y, text_width, text_height)
     else
-      let approx_width = float_of_int (String.length content) *. font_size *. approx_char_width_factor in
-      (x, y -. font_size, approx_width, font_size)
+      let lines = if content = "" then [""]
+        else String.split_on_char '\n' content in
+      let max_chars = List.fold_left
+        (fun a l -> max a (String.length l)) 0 lines in
+      let approx_width = float_of_int max_chars *. font_size *. approx_char_width_factor in
+      let height = float_of_int (List.length lines) *. font_size in
+      (x, y, approx_width, height)
   | Group { children; _ } | Layer { children; _ } ->
     if Array.length children = 0 then (0.0, 0.0, 0.0, 0.0)
     else

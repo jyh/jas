@@ -5,6 +5,7 @@
 (* ------------------------------------------------------------------ *)
 
 class virtual drawing_tool_base = object (_self)
+  inherit Canvas_tool.default_methods
   val mutable drag_start : (float * float) option = None
   val mutable drag_end : (float * float) option = None
 
