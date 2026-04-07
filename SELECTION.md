@@ -250,7 +250,7 @@ The canvas provides hit-test callbacks to tools via the ToolContext:
 |----------|---------|---------|
 | `hit_test_selection(x, y)` | `bool` | All selection tools: determines Moving vs Marquee state |
 | `hit_test_handle(x, y)` | `(path, anchor_idx, handle_type)?` | Direct Selection: detect Bezier handle clicks |
-| `hit_test_text(x, y)` | `(path, element)?` | Text tool: detect clicks on text for editing |
+| `hit_test_text(x, y)` | `(path, element)?` | Type tool: detect clicks on text for editing |
 | `hit_test_path_curve(x, y)` | `(path, element)?` | Pen tool: detect clicks on path curves |
 
 These callbacks check the point against the current document state and
