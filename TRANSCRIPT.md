@@ -477,22 +477,22 @@ Ok, now that we can change the mouse cursor, let's use it to reflect the tool th
 
 The attached image describes the cursors for the selection and direct selection tools. When these tools are active, set the mouse cursor to correspond.
 
-![selection](selection.png)
+![selection](assets/icons/selection.png)
 
 The attached image describes the cursor for the group selection tool. It is like the direct selection tool, but it has a + to the right of the arrow. Let's use this for the mouse cursor.
 
-![group selection](group selection.png)
+![group selection](assets/icons/group%20selection.png)
 
 Now let's update the images in the toolbar, for all apps. The attached images show the selection, direct selection, and group selection.
 
-![toolbar selection](toolbar selection.png)
-![toolbar group selection](toolbar group selection.png)
+![toolbar selection](assets/icons/selection.png)
+![toolbar group selection](assets/icons/group%20selection.png)
 
 ## Pen tools
 
 The attached image shows an image of the pen tool. The cursor point is at the tip of the pen. Update the mouse cursor as described when the pen tool is active. When the pen tool is active, use this for the mouse cursor. Also use it for the icon in the toolbar. Use the file: assets/icons/pen tool.svg
 
-![pen tool](pen tool.svg)
+![pen tool](assets/icons/pen%20tool.svg)
 
 There are three types of anchor points (control points) on a path. "Smooth points" are used for creating fluid, continuous curves; the control handles and the control point all form a line. "Corner points" are sharp, and have no handles at all (i.e. the handle length is 0). "Cusp points" have handles that are independent of one another, not locked in a straight line.
 
@@ -508,17 +508,17 @@ for cusp points, each control handle should be visualized as connected with the 
 
 While holding down the mouse button to place a point with the Add Anchor Point tool, hold Space to reposition that anchor point before you commit to its placement.
 
-![Add Anchor Point](add anchor point.svg)
+![Add Anchor Point](assets/icons/add%20anchor%20point.svg)
 
 Let's add the Delete Anchor Point tool to the toolbar in all apps. When the Delete Anchor Point tool is clicked on a control point, the control point is deleted.  The cursor image is just like the pen tool, but with a minus sign to the right near the base. The svg file is in the file "assets/icons/delete anchor point.svg", and the png file is in the file "assets/icons/delete anchor point.png". Add it in the same way as the pen tool. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
 
 When an anchor point is deleted, the desired behavior is to select all the remaining CP.
 
-![Delete Anchor Point](delete anchor point.svg)
+![Delete Anchor Point](assets/icons/delete%20anchor%20point.svg)
 
 Let's add the Anchor Point tool to the toolbar in all apps. If the Anchor Point tool is dragged on a corner point, it converts smooth point, pulling out control handles. If the Anchor Point tool is clicked on a smooth point, it converts it to a corner point. If the Anchor Point tool dragged on a control handle, it breaks the connection with the other handle, creating a cusp point. The cursor image is just like the pen tool, but with a < sign to the right near the base. The svg file is in the file "assets/icons/anchor point.svg", and the png file is in the file "assets/icons/anchor point.png". Add it in the same way as the pen tool. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
 
-![anchor point](anchor point.svg)
+![anchor point](assets/icons/anchor%20point.svg)
 
 ## Line tool
 
@@ -528,7 +528,7 @@ Let's update the the toolbar icon for the Line Segment tool. The mouse cursor re
 
 Now let’s add a Rounded Rectangle tool. When this tool is selected, we draw a rounded rectangle on the canvas by clicking a corner of the rectangle, dragging, and where we release is the other corner of the rectangle, just like a regular rectangle. The tool should go in the same slot as the Rectangle tool. The radius of rounded should be defined as a module parameter, let's initialize it to 10pt. The svg file is in the file "assets/icons/rounded rect.svg", and the png file is in the file "assets/icons/rounded rect.png". Add it in the same way as the Rectangle tool. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
 
-![rounded rect](assets/icons/rounded rect.svg)
+![rounded rect](assets/icons/rounded%20rect.svg)
 
 Let's add an Ellipse tool. When this tool is selected, we draw an ellipse on the canvas by clicking a corner of the bounding box of the ellipse, dragging, and where we release is the other corner of the bounding box of the ellipse. The tool should go in the same slot as the Rectangle tool. The svg file is in the file "assets/icons/ellipse.svg", and the png file is in the file "assets/icons/ellipse.png". Add it in the same way as the Rectangle tool. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
 
@@ -542,4 +542,32 @@ Let's add a Star Tool. When this tool is selected, we draw a star on the canvas 
 
 Let's work on the Text tool. First, rename the Text Tool to the Type tool. Then update the toolbar icon from the svg file "assets/icons/type.svg" and the png file "assets/icons/type.png". The cursor should be set from "assets/icons/type cursor.svg" and "assets/icons/type cursor.png". Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
 
-![type](assets/icons/type.svg) ![type cursor](assets/icons/type cursor.svg)
+![type](assets/icons/type.svg) ![type cursor](assets/icons/type%20cursor.svg)
+
+Rename the Text on a Path Tool to the Type on a Path Tool. Then update the toolbar icon from the svg file "assets/icons/type on a path.svg" and the png file "assets/icons/type on a path.png". The cursor should be set from "assets/icons/type on a path cursor.svg" and "assets/icons/type on a path cursor.png" with the cursor point at the crosshairs. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
+
+![type on a path](assets/icons/type%20on%20a%20path.svg) ![type cursor](assets/icons/type%20cursor.svg)
+
+## Type editor
+
+Now, let's change the type editor to edit text natively in place, without any need for text input widgets. Let's do this in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
+
+When a type tool is active, and the mouse hovers over some unlocked text, the mouse cursor changes to a type insertion cursor, with svg asset "assets/icons/type insertion cursor.svg" and png asset "assets/icons/type insertion cursor.png". Clicking on the text selects that text element, begins editing at that point within the text, and switches to a text cursor. Text editing also begins whenever new text is created, with the insertion point at the beginning of the text. The mouse cursor does not display during text editing.
+
+When text is edited, there is an insertion point position within the text. A simple text cursor should be drawn at the insertion point, as a vertical line separating the character before the insertion point and the character after. The text cursor should be aligned with the text so that the two characters are clearly separated, but it should not affect the position of those characters. The text cursor should have the same color attributes as the text being edited. The text cursor should flash. If the mouse is dragged through the text, the region under the drag should be "selected". The insertion point moves to the point before the first character in the text that was selected. Selected text should be highlighted with a color that is in clear contrast to the selected text. Use light blue if possible, but if that does not provide enough contrast with the selected text, choose another color.
+
+When text is inserted, either by typing a key, or by pasting from the clipboard, the text is added after the insertion point. If any text was selected, that text is deleted and replaced by the insertion, and the selection is cleared. The insertion point moves after the text that was inserted. 
+
+Use standard text editing conventions. For example, when the backspace key is pressed, if there is a selection, the selection is deleted. Otherwise, the character before the insertion point is deleted. Arrow keys can be used to move the insertion point, etc.
+
+The text editing session ends when the element selection changes, for example with the ESC key, or by adding or editing a different text area, choosing another tool, etc. Restore the mouse cursor, etc.
+
+Add a new undo/redo mechanism used only during text editing, keeping track of all text insertions, deletions, selections, etc. The state of this mechanism state can be discarded after the edit session is complete.
+
+Before we begin, do you understand these instructions? Do you have any clarifications or suggestions?
+
+![type insertion cursor](assets/icons/type%20insertion%20cursor.svg)
+
+# Review
+
+Review the entire codebase and evaluate it for clarity, maintainability, efficiency, complexity, safety, test coverage, pattern consistency, conformity with style conventions, functional equivalence across languages, and anything else of importance. Make suggestions for improvements, ranking them in priority from high to low, and giving each a number. Be ready for a deep dive into any of the suggestions.
