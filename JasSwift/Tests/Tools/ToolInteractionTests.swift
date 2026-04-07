@@ -893,7 +893,9 @@ private func makeClosedPath() -> Element {
     let children = layerChildren(model)
     #expect(children.count == 1)
     if case .textPath(let tp) = children[0] {
-        #expect(tp.content == "Lorem Ipsum")
+        // New session-based design creates an empty TextPath and enters
+        // an editing session immediately (matches Rust/Python/OCaml).
+        #expect(tp.content == "")
         #expect(tp.d.count == 2)
         if case .moveTo(let sx, let sy) = tp.d[0] {
             #expect(sx == 10 && sy == 20)
@@ -965,10 +967,15 @@ private func makeClosedPath() -> Element {
     }
 }
 
-@Test func typeOnPathToolPressTakesSnapshot() {
+@Test func typeOnPathToolPressDoesNotSnapshotUntilCommit() {
+    // In the session-based design a press on empty canvas only stages
+    // a drag — the document snapshot is taken when the user actually
+    // commits a new TextPath on release. Mirrors Rust/OCaml/Python.
     let tool = TypeOnPathTool()
     let (ctx, model, _) = makeCtx()
     #expect(model.canUndo == false)
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    #expect(model.canUndo == false)
+    tool.onRelease(ctx, x: 60, y: 80, shift: false, alt: false)
     #expect(model.canUndo == true)
 }

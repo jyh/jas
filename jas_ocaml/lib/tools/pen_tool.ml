@@ -19,6 +19,7 @@ let handle_size = Canvas_tool.handle_draw_size
 let pen_close_radius = Canvas_tool.hit_radius
 
 class pen_tool = object (self)
+  inherit Canvas_tool.default_methods
   val mutable points : pen_point list = []
   val mutable pen_state : pen_state = PenIdle
   val mutable mouse_x = 0.0

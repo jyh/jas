@@ -167,9 +167,14 @@ class ElementTest(absltest.TestCase):
         t = Text(x=10, y=30, content="Hello")
         x, y, w, h = t.bounds()
         self.assertEqual(x, 10)
-        self.assertEqual(y, 14)  # y - font_size
+        self.assertEqual(y, 30)  # y is treated as the top edge
         self.assertGreater(w, 0)
         self.assertEqual(h, 16)
+
+    def test_text_bounds_multiline(self):
+        t = Text(x=0, y=0, content="ab\nc")
+        _, _, _, h = t.bounds()
+        self.assertEqual(h, 32)
 
     def test_text_attributes(self):
         t = Text(x=0, y=0, content="Hi", font_family="monospace", font_size=24.0)

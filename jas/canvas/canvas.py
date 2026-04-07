@@ -465,11 +465,16 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
                 _apply_stroke(painter, stroke)
             else:
                 painter.setPen(QColor("black"))
-            if tw > 0 and th > 0:
-                flags = Qt.TextFlag.TextWordWrap
-                painter.drawText(QRectF(x, y, tw, th), flags, content)
-            else:
-                painter.drawText(QPointF(x, y), content)
+            # Use the wrapped layout module so what the user sees matches
+            # what the in-place editor measures.
+            from geometry.text_layout import layout as _layout
+            from tools.text_measure import make_measurer
+            measure = make_measurer(ff, fw, fst, fs)
+            max_w = tw if (tw > 0 and th > 0) else 0.0
+            lay = _layout(content, max_w, fs, measure)
+            for line in lay.lines:
+                s = content[line.start:line.end].rstrip('\n')
+                painter.drawText(QPointF(x, y + line.baseline_y), s)
 
         case TextPath(d=d, content=content, start_offset=start_offset,
                       font_family=ff, font_size=fs,
@@ -659,6 +664,27 @@ class CanvasWidget(QWidget):
         self.setMouseTracking(True)
         self._update_cursor()
         model.on_document_changed(self._on_document_changed)
+        # Caret blink timer: ticks while the active tool is in an editing
+        # session (TypeTool / TypeOnPathTool with an open session).
+        try:
+            from PySide6.QtCore import QTimer
+            self._blink_timer = QTimer(self)
+            self._blink_timer.setInterval(265)
+            self._blink_timer.timeout.connect(self._on_blink_tick)
+            self._blink_timer.start()
+        except Exception:
+            self._blink_timer = None
+
+    def _on_blink_tick(self) -> None:
+        editing = self._active_tool.is_editing()
+        if editing:
+            self.update()
+        # Refresh the cursor when editing state changes (e.g. the type
+        # tool entering or leaving a session) so the override flips to
+        # the system I-beam.
+        if editing != getattr(self, "_was_editing", False):
+            self._was_editing = editing
+            self._update_cursor()
 
     @property
     def bbox(self) -> BoundingBox:
@@ -681,6 +707,16 @@ class CanvasWidget(QWidget):
                                            selection=saved_selection)
 
     def _update_cursor(self) -> None:
+        # Active tool can override the per-tool cursor (e.g. the type
+        # tools switch to the system I-beam while in an editing session).
+        override = None
+        try:
+            override = self._active_tool.cursor_css_override()
+        except AttributeError:
+            override = None
+        if override == "ibeam":
+            self.setCursor(QCursor(Qt.CursorShape.IBeamCursor))
+            return
         self.setCursor(self._cursor_for_tool(self._current_tool_enum))
 
     @staticmethod
@@ -774,64 +810,71 @@ class CanvasWidget(QWidget):
         return None
 
     def _start_text_edit(self, path: tuple[int, ...], text_elem: Text | TextPath) -> None:
-        self._commit_text_edit()
-        self._editing_path = path
-        from PySide6.QtGui import QFont
-        style = "background: white; border: 1px solid #4a90d9; padding: 0px;"
-        if isinstance(text_elem, TextPath):
-            font = QFont(text_elem.font_family, int(text_elem.font_size))
-            px, py = path_point_at_offset(text_elem.d, text_elem.start_offset)
-            editor = QLineEdit(self)
-            editor.setText(text_elem.content)
-            editor.setFont(font)
-            editor.setGeometry(int(px), int(py - text_elem.font_size - 4),
-                               max(200, int(text_elem.font_size * len(text_elem.content) * 0.7)),
-                               int(text_elem.font_size) + 8)
-            editor.setStyleSheet(style)
-            editor.returnPressed.connect(self._commit_text_edit)
-        else:
-            font = QFont(text_elem.font_family, int(text_elem.font_size))
-            bx, by, bw, bh = text_elem.bounds()
-            if text_elem.is_area_text:
-                editor = QTextEdit(self)
-                editor.setPlainText(text_elem.content)
-                editor.setFont(font)
-                editor.setGeometry(int(bx), int(by), int(bw), int(bh))
-                editor.setStyleSheet(style)
-                editor.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-            else:
-                editor = QLineEdit(self)
-                editor.setText(text_elem.content)
-                editor.setFont(font)
-                editor.setGeometry(int(bx), int(by), max(int(bw) + 20, 100), int(bh) + 4)
-                editor.setStyleSheet(style)
-                editor.returnPressed.connect(self._commit_text_edit)
-        editor.show()
-        editor.setFocus()
-        editor.selectAll()
-        self._text_editor = editor
+        """No-op: text editing is now handled in-place by the type tools.
+        Kept on the ToolContext for API stability."""
+        return
 
     def _commit_text_edit(self) -> None:
-        if self._text_editor is None or self._editing_path is None:
-            return
-        if isinstance(self._text_editor, QTextEdit):
-            new_text = self._text_editor.toPlainText()
-        else:
-            new_text = self._text_editor.text()
-        path = self._editing_path
-        doc = self._model.document
-        old_elem = doc.get_element(path)
-        if isinstance(old_elem, (Text, TextPath)) and new_text != old_elem.content:
-            import dataclasses
-            new_elem = dataclasses.replace(old_elem, content=new_text)
-            self._model.document = doc.replace_element(path, new_elem)
-        self._text_editor.deleteLater()
-        self._text_editor = None
-        self._editing_path = None
+        """No-op: see _start_text_edit."""
+        return
 
     # -- Event dispatch to active tool --
 
+    @staticmethod
+    def _qt_key_to_name(event) -> str:
+        from PySide6.QtCore import Qt as _Qt
+        k = event.key()
+        # Special keys → JS-style names.
+        special = {
+            _Qt.Key.Key_Escape: "Escape",
+            _Qt.Key.Key_Return: "Enter",
+            _Qt.Key.Key_Enter: "Enter",
+            _Qt.Key.Key_Backspace: "Backspace",
+            _Qt.Key.Key_Delete: "Delete",
+            _Qt.Key.Key_Left: "ArrowLeft",
+            _Qt.Key.Key_Right: "ArrowRight",
+            _Qt.Key.Key_Up: "ArrowUp",
+            _Qt.Key.Key_Down: "ArrowDown",
+            _Qt.Key.Key_Home: "Home",
+            _Qt.Key.Key_End: "End",
+            _Qt.Key.Key_Tab: "Tab",
+        }
+        if k in special:
+            return special[k]
+        text = event.text()
+        if text and text.isprintable():
+            return text
+        return ""
+
+    def _build_key_mods(self, event) -> "KeyMods":
+        from tools.tool import KeyMods
+        m = event.modifiers()
+        return KeyMods(
+            shift=bool(m & Qt.KeyboardModifier.ShiftModifier),
+            ctrl=bool(m & Qt.KeyboardModifier.ControlModifier),
+            alt=bool(m & Qt.KeyboardModifier.AltModifier),
+            meta=bool(m & Qt.KeyboardModifier.MetaModifier),
+        )
+
     def keyPressEvent(self, event):
+        # When the active tool is capturing keyboard (active text edit
+        # session), all keys go to it first.
+        if self._active_tool.captures_keyboard():
+            from tools.tool import KeyMods
+            mods = self._build_key_mods(event)
+            # Cmd+V → async paste path; otherwise pass to on_key_event.
+            if mods.cmd() and event.text().lower() == "v":
+                from PySide6.QtWidgets import QApplication
+                app = QApplication.instance()
+                text = app.clipboard().text() if app is not None else ""
+                if text:
+                    self._active_tool.paste_text(self._tool_ctx, text)
+                    self.update()
+                return
+            name = self._qt_key_to_name(event)
+            if name and self._active_tool.on_key_event(self._tool_ctx, name, mods):
+                self._update_cursor_for_tool()
+                return
         if self._active_tool.on_key(self._tool_ctx, event.key()):
             return
         super().keyPressEvent(event)
@@ -840,6 +883,15 @@ class CanvasWidget(QWidget):
         if self._active_tool.on_key_release(self._tool_ctx, event.key()):
             return
         super().keyReleaseEvent(event)
+
+    def _update_cursor_for_tool(self) -> None:
+        override = self._active_tool.cursor_css_override()
+        if override == "none":
+            self.setCursor(QCursor(Qt.CursorShape.BlankCursor))
+        elif override == "ibeam":
+            self.setCursor(QCursor(Qt.CursorShape.IBeamCursor))
+        else:
+            self.setCursor(self._cursor_for_tool(self._current_tool_enum))
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -855,12 +907,14 @@ class CanvasWidget(QWidget):
             shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
             alt = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
             self._active_tool.on_press(self._tool_ctx, pos.x(), pos.y(), shift, alt)
+            self._update_cursor_for_tool()
 
     def mouseMoveEvent(self, event: QMouseEvent):
         pos = event.position()
         shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         dragging = bool(event.buttons() & Qt.MouseButton.LeftButton)
         self._active_tool.on_move(self._tool_ctx, pos.x(), pos.y(), shift, dragging)
+        self._update_cursor_for_tool()
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:

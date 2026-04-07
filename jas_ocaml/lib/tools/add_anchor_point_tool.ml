@@ -383,6 +383,7 @@ type drag_state = {
 (* ------------------------------------------------------------------ *)
 
 class add_anchor_point_tool = object (_self)
+  inherit Canvas_tool.default_methods
   val mutable drag : drag_state option = None
   val mutable space_held : bool = false
 

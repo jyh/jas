@@ -26,6 +26,8 @@ class canvas_subwindow :
   method pen_cancel : unit
   method forward_key : int -> bool
   method forward_key_release : int -> bool
+  method forward_key_event : GdkEvent.Key.t -> bool
+  method tool_is_editing : bool
 end
 
 val create :

@@ -43,6 +43,20 @@ class ToolContext {
     func snapshot() { model.snapshot() }
 }
 
+// MARK: - Keyboard modifiers
+
+/// Modifier keys passed to `onKeyEvent`. `cmd` is true if the platform's
+/// command key (NSEvent.modifierFlags.command on macOS) is held.
+public struct KeyMods {
+    public var shift: Bool
+    public var ctrl: Bool
+    public var alt: Bool
+    public var cmd: Bool
+    public init(shift: Bool = false, ctrl: Bool = false, alt: Bool = false, cmd: Bool = false) {
+        self.shift = shift; self.ctrl = ctrl; self.alt = alt; self.cmd = cmd
+    }
+}
+
 // MARK: - CanvasTool protocol
 
 /// Interface for canvas interaction tools.
@@ -56,6 +70,13 @@ protocol CanvasTool: AnyObject {
     func drawOverlay(_ ctx: ToolContext, _ cgCtx: CGContext)
     func activate(_ ctx: ToolContext)
     func deactivate(_ ctx: ToolContext)
+
+    // Optional in-place text editing surface (default no-op for most tools).
+    func capturesKeyboard() -> Bool
+    func isEditing() -> Bool
+    func cursorOverride() -> String?
+    func pasteText(_ ctx: ToolContext, _ text: String) -> Bool
+    func onKeyEvent(_ ctx: ToolContext, _ key: String, _ mods: KeyMods) -> Bool
 }
 
 /// Default implementations for optional protocol methods.
@@ -65,6 +86,11 @@ extension CanvasTool {
     func onKeyUp(_ ctx: ToolContext, keyCode: UInt16) -> Bool { false }
     func activate(_ ctx: ToolContext) {}
     func deactivate(_ ctx: ToolContext) {}
+    func capturesKeyboard() -> Bool { false }
+    func isEditing() -> Bool { false }
+    func cursorOverride() -> String? { nil }
+    func pasteText(_ ctx: ToolContext, _ text: String) -> Bool { false }
+    func onKeyEvent(_ ctx: ToolContext, _ key: String, _ mods: KeyMods) -> Bool { false }
 }
 
 // MARK: - Helpers

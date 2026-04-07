@@ -24,6 +24,19 @@ type tool_context = {
 }
 
 (* ------------------------------------------------------------------ *)
+(* Key modifiers                                                       *)
+(* ------------------------------------------------------------------ *)
+
+type key_mods = {
+  shift : bool;
+  ctrl : bool;
+  alt : bool;
+  meta : bool;
+}
+
+let key_mods_cmd m = m.meta || m.ctrl
+
+(* ------------------------------------------------------------------ *)
 (* Tool class type                                                     *)
 (* ------------------------------------------------------------------ *)
 
@@ -37,6 +50,19 @@ class type canvas_tool = object
   method draw_overlay : tool_context -> Cairo.context -> unit
   method activate : tool_context -> unit
   method deactivate : tool_context -> unit
+  method on_key_event : tool_context -> string -> key_mods -> bool
+  method captures_keyboard : unit -> bool
+  method cursor_css_override : unit -> string option
+  method is_editing : unit -> bool
+  method paste_text : tool_context -> string -> bool
+end
+
+class virtual default_methods = object
+  method on_key_event (_ : tool_context) (_ : string) (_ : key_mods) = false
+  method captures_keyboard () = false
+  method cursor_css_override () : string option = None
+  method is_editing () = false
+  method paste_text (_ : tool_context) (_ : string) = false
 end
 
 (* ------------------------------------------------------------------ *)

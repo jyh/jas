@@ -629,15 +629,10 @@ impl CanvasTool for TypeTool {
     }
 
     fn cursor_css_override(&self) -> Option<String> {
+        // While editing, always use the system I-beam ("text" in CSS).
+        // Matches the Swift / OCaml / Python ports.
         if self.session.is_some() {
-            // Hide the OS cursor only while it's actually over the
-            // element being edited (so the rendered caret isn't
-            // occluded). Outside that area, fall through to the I-beam
-            // / default so the user can still see where they're
-            // pointing.
-            if self.pointer_inside_edited {
-                return Some("none".to_string());
-            }
+            return Some("text".to_string());
         }
         if self.hover_text {
             return Some(
@@ -896,8 +891,8 @@ mod tests {
         let mut model = fresh_model();
         tool.on_press(&mut model, 50.0, 50.0, false, false);
         tool.on_release(&mut model, 50.0, 50.0, false, false);
-        // Pointer is, by construction, on the freshly-created element.
-        assert_eq!(tool.cursor_css_override().as_deref(), Some("none"));
+        // While editing, the override is the system I-beam ("text").
+        assert_eq!(tool.cursor_css_override().as_deref(), Some("text"));
     }
 
     #[test]
@@ -965,29 +960,20 @@ mod tests {
     }
 
     #[test]
-    fn cursor_restored_when_pointer_leaves_edited_text() {
+    fn cursor_is_system_ibeam_throughout_session() {
+        // While a session is active the cursor override is the system
+        // I-beam ("text") regardless of pointer position. The previous
+        // "hide while inside, restore while outside" behavior was
+        // dropped to match the other ports.
         let mut tool = TypeTool::new();
         let mut model = model_with_text("hello", 100.0, 100.0);
         tool.on_press(&mut model, 105.0, 105.0, false, false);
         tool.on_release(&mut model, 105.0, 105.0, false, false);
-        // Inside the element bounds → cursor hidden.
-        assert_eq!(tool.cursor_css_override().as_deref(), Some("none"));
-        // Move far away.
+        assert_eq!(tool.cursor_css_override().as_deref(), Some("text"));
         tool.on_move(&mut model, 1000.0, 1000.0, false, false, false);
-        // Pointer is no longer over the edited element → restore cursor.
-        assert_eq!(tool.cursor_css_override(), None);
-    }
-
-    #[test]
-    fn cursor_hides_again_when_pointer_returns_to_edited_text() {
-        let mut tool = TypeTool::new();
-        let mut model = model_with_text("hello", 100.0, 100.0);
-        tool.on_press(&mut model, 105.0, 105.0, false, false);
-        tool.on_release(&mut model, 105.0, 105.0, false, false);
-        tool.on_move(&mut model, 1000.0, 1000.0, false, false, false);
-        assert_eq!(tool.cursor_css_override(), None);
+        assert_eq!(tool.cursor_css_override().as_deref(), Some("text"));
         tool.on_move(&mut model, 110.0, 108.0, false, false, false);
-        assert_eq!(tool.cursor_css_override().as_deref(), Some("none"));
+        assert_eq!(tool.cursor_css_override().as_deref(), Some("text"));
     }
 
     #[test]

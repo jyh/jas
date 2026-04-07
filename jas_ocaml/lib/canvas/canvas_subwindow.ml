@@ -94,24 +94,38 @@ let rec draw_element cr (elem : Element.element) =
     end;
     let slant = if font_style = "italic" || font_style = "oblique" then Cairo.Italic else Cairo.Upright in
     let weight = if font_weight = "bold" then Cairo.Bold else Cairo.Normal in
+    (* Point and area text are both rendered as one Cairo line per
+       laid-out line so they share the same metrics as the in-place
+       editor (which queries Cairo text_extents via the type tool's
+       measurer). For point text we just split on '\n'; for area text we
+       run the editor's TextLayout module to do word-wrap.
+
+       Cairo's show_text treats (x, y) as the *baseline*, so we offset
+       by [font_size *. 0.8] (the layout module's ascent) to keep our
+       (x, y) = top-left convention consistent with the editor's
+       bounding box. *)
+    Cairo.select_font_face cr font_family ~slant ~weight;
+    Cairo.set_font_size cr font_size;
+    let ascent = font_size *. 0.8 in
     if text_width > 0.0 && text_height > 0.0 then begin
-      (* Area text: use Pango for word wrapping *)
-      let layout = Pango.Layout.create (Cairo_pango.Font_map.create_context (Cairo_pango.Font_map.get_default ())) in
-      let style_parts = ref [font_family; string_of_int (int_of_float font_size)] in
-      if font_weight = "bold" then style_parts := !style_parts @ ["Bold"];
-      if font_style = "italic" then style_parts := !style_parts @ ["Italic"];
-      let font_desc = Pango.Font.from_string (String.concat " " !style_parts) in
-      Pango.Layout.set_font_description layout font_desc;
-      Pango.Layout.set_text layout content;
-      Pango.Layout.set_width layout (int_of_float (text_width *. float_of_int Pango.scale));
-      Pango.Layout.set_wrap layout `WORD;
-      Cairo.move_to cr x y;
-      Cairo_pango.show_layout cr layout
+      let measure s =
+        if s = "" then 0.0 else (Cairo.text_extents cr s).Cairo.x_advance
+      in
+      let lay = Text_layout.layout content text_width font_size measure in
+      Array.iter (fun (line : Text_layout.line_info) ->
+        let seg = String.sub content line.start (line.end_ - line.start) in
+        let seg = if String.length seg > 0 && seg.[String.length seg - 1] = '\n'
+                  then String.sub seg 0 (String.length seg - 1) else seg in
+        Cairo.move_to cr (x +. 0.0) (y +. line.baseline_y);
+        Cairo.show_text cr seg
+      ) lay.lines
     end else begin
-      Cairo.select_font_face cr font_family ~slant ~weight;
-      Cairo.set_font_size cr font_size;
-      Cairo.move_to cr x y;
-      Cairo.show_text cr content
+      let lines = String.split_on_char '\n' content in
+      List.iteri (fun i line ->
+        let line_y = y +. ascent +. float_of_int i *. font_size in
+        Cairo.move_to cr x line_y;
+        Cairo.show_text cr line
+      ) lines
     end;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
@@ -747,20 +761,27 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
     }
 
     method private update_cursor =
-      let cursor = match current_tool_type with
-        | Toolbar.Selection ->
-          _self#make_arrow_cursor 0.0 0.0 0.0 1.0 1.0 1.0 false
-        | Toolbar.Direct_selection ->
-          _self#make_arrow_cursor 1.0 1.0 1.0 0.0 0.0 0.0 false
-        | Toolbar.Group_selection ->
-          _self#make_arrow_cursor 1.0 1.0 1.0 0.0 0.0 0.0 true
-        | Toolbar.Pen -> _self#make_pen_cursor
-        | Toolbar.Add_anchor_point -> _self#make_add_anchor_point_cursor
-        | Toolbar.Pencil -> _self#make_pencil_cursor
-        | Toolbar.Path_eraser -> _self#make_path_eraser_cursor
-        | Toolbar.Type_tool -> _self#make_type_cursor
-        | Toolbar.Type_on_path -> _self#make_type_on_path_cursor
-        | _ -> Gdk.Cursor.create `CROSSHAIR
+      (* Active tool can override the per-tool cursor (e.g. the type
+         tools switch to the system XTERM/I-beam while in an editing
+         session). *)
+      let cursor =
+        match active_tool#cursor_css_override () with
+        | Some "ibeam" -> Gdk.Cursor.create `XTERM
+        | _ ->
+          match current_tool_type with
+          | Toolbar.Selection ->
+            _self#make_arrow_cursor 0.0 0.0 0.0 1.0 1.0 1.0 false
+          | Toolbar.Direct_selection ->
+            _self#make_arrow_cursor 1.0 1.0 1.0 0.0 0.0 0.0 false
+          | Toolbar.Group_selection ->
+            _self#make_arrow_cursor 1.0 1.0 1.0 0.0 0.0 0.0 true
+          | Toolbar.Pen -> _self#make_pen_cursor
+          | Toolbar.Add_anchor_point -> _self#make_add_anchor_point_cursor
+          | Toolbar.Pencil -> _self#make_pencil_cursor
+          | Toolbar.Path_eraser -> _self#make_path_eraser_cursor
+          | Toolbar.Type_tool -> _self#make_type_cursor
+          | Toolbar.Type_on_path -> _self#make_type_on_path_cursor
+          | _ -> Gdk.Cursor.create `CROSSHAIR
       in
       let win = canvas_area#misc#window in
       if Gobject.get_oid win <> 0 then
@@ -965,12 +986,65 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       let ctx = _self#tool_context in
       active_tool#on_key_release ctx key
 
+    method tool_is_editing = active_tool#is_editing ()
+
+    method forward_key_event ev =
+      let ctx = _self#tool_context in
+      if not (active_tool#captures_keyboard ()) then false
+      else begin
+        let keyval = GdkEvent.Key.keyval ev in
+        let state = GdkEvent.Key.state ev in
+        let mods : Canvas_tool.key_mods = {
+          shift = List.mem `SHIFT state;
+          ctrl = List.mem `CONTROL state;
+          alt = List.mem `MOD1 state;
+          meta = List.mem `META state;
+        } in
+        let key_name =
+          if keyval = GdkKeysyms._Escape then Some "Escape"
+          else if keyval = GdkKeysyms._Return || keyval = GdkKeysyms._KP_Enter then Some "Enter"
+          else if keyval = GdkKeysyms._BackSpace then Some "Backspace"
+          else if keyval = GdkKeysyms._Delete then Some "Delete"
+          else if keyval = GdkKeysyms._Left then Some "ArrowLeft"
+          else if keyval = GdkKeysyms._Right then Some "ArrowRight"
+          else if keyval = GdkKeysyms._Up then Some "ArrowUp"
+          else if keyval = GdkKeysyms._Down then Some "ArrowDown"
+          else if keyval = GdkKeysyms._Home then Some "Home"
+          else if keyval = GdkKeysyms._End then Some "End"
+          else if keyval = GdkKeysyms._Tab then Some "Tab"
+          else
+            let s = GdkEvent.Key.string ev in
+            if String.length s = 1 then Some s
+            else if keyval >= 0x20 && keyval <= 0x7e then
+              Some (String.make 1 (Char.chr keyval))
+            else None
+        in
+        match key_name with
+        | None -> false
+        | Some k -> active_tool#on_key_event ctx k mods
+      end
+
     initializer
       (* Register for document changes *)
       model#on_document_changed (fun doc ->
         current_doc <- doc;
         canvas_area#misc#queue_draw ()
       );
+
+      (* Blink timer: redraw every ~half blink period while a tool is editing
+         text, so the caret can toggle visibility. Also refreshes the
+         cursor in case the active tool's cursor_css_override changed
+         (e.g. the type tool entering or leaving a session). *)
+      let last_editing = ref false in
+      ignore (GMain.Timeout.add ~ms:265 ~callback:(fun () ->
+        let editing_now = active_tool#is_editing () in
+        if editing_now then canvas_area#misc#queue_draw ();
+        if editing_now <> !last_editing then begin
+          last_editing := editing_now;
+          _self#update_cursor
+        end;
+        true  (* keep the timer alive *)
+      ));
 
 
       (* Set initial cursor once the widget is realized *)

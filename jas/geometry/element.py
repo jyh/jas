@@ -461,8 +461,14 @@ class Text(Element):
     def bounds(self) -> Tuple[float, float, float, float]:
         if self.is_area_text:
             return (self.x, self.y, self.width, self.height)
-        approx_width = len(self.content) * self.font_size * APPROX_CHAR_WIDTH_FACTOR
-        return (self.x, self.y - self.font_size, approx_width, self.font_size)
+        # Treat self.y as the top of the run (matching the in-place editor's
+        # rendering of e.x, e.y at the layout origin). For multi-line content
+        # the box grows downward; the widest line determines width.
+        lines = self.content.split('\n') if self.content else [""]
+        max_chars = max(len(l) for l in lines) if lines else 0
+        approx_width = max_chars * self.font_size * APPROX_CHAR_WIDTH_FACTOR
+        height = len(lines) * self.font_size
+        return (self.x, self.y, approx_width, height)
 
 
 @dataclass(frozen=True)

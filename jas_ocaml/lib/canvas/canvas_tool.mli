@@ -14,6 +14,16 @@ type tool_context = {
   draw_element_overlay : Cairo.context -> Element.element -> int list -> unit;
 }
 
+(** Keyboard modifier state used by [on_key_event]. *)
+type key_mods = {
+  shift : bool;
+  ctrl : bool;
+  alt : bool;
+  meta : bool;
+}
+
+val key_mods_cmd : key_mods -> bool
+
 (** Interface for canvas interaction tools. *)
 class type canvas_tool = object
   method on_press : tool_context -> float -> float -> shift:bool -> alt:bool -> unit
@@ -25,6 +35,22 @@ class type canvas_tool = object
   method draw_overlay : tool_context -> Cairo.context -> unit
   method activate : tool_context -> unit
   method deactivate : tool_context -> unit
+  method on_key_event : tool_context -> string -> key_mods -> bool
+  method captures_keyboard : unit -> bool
+  method cursor_css_override : unit -> string option
+  method is_editing : unit -> bool
+  method paste_text : tool_context -> string -> bool
+end
+
+(** Virtual base class providing no-op default implementations for the
+    new key-handling methods. Existing tools can [inherit] this to pick
+    up the defaults. *)
+class virtual default_methods : object
+  method on_key_event : tool_context -> string -> key_mods -> bool
+  method captures_keyboard : unit -> bool
+  method cursor_css_override : unit -> string option
+  method is_editing : unit -> bool
+  method paste_text : tool_context -> string -> bool
 end
 
 (** Constrain an angle to 45-degree increments. *)

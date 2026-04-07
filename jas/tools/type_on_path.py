@@ -1,21 +1,32 @@
-"""Type-on-path tool for placing text along a curve.
+"""Type-on-path tool with native in-place text editing.
 
-Supports three modes:
-1. Drag to create a new type-on-path element.
-2. Click on an existing Path element to convert it to a TextPath and edit in place.
-3. Drag the start-offset handle to reposition text along the path.
+Three creation flows:
+ 1. Drag on empty canvas → builds a curved path and starts editing
+    a TextPath that flows along it.
+ 2. Click on an existing Path element → converts it to a TextPath and
+    enters editing mode at the click position.
+ 3. Click on an existing TextPath → enters editing mode at the click
+    position.
+
+Editing semantics, undo handling, and keyboard routing match TypeTool.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING
+import math
+from typing import TYPE_CHECKING, Optional
 
 from geometry.element import (
-    Color, CurveTo, Fill, LineTo, MoveTo, Path, TextPath,
+    Color, CurveTo, Element, Fill, Group, Layer, LineTo, MoveTo,
+    Path, TextPath,
     path_closest_offset, path_distance_to_point, path_point_at_offset,
 )
-from tools.tool import CanvasTool, ToolContext, DRAG_THRESHOLD
+from geometry.path_text_layout import layout_path_text, PathTextLayout
+from tools.text_edit import EditTarget, TextEditSession, empty_text_path_elem
+from tools.text_measure import make_measurer
+from tools.tool import CanvasTool, KeyMods, ToolContext, DRAG_THRESHOLD, HIT_RADIUS
+from tools.type_tool import _now_ms, _cursor_visible
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
@@ -23,78 +34,282 @@ if TYPE_CHECKING:
 _OFFSET_HANDLE_RADIUS = 5.0
 
 
+def _accent_color(tp: TextPath) -> "QColor":
+    from PySide6.QtGui import QColor
+    c = (tp.fill.color if tp.fill is not None
+         else (tp.stroke.color if tp.stroke is not None else Color(0, 0, 0)))
+    return QColor(int(c.r * 255), int(c.g * 255), int(c.b * 255))
+
+
+def _selection_color(tp: TextPath) -> "QColor":
+    from PySide6.QtGui import QColor
+    blue_lum = 0.2126 * 0.529 + 0.7152 * 0.808 + 0.0722 * 0.980
+    candidates = []
+    if tp.fill is not None:
+        candidates.append(tp.fill.color)
+    if tp.stroke is not None:
+        candidates.append(tp.stroke.color)
+    for c in candidates:
+        lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+        if abs(lum - blue_lum) < 0.15:
+            return QColor(255, 235, 80, 128)
+    return QColor(135, 206, 250, 115)
+
+
 class TypeOnPathTool(CanvasTool):
-    """Click on an existing path to convert it, or drag to create a new curve."""
-
     def __init__(self):
-        self._drag_start: tuple[float, float] | None = None
-        self._drag_end: tuple[float, float] | None = None
-        self._control: tuple[float, float] | None = None
-        # Offset handle drag state
+        # Drag-create state
+        self._drag_start: Optional[tuple[float, float]] = None
+        self._drag_end: Optional[tuple[float, float]] = None
+        self._control: Optional[tuple[float, float]] = None
+        # Offset handle drag
         self._offset_dragging = False
-        self._offset_drag_path: tuple[int, ...] | None = None
-        self._offset_preview: float | None = None
+        self._offset_drag_path: Optional[tuple] = None
+        self._offset_preview: Optional[float] = None
+        # Edit session
+        self.session: Optional[TextEditSession] = None
+        self._did_snapshot = False
+        self._last_mouse: tuple[float, float] = (0.0, 0.0)
+        self._hover_textpath = False
+        self._hover_path = False
+        self._pointer_inside_edited = False
 
-    # -- helpers --
+    # ---- helpers ----
 
-    def _find_selected_textpath_handle(self, ctx: ToolContext, x: float, y: float
-                                       ) -> tuple[tuple[int, ...], TextPath] | None:
-        """Check if (x, y) is near the start-offset handle of a selected TextPath."""
+    def _build_layout(self, ctx: ToolContext) -> Optional[tuple[TextPath, PathTextLayout]]:
+        if self.session is None or self.session.target != EditTarget.TEXT_PATH:
+            return None
+        try:
+            elem = ctx.document.get_element(self.session.path)
+        except (IndexError, KeyError):
+            return None
+        if not isinstance(elem, TextPath):
+            return None
+        tp = dataclasses.replace(elem, content=self.session.content)
+        measure = make_measurer(tp.font_family, tp.font_weight, tp.font_style, tp.font_size)
+        lay = layout_path_text(tp.d, tp.content, tp.start_offset, tp.font_size, measure)
+        return (tp, lay)
+
+    def _hit_test_path_curve(self, ctx: ToolContext, x: float, y: float
+                              ) -> Optional[tuple[tuple, Element]]:
+        doc = ctx.document
+        threshold = HIT_RADIUS + 2
+        for li, layer in enumerate(doc.layers):
+            for ci, child in enumerate(layer.children):
+                if isinstance(child, (Path, TextPath)) and not getattr(child, 'locked', False):
+                    if path_distance_to_point(child.d, x, y) <= threshold:
+                        return ((li, ci), child)
+                elif isinstance(child, Group) and not isinstance(child, Layer):
+                    if getattr(child, 'locked', False):
+                        continue
+                    for gi, gc in enumerate(child.children):
+                        if isinstance(gc, (Path, TextPath)) and not getattr(gc, 'locked', False):
+                            if path_distance_to_point(gc.d, x, y) <= threshold:
+                                return ((li, ci, gi), gc)
+        return None
+
+    def _cursor_at(self, ctx: ToolContext, x: float, y: float) -> int:
+        built = self._build_layout(ctx)
+        if built is None:
+            return 0
+        _, lay = built
+        return lay.hit_test(x, y)
+
+    def _ensure_snapshot(self, ctx: ToolContext) -> None:
+        if not self._did_snapshot:
+            ctx.snapshot()
+            self._did_snapshot = True
+
+    def _sync_to_model(self, ctx: ToolContext) -> None:
+        if self.session is None:
+            return
+        new_doc = self.session.apply_to_document(ctx.document)
+        if new_doc is not None:
+            ctx.controller.set_document(new_doc)
+
+    def _begin_session_existing(self, ctx: ToolContext, path: tuple,
+                                 elem: TextPath, cursor: int) -> None:
+        self.session = TextEditSession(
+            path=path, target=EditTarget.TEXT_PATH,
+            content=elem.content, insertion=cursor,
+            blink_epoch_ms=_now_ms(),
+        )
+        self._did_snapshot = False
+        ctx.controller.select_element(path)
+
+    def _begin_session_convert_path(self, ctx: ToolContext, path: tuple,
+                                     d: tuple, click_offset: float) -> None:
+        ctx.snapshot()
+        self._did_snapshot = True
+        new_tp = dataclasses.replace(empty_text_path_elem(d), start_offset=click_offset)
+        new_doc = ctx.document.replace_element(path, new_tp)
+        ctx.controller.set_document(new_doc)
+        ctx.controller.select_element(path)
+        self.session = TextEditSession(
+            path=path, target=EditTarget.TEXT_PATH, content="",
+            insertion=0, blink_epoch_ms=_now_ms(),
+        )
+
+    def _begin_session_new_curve(self, ctx: ToolContext, d: tuple) -> None:
+        ctx.snapshot()
+        self._did_snapshot = True
+        new_tp = empty_text_path_elem(d)
+        ctx.controller.add_element(new_tp)
+        doc = ctx.document
+        li = doc.selected_layer
+        ci = len(doc.layers[li].children) - 1
+        path = (li, ci)
+        ctx.controller.select_element(path)
+        self.session = TextEditSession(
+            path=path, target=EditTarget.TEXT_PATH, content="",
+            insertion=0, blink_epoch_ms=_now_ms(),
+        )
+
+    def _end_session(self) -> None:
+        self.session = None
+        self._did_snapshot = False
+        self._drag_start = None
+        self._drag_end = None
+        self._control = None
+        self._pointer_inside_edited = False
+
+    def _find_offset_handle(self, ctx: ToolContext, x: float, y: float
+                             ) -> Optional[tuple[tuple, float]]:
         doc = ctx.document
         for es in doc.selection:
             elem = doc.get_element(es.path)
             if isinstance(elem, TextPath) and elem.d:
                 hx, hy = path_point_at_offset(elem.d, elem.start_offset)
-                if abs(x - hx) <= _OFFSET_HANDLE_RADIUS + 2 and abs(y - hy) <= _OFFSET_HANDLE_RADIUS + 2:
-                    return (es.path, elem)
+                if (abs(x - hx) <= _OFFSET_HANDLE_RADIUS + 2
+                        and abs(y - hy) <= _OFFSET_HANDLE_RADIUS + 2):
+                    return (es.path, elem.start_offset)
         return None
 
-    # -- tool events --
+    def _pointer_near_edited_glyphs(self, ctx: ToolContext, x: float, y: float) -> bool:
+        built = self._build_layout(ctx)
+        if built is None:
+            return False
+        tp, lay = built
+        if not lay.glyphs:
+            if tp.d:
+                first = tp.d[0]
+                if isinstance(first, MoveTo):
+                    return math.hypot(x - first.x, y - first.y) <= lay.font_size
+            return False
+        pad = lay.font_size
+        for g in lay.glyphs:
+            if math.hypot(x - g.cx, y - g.cy) <= pad:
+                return True
+        return False
+
+    # ---- CanvasTool API ----
 
     def on_press(self, ctx: ToolContext, x: float, y: float,
                  shift: bool = False, alt: bool = False) -> None:
-        ctx.snapshot()
-        # 1) Check offset handle drag
-        handle_hit = self._find_selected_textpath_handle(ctx, x, y)
+        if self.session is not None:
+            try:
+                elem = ctx.document.get_element(self.session.path)
+            except (IndexError, KeyError):
+                elem = None
+            near_elem = (isinstance(elem, TextPath)
+                         and path_distance_to_point(elem.d, x, y) <= 20.0)
+            if near_elem:
+                cursor = self._cursor_at(ctx, x, y)
+                self.session.set_insertion(cursor, False)
+                self.session.drag_active = True
+                self.session.blink_epoch_ms = _now_ms()
+                self._last_mouse = (x, y)
+                self._pointer_inside_edited = True
+                ctx.request_update()
+                return
+            self._end_session()
+
+        handle_hit = self._find_offset_handle(ctx, x, y)
         if handle_hit is not None:
-            path, _elem = handle_hit
             self._offset_dragging = True
-            self._offset_drag_path = path
+            self._offset_drag_path = handle_hit[0]
             self._offset_preview = None
             return
-        # 2) Start drag-create
+
+        hit = self._hit_test_path_curve(ctx, x, y)
+        if hit is not None:
+            path, elem = hit
+            if isinstance(elem, TextPath):
+                self._begin_session_existing(ctx, path, elem, 0)
+                cursor = self._cursor_at(ctx, x, y)
+                self.session.set_insertion(cursor, False)
+                self.session.drag_active = True
+                self.session.blink_epoch_ms = _now_ms()
+                self._last_mouse = (x, y)
+                self._pointer_inside_edited = True
+                ctx.request_update()
+                return
+            if isinstance(elem, Path):
+                click_offset = path_closest_offset(elem.d, x, y)
+                self._begin_session_convert_path(ctx, path, elem.d, click_offset)
+                self._last_mouse = (x, y)
+                self._pointer_inside_edited = True
+                ctx.request_update()
+                return
+
         self._drag_start = (x, y)
         self._drag_end = (x, y)
         self._control = None
 
     def on_move(self, ctx: ToolContext, x: float, y: float,
                 shift: bool = False, dragging: bool = False) -> None:
-        # Offset handle drag
+        self._last_mouse = (x, y)
+
+        if self.session is not None and self.session.drag_active and dragging:
+            cursor = self._cursor_at(ctx, x, y)
+            self.session.set_insertion(cursor, True)
+            self.session.blink_epoch_ms = _now_ms()
+            ctx.request_update()
+            return
+
         if self._offset_dragging and self._offset_drag_path is not None:
             elem = ctx.document.get_element(self._offset_drag_path)
             if isinstance(elem, TextPath) and elem.d:
                 self._offset_preview = path_closest_offset(elem.d, x, y)
                 ctx.request_update()
             return
-        # Drag-create
+
         if self._drag_start is not None:
             self._drag_end = (x, y)
             sx, sy = self._drag_start
             dx, dy = x - sx, y - sy
-            dist = (dx * dx + dy * dy) ** 0.5
+            dist = math.hypot(dx, dy)
             if dist > DRAG_THRESHOLD:
                 nx, ny = -dy / dist, dx / dist
                 mx, my = (sx + x) / 2, (sy + y) / 2
                 self._control = (mx + nx * dist * 0.3, my + ny * dist * 0.3)
             ctx.request_update()
 
+        if self.session is None:
+            hit = self._hit_test_path_curve(ctx, x, y)
+            self._hover_textpath = hit is not None and isinstance(hit[1], TextPath)
+            self._hover_path = hit is not None and isinstance(hit[1], Path)
+            self._pointer_inside_edited = False
+        else:
+            self._hover_textpath = False
+            self._hover_path = False
+            self._pointer_inside_edited = self._pointer_near_edited_glyphs(ctx, x, y)
+
     def on_release(self, ctx: ToolContext, x: float, y: float,
                    shift: bool = False, alt: bool = False) -> None:
-        # Offset handle drag commit
+        if self.session is not None:
+            self.session.drag_active = False
+            self.session.blink_epoch_ms = _now_ms()
+            self._drag_start = None
+            self._drag_end = None
+            ctx.request_update()
+            return
+
         if self._offset_dragging and self._offset_drag_path is not None:
             if self._offset_preview is not None:
                 elem = ctx.document.get_element(self._offset_drag_path)
                 if isinstance(elem, TextPath):
+                    ctx.snapshot()
                     new_elem = dataclasses.replace(elem, start_offset=self._offset_preview)
                     new_doc = ctx.document.replace_element(self._offset_drag_path, new_elem)
                     ctx.controller.set_document(new_doc)
@@ -111,100 +326,169 @@ class TypeOnPathTool(CanvasTool):
         self._drag_end = None
         w = abs(x - sx)
         h = abs(y - sy)
-
         if w <= DRAG_THRESHOLD and h <= DRAG_THRESHOLD:
-            # Click (not drag): check if we hit a Path to convert
-            hit = ctx.hit_test_path_curve(x, y)
-            if hit is not None:
-                path, elem = hit
-                if isinstance(elem, Path):
-                    # Convert Path to TextPath
-                    tp = TextPath(
-                        d=elem.d, content="",
-                        start_offset=path_closest_offset(elem.d, x, y),
-                        fill=Fill(color=Color(0, 0, 0)),
-                        font_size=16.0,
-                    )
-                    new_doc = ctx.document.replace_element(path, tp)
-                    ctx.controller.set_document(new_doc)
-                    ctx.controller.select_element(path)
-                    ctx.start_text_edit(path, tp)
-                    ctx.request_update()
-                    return
-                elif isinstance(elem, TextPath):
-                    # Click on existing TextPath: start editing
-                    ctx.controller.select_element(path)
-                    ctx.start_text_edit(path, elem)
-                    ctx.request_update()
-                    return
+            self._control = None
+            return
+        if self._control is not None:
+            cx, cy = self._control
+            d = (MoveTo(sx, sy), CurveTo(cx, cy, cx, cy, x, y))
         else:
-            # Drag: create a new text-on-path element
-            if self._control is not None:
-                cx, cy = self._control
-                d = (
-                    MoveTo(sx, sy),
-                    CurveTo(cx, cy, cx, cy, x, y),
-                )
-            else:
-                d = (
-                    MoveTo(sx, sy),
-                    LineTo(x, y),
-                )
-            elem = TextPath(d=d, content="Lorem Ipsum",
-                            fill=Fill(color=Color(0, 0, 0)))
-            ctx.controller.add_element(elem)
-            doc = ctx.document
-            li = doc.selected_layer
-            ci = len(doc.layers[li].children) - 1
-            path = (li, ci)
-            ctx.start_text_edit(path, elem)
+            d = (MoveTo(sx, sy), LineTo(x, y))
         self._control = None
+        self._begin_session_new_curve(ctx, d)
+        self._last_mouse = (x, y)
+        self._pointer_inside_edited = True
         ctx.request_update()
 
     def on_double_click(self, ctx: ToolContext, x: float, y: float) -> None:
-        hit = ctx.hit_test_path_curve(x, y)
-        if hit is not None:
-            path, elem = hit
-            if isinstance(elem, TextPath):
-                ctx.controller.select_element(path)
-                ctx.start_text_edit(path, elem)
+        if self.session is not None:
+            self.session.select_all()
+            self.session.blink_epoch_ms = _now_ms()
+            ctx.request_update()
+
+    def on_key_event(self, ctx: ToolContext, key: str, mods: KeyMods) -> bool:
+        if self.session is None:
+            return False
+
+        if mods.cmd():
+            if key in ("a", "A"):
+                self.session.select_all()
+                self.session.blink_epoch_ms = _now_ms()
                 ctx.request_update()
+                return True
+            if key in ("z", "Z"):
+                if mods.shift:
+                    self.session.redo()
+                else:
+                    self.session.undo()
+                self.session.blink_epoch_ms = _now_ms()
+                self._sync_to_model(ctx)
+                ctx.request_update()
+                return True
+            if key in ("c", "C"):
+                text = self.session.copy_selection()
+                if text is not None:
+                    _clipboard_write(text)
+                return True
+            if key in ("x", "X"):
+                text = self.session.copy_selection()
+                if text is not None:
+                    _clipboard_write(text)
+                    self._ensure_snapshot(ctx)
+                    self.session.backspace()
+                    self.session.blink_epoch_ms = _now_ms()
+                    self._sync_to_model(ctx)
+                    ctx.request_update()
+                return True
+
+        if key == "Escape":
+            self._end_session()
+            ctx.request_update()
+            return True
+        if key == "Enter":
+            return True  # No multi-line for path text.
+        if key == "Backspace":
+            self._ensure_snapshot(ctx)
+            self.session.backspace()
+            self.session.blink_epoch_ms = _now_ms()
+            self._sync_to_model(ctx)
+            ctx.request_update()
+            return True
+        if key == "Delete":
+            self._ensure_snapshot(ctx)
+            self.session.delete_forward()
+            self.session.blink_epoch_ms = _now_ms()
+            self._sync_to_model(ctx)
+            ctx.request_update()
+            return True
+        if key == "ArrowLeft":
+            self.session.set_insertion(max(0, self.session.insertion - 1), mods.shift)
+            self.session.blink_epoch_ms = _now_ms()
+            ctx.request_update()
+            return True
+        if key == "ArrowRight":
+            self.session.set_insertion(self.session.insertion + 1, mods.shift)
+            self.session.blink_epoch_ms = _now_ms()
+            ctx.request_update()
+            return True
+        if key == "Home":
+            self.session.set_insertion(0, mods.shift)
+            self.session.blink_epoch_ms = _now_ms()
+            ctx.request_update()
+            return True
+        if key == "End":
+            self.session.set_insertion(len(self.session.content), mods.shift)
+            self.session.blink_epoch_ms = _now_ms()
+            ctx.request_update()
+            return True
+
+        if len(key) == 1 and not mods.cmd():
+            self._ensure_snapshot(ctx)
+            self.session.insert(key)
+            self.session.blink_epoch_ms = _now_ms()
+            self._sync_to_model(ctx)
+            ctx.request_update()
+            return True
+        return False
+
+    def captures_keyboard(self) -> bool:
+        return self.session is not None
+
+    def cursor_css_override(self) -> Optional[str]:
+        # While editing, always use the system I-beam.
+        if self.session is not None:
+            return "ibeam"
+        if self._hover_textpath or self._hover_path:
+            return "ibeam"
+        return None
+
+    def is_editing(self) -> bool:
+        return self.session is not None
+
+    def paste_text(self, ctx: ToolContext, text: str) -> bool:
+        if self.session is None:
+            return False
+        self._ensure_snapshot(ctx)
+        self.session.insert(text)
+        self.session.blink_epoch_ms = _now_ms()
+        self._sync_to_model(ctx)
+        ctx.request_update()
+        return True
 
     def deactivate(self, ctx: ToolContext) -> None:
-        ctx.commit_text_edit()
+        self._end_session()
 
-    def draw_overlay(self, ctx: ToolContext, painter: 'QPainter') -> None:
-        from PySide6.QtCore import QPointF, Qt
-        from PySide6.QtGui import QBrush, QColor, QPen, QPainterPath
+    def draw_overlay(self, ctx: ToolContext, painter: "QPainter") -> None:
+        from PySide6.QtCore import QPointF, QRectF, Qt
+        from PySide6.QtGui import QBrush, QColor, QPainterPath, QPen, QTransform
 
-        # Draw drag-create preview
-        if self._drag_start is not None and self._drag_end is not None:
+        # Drag-create preview
+        if self.session is None and self._drag_start is not None and self._drag_end is not None:
             sx, sy = self._drag_start
             ex, ey = self._drag_end
             pen = QPen(QColor(100, 100, 100), 1.0, Qt.PenStyle.DashLine)
             painter.setPen(pen)
             painter.setBrush(QBrush())
-            path = QPainterPath()
-            path.moveTo(sx, sy)
+            qpath = QPainterPath()
+            qpath.moveTo(sx, sy)
             if self._control is not None:
                 cx, cy = self._control
-                path.cubicTo(cx, cy, cx, cy, ex, ey)
+                qpath.cubicTo(cx, cy, cx, cy, ex, ey)
             else:
-                path.lineTo(ex, ey)
-            painter.drawPath(path)
+                qpath.lineTo(ex, ey)
+            painter.drawPath(qpath)
 
-        # Draw offset handle for selected TextPath elements
+        # Offset handles for selected TextPath elements
         doc = ctx.document
         for es in doc.selection:
             elem = doc.get_element(es.path)
             if isinstance(elem, TextPath) and elem.d:
-                offset = self._offset_preview if (
-                    self._offset_dragging and self._offset_drag_path == es.path
-                    and self._offset_preview is not None
-                ) else elem.start_offset
+                offset = (self._offset_preview if (self._offset_dragging
+                          and self._offset_drag_path == es.path
+                          and self._offset_preview is not None)
+                          else elem.start_offset)
                 hx, hy = path_point_at_offset(elem.d, offset)
                 r = _OFFSET_HANDLE_RADIUS
-                # Diamond shape
                 painter.setPen(QPen(QColor(255, 140, 0), 1.5))
                 painter.setBrush(QBrush(QColor(255, 200, 80)))
                 diamond = QPainterPath()
@@ -214,3 +498,49 @@ class TypeOnPathTool(CanvasTool):
                 diamond.lineTo(hx - r, hy)
                 diamond.closeSubpath()
                 painter.drawPath(diamond)
+
+        # Editing overlay
+        if self.session is None:
+            return
+        built = self._build_layout(ctx)
+        if built is None:
+            return
+        tp, lay = built
+        sel_color = _selection_color(tp)
+        caret_color = _accent_color(tp)
+
+        if self.session.has_selection():
+            lo, hi = self.session.selection_range()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(sel_color))
+            for g in lay.glyphs:
+                if g.idx < lo or g.idx >= hi:
+                    continue
+                painter.save()
+                painter.translate(QPointF(g.cx, g.cy))
+                painter.rotate(math.degrees(g.angle))
+                painter.drawRect(QRectF(-g.width / 2.0, -tp.font_size * 0.8,
+                                        g.width, tp.font_size))
+                painter.restore()
+
+        if _cursor_visible(self.session.blink_epoch_ms):
+            pos = lay.cursor_pos(self.session.insertion)
+            if pos is not None:
+                cx, cy, angle = pos
+                painter.save()
+                painter.translate(QPointF(cx, cy))
+                painter.rotate(math.degrees(angle))
+                painter.setPen(QPen(caret_color, 1.5))
+                painter.drawLine(QPointF(0.0, -tp.font_size * 0.8),
+                                 QPointF(0.0, tp.font_size * 0.2))
+                painter.restore()
+
+
+def _clipboard_write(text: str) -> None:
+    try:
+        from PySide6.QtWidgets import QApplication  # type: ignore
+        app = QApplication.instance()
+        if app is not None:
+            app.clipboard().setText(text)
+    except Exception:
+        pass

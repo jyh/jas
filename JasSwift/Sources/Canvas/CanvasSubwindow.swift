@@ -358,20 +358,38 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
         } else if v.textDecoration == "line-through" {
             attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
         }
-        let str = NSAttributedString(string: v.content, attributes: attrs)
         ctx.saveGState()
+        // Both point and area text are rendered as one CTLine per visual
+        // line so the same drawing code works in the NSView's flipped
+        // coordinate system. For area text we run the editor's own
+        // word-wrap layout to figure out where the lines break.
+        ctx.textMatrix = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
         if v.isAreaText {
-            ctx.translateBy(x: 0, y: v.y + v.height)
-            ctx.scaleBy(x: 1, y: -1)
-            let framesetter = CTFramesetterCreateWithAttributedString(str)
-            let path = CGPath(rect: CGRect(x: v.x, y: 0, width: v.width, height: v.height), transform: nil)
-            let frame = CTFramesetterCreateFrame(framesetter, CFRangeMake(0, 0), path, nil)
-            CTFrameDraw(frame, ctx)
+            let measure = makeMeasurer(family: v.fontFamily, weight: v.fontWeight,
+                                       style: v.fontStyle, size: v.fontSize)
+            let lay = layoutText(v.content, maxWidth: v.width,
+                                 fontSize: v.fontSize, measure: measure)
+            let chars = Array(v.content)
+            for (i, line) in lay.lines.enumerated() {
+                let segChars = chars[line.start..<line.end]
+                let segStr = String(segChars)
+                let lineStr = NSAttributedString(string: segStr, attributes: attrs)
+                let ctLine = CTLineCreateWithAttributedString(lineStr)
+                ctx.textPosition = CGPoint(x: v.x,
+                                           y: v.y + v.fontSize * 0.8 + Double(i) * v.fontSize)
+                CTLineDraw(ctLine, ctx)
+            }
         } else {
-            ctx.textMatrix = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
-            let line = CTLineCreateWithAttributedString(str)
-            ctx.textPosition = CGPoint(x: v.x, y: v.y)
-            CTLineDraw(line, ctx)
+            // Point text: split on "\n" and draw each line at
+            // (x, y + i * fontSize). CTLineCreateWithAttributedString
+            // itself ignores newline characters.
+            let segments = v.content.split(separator: "\n", omittingEmptySubsequences: false)
+            for (i, seg) in segments.enumerated() {
+                let lineStr = NSAttributedString(string: String(seg), attributes: attrs)
+                let line = CTLineCreateWithAttributedString(lineStr)
+                ctx.textPosition = CGPoint(x: v.x, y: v.y + Double(i) * v.fontSize)
+                CTLineDraw(line, ctx)
+            }
         }
         ctx.restoreGState()
 
@@ -641,6 +659,39 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document) {
     }
 }
 
+/// Map an NSEvent to a stable key name string used by tools'
+/// `onKeyEvent` (matches the Rust/JS naming used by the cross-language
+/// type tools: "ArrowLeft", "Backspace", "Escape", etc., otherwise the
+/// raw character string).
+func canonicalKeyName(_ event: NSEvent) -> String {
+    let keyCode = event.keyCode
+    switch keyCode {
+    case 36: return "Enter"          // Return
+    case 76: return "Enter"          // numeric keypad Enter
+    case 51: return "Backspace"
+    case 117: return "Delete"         // forward delete
+    case 53: return "Escape"
+    case 123: return "ArrowLeft"
+    case 124: return "ArrowRight"
+    case 125: return "ArrowDown"
+    case 126: return "ArrowUp"
+    case 115: return "Home"
+    case 119: return "End"
+    case 48: return "Tab"
+    default:
+        if let chars = event.charactersIgnoringModifiers, !chars.isEmpty {
+            // Map control characters that some keyboards/layouts deliver
+            // before the keyCode lookup hits.
+            if chars == "\r" || chars == "\n" { return "Enter" }
+            if chars == "\u{7F}" { return "Backspace" }
+            if chars == "\u{F728}" { return "Delete" }
+            if chars == "\u{1B}" { return "Escape" }
+            return chars
+        }
+        return ""
+    }
+}
+
 // MARK: - Canvas NSView for CoreGraphics drawing
 
 /// An NSView that draws the document's elements using CoreGraphics.
@@ -678,13 +729,59 @@ class CanvasNSView: NSView {
     private var textEditor: NSTextField?
     private var editingPath: ElementPath?
 
+    // Blink timer that drives caret animation while a tool is editing.
+    private var blinkTimer: Timer?
+
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
 
+    /// Start a 265 ms timer that bumps `needsDisplay` while the active tool
+    /// is editing — drives the caret blink animation. The timer is created
+    /// lazily on first need and torn down once no tool is editing.
+    private func ensureBlinkTimer() {
+        if blinkTimer != nil { return }
+        blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.265, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            if self.tools.values.contains(where: { $0.isEditing() }) {
+                self.needsDisplay = true
+                // The cursor-hide-when-idle override depends on elapsed
+                // wall clock time, so refresh cursor rects on each tick
+                // too — this is what flips the pointer to "none" once
+                // the user has stopped moving the mouse.
+                self.window?.invalidateCursorRects(for: self)
+            } else {
+                self.blinkTimer?.invalidate()
+                self.blinkTimer = nil
+            }
+        }
+    }
+
     override func resetCursorRects() {
         discardCursorRects()
+        // Active tool can override the per-tool cursor (e.g. the type
+        // tool hides the cursor when the pointer is inside the text it
+        // is currently editing, so the rendered caret is not occluded).
+        if let override = tools[onToolRead?() ?? currentTool]?.cursorOverride() {
+            switch override {
+            case "none":
+                addCursorRect(bounds, cursor: CanvasNSView.hiddenCursor)
+                return
+            case "ibeam":
+                addCursorRect(bounds, cursor: NSCursor.iBeam)
+                return
+            default:
+                break
+            }
+        }
         addCursorRect(bounds, cursor: cursorForTool(onToolRead?() ?? currentTool))
     }
+
+    /// A 1×1 fully-transparent cursor used to "hide" the pointer over the
+    /// text being edited without dropping out of the cursor-rect system.
+    static let hiddenCursor: NSCursor = {
+        let img = NSImage(size: NSSize(width: 1, height: 1))
+        return NSCursor(image: img, hotSpot: .zero)
+    }()
 
     private func cursorForTool(_ tool: Tool) -> NSCursor {
         switch tool {
@@ -1183,6 +1280,23 @@ class CanvasNSView: NSView {
     // MARK: - Event dispatch
 
     override func keyDown(with event: NSEvent) {
+        // If the active tool is in an editing session, route ALL key events
+        // (including shortcuts that would otherwise hit global handlers) to
+        // it first. This is the "captures keyboard" path used by the type
+        // tools' in-place editor.
+        if let ctx = toolContext, activeTool.capturesKeyboard() {
+            let key = canonicalKeyName(event)
+            let mods = KeyMods(
+                shift: event.modifierFlags.contains(.shift),
+                ctrl: event.modifierFlags.contains(.control),
+                alt: event.modifierFlags.contains(.option),
+                cmd: event.modifierFlags.contains(.command)
+            )
+            if activeTool.onKeyEvent(ctx, key, mods) {
+                ensureBlinkTimer()
+                return
+            }
+        }
         if let ctx = toolContext, activeTool.onKey(ctx, keyCode: event.keyCode) {
             return
         }
@@ -1239,17 +1353,25 @@ class CanvasNSView: NSView {
         let pt = convert(event.locationInWindow, from: nil)
         if event.clickCount >= 2 {
             activeTool.onDoubleClick(ctx, x: pt.x, y: pt.y)
+            ensureBlinkTimer()
             return
         }
         let shift = event.modifierFlags.contains(.shift)
         let alt = event.modifierFlags.contains(.option)
         activeTool.onPress(ctx, x: pt.x, y: pt.y, shift: shift, alt: alt)
+        ensureBlinkTimer()
     }
 
     override func mouseMoved(with event: NSEvent) {
         guard let ctx = toolContext else { return }
         let pt = convert(event.locationInWindow, from: nil)
         activeTool.onMove(ctx, x: pt.x, y: pt.y, shift: false, dragging: false)
+        // Cursor override (e.g. "none" inside the edited text) depends on
+        // the live pointer position, so invalidate the cursor rects on
+        // every move while a tool is editing.
+        if activeTool.isEditing() {
+            window?.invalidateCursorRects(for: self)
+        }
     }
 
     override func mouseDragged(with event: NSEvent) {

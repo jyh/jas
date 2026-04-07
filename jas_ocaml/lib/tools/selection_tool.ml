@@ -7,6 +7,7 @@ type selection_state = Idle | Marquee | Moving
 (* ------------------------------------------------------------------ *)
 
 class virtual selection_tool_base = object (self)
+  inherit Canvas_tool.default_methods
   val mutable state : selection_state = Idle
   val mutable drag_start : (float * float) option = None
   val mutable drag_end : (float * float) option = None
