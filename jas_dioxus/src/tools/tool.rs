@@ -119,6 +119,21 @@ impl ToolKind {
     }
 }
 
+/// Modifier flags accompanying a keyboard event.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct KeyMods {
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub meta: bool,
+}
+
+impl KeyMods {
+    pub fn cmd(&self) -> bool {
+        self.ctrl || self.meta
+    }
+}
+
 /// Trait for canvas interaction tools.
 pub trait CanvasTool {
     fn on_press(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, alt: bool);
@@ -129,6 +144,25 @@ pub trait CanvasTool {
     fn on_double_click(&mut self, _model: &mut Model, _x: f64, _y: f64) {}
     fn on_key(&mut self, _model: &mut Model, _key: &str) -> bool { false }
     fn on_key_up(&mut self, _model: &mut Model, _key: &str) -> bool { false }
+    /// Receive a keyboard event with modifiers. Default implementation
+    /// delegates to [`on_key`] with the bare key string. Tools that care
+    /// about modifiers (e.g. text editor) should override this.
+    fn on_key_event(&mut self, model: &mut Model, key: &str, _mods: KeyMods) -> bool {
+        self.on_key(model, key)
+    }
+    /// Return true if the tool wants the canvas to swallow ALL keyboard
+    /// events (including app shortcuts like cmd+z) and route them to
+    /// [`on_key_event`]. Used by the in-place text editor.
+    fn captures_keyboard(&self) -> bool { false }
+    /// Optional cursor CSS override. When `Some`, the canvas displays this
+    /// cursor instead of the static [`ToolKind::cursor_css`] value.
+    fn cursor_css_override(&self) -> Option<String> { None }
+    /// True while the tool is in an active text-editing session. The app
+    /// uses this to set up a blink timer.
+    fn is_editing(&self) -> bool { false }
+    /// Insert pasted text at the current text caret. Returns true if the
+    /// tool consumed the paste (i.e. an edit session is active).
+    fn paste_text(&mut self, _model: &mut Model, _text: &str) -> bool { false }
     fn activate(&mut self, _model: &mut Model) {}
     fn deactivate(&mut self, _model: &mut Model) {}
 }

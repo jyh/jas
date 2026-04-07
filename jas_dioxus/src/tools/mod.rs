@@ -1,4 +1,6 @@
 pub mod tool;
+pub mod text_edit;
+pub mod text_measure;
 pub mod selection;
 pub mod direct_selection;
 pub mod group_selection;
