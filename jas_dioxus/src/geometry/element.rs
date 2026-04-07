@@ -509,8 +509,26 @@ impl Element {
                 if e.is_area_text() {
                     (e.x, e.y, e.width, e.height)
                 } else {
-                    let approx_width = e.content.len() as f64 * e.font_size * APPROX_CHAR_WIDTH_FACTOR;
-                    (e.x, e.y - e.font_size, approx_width, e.font_size)
+                    // The canvas renderer treats `e.y` as the top edge of
+                    // the text run (baseline at e.y + 0.8*font_size). The
+                    // bounding box must therefore extend *downward* from
+                    // e.y, not upward. Hard line breaks in the content
+                    // grow the box vertically and the width is the widest
+                    // line.
+                    let lines: Vec<&str> = if e.content.is_empty() {
+                        vec![""]
+                    } else {
+                        e.content.split('\n').collect()
+                    };
+                    let max_chars = lines
+                        .iter()
+                        .map(|l| l.chars().count())
+                        .max()
+                        .unwrap_or(0);
+                    let approx_width =
+                        max_chars as f64 * e.font_size * APPROX_CHAR_WIDTH_FACTOR;
+                    let height = lines.len() as f64 * e.font_size;
+                    (e.x, e.y, approx_width, height)
                 }
             }
             Element::TextPath(e) => inflate_bounds(path_bounds(&e.d), e.stroke.as_ref()),
@@ -1565,6 +1583,63 @@ mod tests {
     fn empty_group_bounds() {
         let g = group(vec![]);
         assert_eq!(g.bounds(), (0.0, 0.0, 0.0, 0.0));
+    }
+
+    fn point_text(content: &str, x: f64, y: f64, font_size: f64) -> Element {
+        Element::Text(TextElem {
+            x, y,
+            content: content.to_string(),
+            font_family: "sans-serif".into(),
+            font_size,
+            font_weight: "normal".into(),
+            font_style: "normal".into(),
+            text_decoration: "none".into(),
+            width: 0.0, height: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+        })
+    }
+
+    #[test]
+    fn point_text_bounds_extend_downward_from_y() {
+        // The renderer treats `e.y` as the top edge of the text run, so
+        // the bounding box must start at `e.y` and grow downward — not
+        // sit above the text as it did historically.
+        let e = point_text("hi", 100.0, 50.0, 16.0);
+        let (bx, by, _bw, bh) = e.bounds();
+        assert_eq!(bx, 100.0);
+        assert_eq!(by, 50.0);
+        assert_eq!(bh, 16.0);
+    }
+
+    #[test]
+    fn point_text_bounds_grow_with_hard_line_breaks() {
+        let one = point_text("a", 0.0, 0.0, 20.0);
+        let two = point_text("a\nb", 0.0, 0.0, 20.0);
+        let three = point_text("a\nb\nc", 0.0, 0.0, 20.0);
+        let (_, _, _, h1) = one.bounds();
+        let (_, _, _, h2) = two.bounds();
+        let (_, _, _, h3) = three.bounds();
+        assert_eq!(h1, 20.0);
+        assert_eq!(h2, 40.0);
+        assert_eq!(h3, 60.0);
+    }
+
+    #[test]
+    fn point_text_bounds_width_uses_widest_line() {
+        // 5-char line should dominate over the 2-char line.
+        let e = point_text("hi\nhello", 0.0, 0.0, 10.0);
+        let (_, _, w, _) = e.bounds();
+        let one_line = point_text("hello", 0.0, 0.0, 10.0);
+        let (_, _, w_ref, _) = one_line.bounds();
+        assert_eq!(w, w_ref);
+    }
+
+    #[test]
+    fn point_text_empty_content_still_has_one_line_height() {
+        let e = point_text("", 0.0, 0.0, 18.0);
+        let (_, _, _, h) = e.bounds();
+        assert_eq!(h, 18.0);
     }
 
     // --- Control points tests ---

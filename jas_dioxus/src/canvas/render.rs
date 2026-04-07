@@ -221,7 +221,20 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element) {
             apply_fill(ctx, e.fill.as_ref());
             let font = format!("{} {} {}px {}", e.font_style, e.font_weight, e.font_size, e.font_family);
             ctx.set_font(&font);
-            ctx.fill_text(&e.content, e.x, e.y + e.font_size).ok();
+            let measure = crate::tools::text_measure::make_measurer(&font, e.font_size);
+            let max_w = if e.is_area_text() { e.width } else { 0.0 };
+            let layout = crate::geometry::text_layout::layout(
+                &e.content,
+                max_w,
+                e.font_size,
+                measure.as_ref(),
+            );
+            let chars: Vec<char> = e.content.chars().collect();
+            for line in &layout.lines {
+                let s: String = chars[line.start..line.end].iter().collect();
+                let s = s.trim_end_matches(|c: char| c == '\n');
+                ctx.fill_text(s, e.x, e.y + line.baseline_y).ok();
+            }
         }
         Element::TextPath(e) => {
             // Draw the path as a faint guide line

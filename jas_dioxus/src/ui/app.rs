@@ -196,6 +196,26 @@ fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64
         if st.tab().is_none() {
             return;
         }
+
+        // If a tool is in a text-editing session, send the plain text there.
+        let active_kind = st.active_tool;
+        let editing = st
+            .tab()
+            .and_then(|tab| tab.tools.get(&active_kind).map(|t| t.is_editing()))
+            .unwrap_or(false);
+        if editing {
+            if let Some(text) = clipboard_text.clone() {
+                let tab = st.tab_mut().unwrap();
+                if let Some(tool) = tab.tools.get_mut(&active_kind) {
+                    if tool.paste_text(&mut tab.model, &text) {
+                        drop(st);
+                        revision += 1;
+                        return;
+                    }
+                }
+            }
+        }
+
         let tab = st.tab_mut().unwrap();
 
         // Check if clipboard contains SVG
@@ -505,6 +525,46 @@ pub fn App() -> Element {
         });
     }
 
+    // Blink timer: while a tool is in a text-editing session, bump the
+    // revision every ~265ms so the caret blinks. The interval is installed
+    // for the lifetime of the component; it cheaply checks each tick whether
+    // editing is still active and only triggers a repaint then.
+    {
+        let app_b = app.clone();
+        let mut rev_b = revision;
+        use_hook(move || {
+            #[cfg(target_arch = "wasm32")]
+            {
+                use wasm_bindgen::closure::Closure;
+                let app_b = app_b.clone();
+                let cb = Closure::<dyn FnMut()>::new(move || {
+                    let editing = if let Ok(st) = app_b.try_borrow() {
+                        let kind = st.active_tool;
+                        st.tab()
+                            .and_then(|tab| tab.tools.get(&kind).map(|t| t.is_editing()))
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    };
+                    if editing {
+                        rev_b += 1;
+                    }
+                });
+                if let Some(window) = web_sys::window() {
+                    let _ = window
+                        .set_interval_with_callback_and_timeout_and_arguments_0(
+                            cb.as_ref().unchecked_ref(),
+                            265,
+                        );
+                }
+                // Leak the closure so it stays alive for the app lifetime.
+                cb.forget();
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            { let _ = (&app_b, &mut rev_b); }
+        });
+    }
+
     // Macro-like helper: mutate state, then bump revision to trigger repaint.
     let act = {
         let app = app.clone();
@@ -604,6 +664,67 @@ pub fn App() -> Element {
             let key = evt.data().key();
             let mods = evt.data().modifiers();
             let cmd = mods.meta() || mods.ctrl();
+
+            // If the active tool is in a text-editing session, route the
+            // event there first. The tool's `on_key_event` consumes printable
+            // characters, navigation, deletion, and the in-session shortcuts
+            // (Cmd+A/C/X/Z). Cmd+V still goes through the async clipboard
+            // path below; we then call `paste_text` on the tool.
+            let tool_captures = {
+                let st = app_for_keys.borrow();
+                st.tab().and_then(|tab| {
+                    tab.tools.get(&st.active_tool).map(|t| t.captures_keyboard())
+                }).unwrap_or(false)
+            };
+            if tool_captures {
+                // Cmd+V is handled by the async clipboard path so the tool
+                // can receive the actual text.
+                let is_paste = (matches!(key, Key::Character(ref c) if c == "v" || c == "V")) && cmd;
+                if !is_paste {
+                    let key_str: String = match &key {
+                        Key::Character(c) => c.clone(),
+                        Key::Enter => "Enter".to_string(),
+                        Key::Escape => "Escape".to_string(),
+                        Key::Backspace => "Backspace".to_string(),
+                        Key::Delete => "Delete".to_string(),
+                        Key::ArrowLeft => "ArrowLeft".to_string(),
+                        Key::ArrowRight => "ArrowRight".to_string(),
+                        Key::ArrowUp => "ArrowUp".to_string(),
+                        Key::ArrowDown => "ArrowDown".to_string(),
+                        Key::Home => "Home".to_string(),
+                        Key::End => "End".to_string(),
+                        Key::Tab => "Tab".to_string(),
+                        _ => String::new(),
+                    };
+                    if !key_str.is_empty() {
+                        evt.prevent_default();
+                        let km = crate::tools::tool::KeyMods {
+                            shift: mods.shift(),
+                            ctrl: mods.ctrl(),
+                            alt: mods.alt(),
+                            meta: mods.meta(),
+                        };
+                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                            let kind = st.active_tool;
+                            if let Some(tab) = st.tab_mut() {
+                                if let Some(tool) = tab.tools.get_mut(&kind) {
+                                    tool.on_key_event(&mut tab.model, &key_str, km);
+                                }
+                            }
+                        }));
+                        return;
+                    }
+                } else {
+                    evt.prevent_default();
+                    clipboard_read_and_paste(
+                        app_for_keys.clone(),
+                        revision_for_keys.clone(),
+                        0.0,
+                    );
+                    return;
+                }
+            }
+
             match key {
                 // --- Modifier shortcuts ---
                 Key::Character(ref c) if (c == "z" || c == "Z") && cmd => {
@@ -864,6 +985,20 @@ pub fn App() -> Element {
     // Read revision to trigger re-render when state changes.
     let _ = revision();
     let active_tool = app.borrow().active_tool;
+    // Per-frame cursor: tools may override (e.g. Type tool returns the
+    // text-insertion SVG when hovering text, and "none" while editing).
+    let canvas_cursor: String = {
+        let st = app.borrow();
+        st.tab()
+            .and_then(|tab| tab.tools.get(&active_tool).and_then(|t| t.cursor_css_override()))
+            .unwrap_or_else(|| active_tool.cursor_css().to_string())
+    };
+    let any_tool_editing: bool = {
+        let st = app.borrow();
+        st.tab()
+            .and_then(|tab| tab.tools.get(&active_tool).map(|t| t.is_editing()))
+            .unwrap_or(false)
+    };
 
     // If active tool is an alternate that's not currently visible, update the slot.
     // Collect updates first, then apply — writing to signals during render can cause
@@ -1330,7 +1465,7 @@ pub fn App() -> Element {
                     if has_tabs {
                         canvas {
                             id: "jas-canvas",
-                            style: "display:block; width:100%; height:100%; cursor:{active_tool.cursor_css()};",
+                            style: "display:block; width:100%; height:100%; cursor:{canvas_cursor};",
                             onmousedown: on_mousedown,
                             onmousemove: on_mousemove,
                             onmouseup: on_mouseup,
