@@ -30,7 +30,7 @@ class ToolbarTest(absltest.TestCase):
         self.assertIn(Tool.PATH_ERASER, tools)
         self.assertIn(Tool.SMOOTH, tools)
         self.assertIn(Tool.TYPE, tools)
-        self.assertIn(Tool.TEXT_PATH, tools)
+        self.assertIn(Tool.TYPE_ON_PATH, tools)
         self.assertIn(Tool.LINE, tools)
         self.assertIn(Tool.RECT, tools)
         self.assertIn(Tool.ROUNDED_RECT, tools)

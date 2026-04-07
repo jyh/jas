@@ -30,7 +30,7 @@ the button (500 ms) opens a popup menu to switch:
 | Arrow slot | Direct Selection | Group Selection | Row 0, Col 1 |
 | Pen slot | Pen | Add Anchor Point, Delete Anchor Point, Anchor Point | Row 1, Col 0 |
 | Pencil slot | Pencil | Path Eraser, Smooth | Row 1, Col 1 |
-| Text slot | Text | Text on Path | Row 2, Col 0 |
+| Text slot | Type | Type on a Path | Row 2, Col 0 |
 | Shape slot | Rect | Polygon | Row 3, Col 0 |
 
 When an alternate is selected from the menu, that tool replaces the default
@@ -53,7 +53,7 @@ alternates are available.
 | M | Rect |
 | Shift+E | Path Eraser |
 
-Group Selection, Text on Path, and Polygon have no keyboard shortcuts --
+Group Selection, Type on a Path, and Polygon have no keyboard shortcuts --
 they are accessed through the long-press menus.
 
 ---
@@ -790,7 +790,7 @@ and 16 pt sans-serif font.
 
 ---
 
-## Text on Path Tool
+## Type on a Path Tool
 
 **Shortcut:** none (long-press on Text slot)
 

@@ -526,10 +526,20 @@ Let's update the the toolbar icon for the Line Segment tool. The mouse cursor re
 
 ![line](assets/icons/line.svg)
 
-Now let’s add a Rounded Rectangle tool. When this tool is selected, we draw a rounded rectangle on the canvas by clicking a corner of the rectangle, dragging, and where we release is the other corner of the rectangle, just like a regular rectangle. The tool should go in the same slot as the Rectangle too. The radius of rounded should be defined as a module parameter, let's initialize it to 10pt. The svg file is in the file "assets/icons/rounded rect.svg", and the png file is in the file "assets/icons/rounded rect.png". Add it in the same way as the Rectangle tool. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
+Now let’s add a Rounded Rectangle tool. When this tool is selected, we draw a rounded rectangle on the canvas by clicking a corner of the rectangle, dragging, and where we release is the other corner of the rectangle, just like a regular rectangle. The tool should go in the same slot as the Rectangle tool. The radius of rounded should be defined as a module parameter, let's initialize it to 10pt. The svg file is in the file "assets/icons/rounded rect.svg", and the png file is in the file "assets/icons/rounded rect.png". Add it in the same way as the Rectangle tool. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
 
 ![rounded rect](assets/icons/rounded rect.svg)
 
-Let's add an Ellipse tool. When this tool is selected, we draw an ellipse on the canvas by clicking a corner of the bounding box of the ellipser, dragging, and where we release is the other corner of the bounding box of the ellipse. The tool should go in the same slot as the Rectangle too. The svg file is in the file "assets/icons/ellipse.svg", and the png file is in the file "assets/icons/ellipse.png". Add it in the same way as the Rectangle tool. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
+Let's add an Ellipse tool. When this tool is selected, we draw an ellipse on the canvas by clicking a corner of the bounding box of the ellipse, dragging, and where we release is the other corner of the bounding box of the ellipse. The tool should go in the same slot as the Rectangle tool. The svg file is in the file "assets/icons/ellipse.svg", and the png file is in the file "assets/icons/ellipse.png". Add it in the same way as the Rectangle tool. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
 
 ![ellipse](assets/icons/ellipse.svg)
+
+Let's add a Star Tool. When this tool is selected, we draw a star on the canvas by dragging out the bounding box. The number of points in the star should be a module parameter, initialize it to 5. The tool should go in the same slot as the Rectangle tool. The svg file is in the file "assets/icons/star.svg", and the png file is in the file "assets/icons/star.png". Add it in the same way as the Rectangle tool. Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
+
+![star](assets/icons/star.svg)
+
+# Type tool
+
+Let's work on the Text tool. First, rename the Text Tool to the Type tool. Then update the toolbar icon from the svg file "assets/icons/type.svg" and the png file "assets/icons/type.png". The cursor should be set from "assets/icons/type cursor.svg" and "assets/icons/type cursor.png". Let's do it in rust first to see how it works. Once we're satisfied we can propagate to the other apps.
+
+![type](assets/icons/type.svg) ![type cursor](assets/icons/type cursor.svg)

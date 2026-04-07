@@ -1,4 +1,4 @@
-//! Text-on-path tool for placing text along a curve.
+//! Type-on-path tool for placing text along a curve.
 //!
 //! Supports three modes:
 //! 1. Drag to create a new text-on-path element with an auto-generated curve.
@@ -34,13 +34,36 @@ enum State {
     },
 }
 
-pub struct TextPathTool {
+pub struct TypeOnPathTool {
     state: State,
 }
 
-impl TextPathTool {
+impl TypeOnPathTool {
     pub fn new() -> Self {
         Self { state: State::Idle }
+    }
+
+    #[cfg(test)]
+    fn is_idle(&self) -> bool {
+        matches!(self.state, State::Idle)
+    }
+
+    #[cfg(test)]
+    fn drag_create_extent(&self) -> Option<(f64, f64, f64, f64)> {
+        if let State::DragCreate { start_x, start_y, cur_x, cur_y, .. } = self.state {
+            Some((start_x, start_y, cur_x, cur_y))
+        } else {
+            None
+        }
+    }
+
+    #[cfg(test)]
+    fn drag_create_control(&self) -> Option<(f64, f64)> {
+        if let State::DragCreate { control, .. } = self.state {
+            control
+        } else {
+            None
+        }
     }
 
     /// Check if (x, y) is near the start-offset handle of a selected TextPath.
@@ -122,7 +145,7 @@ fn prompt_text(default: &str) -> Option<String> {
     }
 }
 
-impl CanvasTool for TextPathTool {
+impl CanvasTool for TypeOnPathTool {
     fn on_press(&mut self, model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool) {
         model.snapshot();
 
@@ -355,5 +378,73 @@ impl CanvasTool for TextPathTool {
                 ctx.stroke();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_tool_is_idle() {
+        let tool = TypeOnPathTool::new();
+        assert!(tool.is_idle());
+    }
+
+    #[test]
+    fn press_starts_drag_create() {
+        let mut tool = TypeOnPathTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 12.0, 34.0, false, false);
+        assert!(!tool.is_idle());
+        assert_eq!(tool.drag_create_extent(), Some((12.0, 34.0, 12.0, 34.0)));
+        // No control point yet — only set once dist > DRAG_THRESHOLD.
+        assert_eq!(tool.drag_create_control(), None);
+    }
+
+    #[test]
+    fn move_after_press_updates_cur_and_control() {
+        let mut tool = TypeOnPathTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_move(&mut model, 50.0, 60.0, false, false, true);
+        assert_eq!(tool.drag_create_extent(), Some((10.0, 20.0, 50.0, 60.0)));
+        // Distance is sqrt(40^2+40^2) ≈ 56 > DRAG_THRESHOLD, so a control
+        // point should now be set perpendicular to the segment midpoint.
+        assert!(tool.drag_create_control().is_some());
+    }
+
+    #[test]
+    fn move_without_press_is_noop() {
+        let mut tool = TypeOnPathTool::new();
+        let mut model = Model::default();
+        tool.on_move(&mut model, 50.0, 60.0, false, false, true);
+        assert!(tool.is_idle());
+        assert_eq!(tool.drag_create_extent(), None);
+    }
+
+    #[test]
+    fn tiny_move_does_not_set_control_point() {
+        let mut tool = TypeOnPathTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        // Move within DRAG_THRESHOLD (4.0) — control should remain unset.
+        tool.on_move(&mut model, 11.0, 21.0, false, false, true);
+        assert_eq!(tool.drag_create_control(), None);
+    }
+
+    #[test]
+    fn press_takes_snapshot() {
+        let mut tool = TypeOnPathTool::new();
+        let mut model = Model::default();
+        let initial_can_undo = model.can_undo();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        assert!(model.can_undo() && !initial_can_undo,
+            "press should record an undo snapshot");
+    }
+
+    #[test]
+    fn offset_handle_radius_is_positive() {
+        assert!(OFFSET_HANDLE_RADIUS > 0.0);
     }
 }

@@ -17,7 +17,7 @@ import Testing
     #expect(tools.contains(.deleteAnchorPoint))
     #expect(tools.contains(.pencil))
     #expect(tools.contains(.typeTool))
-    #expect(tools.contains(.textPath))
+    #expect(tools.contains(.typeOnPath))
     #expect(tools.contains(.line))
     #expect(tools.contains(.rect))
     #expect(tools.contains(.roundedRect))
@@ -72,10 +72,10 @@ import Testing
 }
 
 @Test func textSlotAlternates() {
-    let alternates: [Tool] = [.typeTool, .textPath]
+    let alternates: [Tool] = [.typeTool, .typeOnPath]
     #expect(alternates.count == 2)
     #expect(alternates.contains(.typeTool))
-    #expect(alternates.contains(.textPath))
+    #expect(alternates.contains(.typeOnPath))
 }
 
 @Test func shapeSlotAlternates() {

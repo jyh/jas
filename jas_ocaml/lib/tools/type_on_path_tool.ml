@@ -1,9 +1,9 @@
-(** Text-on-path tool: click on a path to add text, drag to create new curve,
+(** Type-on-path tool: click on a path to add text, drag to create new curve,
     drag offset handle to reposition text start point. *)
 
 let offset_handle_radius = 5.0
 
-class text_path_tool = object (_self)
+class type_on_path_tool = object (_self)
   val mutable drag_start : (float * float) option = None
   val mutable drag_end : (float * float) option = None
   val mutable control_pt : (float * float) option = None

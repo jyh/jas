@@ -15,7 +15,7 @@ public enum Tool: String, CaseIterable {
     case pathEraser
     case smooth
     case typeTool
-    case textPath
+    case typeOnPath
     case line
     case rect
     case roundedRect
@@ -279,7 +279,7 @@ struct ToolbarPanel: View {
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $textSlotTool,
-                        alternates: [.typeTool, .textPath]
+                        alternates: [.typeTool, .typeOnPath]
                     )
                     ToolbarView.toolButton(currentTool: $currentTool, tool: .line)
                 }

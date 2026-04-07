@@ -838,3 +838,137 @@ private func makeClosedPath() -> Element {
     let children = layerChildren(model)
     #expect(children.isEmpty)
 }
+
+// MARK: - Type-on-path tool tests
+
+@Test func typeOnPathToolNewIsIdle() {
+    let tool = TypeOnPathTool()
+    #expect(tool.dragStart == nil)
+    #expect(tool.controlPt == nil)
+    #expect(tool.offsetDragging == false)
+}
+
+@Test func typeOnPathToolPressStartsDragCreate() {
+    let tool = TypeOnPathTool()
+    let (ctx, _, _) = makeCtx()
+    tool.onPress(ctx, x: 12, y: 34, shift: false, alt: false)
+    #expect(tool.dragStart?.0 == 12 && tool.dragStart?.1 == 34)
+    #expect(tool.dragEnd?.0 == 12 && tool.dragEnd?.1 == 34)
+    // No control point yet — only set once dist > dragThreshold.
+    #expect(tool.controlPt == nil)
+}
+
+@Test func typeOnPathToolMoveAfterPressSetsControlPoint() {
+    let tool = TypeOnPathTool()
+    let (ctx, _, _) = makeCtx()
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    tool.onMove(ctx, x: 50, y: 60, shift: false, dragging: true)
+    #expect(tool.dragEnd?.0 == 50 && tool.dragEnd?.1 == 60)
+    // Distance ≈ 56 > dragThreshold, so a control point is set.
+    #expect(tool.controlPt != nil)
+}
+
+@Test func typeOnPathToolTinyMoveDoesNotSetControlPoint() {
+    let tool = TypeOnPathTool()
+    let (ctx, _, _) = makeCtx()
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    tool.onMove(ctx, x: 11, y: 21, shift: false, dragging: true)
+    #expect(tool.controlPt == nil)
+}
+
+@Test func typeOnPathToolMoveWithoutPressIsNoop() {
+    let tool = TypeOnPathTool()
+    let (ctx, _, _) = makeCtx()
+    tool.onMove(ctx, x: 50, y: 60, shift: false, dragging: true)
+    #expect(tool.dragStart == nil)
+    #expect(tool.controlPt == nil)
+}
+
+@Test func typeOnPathToolDragCreatesCurvedTextPath() {
+    let tool = TypeOnPathTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    tool.onMove(ctx, x: 50, y: 60, shift: false, dragging: true)
+    tool.onRelease(ctx, x: 50, y: 60, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 1)
+    if case .textPath(let tp) = children[0] {
+        #expect(tp.content == "Lorem Ipsum")
+        #expect(tp.d.count == 2)
+        if case .moveTo(let sx, let sy) = tp.d[0] {
+            #expect(sx == 10 && sy == 20)
+        } else {
+            Issue.record("Expected MoveTo")
+        }
+        if case .curveTo(_, _, _, _, let ex, let ey) = tp.d[1] {
+            #expect(ex == 50 && ey == 60)
+        } else {
+            Issue.record("Expected CurveTo")
+        }
+    } else {
+        Issue.record("Expected TextPath element")
+    }
+}
+
+@Test func typeOnPathToolPressReleaseWithoutMoveCreatesLineTo() {
+    let tool = TypeOnPathTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    tool.onRelease(ctx, x: 50, y: 60, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 1)
+    if case .textPath(let tp) = children[0] {
+        if case .lineTo = tp.d[1] { } else {
+            Issue.record("Expected LineTo")
+        }
+    } else {
+        Issue.record("Expected TextPath element")
+    }
+}
+
+@Test func typeOnPathToolTinyDragWithoutHitIsNoop() {
+    let tool = TypeOnPathTool()
+    let (ctx, model, _) = makeCtx()
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    tool.onRelease(ctx, x: 11, y: 21, shift: false, alt: false)
+    #expect(layerChildren(model).isEmpty)
+}
+
+@Test func typeOnPathToolClickOnPathConvertsToTextPath() {
+    let tool = TypeOnPathTool()
+    let pathElem = Path(
+        d: [.moveTo(0, 0), .lineTo(100, 0)],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0))
+    )
+    let layer = Layer(name: "L", children: [.path(pathElem)])
+    let model = Model()
+    model.document = Document(layers: [layer])
+    let ctrl = Controller(model: model)
+    let ctx = ToolContext(
+        model: model,
+        controller: ctrl,
+        hitTestSelection: { _ in false },
+        hitTestHandle: { _ in nil },
+        hitTestText: { _ in nil },
+        hitTestPathCurve: { _, _ in ([0, 0], .path(pathElem)) },
+        requestUpdate: {},
+        startTextEdit: { _, _ in },
+        commitTextEdit: {},
+        drawElementOverlay: { _, _, _ in }
+    )
+    tool.onPress(ctx, x: 50, y: 0, shift: false, alt: false)
+    tool.onRelease(ctx, x: 50, y: 0, shift: false, alt: false)
+    let children = layerChildren(model)
+    #expect(children.count == 1)
+    if case .textPath = children[0] { } else {
+        Issue.record("Expected TextPath element after conversion")
+    }
+}
+
+@Test func typeOnPathToolPressTakesSnapshot() {
+    let tool = TypeOnPathTool()
+    let (ctx, model, _) = makeCtx()
+    #expect(model.canUndo == false)
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    #expect(model.canUndo == true)
+}

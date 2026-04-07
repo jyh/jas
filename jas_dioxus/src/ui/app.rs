@@ -33,7 +33,7 @@ use crate::tools::rect::RectTool;
 use crate::tools::rounded_rect::RoundedRectTool;
 use crate::tools::selection::SelectionTool;
 use crate::tools::type_tool::TypeTool;
-use crate::tools::text_path::TextPathTool;
+use crate::tools::type_on_path::TypeOnPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind, PASTE_OFFSET};
 
 /// Per-tab state: each tab has its own document, tools, and clipboard.
@@ -61,7 +61,7 @@ impl TabState {
         tools.insert(ToolKind::PathEraser, Box::new(PathEraserTool::new()));
         tools.insert(ToolKind::Smooth, Box::new(SmoothTool::new()));
         tools.insert(ToolKind::Type, Box::new(TypeTool::new()));
-        tools.insert(ToolKind::TextOnPath, Box::new(TextPathTool::new()));
+        tools.insert(ToolKind::TypeOnPath, Box::new(TypeOnPathTool::new()));
         tools.insert(ToolKind::Rect, Box::new(RectTool::new()));
         tools.insert(ToolKind::RoundedRect, Box::new(RoundedRectTool::new()));
         tools.insert(ToolKind::Polygon, Box::new(PolygonTool::new()));
@@ -396,7 +396,7 @@ const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (0, 1, &[ToolKind::DirectSelection, ToolKind::GroupSelection]),
     (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint, ToolKind::AnchorPoint]),
     (1, 1, &[ToolKind::Pencil, ToolKind::PathEraser, ToolKind::Smooth]),
-    (2, 0, &[ToolKind::Type, ToolKind::TextOnPath]),
+    (2, 0, &[ToolKind::Type, ToolKind::TypeOnPath]),
     (2, 1, &[ToolKind::Line]),
     (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star]),
 ];
@@ -460,9 +460,11 @@ fn toolbar_svg_icon(kind: ToolKind) -> String {
             let _c = c;
             r##"<g transform="scale(0.109375)"><path d="M156.78,197.66l-56.03-.18c-3.93-3.08-4.04-16.09.02-18.64,4.02-2.53,15.24,1.59,16.75-3.47l.29-96.22c-13.59-1.73-25.59-1.5-38.2-.19l-1.84,18.33c-6.36,1.3-11.83,1.26-18.54-.07-.74-13-1.05-25.04.15-38.87h137.24c1.18,13.75.97,25.84.13,38.9-6.65,1.37-12.09,1.27-18.54,0l-1.83-18.28c-12.65-1.26-24.67-1.46-38.15.18v97.73s18.59,1.88,18.59,1.88c1.2,5.78,1.58,10.49-.04,18.91Z" fill="rgb(204,204,204)"/></g>"##.to_string()
         },
-        // T + wavy path
-        ToolKind::TextOnPath => format!(
-            r#"<text x="2" y="18" font-family="sans-serif" font-size="14" font-weight="bold" fill="{c}">T</text><path d="M12,20 C16,8 22,24 26,12" fill="none" stroke="{c}" stroke-width="1"/>"#),
+        // Type on a Path tool — from assets/icons/type on a path.svg, scaled from 256→28
+        ToolKind::TypeOnPath => {
+            let _c = c;
+            r##"<g transform="scale(0.109375)"><path d="M146.65,143.92c.25,5.89-10.02,3.55-13.5-.15l-17.92-19.02c-3-3.18-.32-7.5,1-9.94,1.7-3.12,8.6,2.51,10.49,1.07,15.2-12.87,29.41-28.44,43.64-43.37,2.98-3.13-2.77-7.24-4.77-8.68-6.3-4.54-20.83,10.64-19.23-6.09.62-6.48,13.52-18.6,20.25-12.75,18.17,15.8,34.79,33.15,50.51,50.94,1.89,6.41-11.7,19.89-18.09,19.49-9.05-.56,2.31-14.04-1.7-19.76-1.73-2.47-7.6-8.13-11.2-4.55l-40.04,39.78.56,13.03Z" fill="rgb(204,204,204)"/><path d="M194,177.67c2.66,10.8-4.29,21.85-11.68,25.96-23.8,13.25-44.93-14.65-61.98-34.74-14.94-17.61-31.47-32.64-47.69-49.18-3.69-3.77-9.56-5.01-13.23-2.97-12.18,6.76-4.54,18.02-13.79,18.91-18.21-.22-2.19-26.12,6.1-28.91,8.07-4.38,20.73-4.56,27.31,1.72,14.67,14.02,28.79,27.1,41.77,42.46,12.68,14.99,26.22,28.37,40.53,41.76,3.82,3.58,10.67,1.41,14.46-.14,4.52-1.84,4.83-8.04,5.72-14.43.45-3.2,11.61-3.95,12.48-.44Z" fill="rgb(204,204,204)"/></g>"##.to_string()
+        },
         // Line segment (from SVG, scaled from 256→28)
         ToolKind::Line => {
             let _c = c;

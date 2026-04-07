@@ -307,7 +307,7 @@ POLYGON_SIDES       = 5         default sides for polygon tool
 | **Pen** | Click to place anchor points, drag to create Bezier handles. Builds a Path element. Double-click or Escape to finish. |
 | **Pencil** | Freehand drawing: samples mouse points during drag, fits Bezier curves to the stroke. |
 | **Text** | Click to place a text element. Double-click existing text to edit. |
-| **Text on Path** | Like Pen, but attaches editable text that flows along the resulting path. |
+| **Type on a Path** | Like Pen, but attaches editable text that flows along the resulting path. |
 | **Line** | Press-drag-release to create a Line element. |
 | **Rect** | Press-drag-release to create a Rect element. Coordinates normalized for any drag direction. |
 | **Polygon** | Press-drag-release to create a regular polygon. First edge defined by drag vector. |
@@ -391,7 +391,7 @@ tools/
   pen          # Pen tool (Bezier path creation)
   pencil       # Pencil tool (freehand with curve fitting)
   text         # Text tool
-  text_path    # Text on Path tool
+  type_on_path # Type on a Path tool
 canvas/
   canvas       # Canvas view, rendering, hit-test callbacks, tool dispatch
   toolbar      # Tool selection UI

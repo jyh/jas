@@ -1,7 +1,7 @@
-"""Text-on-path tool for placing text along a curve.
+"""Type-on-path tool for placing text along a curve.
 
 Supports three modes:
-1. Drag to create a new text-on-path element.
+1. Drag to create a new type-on-path element.
 2. Click on an existing Path element to convert it to a TextPath and edit in place.
 3. Drag the start-offset handle to reposition text along the path.
 """
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 _OFFSET_HANDLE_RADIUS = 5.0
 
 
-class TextPathTool(CanvasTool):
+class TypeOnPathTool(CanvasTool):
     """Click on an existing path to convert it, or drag to create a new curve."""
 
     def __init__(self):

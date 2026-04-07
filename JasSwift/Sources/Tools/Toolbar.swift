@@ -553,19 +553,93 @@ public struct ToolbarView {
                 let transformed = path.applying(transform)
                 context.fill(transformed, with: .color(color))
 
-            case .textPath:
-                // "T" with a wavy path
-                context.draw(
-                    SwiftUI.Text("T").font(.system(size: 14, weight: .bold))
-                        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.8, alpha: 1.0))),
-                    at: CGPoint(x: ox + 7, y: size.height / 2)
-                )
-                var wavePath = SwiftUI.Path()
-                wavePath.move(to: CGPoint(x: ox + 12, y: oy + 20))
-                wavePath.addCurve(to: CGPoint(x: ox + 26, y: oy + 12),
-                                  control1: CGPoint(x: ox + 16, y: oy + 8),
-                                  control2: CGPoint(x: ox + 22, y: oy + 24))
-                context.stroke(wavePath, with: .color(color), lineWidth: 1.0)
+            case .typeOnPath:
+                // Type-on-a-Path icon from assets/icons/type on a path.svg
+                // (viewBox 0 0 256 256), scaled to 28x28.
+                let s: CGFloat = 28.0 / 256.0
+                let transform = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: s, y: s)
+                // Caret/insertion-point glyph.
+                var caret = SwiftUI.Path()
+                caret.move(to: CGPoint(x: 146.65, y: 143.92))
+                caret.addCurve(to: CGPoint(x: 133.15, y: 143.77),
+                               control1: CGPoint(x: 146.90, y: 149.81),
+                               control2: CGPoint(x: 136.63, y: 147.47))
+                caret.addLine(to: CGPoint(x: 115.23, y: 124.75))
+                caret.addCurve(to: CGPoint(x: 116.23, y: 114.81),
+                               control1: CGPoint(x: 112.23, y: 121.57),
+                               control2: CGPoint(x: 114.91, y: 117.25))
+                caret.addCurve(to: CGPoint(x: 126.72, y: 115.88),
+                               control1: CGPoint(x: 117.93, y: 111.69),
+                               control2: CGPoint(x: 124.83, y: 117.32))
+                caret.addCurve(to: CGPoint(x: 170.36, y: 72.51),
+                               control1: CGPoint(x: 141.92, y: 103.01),
+                               control2: CGPoint(x: 156.13, y: 87.44))
+                caret.addCurve(to: CGPoint(x: 165.59, y: 63.83),
+                               control1: CGPoint(x: 173.34, y: 69.38),
+                               control2: CGPoint(x: 167.59, y: 65.27))
+                caret.addCurve(to: CGPoint(x: 146.36, y: 57.74),
+                               control1: CGPoint(x: 159.29, y: 59.29),
+                               control2: CGPoint(x: 144.76, y: 74.47))
+                caret.addCurve(to: CGPoint(x: 166.61, y: 44.99),
+                               control1: CGPoint(x: 146.98, y: 51.26),
+                               control2: CGPoint(x: 159.88, y: 39.14))
+                caret.addCurve(to: CGPoint(x: 217.12, y: 95.93),
+                               control1: CGPoint(x: 184.78, y: 60.79),
+                               control2: CGPoint(x: 201.40, y: 78.14))
+                caret.addCurve(to: CGPoint(x: 199.03, y: 115.42),
+                               control1: CGPoint(x: 219.01, y: 102.34),
+                               control2: CGPoint(x: 205.42, y: 115.82))
+                caret.addCurve(to: CGPoint(x: 197.33, y: 95.66),
+                               control1: CGPoint(x: 189.98, y: 114.86),
+                               control2: CGPoint(x: 201.34, y: 101.38))
+                caret.addCurve(to: CGPoint(x: 186.13, y: 91.11),
+                               control1: CGPoint(x: 195.60, y: 93.19),
+                               control2: CGPoint(x: 189.73, y: 87.53))
+                caret.addLine(to: CGPoint(x: 146.09, y: 130.89))
+                caret.addLine(to: CGPoint(x: 146.65, y: 143.92))
+                caret.closeSubpath()
+                context.fill(caret.applying(transform), with: .color(color))
+                // Underlying curve glyph.
+                var curve = SwiftUI.Path()
+                curve.move(to: CGPoint(x: 194.00, y: 177.67))
+                curve.addCurve(to: CGPoint(x: 182.32, y: 203.63),
+                               control1: CGPoint(x: 196.66, y: 188.47),
+                               control2: CGPoint(x: 189.71, y: 199.52))
+                curve.addCurve(to: CGPoint(x: 120.34, y: 168.89),
+                               control1: CGPoint(x: 158.52, y: 216.88),
+                               control2: CGPoint(x: 137.39, y: 188.98))
+                curve.addCurve(to: CGPoint(x: 72.65, y: 119.71),
+                               control1: CGPoint(x: 105.40, y: 151.28),
+                               control2: CGPoint(x: 88.87, y: 136.25))
+                curve.addCurve(to: CGPoint(x: 59.42, y: 116.74),
+                               control1: CGPoint(x: 68.96, y: 115.94),
+                               control2: CGPoint(x: 63.09, y: 114.70))
+                curve.addCurve(to: CGPoint(x: 45.63, y: 135.65),
+                               control1: CGPoint(x: 47.24, y: 123.50),
+                               control2: CGPoint(x: 54.88, y: 134.76))
+                curve.addCurve(to: CGPoint(x: 51.73, y: 106.74),
+                               control1: CGPoint(x: 27.42, y: 135.43),
+                               control2: CGPoint(x: 43.44, y: 109.53))
+                curve.addCurve(to: CGPoint(x: 79.04, y: 108.46),
+                               control1: CGPoint(x: 59.80, y: 102.36),
+                               control2: CGPoint(x: 72.46, y: 102.18))
+                curve.addCurve(to: CGPoint(x: 120.81, y: 150.92),
+                               control1: CGPoint(x: 93.71, y: 122.48),
+                               control2: CGPoint(x: 107.83, y: 135.56))
+                curve.addCurve(to: CGPoint(x: 161.34, y: 192.68),
+                               control1: CGPoint(x: 133.49, y: 165.91),
+                               control2: CGPoint(x: 147.03, y: 179.29))
+                curve.addCurve(to: CGPoint(x: 175.80, y: 192.54),
+                               control1: CGPoint(x: 165.16, y: 196.26),
+                               control2: CGPoint(x: 172.01, y: 194.09))
+                curve.addCurve(to: CGPoint(x: 181.52, y: 178.11),
+                               control1: CGPoint(x: 180.32, y: 190.70),
+                               control2: CGPoint(x: 180.63, y: 184.50))
+                curve.addCurve(to: CGPoint(x: 194.00, y: 177.67),
+                               control1: CGPoint(x: 181.97, y: 174.91),
+                               control2: CGPoint(x: 193.13, y: 174.16))
+                curve.closeSubpath()
+                context.fill(curve.applying(transform), with: .color(color))
 
             case .line:
                 // Line icon from SVG (viewBox 0 0 256 256), scaled to 28x28
@@ -719,7 +793,7 @@ private struct ArrowSlotButton: View {
         case .pathEraser: return "Path Eraser"
         case .smooth: return "Smooth"
         case .typeTool: return "Type"
-        case .textPath: return "Text on Path"
+        case .typeOnPath: return "Type on a Path"
         case .rect: return "Rectangle"
         case .roundedRect: return "Rounded Rectangle"
         case .polygon: return "Polygon"

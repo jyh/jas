@@ -759,6 +759,7 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         | Toolbar.Pencil -> _self#make_pencil_cursor
         | Toolbar.Path_eraser -> _self#make_path_eraser_cursor
         | Toolbar.Type_tool -> _self#make_type_cursor
+        | Toolbar.Type_on_path -> _self#make_type_on_path_cursor
         | _ -> Gdk.Cursor.create `CROSSHAIR
       in
       let win = canvas_area#misc#window in
@@ -866,6 +867,29 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
           ~scale_y:(float_of_int sz /. float_of_int (GdkPixbuf.get_height orig))
           ~interp:`BILINEAR orig;
         Gdk.Cursor.create_from_pixbuf pixbuf ~x:8 ~y:8
+      with Not_found -> Gdk.Cursor.create `XTERM
+
+    method private make_type_on_path_cursor =
+      let candidates = [
+        "assets/icons/type on a path cursor.png";
+        "../assets/icons/type on a path cursor.png";
+        Filename.concat (Filename.concat
+          (Filename.dirname Sys.executable_name) "..")
+          "assets/icons/type on a path cursor.png";
+      ] in
+      try
+        let path = List.find Sys.file_exists candidates in
+        let orig = GdkPixbuf.from_file path in
+        let sz = 16 in
+        let pixbuf = GdkPixbuf.create ~width:sz ~height:sz
+          ~bits:(GdkPixbuf.get_bits_per_sample orig)
+          ~has_alpha:(GdkPixbuf.get_has_alpha orig) () in
+        GdkPixbuf.scale ~dest:pixbuf ~width:sz ~height:sz
+          ~scale_x:(float_of_int sz /. float_of_int (GdkPixbuf.get_width orig))
+          ~scale_y:(float_of_int sz /. float_of_int (GdkPixbuf.get_height orig))
+          ~interp:`BILINEAR orig;
+        (* Hot spot near the I-beam center; 16x16 logical pixels. *)
+        Gdk.Cursor.create_from_pixbuf pixbuf ~x:8 ~y:6
       with Not_found -> Gdk.Cursor.create `XTERM
 
     method private make_arrow_cursor fr fg fb sr sg sb with_plus =
