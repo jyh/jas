@@ -1,4 +1,4 @@
-//! Text tool for placing and editing text elements.
+//! Type tool for placing and editing text elements.
 //!
 //! - Click to place point text
 //! - Drag to create area text (with width/height bounding box)
@@ -23,13 +23,27 @@ enum State {
     },
 }
 
-pub struct TextTool {
+pub struct TypeTool {
     state: State,
 }
 
-impl TextTool {
+impl TypeTool {
     pub fn new() -> Self {
         Self { state: State::Idle }
+    }
+
+    #[cfg(test)]
+    fn is_idle(&self) -> bool {
+        matches!(self.state, State::Idle)
+    }
+
+    #[cfg(test)]
+    fn drag_extent(&self) -> Option<(f64, f64, f64, f64)> {
+        if let State::Dragging { start_x, start_y, cur_x, cur_y } = self.state {
+            Some((start_x, start_y, cur_x, cur_y))
+        } else {
+            None
+        }
     }
 }
 
@@ -62,7 +76,7 @@ fn prompt_text(default: &str) -> Option<String> {
     }
 }
 
-impl CanvasTool for TextTool {
+impl CanvasTool for TypeTool {
     fn on_press(&mut self, model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool) {
         model.snapshot();
         self.state = State::Dragging {
@@ -157,6 +171,85 @@ impl CanvasTool for TextTool {
                 .ok();
             ctx.stroke_rect(rx, ry, rw, rh);
             ctx.set_line_dash(&js_sys::Array::new().into()).ok();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::model::Model;
+
+    #[test]
+    fn new_tool_is_idle() {
+        let tool = TypeTool::new();
+        assert!(tool.is_idle());
+    }
+
+    #[test]
+    fn press_transitions_to_dragging() {
+        let mut tool = TypeTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 12.0, 34.0, false, false);
+        assert!(!tool.is_idle());
+        assert_eq!(tool.drag_extent(), Some((12.0, 34.0, 12.0, 34.0)));
+    }
+
+    #[test]
+    fn move_after_press_updates_cursor() {
+        let mut tool = TypeTool::new();
+        let mut model = Model::default();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_move(&mut model, 50.0, 60.0, false, false, true);
+        assert_eq!(tool.drag_extent(), Some((10.0, 20.0, 50.0, 60.0)));
+    }
+
+    #[test]
+    fn move_without_press_is_noop() {
+        let mut tool = TypeTool::new();
+        let mut model = Model::default();
+        tool.on_move(&mut model, 50.0, 60.0, false, false, true);
+        assert!(tool.is_idle());
+        assert_eq!(tool.drag_extent(), None);
+    }
+
+    #[test]
+    fn press_takes_snapshot() {
+        let mut tool = TypeTool::new();
+        let mut model = Model::default();
+        let initial_can_undo = model.can_undo();
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        assert!(model.can_undo() && !initial_can_undo,
+            "press should record an undo snapshot");
+    }
+
+    #[test]
+    fn default_text_elem_uses_supplied_geometry() {
+        let elem = default_text_elem(10.0, 20.0, 100.0, 50.0, "hello");
+        if let Element::Text(t) = elem {
+            assert_eq!(t.x, 10.0);
+            assert_eq!(t.y, 20.0);
+            assert_eq!(t.width, 100.0);
+            assert_eq!(t.height, 50.0);
+            assert_eq!(t.content, "hello");
+            assert_eq!(t.font_family, "sans-serif");
+            assert_eq!(t.font_size, 16.0);
+            assert!(t.fill.is_some());
+            assert!(t.stroke.is_none());
+        } else {
+            panic!("expected Text element");
+        }
+    }
+
+    #[test]
+    fn default_text_elem_supports_point_text() {
+        // Point text uses width=0, height=0
+        let elem = default_text_elem(5.0, 5.0, 0.0, 0.0, "x");
+        if let Element::Text(t) = elem {
+            assert_eq!(t.width, 0.0);
+            assert_eq!(t.height, 0.0);
+        } else {
+            panic!("expected Text element");
         }
     }
 }

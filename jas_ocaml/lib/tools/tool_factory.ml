@@ -16,5 +16,5 @@ let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
   | Toolbar.Pencil -> (new Pencil_tool.pencil_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Path_eraser -> (new Path_eraser_tool.path_eraser_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Smooth -> (new Smooth_tool.smooth_tool :> Canvas_tool.canvas_tool)
-  | Toolbar.Text_tool -> (new Text_tool.text_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Type_tool -> (new Type_tool.type_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Text_path -> (new Text_path_tool.text_path_tool :> Canvas_tool.canvas_tool)

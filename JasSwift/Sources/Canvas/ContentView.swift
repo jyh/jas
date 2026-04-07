@@ -14,7 +14,7 @@ public enum Tool: String, CaseIterable {
     case pencil
     case pathEraser
     case smooth
-    case text
+    case typeTool
     case textPath
     case line
     case rect
@@ -237,7 +237,7 @@ struct ToolbarPanel: View {
     @State private var arrowSlotTool: Tool = .directSelection
     @State private var penSlotTool: Tool = .pen
     @State private var pencilSlotTool: Tool = .pencil
-    @State private var textSlotTool: Tool = .text
+    @State private var textSlotTool: Tool = .typeTool
     @State private var shapeSlotTool: Tool = .rect
 
     private let toolbarWidth: CGFloat = 80
@@ -279,7 +279,7 @@ struct ToolbarPanel: View {
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $textSlotTool,
-                        alternates: [.text, .textPath]
+                        alternates: [.typeTool, .textPath]
                     )
                     ToolbarView.toolButton(currentTool: $currentTool, tool: .line)
                 }

@@ -509,12 +509,49 @@ public struct ToolbarView {
                 sPath.closeSubpath()
                 context.fill(sPath.applying(transform), with: .color(color))
 
-            case .text:
-                context.draw(
-                    SwiftUI.Text("T").font(.system(size: 18, weight: .bold))
-                        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.8, alpha: 1.0))),
-                    at: CGPoint(x: size.width / 2, y: size.height / 2)
-                )
+            case .typeTool:
+                // Type icon from assets/icons/type.svg (viewBox 0 0 256 256), scaled to 28x28
+                let s: CGFloat = 28.0 / 256.0
+                let transform = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: s, y: s)
+                var path = SwiftUI.Path()
+                path.move(to: CGPoint(x: 156.78, y: 197.66))
+                path.addLine(to: CGPoint(x: 100.75, y: 197.48))
+                path.addCurve(to: CGPoint(x: 100.77, y: 178.84),
+                              control1: CGPoint(x: 96.82, y: 194.40),
+                              control2: CGPoint(x: 96.71, y: 181.39))
+                path.addCurve(to: CGPoint(x: 117.52, y: 175.37),
+                              control1: CGPoint(x: 104.79, y: 176.31),
+                              control2: CGPoint(x: 116.01, y: 180.43))
+                path.addLine(to: CGPoint(x: 117.81, y: 79.15))
+                path.addCurve(to: CGPoint(x: 79.61, y: 78.96),
+                              control1: CGPoint(x: 104.22, y: 77.42),
+                              control2: CGPoint(x: 92.22, y: 77.65))
+                path.addLine(to: CGPoint(x: 77.77, y: 97.29))
+                path.addCurve(to: CGPoint(x: 59.23, y: 97.22),
+                              control1: CGPoint(x: 71.41, y: 98.59),
+                              control2: CGPoint(x: 65.94, y: 98.55))
+                path.addCurve(to: CGPoint(x: 59.38, y: 58.35),
+                              control1: CGPoint(x: 58.49, y: 84.22),
+                              control2: CGPoint(x: 58.18, y: 72.18))
+                path.addLine(to: CGPoint(x: 196.62, y: 58.35))
+                path.addCurve(to: CGPoint(x: 196.75, y: 97.25),
+                              control1: CGPoint(x: 197.80, y: 72.10),
+                              control2: CGPoint(x: 197.59, y: 84.19))
+                path.addCurve(to: CGPoint(x: 178.21, y: 97.25),
+                              control1: CGPoint(x: 190.10, y: 98.62),
+                              control2: CGPoint(x: 184.66, y: 98.52))
+                path.addLine(to: CGPoint(x: 176.38, y: 78.97))
+                path.addCurve(to: CGPoint(x: 138.23, y: 79.15),
+                              control1: CGPoint(x: 163.73, y: 77.71),
+                              control2: CGPoint(x: 151.71, y: 77.51))
+                path.addLine(to: CGPoint(x: 138.23, y: 176.88))
+                path.addLine(to: CGPoint(x: 156.82, y: 178.76))
+                path.addCurve(to: CGPoint(x: 156.78, y: 197.67),
+                              control1: CGPoint(x: 158.02, y: 184.54),
+                              control2: CGPoint(x: 158.40, y: 189.25))
+                path.closeSubpath()
+                let transformed = path.applying(transform)
+                context.fill(transformed, with: .color(color))
 
             case .textPath:
                 // "T" with a wavy path
@@ -681,7 +718,7 @@ private struct ArrowSlotButton: View {
         case .pencil: return "Pencil"
         case .pathEraser: return "Path Eraser"
         case .smooth: return "Smooth"
-        case .text: return "Text"
+        case .typeTool: return "Type"
         case .textPath: return "Text on Path"
         case .rect: return "Rectangle"
         case .roundedRect: return "Rounded Rectangle"

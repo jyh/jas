@@ -1,4 +1,4 @@
-"""Text tool for placing and editing text elements."""
+"""Type tool for placing and editing text elements."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
 
 
-class TextTool(CanvasTool):
+class TypeTool(CanvasTool):
     def __init__(self):
         self._drag_start: tuple[float, float] | None = None
         self._drag_end: tuple[float, float] | None = None

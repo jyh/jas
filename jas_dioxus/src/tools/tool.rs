@@ -29,7 +29,7 @@ pub enum ToolKind {
     Pencil,
     PathEraser,
     Smooth,
-    Text,
+    Type,
     TextOnPath,
     Line,
     Rect,
@@ -51,7 +51,7 @@ impl ToolKind {
             ToolKind::Pencil => "Pencil (N)",
             ToolKind::PathEraser => "Path Eraser (Shift+E)",
             ToolKind::Smooth => "Smooth",
-            ToolKind::Text => "Text (T)",
+            ToolKind::Type => "Type (T)",
             ToolKind::TextOnPath => "Text on Path",
             ToolKind::Line => "Line (L)",
             ToolKind::Rect => "Rectangle (M)",
@@ -90,6 +90,9 @@ impl ToolKind {
                 "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 256 256'%3E%3Cpath d='M169.86,33.13L243.34,1.82c3.43-1.46,6.39-2.97,9.92-.52,2.21,1.54,3.34,4.88,2.41,8.76l-19.31,80.53-108.02,125.71-27.98,31.2c-9.63,10.74-24.91,11.34-35.56,1.63l-28-25.52c-9.09-8.28-9.54-23.48-1.42-32.95l40.64-47.45,93.83-110.08Z' fill='black'/%3E%3Cpath d='M184.63,65.93c4.88.46,9.96.27,13.5,2.32,2.91,1.68,5.44,10.2,3.01,13.03l-84.89,99c-6.97-3.72-11.86-9.07-15.89-15.76l84.27-98.59Z' fill='%235f5f5b'/%3E%3Cpath d='M44.69,212.9c-7.74-11.08,8.68-22.32,17.05-32.78l45.05,40.93-15.82,18.47c-8.77,10.24-21.21-2.39-26.77-7.31-6.96-6.17-14.12-11.58-19.52-19.31Z' fill='%235f5f5b'/%3E%3Cpath d='M207.17,85.96c4.81-.22,8.54.77,12.85,3.59l-65.13,76.29-23.35,27c-3.91-1.36-6.44-4.06-8.62-7.89l84.25-98.98Z' fill='%235f5f5b'/%3E%3Cpath d='M124.64,106.13l50.36-58.45c2.8,3.96,5.01,9.06,3.33,12.12-5.2,9.48-12.82,16.62-19.83,24.82l-62.56,73.21c-1.99,2.33-5.01,1.06-6.38.14-1.59-1.07-5.25-3.97-3.15-6.5,10.19-12.26,20.7-23.56,30.54-35.78l7.69-9.56Z' fill='%235f5f5b'/%3E%3Cpath d='M183.88,41.54c8.08-4.67,16.32-7.31,24.34-10.36,12.84-4.88,5.89-4.25,24.42,10.2,2.91.33-5.31,35.45-6.97,35.87-3.37,3.03-13.57,1.84-14.92-2.22l-4.99-15-16.7-3.81c-4.53-1.03-4.11-9.11-5.17-14.68Z' fill='white'/%3E%3Crect x='88.74' y='155.97' width='14.58' height='61.84' transform='translate(299.56 239.09) rotate(131.58)' fill='white'/%3E%3C/svg%3E\") 1 23, crosshair"
             }
             ToolKind::Smooth => "crosshair",
+            ToolKind::Type => {
+                "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 256 256'%3E%3Cpath d='M177.43,198.77c-19.17,2.05-18.23-10.69-25.79-13.06-14.07.97-17.57,23.76-40.47,9.57-8.04-18.45,10.13-.12,27.33-16.72,5.39-5.63,8.79-14.52,4.25-23.05-5.62-2.92-13.78-3.46-10.58-13.03l11.87-2.02.17-73.52c-20.19-23.25-20-9.66-32.95-14.5-8.46-12.81,19.52-19.77,30.97-3.62,1.79,2.53,4.94,4.59,7.6,4.66s5.67-2.1,7.43-4.8c9.19-14.13,30-7.43,30.15-7.01,1.03,2.96.87,5.74.79,8.48-2.27,8.17-27.84-4.84-30.64,18.44,0,0-.29,72.04-.29,72.04,12.66.4,12.18,11.68,2.44,15.03-5.96,4.42-2.79,17.68,1.19,22.73,13.95,17.7,30.47-3.87,27.16,17.25-.71,4.56-6.29,2.67-10.62,3.13Z' fill='%23222'/%3E%3Cpath d='M63.75,59.55c7.7,7.89-28.2,6.2-30.62,7.79C23.46,73.65-.01,103.79,0,90.77L.09,2.01c0-4.91,7.97.46,10.09,2.64l53.58,54.91Z' fill='%23222'/%3E%3C/svg%3E\") 12 12, text"
+            }
             _ => "crosshair",
         }
     }
@@ -100,7 +103,7 @@ impl ToolKind {
             ToolKind::DirectSelection => Some("a"),
             ToolKind::Pen => Some("p"),
             ToolKind::Pencil => Some("n"),
-            ToolKind::Text => Some("t"),
+            ToolKind::Type => Some("t"),
             ToolKind::Line => Some("l"),
             ToolKind::Rect => Some("m"),
             ToolKind::AddAnchorPoint => Some("="),
@@ -144,7 +147,7 @@ mod tests {
             ToolKind::Pencil,
             ToolKind::PathEraser,
             ToolKind::Smooth,
-            ToolKind::Text,
+            ToolKind::Type,
             ToolKind::TextOnPath,
             ToolKind::Line,
             ToolKind::Rect,
@@ -159,7 +162,7 @@ mod tests {
     fn tool_kind_equality() {
         assert_eq!(ToolKind::Selection, ToolKind::Selection);
         assert_ne!(ToolKind::Selection, ToolKind::DirectSelection);
-        assert_ne!(ToolKind::Text, ToolKind::TextOnPath);
+        assert_ne!(ToolKind::Type, ToolKind::TextOnPath);
         assert_ne!(ToolKind::Rect, ToolKind::Polygon);
     }
 
@@ -184,7 +187,7 @@ mod tests {
             ToolKind::Selection, ToolKind::DirectSelection, ToolKind::GroupSelection,
             ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint,
             ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::PathEraser,
-            ToolKind::Smooth, ToolKind::Text, ToolKind::TextOnPath, ToolKind::Line,
+            ToolKind::Smooth, ToolKind::Type, ToolKind::TextOnPath, ToolKind::Line,
             ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
         ];
         for t in &all {
@@ -199,7 +202,7 @@ mod tests {
             ToolKind::Selection, ToolKind::DirectSelection, ToolKind::GroupSelection,
             ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint,
             ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::PathEraser,
-            ToolKind::Smooth, ToolKind::Text, ToolKind::TextOnPath, ToolKind::Line,
+            ToolKind::Smooth, ToolKind::Type, ToolKind::TextOnPath, ToolKind::Line,
             ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
         ];
         for t in &all {
@@ -211,9 +214,39 @@ mod tests {
     fn labels_contain_tool_name() {
         assert!(ToolKind::Selection.label().contains("Selection"));
         assert!(ToolKind::Pen.label().contains("Pen"));
-        assert!(ToolKind::Text.label().contains("Text"));
+        assert!(ToolKind::Type.label().contains("Type"));
         assert!(ToolKind::Line.label().contains("Line"));
         assert!(ToolKind::Rect.label().contains("Rect"));
+    }
+
+    #[test]
+    fn type_label_is_type() {
+        // Renamed from "Text" to "Type"; ensure the user-facing label
+        // no longer leaks the old name.
+        assert_eq!(ToolKind::Type.label(), "Type (T)");
+        assert!(!ToolKind::Type.label().contains("Text"));
+    }
+
+    #[test]
+    fn type_cursor_uses_text_fallback() {
+        // The Type tool's CSS cursor should fall back to the system
+        // 'text' (I-beam) cursor rather than 'crosshair'.
+        let css = ToolKind::Type.cursor_css();
+        assert!(css.ends_with(", text"), "cursor css = {}", css);
+    }
+
+    #[test]
+    fn type_cursor_embeds_svg_data_url() {
+        let css = ToolKind::Type.cursor_css();
+        assert!(css.contains("data:image/svg+xml"));
+        assert!(css.contains("svg"));
+    }
+
+    #[test]
+    fn type_cursor_hot_spot_is_center() {
+        // Hot spot is "12 12" for a 24x24 cursor (center).
+        let css = ToolKind::Type.cursor_css();
+        assert!(css.contains("\") 12 12,"), "cursor css = {}", css);
     }
 
     #[test]
@@ -222,7 +255,7 @@ mod tests {
         assert_eq!(ToolKind::DirectSelection.shortcut(), Some("a"));
         assert_eq!(ToolKind::Pen.shortcut(), Some("p"));
         assert_eq!(ToolKind::Pencil.shortcut(), Some("n"));
-        assert_eq!(ToolKind::Text.shortcut(), Some("t"));
+        assert_eq!(ToolKind::Type.shortcut(), Some("t"));
         assert_eq!(ToolKind::Line.shortcut(), Some("l"));
         assert_eq!(ToolKind::Rect.shortcut(), Some("m"));
     }
@@ -280,7 +313,7 @@ mod tests {
 
     #[test]
     fn text_slot_alternates() {
-        let alternates = [ToolKind::Text, ToolKind::TextOnPath];
+        let alternates = [ToolKind::Type, ToolKind::TextOnPath];
         assert_eq!(alternates.len(), 2);
     }
 
@@ -310,7 +343,7 @@ mod tests {
             (0, 1, &[ToolKind::DirectSelection, ToolKind::GroupSelection]),
             (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint, ToolKind::AnchorPoint]),
             (1, 1, &[ToolKind::Pencil, ToolKind::PathEraser, ToolKind::Smooth]),
-            (2, 0, &[ToolKind::Text, ToolKind::TextOnPath]),
+            (2, 0, &[ToolKind::Type, ToolKind::TextOnPath]),
             (2, 1, &[ToolKind::Line]),
             (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star]),
         ];

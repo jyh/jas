@@ -789,4 +789,50 @@ let () =
        assert (abs_float y < 0.01)
      | _ -> assert false));
 
+  (* ---- Type tool ---- *)
+
+  run_test "type tool: drag creates area text" (fun () ->
+    let tool = new Jas.Type_tool.type_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+    tool#on_move ctx 60.0 70.0 ~shift:false ~dragging:true;
+    tool#on_release ctx 110.0 80.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    match children.(0) with
+    | Text { x; y; text_width; text_height; _ } ->
+      assert (abs_float (x -. 10.0) < 0.01);
+      assert (abs_float (y -. 20.0) < 0.01);
+      assert (text_width > 0.0);
+      assert (text_height > 0.0)
+    | _ -> assert false);
+
+  run_test "type tool: click creates point text" (fun () ->
+    let tool = new Jas.Type_tool.type_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 50.0 60.0 ~shift:false ~alt:false;
+    tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1);
+    match children.(0) with
+    | Text { x; y; _ } ->
+      assert (abs_float (x -. 50.0) < 0.01);
+      assert (abs_float (y -. 60.0) < 0.01)
+    | _ -> assert false);
+
+  run_test "type tool: tiny drag treated as click" (fun () ->
+    let tool = new Jas.Type_tool.type_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_press ctx 5.0 5.0 ~shift:false ~alt:false;
+    tool#on_release ctx 6.0 6.0 ~shift:false ~alt:false;
+    let children = layer_children model in
+    assert (Array.length children = 1));
+
+  run_test "type tool: move without press is noop" (fun () ->
+    let tool = new Jas.Type_tool.type_tool in
+    let (ctx, model, _ctrl) = make_ctx () in
+    tool#on_move ctx 100.0 100.0 ~shift:false ~dragging:false;
+    let children = layer_children model in
+    assert (Array.length children = 0));
+
   Printf.printf "All tool interaction tests passed.\n"

@@ -73,7 +73,7 @@ let () =
     end else if key = GdkKeysyms._minus || key = GdkKeysyms._underscore then begin
       toolbar#select_tool Jas.Toolbar.Delete_anchor_point; true
     end else if key = GdkKeysyms._t || key = GdkKeysyms._T then begin
-      toolbar#select_tool Jas.Toolbar.Text_tool; true
+      toolbar#select_tool Jas.Toolbar.Type_tool; true
     end else if key = GdkKeysyms._backslash then begin
       toolbar#select_tool Jas.Toolbar.Line; true
     end else if key = GdkKeysyms._m || key = GdkKeysyms._M then begin

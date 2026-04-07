@@ -4,7 +4,7 @@
     - Selection_tool: selection, group selection, direct selection
     - Drawing_tool: line, rect, polygon
     - Pen_tool: pen (Bezier path creation)
-    - Text_tool: text placement and editing *)
+    - Type_tool: text placement and editing *)
 
 (* ------------------------------------------------------------------ *)
 (* Tool context                                                        *)

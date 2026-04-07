@@ -204,6 +204,76 @@ class StarToolTest(absltest.TestCase):
         self.assertEqual(STAR_POINTS, 5)
 
 
+class TypeToolTest(absltest.TestCase):
+    def test_drag_creates_area_text(self):
+        """Drag larger than DRAG_THRESHOLD creates an area Text element."""
+        from tools.type_tool import TypeTool
+        from geometry.element import Text
+        tool = TypeTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 10, 20)
+        tool.on_release(ctx, 110, 70)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 1)
+        elem = children[0]
+        self.assertIsInstance(elem, Text)
+        self.assertEqual(elem.x, 10)
+        self.assertEqual(elem.y, 20)
+        self.assertEqual(elem.width, 100)
+        self.assertEqual(elem.height, 50)
+        self.assertEqual(elem.content, "Lorem Ipsum")
+
+    def test_click_creates_point_text(self):
+        """Click without drag (and without text under cursor) creates point text."""
+        from tools.type_tool import TypeTool
+        from geometry.element import Text
+        tool = TypeTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_press(ctx, 30, 40)
+        tool.on_release(ctx, 30, 40)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 1)
+        elem = children[0]
+        self.assertIsInstance(elem, Text)
+        self.assertEqual(elem.x, 30)
+        self.assertEqual(elem.y, 40)
+
+    def test_click_on_existing_text_starts_edit(self):
+        """Click on existing text triggers start_text_edit instead of new text."""
+        from tools.type_tool import TypeTool
+        from geometry.element import Text
+        edit_calls = []
+        ctx, model, ctrl = _make_ctx()
+        existing = Text(x=0, y=0, content="hello",
+                        fill=Fill(Color(0, 0, 0)))
+        ctx.hit_test_text = lambda x, y: ((0, 0), existing)
+        ctx.start_text_edit = lambda path, elem: edit_calls.append((path, elem))
+        tool = TypeTool()
+        tool.on_press(ctx, 5, 5)
+        tool.on_release(ctx, 5, 5)
+        self.assertEqual(len(edit_calls), 1)
+        # No new element added
+        self.assertEqual(len(_layer_children(model)), 0)
+
+    def test_idle_after_release(self):
+        """Tool returns to idle state after release."""
+        from tools.type_tool import TypeTool
+        tool = TypeTool()
+        ctx, model, ctrl = _make_ctx()
+        self.assertIsNone(tool._drag_start)
+        tool.on_press(ctx, 10, 20)
+        self.assertIsNotNone(tool._drag_start)
+        tool.on_release(ctx, 50, 60)
+        self.assertIsNone(tool._drag_start)
+
+    def test_move_without_press_is_noop(self):
+        from tools.type_tool import TypeTool
+        tool = TypeTool()
+        ctx, model, ctrl = _make_ctx()
+        tool.on_move(ctx, 50, 60, dragging=True)
+        self.assertIsNone(tool._drag_start)
+
+
 class SelectionToolTest(absltest.TestCase):
     def test_marquee_select(self):
         """Drag marquee over an element => element is selected."""

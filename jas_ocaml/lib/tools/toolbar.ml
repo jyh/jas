@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Pencil | Path_eraser | Smooth | Text_tool | Text_path | Line | Rect | Rounded_rect | Polygon | Star
+type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Pencil | Path_eraser | Smooth | Type_tool | Text_path | Line | Rect | Rounded_rect | Polygon | Star
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -49,7 +49,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
     val mutable arrow_slot_tool = Direct_selection
     val mutable pen_slot_tool = Pen
     val mutable pencil_slot_tool = Pencil
-    val mutable text_slot_tool = Text_tool
+    val mutable text_slot_tool = Type_tool
     val mutable shape_slot_tool = Rect
     val mutable dragging = false
     val mutable drag_offset_x = 0.0
@@ -74,7 +74,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
          pen_slot_tool <- t
        | Pencil | Path_eraser | Smooth ->
          pencil_slot_tool <- t
-       | Text_tool | Text_path ->
+       | Type_tool | Text_path ->
          text_slot_tool <- t
        | Rect | Rounded_rect | Polygon | Star ->
          shape_slot_tool <- t
@@ -321,16 +321,37 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.fill cr
       in
 
-      let draw_text_icon cr ~alloc =
+      let draw_type_icon cr ~alloc =
+        (* Type icon from assets/icons/type.svg (viewBox 0 0 256 256), scaled to 28x28 *)
         let bw = float_of_int alloc.Gtk.width in
         let bh = float_of_int alloc.Gtk.height in
         let ox = (bw -. 28.0) /. 2.0 in
         let oy = (bh -. 28.0) /. 2.0 in
+        let s = 28.0 /. 256.0 in
+        Cairo.save cr;
+        Cairo.translate cr ox oy;
+        Cairo.scale cr s s;
         Cairo.set_source_rgb cr 0.8 0.8 0.8;
-        Cairo.select_font_face cr "Sans" ~weight:Cairo.Bold;
-        Cairo.set_font_size cr 20.0;
-        Cairo.move_to cr (ox +. 7.0) (oy +. 22.0);
-        Cairo.show_text cr "T"
+        Cairo.move_to cr 156.78 197.66;
+        Cairo.line_to cr 100.75 197.48;
+        Cairo.curve_to cr 96.82 194.4 96.71 181.39 100.77 178.84;
+        Cairo.curve_to cr 104.79 176.31 116.01 180.43 117.52 175.37;
+        Cairo.line_to cr 117.81 79.15;
+        Cairo.curve_to cr 104.22 77.42 92.22 77.65 79.61 78.96;
+        Cairo.line_to cr 77.77 97.29;
+        Cairo.curve_to cr 71.41 98.59 65.94 98.55 59.23 97.22;
+        Cairo.curve_to cr 58.49 84.22 58.18 72.18 59.38 58.35;
+        Cairo.line_to cr 196.62 58.35;
+        Cairo.curve_to cr 197.80 72.10 197.59 84.19 196.75 97.25;
+        Cairo.curve_to cr 190.10 98.62 184.66 98.52 178.21 97.25;
+        Cairo.line_to cr 176.38 78.97;
+        Cairo.curve_to cr 163.73 77.71 151.71 77.51 138.23 79.15;
+        Cairo.line_to cr 138.23 176.88;
+        Cairo.line_to cr 156.82 178.76;
+        Cairo.curve_to cr 158.02 184.54 158.40 189.25 156.78 197.67;
+        Cairo.Path.close cr;
+        Cairo.fill cr;
+        Cairo.restore cr
       in
 
       let draw_text_path_icon cr ~alloc =
@@ -843,7 +864,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
           Cairo.fill cr
         end;
         (match text_slot_tool with
-         | Text_tool -> draw_text_icon cr ~alloc
+         | Type_tool -> draw_type_icon cr ~alloc
          | Text_path -> draw_text_path_icon cr ~alloc
          | _ -> ());
         (* Alternate triangle *)
@@ -1115,7 +1136,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
           self#redraw_all
         ) |> ignore
       in
-      add_item "Text" Text_tool;
+      add_item "Type" Type_tool;
       add_item "Text on Path" Text_path;
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
 

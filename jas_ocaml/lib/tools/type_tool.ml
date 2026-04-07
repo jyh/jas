@@ -1,6 +1,6 @@
-(** Text tool for placing and editing text elements. *)
+(** Type tool for placing and editing text elements. *)
 
-class text_tool = object (_self)
+class type_tool = object (_self)
   val mutable drag_start : (float * float) option = None
   val mutable drag_end : (float * float) option = None
 

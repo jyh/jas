@@ -704,6 +704,8 @@ class CanvasNSView: NSView {
             return makePencilCursor()
         case .pathEraser:
             return makePathEraserCursor()
+        case .typeTool:
+            return makeTypeCursor()
         default:
             return NSCursor.crosshair
         }
@@ -862,6 +864,31 @@ class CanvasNSView: NSView {
             }
         }
         return NSCursor.crosshair
+    }
+
+    private func makeTypeCursor() -> NSCursor {
+        let bundle = Bundle.main
+        let cwd = FileManager.default.currentDirectoryPath
+        let candidates = [
+            (cwd as NSString).appendingPathComponent("assets/icons/type cursor.png"),
+            (cwd as NSString).appendingPathComponent("../assets/icons/type cursor.png"),
+            bundle.resourcePath.map { ($0 as NSString).appendingPathComponent("assets/icons/type cursor.png") },
+            bundle.path(forResource: "type cursor", ofType: "png"),
+        ].compactMap { $0 }
+        for path in candidates {
+            if let orig = NSImage(contentsOfFile: path) {
+                let pixelSize = NSSize(width: 32, height: 32)
+                let image = NSImage(size: pixelSize)
+                image.lockFocus()
+                orig.draw(in: NSRect(origin: .zero, size: pixelSize),
+                          from: NSRect(origin: .zero, size: orig.size),
+                          operation: .sourceOver, fraction: 1.0)
+                image.unlockFocus()
+                image.size = NSSize(width: 16, height: 16)
+                return NSCursor(image: image, hotSpot: NSPoint(x: 8, y: 8))
+            }
+        }
+        return NSCursor.iBeam
     }
 
     private func makeDeleteAnchorPointCursor() -> NSCursor {
@@ -1159,7 +1186,7 @@ class CanvasNSView: NSView {
                 case "v": onToolChange?(.selection)
                 case "a": onToolChange?(.directSelection)
                 case "p": onToolChange?(.pen)
-                case "t": onToolChange?(.text)
+                case "t": onToolChange?(.typeTool)
                 case "\\": onToolChange?(.line)
                 case "m": onToolChange?(.rect)
                 case "=", "+": onToolChange?(.addAnchorPoint)

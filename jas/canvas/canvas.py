@@ -135,6 +135,18 @@ def _make_path_eraser_cursor() -> QCursor:
     return QCursor(pixmap, 1, 31)
 
 
+def _make_type_cursor() -> QCursor:
+    """Create the Type tool cursor from assets/icons/type cursor.png."""
+    import os
+    png_path = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons", "type cursor.png")
+    pixmap = QPixmap(png_path)
+    if pixmap.isNull():
+        return QCursor(Qt.CursorShape.IBeamCursor)
+    pixmap = pixmap.scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    pixmap.setDevicePixelRatio(2.0)
+    return QCursor(pixmap, 16, 16)
+
+
 @dataclass(frozen=True)
 class BoundingBox:
     """Axis-aligned bounding box in px."""
@@ -675,6 +687,8 @@ class CanvasWidget(QWidget):
             return _make_pencil_cursor()
         elif tool == Tool.PATH_ERASER:
             return _make_path_eraser_cursor()
+        elif tool == Tool.TYPE:
+            return _make_type_cursor()
         else:
             return QCursor(Qt.CursorShape.CrossCursor)
 
