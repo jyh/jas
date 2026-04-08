@@ -1,0 +1,751 @@
+//! Shape recognition: classify a freehand path as the nearest geometric
+//! primitive (line, triangle, rectangle, rounded rectangle, circle,
+//! ellipse, filled-arrow outline, or lemniscate).
+//!
+//! The recognizer is a pure function on `&[(f64, f64)]`. It does not
+//! depend on `Element`, `Model`, or any UI state — `recognize_path` and
+//! `recognized_to_element` are thin adapters for callers that work with
+//! the document model.
+//!
+//! Design constraints:
+//!   - Output shapes are axis-aligned. Rotated inputs return `None`.
+//!   - Strict: if no candidate fits within tolerance, return `None`.
+//!   - Accepts both raw pencil polylines and Bezier paths (via flatten).
+
+use crate::geometry::element::{flatten_path_commands, PathCommand};
+
+pub type Pt = (f64, f64);
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RecognizedShape {
+    Line {
+        a: Pt,
+        b: Pt,
+    },
+    Triangle {
+        pts: [Pt; 3],
+    },
+    /// Square is emitted as `Rectangle { w == h }` — no separate variant.
+    Rectangle {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    },
+    RoundRect {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        r: f64,
+    },
+    Circle {
+        cx: f64,
+        cy: f64,
+        r: f64,
+    },
+    Ellipse {
+        cx: f64,
+        cy: f64,
+        rx: f64,
+        ry: f64,
+    },
+    /// Outline of a filled arrow with axis-aligned shaft.
+    Arrow {
+        tail: Pt,
+        tip: Pt,
+        head_len: f64,
+        head_half_width: f64,
+        shaft_half_width: f64,
+    },
+    /// Bernoulli's lemniscate, axis-aligned.
+    Lemniscate {
+        center: Pt,
+        a: f64,
+        horizontal: bool,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct RecognizeConfig {
+    /// Max mean fit residual (as fraction of bbox diagonal).
+    pub tolerance: f64,
+    /// Endpoint gap below this fraction of arc length → treat as closed.
+    pub close_gap_frac: f64,
+    /// Min turning angle (deg) at a single sample to count as a corner.
+    pub corner_angle_deg: f64,
+    /// `|w-h| / max(w,h)` below this → emit as a square (`w == h`).
+    pub square_aspect_eps: f64,
+    /// `min(rx,ry) / max(rx,ry)` above this → emit as a circle.
+    pub circle_eccentricity_eps: f64,
+    /// Number of samples to resample to before analysis.
+    pub resample_n: usize,
+}
+
+impl Default for RecognizeConfig {
+    fn default() -> Self {
+        Self {
+            tolerance: 0.06,
+            close_gap_frac: 0.10,
+            corner_angle_deg: 35.0,
+            square_aspect_eps: 0.10,
+            circle_eccentricity_eps: 0.92,
+            resample_n: 64,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Recognize from a raw polyline.
+pub fn recognize(_points: &[Pt], _cfg: &RecognizeConfig) -> Option<RecognizedShape> {
+    unimplemented!("recognize: detector not yet implemented")
+}
+
+/// Recognize from a path that may contain Beziers — flattens via
+/// [`flatten_path_commands`] then calls [`recognize`].
+pub fn recognize_path(d: &[PathCommand], cfg: &RecognizeConfig) -> Option<RecognizedShape> {
+    let pts = flatten_path_commands(d);
+    recognize(&pts, cfg)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::f64::consts::PI;
+
+    // -----------------------------------------------------------------------
+    // Deterministic PRNG (seeded LCG, returns f64 in [-1, 1])
+    // -----------------------------------------------------------------------
+
+    fn lcg(seed: &mut u64) -> f64 {
+        // Numerical Recipes constants
+        *seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+        let v = (*seed >> 11) as f64 / (1u64 << 53) as f64; // [0,1)
+        2.0 * v - 1.0
+    }
+
+    // -----------------------------------------------------------------------
+    // Synthetic generators
+    // -----------------------------------------------------------------------
+
+    fn sample_line(a: Pt, b: Pt, n: usize) -> Vec<Pt> {
+        assert!(n >= 2);
+        (0..n)
+            .map(|i| {
+                let t = i as f64 / (n - 1) as f64;
+                (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
+            })
+            .collect()
+    }
+
+    fn sample_triangle(a: Pt, b: Pt, c: Pt, n_per_side: usize) -> Vec<Pt> {
+        let mut pts = Vec::new();
+        for (p, q) in [(a, b), (b, c), (c, a)] {
+            // Skip the last point of each side to avoid duplicates at corners
+            // (the next side starts there).
+            let side = sample_line(p, q, n_per_side);
+            pts.extend_from_slice(&side[..side.len() - 1]);
+        }
+        // Close the loop by repeating the first vertex.
+        pts.push(a);
+        pts
+    }
+
+    fn sample_rect(x: f64, y: f64, w: f64, h: f64, n_per_side: usize) -> Vec<Pt> {
+        sample_triangle((x, y), (x + w, y), (x + w, y + h), n_per_side); // type-check helper unused
+        let p0 = (x, y);
+        let p1 = (x + w, y);
+        let p2 = (x + w, y + h);
+        let p3 = (x, y + h);
+        let mut pts = Vec::new();
+        for (p, q) in [(p0, p1), (p1, p2), (p2, p3), (p3, p0)] {
+            let side = sample_line(p, q, n_per_side);
+            pts.extend_from_slice(&side[..side.len() - 1]);
+        }
+        pts.push(p0);
+        pts
+    }
+
+    fn sample_round_rect(x: f64, y: f64, w: f64, h: f64, r: f64, n: usize) -> Vec<Pt> {
+        // Walk the perimeter: 4 straight sides + 4 quarter-arcs.
+        // n is approximate total point count.
+        assert!(r * 2.0 < w && r * 2.0 < h);
+        let arc_n = (n / 16).max(4);
+        let side_n = (n / 8).max(4);
+        let mut pts = Vec::new();
+
+        // Helper: append an arc from start_angle to end_angle (radians) on
+        // circle centered at (cx, cy) radius r, k samples (excluding final).
+        let mut arc = |pts: &mut Vec<Pt>, cx: f64, cy: f64, a0: f64, a1: f64, k: usize| {
+            for i in 0..k {
+                let t = i as f64 / k as f64;
+                let a = a0 + (a1 - a0) * t;
+                pts.push((cx + r * a.cos(), cy + r * a.sin()));
+            }
+        };
+        // Helper: straight side from (x0,y0) to (x1,y1), k samples (excluding final).
+        let line = |pts: &mut Vec<Pt>, x0: f64, y0: f64, x1: f64, y1: f64, k: usize| {
+            for i in 0..k {
+                let t = i as f64 / k as f64;
+                pts.push((x0 + (x1 - x0) * t, y0 + (y1 - y0) * t));
+            }
+        };
+
+        // Start at top-left straight edge start (after top-left corner).
+        // Top side: from (x+r, y) to (x+w-r, y)
+        line(&mut pts, x + r, y, x + w - r, y, side_n);
+        // Top-right corner: arc from -PI/2 to 0, center (x+w-r, y+r)
+        arc(&mut pts, x + w - r, y + r, -PI / 2.0, 0.0, arc_n);
+        // Right side: (x+w, y+r) to (x+w, y+h-r)
+        line(&mut pts, x + w, y + r, x + w, y + h - r, side_n);
+        // Bottom-right corner: arc from 0 to PI/2, center (x+w-r, y+h-r)
+        arc(&mut pts, x + w - r, y + h - r, 0.0, PI / 2.0, arc_n);
+        // Bottom side: (x+w-r, y+h) to (x+r, y+h)
+        line(&mut pts, x + w - r, y + h, x + r, y + h, side_n);
+        // Bottom-left corner: arc from PI/2 to PI, center (x+r, y+h-r)
+        arc(&mut pts, x + r, y + h - r, PI / 2.0, PI, arc_n);
+        // Left side: (x, y+h-r) to (x, y+r)
+        line(&mut pts, x, y + h - r, x, y + r, side_n);
+        // Top-left corner: arc from PI to 3PI/2, center (x+r, y+r)
+        arc(&mut pts, x + r, y + r, PI, 3.0 * PI / 2.0, arc_n);
+        // Close
+        pts.push((x + r, y));
+        pts
+    }
+
+    fn sample_circle(cx: f64, cy: f64, r: f64, n: usize) -> Vec<Pt> {
+        (0..=n)
+            .map(|i| {
+                let a = 2.0 * PI * i as f64 / n as f64;
+                (cx + r * a.cos(), cy + r * a.sin())
+            })
+            .collect()
+    }
+
+    fn sample_ellipse(cx: f64, cy: f64, rx: f64, ry: f64, n: usize) -> Vec<Pt> {
+        (0..=n)
+            .map(|i| {
+                let a = 2.0 * PI * i as f64 / n as f64;
+                (cx + rx * a.cos(), cy + ry * a.sin())
+            })
+            .collect()
+    }
+
+    /// Outline of a filled arrow with axis-aligned shaft pointing from
+    /// `tail` to `tip`. Produces the classic 7-corner silhouette:
+    /// shaft-bottom-left, shaft-bottom-right, head-bottom, tip,
+    /// head-top, shaft-top-right, shaft-top-left, back to start.
+    fn sample_arrow_outline(
+        tail: Pt,
+        tip: Pt,
+        head_len: f64,
+        head_half_w: f64,
+        shaft_half_w: f64,
+    ) -> Vec<Pt> {
+        // Only horizontal or vertical shafts supported in the generator.
+        let dx = tip.0 - tail.0;
+        let dy = tip.1 - tail.1;
+        assert!(dx.abs() < 1e-9 || dy.abs() < 1e-9, "shaft must be axis-aligned");
+
+        let corners: [Pt; 7] = if dy.abs() < 1e-9 {
+            // Horizontal arrow
+            let dir = dx.signum();
+            let shaft_end_x = tip.0 - dir * head_len;
+            [
+                (tail.0, tail.1 - shaft_half_w),
+                (shaft_end_x, tail.1 - shaft_half_w),
+                (shaft_end_x, tail.1 - head_half_w),
+                (tip.0, tip.1),
+                (shaft_end_x, tail.1 + head_half_w),
+                (shaft_end_x, tail.1 + shaft_half_w),
+                (tail.0, tail.1 + shaft_half_w),
+            ]
+        } else {
+            // Vertical arrow
+            let dir = dy.signum();
+            let shaft_end_y = tip.1 - dir * head_len;
+            [
+                (tail.0 - shaft_half_w, tail.1),
+                (tail.0 - shaft_half_w, shaft_end_y),
+                (tail.0 - head_half_w, shaft_end_y),
+                (tip.0, tip.1),
+                (tail.0 + head_half_w, shaft_end_y),
+                (tail.0 + shaft_half_w, shaft_end_y),
+                (tail.0 + shaft_half_w, tail.1),
+            ]
+        };
+
+        // Walk the corners with ~10 points per edge.
+        let mut pts = Vec::new();
+        for i in 0..corners.len() {
+            let p = corners[i];
+            let q = corners[(i + 1) % corners.len()];
+            let side = sample_line(p, q, 10);
+            pts.extend_from_slice(&side[..side.len() - 1]);
+        }
+        pts.push(corners[0]);
+        pts
+    }
+
+    /// Bernoulli's lemniscate sampled in polar form: r² = a² · cos(2θ)
+    /// (horizontal) or sin(2θ) variant (vertical).
+    fn sample_lemniscate(cx: f64, cy: f64, a: f64, horizontal: bool, n: usize) -> Vec<Pt> {
+        // Parametrize via t ∈ [0, 2π) using:
+        //   x = a · cos(t) / (1 + sin²(t))
+        //   y = a · sin(t) · cos(t) / (1 + sin²(t))
+        // (Gerono lemniscate parametrization — produces the classic figure-8.)
+        let mut pts = Vec::with_capacity(n + 1);
+        for i in 0..=n {
+            let t = 2.0 * PI * i as f64 / n as f64;
+            let s = t.sin();
+            let c = t.cos();
+            let denom = 1.0 + s * s;
+            let lx = a * c / denom;
+            let ly = a * s * c / denom;
+            if horizontal {
+                pts.push((cx + lx, cy + ly));
+            } else {
+                pts.push((cx + ly, cy + lx));
+            }
+        }
+        pts
+    }
+
+    fn jitter(pts: &[Pt], seed: u64, amplitude: f64) -> Vec<Pt> {
+        let mut s = seed;
+        pts.iter()
+            .map(|&(x, y)| (x + amplitude * lcg(&mut s), y + amplitude * lcg(&mut s)))
+            .collect()
+    }
+
+    /// Drop the last `frac` fraction of points to leave an open gap.
+    fn open_gap(pts: &[Pt], frac: f64) -> Vec<Pt> {
+        let n = pts.len();
+        let keep = ((n as f64) * (1.0 - frac)) as usize;
+        pts[..keep.max(2)].to_vec()
+    }
+
+    fn bbox_diag(pts: &[Pt]) -> f64 {
+        let mut xmin = f64::INFINITY;
+        let mut xmax = f64::NEG_INFINITY;
+        let mut ymin = f64::INFINITY;
+        let mut ymax = f64::NEG_INFINITY;
+        for &(x, y) in pts {
+            if x < xmin { xmin = x; }
+            if x > xmax { xmax = x; }
+            if y < ymin { ymin = y; }
+            if y > ymax { ymax = y; }
+        }
+        ((xmax - xmin).powi(2) + (ymax - ymin).powi(2)).sqrt()
+    }
+
+    fn rotate_pts(pts: &[Pt], cx: f64, cy: f64, theta: f64) -> Vec<Pt> {
+        let (s, c) = theta.sin_cos();
+        pts.iter()
+            .map(|&(x, y)| {
+                let dx = x - cx;
+                let dy = y - cy;
+                (cx + dx * c - dy * s, cy + dx * s + dy * c)
+            })
+            .collect()
+    }
+
+    fn assert_close(a: f64, b: f64, tol: f64, name: &str) {
+        assert!(
+            (a - b).abs() <= tol,
+            "{name}: expected {b}, got {a}, tol {tol}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Sanity checks on the generators themselves
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn generator_circle_has_expected_radius() {
+        let pts = sample_circle(50.0, 50.0, 30.0, 64);
+        for &(x, y) in &pts {
+            let r = ((x - 50.0).powi(2) + (y - 50.0).powi(2)).sqrt();
+            assert!((r - 30.0).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn generator_round_rect_runs_without_panic() {
+        let pts = sample_round_rect(0.0, 0.0, 100.0, 60.0, 10.0, 200);
+        assert!(pts.len() > 50);
+    }
+
+    #[test]
+    fn generator_lemniscate_passes_through_origin_offset() {
+        // The Gerono parametrization at t=0 gives (a, 0) relative to center.
+        let pts = sample_lemniscate(100.0, 100.0, 40.0, true, 64);
+        let p0 = pts[0];
+        assert!((p0.0 - 140.0).abs() < 1e-9);
+        assert!((p0.1 - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn jitter_is_deterministic() {
+        let pts = sample_circle(0.0, 0.0, 10.0, 32);
+        let a = jitter(&pts, 42, 0.5);
+        let b = jitter(&pts, 42, 0.5);
+        assert_eq!(a, b);
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 2: positive ID, clean inputs
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn recognize_clean_line() {
+        let pts = sample_line((10.0, 20.0), (110.0, 20.0), 32);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Line { a, b }) => {
+                let diag = bbox_diag(&pts);
+                let tol = 0.02 * diag;
+                assert_close(a.0.min(b.0), 10.0, tol, "x_min");
+                assert_close(a.0.max(b.0), 110.0, tol, "x_max");
+                assert_close(a.1, 20.0, tol, "y");
+                assert_close(b.1, 20.0, tol, "y");
+            }
+            other => panic!("expected Line, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognize_clean_triangle() {
+        let pts = sample_triangle((0.0, 0.0), (100.0, 0.0), (50.0, 86.6), 20);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Triangle { .. }) => {}
+            other => panic!("expected Triangle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognize_clean_rectangle() {
+        let pts = sample_rect(10.0, 20.0, 100.0, 60.0, 16);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Rectangle { x, y, w, h }) => {
+                let tol = 0.02 * bbox_diag(&pts);
+                assert_close(x, 10.0, tol, "x");
+                assert_close(y, 20.0, tol, "y");
+                assert_close(w, 100.0, tol, "w");
+                assert_close(h, 60.0, tol, "h");
+            }
+            other => panic!("expected Rectangle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognize_clean_square_emits_rectangle_with_equal_sides() {
+        let pts = sample_rect(0.0, 0.0, 80.0, 80.0, 16);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Rectangle { w, h, .. }) => {
+                assert!((w - h).abs() < 1e-6, "square should have w == h, got {w} vs {h}");
+            }
+            other => panic!("expected Rectangle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognize_clean_round_rect() {
+        let pts = sample_round_rect(0.0, 0.0, 120.0, 80.0, 15.0, 256);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::RoundRect { x, y, w, h, r }) => {
+                let tol = 0.04 * bbox_diag(&pts);
+                assert_close(x, 0.0, tol, "x");
+                assert_close(y, 0.0, tol, "y");
+                assert_close(w, 120.0, tol, "w");
+                assert_close(h, 80.0, tol, "h");
+                assert_close(r, 15.0, tol, "r");
+            }
+            other => panic!("expected RoundRect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognize_clean_circle() {
+        let pts = sample_circle(50.0, 50.0, 30.0, 64);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Circle { cx, cy, r }) => {
+                let tol = 0.02 * bbox_diag(&pts);
+                assert_close(cx, 50.0, tol, "cx");
+                assert_close(cy, 50.0, tol, "cy");
+                assert_close(r, 30.0, tol, "r");
+            }
+            other => panic!("expected Circle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognize_clean_ellipse() {
+        let pts = sample_ellipse(50.0, 50.0, 60.0, 30.0, 64);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Ellipse { cx, cy, rx, ry }) => {
+                let tol = 0.02 * bbox_diag(&pts);
+                assert_close(cx, 50.0, tol, "cx");
+                assert_close(cy, 50.0, tol, "cy");
+                assert_close(rx, 60.0, tol, "rx");
+                assert_close(ry, 30.0, tol, "ry");
+            }
+            other => panic!("expected Ellipse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognize_clean_arrow_outline() {
+        let pts = sample_arrow_outline((0.0, 50.0), (100.0, 50.0), 25.0, 20.0, 8.0);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Arrow { tail, tip, head_len, head_half_width, shaft_half_width }) => {
+                let tol = 0.05 * bbox_diag(&pts);
+                assert_close(tail.0, 0.0, tol, "tail.x");
+                assert_close(tip.0, 100.0, tol, "tip.x");
+                assert_close(head_len, 25.0, tol, "head_len");
+                assert_close(head_half_width, 20.0, tol, "head_hw");
+                assert_close(shaft_half_width, 8.0, tol, "shaft_hw");
+            }
+            other => panic!("expected Arrow, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognize_clean_lemniscate_horizontal() {
+        let pts = sample_lemniscate(100.0, 100.0, 50.0, true, 128);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Lemniscate { center, a, horizontal }) => {
+                let tol = 0.05 * bbox_diag(&pts);
+                assert_close(center.0, 100.0, tol, "cx");
+                assert_close(center.1, 100.0, tol, "cy");
+                assert_close(a, 50.0, tol, "a");
+                assert!(horizontal);
+            }
+            other => panic!("expected Lemniscate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognize_clean_lemniscate_vertical() {
+        let pts = sample_lemniscate(0.0, 0.0, 30.0, false, 128);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Lemniscate { horizontal, .. }) => {
+                assert!(!horizontal);
+            }
+            other => panic!("expected Lemniscate, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 3: noisy positive ID
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn recognize_noisy_circle() {
+        let clean = sample_circle(50.0, 50.0, 30.0, 64);
+        let amp = 0.03 * bbox_diag(&clean);
+        let pts = jitter(&clean, 1, amp);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Circle { cx, cy, r }) => {
+                let tol = 0.05 * bbox_diag(&clean);
+                assert_close(cx, 50.0, tol, "cx");
+                assert_close(cy, 50.0, tol, "cy");
+                assert_close(r, 30.0, tol, "r");
+            }
+            other => panic!("expected Circle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognize_noisy_rectangle() {
+        let clean = sample_rect(0.0, 0.0, 100.0, 60.0, 16);
+        let pts = jitter(&clean, 2, 0.03 * bbox_diag(&clean));
+        let cfg = RecognizeConfig::default();
+        assert!(matches!(recognize(&pts, &cfg), Some(RecognizedShape::Rectangle { .. })));
+    }
+
+    #[test]
+    fn recognize_noisy_ellipse() {
+        let clean = sample_ellipse(0.0, 0.0, 60.0, 30.0, 64);
+        let pts = jitter(&clean, 3, 0.03 * bbox_diag(&clean));
+        let cfg = RecognizeConfig::default();
+        assert!(matches!(recognize(&pts, &cfg), Some(RecognizedShape::Ellipse { .. })));
+    }
+
+    #[test]
+    fn recognize_noisy_triangle() {
+        let clean = sample_triangle((0.0, 0.0), (100.0, 0.0), (50.0, 86.6), 20);
+        let pts = jitter(&clean, 4, 0.03 * bbox_diag(&clean));
+        let cfg = RecognizeConfig::default();
+        assert!(matches!(recognize(&pts, &cfg), Some(RecognizedShape::Triangle { .. })));
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 4: closed/open dispatch
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn nearly_closed_polyline_treated_as_closed() {
+        let clean = sample_rect(0.0, 0.0, 100.0, 60.0, 16);
+        let pts = open_gap(&clean, 0.05);
+        let cfg = RecognizeConfig::default();
+        assert!(matches!(recognize(&pts, &cfg), Some(RecognizedShape::Rectangle { .. })));
+    }
+
+    #[test]
+    fn clearly_open_polyline_not_rectangle() {
+        let clean = sample_rect(0.0, 0.0, 100.0, 60.0, 16);
+        let pts = open_gap(&clean, 0.25);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Rectangle { .. }) => {
+                panic!("clearly open path should not classify as Rectangle");
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn recognize_path_via_bezier_input() {
+        // A square traced as Beziers — flatten + recognize should still find it.
+        let d = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 100.0 },
+            PathCommand::LineTo { x: 0.0, y: 100.0 },
+            PathCommand::ClosePath,
+        ];
+        let cfg = RecognizeConfig::default();
+        assert!(matches!(recognize_path(&d, &cfg), Some(RecognizedShape::Rectangle { .. })));
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 5: disambiguation edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn square_with_aspect_1_04_is_square() {
+        // w/h = 1.04 → within square_aspect_eps (0.10) → emit equal sides.
+        let pts = sample_rect(0.0, 0.0, 104.0, 100.0, 16);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Rectangle { w, h, .. }) => {
+                assert!((w - h).abs() < 1e-6, "near-square should snap to w == h, got {w} vs {h}");
+            }
+            other => panic!("expected Rectangle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rect_with_aspect_1_15_is_not_square() {
+        let pts = sample_rect(0.0, 0.0, 115.0, 100.0, 16);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Rectangle { w, h, .. }) => {
+                assert!((w - h).abs() > 1.0, "1.15 aspect should NOT snap to square");
+            }
+            other => panic!("expected Rectangle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nearly_circular_ellipse_is_circle() {
+        // rx/ry = 30/29.5 → ratio 0.983 > 0.92 → Circle.
+        let pts = sample_ellipse(0.0, 0.0, 30.0, 29.5, 64);
+        let cfg = RecognizeConfig::default();
+        assert!(matches!(recognize(&pts, &cfg), Some(RecognizedShape::Circle { .. })));
+    }
+
+    #[test]
+    fn clearly_elliptical_is_ellipse() {
+        // rx/ry = 30/15 → ratio 0.5 < 0.92 → Ellipse.
+        let pts = sample_ellipse(0.0, 0.0, 30.0, 15.0, 64);
+        let cfg = RecognizeConfig::default();
+        assert!(matches!(recognize(&pts, &cfg), Some(RecognizedShape::Ellipse { .. })));
+    }
+
+    #[test]
+    fn tiny_corner_radius_is_plain_rect() {
+        let pts = sample_round_rect(0.0, 0.0, 100.0, 60.0, 1.0, 256);
+        let cfg = RecognizeConfig::default();
+        assert!(matches!(recognize(&pts, &cfg), Some(RecognizedShape::Rectangle { .. })));
+    }
+
+    #[test]
+    fn flat_triangle_is_line() {
+        // A "triangle" with one vertex barely off the baseline → essentially a line.
+        let pts = sample_triangle((0.0, 0.0), (100.0, 0.0), (50.0, 0.5), 20);
+        let cfg = RecognizeConfig::default();
+        assert!(matches!(recognize(&pts, &cfg), Some(RecognizedShape::Line { .. })));
+    }
+
+    #[test]
+    fn random_scribble_returns_none() {
+        // 64 random points in a 100x100 box — nothing should fit.
+        let mut s = 99u64;
+        let pts: Vec<Pt> = (0..64)
+            .map(|_| (50.0 + 50.0 * lcg(&mut s), 50.0 + 50.0 * lcg(&mut s)))
+            .collect();
+        let cfg = RecognizeConfig::default();
+        assert!(recognize(&pts, &cfg).is_none());
+    }
+
+    #[test]
+    fn nearly_straight_arrow_outline_still_recognized() {
+        // Long thin arrow — the head still has to win over Line/Rectangle.
+        let pts = sample_arrow_outline((0.0, 50.0), (200.0, 50.0), 20.0, 15.0, 4.0);
+        let cfg = RecognizeConfig::default();
+        assert!(matches!(recognize(&pts, &cfg), Some(RecognizedShape::Arrow { .. })));
+    }
+
+    #[test]
+    fn tilted_square_returns_none() {
+        // Rotated 30° → no axis-aligned fit → None (per the no-rotation rule).
+        let clean = sample_rect(-50.0, -50.0, 100.0, 100.0, 16);
+        let pts = rotate_pts(&clean, 0.0, 0.0, 30f64.to_radians());
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            None => {}
+            Some(RecognizedShape::Rectangle { .. }) => {
+                // Acceptable IF the bounding box happens to look like a rectangle
+                // and the residual stays within tolerance — but typically not.
+                // We pin "None" here as the locked behavior.
+                panic!("tilted square should NOT classify as axis-aligned Rectangle");
+            }
+            other => panic!("expected None, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lemniscate_off_center_crossing_returns_none() {
+        // Take a clean lemniscate and translate one lobe to break symmetry.
+        let pts = sample_lemniscate(0.0, 0.0, 50.0, true, 128);
+        let skewed: Vec<Pt> = pts
+            .iter()
+            .map(|&(x, y)| if x > 0.0 { (x + 30.0, y) } else { (x, y) })
+            .collect();
+        let cfg = RecognizeConfig::default();
+        assert!(recognize(&skewed, &cfg).is_none());
+    }
+}

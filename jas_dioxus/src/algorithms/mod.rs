@@ -4,4 +4,5 @@ pub mod hit_test;
 pub mod boolean_normalize;
 pub mod planar;
 pub mod path_text_layout;
+pub mod shape_recognize;
 pub mod text_layout;
