@@ -802,6 +802,116 @@ def move_path_handle(elem: Path, anchor_idx: int, handle_type: str,
     return replace(elem, d=tuple(new_cmds))
 
 
+def move_path_handle_independent(elem: Path, anchor_idx: int, handle_type: str,
+                                 dx: float, dy: float) -> Path:
+    """Move a single handle without reflecting the opposite handle (cusp)."""
+    from dataclasses import replace
+    d = elem.d
+    cmd_indices: list[int] = []
+    for ci, cmd in enumerate(d):
+        if not isinstance(cmd, ClosePath):
+            cmd_indices.append(ci)
+    if anchor_idx < 0 or anchor_idx >= len(cmd_indices):
+        return elem
+    ci = cmd_indices[anchor_idx]
+    new_cmds = list(d)
+    if handle_type == 'in':
+        cmd = d[ci]
+        if isinstance(cmd, CurveTo):
+            new_cmds[ci] = CurveTo(cmd.x1, cmd.y1,
+                                   cmd.x2 + dx, cmd.y2 + dy, cmd.x, cmd.y)
+    elif handle_type == 'out':
+        if ci + 1 < len(d) and isinstance(d[ci + 1], CurveTo):
+            nc = d[ci + 1]
+            new_cmds[ci + 1] = CurveTo(nc.x1 + dx, nc.y1 + dy,
+                                       nc.x2, nc.y2, nc.x, nc.y)
+    return replace(elem, d=tuple(new_cmds))
+
+
+def is_smooth_point(d: tuple[PathCommand, ...], anchor_idx: int) -> bool:
+    """True if a path anchor has at least one non-degenerate handle."""
+    h_in, h_out = path_handle_positions(d, anchor_idx)
+    return h_in is not None or h_out is not None
+
+
+def convert_corner_to_smooth(elem: Path, anchor_idx: int,
+                             hx: float, hy: float) -> Path:
+    """Convert a corner anchor to a smooth one. The outgoing handle is
+    placed at (hx, hy) and the incoming handle is reflected through the
+    anchor."""
+    from dataclasses import replace
+    d = elem.d
+    cmd_indices: list[int] = []
+    for ci, cmd in enumerate(d):
+        if not isinstance(cmd, ClosePath):
+            cmd_indices.append(ci)
+    if anchor_idx < 0 or anchor_idx >= len(cmd_indices):
+        return elem
+    ci = cmd_indices[anchor_idx]
+    cmd = d[ci]
+    match cmd:
+        case MoveTo(x, y) | LineTo(x, y):
+            ax, ay = x, y
+        case CurveTo(_, _, _, _, x, y):
+            ax, ay = x, y
+        case _:
+            return elem
+    rhx = 2.0 * ax - hx
+    rhy = 2.0 * ay - hy
+    new_cmds = list(d)
+    # Set incoming handle (x2, y2) on this command.
+    if isinstance(cmd, LineTo):
+        # Need x1, y1 from the previous anchor.
+        px, py = cmd.x, cmd.y
+        if ci > 0:
+            prev = d[ci - 1]
+            if isinstance(prev, (MoveTo, LineTo)):
+                px, py = prev.x, prev.y
+            elif isinstance(prev, CurveTo):
+                px, py = prev.x, prev.y
+        new_cmds[ci] = CurveTo(px, py, rhx, rhy, cmd.x, cmd.y)
+    elif isinstance(cmd, CurveTo):
+        new_cmds[ci] = CurveTo(cmd.x1, cmd.y1, rhx, rhy, cmd.x, cmd.y)
+    # MoveTo has no incoming handle to set.
+    # Set outgoing handle (x1, y1) on the next command.
+    if ci + 1 < len(d):
+        nc = d[ci + 1]
+        if isinstance(nc, LineTo):
+            new_cmds[ci + 1] = CurveTo(hx, hy, nc.x, nc.y, nc.x, nc.y)
+        elif isinstance(nc, CurveTo):
+            new_cmds[ci + 1] = CurveTo(hx, hy, nc.x2, nc.y2, nc.x, nc.y)
+    return replace(elem, d=tuple(new_cmds))
+
+
+def convert_smooth_to_corner(elem: Path, anchor_idx: int) -> Path:
+    """Convert a smooth anchor to a corner by collapsing both handles to
+    the anchor position."""
+    from dataclasses import replace
+    d = elem.d
+    cmd_indices: list[int] = []
+    for ci, cmd in enumerate(d):
+        if not isinstance(cmd, ClosePath):
+            cmd_indices.append(ci)
+    if anchor_idx < 0 or anchor_idx >= len(cmd_indices):
+        return elem
+    ci = cmd_indices[anchor_idx]
+    cmd = d[ci]
+    match cmd:
+        case MoveTo(x, y) | LineTo(x, y):
+            ax, ay = x, y
+        case CurveTo(_, _, _, _, x, y):
+            ax, ay = x, y
+        case _:
+            return elem
+    new_cmds = list(d)
+    if isinstance(cmd, CurveTo):
+        new_cmds[ci] = CurveTo(cmd.x1, cmd.y1, ax, ay, cmd.x, cmd.y)
+    if ci + 1 < len(d) and isinstance(d[ci + 1], CurveTo):
+        nc = d[ci + 1]
+        new_cmds[ci + 1] = CurveTo(ax, ay, nc.x2, nc.y2, nc.x, nc.y)
+    return replace(elem, d=tuple(new_cmds))
+
+
 def control_point_count(elem: Element) -> int:
     """Return the number of control points for an element."""
     if isinstance(elem, Line):
