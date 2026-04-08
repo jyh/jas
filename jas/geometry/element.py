@@ -27,6 +27,37 @@ class Color:
     a: float = 1.0
 
 
+class Visibility(Enum):
+    """Per-element visibility mode.
+
+    Ordered from minimum visibility (INVISIBLE) to maximum (PREVIEW)
+    by integer value, so ``min(a, b)`` picks the more restrictive of
+    two modes — the rule used to combine an element's own visibility
+    with the cap inherited from its parent Group or Layer.
+
+    - PREVIEW: the element is fully drawn.
+    - OUTLINE: drawn as a thin black outline (stroke 0, no fill).
+      Hit detection ignores fill and stroke width. Text is the single
+      exception and still renders as PREVIEW.
+    - INVISIBLE: not drawn and not hittable.
+
+    This state is runtime-only — it is not persisted to SVG.
+    """
+    INVISIBLE = 0
+    OUTLINE = 1
+    PREVIEW = 2
+
+    def __lt__(self, other: "Visibility") -> bool:
+        if not isinstance(other, Visibility):
+            return NotImplemented
+        return self.value < other.value
+
+    def __le__(self, other: "Visibility") -> bool:
+        if not isinstance(other, Visibility):
+            return NotImplemented
+        return self.value <= other.value
+
+
 class LineCap(Enum):
     """SVG stroke-linecap."""
     BUTT = "butt"
@@ -200,6 +231,7 @@ class Line(Element):
     opacity: float = 1.0
     transform: Transform | None = None
     locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
 
     def bounds(self) -> Tuple[float, float, float, float]:
         min_x = min(self.x1, self.x2)
@@ -223,6 +255,7 @@ class Rect(Element):
     opacity: float = 1.0
     transform: Transform | None = None
     locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
 
     def bounds(self) -> Tuple[float, float, float, float]:
         return _inflate_bounds((self.x, self.y, self.width, self.height), self.stroke)
@@ -239,6 +272,7 @@ class Circle(Element):
     opacity: float = 1.0
     transform: Transform | None = None
     locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
 
     def bounds(self) -> Tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -258,6 +292,7 @@ class Ellipse(Element):
     opacity: float = 1.0
     transform: Transform | None = None
     locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
 
     def bounds(self) -> Tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -274,6 +309,7 @@ class Polyline(Element):
     opacity: float = 1.0
     transform: Transform | None = None
     locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
 
     def bounds(self) -> Tuple[float, float, float, float]:
         if not self.points:
@@ -294,6 +330,7 @@ class Polygon(Element):
     opacity: float = 1.0
     transform: Transform | None = None
     locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
 
     def bounds(self) -> Tuple[float, float, float, float]:
         if not self.points:
@@ -314,6 +351,7 @@ class Path(Element):
     opacity: float = 1.0
     transform: Transform | None = None
     locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
 
     def bounds(self) -> Tuple[float, float, float, float]:
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
@@ -453,6 +491,7 @@ class Text(Element):
     opacity: float = 1.0
     transform: Transform | None = None
     locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
 
     @property
     def is_area_text(self) -> bool:
@@ -501,6 +540,7 @@ class TextPath(Element):
     opacity: float = 1.0
     transform: Transform | None = None
     locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
 
     def bounds(self) -> Tuple[float, float, float, float]:
         # Approximate from path bounds
@@ -514,6 +554,7 @@ class Group(Element):
     opacity: float = 1.0
     transform: Transform | None = None
     locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
 
     def bounds(self) -> Tuple[float, float, float, float]:
         if not self.children:

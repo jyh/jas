@@ -262,6 +262,32 @@ impl Document {
         Some(node)
     }
 
+    /// Return the effective visibility of the element at `path`,
+    /// computed as the minimum of the visibilities of every element
+    /// along the path from the root layer down to the target. A
+    /// Group or Layer's visibility caps the visibility of everything
+    /// it contains: if any ancestor is `Invisible`, the result is
+    /// `Invisible` even when the target itself is `Preview`.
+    pub fn effective_visibility(&self, path: &ElementPath) -> crate::geometry::element::Visibility {
+        use crate::geometry::element::Visibility;
+        if path.is_empty() {
+            return Visibility::Preview;
+        }
+        let mut node = match self.layers.get(path[0]) {
+            Some(n) => n,
+            None => return Visibility::Preview,
+        };
+        let mut effective = node.visibility();
+        for &idx in &path[1..] {
+            node = match node.children().and_then(|c| c.get(idx)) {
+                Some(n) => n,
+                None => return effective,
+            };
+            effective = std::cmp::min(effective, node.visibility());
+        }
+        effective
+    }
+
     /// Return a new Document with the element at path replaced.
     pub fn replace_element(&self, path: &ElementPath, new_elem: Element) -> Self {
         let mut doc = self.clone();

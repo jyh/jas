@@ -51,12 +51,23 @@ impl Controller {
         height: f64,
         extend: bool,
     ) {
+        use crate::geometry::element::Visibility;
         let doc = model.document().clone();
         let mut entries: Selection = Vec::new();
         for (li, layer) in doc.layers.iter().enumerate() {
+            let layer_vis = layer.visibility();
+            if layer_vis == Visibility::Invisible {
+                // Entire layer is hidden — nothing beneath it is
+                // selectable, regardless of individual visibilities.
+                continue;
+            }
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate() {
                     if child.locked() {
+                        continue;
+                    }
+                    let child_vis = std::cmp::min(layer_vis, child.visibility());
+                    if child_vis == Visibility::Invisible {
                         continue;
                     }
                     if child.is_group() {
@@ -103,12 +114,18 @@ impl Controller {
             entries: &mut Selection,
             path: &ElementPath,
             elem: &Element,
+            ancestor_vis: crate::geometry::element::Visibility,
             x: f64,
             y: f64,
             width: f64,
             height: f64,
         ) {
+            use crate::geometry::element::Visibility;
             if elem.locked() {
+                return;
+            }
+            let effective = std::cmp::min(ancestor_vis, elem.visibility());
+            if effective == Visibility::Invisible {
                 return;
             }
             if elem.is_group_or_layer() {
@@ -116,7 +133,7 @@ impl Controller {
                     for (i, child) in children.iter().enumerate() {
                         let mut child_path = path.clone();
                         child_path.push(i);
-                        check(entries, &child_path, child, x, y, width, height);
+                        check(entries, &child_path, child, effective, x, y, width, height);
                     }
                 }
                 return;
@@ -149,7 +166,16 @@ impl Controller {
         }
 
         for (li, layer) in doc.layers.iter().enumerate() {
-            check(&mut entries, &vec![li], layer, x, y, width, height);
+            check(
+                &mut entries,
+                &vec![li],
+                layer,
+                crate::geometry::element::Visibility::Preview,
+                x,
+                y,
+                width,
+                height,
+            );
         }
 
         let new_sel = if extend {
@@ -162,14 +188,22 @@ impl Controller {
         model.set_document(new_doc);
     }
 
-    /// Select all unlocked elements in the document.
+    /// Select all unlocked, visible elements in the document.
     pub fn select_all(model: &mut Model) {
+        use crate::geometry::element::Visibility;
         let doc = model.document().clone();
         let mut entries: Selection = Vec::new();
         for (li, layer) in doc.layers.iter().enumerate() {
+            let layer_vis = layer.visibility();
+            if layer_vis == Visibility::Invisible {
+                continue;
+            }
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate() {
                     if child.locked() {
+                        continue;
+                    }
+                    if std::cmp::min(layer_vis, child.visibility()) == Visibility::Invisible {
                         continue;
                     }
                     entries.push(ElementSelection::all(vec![li, ci]));
@@ -190,6 +224,7 @@ impl Controller {
 
     /// Select an element by path.
     pub fn select_element(model: &mut Model, path: &ElementPath) {
+        use crate::geometry::element::Visibility;
         if path.is_empty() {
             return;
         }
@@ -199,6 +234,9 @@ impl Controller {
             None => return,
         };
         if elem.locked() {
+            return;
+        }
+        if doc.effective_visibility(path) == Visibility::Invisible {
             return;
         }
         // Check if parent is a group (not layer) — select the whole group
@@ -476,6 +514,88 @@ impl Controller {
         new_doc.selection.clear();
         model.set_document(new_doc);
     }
+
+    /// Set every element in the current selection to
+    /// [`Visibility::Invisible`] and clear the selection. If an
+    /// element is a Group/Layer, the visibility is set on the
+    /// container itself (not its children) — a parent's `Invisible`
+    /// caps every descendant, so the effect reaches the whole
+    /// subtree without mutating every node.
+    pub fn hide_selection(model: &mut Model) {
+        use crate::geometry::element::Visibility;
+        let doc = model.document().clone();
+        if doc.selection.is_empty() {
+            return;
+        }
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = new_doc.get_element(&es.path).cloned() {
+                let mut hidden = elem.clone();
+                hidden.common_mut().visibility = Visibility::Invisible;
+                new_doc = new_doc.replace_element(&es.path, hidden);
+            }
+        }
+        new_doc.selection.clear();
+        model.set_document(new_doc);
+    }
+
+    /// Traverse the document, set every element whose own
+    /// visibility is [`Visibility::Invisible`] back to
+    /// [`Visibility::Preview`], and replace the current selection
+    /// with exactly the paths that were shown. Elements that are
+    /// effectively invisible only because an ancestor is invisible
+    /// are *not* individually modified — it is the ancestor whose
+    /// own flag is unset, and that cascades.
+    pub fn show_all(model: &mut Model) {
+        use crate::geometry::element::Visibility;
+        let doc = model.document().clone();
+        let mut shown_paths: Vec<ElementPath> = Vec::new();
+        let new_layers: Vec<Element> = doc
+            .layers
+            .iter()
+            .enumerate()
+            .map(|(li, layer)| show_all_in(layer, &vec![li], &mut shown_paths))
+            .collect();
+        let mut new_doc = doc;
+        new_doc.layers = new_layers;
+        new_doc.selection = shown_paths
+            .into_iter()
+            .map(ElementSelection::all)
+            .collect();
+        // Suppress the unused `Visibility` warning when compiled in
+        // configurations that optimise the helper away.
+        let _ = Visibility::Preview;
+        model.set_document(new_doc);
+    }
+}
+
+/// Recursively rewrite `elem` so that every node whose own
+/// visibility is `Invisible` becomes `Preview`, collecting the paths
+/// of rewritten nodes into `shown_paths`.
+fn show_all_in(
+    elem: &Element,
+    path: &ElementPath,
+    shown_paths: &mut Vec<ElementPath>,
+) -> Element {
+    use crate::geometry::element::Visibility;
+    let mut new = elem.clone();
+    if new.visibility() == Visibility::Invisible {
+        new.common_mut().visibility = Visibility::Preview;
+        shown_paths.push(path.clone());
+    }
+    if let Some(children) = new.children_mut() {
+        let rewritten: Vec<Rc<Element>> = children
+            .iter()
+            .enumerate()
+            .map(|(i, child)| {
+                let mut cp = path.clone();
+                cp.push(i);
+                Rc::new(show_all_in(child, &cp, shown_paths))
+            })
+            .collect();
+        *children = rewritten;
+    }
+    new
 }
 
 fn lock_element(elem: &Element) -> Element {
@@ -756,6 +876,133 @@ mod tests {
         Controller::copy_selection(&mut model, 10.0, 10.0);
         let new_count = model.document().layers[0].children().unwrap().len();
         assert_eq!(new_count, orig_count + 1);
+    }
+
+    // ---- Visibility: Hide / Show All ----
+
+    #[test]
+    fn visibility_order_preview_greater_than_outline_greater_than_invisible() {
+        use crate::geometry::element::Visibility;
+        assert!(Visibility::Preview > Visibility::Outline);
+        assert!(Visibility::Outline > Visibility::Invisible);
+        assert_eq!(
+            std::cmp::min(Visibility::Preview, Visibility::Outline),
+            Visibility::Outline
+        );
+        assert_eq!(
+            std::cmp::min(Visibility::Outline, Visibility::Invisible),
+            Visibility::Invisible
+        );
+    }
+
+    #[test]
+    fn hide_selection_sets_invisible_and_clears_selection() {
+        use crate::geometry::element::Visibility;
+        let mut model = setup_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        Controller::hide_selection(&mut model);
+        assert!(model.document().selection.is_empty());
+        let elem = model.document().get_element(&vec![0, 0]).unwrap();
+        assert_eq!(elem.visibility(), Visibility::Invisible);
+    }
+
+    #[test]
+    fn hidden_element_not_selectable_via_rect() {
+        let mut model = setup_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        Controller::hide_selection(&mut model);
+        // Marquee over where the rect is.
+        Controller::select_rect(&mut model, -1.0, -1.0, 12.0, 12.0, false);
+        let paths = sel_paths(&model);
+        assert!(!paths.contains(&vec![0, 0]),
+            "hidden rect must not be marquee-selectable, got {:?}", paths);
+    }
+
+    #[test]
+    fn hidden_element_not_selectable_via_select_element() {
+        let mut model = setup_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        Controller::hide_selection(&mut model);
+        // Try to select again by path.
+        Controller::select_element(&mut model, &vec![0, 0]);
+        assert!(model.document().selection.is_empty());
+    }
+
+    #[test]
+    fn hidden_element_not_included_in_select_all() {
+        let mut model = setup_model();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        Controller::hide_selection(&mut model);
+        Controller::select_all(&mut model);
+        let paths = sel_paths(&model);
+        assert!(!paths.contains(&vec![0, 0]));
+    }
+
+    #[test]
+    fn invisible_group_caps_children() {
+        use crate::geometry::element::Visibility;
+        // The setup_model builds a layer like
+        //   [Rect, Group(Line, Line), Line]
+        // Hide the group — its children should become
+        // effectively invisible even though their own flag is
+        // still `Preview`.
+        let mut model = setup_model();
+        Controller::select_element(&mut model, &vec![0, 1]);
+        Controller::hide_selection(&mut model);
+        let doc = model.document();
+        // Group itself is Invisible
+        assert_eq!(
+            doc.get_element(&vec![0, 1]).unwrap().visibility(),
+            Visibility::Invisible
+        );
+        // Children's own flag is unchanged
+        assert_eq!(
+            doc.get_element(&vec![0, 1, 0]).unwrap().visibility(),
+            Visibility::Preview
+        );
+        // But their effective visibility is Invisible
+        assert_eq!(doc.effective_visibility(&vec![0, 1, 0]), Visibility::Invisible);
+    }
+
+    #[test]
+    fn show_all_resets_invisible_and_selects_them() {
+        use crate::geometry::element::Visibility;
+        let mut model = setup_model();
+        // Hide two elements.
+        Controller::set_selection(
+            &mut model,
+            vec![
+                ElementSelection::all(vec![0, 0]),
+                ElementSelection::all(vec![0, 2]),
+            ],
+        );
+        Controller::hide_selection(&mut model);
+        // Now run Show All.
+        Controller::show_all(&mut model);
+        let doc = model.document();
+        // Both elements are back to Preview.
+        assert_eq!(
+            doc.get_element(&vec![0, 0]).unwrap().visibility(),
+            Visibility::Preview
+        );
+        assert_eq!(
+            doc.get_element(&vec![0, 2]).unwrap().visibility(),
+            Visibility::Preview
+        );
+        // The selection contains exactly the two newly shown paths.
+        let paths = sel_paths(&model);
+        assert!(paths.contains(&vec![0, 0]));
+        assert!(paths.contains(&vec![0, 2]));
+        assert_eq!(paths.len(), 2);
+    }
+
+    #[test]
+    fn show_all_ignores_elements_that_were_already_visible() {
+        let mut model = setup_model();
+        // Nothing is hidden — Show All should leave the selection
+        // empty and the document unchanged in terms of visibility.
+        Controller::show_all(&mut model);
+        assert!(model.document().selection.is_empty());
     }
 
     // ---- Partial(empty) is a legal retained state ----

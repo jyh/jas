@@ -292,6 +292,90 @@ private func makeMarqueeCtrl() -> Controller {
     }
 }
 
+// MARK: - Visibility / Hide / Show All
+
+@Test func visibilityOrderingInvisibleLessOutlineLessPreview() {
+    #expect(Visibility.invisible < Visibility.outline)
+    #expect(Visibility.outline < Visibility.preview)
+    #expect(min(Visibility.preview, Visibility.outline) == .outline)
+    #expect(min(Visibility.outline, Visibility.invisible) == .invisible)
+}
+
+@Test func hideSelectionSetsInvisibleAndClearsSelection() {
+    let r = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [r])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
+    ctrl.selectElement([0, 0])
+    ctrl.hideSelection()
+    #expect(ctrl.document.selection.isEmpty)
+    #expect(ctrl.document.getElement([0, 0]).visibility == .invisible)
+}
+
+@Test func hiddenElementNotSelectableViaRect() {
+    let r = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [r])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
+    ctrl.selectElement([0, 0])
+    ctrl.hideSelection()
+    ctrl.selectRect(x: -1, y: -1, width: 12, height: 12)
+    let paths = selPaths(ctrl.document.selection)
+    #expect(!paths.contains([0, 0]))
+}
+
+@Test func hiddenElementNotSelectableViaSelectElement() {
+    let r = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [r])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
+    ctrl.selectElement([0, 0])
+    ctrl.hideSelection()
+    ctrl.selectElement([0, 0])
+    #expect(ctrl.document.selection.isEmpty)
+}
+
+@Test func invisibleGroupCapsChildren() {
+    let r = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let g = Element.group(Group(children: [r]))
+    let layer = Layer(name: "L0", children: [g])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
+    ctrl.selectElement([0, 0])
+    ctrl.hideSelection()
+    let doc = ctrl.document
+    // Group itself is Invisible
+    #expect(doc.getElement([0, 0]).visibility == .invisible)
+    // Child's own flag is unchanged
+    #expect(doc.getElement([0, 0, 0]).visibility == .preview)
+    // But effective visibility of child is Invisible
+    #expect(doc.effectiveVisibility([0, 0, 0]) == .invisible)
+}
+
+@Test func showAllResetsAndSelectsNewlyShown() {
+    let r1 = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let r2 = Element.rect(Rect(x: 50, y: 50, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [r1, r2])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
+    ctrl.setSelection([
+        ElementSelection.all([0, 0]),
+        ElementSelection.all([0, 1]),
+    ])
+    ctrl.hideSelection()
+    ctrl.showAll()
+    let doc = ctrl.document
+    #expect(doc.getElement([0, 0]).visibility == .preview)
+    #expect(doc.getElement([0, 1]).visibility == .preview)
+    let paths = selPaths(doc.selection)
+    #expect(paths.contains([0, 0]))
+    #expect(paths.contains([0, 1]))
+    #expect(paths.count == 2)
+}
+
+@Test func showAllNothingHiddenLeavesEmptySelection() {
+    let r = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [r])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
+    ctrl.showAll()
+    #expect(ctrl.document.selection.isEmpty)
+}
+
 // MARK: - Group selection tests
 
 @Test func groupSelectRectNoGroupExpansion() {

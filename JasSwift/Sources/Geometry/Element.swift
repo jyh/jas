@@ -50,6 +50,31 @@ public struct Color: Equatable, Hashable {
 }
 
 /// SVG stroke-linecap.
+/// Per-element visibility mode.
+///
+/// Conforms to `Comparable` so that `min(a, b)` picks the more
+/// restrictive of two modes — the rule used to combine an element's
+/// own visibility with the cap inherited from its parent Group or
+/// Layer. The raw values establish the ordering
+/// `invisible < outline < preview`.
+///
+/// - `preview`: the element is fully drawn.
+/// - `outline`: drawn as a thin black outline (stroke 0, no fill).
+///   Hit detection ignores fill and stroke width. Text is the
+///   exception and still renders as `preview`.
+/// - `invisible`: not drawn and not hittable.
+///
+/// This state is runtime-only and is not persisted to SVG.
+public enum Visibility: Int, Equatable, Hashable, Comparable {
+    case invisible = 0
+    case outline = 1
+    case preview = 2
+
+    public static func < (lhs: Visibility, rhs: Visibility) -> Bool {
+        return lhs.rawValue < rhs.rawValue
+    }
+}
+
 public enum LineCap: Equatable, Hashable {
     case butt
     case round
@@ -432,28 +457,34 @@ public enum Element: Equatable {
         case .line(let v):
             return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
                               stroke: v.stroke, opacity: v.opacity, transform: v.transform,
-                              locked: locked))
+                              locked: locked, visibility: v.visibility))
         case .rect(let v):
             return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
                               rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: locked))
+                              opacity: v.opacity, transform: v.transform, locked: locked,
+                              visibility: v.visibility))
         case .circle(let v):
             return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
                                   fill: v.fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: locked))
+                                  opacity: v.opacity, transform: v.transform, locked: locked,
+                                  visibility: v.visibility))
         case .ellipse(let v):
             return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
                                     fill: v.fill, stroke: v.stroke,
-                                    opacity: v.opacity, transform: v.transform, locked: locked))
+                                    opacity: v.opacity, transform: v.transform, locked: locked,
+                                    visibility: v.visibility))
         case .polyline(let v):
             return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
-                                     opacity: v.opacity, transform: v.transform, locked: locked))
+                                     opacity: v.opacity, transform: v.transform, locked: locked,
+                                     visibility: v.visibility))
         case .polygon(let v):
             return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
-                                    opacity: v.opacity, transform: v.transform, locked: locked))
+                                    opacity: v.opacity, transform: v.transform, locked: locked,
+                                    visibility: v.visibility))
         case .path(let v):
             return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: locked))
+                              opacity: v.opacity, transform: v.transform, locked: locked,
+                              visibility: v.visibility))
         case .text(let v):
             return .text(Text(x: v.x, y: v.y, content: v.content,
                               fontFamily: v.fontFamily, fontSize: v.fontSize,
@@ -461,7 +492,8 @@ public enum Element: Equatable {
                               textDecoration: v.textDecoration,
                               width: v.width, height: v.height,
                               fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: locked))
+                              opacity: v.opacity, transform: v.transform, locked: locked,
+                              visibility: v.visibility))
         case .textPath(let v):
             return .textPath(TextPath(d: v.d, content: v.content,
                                       startOffset: v.startOffset,
@@ -469,13 +501,98 @@ public enum Element: Equatable {
                                       fontWeight: v.fontWeight, fontStyle: v.fontStyle,
                                       textDecoration: v.textDecoration,
                                       fill: v.fill, stroke: v.stroke,
-                                      opacity: v.opacity, transform: v.transform, locked: locked))
+                                      opacity: v.opacity, transform: v.transform, locked: locked,
+                                      visibility: v.visibility))
         case .group(let v):
             return .group(Group(children: v.children, opacity: v.opacity,
-                                transform: v.transform, locked: locked))
+                                transform: v.transform, locked: locked,
+                                visibility: v.visibility))
         case .layer(let v):
             return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
-                                transform: v.transform, locked: locked))
+                                transform: v.transform, locked: locked,
+                                visibility: v.visibility))
+        }
+    }
+
+    /// Visibility of this element (does not include any cap inherited
+    /// from a parent Group/Layer; use ``Document.effectiveVisibility``
+    /// for that).
+    public var visibility: Visibility {
+        switch self {
+        case .line(let v): return v.visibility
+        case .rect(let v): return v.visibility
+        case .circle(let v): return v.visibility
+        case .ellipse(let v): return v.visibility
+        case .polyline(let v): return v.visibility
+        case .polygon(let v): return v.visibility
+        case .path(let v): return v.visibility
+        case .text(let v): return v.visibility
+        case .textPath(let v): return v.visibility
+        case .group(let v): return v.visibility
+        case .layer(let v): return v.visibility
+        }
+    }
+
+    /// Return a copy of this element with its `visibility` replaced.
+    public func withVisibility(_ visibility: Visibility) -> Element {
+        switch self {
+        case .line(let v):
+            return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
+                              stroke: v.stroke, opacity: v.opacity, transform: v.transform,
+                              locked: v.locked, visibility: visibility))
+        case .rect(let v):
+            return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
+                              rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
+                              opacity: v.opacity, transform: v.transform, locked: v.locked,
+                              visibility: visibility))
+        case .circle(let v):
+            return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
+                                  fill: v.fill, stroke: v.stroke,
+                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                  visibility: visibility))
+        case .ellipse(let v):
+            return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
+                                    fill: v.fill, stroke: v.stroke,
+                                    opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                    visibility: visibility))
+        case .polyline(let v):
+            return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
+                                     opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                     visibility: visibility))
+        case .polygon(let v):
+            return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
+                                    opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                    visibility: visibility))
+        case .path(let v):
+            return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
+                              opacity: v.opacity, transform: v.transform, locked: v.locked,
+                              visibility: visibility))
+        case .text(let v):
+            return .text(Text(x: v.x, y: v.y, content: v.content,
+                              fontFamily: v.fontFamily, fontSize: v.fontSize,
+                              fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                              textDecoration: v.textDecoration,
+                              width: v.width, height: v.height,
+                              fill: v.fill, stroke: v.stroke,
+                              opacity: v.opacity, transform: v.transform, locked: v.locked,
+                              visibility: visibility))
+        case .textPath(let v):
+            return .textPath(TextPath(d: v.d, content: v.content,
+                                      startOffset: v.startOffset,
+                                      fontFamily: v.fontFamily, fontSize: v.fontSize,
+                                      fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                                      textDecoration: v.textDecoration,
+                                      fill: v.fill, stroke: v.stroke,
+                                      opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                      visibility: visibility))
+        case .group(let v):
+            return .group(Group(children: v.children, opacity: v.opacity,
+                                transform: v.transform, locked: v.locked,
+                                visibility: visibility))
+        case .layer(let v):
+            return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
+                                transform: v.transform, locked: v.locked,
+                                visibility: visibility))
         }
     }
 }
@@ -607,13 +724,16 @@ public struct Line: Equatable {
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
+    public let visibility: Visibility
 
     public init(x1: Double, y1: Double, x2: Double, y2: Double,
                 stroke: Stroke? = nil, opacity: Double = 1.0, transform: Transform? = nil,
-                locked: Bool = false) {
+                locked: Bool = false,
+                visibility: Visibility = .preview) {
         self.x1 = x1; self.y1 = y1; self.x2 = x2; self.y2 = y2
         self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
+        self.visibility = visibility
     }
 
     public var bounds: BBox {
@@ -631,16 +751,19 @@ public struct Rect: Equatable {
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
+    public let visibility: Visibility
 
     public init(x: Double, y: Double, width: Double, height: Double,
                 rx: Double = 0, ry: Double = 0,
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
-                locked: Bool = false) {
+                locked: Bool = false,
+                visibility: Visibility = .preview) {
         self.x = x; self.y = y; self.width = width; self.height = height
         self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
+        self.visibility = visibility
     }
 
     public var bounds: BBox { inflateBounds((x, y, width, height), stroke) }
@@ -654,14 +777,17 @@ public struct Circle: Equatable {
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
+    public let visibility: Visibility
 
     public init(cx: Double, cy: Double, r: Double,
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
-                locked: Bool = false) {
+                locked: Bool = false,
+                visibility: Visibility = .preview) {
         self.cx = cx; self.cy = cy; self.r = r
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
+        self.visibility = visibility
     }
 
     public var bounds: BBox { inflateBounds((cx - r, cy - r, r * 2, r * 2), stroke) }
@@ -675,14 +801,17 @@ public struct Ellipse: Equatable {
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
+    public let visibility: Visibility
 
     public init(cx: Double, cy: Double, rx: Double, ry: Double,
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
-                locked: Bool = false) {
+                locked: Bool = false,
+                visibility: Visibility = .preview) {
         self.cx = cx; self.cy = cy; self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
+        self.visibility = visibility
     }
 
     public var bounds: BBox { inflateBounds((cx - rx, cy - ry, rx * 2, ry * 2), stroke) }
@@ -696,14 +825,17 @@ public struct Polyline: Equatable {
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
+    public let visibility: Visibility
 
     public init(points: [(Double, Double)],
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
-                locked: Bool = false) {
+                locked: Bool = false,
+                visibility: Visibility = .preview) {
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
+        self.visibility = visibility
     }
 
     public var bounds: BBox {
@@ -730,14 +862,17 @@ public struct Polygon: Equatable {
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
+    public let visibility: Visibility
 
     public init(points: [(Double, Double)],
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
-                locked: Bool = false) {
+                locked: Bool = false,
+                visibility: Visibility = .preview) {
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
+        self.visibility = visibility
     }
 
     public var bounds: BBox {
@@ -848,14 +983,17 @@ public struct Path: Equatable {
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
+    public let visibility: Visibility
 
     public init(d: [PathCommand],
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
-                locked: Bool = false) {
+                locked: Bool = false,
+                visibility: Visibility = .preview) {
         self.d = d
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
+        self.visibility = visibility
     }
 
     public var bounds: BBox {
@@ -879,6 +1017,7 @@ public struct Text: Equatable {
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
+    public let visibility: Visibility
 
     public init(x: Double, y: Double, content: String,
                 fontFamily: String = "sans-serif", fontSize: Double = 16.0,
@@ -887,13 +1026,15 @@ public struct Text: Equatable {
                 width: Double = 0, height: Double = 0,
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
-                locked: Bool = false) {
+                locked: Bool = false,
+                visibility: Visibility = .preview) {
         self.x = x; self.y = y; self.content = content
         self.fontFamily = fontFamily; self.fontSize = fontSize
         self.fontWeight = fontWeight; self.fontStyle = fontStyle; self.textDecoration = textDecoration
         self.width = width; self.height = height
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
+        self.visibility = visibility
     }
 
     public var isAreaText: Bool { width > 0 && height > 0 }
@@ -947,6 +1088,7 @@ public struct TextPath: Equatable {
     public let transform: Transform?
 
     public let locked: Bool
+    public let visibility: Visibility
 
     public init(d: [PathCommand], content: String = "Lorem Ipsum",
                 startOffset: Double = 0.0,
@@ -955,12 +1097,14 @@ public struct TextPath: Equatable {
                 textDecoration: String = "none",
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
-                locked: Bool = false) {
+                locked: Bool = false,
+                visibility: Visibility = .preview) {
         self.d = d; self.content = content; self.startOffset = startOffset
         self.fontFamily = fontFamily; self.fontSize = fontSize
         self.fontWeight = fontWeight; self.fontStyle = fontStyle; self.textDecoration = textDecoration
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
+        self.visibility = visibility
     }
 
     public var bounds: BBox {
@@ -984,12 +1128,15 @@ public struct Group: Equatable {
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
+    public let visibility: Visibility
 
     public init(children: [Element], opacity: Double = 1.0, transform: Transform? = nil,
-                locked: Bool = false) {
+                locked: Bool = false,
+                visibility: Visibility = .preview) {
         self.children = children
         self.opacity = opacity; self.transform = transform
         self.locked = locked
+        self.visibility = visibility
     }
 
     public var bounds: BBox {
@@ -1009,13 +1156,16 @@ public struct Layer: Equatable {
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
+    public let visibility: Visibility
 
     public init(name: String = "Layer", children: [Element], opacity: Double = 1.0, transform: Transform? = nil,
-                locked: Bool = false) {
+                locked: Bool = false,
+                visibility: Visibility = .preview) {
         self.name = name
         self.children = children
         self.opacity = opacity; self.transform = transform
         self.locked = locked
+        self.visibility = visibility
     }
 
     public var bounds: BBox {

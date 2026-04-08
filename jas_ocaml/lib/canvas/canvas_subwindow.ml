@@ -15,15 +15,42 @@ let make_bounding_box ?(x = 0.0) ?(y = 0.0) ?(width = 800.0) ?(height = 600.0) (
 
 let title_bar_height = 24
 
-(** Draw an element to a Cairo context. *)
-let rec draw_element cr (elem : Element.element) =
+(** Configure [cr] for an outline-mode draw. The spec says
+    "stroke of size 0"; on Cairo, a 0-width stroke renders nothing,
+    so we use a 1-pixel width which gives a thin black line at
+    default zoom. No fill, solid black stroke. Used when an
+    element's effective visibility is [Element.Outline]. *)
+let apply_outline_style cr =
+  Cairo.set_source_rgba cr 0.0 0.0 0.0 1.0;
+  Cairo.set_line_width cr 1.0;
+  Cairo.set_line_cap cr Cairo.BUTT;
+  Cairo.set_line_join cr Cairo.JOIN_MITER
+
+(** Draw an element to a Cairo context.
+
+    [ancestor_vis] is the capping visibility inherited from parent
+    Groups/Layers. The element's effective visibility is the minimum
+    of its own and the ancestor's:
+
+    - [Invisible] effective: the subtree is skipped entirely.
+    - [Outline]   effective: every non-Text element is drawn with a
+      thin black hairline stroke and no fill. Text and Text_path
+      remain rendered as Preview.
+    - [Preview]   effective: normal rendering. *)
+let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.element) =
   let open Element in
+  let elem_vis = Element.get_visibility elem in
+  let effective = if compare elem_vis ancestor_vis < 0 then elem_vis else ancestor_vis in
+  if effective = Element.Invisible then ()
+  else
+  let outline = effective = Element.Outline in
   Cairo.save cr;
   begin match elem with
   | Line { x1; y1; x2; y2; stroke; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
-    apply_stroke cr stroke;
+    if outline then apply_outline_style cr
+    else apply_stroke cr stroke;
     Cairo.move_to cr x1 y1;
     Cairo.line_to cr x2 y2;
     Cairo.stroke cr;
@@ -37,7 +64,10 @@ let rec draw_element cr (elem : Element.element) =
       rounded_rect cr x y width height rx ry
     else
       Cairo.rectangle cr x y ~w:width ~h:height;
-    fill_and_stroke cr fill stroke;
+    if outline then begin
+      apply_outline_style cr;
+      Cairo.stroke cr
+    end else fill_and_stroke cr fill stroke;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
@@ -45,7 +75,10 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.push cr;
     apply_transform cr transform;
     Cairo.arc cr cx cy ~r ~a1:0.0 ~a2:(2.0 *. Float.pi);
-    fill_and_stroke cr fill stroke;
+    if outline then begin
+      apply_outline_style cr;
+      Cairo.stroke cr
+    end else fill_and_stroke cr fill stroke;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
@@ -57,7 +90,10 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.scale cr rx ry;
     Cairo.arc cr 0.0 0.0 ~r:1.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
     Cairo.restore cr;
-    fill_and_stroke cr fill stroke;
+    if outline then begin
+      apply_outline_style cr;
+      Cairo.stroke cr
+    end else fill_and_stroke cr fill stroke;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
@@ -65,7 +101,10 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.push cr;
     apply_transform cr transform;
     draw_points cr points false;
-    fill_and_stroke cr fill stroke;
+    if outline then begin
+      apply_outline_style cr;
+      Cairo.stroke cr
+    end else fill_and_stroke cr fill stroke;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
@@ -73,7 +112,10 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.push cr;
     apply_transform cr transform;
     draw_points cr points true;
-    fill_and_stroke cr fill stroke;
+    if outline then begin
+      apply_outline_style cr;
+      Cairo.stroke cr
+    end else fill_and_stroke cr fill stroke;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
@@ -81,7 +123,10 @@ let rec draw_element cr (elem : Element.element) =
     Cairo.Group.push cr;
     apply_transform cr transform;
     build_path cr d;
-    fill_and_stroke cr fill stroke;
+    if outline then begin
+      apply_outline_style cr;
+      Cairo.stroke cr
+    end else fill_and_stroke cr fill stroke;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
@@ -228,14 +273,14 @@ let rec draw_element cr (elem : Element.element) =
   | Group { children; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
-    Array.iter (draw_element cr) children;
+    Array.iter (fun c -> draw_element ~ancestor_vis:effective cr c) children;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
   | Layer { children; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
-    Array.iter (draw_element cr) children;
+    Array.iter (fun c -> draw_element ~ancestor_vis:effective cr c) children;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
   end;
@@ -442,56 +487,71 @@ let show_selection_bbox = Canvas_tool.show_selection_bbox
 let control_points (elem : Element.element) =
   Element.control_points elem
 
-let draw_element_overlay cr (elem : Element.element) ~(is_partial : bool) (selected_cps : int list) =
+(** Draw the selection overlay for one element.
+
+    Rule: every selected element (except [Text]/[Text_path]) is
+    outlined by re-tracing its own geometry in bright blue, and its
+    control-point squares are drawn on top. A CP listed in
+    [selected_cps] is filled blue; the rest are filled white.
+
+    [Text]/[Text_path] are the exception: they get a plain
+    bounding-box rectangle (for area text the bbox aligns with the
+    explicit area dimensions). No CP squares for Text/Text_path.
+
+    Groups and Layers emit no overlay themselves — their descendants
+    are individually in the selection (see [select_element]) and
+    draw their own highlights. *)
+let draw_element_overlay cr (elem : Element.element)
+    ~is_partial:(_ : bool) (selected_cps : int list) =
   let open Element in
-  (* Text/Text_path selections never get the outline or corner squares. *)
-  match elem with
-  | Text _ | Text_path _ -> ()
-  | _ ->
   Cairo.set_source_rgb cr 0.0 0.47 1.0;
   Cairo.set_line_width cr 1.0;
   Cairo.set_dash cr [||];
-  let cp_shape = match elem with
-    | Line _ | Polyline _ | Polygon _ | Path _ -> true
-    | _ -> false
-  in
-  if show_selection_bbox then begin
-    match elem with
-    | Line { x1; y1; x2; y2; _ } ->
-      Cairo.move_to cr x1 y1;
-      Cairo.line_to cr x2 y2;
-      Cairo.stroke cr
-    | Rect { x; y; width; height; rx; ry; _ } ->
-      if rx > 0.0 || ry > 0.0 then
-        rounded_rect cr x y width height rx ry
-      else
-        Cairo.rectangle cr x y ~w:width ~h:height;
-      Cairo.stroke cr
-    | Circle { cx; cy; r; _ } ->
-      Cairo.arc cr cx cy ~r ~a1:0.0 ~a2:(2.0 *. Float.pi);
-      Cairo.stroke cr
-    | Ellipse { cx; cy; rx; ry; _ } ->
-      Cairo.save cr;
-      Cairo.translate cr cx cy;
-      Cairo.scale cr rx ry;
-      Cairo.arc cr 0.0 0.0 ~r:1.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
-      Cairo.restore cr;
-      Cairo.stroke cr
-    | Polyline { points; _ } ->
-      draw_points cr points false;
-      Cairo.stroke cr
-    | Polygon { points; _ } ->
-      draw_points cr points true;
-      Cairo.stroke cr
-    | Path { d; _ } ->
-      build_path cr d;
-      Cairo.stroke cr
-    | _ ->
-      let (bx, by, bw, bh) = Element.bounds elem in
-      Cairo.rectangle cr bx by ~w:bw ~h:bh;
-      Cairo.stroke cr
+
+  (* Text and Text_path: bounding-box highlight only. No CP squares. *)
+  match elem with
+  | Text _ | Text_path _ ->
+    let (bx, by, bw, bh) = Element.bounds elem in
+    Cairo.rectangle cr bx by ~w:bw ~h:bh;
+    Cairo.stroke cr
+  (* Groups and Layers: nothing — their descendants render their own
+     highlights when the group is selected. *)
+  | Group _ | Layer _ -> ()
+  | _ ->
+  (* All other shapes: stroke the element's own geometry in blue. *)
+  begin match elem with
+  | Line { x1; y1; x2; y2; _ } ->
+    Cairo.move_to cr x1 y1;
+    Cairo.line_to cr x2 y2;
+    Cairo.stroke cr
+  | Rect { x; y; width; height; rx; ry; _ } ->
+    if rx > 0.0 || ry > 0.0 then
+      rounded_rect cr x y width height rx ry
+    else
+      Cairo.rectangle cr x y ~w:width ~h:height;
+    Cairo.stroke cr
+  | Circle { cx; cy; r; _ } ->
+    Cairo.arc cr cx cy ~r ~a1:0.0 ~a2:(2.0 *. Float.pi);
+    Cairo.stroke cr
+  | Ellipse { cx; cy; rx; ry; _ } ->
+    Cairo.save cr;
+    Cairo.translate cr cx cy;
+    Cairo.scale cr rx ry;
+    Cairo.arc cr 0.0 0.0 ~r:1.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
+    Cairo.restore cr;
+    Cairo.stroke cr
+  | Polyline { points; _ } ->
+    draw_points cr points false;
+    Cairo.stroke cr
+  | Polygon { points; _ } ->
+    draw_points cr points true;
+    Cairo.stroke cr
+  | Path { d; _ } ->
+    build_path cr d;
+    Cairo.stroke cr
+  | _ -> ()
   end;
-  (* Draw Bezier handles for selected path control points (always). *)
+  (* Draw Bezier handles for selected path control points. *)
   let handle_circle_radius = 3.0 in
   (match elem with
    | Path { d; _ } when selected_cps <> [] ->
@@ -527,25 +587,19 @@ let draw_element_overlay cr (elem : Element.element) ~(is_partial : bool) (selec
        end
      ) selected_cps
    | _ -> ());
-  (* Draw control-point squares.
-     - cp-shape: always (per-vertex/anchor handles are draggable).
-     - bbox-shape: when the kind is [Partial _] (including empty) —
-       the Direct Selection tool needs the user to see the grabbable
-       handles even when none are highlighted — or when
-       [show_selection_bbox] is on. *)
-  if cp_shape || is_partial || show_selection_bbox then begin
-    let half = handle_size /. 2.0 in
-    List.iteri (fun i (px, py) ->
-      Cairo.rectangle cr (px -. half) (py -. half) ~w:handle_size ~h:handle_size;
-      if List.mem i selected_cps then
-        Cairo.set_source_rgb cr 0.0 0.47 1.0
-      else
-        Cairo.set_source_rgb cr 1.0 1.0 1.0;
-      Cairo.fill_preserve cr;
-      Cairo.set_source_rgb cr 0.0 0.47 1.0;
-      Cairo.stroke cr
-    ) (control_points elem)
-  end
+  (* Draw control-point squares for every non-Text, non-container
+     selected element. *)
+  let half = handle_size /. 2.0 in
+  List.iteri (fun i (px, py) ->
+    Cairo.rectangle cr (px -. half) (py -. half) ~w:handle_size ~h:handle_size;
+    if List.mem i selected_cps then
+      Cairo.set_source_rgb cr 0.0 0.47 1.0
+    else
+      Cairo.set_source_rgb cr 1.0 1.0 1.0;
+    Cairo.fill_preserve cr;
+    Cairo.set_source_rgb cr 0.0 0.47 1.0;
+    Cairo.stroke cr
+  ) (control_points elem)
 
 let draw_selection_overlays cr (doc : Document.document) =
   let open Document in

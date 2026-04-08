@@ -154,6 +154,29 @@ let get_element doc path =
     in
     walk doc.layers.(i) rest
 
+let effective_visibility doc path =
+  match path with
+  | [] -> Element.Preview
+  | i :: rest ->
+    if i >= Array.length doc.layers then Element.Preview
+    else
+      let node = ref doc.layers.(i) in
+      let effective = ref (Element.get_visibility !node) in
+      let rec walk = function
+        | [] -> ()
+        | j :: rest ->
+          let children = children_of !node in
+          if j >= Array.length children then ()
+          else begin
+            node := children.(j);
+            let v = Element.get_visibility !node in
+            if compare v !effective < 0 then effective := v;
+            walk rest
+          end
+      in
+      walk rest;
+      !effective
+
 (** Return a copy of the array with element at index n replaced. *)
 let array_replace_nth arr n x =
   let a = Array.copy arr in
@@ -162,8 +185,10 @@ let array_replace_nth arr n x =
 (** Return the node with new_children substituted. *)
 let with_children node new_children =
   match node with
-  | Group { opacity; transform; locked; _ } -> Group { children = new_children; opacity; transform; locked }
-  | Layer { name; opacity; transform; locked; _ } -> Layer { name; children = new_children; opacity; transform; locked }
+  | Group { opacity; transform; locked; visibility; _ } ->
+    Group { children = new_children; opacity; transform; locked; visibility }
+  | Layer { name; opacity; transform; locked; visibility; _ } ->
+    Layer { name; children = new_children; opacity; transform; locked; visibility }
   | _ -> failwith "element has no children"
 
 (** Recursively replace the element at [rest] inside a group/layer node. *)

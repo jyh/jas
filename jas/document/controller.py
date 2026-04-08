@@ -122,11 +122,18 @@ class Controller:
         Group expansion: if any child of a Group intersects, all children
         of that Group are selected.
         """
+        from geometry.element import Visibility
         doc = self._model.document
         entries: list[ElementSelection] = []
         for li, layer in enumerate(doc.layers):
+            if layer.visibility == Visibility.INVISIBLE:
+                continue
             for ci, child in enumerate(layer.children):
                 if child.locked:
+                    continue
+                child_vis = min(layer.visibility, child.visibility,
+                                key=lambda v: v.value)
+                if child_vis == Visibility.INVISIBLE:
                     continue
                 if isinstance(child, Group) and not isinstance(child, Layer):
                     if any(element_intersects_rect(gc, x, y, width, height)
@@ -148,21 +155,27 @@ class Controller:
         control points.  Groups are traversed (not expanded) so elements
         inside groups can be individually selected.
         """
+        from geometry.element import Visibility
         doc = self._model.document
         entries: list[ElementSelection] = []
 
-        def _check(path: ElementPath, elem: Element) -> None:
+        def _check(path: ElementPath, elem: Element,
+                   ancestor_vis: Visibility) -> None:
             if elem.locked:
+                return
+            effective = min(ancestor_vis, elem.visibility,
+                            key=lambda v: v.value)
+            if effective == Visibility.INVISIBLE:
                 return
             if isinstance(elem, (Group, Layer)):
                 for i, child in enumerate(elem.children):
-                    _check(path + (i,), child)
+                    _check(path + (i,), child, effective)
                 return
             if element_intersects_rect(elem, x, y, width, height):
                 entries.append(ElementSelection.all(path))
 
         for li, layer in enumerate(doc.layers):
-            _check((li,), layer)
+            _check((li,), layer, Visibility.PREVIEW)
 
         new_sel = frozenset(entries)
         if extend:
@@ -175,15 +188,21 @@ class Controller:
         control points that fall within the rectangle.  Groups are not
         expanded — elements inside groups can be individually selected.
         """
+        from geometry.element import Visibility
         doc = self._model.document
         entries: list[ElementSelection] = []
 
-        def _check(path: ElementPath, elem: Element) -> None:
+        def _check(path: ElementPath, elem: Element,
+                   ancestor_vis: Visibility) -> None:
             if elem.locked:
+                return
+            effective = min(ancestor_vis, elem.visibility,
+                            key=lambda v: v.value)
+            if effective == Visibility.INVISIBLE:
                 return
             if isinstance(elem, (Group, Layer)):
                 for i, child in enumerate(elem.children):
-                    _check(path + (i,), child)
+                    _check(path + (i,), child, effective)
                 return
             # Find which control points are inside the rect
             cps = control_points(elem)
@@ -201,7 +220,7 @@ class Controller:
                 entries.append(ElementSelection.partial(path, ()))
 
         for li, layer in enumerate(doc.layers):
-            _check((li,), layer)
+            _check((li,), layer, Visibility.PREVIEW)
 
         new_sel = frozenset(entries)
         if extend:
@@ -219,11 +238,14 @@ class Controller:
         children of that Group are selected.  Otherwise just the single
         element is selected.  Locked elements cannot be selected.
         """
+        from geometry.element import Visibility
         if not path:
             raise ValueError("Path must be non-empty")
         doc = self._model.document
         elem = doc.get_element(path)
         if elem.locked:
+            return
+        if doc.effective_visibility(path) == Visibility.INVISIBLE:
             return
         if len(path) >= 2:
             parent_path = path[:-1]
@@ -345,3 +367,59 @@ class Controller:
         if isinstance(elem, Path):
             new_elem = _move_path_handle(elem, anchor_idx, handle_type, dx, dy)
             self._model.document = doc.replace_element(path, new_elem)
+
+    def hide_selection(self) -> None:
+        """Set every element in the current selection to
+        :class:`Visibility.INVISIBLE` and clear the selection.
+
+        If an element is a Group or Layer, only the container's own
+        flag is set — a parent's ``INVISIBLE`` caps every descendant,
+        so the effect reaches the whole subtree without rewriting
+        every node.
+        """
+        from geometry.element import Visibility
+        doc = self._model.document
+        if not doc.selection:
+            return
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            hidden = replace(elem, visibility=Visibility.INVISIBLE)
+            new_doc = new_doc.replace_element(es.path, hidden)
+        self._model.document = replace(new_doc, selection=frozenset())
+
+    def show_all(self) -> None:
+        """Traverse the document, set every element whose own
+        visibility is :class:`Visibility.INVISIBLE` back to
+        :class:`Visibility.PREVIEW`, and replace the current
+        selection with exactly the paths that were shown.
+
+        Elements that are effectively invisible only because an
+        ancestor is invisible are *not* individually modified — it
+        is the ancestor whose own flag is unset, and that cascades.
+        """
+        from geometry.element import Visibility
+        doc = self._model.document
+        shown_paths: list[ElementPath] = []
+
+        def _show(elem: Element, path: ElementPath) -> Element:
+            new_elem = elem
+            if elem.visibility == Visibility.INVISIBLE:
+                new_elem = replace(new_elem, visibility=Visibility.PREVIEW)
+                shown_paths.append(path)
+            if isinstance(new_elem, (Group, Layer)):
+                new_children = tuple(
+                    _show(c, path + (i,))
+                    for i, c in enumerate(new_elem.children)
+                )
+                new_elem = replace(new_elem, children=new_children)
+            return new_elem
+
+        new_layers = tuple(
+            _show(layer, (li,)) for li, layer in enumerate(doc.layers)
+        )
+        new_selection = frozenset(
+            ElementSelection.all(p) for p in shown_paths
+        )
+        self._model.document = replace(
+            doc, layers=new_layers, selection=new_selection)

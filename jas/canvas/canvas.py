@@ -389,8 +389,45 @@ def _build_path(cmds: tuple[PathCommand, ...]) -> QPainterPath:
     return path
 
 
-def _draw_element(painter: QPainter, elem: Element) -> None:
-    """Draw a single element using the QPainter."""
+def _apply_outline_style(painter: QPainter) -> None:
+    """Configure ``painter`` for an outline-mode draw of a shape.
+
+    The spec says "stroke of size 0"; in practice Qt strokes of width
+    0 render as "cosmetic" hairlines (1 device pixel regardless of
+    zoom), which matches the intended look. No fill, solid black
+    stroke. Used when an element's effective visibility is
+    :class:`Visibility.OUTLINE`.
+    """
+    from PySide6.QtGui import QBrush, QPen, Qt
+    painter.setBrush(QBrush())
+    pen = QPen(QColor("black"), 0.0)
+    pen.setCosmetic(True)
+    pen.setStyle(Qt.SolidLine)
+    painter.setPen(pen)
+
+
+def _draw_element(painter: QPainter, elem: Element,
+                  ancestor_vis=None) -> None:
+    """Draw a single element using the QPainter.
+
+    ``ancestor_vis`` is the capping visibility inherited from parent
+    Groups/Layers. The element's effective visibility is the minimum
+    of its own ``visibility`` and ``ancestor_vis``:
+
+    - ``INVISIBLE`` effective → the subtree is skipped entirely.
+    - ``OUTLINE`` effective → every non-Text element is drawn with a
+      thin black cosmetic stroke and no fill. Text and TextPath are
+      the exception and render as Preview.
+    - ``PREVIEW`` effective → normal rendering.
+    """
+    from geometry.element import Visibility
+    if ancestor_vis is None:
+        ancestor_vis = Visibility.PREVIEW
+    effective = min(ancestor_vis, elem.visibility, key=lambda v: v.value)
+    if effective == Visibility.INVISIBLE:
+        return
+    outline = effective == Visibility.OUTLINE
+
     painter.save()
 
     opacity = getattr(elem, 'opacity', 1.0)
@@ -402,45 +439,66 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
 
     match elem:
         case Line(x1=x1, y1=y1, x2=x2, y2=y2, stroke=stroke):
-            _apply_stroke(painter, stroke)
+            if outline:
+                _apply_outline_style(painter)
+            else:
+                _apply_stroke(painter, stroke)
             painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
 
         case Rect(x=x, y=y, width=w, height=h, rx=rx, ry=ry,
                   fill=fill, stroke=stroke):
-            _apply_fill(painter, fill)
-            _apply_stroke(painter, stroke)
+            if outline:
+                _apply_outline_style(painter)
+            else:
+                _apply_fill(painter, fill)
+                _apply_stroke(painter, stroke)
             if rx > 0 or ry > 0:
                 painter.drawRoundedRect(QRectF(x, y, w, h), rx, ry)
             else:
                 painter.drawRect(QRectF(x, y, w, h))
 
         case Circle(cx=cx, cy=cy, r=r, fill=fill, stroke=stroke):
-            _apply_fill(painter, fill)
-            _apply_stroke(painter, stroke)
+            if outline:
+                _apply_outline_style(painter)
+            else:
+                _apply_fill(painter, fill)
+                _apply_stroke(painter, stroke)
             painter.drawEllipse(QPointF(cx, cy), r, r)
 
         case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry, fill=fill, stroke=stroke):
-            _apply_fill(painter, fill)
-            _apply_stroke(painter, stroke)
+            if outline:
+                _apply_outline_style(painter)
+            else:
+                _apply_fill(painter, fill)
+                _apply_stroke(painter, stroke)
             painter.drawEllipse(QPointF(cx, cy), rx, ry)
 
         case Polyline(points=points, fill=fill, stroke=stroke):
-            _apply_fill(painter, fill)
-            _apply_stroke(painter, stroke)
+            if outline:
+                _apply_outline_style(painter)
+            else:
+                _apply_fill(painter, fill)
+                _apply_stroke(painter, stroke)
             if points:
                 qpoints = [QPointF(x, y) for x, y in points]
                 painter.drawPolyline(qpoints)
 
         case Polygon(points=points, fill=fill, stroke=stroke):
-            _apply_fill(painter, fill)
-            _apply_stroke(painter, stroke)
+            if outline:
+                _apply_outline_style(painter)
+            else:
+                _apply_fill(painter, fill)
+                _apply_stroke(painter, stroke)
             if points:
                 qpoints = [QPointF(x, y) for x, y in points]
                 painter.drawPolygon(qpoints)
 
         case Path(d=d, fill=fill, stroke=stroke):
-            _apply_fill(painter, fill)
-            _apply_stroke(painter, stroke)
+            if outline:
+                _apply_outline_style(painter)
+            else:
+                _apply_fill(painter, fill)
+                _apply_stroke(painter, stroke)
             painter.drawPath(_build_path(d))
 
         case Text(x=x, y=y, content=content, font_family=ff,
@@ -519,7 +577,7 @@ def _draw_element(painter: QPainter, elem: Element) -> None:
 
         case Group(children=children) | Layer(children=children):
             for child in children:
-                _draw_element(painter, child)
+                _draw_element(painter, child, effective)
 
         case Element():
             raise ValueError(f"Unknown element type: {elem}")
@@ -538,26 +596,26 @@ def _control_points(elem: Element) -> list[tuple[float, float]]:
     return element_control_points(elem)
 
 
-# Whether to draw the blue bounding-box outline + corner-square
-# handles around bbox-shape selected elements (Rect, Circle, Ellipse,
-# Group, ...). Per-vertex/anchor handles for cp-shape elements
-# (Line, Polyline, Polygon, Path) and Bezier handle decoration on
-# Path anchors are drawn regardless. Text and TextPath selections
-# never draw the bbox or its corner squares — the editing overlay is
-# sufficient. Default: False (uncluttered canvas).
-SHOW_SELECTION_BBOX = False
-
-
 def _draw_element_overlay(painter: QPainter, elem: Element,
                           kind=None) -> None:
-    """Draw the selection overlay (outline + control handles) for one element.
+    """Draw the selection overlay for one element.
 
-    `kind` is a `SelectionKind`. CPs whose index is in `kind` are
-    filled blue; the rest are filled white. Defaults to "outline only,
-    no CPs highlighted".
+    Rule: every selected element (except Text/TextPath) is outlined
+    by re-tracing its own geometry in bright blue, and its control-
+    point squares are drawn on top. A CP listed in ``kind`` is filled
+    blue; the rest are filled white. On ``.all`` every CP is filled
+    blue — the whole element is grabbable.
+
+    Text and TextPath are the exception: instead of re-tracing their
+    geometry, they get a plain bounding-box rectangle (for area text
+    the bbox aligns with the explicit area dimensions; for point
+    text it wraps the glyphs). No CP squares for Text/TextPath.
+
+    Groups and Layers emit no overlay themselves — their descendants
+    are individually in the selection (see ``select_element``) and
+    draw their own highlights.
     """
     from document.document import (
-        _SelectionPartial,
         selection_kind_contains as _contains,
         selection_kind_to_sorted as _to_sorted,
         selection_partial,
@@ -565,42 +623,44 @@ def _draw_element_overlay(painter: QPainter, elem: Element,
     if kind is None:
         kind = selection_partial([])
 
-    # Text selections show no outline or corner squares.
-    if isinstance(elem, (Text, TextPath)):
-        return
-
     pen = QPen(_SELECTION_COLOR, 1.0)
     painter.setPen(pen)
     painter.setBrush(QBrush())
 
-    cp_shape = isinstance(elem, (Line, Polyline, Polygon, Path))
+    # Text and TextPath: bounding-box highlight only. No CP squares.
+    if isinstance(elem, (Text, TextPath)):
+        bx, by, bw, bh = elem.bounds()
+        painter.drawRect(QRectF(bx, by, bw, bh))
+        return
 
-    if SHOW_SELECTION_BBOX:
-        match elem:
-            case Line(x1=x1, y1=y1, x2=x2, y2=y2):
-                painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
-            case Rect(x=x, y=y, width=w, height=h, rx=rx, ry=ry):
-                if rx > 0 or ry > 0:
-                    painter.drawRoundedRect(QRectF(x, y, w, h), rx, ry)
-                else:
-                    painter.drawRect(QRectF(x, y, w, h))
-            case Circle(cx=cx, cy=cy, r=r):
-                painter.drawEllipse(QPointF(cx, cy), r, r)
-            case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry):
-                painter.drawEllipse(QPointF(cx, cy), rx, ry)
-            case Polygon(points=points):
-                if points:
-                    painter.drawPolygon([QPointF(x, y) for x, y in points])
-            case Polyline(points=points):
-                if points:
-                    painter.drawPolyline([QPointF(x, y) for x, y in points])
-            case Path(d=d):
-                painter.drawPath(_build_path(d))
-            case _:
-                bx, by, bw, bh = elem.bounds()
-                painter.drawRect(QRectF(bx, by, bw, bh))
+    # Groups and Layers: nothing. Their descendants render their own
+    # highlights when the group is selected.
+    if isinstance(elem, (Group, Layer)):
+        return
 
-    # Draw Bezier handles for selected path control points (always).
+    # All other shapes: stroke the element's own geometry in blue.
+    match elem:
+        case Line(x1=x1, y1=y1, x2=x2, y2=y2):
+            painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+        case Rect(x=x, y=y, width=w, height=h, rx=rx, ry=ry):
+            if rx > 0 or ry > 0:
+                painter.drawRoundedRect(QRectF(x, y, w, h), rx, ry)
+            else:
+                painter.drawRect(QRectF(x, y, w, h))
+        case Circle(cx=cx, cy=cy, r=r):
+            painter.drawEllipse(QPointF(cx, cy), r, r)
+        case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry):
+            painter.drawEllipse(QPointF(cx, cy), rx, ry)
+        case Polygon(points=points):
+            if points:
+                painter.drawPolygon([QPointF(x, y) for x, y in points])
+        case Polyline(points=points):
+            if points:
+                painter.drawPolyline([QPointF(x, y) for x, y in points])
+        case Path(d=d):
+            painter.drawPath(_build_path(d))
+
+    # Draw Bezier handles for selected path control points.
     cp_highlight = list(_to_sorted(kind, len(_control_points(elem))))
     if isinstance(elem, Path) and cp_highlight:
         anchors = _control_points(elem)
@@ -620,26 +680,16 @@ def _draw_element_overlay(painter: QPainter, elem: Element,
                 painter.drawEllipse(QPointF(*h_out),
                                     _HANDLE_CIRCLE_RADIUS, _HANDLE_CIRCLE_RADIUS)
 
-    # Draw control-point squares.
-    # cp-shape: always (per-vertex/anchor squares are draggable).
-    # bbox-shape: when the kind is `Partial(*)` (including empty) —
-    #   the Direct Selection tool needs the user to see the grabbable
-    #   handles even when none are highlighted — or when
-    #   SHOW_SELECTION_BBOX is on.
-    draw_cp_squares = (
-        cp_shape
-        or isinstance(kind, _SelectionPartial)
-        or SHOW_SELECTION_BBOX
-    )
-    if draw_cp_squares:
-        half = _HANDLE_SIZE / 2
-        painter.setPen(QPen(_SELECTION_COLOR, 1.0))
-        for i, (px, py) in enumerate(_control_points(elem)):
-            if _contains(kind, i):
-                painter.setBrush(QBrush(_SELECTION_COLOR))
-            else:
-                painter.setBrush(QBrush(QColor("white")))
-            painter.drawRect(QRectF(px - half, py - half, _HANDLE_SIZE, _HANDLE_SIZE))
+    # Draw control-point squares for every non-Text, non-container
+    # selected element.
+    half = _HANDLE_SIZE / 2
+    painter.setPen(QPen(_SELECTION_COLOR, 1.0))
+    for i, (px, py) in enumerate(_control_points(elem)):
+        if _contains(kind, i):
+            painter.setBrush(QBrush(_SELECTION_COLOR))
+        else:
+            painter.setBrush(QBrush(QColor("white")))
+        painter.drawRect(QRectF(px - half, py - half, _HANDLE_SIZE, _HANDLE_SIZE))
 
 
 def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:

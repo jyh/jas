@@ -94,9 +94,17 @@ class controller ?(model = Model.create ()) () =
       let selection = ref Document.PathMap.empty in
       Array.iteri (fun li layer ->
         match layer with
-        | Element.Layer { children; _ } ->
+        | Element.Layer { children; visibility = layer_vis; _ } ->
+          if layer_vis = Element.Invisible then ()
+          else
           Array.iteri (fun ci child ->
             if Element.is_locked child then ()
+            else
+            let child_vis =
+              let cv = Element.get_visibility child in
+              if compare cv layer_vis < 0 then cv else layer_vis
+            in
+            if child_vis = Element.Invisible then ()
             else
             match child with
             | Element.Group { children = gc; _ } ->
@@ -127,30 +135,42 @@ class controller ?(model = Model.create ()) () =
     method group_select_rect ?(extend=false) x y w h =
       let doc = model#document in
       let selection = ref Document.PathMap.empty in
-      let rec check path (elem : Element.element) =
+      let rec check path (elem : Element.element) ancestor_vis =
         if Element.is_locked elem then ()
+        else
+        let effective =
+          let v = Element.get_visibility elem in
+          if compare v ancestor_vis < 0 then v else ancestor_vis
+        in
+        if effective = Element.Invisible then ()
         else
         match elem with
         | Element.Layer { children; _ } | Element.Group { children; _ } ->
-          Array.iteri (fun i child -> check (path @ [i]) child) children
+          Array.iteri (fun i child -> check (path @ [i]) child effective) children
         | _ ->
           if element_intersects_rect elem x y w h then
             selection := Document.PathMap.add path
               (Document.element_selection_all path) !selection
       in
-      Array.iteri (fun li layer -> check [li] layer) doc.Document.layers;
+      Array.iteri (fun li layer -> check [li] layer Element.Preview) doc.Document.layers;
       let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
       model#set_document { doc with Document.selection = new_sel }
 
     method direct_select_rect ?(extend=false) x y w h =
       let doc = model#document in
       let selection = ref Document.PathMap.empty in
-      let rec check path (elem : Element.element) =
+      let rec check path (elem : Element.element) ancestor_vis =
         if Element.is_locked elem then ()
+        else
+        let effective =
+          let v = Element.get_visibility elem in
+          if compare v ancestor_vis < 0 then v else ancestor_vis
+        in
+        if effective = Element.Invisible then ()
         else
         match elem with
         | Element.Layer { children; _ } | Element.Group { children; _ } ->
-          Array.iteri (fun i child -> check (path @ [i]) child) children
+          Array.iteri (fun i child -> check (path @ [i]) child effective) children
         | _ ->
           let cps = Element.control_points elem in
           let hit_cps =
@@ -169,7 +189,7 @@ class controller ?(model = Model.create ()) () =
             selection := Document.PathMap.add path
               (Document.element_selection_partial path []) !selection
       in
-      Array.iteri (fun li layer -> check [li] layer) doc.Document.layers;
+      Array.iteri (fun li layer -> check [li] layer Element.Preview) doc.Document.layers;
       let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
       model#set_document { doc with Document.selection = new_sel }
 
@@ -183,6 +203,7 @@ class controller ?(model = Model.create ()) () =
         let doc = model#document in
         let elem = Document.get_element doc path in
         if Element.is_locked elem then ()
+        else if Document.effective_visibility doc path = Element.Invisible then ()
         else
         let parent_path = List.filteri (fun i _ -> i < List.length path - 1) path in
         if List.length path >= 2 then
@@ -282,6 +303,46 @@ class controller ?(model = Model.create ()) () =
           (Document.element_selection_all path) acc
       ) Document.PathMap.empty !locked_paths in
       model#set_document { new_doc with Document.selection = new_sel }
+
+    method hide_selection =
+      let doc = model#document in
+      if Document.PathMap.is_empty doc.Document.selection then ()
+      else begin
+        let new_doc = Document.PathMap.fold (fun path _ acc ->
+          let elem = Document.get_element acc path in
+          let hidden = Element.set_visibility Element.Invisible elem in
+          Document.replace_element acc path hidden
+        ) doc.Document.selection doc in
+        model#set_document
+          { new_doc with Document.selection = Document.PathMap.empty }
+      end
+
+    method show_all =
+      let doc = model#document in
+      let shown_paths = ref [] in
+      let rec show_in path elem =
+        let elem =
+          if Element.get_visibility elem = Element.Invisible then begin
+            shown_paths := path :: !shown_paths;
+            Element.set_visibility Element.Preview elem
+          end else elem
+        in
+        match elem with
+        | Element.Group r ->
+          let new_children = Array.mapi (fun i c -> show_in (path @ [i]) c) r.children in
+          Element.Group { r with children = new_children }
+        | Element.Layer r ->
+          let new_children = Array.mapi (fun i c -> show_in (path @ [i]) c) r.children in
+          Element.Layer { r with children = new_children }
+        | _ -> elem
+      in
+      let new_layers = Array.mapi (fun li layer -> show_in [li] layer) doc.Document.layers in
+      let new_sel = List.fold_left (fun acc path ->
+        Document.PathMap.add path
+          (Document.element_selection_all path) acc
+      ) Document.PathMap.empty !shown_paths in
+      model#set_document { doc with Document.layers = new_layers;
+                                     Document.selection = new_sel }
 
     method move_selection (dx : float) (dy : float) =
       let doc = model#document in

@@ -17,6 +17,16 @@ type color = {
   a : float;
 }
 
+(** Per-element visibility mode. Declaration order places
+    [Invisible] first so that [compare] / [min] pick the more
+    restrictive mode — the rule used to combine an element's own
+    visibility with the cap inherited from its parent Group or
+    Layer. *)
+type visibility =
+  | Invisible
+  | Outline
+  | Preview
+
 (** SVG stroke-linecap. *)
 type linecap =
   | Butt
@@ -72,6 +82,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Rect of {
       x : float; y : float;
@@ -82,6 +93,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Circle of {
       cx : float; cy : float; r : float;
@@ -90,6 +102,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Ellipse of {
       cx : float; cy : float;
@@ -99,6 +112,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Polyline of {
       points : (float * float) list;
@@ -107,6 +121,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Polygon of {
       points : (float * float) list;
@@ -115,6 +130,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Path of {
       d : path_command list;
@@ -123,6 +139,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Text of {
       x : float; y : float;
@@ -139,6 +156,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Text_path of {
       d : path_command list;
@@ -154,12 +172,14 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Group of {
       children : element array;
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Layer of {
       name : string;
@@ -167,6 +187,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
 
 (** Expand a bounding box by half the stroke width on all sides. *)
@@ -373,37 +394,37 @@ let make_rotate angle_deg =
   { identity_transform with a = cos rad; b = sin rad; c = -. sin rad; d = cos rad }
 
 let make_line ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
-  Line { x1; y1; x2; y2; stroke; opacity; transform; locked }
+  Line { x1; y1; x2; y2; stroke; opacity; transform; locked; visibility = Preview }
 
 let make_rect ?(rx = 0.0) ?(ry = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y width height =
-  Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked }
+  Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview }
 
 let make_circle ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy r =
-  Circle { cx; cy; r; fill; stroke; opacity; transform; locked }
+  Circle { cx; cy; r; fill; stroke; opacity; transform; locked; visibility = Preview }
 
 let make_ellipse ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy rx ry =
-  Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; locked }
+  Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview }
 
 let make_polyline ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
-  Polyline { points; fill; stroke; opacity; transform; locked }
+  Polyline { points; fill; stroke; opacity; transform; locked; visibility = Preview }
 
 let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
-  Polygon { points; fill; stroke; opacity; transform; locked }
+  Polygon { points; fill; stroke; opacity; transform; locked; visibility = Preview }
 
 let make_path ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d =
-  Path { d; fill; stroke; opacity; transform; locked }
+  Path { d; fill; stroke; opacity; transform; locked; visibility = Preview }
 
 let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none") ?(text_width = 0.0) ?(text_height = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y content =
-  Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration; text_width; text_height; fill; stroke; opacity; transform; locked }
+  Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration; text_width; text_height; fill; stroke; opacity; transform; locked; visibility = Preview }
 
 let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none") ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d content =
-  Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration; fill; stroke; opacity; transform; locked }
+  Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration; fill; stroke; opacity; transform; locked; visibility = Preview }
 
 let make_group ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
-  Group { children; opacity; transform; locked }
+  Group { children; opacity; transform; locked; visibility = Preview }
 
 let make_layer ?(name = "Layer") ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
-  Layer { name; children; opacity; transform; locked }
+  Layer { name; children; opacity; transform; locked; visibility = Preview }
 
 let is_locked = function
   | Line { locked; _ } | Rect { locked; _ } | Circle { locked; _ }
@@ -423,6 +444,26 @@ let set_locked v = function
   | Text_path r -> Text_path { r with locked = v }
   | Group r -> Group { r with locked = v }
   | Layer r -> Layer { r with locked = v }
+
+let get_visibility = function
+  | Line { visibility; _ } | Rect { visibility; _ } | Circle { visibility; _ }
+  | Ellipse { visibility; _ } | Polyline { visibility; _ }
+  | Polygon { visibility; _ } | Path { visibility; _ } | Text { visibility; _ }
+  | Text_path { visibility; _ } | Group { visibility; _ }
+  | Layer { visibility; _ } -> visibility
+
+let set_visibility v = function
+  | Line r -> Line { r with visibility = v }
+  | Rect r -> Rect { r with visibility = v }
+  | Circle r -> Circle { r with visibility = v }
+  | Ellipse r -> Ellipse { r with visibility = v }
+  | Polyline r -> Polyline { r with visibility = v }
+  | Polygon r -> Polygon { r with visibility = v }
+  | Path r -> Path { r with visibility = v }
+  | Text r -> Text { r with visibility = v }
+  | Text_path r -> Text_path { r with visibility = v }
+  | Group r -> Group { r with visibility = v }
+  | Layer r -> Layer { r with visibility = v }
 
 let path_anchor_points d =
   List.fold_left (fun acc cmd ->
@@ -602,7 +643,7 @@ let move_control_points ?(is_all = false) elem indices dx dy =
       Polygon { points = Array.to_list pts;
                 fill = r.fill; stroke = r.stroke;
                 opacity = r.opacity; transform = r.transform;
-                locked = r.locked }
+                locked = r.locked; visibility = r.visibility }
   | Circle r ->
     if is_all then
       Circle { r with cx = r.cx +. dx; cy = r.cy +. dy }

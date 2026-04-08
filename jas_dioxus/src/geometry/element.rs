@@ -237,12 +237,38 @@ pub enum Element {
     Layer(LayerElem),
 }
 
+/// Per-element visibility mode.
+///
+/// Ordered from maximum visibility (`Preview`) to minimum
+/// (`Invisible`). The `Ord` derivation makes `min(a, b)` produce the
+/// more restrictive of two modes, which is the rule used to combine
+/// an element's own visibility with the capping visibility inherited
+/// from its parent Group or Layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Visibility {
+    /// Not rendered; cannot be selected or hit-tested.
+    Invisible,
+    /// Drawn as a thin black outline (stroke width 0, no fill). Hit
+    /// detection ignores fill and stroke width. Text is the single
+    /// exception: Text in outline mode still renders as Preview.
+    Outline,
+    /// Element is fully drawn with its fill, stroke, and effects.
+    Preview,
+}
+
+impl Default for Visibility {
+    fn default() -> Self {
+        Visibility::Preview
+    }
+}
+
 /// Common properties shared by all visible elements.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommonProps {
     pub opacity: f64,
     pub transform: Option<Transform>,
     pub locked: bool,
+    pub visibility: Visibility,
 }
 
 impl Default for CommonProps {
@@ -251,6 +277,7 @@ impl Default for CommonProps {
             opacity: 1.0,
             transform: None,
             locked: false,
+            visibility: Visibility::Preview,
         }
     }
 }
@@ -413,6 +440,10 @@ impl Element {
 
     pub fn locked(&self) -> bool {
         self.common().locked
+    }
+
+    pub fn visibility(&self) -> Visibility {
+        self.common().visibility
     }
 
     pub fn opacity(&self) -> f64 {
