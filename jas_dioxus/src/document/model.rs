@@ -46,6 +46,10 @@ impl Default for Model {
 }
 
 impl Model {
+    /// Create a new model wrapping `document`. If `filename` is `None`,
+    /// allocate a fresh `Untitled-N` placeholder. The provided document
+    /// is also recorded as the saved baseline, so [`is_modified`] returns
+    /// `false` until something edits it.
     pub fn new(document: Document, filename: Option<String>) -> Self {
         Self {
             saved_document: document.clone(),
@@ -58,16 +62,25 @@ impl Model {
         }
     }
 
+    /// Borrow the current document. The returned reference is invalidated
+    /// by any subsequent mutating call on this model.
     pub fn document(&self) -> &Document {
         &self.document
     }
 
+    /// Replace the current document and bump the modification generation.
+    /// Callers that want this change to be undoable should call
+    /// [`snapshot`] first; `set_document` itself does not push onto the
+    /// undo stack.
     pub fn set_document(&mut self, doc: Document) {
         self.document = doc;
         self.generation += 1;
     }
 
-    /// Save the current document state for undo.
+    /// Push the current document onto the undo stack and clear the redo
+    /// stack. Tools should call this exactly once per user-visible action,
+    /// before mutating the document. The undo stack is capped at
+    /// `MAX_UNDO` entries; older snapshots are silently dropped.
     pub fn snapshot(&mut self) {
         self.undo_stack.push(self.document.clone());
         if self.undo_stack.len() > MAX_UNDO {
@@ -76,7 +89,8 @@ impl Model {
         self.redo_stack.clear();
     }
 
-    /// Restore the previous document state.
+    /// Restore the most recently snapshotted document, moving the current
+    /// document onto the redo stack. No-op if the undo stack is empty.
     pub fn undo(&mut self) {
         if let Some(prev) = self.undo_stack.pop() {
             self.redo_stack.push(self.document.clone());
@@ -85,7 +99,9 @@ impl Model {
         }
     }
 
-    /// Re-apply a previously undone document state.
+    /// Re-apply the most recently undone document, moving the current
+    /// document back onto the undo stack. No-op if the redo stack is
+    /// empty (e.g. after any new edit, which clears redo).
     pub fn redo(&mut self) {
         if let Some(next) = self.redo_stack.pop() {
             self.undo_stack.push(self.document.clone());
@@ -94,18 +110,27 @@ impl Model {
         }
     }
 
+    /// True if there is at least one snapshot available to [`undo`].
     pub fn can_undo(&self) -> bool {
         !self.undo_stack.is_empty()
     }
 
+    /// True if there is at least one undone snapshot available to [`redo`].
     pub fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
     }
 
+    /// True if the document has been mutated since the last [`mark_saved`]
+    /// call (or since model construction, whichever is later). Compares
+    /// generations rather than document contents, so an undo back to the
+    /// saved state still reads as modified.
     pub fn is_modified(&self) -> bool {
         self.generation != self.saved_generation
     }
 
+    /// Snapshot the current document as the on-disk baseline, after
+    /// which [`is_modified`] will return `false` until the next edit.
+    /// Call this after a successful save.
     pub fn mark_saved(&mut self) {
         self.saved_document = self.document.clone();
         self.saved_generation = self.generation;
