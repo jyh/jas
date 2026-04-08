@@ -202,6 +202,25 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
                 }
             }
         }
+
+        // Arrow outline (closed, 7-corner silhouette of a filled arrow).
+        // Run on the un-resampled input so corner positions are preserved.
+        if let Some((tail, tip, head_len, head_half_width, shaft_half_width, res)) =
+            fit_arrow(points, diag)
+        {
+            if res <= tol_abs {
+                candidates.push((
+                    res,
+                    RecognizedShape::Arrow {
+                        tail,
+                        tip,
+                        head_len,
+                        head_half_width,
+                        shaft_half_width,
+                    },
+                ));
+            }
+        }
     }
 
     candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -512,6 +531,187 @@ fn fit_round_rect(pts: &[Pt]) -> Option<(f64, f64, f64, f64, f64, f64)> {
     let r = (lo + hi) / 2.0;
     let rms = round_rect_rms(pts, xmin, ymin, w, h, r);
     Some((xmin, ymin, w, h, r, rms))
+}
+
+/// Ramer–Douglas–Peucker polyline simplification. Returns the kept
+/// vertices in order; always includes the first and last input points.
+fn rdp(pts: &[Pt], epsilon: f64) -> Vec<Pt> {
+    if pts.len() < 3 {
+        return pts.to_vec();
+    }
+    let mut keep = vec![false; pts.len()];
+    keep[0] = true;
+    *keep.last_mut().unwrap() = true;
+    rdp_recurse(pts, 0, pts.len() - 1, epsilon, &mut keep);
+    pts.iter()
+        .enumerate()
+        .filter_map(|(i, p)| if keep[i] { Some(*p) } else { None })
+        .collect()
+}
+
+fn rdp_recurse(pts: &[Pt], start: usize, end: usize, eps: f64, keep: &mut [bool]) {
+    if end <= start + 1 {
+        return;
+    }
+    let a = pts[start];
+    let b = pts[end];
+    let mut max_d = 0.0;
+    let mut max_i = start;
+    for i in (start + 1)..end {
+        let d = point_to_segment_dist(pts[i], a, b);
+        if d > max_d {
+            max_d = d;
+            max_i = i;
+        }
+    }
+    if max_d > eps {
+        keep[max_i] = true;
+        rdp_recurse(pts, start, max_i, eps, keep);
+        rdp_recurse(pts, max_i, end, eps, keep);
+    }
+}
+
+/// Filled-arrow outline fit. Expects a closed 7-corner silhouette with
+/// an axis-aligned shaft.
+///
+/// Returns `(tail, tip, head_len, head_half_width, shaft_half_width, rms)`.
+fn fit_arrow(pts: &[Pt], diag: f64) -> Option<(Pt, Pt, f64, f64, f64, f64)> {
+    if pts.len() < 7 {
+        return None;
+    }
+    // Try a few RDP eps levels: a coarse pass tolerates noise, while finer
+    // passes handle thin shafts where the bbox-diagonal scale is too loose.
+    let mut corners: Vec<Pt> = Vec::new();
+    for &frac in &[0.04, 0.02, 0.01, 0.005] {
+        let eps = frac * diag;
+        let mut s = rdp(pts, eps);
+        if s.len() >= 2 && dist(s[0], *s.last().unwrap()) < eps.max(1e-6) {
+            s.pop();
+        }
+        if s.len() == 7 {
+            corners = s;
+            break;
+        }
+    }
+    let n = corners.len();
+    if n != 7 {
+        return None;
+    }
+
+    // Convexity sign at each corner: positive cross product = one orientation,
+    // negative = the other. A 7-corner arrow outline has 5 corners of one sign
+    // (the tip, the two head-back corners, and the two tail corners) and 2 of
+    // the opposite sign (the shaft-junction corners where the head meets the
+    // shaft, which are the concave indents).
+    let cross_signs: Vec<f64> = (0..n)
+        .map(|i| {
+            let prev = corners[(i + n - 1) % n];
+            let curr = corners[i];
+            let next = corners[(i + 1) % n];
+            let v1 = (prev.0 - curr.0, prev.1 - curr.1);
+            let v2 = (next.0 - curr.0, next.1 - curr.1);
+            v2.0 * v1.1 - v2.1 * v1.0
+        })
+        .collect();
+    let positives = cross_signs.iter().filter(|&&s| s > 0.0).count();
+    let negatives = n - positives;
+    if positives.max(negatives) != 5 || positives.min(negatives) != 2 {
+        return None;
+    }
+    let majority_positive = positives > negatives;
+
+    // The tip is the unique majority-sign corner whose BOTH neighbors are
+    // also majority sign. Every other majority-sign corner (the head-back
+    // and tail corners) has at least one concave neighbor adjacent to a
+    // shaft junction.
+    let is_majority = |s: f64| (s > 0.0) == majority_positive;
+    let mut tip_idx_opt = None;
+    for i in 0..n {
+        if is_majority(cross_signs[i])
+            && is_majority(cross_signs[(i + n - 1) % n])
+            && is_majority(cross_signs[(i + 1) % n])
+        {
+            if tip_idx_opt.is_some() {
+                return None; // ambiguous: more than one such corner
+            }
+            tip_idx_opt = Some(i);
+        }
+    }
+    let tip_idx = tip_idx_opt?;
+    let tip = corners[tip_idx];
+
+    // Index helper that walks the cyclic corner list relative to the tip.
+    let c = |k: i32| -> Pt {
+        let idx = ((tip_idx as i32 + k).rem_euclid(n as i32)) as usize;
+        corners[idx]
+    };
+
+    // Pair corners symmetrically across the tip:
+    //   ±1 = head-back corners (the wide part of the arrow head)
+    //   ±2 = shaft-end corners (where head meets shaft)
+    //   ±3 = tail corners (back of the shaft)
+    let head_back_a = c(-1);
+    let head_back_b = c(1);
+    let shaft_end_a = c(-2);
+    let shaft_end_b = c(2);
+    let tail_a = c(-3);
+    let tail_b = c(3);
+
+    // Tail point = midpoint of the two tail corners (lies on symmetry axis).
+    let tail = ((tail_a.0 + tail_b.0) / 2.0, (tail_a.1 + tail_b.1) / 2.0);
+
+    // Verify the tip-tail axis is axis-aligned (≥ 0.95 cosine alignment).
+    let dx = tip.0 - tail.0;
+    let dy = tip.1 - tail.1;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-9 {
+        return None;
+    }
+    let nx = (dx / len).abs();
+    let ny = (dy / len).abs();
+    if nx.max(ny) < 0.95 {
+        return None;
+    }
+
+    // Dimensions.
+    let shaft_half_width = dist(tail_a, tail_b) / 2.0;
+    let head_half_width = dist(head_back_a, head_back_b) / 2.0;
+    let shaft_end_mid = (
+        (shaft_end_a.0 + shaft_end_b.0) / 2.0,
+        (shaft_end_a.1 + shaft_end_b.1) / 2.0,
+    );
+    let head_len = dist(tip, shaft_end_mid);
+
+    // Geometric sanity: head wider than shaft, head & shaft non-degenerate.
+    if head_half_width <= shaft_half_width {
+        return None;
+    }
+    if shaft_half_width < 1e-6 || head_len < 1e-6 {
+        return None;
+    }
+
+    // Residual: mean distance from each input point to the recovered
+    // arrow polygon perimeter.
+    let arrow_corners = [
+        tail_a, shaft_end_a, head_back_a, tip, head_back_b, shaft_end_b, tail_b,
+    ];
+    let edges: Vec<(Pt, Pt)> = (0..7)
+        .map(|i| (arrow_corners[i], arrow_corners[(i + 1) % 7]))
+        .collect();
+    let mut sq_sum = 0.0;
+    for &p in pts {
+        let mut min_d = f64::INFINITY;
+        for &(e0, e1) in &edges {
+            let d = point_to_segment_dist(p, e0, e1);
+            if d < min_d {
+                min_d = d;
+            }
+        }
+        sq_sum += min_d * min_d;
+    }
+    let rms = (sq_sum / pts.len() as f64).sqrt();
+
+    Some((tail, tip, head_len, head_half_width, shaft_half_width, rms))
 }
 
 /// Count strict (non-collinear, non-endpoint) self-intersections of a
