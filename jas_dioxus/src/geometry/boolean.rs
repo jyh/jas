@@ -402,67 +402,258 @@ fn run_boolean(a: &PolygonSet, b: &PolygonSet, op: Operation) -> PolygonSet {
     sweep.add_polygon_set(a, PolygonId::Subject);
     sweep.add_polygon_set(b, PolygonId::Clipping);
 
-    // Phase 1: process events in priority order, computing in_out /
-    // other_in_out / in_result. Phase 2 will add intersection
-    // detection here. For now we visit each event in order and
-    // assume the existing edges form a non-self-intersecting
-    // partition.
-    let order = phase1_sort_events(&sweep.events);
-    let mut status: Vec<usize> = Vec::new(); // sorted by status_less
-    for &idx in &order {
-        let is_left = sweep.events[idx].is_left;
-        if is_left {
-            // Insert into status line at the correct position.
-            let pos = status
-                .binary_search_by(|&probe| {
-                    if status_less(&sweep.events, probe, idx) {
-                        std::cmp::Ordering::Less
-                    } else if probe == idx {
-                        std::cmp::Ordering::Equal
-                    } else {
-                        std::cmp::Ordering::Greater
-                    }
-                })
-                .unwrap_or_else(|e| e);
-            status.insert(pos, idx);
-            // Compute in_out / other_in_out by inspecting the edge
-            // immediately below this one in the status line.
-            compute_fields(&mut sweep.events, &status, pos);
-            // Decide whether this edge contributes.
-            sweep.events[idx].in_result = edge_in_result(&sweep.events[idx], op);
-        } else {
-            // Right event — find the matching left event and remove
-            // it from the status line. The right event itself does
-            // not need to be inserted.
-            let other = sweep.events[idx].other_event;
-            if let Some(pos) = status.iter().position(|&e| e == other) {
-                status.remove(pos);
-            }
-            // Phase 1: copy in_result from the left event to the
-            // right event for use by the connection step.
-            sweep.events[idx].in_result = sweep.events[other].in_result;
-        }
-    }
-
-    connect_edges(&sweep.events, &order)
-}
-
-/// Sort the (still-flat) events arena into priority order. In
-/// phase 1 this is a one-shot sort; phase 2 will replace it with a
-/// real priority queue so newly-created intersection events can be
-/// inserted on the fly.
-fn phase1_sort_events(events: &[SweepEvent]) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..events.len()).collect();
-    order.sort_by(|&a, &b| {
-        if event_less(events, a, b) {
-            std::cmp::Ordering::Less
-        } else if event_less(events, b, a) {
+    // Build the priority queue. Sorted in *descending* event_less
+    // order so `pop` removes the smallest from the back in O(1).
+    let mut queue: Vec<usize> = (0..sweep.events.len()).collect();
+    queue.sort_by(|&a, &b| {
+        if event_less(&sweep.events, a, b) {
             std::cmp::Ordering::Greater
+        } else if event_less(&sweep.events, b, a) {
+            std::cmp::Ordering::Less
         } else {
             std::cmp::Ordering::Equal
         }
     });
-    order
+
+    // Trace of every event we processed, in pop order — needed by
+    // the connection step.
+    let mut processed: Vec<usize> = Vec::with_capacity(queue.len() * 2);
+    let mut status: Vec<usize> = Vec::new(); // sorted by status_less
+
+    while let Some(idx) = queue.pop() {
+        processed.push(idx);
+        let is_left = sweep.events[idx].is_left;
+        if is_left {
+            // Insert this edge into the status line at its proper
+            // position.
+            let pos = status_insert_pos(&sweep.events, &status, idx);
+            status.insert(pos, idx);
+
+            // Check for intersections with the new neighbours: the
+            // edge directly below (`prev`) and directly above
+            // (`next`). Each `possible_intersection` may split one
+            // or both edges and queue up the resulting sub-events.
+            //
+            // After splitting, neither edge changes its position
+            // in the status line — only its right endpoint moves
+            // — so the slot at `pos` still refers to the current
+            // event when we go on to compute its fields below.
+            if pos + 1 < status.len() {
+                let above = status[pos + 1];
+                possible_intersection(&mut sweep.events, &mut queue, idx, above);
+            }
+            if pos > 0 {
+                let below = status[pos - 1];
+                possible_intersection(&mut sweep.events, &mut queue, below, idx);
+            }
+
+            // Compute in_out / other_in_out from the (possibly
+            // shortened) edge directly below. The status-line
+            // position has not changed.
+            let cur_pos = status
+                .iter()
+                .position(|&e| e == idx)
+                .expect("inserted event must still be in the status line");
+            compute_fields(&mut sweep.events, &status, cur_pos);
+            sweep.events[idx].in_result =
+                edge_in_result(&sweep.events[idx], op);
+        } else {
+            // Right event — find the matching left event in the
+            // status line and remove it. After removal, the
+            // edges that used to be `pos-1` and `pos+1` become
+            // direct neighbours; check them for intersection.
+            let other = sweep.events[idx].other_event;
+            if let Some(pos) = status.iter().position(|&e| e == other) {
+                let above = if pos + 1 < status.len() {
+                    Some(status[pos + 1])
+                } else {
+                    None
+                };
+                let below = if pos > 0 {
+                    Some(status[pos - 1])
+                } else {
+                    None
+                };
+                status.remove(pos);
+                if let (Some(b), Some(a)) = (below, above) {
+                    possible_intersection(&mut sweep.events, &mut queue, b, a);
+                }
+            }
+            // Propagate in_result from the left event so the
+            // connection step can find both endpoints.
+            sweep.events[idx].in_result =
+                sweep.events[other].in_result;
+        }
+    }
+
+    connect_edges(&sweep.events, &processed)
+}
+
+/// Find the insertion position for `idx` in `status` such that the
+/// resulting `status` is still sorted by [`status_less`].
+fn status_insert_pos(events: &[SweepEvent], status: &[usize], idx: usize) -> usize {
+    status
+        .binary_search_by(|&probe| {
+            if status_less(events, probe, idx) {
+                std::cmp::Ordering::Less
+            } else if status_less(events, idx, probe) {
+                std::cmp::Ordering::Greater
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .unwrap_or_else(|e| e)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: priority queue helpers and intersection detection
+// ---------------------------------------------------------------------------
+
+/// Insert `idx` into the priority queue, maintaining descending
+/// `event_less` order so that the smallest is at the back (where
+/// `pop` removes it in O(1)).
+fn queue_push(queue: &mut Vec<usize>, events: &[SweepEvent], idx: usize) {
+    let pos = queue
+        .binary_search_by(|&probe| {
+            if event_less(events, probe, idx) {
+                // probe is *earlier* than idx — should come *after*
+                // idx in the descending arrangement.
+                std::cmp::Ordering::Greater
+            } else if event_less(events, idx, probe) {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .unwrap_or_else(|e| e);
+    queue.insert(pos, idx);
+}
+
+/// Result of intersecting two segments.
+#[derive(Debug, Clone, Copy)]
+enum Intersection {
+    None,
+    /// Single intersection point. The point may coincide with an
+    /// endpoint of either or both segments — the caller decides
+    /// whether splitting is required.
+    Point((f64, f64)),
+    /// Segments are collinear and share more than a single point.
+    /// Phase 2 reports this as `None` and defers all collinear
+    /// handling to phase 3, which will inject `EdgeType::*` flags
+    /// rather than splitting.
+    Overlap,
+}
+
+/// Geometric intersection of two segments `a = a1→a2` and
+/// `b = b1→b2`.
+fn find_intersection(
+    a1: (f64, f64),
+    a2: (f64, f64),
+    b1: (f64, f64),
+    b2: (f64, f64),
+) -> Intersection {
+    let dx_a = a2.0 - a1.0;
+    let dy_a = a2.1 - a1.1;
+    let dx_b = b2.0 - b1.0;
+    let dy_b = b2.1 - b1.1;
+    let denom = dx_a * dy_b - dy_a * dx_b;
+    if denom.abs() < 1e-12 {
+        // Parallel or collinear. We don't try to distinguish them
+        // geometrically here; phase 3 handles collinear overlaps.
+        return Intersection::Overlap;
+    }
+    let dx_ab = a1.0 - b1.0;
+    let dy_ab = a1.1 - b1.1;
+    let s = (dx_b * dy_ab - dy_b * dx_ab) / denom;
+    let t = (dx_a * dy_ab - dy_a * dx_ab) / denom;
+    // Allow a small slack at the endpoints so vertex-incident
+    // intersections aren't missed by FP noise.
+    const EPS: f64 = 1e-9;
+    if s < -EPS || s > 1.0 + EPS || t < -EPS || t > 1.0 + EPS {
+        return Intersection::None;
+    }
+    let s = s.clamp(0.0, 1.0);
+    Intersection::Point((a1.0 + s * dx_a, a1.1 + s * dy_a))
+}
+
+/// Test whether the edges represented by left events `e1` and `e2`
+/// intersect, and if they do, split each edge at the intersection
+/// point so subsequent processing sees a clean partition. The new
+/// sub-events are pushed onto `queue`.
+fn possible_intersection(
+    events: &mut Vec<SweepEvent>,
+    queue: &mut Vec<usize>,
+    e1: usize,
+    e2: usize,
+) {
+    if events[e1].polygon == events[e2].polygon {
+        // Edges of the same polygon don't normally intersect in a
+        // valid input. We skip them in phase 2; phase 3 may revisit
+        // this for self-intersection support.
+        return;
+    }
+    let a1 = events[e1].point;
+    let a2 = events[events[e1].other_event].point;
+    let b1 = events[e2].point;
+    let b2 = events[events[e2].other_event].point;
+    match find_intersection(a1, a2, b1, b2) {
+        Intersection::None | Intersection::Overlap => {}
+        Intersection::Point(p) => {
+            // Only split an edge if `p` is strictly interior — at
+            // an endpoint there's nothing to subdivide.
+            if !points_eq(p, a1) && !points_eq(p, a2) {
+                divide_segment(events, queue, e1, p);
+            }
+            if !points_eq(p, b1) && !points_eq(p, b2) {
+                divide_segment(events, queue, e2, p);
+            }
+        }
+    }
+}
+
+/// Approximate point equality with the same epsilon used by
+/// `find_intersection`.
+fn points_eq(a: (f64, f64), b: (f64, f64)) -> bool {
+    const EPS: f64 = 1e-9;
+    (a.0 - b.0).abs() < EPS && (a.1 - b.1).abs() < EPS
+}
+
+/// Subdivide the edge whose left event is `edge_left_idx` at point
+/// `p`. After this call:
+///
+/// - the original left event still refers to the *same* point but
+///   its right partner has been replaced with a new event at `p`;
+/// - a new left event is created at `p` whose right partner is the
+///   original right event;
+/// - the new "right of the left half" and "left of the right half"
+///   events are pushed onto `queue` so they will be processed in
+///   priority order.
+fn divide_segment(
+    events: &mut Vec<SweepEvent>,
+    queue: &mut Vec<usize>,
+    edge_left_idx: usize,
+    p: (f64, f64),
+) {
+    let edge_right_idx = events[edge_left_idx].other_event;
+    let polygon = events[edge_left_idx].polygon;
+
+    // l = right of the left half (at p, is_left = false)
+    // nr = left of the right half (at p, is_left = true)
+    let l_idx = events.len();
+    let nr_idx = l_idx + 1;
+    let mut l_event = SweepEvent::new(p, false, polygon);
+    l_event.other_event = edge_left_idx;
+    let mut nr_event = SweepEvent::new(p, true, polygon);
+    nr_event.other_event = edge_right_idx;
+    events.push(l_event);
+    events.push(nr_event);
+
+    // Re-link partner pointers.
+    events[edge_left_idx].other_event = l_idx;
+    events[edge_right_idx].other_event = nr_idx;
+
+    queue_push(queue, events, l_idx);
+    queue_push(queue, events, nr_idx);
 }
 
 /// Populate `in_out` / `other_in_out` for the left event at
