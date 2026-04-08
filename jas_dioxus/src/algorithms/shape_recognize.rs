@@ -185,6 +185,23 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
                 candidates.push((res, RecognizedShape::Triangle { pts: verts }));
             }
         }
+
+        // Lemniscate. Only attempted when the path crosses itself, which
+        // is the defining topological feature of the figure-8.
+        if count_self_intersections(&pts) >= 1 {
+            if let Some((cx, cy, a, horizontal, res)) = fit_lemniscate(&pts) {
+                if res <= tol_abs {
+                    candidates.push((
+                        res,
+                        RecognizedShape::Lemniscate {
+                            center: (cx, cy),
+                            a,
+                            horizontal,
+                        },
+                    ));
+                }
+            }
+        }
     }
 
     candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -495,6 +512,102 @@ fn fit_round_rect(pts: &[Pt]) -> Option<(f64, f64, f64, f64, f64, f64)> {
     let r = (lo + hi) / 2.0;
     let rms = round_rect_rms(pts, xmin, ymin, w, h, r);
     Some((xmin, ymin, w, h, r, rms))
+}
+
+/// Count strict (non-collinear, non-endpoint) self-intersections of a
+/// polyline. Adjacent segments — and the closure pair (last, first) for
+/// closed paths — are skipped.
+fn count_self_intersections(pts: &[Pt]) -> usize {
+    fn ccw(a: Pt, b: Pt, c: Pt) -> f64 {
+        (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
+    }
+    fn segments_intersect(a1: Pt, a2: Pt, b1: Pt, b2: Pt) -> bool {
+        let d1 = ccw(b1, b2, a1);
+        let d2 = ccw(b1, b2, a2);
+        let d3 = ccw(a1, a2, b1);
+        let d4 = ccw(a1, a2, b2);
+        d1 * d2 < 0.0 && d3 * d4 < 0.0
+    }
+    let n = pts.len();
+    if n < 4 {
+        return 0;
+    }
+    let n_segs = n - 1;
+    let mut count = 0;
+    for i in 0..n_segs {
+        for j in (i + 2)..n_segs {
+            // Skip the wraparound adjacency for closed paths.
+            if i == 0 && j == n_segs - 1 {
+                let close_gap = dist(pts[0], *pts.last().unwrap());
+                if close_gap < 1e-6 {
+                    continue;
+                }
+            }
+            if segments_intersect(pts[i], pts[i + 1], pts[j], pts[j + 1]) {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// Lemniscate fit (Gerono parametrization, axis-aligned). Returns
+/// `(cx, cy, a, horizontal, rms_residual)`.
+///
+/// Strategy: center = bbox center; orientation chosen so the long axis
+/// of the bbox is the long axis of the figure-8; `a` = long half-extent.
+/// An aspect sanity check (cross extent must be ≈ `a·√2/2`) rejects
+/// inputs whose bbox doesn't look like a figure-8 at all. Residual is
+/// computed against a dense parametric sample.
+fn fit_lemniscate(pts: &[Pt]) -> Option<(f64, f64, f64, bool, f64)> {
+    let (xmin, ymin, xmax, ymax) = bbox_of(pts);
+    let w = xmax - xmin;
+    let h = ymax - ymin;
+    if w <= 1e-9 || h <= 1e-9 {
+        return None;
+    }
+    let cx = (xmin + xmax) / 2.0;
+    let cy = (ymin + ymax) / 2.0;
+    let horizontal = w >= h;
+    let a = if horizontal { w / 2.0 } else { h / 2.0 };
+    let cross = if horizontal { h } else { w };
+    let expected_cross = a * std::f64::consts::SQRT_2 / 2.0;
+    if (cross / expected_cross - 1.0).abs() > 0.20 {
+        return None;
+    }
+
+    // Dense parametric sample of the ideal lemniscate.
+    let n_samples = 200;
+    let mut samples = Vec::with_capacity(n_samples);
+    for i in 0..n_samples {
+        let t = 2.0 * std::f64::consts::PI * i as f64 / n_samples as f64;
+        let s = t.sin();
+        let c = t.cos();
+        let denom = 1.0 + s * s;
+        let lx = a * c / denom;
+        let ly = a * s * c / denom;
+        if horizontal {
+            samples.push((cx + lx, cy + ly));
+        } else {
+            samples.push((cx + ly, cy + lx));
+        }
+    }
+
+    let mut sq_sum = 0.0;
+    for &p in pts {
+        let mut min_d_sq = f64::INFINITY;
+        for &s in &samples {
+            let dx = p.0 - s.0;
+            let dy = p.1 - s.1;
+            let d2 = dx * dx + dy * dy;
+            if d2 < min_d_sq {
+                min_d_sq = d2;
+            }
+        }
+        sq_sum += min_d_sq;
+    }
+    let rms = (sq_sum / pts.len() as f64).sqrt();
+    Some((cx, cy, a, horizontal, rms))
 }
 
 /// Triangle fit by the "max-pair + farthest perpendicular" heuristic.
@@ -1191,6 +1304,7 @@ mod tests {
             .map(|&(x, y)| if x > 0.0 { (x + 30.0, y) } else { (x, y) })
             .collect();
         let cfg = RecognizeConfig::default();
-        assert!(recognize(&skewed, &cfg).is_none());
+        let got = recognize(&skewed, &cfg);
+        assert!(got.is_none(), "expected None, got {got:?}");
     }
 }
