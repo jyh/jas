@@ -1,6 +1,6 @@
 """Tests for the word-wrap text layout."""
 
-from geometry.text_layout import layout, ordered_range
+from algorithms.text_layout import layout, ordered_range
 
 
 def fixed(w):

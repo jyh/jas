@@ -525,7 +525,7 @@ def _draw_element(painter: QPainter, elem: Element,
                 painter.setPen(QColor("black"))
             # Use the wrapped layout module so what the user sees matches
             # what the in-place editor measures.
-            from geometry.text_layout import layout as _layout
+            from algorithms.text_layout import layout as _layout
             from tools.text_measure import make_measurer
             measure = make_measurer(ff, fw, fst, fs)
             max_w = tw if (tw > 0 and th > 0) else 0.0

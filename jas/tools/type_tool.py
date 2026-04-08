@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Optional
 from geometry.element import (
     Color, Element, Fill, Group, Layer, Text, Stroke,
 )
-from geometry.text_layout import layout as _layout, TextLayout
+from algorithms.text_layout import layout as _layout, TextLayout
 from tools.text_edit import (
     EditTarget, TextEditSession, empty_text_elem,
     BLINK_HALF_PERIOD_MS, now_ms as _now_ms, cursor_visible as _cursor_visible,

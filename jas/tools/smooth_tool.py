@@ -83,7 +83,7 @@ from geometry.element import (
     CurveTo, LineTo, MoveTo, Path, QuadTo, PathCommand,
     flatten_path_commands,
 )
-from geometry.fit_curve import fit_curve
+from algorithms.fit_curve import fit_curve
 from tools.tool import CanvasTool, ToolContext
 
 if TYPE_CHECKING:

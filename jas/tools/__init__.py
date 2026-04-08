@@ -3,16 +3,16 @@
 from tools.tool import CanvasTool
 from tools.toolbar import Tool
 
-from tools.selection import SelectionTool, DirectSelectionTool, GroupSelectionTool
-from tools.drawing import LineTool, RectTool, RoundedRectTool, PolygonTool, StarTool
-from tools.pen import PenTool
-from tools.add_anchor_point import AddAnchorPointTool
-from tools.delete_anchor_point import DeleteAnchorPointTool
-from tools.pencil import PencilTool
-from tools.path_eraser import PathEraserTool
-from tools.smooth import SmoothTool
+from tools.selection_tool import SelectionTool, DirectSelectionTool, GroupSelectionTool
+from tools.drawing_tool import LineTool, RectTool, RoundedRectTool, PolygonTool, StarTool
+from tools.pen_tool import PenTool
+from tools.add_anchor_point_tool import AddAnchorPointTool
+from tools.delete_anchor_point_tool import DeleteAnchorPointTool
+from tools.pencil_tool import PencilTool
+from tools.path_eraser_tool import PathEraserTool
+from tools.smooth_tool import SmoothTool
 from tools.type_tool import TypeTool
-from tools.type_on_path import TypeOnPathTool
+from tools.type_on_path_tool import TypeOnPathTool
 
 
 def create_tools() -> dict[Tool, CanvasTool]:

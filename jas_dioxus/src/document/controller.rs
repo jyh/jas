@@ -14,7 +14,7 @@ use crate::geometry::element::{
     control_point_count, control_points, move_control_points,
     move_path_handle, Element, PathElem,
 };
-use crate::geometry::hit_test::{element_intersects_rect, point_in_rect};
+use crate::algorithms::hit_test::{element_intersects_rect, point_in_rect};
 
 // ---------------------------------------------------------------------------
 // Controller

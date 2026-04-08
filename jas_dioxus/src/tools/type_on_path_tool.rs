@@ -20,7 +20,7 @@ use crate::geometry::element::{
     Color, Element, PathCommand, TextPathElem,
 };
 use crate::geometry::measure::{path_closest_offset, path_distance_to_point, path_point_at_offset};
-use crate::geometry::path_text_layout::{layout_path_text, PathTextLayout};
+use crate::algorithms::path_text_layout::{layout_path_text, PathTextLayout};
 
 use super::tool::{CanvasTool, KeyMods, DRAG_THRESHOLD, HIT_RADIUS};
 use super::text_edit::{

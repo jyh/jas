@@ -16,7 +16,7 @@ from enum import Enum
 from typing import List, Optional
 
 from geometry.element import Color, Fill, Text, TextPath
-from geometry.text_layout import ordered_range
+from algorithms.text_layout import ordered_range
 
 
 # Cursor blink half-period in milliseconds (matches the macOS default).

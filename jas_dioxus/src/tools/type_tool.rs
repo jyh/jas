@@ -20,7 +20,7 @@ use crate::document::controller::Controller;
 use crate::document::document::ElementSelection;
 use crate::document::model::Model;
 use crate::geometry::element::{Color, Element, TextElem};
-use crate::geometry::text_layout::{layout, TextLayout};
+use crate::algorithms::text_layout::{layout, TextLayout};
 
 use super::tool::{CanvasTool, KeyMods, DRAG_THRESHOLD};
 use super::text_edit::{

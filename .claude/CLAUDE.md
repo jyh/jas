@@ -1,0 +1,1 @@
+The four projects here in jas (python), jas_ocaml (OCaml), jas_dioxus (Rust), and JasSwift (Swift), are intended to be identical. Generally, develop new features in the Rust app first, then push the feature to the other apps.

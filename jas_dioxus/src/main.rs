@@ -1,3 +1,4 @@
+mod algorithms;
 mod canvas;
 mod document;
 mod geometry;
