@@ -14,6 +14,7 @@ from tools.star_tool import StarTool
 from tools.pen_tool import PenTool
 from tools.add_anchor_point_tool import AddAnchorPointTool
 from tools.delete_anchor_point_tool import DeleteAnchorPointTool
+from tools.anchor_point_tool import AnchorPointTool
 from tools.pencil_tool import PencilTool
 from tools.path_eraser_tool import PathEraserTool
 from tools.smooth_tool import SmoothTool
@@ -30,6 +31,7 @@ def create_tools() -> dict[Tool, CanvasTool]:
         Tool.PEN: PenTool(),
         Tool.ADD_ANCHOR_POINT: AddAnchorPointTool(),
         Tool.DELETE_ANCHOR_POINT: DeleteAnchorPointTool(),
+        Tool.ANCHOR_POINT: AnchorPointTool(),
         Tool.PENCIL: PencilTool(),
         Tool.PATH_ERASER: PathEraserTool(),
         Tool.SMOOTH: SmoothTool(),

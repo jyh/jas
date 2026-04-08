@@ -16,6 +16,7 @@ class Tool(Enum):
     PEN = auto()
     ADD_ANCHOR_POINT = auto()
     DELETE_ANCHOR_POINT = auto()
+    ANCHOR_POINT = auto()
     PENCIL = auto()
     PATH_ERASER = auto()
     SMOOTH = auto()
@@ -89,6 +90,8 @@ class ToolButton(QToolButton):
             self._draw_add_anchor_point_tool(painter)
         elif self.tool == Tool.DELETE_ANCHOR_POINT:
             self._draw_delete_anchor_point_tool(painter)
+        elif self.tool == Tool.ANCHOR_POINT:
+            self._draw_anchor_point_tool(painter)
         elif self.tool == Tool.PENCIL:
             self._draw_pencil_tool(painter)
         elif self.tool == Tool.PATH_ERASER:
@@ -311,6 +314,29 @@ class ToolButton(QToolButton):
         painter.rotate(-28)
         painter.drawRect(158.95, 110.41, 93.43, 15.36)
         painter.restore()
+        painter.restore()
+
+    def _draw_anchor_point_tool(self, painter):
+        """Convert Anchor Point: a center anchor square with two
+        diagonal handle lines, suggesting a smooth/corner convert."""
+        cx = self.ICON_SIZE / 2.0
+        cy = self.ICON_SIZE / 2.0
+        painter.save()
+        painter.setPen(QPen(QColor("#cccccc"), 1.5))
+        # Diagonal handle line
+        painter.drawLine(int(cx - 10), int(cy - 10), int(cx + 10), int(cy + 10))
+        # Handle endpoint circles (filled)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#cccccc"))
+        r = 2.5
+        for hx, hy in ((cx - 10, cy - 10), (cx + 10, cy + 10)):
+            painter.drawEllipse(QPoint(int(hx), int(hy)), int(r), int(r))
+        # Anchor square (filled with black outline)
+        half = 4
+        painter.drawRect(int(cx - half), int(cy - half), half * 2, half * 2)
+        painter.setPen(QPen(QColor("#000000"), 1.0))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(int(cx - half), int(cy - half), half * 2, half * 2)
         painter.restore()
 
     def _draw_pencil_tool(self, painter):
@@ -730,7 +756,7 @@ class ToolButton(QToolButton):
 # Tools that share the direct/group selection slot
 _ARROW_SLOT_TOOLS = {Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION}
 # Tools that share the pen/add-anchor-point slot
-_PEN_SLOT_TOOLS = {Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT}
+_PEN_SLOT_TOOLS = {Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT, Tool.ANCHOR_POINT}
 # Tools that share the pencil/path-eraser slot
 _PENCIL_SLOT_TOOLS = {Tool.PENCIL, Tool.PATH_ERASER, Tool.SMOOTH}
 # Tools that share the text/text-path slot
@@ -797,6 +823,8 @@ class Toolbar(QWidget):
         self.button_group.addButton(self.buttons[Tool.ADD_ANCHOR_POINT])
         self.buttons[Tool.DELETE_ANCHOR_POINT] = ToolButton(Tool.DELETE_ANCHOR_POINT, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.DELETE_ANCHOR_POINT])
+        self.buttons[Tool.ANCHOR_POINT] = ToolButton(Tool.ANCHOR_POINT, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.ANCHOR_POINT])
         self.buttons[Tool.TYPE_ON_PATH] = ToolButton(Tool.TYPE_ON_PATH, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.TYPE_ON_PATH])
         self.buttons[Tool.POLYGON] = ToolButton(Tool.POLYGON, has_alternates=True)
@@ -920,9 +948,10 @@ class Toolbar(QWidget):
 
     def _show_pen_slot_menu(self):
         menu = QMenu(self)
-        for tool in (Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT):
+        for tool in (Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT, Tool.ANCHOR_POINT):
             label = {Tool.PEN: "Pen", Tool.ADD_ANCHOR_POINT: "Add Anchor Point",
-                     Tool.DELETE_ANCHOR_POINT: "Delete Anchor Point"}[tool]
+                     Tool.DELETE_ANCHOR_POINT: "Delete Anchor Point",
+                     Tool.ANCHOR_POINT: "Anchor Point"}[tool]
             action = menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(tool == self._pen_slot_tool)
