@@ -377,7 +377,115 @@ impl Sweep {
 /// Top-level dispatch: build a `Sweep`, run it, return the result
 /// `PolygonSet`. Handles the trivial empty-operand cases without
 /// invoking the sweep machinery.
+/// Snap-rounding ratio: the grid spacing is `SNAP_RATIO * diagonal`
+/// of the combined input bounding box. For a typical user-drawn
+/// document (diagonal on the order of 10² units) this produces a
+/// grid of 10⁻⁷ units — well below any visible resolution but well
+/// above the 10⁻¹² / 10⁻⁹ thresholds used inside the sweep. The
+/// goal is to fuse points that are "numerically equal" from the
+/// algorithm's point of view before they hit the sweep, so the
+/// sweep never has to reason about sub-epsilon differences.
+const SNAP_RATIO: f64 = 1e-9;
+
+/// Compute the snap-rounding grid spacing for two input polygon
+/// sets. Returns `None` if the combined input has no vertices or a
+/// zero-diameter bounding box — in that case the caller skips
+/// snapping and falls through to the regular empty-operand
+/// handling.
+///
+/// The returned grid is always a **power of 2**. This is critical:
+/// `(x / grid) * grid` is bit-exact only for power-of-2 grids, so
+/// snap-rounding leaves already-aligned input unchanged down to the
+/// last bit (and in particular leaves integer-coordinate fixtures
+/// alone). Rounding the ideal grid (`diagonal * SNAP_RATIO`) to the
+/// next *larger* power of 2 makes the actual grid slightly coarser
+/// than the target, which is harmless — the effective ratio stays
+/// within a factor of 2 of the intended value.
+fn snap_grid(a: &PolygonSet, b: &PolygonSet) -> Option<f64> {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut any = false;
+    for ring in a.iter().chain(b.iter()) {
+        for &(x, y) in ring {
+            if x < min_x {
+                min_x = x;
+            }
+            if y < min_y {
+                min_y = y;
+            }
+            if x > max_x {
+                max_x = x;
+            }
+            if y > max_y {
+                max_y = y;
+            }
+            any = true;
+        }
+    }
+    if !any {
+        return None;
+    }
+    let dx = max_x - min_x;
+    let dy = max_y - min_y;
+    let diagonal = (dx * dx + dy * dy).sqrt();
+    if diagonal <= 0.0 {
+        return None;
+    }
+    let target = diagonal * SNAP_RATIO;
+    if target <= 0.0 || !target.is_finite() {
+        return None;
+    }
+    // Round target up to the nearest power of 2: 2^ceil(log2(target)).
+    let exponent = target.log2().ceil() as i32;
+    Some((2.0_f64).powi(exponent))
+}
+
+/// Snap each vertex to the nearest point on a `grid`-spaced lattice,
+/// remove any consecutive duplicate vertices (including wrap-around),
+/// and drop rings that collapse to fewer than 3 distinct vertices.
+///
+/// Snap-rounding is the standard robustness technique for sweep-line
+/// boolean ops: by collapsing vertices that are within half a grid
+/// cell of each other, we guarantee that any two "meaningfully
+/// different" input features stay distinct, and any two "numerically
+/// equal" ones become literally equal. The sweep then never has to
+/// choose between `!= 0.0` and `abs(x) < eps` — the answer is the
+/// same either way.
+fn snap_round(ps: &PolygonSet, grid: f64) -> PolygonSet {
+    let snap = |x: f64| (x / grid).round() * grid;
+    let mut out: PolygonSet = Vec::with_capacity(ps.len());
+    for ring in ps {
+        let mut new_ring: Ring = Vec::with_capacity(ring.len());
+        for &(x, y) in ring {
+            let p = (snap(x), snap(y));
+            if new_ring.last() != Some(&p) {
+                new_ring.push(p);
+            }
+        }
+        // Wrap-around: if the ring closed back onto its first vertex
+        // after snapping, drop the redundant last vertex.
+        if new_ring.len() > 1 && new_ring.first() == new_ring.last() {
+            new_ring.pop();
+        }
+        if new_ring.len() >= 3 {
+            out.push(new_ring);
+        }
+    }
+    out
+}
+
 fn run_boolean(a: &PolygonSet, b: &PolygonSet, op: Operation) -> PolygonSet {
+    // Snap-round inputs onto a grid sized as a fixed fraction of the
+    // combined bounding-box diagonal. See `SNAP_RATIO`.
+    let (a_snap, b_snap) = match snap_grid(a, b) {
+        Some(grid) => (snap_round(a, grid), snap_round(b, grid)),
+        None => (clone_nondegenerate(a), clone_nondegenerate(b)),
+    };
+    let a = &a_snap;
+    let b = &b_snap;
+
     // Trivial cases — handled here so the sweep code can assume both
     // operands are non-empty.
     let a_empty = a.iter().all(|r| r.len() < 3);
@@ -2070,56 +2178,27 @@ mod tests {
         assert!(s_ok, "{}: subtract area {} not within {} of 50", label, s_area, ZONE_TOL);
     }
 
-    // -------------------------------------------------------------------
-    // KNOWN LIMITATION: off-line split points in handle_collinear
-    //
-    // Perturbation tests at delta ∈ [1e-15, 1e-10] currently fail on
-    // `boolean_subtract`: the result is an empty region instead of
-    // the expected ~50-area rectangle. Root cause: when two edges
-    // are parallel-but-not-exactly-equal (dy_a = dy_b = 0 for both
-    // horizontals, but the y values differ by delta), find_intersection
-    // returns Overlap and handle_collinear's Case D2 fires. It then
-    // splits each edge at the *other* edge's endpoint, producing
-    // split points that sit slightly off the edge being split — e.g.
-    // splitting a_bot=(0,0)-(10,0) at (5, 1e-15) produces a left
-    // half (0,0)-(5, 1e-15) which is no longer horizontal. The
-    // slanted sub-edges corrupt later sweep invariants.
-    //
-    // At delta >= ~1e-8 the edges are distinct enough that
-    // find_intersection returns Point instead of Overlap, the
-    // collinear path is bypassed entirely, and the algorithm handles
-    // the inputs correctly.
-    //
-    // Fix options (not implemented):
-    //   1. Project the split point onto the edge being split in
-    //      handle_collinear (snap to edge line).
-    //   2. Snap-round all inputs to a fixed grid at the start of
-    //      run_boolean.
-    //
-    // Re-enable the ignored tests once one of these is in place.
-    // -------------------------------------------------------------------
-
+    // Zone 1: well below SNAP_RATIO × diagonal. These deltas get
+    // fused to zero by snap-rounding at the entry of run_boolean,
+    // so the algorithm sees an exact shared-edge fixture.
     #[test]
-    #[ignore = "known robustness gap: off-line split points in handle_collinear Case D2"]
     fn perturb_1e_minus_15() {
         check_perturbation(1e-15, "1e-15");
     }
 
     #[test]
-    #[ignore = "known robustness gap: off-line split points in handle_collinear Case D2"]
     fn perturb_1e_minus_11() {
         check_perturbation(1e-11, "1e-11");
     }
 
     #[test]
-    #[ignore = "known robustness gap: off-line split points in handle_collinear Case D2"]
     fn perturb_1e_minus_10() {
         check_perturbation(1e-10, "1e-10");
     }
 
-    // Zone where perturbation is large enough to bypass the collinear
-    // code path entirely — find_intersection returns Point, Case D2
-    // never fires. These should pass.
+    // Zone where perturbation survives snap-rounding (above the
+    // grid cell) and the edges are distinct enough that
+    // find_intersection returns Point, bypassing the collinear path.
     #[test]
     fn perturb_1e_minus_8() {
         check_perturbation(1e-8, "1e-8");
