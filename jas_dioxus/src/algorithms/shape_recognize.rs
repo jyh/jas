@@ -89,7 +89,7 @@ pub struct RecognizeConfig {
 impl Default for RecognizeConfig {
     fn default() -> Self {
         Self {
-            tolerance: 0.06,
+            tolerance: 0.05,
             close_gap_frac: 0.10,
             corner_angle_deg: 35.0,
             square_aspect_eps: 0.10,
@@ -99,13 +99,77 @@ impl Default for RecognizeConfig {
     }
 }
 
+/// Closed-shape fits (rect, ellipse, triangle) are rejected when the bbox
+/// aspect ratio falls below this. Without it, very thin inputs (a flat
+/// triangle, a near-line) succeed as zero-residual rectangles because
+/// almost every point sits on the thin bbox perimeter.
+const MIN_CLOSED_BBOX_ASPECT: f64 = 0.10;
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /// Recognize from a raw polyline.
-pub fn recognize(_points: &[Pt], _cfg: &RecognizeConfig) -> Option<RecognizedShape> {
-    unimplemented!("recognize: detector not yet implemented")
+pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape> {
+    if points.len() < 3 {
+        return None;
+    }
+    let pts = resample(points, cfg.resample_n);
+    let diag = bbox_diag_of(&pts);
+    if diag < 1e-9 {
+        return None;
+    }
+    let closed = is_closed(&pts, cfg.close_gap_frac);
+    let tol_abs = cfg.tolerance * diag;
+
+    let mut candidates: Vec<(f64, RecognizedShape)> = Vec::new();
+
+    // Line is always a valid candidate (open or closed).
+    if let Some((a, b, res)) = fit_line(&pts) {
+        if res <= tol_abs {
+            candidates.push((res, RecognizedShape::Line { a, b }));
+        }
+    }
+
+    if closed {
+        // Ellipse (axis-aligned, bbox-based). Snap to circle when nearly so.
+        if let Some((cx, cy, rx, ry, res)) = fit_ellipse_aa(&pts) {
+            if res <= tol_abs {
+                let ratio = rx.min(ry) / rx.max(ry);
+                let shape = if ratio >= cfg.circle_eccentricity_eps {
+                    let r = (rx + ry) / 2.0;
+                    RecognizedShape::Circle { cx, cy, r }
+                } else {
+                    RecognizedShape::Ellipse { cx, cy, rx, ry }
+                };
+                candidates.push((res, shape));
+            }
+        }
+
+        // Rectangle (axis-aligned, bbox-based). Snap to square when nearly so.
+        if let Some((x, y, w, h, res)) = fit_rect_aa(&pts) {
+            if res <= tol_abs {
+                let aspect = (w - h).abs() / w.max(h);
+                let (w, h) = if aspect <= cfg.square_aspect_eps {
+                    let m = (w + h) / 2.0;
+                    (m, m)
+                } else {
+                    (w, h)
+                };
+                candidates.push((res, RecognizedShape::Rectangle { x, y, w, h }));
+            }
+        }
+
+        // Triangle.
+        if let Some((verts, res)) = fit_triangle(&pts) {
+            if res <= tol_abs {
+                candidates.push((res, RecognizedShape::Triangle { pts: verts }));
+            }
+        }
+    }
+
+    candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.into_iter().next().map(|(_, s)| s)
 }
 
 /// Recognize from a path that may contain Beziers — flattens via
@@ -113,6 +177,285 @@ pub fn recognize(_points: &[Pt], _cfg: &RecognizeConfig) -> Option<RecognizedSha
 pub fn recognize_path(d: &[PathCommand], cfg: &RecognizeConfig) -> Option<RecognizedShape> {
     let pts = flatten_path_commands(d);
     recognize(&pts, cfg)
+}
+
+// ---------------------------------------------------------------------------
+// Geometric helpers
+// ---------------------------------------------------------------------------
+
+fn dist(a: Pt, b: Pt) -> f64 {
+    ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt()
+}
+
+/// (xmin, ymin, xmax, ymax)
+fn bbox_of(pts: &[Pt]) -> (f64, f64, f64, f64) {
+    let mut xmin = f64::INFINITY;
+    let mut ymin = f64::INFINITY;
+    let mut xmax = f64::NEG_INFINITY;
+    let mut ymax = f64::NEG_INFINITY;
+    for &(x, y) in pts {
+        if x < xmin { xmin = x; }
+        if x > xmax { xmax = x; }
+        if y < ymin { ymin = y; }
+        if y > ymax { ymax = y; }
+    }
+    (xmin, ymin, xmax, ymax)
+}
+
+fn bbox_diag_of(pts: &[Pt]) -> f64 {
+    let (xmin, ymin, xmax, ymax) = bbox_of(pts);
+    ((xmax - xmin).powi(2) + (ymax - ymin).powi(2)).sqrt()
+}
+
+fn arc_length(pts: &[Pt]) -> f64 {
+    pts.windows(2).map(|w| dist(w[0], w[1])).sum()
+}
+
+fn is_closed(pts: &[Pt], frac: f64) -> bool {
+    if pts.len() < 2 {
+        return false;
+    }
+    let total = arc_length(pts);
+    if total < 1e-12 {
+        return false;
+    }
+    let gap = dist(pts[0], *pts.last().unwrap());
+    gap / total <= frac
+}
+
+/// Resample to `n` points uniformly along arc length.
+fn resample(pts: &[Pt], n: usize) -> Vec<Pt> {
+    if pts.len() < 2 || n < 2 {
+        return pts.to_vec();
+    }
+    let mut cum = Vec::with_capacity(pts.len());
+    cum.push(0.0);
+    for i in 1..pts.len() {
+        cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
+    }
+    let total = *cum.last().unwrap();
+    if total < 1e-12 {
+        return pts.to_vec();
+    }
+    let step = total / (n - 1) as f64;
+    let mut out = Vec::with_capacity(n);
+    out.push(pts[0]);
+    let mut idx = 1;
+    for k in 1..(n - 1) {
+        let target = step * k as f64;
+        while idx < pts.len() - 1 && cum[idx] < target {
+            idx += 1;
+        }
+        let seg_start = cum[idx - 1];
+        let seg_len = cum[idx] - seg_start;
+        let t = if seg_len > 1e-12 {
+            ((target - seg_start) / seg_len).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let x = pts[idx - 1].0 + t * (pts[idx].0 - pts[idx - 1].0);
+        let y = pts[idx - 1].1 + t * (pts[idx].1 - pts[idx - 1].1);
+        out.push((x, y));
+    }
+    out.push(*pts.last().unwrap());
+    out
+}
+
+/// Distance from point `p` to line segment `(a, b)`.
+fn point_to_segment_dist(p: Pt, a: Pt, b: Pt) -> f64 {
+    let dx = b.0 - a.0;
+    let dy = b.1 - a.1;
+    let len2 = dx * dx + dy * dy;
+    if len2 < 1e-12 {
+        return dist(p, a);
+    }
+    let t = ((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len2;
+    let t = t.clamp(0.0, 1.0);
+    let qx = a.0 + t * dx;
+    let qy = a.1 + t * dy;
+    ((p.0 - qx).powi(2) + (p.1 - qy).powi(2)).sqrt()
+}
+
+/// Perpendicular distance from `p` to the infinite line through `(a, b)`.
+fn point_to_line_dist(p: Pt, a: Pt, b: Pt) -> f64 {
+    let dx = b.0 - a.0;
+    let dy = b.1 - a.1;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-12 {
+        return dist(p, a);
+    }
+    ((p.0 - a.0) * dy - (p.1 - a.1) * dx).abs() / len
+}
+
+// ---------------------------------------------------------------------------
+// Fits
+// ---------------------------------------------------------------------------
+
+/// Total least squares (PCA) line fit. Returns endpoints (projected min/max
+/// along the principal direction) and mean orthogonal residual.
+fn fit_line(pts: &[Pt]) -> Option<(Pt, Pt, f64)> {
+    let n = pts.len() as f64;
+    if pts.len() < 2 {
+        return None;
+    }
+    let cx = pts.iter().map(|p| p.0).sum::<f64>() / n;
+    let cy = pts.iter().map(|p| p.1).sum::<f64>() / n;
+    let mut sxx = 0.0;
+    let mut syy = 0.0;
+    let mut sxy = 0.0;
+    for &(x, y) in pts {
+        sxx += (x - cx).powi(2);
+        syy += (y - cy).powi(2);
+        sxy += (x - cx) * (y - cy);
+    }
+    // Eigenvector of [[sxx, sxy],[sxy, syy]] with largest eigenvalue.
+    let trace = sxx + syy;
+    let det = sxx * syy - sxy * sxy;
+    let disc = ((trace * trace / 4.0) - det).max(0.0).sqrt();
+    let lambda1 = trace / 2.0 + disc;
+    let (dx, dy) = if sxy.abs() > 1e-12 {
+        (lambda1 - syy, sxy)
+    } else if sxx >= syy {
+        (1.0, 0.0)
+    } else {
+        (0.0, 1.0)
+    };
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-12 {
+        return None;
+    }
+    let dx = dx / len;
+    let dy = dy / len;
+    let mut tmin = f64::INFINITY;
+    let mut tmax = f64::NEG_INFINITY;
+    let mut sq_sum = 0.0;
+    for &(x, y) in pts {
+        let t = (x - cx) * dx + (y - cy) * dy;
+        if t < tmin { tmin = t; }
+        if t > tmax { tmax = t; }
+        let perp = (x - cx) * (-dy) + (y - cy) * dx;
+        sq_sum += perp * perp;
+    }
+    let rms = (sq_sum / n).sqrt();
+    let a = (cx + tmin * dx, cy + tmin * dy);
+    let b = (cx + tmax * dx, cy + tmax * dy);
+    Some((a, b, rms))
+}
+
+/// Axis-aligned ellipse fit via the bounding box. Center = bbox center;
+/// `rx`, `ry` = bbox half-extents. Residual is mean approximate distance
+/// to the ellipse perimeter.
+fn fit_ellipse_aa(pts: &[Pt]) -> Option<(f64, f64, f64, f64, f64)> {
+    let (xmin, ymin, xmax, ymax) = bbox_of(pts);
+    let rx = (xmax - xmin) / 2.0;
+    let ry = (ymax - ymin) / 2.0;
+    if rx <= 1e-9 || ry <= 1e-9 {
+        return None;
+    }
+    if rx.min(ry) / rx.max(ry) < MIN_CLOSED_BBOX_ASPECT {
+        return None;
+    }
+    let cx = (xmin + xmax) / 2.0;
+    let cy = (ymin + ymax) / 2.0;
+    let scale = rx.min(ry);
+    let mut sq_sum = 0.0;
+    for &(x, y) in pts {
+        let nx = (x - cx) / rx;
+        let ny = (y - cy) / ry;
+        let r = (nx * nx + ny * ny).sqrt();
+        let d = (r - 1.0) * scale;
+        sq_sum += d * d;
+    }
+    let rms = (sq_sum / pts.len() as f64).sqrt();
+    Some((cx, cy, rx, ry, rms))
+}
+
+/// Axis-aligned rectangle fit via the bounding box. Residual is mean
+/// distance from each point to the nearest of the four edges. For a true
+/// rectangle the residual is ~0; for a tilted square the residual is large
+/// because many points lie far inside the bbox.
+fn fit_rect_aa(pts: &[Pt]) -> Option<(f64, f64, f64, f64, f64)> {
+    let (xmin, ymin, xmax, ymax) = bbox_of(pts);
+    let w = xmax - xmin;
+    let h = ymax - ymin;
+    if w <= 1e-9 || h <= 1e-9 {
+        return None;
+    }
+    if w.min(h) / w.max(h) < MIN_CLOSED_BBOX_ASPECT {
+        return None;
+    }
+    let mut sq_sum = 0.0;
+    for &(x, y) in pts {
+        let dx = (x - xmin).abs().min((x - xmax).abs());
+        let dy = (y - ymin).abs().min((y - ymax).abs());
+        let d = dx.min(dy);
+        sq_sum += d * d;
+    }
+    let rms = (sq_sum / pts.len() as f64).sqrt();
+    Some((xmin, ymin, w, h, rms))
+}
+
+/// Triangle fit by the "max-pair + farthest perpendicular" heuristic.
+/// Rejects degenerate (flat) triangles so flat inputs fall through to Line.
+fn fit_triangle(pts: &[Pt]) -> Option<([Pt; 3], f64)> {
+    if pts.len() < 3 {
+        return None;
+    }
+    // Find pair of input points with maximum distance.
+    let mut max_d = 0.0;
+    let mut ai = 0;
+    let mut bi = 0;
+    for i in 0..pts.len() {
+        for j in (i + 1)..pts.len() {
+            let d = dist(pts[i], pts[j]);
+            if d > max_d {
+                max_d = d;
+                ai = i;
+                bi = j;
+            }
+        }
+    }
+    if max_d < 1e-9 {
+        return None;
+    }
+    let pa = pts[ai];
+    let pb = pts[bi];
+    // Find third vertex: input point with max perpendicular distance from line ab.
+    let mut max_perp = 0.0;
+    let mut ci = 0;
+    for (i, &p) in pts.iter().enumerate() {
+        if i == ai || i == bi {
+            continue;
+        }
+        let d = point_to_line_dist(p, pa, pb);
+        if d > max_perp {
+            max_perp = d;
+            ci = i;
+        }
+    }
+    if max_perp < 1e-9 {
+        return None;
+    }
+    // Reject very flat triangles — they should be classified as Line instead.
+    if max_perp / max_d < 0.05 {
+        return None;
+    }
+    let pc = pts[ci];
+    let verts = [pa, pb, pc];
+    let edges = [(pa, pb), (pb, pc), (pc, pa)];
+    let mut sq_sum = 0.0;
+    for &p in pts {
+        let mut min_d = f64::INFINITY;
+        for &(e0, e1) in &edges {
+            let d = point_to_segment_dist(p, e0, e1);
+            if d < min_d {
+                min_d = d;
+            }
+        }
+        sq_sum += min_d * min_d;
+    }
+    let rms = (sq_sum / pts.len() as f64).sqrt();
+    Some((verts, rms))
 }
 
 // ---------------------------------------------------------------------------
