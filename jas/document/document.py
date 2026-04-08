@@ -184,10 +184,14 @@ class Document:
         """Return the element at the given path."""
         if not path:
             raise ValueError("Path must be non-empty")
+        if path[0] < 0 or path[0] >= len(self.layers):
+            raise ValueError(f"Layer index {path[0]} out of range (have {len(self.layers)} layers)")
         node: Element = self.layers[path[0]]
         for idx in path[1:]:
             if not isinstance(node, Group):
                 raise ValueError(f"Expected Group at path, got {type(node).__name__}")
+            if idx < 0 or idx >= len(node.children):
+                raise ValueError(f"Child index {idx} out of range in path {path}")
             node = node.children[idx]
         return node
 

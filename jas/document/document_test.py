@@ -79,6 +79,18 @@ class SelectionTest(absltest.TestCase):
         with self.assertRaises(ValueError):
             self.doc.get_element(())
 
+    def test_get_element_layer_out_of_range_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            self.doc.get_element((99,))
+
+    def test_get_element_child_out_of_range_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            self.doc.get_element((0, 99))
+
+    def test_get_element_nested_child_out_of_range_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            self.doc.get_element((0, 2, 99))
+
     # replace_element
 
     def test_replace_element_child(self):
