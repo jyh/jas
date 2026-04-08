@@ -147,7 +147,8 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
         }
 
         // Rectangle (axis-aligned, bbox-based). Snap to square when nearly so.
-        if let Some((x, y, w, h, res)) = fit_rect_aa(&pts) {
+        let rect_fit = fit_rect_aa(&pts);
+        if let Some((x, y, w, h, res)) = rect_fit {
             if res <= tol_abs {
                 let aspect = (w - h).abs() / w.max(h);
                 let (w, h) = if aspect <= cfg.square_aspect_eps {
@@ -157,6 +158,24 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
                     (w, h)
                 };
                 candidates.push((res, RecognizedShape::Rectangle { x, y, w, h }));
+            }
+        }
+
+        // Round rectangle. Two guards prevent false positives:
+        //   1. r/short ∈ (0.05, 0.45) — outside this band the plain rect or
+        //      the ellipse handles the shape better.
+        //   2. The round-rect residual must be substantially below the plain
+        //      rect residual (< 0.5×). Otherwise we're just absorbing noise
+        //      into a fictitious corner radius on a true rectangle.
+        if let Some((x, y, w, h, r, res)) = fit_round_rect(&pts) {
+            let short = w.min(h);
+            let rect_rms = rect_fit.map(|f| f.4).unwrap_or(f64::INFINITY);
+            if res <= tol_abs
+                && r / short > 0.05
+                && r / short < 0.45
+                && res < 0.5 * rect_rms
+            {
+                candidates.push((res, RecognizedShape::RoundRect { x, y, w, h, r }));
             }
         }
 
@@ -393,6 +412,89 @@ fn fit_rect_aa(pts: &[Pt]) -> Option<(f64, f64, f64, f64, f64)> {
     }
     let rms = (sq_sum / pts.len() as f64).sqrt();
     Some((xmin, ymin, w, h, rms))
+}
+
+/// Distance from `p` to the perimeter of an axis-aligned rounded rect
+/// with origin `(x, y)`, dimensions `(w, h)`, and corner radius `r`.
+fn dist_to_round_rect(p: Pt, x: f64, y: f64, w: f64, h: f64, r: f64) -> f64 {
+    // Reflect into the top-left quadrant of the bbox so we only handle
+    // one corner and one pair of straight edges.
+    let px = p.0 - x;
+    let py = p.1 - y;
+    let qx = if px > w / 2.0 { w - px } else { px };
+    let qy = if py > h / 2.0 { h - py } else { py };
+    if qx >= r && qy >= r {
+        // Far from any corner — closest is whichever straight side is nearer.
+        qx.min(qy)
+    } else if qx >= r {
+        // qy < r: point is in the strip alongside the top straight edge.
+        // The top edge runs from (r, 0) to (w-r, 0); since qx ∈ [r, w/2],
+        // its perpendicular foot is on the edge. Distance is qy.
+        qy
+    } else if qy >= r {
+        // Symmetric case: left edge runs from (0, r) to (0, h-r).
+        qx
+    } else {
+        // Both qx < r and qy < r: corner sub-region. Closest is the arc.
+        let dx = qx - r;
+        let dy = qy - r;
+        let d_to_center = (dx * dx + dy * dy).sqrt();
+        (d_to_center - r).abs()
+    }
+}
+
+/// RMS residual of `pts` against a rounded-rect outline.
+fn round_rect_rms(pts: &[Pt], x: f64, y: f64, w: f64, h: f64, r: f64) -> f64 {
+    let mut sq_sum = 0.0;
+    for &p in pts {
+        let d = dist_to_round_rect(p, x, y, w, h, r);
+        sq_sum += d * d;
+    }
+    (sq_sum / pts.len() as f64).sqrt()
+}
+
+/// Round-rect fit. Bbox gives `x/y/w/h`; the optimal corner radius is
+/// found by a coarse 1D scan followed by golden-section refinement on
+/// the RMS residual.
+fn fit_round_rect(pts: &[Pt]) -> Option<(f64, f64, f64, f64, f64, f64)> {
+    let (xmin, ymin, xmax, ymax) = bbox_of(pts);
+    let w = xmax - xmin;
+    let h = ymax - ymin;
+    if w <= 1e-9 || h <= 1e-9 {
+        return None;
+    }
+    if w.min(h) / w.max(h) < MIN_CLOSED_BBOX_ASPECT {
+        return None;
+    }
+    let r_max = w.min(h) / 2.0;
+    let n_steps = 40;
+    let mut best_r = 0.0;
+    let mut best_rms = f64::INFINITY;
+    for i in 0..=n_steps {
+        let r = r_max * i as f64 / n_steps as f64;
+        let rms = round_rect_rms(pts, xmin, ymin, w, h, r);
+        if rms < best_rms {
+            best_rms = rms;
+            best_r = r;
+        }
+    }
+    let step = r_max / n_steps as f64;
+    let mut lo = (best_r - step).max(0.0);
+    let mut hi = (best_r + step).min(r_max);
+    for _ in 0..30 {
+        let m1 = lo + (hi - lo) * 0.382;
+        let m2 = lo + (hi - lo) * 0.618;
+        let r1 = round_rect_rms(pts, xmin, ymin, w, h, m1);
+        let r2 = round_rect_rms(pts, xmin, ymin, w, h, m2);
+        if r1 < r2 {
+            hi = m2;
+        } else {
+            lo = m1;
+        }
+    }
+    let r = (lo + hi) / 2.0;
+    let rms = round_rect_rms(pts, xmin, ymin, w, h, r);
+    Some((xmin, ymin, w, h, r, rms))
 }
 
 /// Triangle fit by the "max-pair + farthest perpendicular" heuristic.
