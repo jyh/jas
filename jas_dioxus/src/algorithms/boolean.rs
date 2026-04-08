@@ -483,8 +483,24 @@ fn run_boolean(a: &PolygonSet, b: &PolygonSet, op: Operation) -> PolygonSet {
         Some(grid) => (snap_round(a, grid), snap_round(b, grid)),
         None => (clone_nondegenerate(a), clone_nondegenerate(b)),
     };
-    let a = &a_snap;
-    let b = &b_snap;
+
+    // Resolve any self-intersections under the non-zero winding fill
+    // rule, so the sweep below can keep assuming simple input rings.
+    // The normalizer is a no-op for inputs that are already simple,
+    // which is the common case.
+    let a_norm = crate::algorithms::normalize::normalize(&a_snap);
+    let b_norm = crate::algorithms::normalize::normalize(&b_snap);
+
+    // The normalizer can introduce new vertices at intersection
+    // points that don't land on the snap grid. Re-snap so downstream
+    // Martinez still sees grid-aligned input. The grid is unchanged
+    // because normalize() doesn't expand the bounding box.
+    let (a_final, b_final) = match snap_grid(&a_norm, &b_norm) {
+        Some(grid) => (snap_round(&a_norm, grid), snap_round(&b_norm, grid)),
+        None => (a_norm, b_norm),
+    };
+    let a = &a_final;
+    let b = &b_final;
 
     // Trivial cases — handled here so the sweep code can assume both
     // operands are non-empty.
@@ -2232,6 +2248,103 @@ mod tests {
         assert!((polygon_set_area(&boolean_subtract(&a, &b)) - 50.0).abs() < EPS);
         assert!((polygon_set_area(&boolean_subtract(&b, &a)) - 50.0).abs() < EPS);
         assert!((polygon_set_area(&boolean_exclude(&a, &b)) - 100.0).abs() < EPS);
+    }
+
+    // -------------------------------------------------------------------
+    // Self-intersecting input
+    //
+    // These verify that run_boolean feeds its inputs through the
+    // normalizer pre-pass. For a self-intersecting bowtie (figure-8)
+    // the filled region under non-zero winding is two triangles
+    // meeting at (5, 5); the boolean ops should treat the input as
+    // that two-triangle region.
+    //
+    // Bowtie vertices in visit order: (0,0) → (10,10) → (10,0) →
+    // (0,10). Edges (0,0)-(10,10) and (10,0)-(0,10) cross at (5,5).
+    // After normalization the input is two triangles:
+    //   Left triangle:  (0,0), (5,5), (0,10)   area 25
+    //   Right triangle: (5,5), (10,10), (10,0) area 25
+    // Total filled area: 50.
+    // -------------------------------------------------------------------
+
+    fn bowtie() -> PolygonSet {
+        vec![vec![(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]]
+    }
+
+    #[test]
+    fn union_bowtie_with_empty_is_two_triangles() {
+        let empty: PolygonSet = Vec::new();
+        let result = boolean_union(&bowtie(), &empty);
+        let area = polygon_set_area(&result);
+        assert!(
+            (area - 50.0).abs() < EPS,
+            "expected area 50 (two triangles), got {}",
+            area
+        );
+    }
+
+    #[test]
+    fn union_bowtie_with_covering_rectangle() {
+        // Rectangle (0,0)-(10,10) covers both lobes completely.
+        // Result should be the full 10x10 square, area 100.
+        let rect: PolygonSet = vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]];
+        let result = boolean_union(&bowtie(), &rect);
+        let area = polygon_set_area(&result);
+        assert!(
+            (area - 100.0).abs() < EPS,
+            "expected area 100 (rectangle dominates), got {}",
+            area
+        );
+    }
+
+    #[test]
+    fn intersect_bowtie_with_covering_rectangle() {
+        // Rectangle (0,0)-(10,10) covers both lobes. Intersection
+        // is the bowtie's filled region: two triangles, area 50.
+        let rect: PolygonSet = vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]];
+        let result = boolean_intersect(&bowtie(), &rect);
+        let area = polygon_set_area(&result);
+        assert!(
+            (area - 50.0).abs() < EPS,
+            "expected area 50, got {}",
+            area
+        );
+    }
+
+    #[test]
+    fn intersect_bowtie_with_bottom_half_rectangle() {
+        // Rectangle (0,0)-(10,5) covers the bottom half of the
+        // bounding box. Both lobes intersect it:
+        //   Left triangle (0,0),(5,5),(0,10) clipped to y<=5
+        //     gives (0,0),(5,5),(0,5) — area 12.5
+        //   Right triangle (5,5),(10,10),(10,0) clipped to y<=5
+        //     gives (5,5),(10,5),(10,0) — area 12.5
+        // Total 25.
+        let rect: PolygonSet = vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]];
+        let result = boolean_intersect(&bowtie(), &rect);
+        let area = polygon_set_area(&result);
+        assert!(
+            (area - 25.0).abs() < EPS,
+            "expected area 25, got {} (rings: {:?})",
+            area,
+            result
+        );
+    }
+
+    #[test]
+    fn subtract_rectangle_from_bowtie() {
+        // Bowtie − rectangle(0,0)-(10,5). Bowtie filled region is
+        // 50; the rectangle removes the bottom 25 (12.5 from each
+        // triangle); 25 remains.
+        let rect: PolygonSet = vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]];
+        let result = boolean_subtract(&bowtie(), &rect);
+        let area = polygon_set_area(&result);
+        assert!(
+            (area - 25.0).abs() < EPS,
+            "expected area 25, got {} (rings: {:?})",
+            area,
+            result
+        );
     }
 
     /// Pin: subtract is *not* associative.
