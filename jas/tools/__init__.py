@@ -3,8 +3,14 @@
 from tools.tool import CanvasTool
 from tools.toolbar import Tool
 
-from tools.selection_tool import SelectionTool, DirectSelectionTool, GroupSelectionTool
-from tools.drawing_tool import LineTool, RectTool, RoundedRectTool, PolygonTool, StarTool
+from tools.selection_tool import SelectionTool
+from tools.direct_selection_tool import DirectSelectionTool
+from tools.group_selection_tool import GroupSelectionTool
+from tools.line_tool import LineTool
+from tools.rect_tool import RectTool
+from tools.rounded_rect_tool import RoundedRectTool
+from tools.polygon_tool import PolygonTool
+from tools.star_tool import StarTool
 from tools.pen_tool import PenTool
 from tools.add_anchor_point_tool import AddAnchorPointTool
 from tools.delete_anchor_point_tool import DeleteAnchorPointTool

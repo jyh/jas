@@ -1,29 +1,20 @@
-"""Drawing tools: Line, Rect, Polygon."""
+"""Drawing tool base class shared by line / rect / rounded_rect / polygon / star.
+
+The individual drawing tools live in their own per-tool files
+(`line_tool.py`, `rect_tool.py`, etc.) and import `DrawingToolBase`
+from here. This file holds only the base class plus the angle-snap
+helper used by every drawing tool.
+"""
 
 from __future__ import annotations
 
 import math
 from typing import TYPE_CHECKING
 
-from geometry.element import (
-    Color, Line, Polygon, Rect, Stroke,
-)
-from tools.tool import CanvasTool, ToolContext, POLYGON_SIDES
+from tools.tool import CanvasTool, ToolContext
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
-
-
-_POLYGON_SIDES = POLYGON_SIDES
-
-# Default corner radius (in points) for new rounded rectangles.
-ROUNDED_RECT_RADIUS = 10.0
-
-# Default number of points (outer vertices) for new stars.
-STAR_POINTS = 5
-
-# Ratio of inner radius to outer radius for stars.
-_STAR_INNER_RATIO = 0.4
 
 
 def _constrain_angle(sx: float, sy: float, ex: float, ey: float) -> tuple[float, float]:
@@ -35,44 +26,6 @@ def _constrain_angle(sx: float, sy: float, ex: float, ey: float) -> tuple[float,
     angle = math.atan2(dy, dx)
     snapped = round(angle / (math.pi / 4)) * (math.pi / 4)
     return (sx + dist * math.cos(snapped), sy + dist * math.sin(snapped))
-
-
-def _star_points(sx: float, sy: float, ex: float, ey: float,
-                 n: int) -> list[tuple[float, float]]:
-    """Vertices of a star inscribed in the bounding box. The star has ``n``
-    outer vertices alternating with ``n`` inner vertices, for ``2 * n`` total.
-    The first outer vertex is at the top of the box."""
-    cx = (sx + ex) / 2
-    cy = (sy + ey) / 2
-    rx_outer = abs(ex - sx) / 2
-    ry_outer = abs(ey - sy) / 2
-    rx_inner = rx_outer * _STAR_INNER_RATIO
-    ry_inner = ry_outer * _STAR_INNER_RATIO
-    theta0 = -math.pi / 2
-    pts = []
-    for k in range(2 * n):
-        angle = theta0 + math.pi * k / n
-        rx = rx_outer if k % 2 == 0 else rx_inner
-        ry = ry_outer if k % 2 == 0 else ry_inner
-        pts.append((cx + rx * math.cos(angle), cy + ry * math.sin(angle)))
-    return pts
-
-
-def _regular_polygon_points(x1: float, y1: float, x2: float, y2: float,
-                            n: int) -> list[tuple[float, float]]:
-    ex, ey = x2 - x1, y2 - y1
-    s = math.hypot(ex, ey)
-    if s == 0:
-        return [(x1, y1)] * n
-    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
-    px, py = -ey / s, ex / s
-    d = s / (2 * math.tan(math.pi / n))
-    cx, cy = mx + d * px, my + d * py
-    r = s / (2 * math.sin(math.pi / n))
-    theta0 = math.atan2(y1 - cy, x1 - cx)
-    return [(cx + r * math.cos(theta0 + 2 * math.pi * k / n),
-             cy + r * math.sin(theta0 + 2 * math.pi * k / n))
-            for k in range(n)]
 
 
 class DrawingToolBase(CanvasTool):
@@ -126,74 +79,3 @@ class DrawingToolBase(CanvasTool):
         from PySide6.QtGui import QBrush
         painter.setBrush(QBrush())
         self._draw_preview(painter, sx, sy, ex, ey)
-
-
-class LineTool(DrawingToolBase):
-    def _create_element(self, sx, sy, ex, ey):
-        return Line(x1=sx, y1=sy, x2=ex, y2=ey,
-                    stroke=Stroke(color=Color(0, 0, 0), width=1.0))
-
-    def _draw_preview(self, painter, sx, sy, ex, ey):
-        from PySide6.QtCore import QPointF
-        painter.drawLine(QPointF(sx, sy), QPointF(ex, ey))
-
-
-class RectTool(DrawingToolBase):
-    def _create_element(self, sx, sy, ex, ey):
-        x, y = min(sx, ex), min(sy, ey)
-        w, h = abs(ex - sx), abs(ey - sy)
-        return Rect(x=x, y=y, width=w, height=h,
-                    stroke=Stroke(color=Color(0, 0, 0), width=1.0))
-
-    def _draw_preview(self, painter, sx, sy, ex, ey):
-        from PySide6.QtCore import QPointF, QRectF
-        painter.drawRect(QRectF(QPointF(sx, sy), QPointF(ex, ey)).normalized())
-
-
-class RoundedRectTool(DrawingToolBase):
-    """Rounded rectangle tool. Uses ROUNDED_RECT_RADIUS for corner radius."""
-
-    def _create_element(self, sx, sy, ex, ey):
-        x, y = min(sx, ex), min(sy, ey)
-        w, h = abs(ex - sx), abs(ey - sy)
-        if w <= 0 or h <= 0:
-            return None
-        return Rect(x=x, y=y, width=w, height=h,
-                    rx=ROUNDED_RECT_RADIUS, ry=ROUNDED_RECT_RADIUS,
-                    stroke=Stroke(color=Color(0, 0, 0), width=1.0))
-
-    def _draw_preview(self, painter, sx, sy, ex, ey):
-        from PySide6.QtCore import QPointF, QRectF
-        rect = QRectF(QPointF(sx, sy), QPointF(ex, ey)).normalized()
-        r = min(ROUNDED_RECT_RADIUS, rect.width() / 2.0, rect.height() / 2.0)
-        painter.drawRoundedRect(rect, r, r)
-
-
-class StarTool(DrawingToolBase):
-    """Star tool. Draws a star inscribed in the dragged bounding box."""
-
-    def _create_element(self, sx, sy, ex, ey):
-        if abs(ex - sx) <= 0 or abs(ey - sy) <= 0:
-            return None
-        pts = _star_points(sx, sy, ex, ey, STAR_POINTS)
-        return Polygon(points=tuple(pts),
-                       stroke=Stroke(color=Color(0, 0, 0), width=1.0))
-
-    def _draw_preview(self, painter, sx, sy, ex, ey):
-        from PySide6.QtCore import QPointF
-        pts = _star_points(sx, sy, ex, ey, STAR_POINTS)
-        if pts:
-            painter.drawPolygon([QPointF(x, y) for x, y in pts])
-
-
-class PolygonTool(DrawingToolBase):
-    def _create_element(self, sx, sy, ex, ey):
-        pts = _regular_polygon_points(sx, sy, ex, ey, _POLYGON_SIDES)
-        return Polygon(points=tuple(pts),
-                       stroke=Stroke(color=Color(0, 0, 0), width=1.0))
-
-    def _draw_preview(self, painter, sx, sy, ex, ey):
-        from PySide6.QtCore import QPointF
-        pts = _regular_polygon_points(sx, sy, ex, ey, _POLYGON_SIDES)
-        if pts:
-            painter.drawPolygon([QPointF(x, y) for x, y in pts])
