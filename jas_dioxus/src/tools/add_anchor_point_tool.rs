@@ -7,8 +7,6 @@
 use wasm_bindgen::prelude::*;
 use web_sys::CanvasRenderingContext2d;
 
-use std::collections::HashSet;
-
 use crate::document::document::ElementSelection;
 use crate::document::model::Model;
 use crate::geometry::element::{Element, PathCommand, PathElem};

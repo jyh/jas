@@ -2,6 +2,9 @@
 //! polygon set into an equivalent set of **simple** rings under the
 //! **non-zero winding** fill rule.
 //!
+// Module-wide allow: tested but not yet wired into the document model.
+#![allow(dead_code)]
+//!
 //! # What this is for
 //!
 //! The boolean operations in [`crate::algorithms::boolean`] assume

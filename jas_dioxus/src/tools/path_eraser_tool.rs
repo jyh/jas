@@ -404,7 +404,7 @@ fn split_path_at_eraser(
             return vec![];
         }
 
-        let n = drawing_cmds.len();
+        let _n = drawing_cmds.len();
         let mut open_cmds: Vec<PathCommand> = Vec::new();
 
         // Start at the exit point.

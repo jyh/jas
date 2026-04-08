@@ -4,9 +4,7 @@
 //! element intersection tests, and control-point queries.  These do not
 //! depend on the document model — only on element geometry.
 
-use std::collections::HashSet;
-
-use crate::geometry::element::{control_point_count, flatten_path_commands, Element};
+use crate::geometry::element::{flatten_path_commands, Element};
 
 // ---------------------------------------------------------------------------
 // Primitive geometry
@@ -108,18 +106,6 @@ pub fn segments_of_element(elem: &Element) -> Vec<(f64, f64, f64, f64)> {
         }
         _ => vec![],
     }
-}
-
-/// Return a `HashSet` containing every CP index of `elem`.
-///
-/// This used to be the canonical "select the whole element" helper
-/// in the days when selection state was a raw CP set. Now that the
-/// selection has an explicit `SelectionKind::All` variant, new code
-/// should prefer `ElementSelection::all(path)` or
-/// `SelectionKind::All` instead. This helper is kept for a few
-/// hit-test callers that still need an explicit index set.
-pub fn all_cp_indices(elem: &Element) -> HashSet<usize> {
-    (0..control_point_count(elem)).collect()
 }
 
 pub fn element_intersects_rect(elem: &Element, rx: f64, ry: f64, rw: f64, rh: f64) -> bool {

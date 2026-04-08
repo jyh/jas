@@ -1,5 +1,9 @@
 //! Immutable document model.
 //!
+// Public API surface — several methods are exposed for the editor
+// shell that hasn't been wired in yet.
+#![allow(dead_code)]
+//!
 //! # Immutability contract
 //!
 //! A [`Document`] is treated as an immutable value: every mutation produces a

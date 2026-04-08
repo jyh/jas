@@ -1,5 +1,9 @@
 //! Tool protocol and context for the canvas tool system.
 //!
+// CanvasTool's `shortcut` and `activate` methods are part of the
+// trait surface but not invoked in the current binary.
+#![allow(dead_code)]
+//!
 //! Each tool implements the CanvasTool trait and receives events from the
 //! canvas. Tools own their interaction state and draw overlays.
 
