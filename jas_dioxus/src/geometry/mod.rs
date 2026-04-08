@@ -1,3 +1,4 @@
+pub mod boolean;
 pub mod element;
 pub mod fit_curve;
 pub mod hit_test;
