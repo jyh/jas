@@ -5,7 +5,7 @@ use web_sys::CanvasRenderingContext2d;
 use crate::document::controller::Controller;
 use crate::document::document::{ElementPath, ElementSelection};
 use crate::document::model::Model;
-use crate::geometry::element::{control_point_count, control_points};
+use crate::geometry::element::control_points;
 
 use super::tool::{CanvasTool, DRAG_THRESHOLD, HIT_RADIUS};
 
@@ -128,7 +128,7 @@ impl CanvasTool for SelectionTool {
         };
     }
 
-    fn on_move(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, _alt: bool, dragging: bool) {
+    fn on_move(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, _alt: bool, _dragging: bool) {
         self.shift_held = shift;
         match self.state {
             State::PendingDrag { start_x, start_y } => {

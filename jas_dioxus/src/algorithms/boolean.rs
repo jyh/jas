@@ -3,6 +3,12 @@
 //!
 //! # Status
 //!
+// The public API is feature-complete and tested but not yet wired into
+// the document model — the editor calls into this module via a future
+// element-level adapter. Until that lands, every item here looks "dead"
+// to cargo's reachability analysis.
+#![allow(dead_code)]
+//!
 //! **Spec only.** This module currently exposes the public API as
 //! `unimplemented!()` stubs and a comprehensive test suite. The
 //! intent is to nail down the contract — including all the

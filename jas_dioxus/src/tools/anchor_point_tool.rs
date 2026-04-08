@@ -5,14 +5,12 @@
 //! - Click on a smooth point: collapse handles to anchor (→ corner).
 //! - Drag on a control handle: move that handle independently (→ cusp).
 
-use std::collections::HashSet;
-
 use web_sys::CanvasRenderingContext2d;
 
 use crate::document::document::ElementSelection;
 use crate::document::model::Model;
 use crate::geometry::element::{
-    control_point_count, control_points, convert_corner_to_smooth, convert_smooth_to_corner,
+    control_points, convert_corner_to_smooth, convert_smooth_to_corner,
     is_smooth_point, move_path_handle_independent, path_handle_positions, Element, PathElem,
 };
 

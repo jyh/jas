@@ -1,5 +1,9 @@
 //! Immutable document elements conforming to SVG element types.
 //!
+// Public API surface — convenience constructors and predicates are
+// exposed for callers that aren't all wired up yet.
+#![allow(dead_code)]
+//!
 //! All elements are immutable value objects. To modify an element, create a new
 //! one with the desired changes. Element types and attributes follow the SVG 1.1
 //! specification.

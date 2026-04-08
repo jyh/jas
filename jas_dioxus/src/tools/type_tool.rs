@@ -1,5 +1,9 @@
 //! Type tool with native in-place text editing.
 //!
+// `select_editing_element` and `selected_text` are exposed for the
+// editor shell's selection-aware menus, which aren't wired yet.
+#![allow(dead_code)]
+//!
 //! Click on existing unlocked text to start editing it; click on empty
 //! canvas to create a new (initially empty) text element and immediately
 //! enter editing mode. Drag to create an area text box.

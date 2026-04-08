@@ -1,5 +1,9 @@
 //! Observable model that holds the current document.
 //!
+// Public API surface; can_undo / can_redo / is_modified are wired by
+// the editor shell, which isn't fully integrated yet.
+#![allow(dead_code)]
+//!
 //! In the Dioxus version, reactivity is handled by Dioxus signals rather than
 //! manual callbacks. The Model still owns undo/redo stacks and filename state.
 

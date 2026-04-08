@@ -20,11 +20,6 @@ fn pt(v: f64) -> f64 {
     v * PX_TO_PT
 }
 
-/// Parse a string as f64, returning `default` on failure.
-fn safe_f64(s: &str, default: f64) -> f64 {
-    s.parse::<f64>().unwrap_or(default)
-}
-
 fn fmt(v: f64) -> String {
     let s = format!("{:.4}", v);
     let s = s.trim_end_matches('0');
@@ -403,7 +398,7 @@ fn parse_xml_node(input: &str) -> Option<(XmlNode, &str)> {
     let mut children = Vec::new();
     let mut text = String::new();
     let mut rest = rest;
-    let close_tag = format!("</{}", tag.split(':').last().unwrap_or(&tag));
+    let _close_tag = format!("</{}", tag.split(':').last().unwrap_or(&tag));
     // Also handle namespaced close tags
     loop {
         rest = rest.trim_start();

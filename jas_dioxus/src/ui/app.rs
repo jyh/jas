@@ -15,7 +15,7 @@ use crate::canvas::render;
 use crate::document::controller::Controller;
 use crate::document::document::ElementSelection;
 use crate::document::model::Model;
-use crate::geometry::element::{control_point_count, translate_element, Element as GeoElement};
+use crate::geometry::element::{translate_element, Element as GeoElement};
 use crate::geometry::svg::{document_to_svg, svg_to_document};
 use crate::tools::direct_selection_tool::DirectSelectionTool;
 use crate::tools::group_selection_tool::GroupSelectionTool;
@@ -1003,7 +1003,7 @@ pub fn App() -> Element {
             .and_then(|tab| tab.tools.get(&active_tool).and_then(|t| t.cursor_css_override()))
             .unwrap_or_else(|| active_tool.cursor_css().to_string())
     };
-    let any_tool_editing: bool = {
+    let _any_tool_editing: bool = {
         let st = app.borrow();
         st.tab()
             .and_then(|tab| tab.tools.get(&active_tool).map(|t| t.is_editing()))

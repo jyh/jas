@@ -6,16 +6,10 @@
 
 use web_sys::CanvasRenderingContext2d;
 
-use std::collections::HashSet;
-
 use crate::document::document::ElementSelection;
 use crate::document::model::Model;
 use crate::geometry::element::{control_point_count, Element, PathCommand, PathElem};
-use crate::geometry::measure::path_distance_to_point;
-
 use super::tool::{CanvasTool, HIT_RADIUS};
-
-const DELETE_POINT_THRESHOLD: f64 = HIT_RADIUS + 2.0;
 
 pub struct DeleteAnchorPointTool {
     _private: (),
@@ -24,37 +18,6 @@ pub struct DeleteAnchorPointTool {
 impl DeleteAnchorPointTool {
     pub fn new() -> Self {
         Self { _private: () }
-    }
-
-    /// Find the closest path element in the document to (x, y).
-    fn hit_test_path(model: &Model, x: f64, y: f64) -> Option<(Vec<usize>, PathElem)> {
-        let doc = model.document();
-        for (li, layer) in doc.layers.iter().enumerate() {
-            if let Some(children) = layer.children() {
-                for (ci, child) in children.iter().enumerate() {
-                    match &**child {
-                        Element::Path(pe) => {
-                            let dist = path_distance_to_point(&pe.d, x, y);
-                            if dist <= DELETE_POINT_THRESHOLD {
-                                return Some((vec![li, ci], pe.clone()));
-                            }
-                        }
-                        Element::Group(g) if !child.common().locked => {
-                            for (gi, gc) in g.children.iter().enumerate() {
-                                if let Element::Path(pe) = &**gc {
-                                    let dist = path_distance_to_point(&pe.d, x, y);
-                                    if dist <= DELETE_POINT_THRESHOLD {
-                                        return Some((vec![li, ci, gi], pe.clone()));
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-        None
     }
 }
 

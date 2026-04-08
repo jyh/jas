@@ -12,7 +12,7 @@ use crate::document::document::{
 use crate::document::model::Model;
 use crate::geometry::element::{
     control_point_count, control_points, move_control_points,
-    move_path_handle, Element, PathElem,
+    move_path_handle, Element,
 };
 use crate::algorithms::hit_test::{element_intersects_rect, point_in_rect};
 

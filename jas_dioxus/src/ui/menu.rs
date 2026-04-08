@@ -1,5 +1,9 @@
 //! Menu bar data: structure, items, and commands.
 //!
+// DISPATCH_COMMANDS is used by tests to verify menu ↔ command coverage
+// but isn't currently called from the Dioxus UI dispatch path.
+#![allow(dead_code)]
+//!
 //! Defines the menu layout as static data so it can be tested independently
 //! of the Dioxus UI.
 

@@ -115,7 +115,7 @@ fn hit_recursive(
 }
 
 impl CanvasTool for GroupSelectionTool {
-    fn on_press(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, alt: bool) {
+    fn on_press(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, _alt: bool) {
         // Clicking on selected element -> prepare to drag
         if Self::hit_test_selection(model, x, y) {
             self.state = State::PendingDrag { start_x: x, start_y: y };
