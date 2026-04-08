@@ -429,32 +429,32 @@ fn run_boolean(a: &PolygonSet, b: &PolygonSet, op: Operation) -> PolygonSet {
             let pos = status_insert_pos(&sweep.events, &status, idx);
             status.insert(pos, idx);
 
+            // Compute in_out / other_in_out from the edge directly
+            // below. We do this *before* intersection handling so
+            // the collinear-overlap branch (phase 3) can compare
+            // in/out flags between two coincident edges.
+            compute_fields(&mut sweep.events, &status, pos);
+
             // Check for intersections with the new neighbours: the
             // edge directly below (`prev`) and directly above
             // (`next`). Each `possible_intersection` may split one
-            // or both edges and queue up the resulting sub-events.
+            // or both edges and queue up the resulting sub-events,
+            // *or* set edge_type on this event and the neighbour
+            // when the two are collinear and overlapping.
             //
             // After splitting, neither edge changes its position
             // in the status line — only its right endpoint moves
             // — so the slot at `pos` still refers to the current
-            // event when we go on to compute its fields below.
+            // event below.
             if pos + 1 < status.len() {
                 let above = status[pos + 1];
-                possible_intersection(&mut sweep.events, &mut queue, idx, above);
+                possible_intersection(&mut sweep.events, &mut queue, idx, above, op);
             }
             if pos > 0 {
                 let below = status[pos - 1];
-                possible_intersection(&mut sweep.events, &mut queue, below, idx);
+                possible_intersection(&mut sweep.events, &mut queue, below, idx, op);
             }
 
-            // Compute in_out / other_in_out from the (possibly
-            // shortened) edge directly below. The status-line
-            // position has not changed.
-            let cur_pos = status
-                .iter()
-                .position(|&e| e == idx)
-                .expect("inserted event must still be in the status line");
-            compute_fields(&mut sweep.events, &status, cur_pos);
             sweep.events[idx].in_result =
                 edge_in_result(&sweep.events[idx], op);
         } else {
@@ -476,7 +476,7 @@ fn run_boolean(a: &PolygonSet, b: &PolygonSet, op: Operation) -> PolygonSet {
                 };
                 status.remove(pos);
                 if let (Some(b), Some(a)) = (below, above) {
-                    possible_intersection(&mut sweep.events, &mut queue, b, a);
+                    possible_intersection(&mut sweep.events, &mut queue, b, a, op);
                 }
             }
             // Propagate in_result from the left event so the
@@ -578,18 +578,30 @@ fn find_intersection(
 
 /// Test whether the edges represented by left events `e1` and `e2`
 /// intersect, and if they do, split each edge at the intersection
-/// point so subsequent processing sees a clean partition. The new
-/// sub-events are pushed onto `queue`.
+/// point so subsequent processing sees a clean partition.
+///
+/// For *transverse* (non-collinear) intersections this is the
+/// phase 2 behaviour: split each edge at the intersection point if
+/// it's strictly interior, and queue the new sub-events.
+///
+/// For *collinear-overlap* intersections this delegates to
+/// [`handle_collinear`], which classifies one of the two edges as
+/// `EdgeType::NonContributing` and the other as
+/// `EdgeType::SameTransition` or `EdgeType::DifferentTransition`,
+/// possibly subdividing the longer of the two so the kept and
+/// suppressed copies span exactly the overlap region.
 fn possible_intersection(
     events: &mut Vec<SweepEvent>,
     queue: &mut Vec<usize>,
     e1: usize,
     e2: usize,
+    op: Operation,
 ) {
     if events[e1].polygon == events[e2].polygon {
         // Edges of the same polygon don't normally intersect in a
-        // valid input. We skip them in phase 2; phase 3 may revisit
-        // this for self-intersection support.
+        // valid input. Same-polygon collinear overlaps are also
+        // skipped — they'd indicate a degenerate self-touching
+        // ring which is out of scope.
         return;
     }
     let a1 = events[e1].point;
@@ -597,7 +609,7 @@ fn possible_intersection(
     let b1 = events[e2].point;
     let b2 = events[events[e2].other_event].point;
     match find_intersection(a1, a2, b1, b2) {
-        Intersection::None | Intersection::Overlap => {}
+        Intersection::None => {}
         Intersection::Point(p) => {
             // Only split an edge if `p` is strictly interior — at
             // an endpoint there's nothing to subdivide.
@@ -608,6 +620,227 @@ fn possible_intersection(
                 divide_segment(events, queue, e2, p);
             }
         }
+        Intersection::Overlap => {
+            handle_collinear(events, queue, e1, e2, op);
+        }
+    }
+}
+
+/// Phase 3 collinear-overlap handling. Called when
+/// [`find_intersection`] reports the two edges as parallel /
+/// collinear with non-zero overlap (or possibly parallel-disjoint
+/// — we re-check that case here and return early).
+///
+/// On a real overlap, classifies the kept edge as
+/// `SameTransition` (both edges traverse the boundary in the same
+/// direction, so they're either both an in-transition or both an
+/// out-transition) or `DifferentTransition` (one in, one out), and
+/// marks the other as `NonContributing`. The connection step then
+/// emits the kept edge once.
+///
+/// If the overlap is partial — only one endpoint coincides, or
+/// neither — the longer edge(s) are subdivided so the kept and
+/// suppressed copies have matching endpoints.
+fn handle_collinear(
+    events: &mut Vec<SweepEvent>,
+    queue: &mut Vec<usize>,
+    e1: usize,
+    e2: usize,
+    op: Operation,
+) {
+    let e1r = events[e1].other_event;
+    let e2r = events[e2].other_event;
+    let p1l = events[e1].point;
+    let p1r = events[e1r].point;
+    let p2l = events[e2].point;
+    let p2r = events[e2r].point;
+
+    // Re-check true collinearity. find_intersection's "Overlap"
+    // result also fires for parallel-but-disjoint segments, so
+    // verify that *all four* endpoints lie on the same line.
+    if signed_area(p1l, p1r, p2l).abs() > 1e-9
+        || signed_area(p1l, p1r, p2r).abs() > 1e-9
+    {
+        return;
+    }
+
+    // Check that the two segments actually overlap (not just
+    // collinear-but-disjoint). Project to the dominant axis and
+    // intersect the 1-D intervals. The dominant axis is the one
+    // with the larger extent, which avoids dividing by a tiny
+    // delta on a near-vertical or near-horizontal edge.
+    let dx = (p1r.0 - p1l.0).abs();
+    let dy = (p1r.1 - p1l.1).abs();
+    let proj = |p: (f64, f64)| if dx >= dy { p.0 } else { p.1 };
+    let s1_lo = proj(p1l).min(proj(p1r));
+    let s1_hi = proj(p1l).max(proj(p1r));
+    let s2_lo = proj(p2l).min(proj(p2r));
+    let s2_hi = proj(p2l).max(proj(p2r));
+    let lo = s1_lo.max(s2_lo);
+    let hi = s1_hi.min(s2_hi);
+    const TOUCH_EPS: f64 = 1e-9;
+    if hi - lo <= TOUCH_EPS {
+        // Touch at a single point or fully disjoint — neither is
+        // an "overlap" for our purposes.
+        return;
+    }
+
+    let left_coincide = points_eq(p1l, p2l);
+    let right_coincide = points_eq(p1r, p2r);
+
+    // Helper: classify the *kept* edge based on whether the two
+    // overlapping edges traverse the boundary in the same
+    // direction. The `in_out` field of a left event captures the
+    // direction (in→out or out→in) of *its own polygon* across the
+    // edge; if both events have the same `in_out`, they agree on
+    // the direction of the shared boundary.
+    let same_dir = events[e1].in_out == events[e2].in_out;
+    let kept_type = if same_dir {
+        EdgeType::SameTransition
+    } else {
+        EdgeType::DifferentTransition
+    };
+
+    if left_coincide && right_coincide {
+        // Case A — edges are identical. Suppress one copy and
+        // classify the other. Recompute in_result for both:
+        // e1's in_result was set with EdgeType::Normal earlier
+        // and is now stale.
+        events[e1].edge_type = EdgeType::NonContributing;
+        events[e2].edge_type = kept_type;
+        events[e1].in_result = edge_in_result(&events[e1], op);
+        events[e2].in_result = edge_in_result(&events[e2], op);
+        return;
+    }
+
+    if left_coincide {
+        // Case B — shared left endpoint, different right
+        // endpoints. The shorter edge sits inside the longer; we
+        // split the longer at the shorter's right.
+        let (longer_left, shorter_right_pt) = if event_less(events, e1r, e2r) {
+            // e1's right is earlier, so e1 is the shorter.
+            (e2, p1r)
+        } else {
+            (e1, p2r)
+        };
+        // Mark the (now-overlap) portion: the shorter is kept; the
+        // longer's left half (after splitting) is suppressed.
+        if longer_left == e1 {
+            events[e1].edge_type = EdgeType::NonContributing;
+            events[e2].edge_type = kept_type;
+        } else {
+            events[e1].edge_type = kept_type;
+            events[e2].edge_type = EdgeType::NonContributing;
+        }
+        events[e1].in_result = edge_in_result(&events[e1], op);
+        events[e2].in_result = edge_in_result(&events[e2], op);
+        divide_segment(events, queue, longer_left, shorter_right_pt);
+        return;
+    }
+
+    if right_coincide {
+        // Case C — shared right endpoint, different left
+        // endpoints. We split the longer at the later left.
+        let (longer_left, later_left_pt) = if event_less(events, e1, e2) {
+            // e2's left is later, so e2 is the shorter; e1 is longer.
+            (e1, p2l)
+        } else {
+            (e2, p1l)
+        };
+        // Split the longer first, then mark types. The split
+        // creates a new sub-edge that aligns with the shorter; the
+        // shorter is kept and the new sub-edge is suppressed.
+        divide_segment(events, queue, longer_left, later_left_pt);
+        // After splitting, longer_left's other_event now points to
+        // the new "right of left half" event at later_left_pt. The
+        // new "left of right half" event is at later_left_pt and
+        // is the one that overlaps the shorter — but it hasn't
+        // been processed yet, so we mark it directly via the
+        // events arena.
+        let split_left = events[events[longer_left].other_event].other_event;
+        // `split_left` is the new left event of the right half of
+        // the longer edge (the part that overlaps the shorter).
+        // It's queued for later processing and will get its
+        // edge_type honoured when it pops out.
+        events[split_left].edge_type = EdgeType::NonContributing;
+        let shorter = if longer_left == e1 { e2 } else { e1 };
+        events[shorter].edge_type = kept_type;
+        events[split_left].in_result = edge_in_result(&events[split_left], op);
+        events[shorter].in_result = edge_in_result(&events[shorter], op);
+        return;
+    }
+
+    // Case D — neither endpoint coincides. Two sub-cases:
+    //   D1: one edge entirely contains the other.
+    //   D2: edges overlap "in the middle" with neither containing
+    //       the other.
+    //
+    // Sort the four endpoints by event order. The middle two span
+    // the overlap region.
+    let mut endpoints = [e1, e1r, e2, e2r];
+    endpoints.sort_by(|&a, &b| {
+        if event_less(events, a, b) {
+            std::cmp::Ordering::Less
+        } else if event_less(events, b, a) {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Equal
+        }
+    });
+
+    // The first endpoint owns one of the two left events; the
+    // last endpoint owns one of the two right events. Determine
+    // whether they belong to the same edge (containment) or
+    // different edges (mid-overlap).
+    let first = endpoints[0];
+    let second = endpoints[1];
+    let third = endpoints[2];
+    let fourth = endpoints[3];
+
+    if events[first].other_event == fourth {
+        // Containment: edge `first..fourth` fully contains the
+        // other. Split it twice — once at `second.point` and once
+        // at `third.point`.
+        let mid_left = events[second].point;
+        let mid_right = events[third].point;
+        divide_segment(events, queue, first, mid_left);
+        // After the first split, `first.other_event` points to a
+        // new right event at `mid_left`, and a new left event also
+        // at `mid_left` is the head of the right half. We need to
+        // split *that* right half at `mid_right`.
+        let right_half_left = events[events[first].other_event].other_event;
+        divide_segment(events, queue, right_half_left, mid_right);
+        // The middle sub-edge of the longer (between mid_left and
+        // mid_right) is the one that overlaps the shorter; mark it
+        // suppressed, and the shorter as kept.
+        events[right_half_left].edge_type = EdgeType::NonContributing;
+        let shorter = if first == e1 { e2 } else { e1 };
+        events[shorter].edge_type = kept_type;
+        events[right_half_left].in_result = edge_in_result(&events[right_half_left], op);
+        events[shorter].in_result = edge_in_result(&events[shorter], op);
+    } else {
+        // Partial overlap: split each at the other's interior
+        // endpoint.
+        let split_a = events[second].point;
+        let split_b = events[third].point;
+        divide_segment(events, queue, first, split_a);
+        divide_segment(events, queue, events[fourth].other_event, split_b);
+        // The right half of the first edge and the left half of
+        // the other span the overlap. Mark one as kept and the
+        // other as suppressed.
+        let first_right_half_left = events[events[first].other_event].other_event;
+        events[first_right_half_left].edge_type = EdgeType::NonContributing;
+        // The other edge's left half (which now ends at split_b)
+        // is the one we keep — its edge_type stays Normal until
+        // the kept-classification logic above sets it. But we
+        // need to mark it explicitly here since the type was set
+        // before the split. Use `second`'s edge — it's whichever
+        // of e1/e2 was *not* `first`.
+        let kept_left = if first == e1 { e2 } else { e1 };
+        events[kept_left].edge_type = kept_type;
+        events[first_right_half_left].in_result =
+            edge_in_result(&events[first_right_half_left], op);
+        events[kept_left].in_result = edge_in_result(&events[kept_left], op);
     }
 }
 
