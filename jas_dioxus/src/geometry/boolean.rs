@@ -67,27 +67,563 @@ pub type PolygonSet = Vec<Ring>;
 
 /// `a ∪ b` — the region covered by either operand.
 pub fn boolean_union(a: &PolygonSet, b: &PolygonSet) -> PolygonSet {
-    let _ = (a, b);
-    unimplemented!("boolean_union: not yet implemented")
+    run_boolean(a, b, Operation::Union)
 }
 
 /// `a ∩ b` — the region covered by both operands.
 pub fn boolean_intersect(a: &PolygonSet, b: &PolygonSet) -> PolygonSet {
-    let _ = (a, b);
-    unimplemented!("boolean_intersect: not yet implemented")
+    run_boolean(a, b, Operation::Intersection)
 }
 
 /// `a − b` — the region covered by `a` but not `b`. Not symmetric.
 pub fn boolean_subtract(a: &PolygonSet, b: &PolygonSet) -> PolygonSet {
-    let _ = (a, b);
-    unimplemented!("boolean_subtract: not yet implemented")
+    run_boolean(a, b, Operation::Difference)
 }
 
 /// `a ⊕ b` — symmetric difference; the region covered by exactly
 /// one of the operands. Equivalent to `(a ∪ b) − (a ∩ b)`.
 pub fn boolean_exclude(a: &PolygonSet, b: &PolygonSet) -> PolygonSet {
-    let _ = (a, b);
-    unimplemented!("boolean_exclude: not yet implemented")
+    run_boolean(a, b, Operation::Xor)
+}
+
+// ---------------------------------------------------------------------------
+// Implementation: Martinez-Rueda-Feito sweep-line algorithm
+//
+// References:
+//   - Martinez, F., Rueda, A., Feito, F. (2009).
+//     "A new algorithm for computing Boolean operations on polygons".
+//     Computers & Geosciences, 35(6), 1177-1185.
+//   - Reference C++ implementation accompanying the paper.
+//   - Open-source Rust ports (geo-booleanop, polygon-clipping/JS).
+//
+// Phasing:
+//   - Phase 1 (this commit): skeleton — data structures, event queue
+//     ordering, sweep loop with in_out / other_in_out / in_result
+//     computation, connection step. *No proper-intersection
+//     detection*: edges that cross in the interior are not yet
+//     subdivided. As a result, only inputs whose edges have no
+//     interior crossings (disjoint, empty operands) produce correct
+//     results in this phase.
+//   - Phase 2 (next commit): add intersection detection / edge
+//     subdivision so the overlapping cases pass.
+//   - Phase 3 (final commit): degeneracy fixes (collinear edges,
+//     vertex coincidences, vertical edges, robustness tweaks) so
+//     the touching cases pass.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Operation {
+    Union,
+    Intersection,
+    Difference,
+    Xor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PolygonId {
+    Subject = 0,
+    Clipping = 1,
+}
+
+/// Classification of an edge with respect to overlapping (collinear)
+/// edges in the other polygon. Used in the sweep step to decide
+/// which edge of a coincident pair contributes to the result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EdgeType {
+    /// Normal edge — does not coincide with an edge of the other polygon.
+    Normal,
+    /// One of two coincident edges that traverse the same boundary
+    /// in the same direction (same in/out transition).
+    SameTransition,
+    /// One of two coincident edges that traverse opposite directions.
+    DifferentTransition,
+    /// A coincident edge that does not contribute to the output —
+    /// suppressed because its partner already does.
+    NonContributing,
+}
+
+/// One endpoint of an edge in the sweep-line algorithm. Each edge
+/// produces two events: a "left" event at its lex-smaller endpoint
+/// and a "right" event at the lex-larger endpoint. Events are
+/// stored in a single arena ([`Sweep::events`]) and referred to by
+/// index everywhere else.
+#[derive(Debug, Clone)]
+struct SweepEvent {
+    point: (f64, f64),
+    /// True iff this event is the lex-smaller endpoint of the edge.
+    is_left: bool,
+    /// Which input polygon this edge came from.
+    polygon: PolygonId,
+    /// Index of the *other* endpoint of the same edge in the arena.
+    /// When this event is processed the algorithm needs to find its
+    /// partner cheaply.
+    other_event: usize,
+
+    // ---- Fields populated during the sweep ----
+    /// For *left* events: true iff this edge is an "out" transition
+    /// (the polygon's interior lies *below* the edge for non-vertical
+    /// edges, *left* for vertical). The naming follows the original
+    /// paper.
+    in_out: bool,
+    /// For left events: the most recent `in_out` value seen for the
+    /// *other* polygon's nearest edge below this one in the status
+    /// line. Combined with `in_out` this tells us whether the
+    /// current edge's interior side lies inside the other polygon.
+    other_in_out: bool,
+    /// Tag set in the sweep step: this edge contributes to the
+    /// result of the requested boolean operation.
+    in_result: bool,
+    /// Coincident-edge classification (see [`EdgeType`]).
+    edge_type: EdgeType,
+    /// Connection-step pointer: index of the previous in-result edge
+    /// below this one in the status line. Used to nest holes inside
+    /// outer rings.
+    prev_in_result: Option<usize>,
+}
+
+impl SweepEvent {
+    fn new(point: (f64, f64), is_left: bool, polygon: PolygonId) -> Self {
+        Self {
+            point,
+            is_left,
+            polygon,
+            other_event: usize::MAX,
+            in_out: false,
+            other_in_out: false,
+            in_result: false,
+            edge_type: EdgeType::Normal,
+            prev_in_result: None,
+        }
+    }
+}
+
+/// Compare two points lexicographically by `(x, y)`.
+fn point_lex_less(a: (f64, f64), b: (f64, f64)) -> bool {
+    if a.0 != b.0 {
+        a.0 < b.0
+    } else {
+        a.1 < b.1
+    }
+}
+
+/// Signed area of the triangle (p0, p1, p2). Positive iff (p0, p1,
+/// p2) makes a left turn (counter-clockwise), negative for right
+/// turn, zero for collinear.
+fn signed_area(p0: (f64, f64), p1: (f64, f64), p2: (f64, f64)) -> f64 {
+    (p0.0 - p2.0) * (p1.1 - p2.1) - (p1.0 - p2.0) * (p0.1 - p2.1)
+}
+
+/// Strict ordering on events for the sweep-line priority queue.
+/// Returns true iff `a` comes *strictly before* `b` in processing
+/// order. Tie-breaking follows the original Martinez paper:
+///
+/// 1. By x.
+/// 2. By y.
+/// 3. Right events before left events (so that an edge's right
+///    endpoint is processed before the left endpoint of an
+///    incident edge sharing the same point).
+/// 4. By the signed area of the (a.point, a.other, b.other)
+///    triangle: the edge with the lower other endpoint comes first.
+/// 5. By polygon id (subject before clipping) as a final
+///    tie-break.
+fn event_less(events: &[SweepEvent], a: usize, b: usize) -> bool {
+    let ea = &events[a];
+    let eb = &events[b];
+    if ea.point.0 != eb.point.0 {
+        return ea.point.0 < eb.point.0;
+    }
+    if ea.point.1 != eb.point.1 {
+        return ea.point.1 < eb.point.1;
+    }
+    if ea.is_left != eb.is_left {
+        // right (false) before left (true)
+        return !ea.is_left;
+    }
+    // Both events are at the same point and have the same direction.
+    // Use the orientation of the edge to break the tie: the one whose
+    // other endpoint is below comes first.
+    let other_a = events[ea.other_event].point;
+    let other_b = events[eb.other_event].point;
+    let area = signed_area(ea.point, other_a, other_b);
+    if area != 0.0 {
+        return area > 0.0;
+    }
+    // Final tie-break: subject (0) before clipping (1).
+    (ea.polygon as u8) < (eb.polygon as u8)
+}
+
+/// Strict ordering on edges in the status line. Edges are compared
+/// by which one lies "below" the other at the current sweep
+/// position. The status-line keeps left events of currently-active
+/// edges sorted from bottom to top.
+///
+/// The key property: if edge `a` is below edge `b` at sweep x,
+/// then at any sweep x where both are active, `a` is still below
+/// `b` (because edges in the status line have been split at every
+/// intersection — there are no proper crossings inside the
+/// status-line slab).
+fn status_less(events: &[SweepEvent], a: usize, b: usize) -> bool {
+    if a == b {
+        return false;
+    }
+    let ea = &events[a];
+    let eb = &events[b];
+    let other_a = events[ea.other_event].point;
+    let other_b = events[eb.other_event].point;
+    // Check whether ea's two endpoints are collinear with eb. If so,
+    // tie-break by point ordering; otherwise use the signed area to
+    // decide which is below.
+    if signed_area(ea.point, other_a, eb.point) != 0.0
+        || signed_area(ea.point, other_a, other_b) != 0.0
+    {
+        // Not collinear.
+        if ea.point == eb.point {
+            return signed_area(ea.point, other_a, other_b) > 0.0;
+        }
+        // If the events have different left endpoints, use the one
+        // that comes first lexicographically as the reference and
+        // measure the other's position relative to it.
+        if event_less(events, a, b) {
+            return signed_area(ea.point, other_a, eb.point) > 0.0;
+        }
+        return signed_area(eb.point, other_b, ea.point) < 0.0;
+    }
+    // Collinear edges: tie-break by polygon id then by point order.
+    if ea.polygon != eb.polygon {
+        return (ea.polygon as u8) < (eb.polygon as u8);
+    }
+    if ea.point != eb.point {
+        return point_lex_less(ea.point, eb.point);
+    }
+    point_lex_less(other_a, other_b)
+}
+
+/// Decide whether an edge should appear in the result of `op`,
+/// based on its classification flags. Called once the sweep step
+/// has filled `in_out`, `other_in_out`, and `edge_type` on a
+/// left event.
+///
+/// In the Martinez convention, `other_in_out = true` means the
+/// edge is *outside* the other polygon (the imaginary edge below
+/// from the other polygon was an in-out transition leaving us
+/// outside). So an edge contributes to the union iff it is
+/// outside the other polygon (`other_in_out`), and contributes to
+/// the intersection iff it is inside the other polygon
+/// (`!other_in_out`).
+fn edge_in_result(event: &SweepEvent, op: Operation) -> bool {
+    match event.edge_type {
+        EdgeType::Normal => match op {
+            Operation::Union => event.other_in_out,
+            Operation::Intersection => !event.other_in_out,
+            Operation::Difference => match event.polygon {
+                PolygonId::Subject => event.other_in_out,
+                PolygonId::Clipping => !event.other_in_out,
+            },
+            Operation::Xor => true,
+        },
+        EdgeType::SameTransition => matches!(op, Operation::Union | Operation::Intersection),
+        EdgeType::DifferentTransition => matches!(op, Operation::Difference),
+        EdgeType::NonContributing => false,
+    }
+}
+
+/// State for one run of the sweep algorithm. The events arena owns
+/// every `SweepEvent`; everything else refers to events by index.
+struct Sweep {
+    events: Vec<SweepEvent>,
+}
+
+impl Sweep {
+    fn new() -> Self {
+        Self { events: Vec::new() }
+    }
+
+    /// Push the two events (left, right) for an edge from `p1` to
+    /// `p2` belonging to the given polygon. Returns the indices of
+    /// the two new events as `(left_idx, right_idx)`. Skips
+    /// degenerate edges (`p1 == p2`).
+    fn add_edge(&mut self, p1: (f64, f64), p2: (f64, f64), polygon: PolygonId) {
+        if p1 == p2 {
+            return;
+        }
+        let (lp, rp) = if point_lex_less(p1, p2) { (p1, p2) } else { (p2, p1) };
+        let l = self.events.len();
+        let r = l + 1;
+        let mut le = SweepEvent::new(lp, true, polygon);
+        let mut re = SweepEvent::new(rp, false, polygon);
+        le.other_event = r;
+        re.other_event = l;
+        self.events.push(le);
+        self.events.push(re);
+    }
+
+    /// Push every edge of the given `PolygonSet` into the events
+    /// arena, tagged with `polygon`.
+    fn add_polygon_set(&mut self, ps: &PolygonSet, polygon: PolygonId) {
+        for ring in ps {
+            let n = ring.len();
+            if n < 3 {
+                continue;
+            }
+            for i in 0..n {
+                let p = ring[i];
+                let q = ring[(i + 1) % n];
+                self.add_edge(p, q, polygon);
+            }
+        }
+    }
+}
+
+/// Top-level dispatch: build a `Sweep`, run it, return the result
+/// `PolygonSet`. Handles the trivial empty-operand cases without
+/// invoking the sweep machinery.
+fn run_boolean(a: &PolygonSet, b: &PolygonSet, op: Operation) -> PolygonSet {
+    // Trivial cases — handled here so the sweep code can assume both
+    // operands are non-empty.
+    let a_empty = a.iter().all(|r| r.len() < 3);
+    let b_empty = b.iter().all(|r| r.len() < 3);
+    if a_empty && b_empty {
+        return Vec::new();
+    }
+    if a_empty {
+        return match op {
+            Operation::Union | Operation::Xor => clone_nondegenerate(b),
+            Operation::Intersection | Operation::Difference => Vec::new(),
+        };
+    }
+    if b_empty {
+        return match op {
+            Operation::Union | Operation::Xor | Operation::Difference => clone_nondegenerate(a),
+            Operation::Intersection => Vec::new(),
+        };
+    }
+
+    let mut sweep = Sweep::new();
+    sweep.add_polygon_set(a, PolygonId::Subject);
+    sweep.add_polygon_set(b, PolygonId::Clipping);
+
+    // Phase 1: process events in priority order, computing in_out /
+    // other_in_out / in_result. Phase 2 will add intersection
+    // detection here. For now we visit each event in order and
+    // assume the existing edges form a non-self-intersecting
+    // partition.
+    let order = phase1_sort_events(&sweep.events);
+    let mut status: Vec<usize> = Vec::new(); // sorted by status_less
+    for &idx in &order {
+        let is_left = sweep.events[idx].is_left;
+        if is_left {
+            // Insert into status line at the correct position.
+            let pos = status
+                .binary_search_by(|&probe| {
+                    if status_less(&sweep.events, probe, idx) {
+                        std::cmp::Ordering::Less
+                    } else if probe == idx {
+                        std::cmp::Ordering::Equal
+                    } else {
+                        std::cmp::Ordering::Greater
+                    }
+                })
+                .unwrap_or_else(|e| e);
+            status.insert(pos, idx);
+            // Compute in_out / other_in_out by inspecting the edge
+            // immediately below this one in the status line.
+            compute_fields(&mut sweep.events, &status, pos);
+            // Decide whether this edge contributes.
+            sweep.events[idx].in_result = edge_in_result(&sweep.events[idx], op);
+        } else {
+            // Right event — find the matching left event and remove
+            // it from the status line. The right event itself does
+            // not need to be inserted.
+            let other = sweep.events[idx].other_event;
+            if let Some(pos) = status.iter().position(|&e| e == other) {
+                status.remove(pos);
+            }
+            // Phase 1: copy in_result from the left event to the
+            // right event for use by the connection step.
+            sweep.events[idx].in_result = sweep.events[other].in_result;
+        }
+    }
+
+    connect_edges(&sweep.events, &order)
+}
+
+/// Sort the (still-flat) events arena into priority order. In
+/// phase 1 this is a one-shot sort; phase 2 will replace it with a
+/// real priority queue so newly-created intersection events can be
+/// inserted on the fly.
+fn phase1_sort_events(events: &[SweepEvent]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..events.len()).collect();
+    order.sort_by(|&a, &b| {
+        if event_less(events, a, b) {
+            std::cmp::Ordering::Less
+        } else if event_less(events, b, a) {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Equal
+        }
+    });
+    order
+}
+
+/// Populate `in_out` / `other_in_out` for the left event at
+/// `status[pos]`. Looks at the nearest edge below in the status
+/// line and uses the standard Martinez transition rules.
+///
+/// Field semantics (Martinez 2009, §4):
+/// - `in_out`: true iff this edge is an *inside-to-outside*
+///   transition of *its own* polygon when traversed from below
+///   to above. The bottom edge of a polygon has `in_out = false`
+///   (going up across it we enter the polygon, so it is *not* an
+///   in-out transition); the top edge has `in_out = true`.
+/// - `other_in_out`: true iff the imaginary edge directly below
+///   this one in the other polygon is an in-out transition —
+///   equivalently, this edge lies *outside* the other polygon.
+///   The bottom-most edge in the status line is treated as if
+///   the imaginary other-polygon edge below it was already an
+///   in-out transition (so we're outside), giving
+///   `other_in_out = true`.
+fn compute_fields(events: &mut [SweepEvent], status: &[usize], pos: usize) {
+    let idx = status[pos];
+    if pos == 0 {
+        events[idx].in_out = false;
+        events[idx].other_in_out = true;
+        return;
+    }
+    let prev = status[pos - 1];
+    let prev_polygon = events[prev].polygon;
+    let cur_polygon = events[idx].polygon;
+    if cur_polygon == prev_polygon {
+        // Same polygon: the in/out status of this polygon flips
+        // relative to the previous edge of the same polygon.
+        events[idx].in_out = !events[prev].in_out;
+        events[idx].other_in_out = events[prev].other_in_out;
+    } else {
+        // Different polygons: the previous edge tells us about the
+        // *other* polygon's status from this edge's perspective,
+        // and vice versa.
+        let prev_vertical = events[prev].point.0
+            == events[events[prev].other_event].point.0;
+        events[idx].in_out = !events[prev].other_in_out;
+        events[idx].other_in_out = if prev_vertical {
+            !events[prev].in_out
+        } else {
+            events[prev].in_out
+        };
+    }
+    // Track the previous in-result edge below for the connection
+    // step (used to nest holes inside outer rings).
+    if events[prev].in_result {
+        events[idx].prev_in_result = Some(prev);
+    } else {
+        events[idx].prev_in_result = events[prev].prev_in_result;
+    }
+}
+
+/// Walk the in-result events to form output rings. The standard
+/// Martinez connection step builds a graph where each in-result
+/// vertex links to its partner via `other_event`, then walks the
+/// graph to extract closed loops.
+fn connect_edges(events: &[SweepEvent], order: &[usize]) -> PolygonSet {
+    // Collect in-result events in priority order. Both events
+    // (left and right) of an in-result edge are included so the
+    // walker can step from a vertex to its partner via
+    // `other_event`.
+    let mut in_result: Vec<usize> = Vec::new();
+    for &idx in order {
+        let e = &events[idx];
+        let is_in = if e.is_left {
+            e.in_result
+        } else {
+            events[e.other_event].in_result
+        };
+        if is_in {
+            in_result.push(idx);
+        }
+    }
+
+    // For O(1) "where is event X in the in_result list?" lookups
+    // during the walk.
+    let mut pos_in_result: std::collections::HashMap<usize, usize> =
+        std::collections::HashMap::with_capacity(in_result.len());
+    for (i, &idx) in in_result.iter().enumerate() {
+        pos_in_result.insert(idx, i);
+    }
+
+    let mut visited = vec![false; in_result.len()];
+    let mut result: PolygonSet = Vec::new();
+
+    for start in 0..in_result.len() {
+        if visited[start] {
+            continue;
+        }
+        let mut ring: Ring = Vec::new();
+        let mut i = start;
+        loop {
+            visited[i] = true;
+            let cur_event = in_result[i];
+            ring.push(events[cur_event].point);
+            // Step to the partner (other endpoint of the same edge).
+            let partner = events[cur_event].other_event;
+            let Some(&partner_pos) = pos_in_result.get(&partner) else {
+                // Partner not in result — shouldn't happen for a
+                // well-formed input, but bail safely.
+                break;
+            };
+            visited[partner_pos] = true;
+            // From the partner, look for the next in-result event
+            // sharing the same point and not yet visited.
+            let partner_point = events[partner].point;
+            let mut next: Option<usize> = None;
+            // Search forward then backward in the in_result list.
+            for j in (partner_pos + 1)..in_result.len() {
+                if visited[j] {
+                    continue;
+                }
+                if events[in_result[j]].point == partner_point {
+                    next = Some(j);
+                    break;
+                }
+                if events[in_result[j]].point.0 > partner_point.0 {
+                    break;
+                }
+            }
+            if next.is_none() {
+                let mut j = partner_pos;
+                while j > 0 {
+                    j -= 1;
+                    if visited[j] {
+                        continue;
+                    }
+                    if events[in_result[j]].point == partner_point {
+                        next = Some(j);
+                        break;
+                    }
+                    if events[in_result[j]].point.0 < partner_point.0 {
+                        break;
+                    }
+                }
+            }
+            match next {
+                Some(j) => i = j,
+                None => break,
+            }
+            if i == start {
+                break;
+            }
+        }
+        if ring.len() >= 3 {
+            result.push(ring);
+        }
+    }
+
+    result
+}
+
+/// Return a deep copy of every ring in `ps` that has at least 3
+/// vertices. Used to handle the empty-operand fast path without
+/// returning references into the input.
+fn clone_nondegenerate(ps: &PolygonSet) -> PolygonSet {
+    ps.iter().filter(|r| r.len() >= 3).cloned().collect()
 }
 
 // ---------------------------------------------------------------------------
