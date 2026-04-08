@@ -15,6 +15,8 @@ py_library(
     name = "algorithms",
     srcs = [
         "algorithms/__init__.py",
+        "algorithms/boolean.py",
+        "algorithms/boolean_normalize.py",
         "algorithms/fit_curve.py",
         "algorithms/hit_test.py",
         "algorithms/path_text_layout.py",
