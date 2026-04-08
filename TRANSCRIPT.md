@@ -692,3 +692,8 @@ Face Traversal: Traverse the graph to find all enclosed areas.
 Hit Testing: When the user clicks, use a Point-in-Polygon test to see which Face index they hit.
 
 What do you think of this plan? Give me your suggestions.
+
+# Shape tool
+
+Let’s write an algorithm that takes a path and converts it to the nearest geometric object, a triangle, square, rectangle, circle, ellipse, figure-8, etc. please give suggestions.
+
