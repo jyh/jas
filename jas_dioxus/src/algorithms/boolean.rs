@@ -2009,6 +2009,132 @@ mod tests {
         );
     }
 
+    // -------------------------------------------------------------------
+    // Perturbation / robustness probes
+    //
+    // These explore what happens when two polygons are "nearly"
+    // coincident rather than exactly coincident. The fixture is the
+    // shared-edge repro (two 10x10 squares overlapping in 5x10) but
+    // with `b` shifted vertically by a small delta, so its top and
+    // bottom edges are no longer perfectly collinear with `a`'s.
+    //
+    // Three epsilons in the implementation govern the behaviour:
+    //   - 1e-12 in find_intersection (denom.abs() < 1e-12 -> Overlap)
+    //   - 1e-9 in points_eq, handle_collinear collinearity re-check,
+    //     find_intersection parameter clamp, overlap extent check
+    //   - strict `!= 0.0` in status_less (no epsilon)
+    //
+    // For each delta we run union and subtract on the perturbed
+    // fixture, assert the result area is within 0.1 of correct (a
+    // very loose tolerance — we're testing topology, not accuracy),
+    // and eprintln the ring structure so any deviation is visible.
+    //
+    // Each test runs independently so a failing zone doesn't mask
+    // the zones below it.
+
+    fn perturbed_fixture(delta: f64) -> (PolygonSet, PolygonSet) {
+        let a: PolygonSet = vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]];
+        let b: PolygonSet = vec![vec![
+            (5.0, delta),
+            (15.0, delta),
+            (15.0, 10.0 + delta),
+            (5.0, 10.0 + delta),
+        ]];
+        (a, b)
+    }
+
+    /// Area tolerance for perturbation tests. At delta <= 1e-6 a
+    /// correct algorithm should differ from the ideal area by less
+    /// than this; anything larger signals a real topological error.
+    const ZONE_TOL: f64 = 0.1;
+
+    fn check_perturbation(delta: f64, label: &str) {
+        let (a, b) = perturbed_fixture(delta);
+        // Expected areas (ignoring delta's contribution to |b|):
+        //   |a ∪ b|  ≈ 150  (rect (0,0)-(15, 10+delta) minus tiny notches)
+        //   |a − b|  ≈ 50   (rect (0,0)-(5, 10) plus/minus tiny slivers)
+        let u = boolean_union(&a, &b);
+        let s = boolean_subtract(&a, &b);
+        let u_area = polygon_set_area(&u);
+        let s_area = polygon_set_area(&s);
+        let u_ok = (u_area - 150.0).abs() < ZONE_TOL;
+        let s_ok = (s_area - 50.0).abs() < ZONE_TOL;
+        if !u_ok || !s_ok {
+            eprintln!("[{}] delta = {:e}", label, delta);
+            eprintln!("  union  area = {} (expect ~150) rings = {}", u_area, u.len());
+            eprintln!("    {:?}", u);
+            eprintln!("  subtract area = {} (expect ~50) rings = {}", s_area, s.len());
+            eprintln!("    {:?}", s);
+        }
+        assert!(u_ok, "{}: union area {} not within {} of 150", label, u_area, ZONE_TOL);
+        assert!(s_ok, "{}: subtract area {} not within {} of 50", label, s_area, ZONE_TOL);
+    }
+
+    // -------------------------------------------------------------------
+    // KNOWN LIMITATION: off-line split points in handle_collinear
+    //
+    // Perturbation tests at delta ∈ [1e-15, 1e-10] currently fail on
+    // `boolean_subtract`: the result is an empty region instead of
+    // the expected ~50-area rectangle. Root cause: when two edges
+    // are parallel-but-not-exactly-equal (dy_a = dy_b = 0 for both
+    // horizontals, but the y values differ by delta), find_intersection
+    // returns Overlap and handle_collinear's Case D2 fires. It then
+    // splits each edge at the *other* edge's endpoint, producing
+    // split points that sit slightly off the edge being split — e.g.
+    // splitting a_bot=(0,0)-(10,0) at (5, 1e-15) produces a left
+    // half (0,0)-(5, 1e-15) which is no longer horizontal. The
+    // slanted sub-edges corrupt later sweep invariants.
+    //
+    // At delta >= ~1e-8 the edges are distinct enough that
+    // find_intersection returns Point instead of Overlap, the
+    // collinear path is bypassed entirely, and the algorithm handles
+    // the inputs correctly.
+    //
+    // Fix options (not implemented):
+    //   1. Project the split point onto the edge being split in
+    //      handle_collinear (snap to edge line).
+    //   2. Snap-round all inputs to a fixed grid at the start of
+    //      run_boolean.
+    //
+    // Re-enable the ignored tests once one of these is in place.
+    // -------------------------------------------------------------------
+
+    #[test]
+    #[ignore = "known robustness gap: off-line split points in handle_collinear Case D2"]
+    fn perturb_1e_minus_15() {
+        check_perturbation(1e-15, "1e-15");
+    }
+
+    #[test]
+    #[ignore = "known robustness gap: off-line split points in handle_collinear Case D2"]
+    fn perturb_1e_minus_11() {
+        check_perturbation(1e-11, "1e-11");
+    }
+
+    #[test]
+    #[ignore = "known robustness gap: off-line split points in handle_collinear Case D2"]
+    fn perturb_1e_minus_10() {
+        check_perturbation(1e-10, "1e-10");
+    }
+
+    // Zone where perturbation is large enough to bypass the collinear
+    // code path entirely — find_intersection returns Point, Case D2
+    // never fires. These should pass.
+    #[test]
+    fn perturb_1e_minus_8() {
+        check_perturbation(1e-8, "1e-8");
+    }
+
+    #[test]
+    fn perturb_1e_minus_6() {
+        check_perturbation(1e-6, "1e-6");
+    }
+
+    #[test]
+    fn perturb_1e_minus_3() {
+        check_perturbation(1e-3, "1e-3");
+    }
+
     /// All four operations on the shared-edge fixture from
     /// `xor_minimal_repro_shared_top_and_bottom_edges`. This is the
     /// regression check for the collinear-shared-edge bug fixed in
