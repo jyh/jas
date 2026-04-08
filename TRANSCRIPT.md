@@ -596,3 +596,99 @@ Add a flag to each element that indicates its visiblity state.
 Add a Hide item to the Object menu, which sets the visibility of elements in the selection to invisible (and deselects them). Add an “Show All” item to the Object menu that sets the visibility of all hidden elements to preview.
 
 After “Show All”, the current selection is cleared, and all of the newly shown elements are selected.
+
+# Pathfinder
+
+Can we implement boolean operations with Martinez-Rueda-Feito? Give me your suggestions.
+
+[we discuss, then about 60min to implement]
+
+# Refactor
+
+We have various algorithms like fit_curve, hit test, boolean, etc. We may develop more with time. What about factoring these code into a directory called "algorithms"? Give me you suggestions.
+
+[we do this before porting the boolean operations]
+
+# Boolean operations
+
+let's go back to the boolean implementation in rust. do we have any roundtrip tests, for example where we subtract an element, then union it back in, then check that the result is the same as the original?
+
+maybe we should add commutative tests
+
+let's also add associativity
+
+> [found a bug in subtract]
+
+Build a minimal reproducer
+
+> [got one with 2 squares]
+
+fix it
+
+> [think for 20 min]
+
+> Found it. Look at event [0]:
+> 
+> [0] Subject (0.0, 0.0)→(5.0, 0.0) type=NonContributing in_out=false other_in_out=true in_result=false
+> The first half of a's bottom edge is marked NonContributing when it should be Normal. Its other_in_out=true is correct (outside b), so if edge_type were Normal it would be in the result. The > handle_collinear function is marking the wrong event as NonContributing.
+>
+> The fix
+> 
+> Make divide_segment return (l_idx, nr_idx) so callers can refer to the new events directly. Then fix the 3 buggy sites.
+
+what happens when we perform a boolean operation like union on two rings that are very very close, but not exactly equal?
+
+> Want me to write a few "fuzz" tests that systematically perturb the minimal repro fixture by decreasing amounts (1e-15, 1e-12, 1e-10, 1e-8, 1e-6) and report what each produces? 
+
+yes
+
+> Empirical results are significantly worse than I predicted. 
+
+I also want to support self-intersection. Does that affect our choices?
+
+> Yes, substantially.
+
+This is from user-drawn input. We should probably use non-zero winding. yes, we need to preserve the self-intersections. we will want to port to the other 3 languages.
+
+> Do you want semantic (A) or structural (B) preservation?
+
+Reading B probably makes more sense, but let's discuss first. We will be mapping document elements to rings, performing a boolean operation, then mapping back to document elements. We want the final geometry to be intuitively sensible to the artist.
+
+> Let me push back a little, because I think "preserve self-intersections" and "intuitive to the artist" are actually in tension in most of the cases you care about, and the right call might not be Reading B. ....
+
+that's a very good explanation, I agree, let's go with reading A
+
+> Before implementing, I want to enumerate test cases so I can write them first (TDD-style) and not miss anything:
+
+go
+
+> adds normalization and fixes tests
+
+> Before we talk ports I want to flag something. We still have the off-line-split bug in handle_collinear Case D2 as a latent issue. 
+
+fix it
+
+> [In the end, we left in a bug that occurs only when the entire selection fits into a 1-unit square, so in practice it never occurs. We decided to do nothing about it.]
+
+# Review
+
+Review the entire codebase and evaluate it for clarity, maintainability, efficiency, complexity, safety, test coverage, pattern consistency, conformity with style conventions, functional equivalence across languages, and anything else of importance. Make suggestions for improvements, ranking them in priority from high to low, and giving each a number. Be ready for a deep dive into any of the suggestions.
+
+# Shape Builder tool
+ 
+Next' let's develop an algorithm for Planar Graph Extraction. For this, we treat a set of elements as a collection of fragments created by every overlapping path. The idea is to take all path and split them at intersection points. After this,. we have a collection of individual edges that meet at nodes. A "face" can be defined by the left-at-intersection rule: start at an edge, and at every node, always take the leftmost available path. If this path forms a loop, the edged define the boundaries of a shape. Here is an implementation proposal.
+
+The Data Structure: Doubly Connected Edge List (DCEL)
+
+In computational geometry, a DCEL stores: 
+Vertices: $(x, y)$ coordinates.
+Edges: Links between vertices, but stored as "half-edges" (one for each direction).
+Faces: A pointer to one of the edges that bounds the empty space.
+
+The Workflow in Rust
+Intersection: Use a Sweep-line algorithm (like Bentley-Ottmann) to find all intersections in $O((n+k) \log n)$ time. This is much faster than checking every line against every other line.
+Graph Construction: Build a petgraph (a popular Rust graph crate) or a custom DCEL.
+Face Traversal: Traverse the graph to find all enclosed areas.
+Hit Testing: When the user clicks, use a Point-in-Polygon test to see which Face index they hit.
+
+What do you think of this plan? Give me your suggestions.
