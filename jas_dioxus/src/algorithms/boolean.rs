@@ -740,32 +740,23 @@ fn handle_collinear(
 
     if right_coincide {
         // Case C — shared right endpoint, different left
-        // endpoints. We split the longer at the later left.
+        // endpoints. We split the longer at the later left so that
+        // the longer's right half exactly matches the shorter; that
+        // right half is the suppressed overlap copy.
         let (longer_left, later_left_pt) = if event_less(events, e1, e2) {
             // e2's left is later, so e2 is the shorter; e1 is longer.
             (e1, p2l)
         } else {
             (e2, p1l)
         };
-        // Split the longer first, then mark types. The split
-        // creates a new sub-edge that aligns with the shorter; the
-        // shorter is kept and the new sub-edge is suppressed.
-        divide_segment(events, queue, longer_left, later_left_pt);
-        // After splitting, longer_left's other_event now points to
-        // the new "right of left half" event at later_left_pt. The
-        // new "left of right half" event is at later_left_pt and
-        // is the one that overlaps the shorter — but it hasn't
-        // been processed yet, so we mark it directly via the
-        // events arena.
-        let split_left = events[events[longer_left].other_event].other_event;
-        // `split_left` is the new left event of the right half of
-        // the longer edge (the part that overlaps the shorter).
-        // It's queued for later processing and will get its
-        // edge_type honoured when it pops out.
-        events[split_left].edge_type = EdgeType::NonContributing;
+        let (_l_split, nr_idx) = divide_segment(events, queue, longer_left, later_left_pt);
+        // `nr_idx` is the left event of the longer's right half
+        // (later_left_pt → shared right). That sub-edge is
+        // collinear with the shorter; mark it suppressed.
+        events[nr_idx].edge_type = EdgeType::NonContributing;
         let shorter = if longer_left == e1 { e2 } else { e1 };
         events[shorter].edge_type = kept_type;
-        events[split_left].in_result = edge_in_result(&events[split_left], op);
+        events[nr_idx].in_result = edge_in_result(&events[nr_idx], op);
         events[shorter].in_result = edge_in_result(&events[shorter], op);
         return;
     }
@@ -800,46 +791,49 @@ fn handle_collinear(
     if events[first].other_event == fourth {
         // Containment: edge `first..fourth` fully contains the
         // other. Split it twice — once at `second.point` and once
-        // at `third.point`.
+        // at `third.point`. The MIDDLE sub-edge of the longer is
+        // the one that overlaps the shorter; mark it suppressed.
         let mid_left = events[second].point;
         let mid_right = events[third].point;
-        divide_segment(events, queue, first, mid_left);
-        // After the first split, `first.other_event` points to a
-        // new right event at `mid_left`, and a new left event also
-        // at `mid_left` is the head of the right half. We need to
-        // split *that* right half at `mid_right`.
-        let right_half_left = events[events[first].other_event].other_event;
-        divide_segment(events, queue, right_half_left, mid_right);
-        // The middle sub-edge of the longer (between mid_left and
-        // mid_right) is the one that overlaps the shorter; mark it
-        // suppressed, and the shorter as kept.
-        events[right_half_left].edge_type = EdgeType::NonContributing;
+        // First split: `first` now represents (first.point, mid_left);
+        // `nr1` is the left of the right half (mid_left, fourth.point).
+        let (_l1, nr1) = divide_segment(events, queue, first, mid_left);
+        // Second split (on the right half): `nr1` now represents
+        // (mid_left, mid_right); `nr2` is the new left of the
+        // tail (mid_right, fourth.point).
+        let (_l2, _nr2) = divide_segment(events, queue, nr1, mid_right);
+        // After both splits, `nr1` is the middle sub-edge — the
+        // one collinear with the shorter. Mark it suppressed.
+        events[nr1].edge_type = EdgeType::NonContributing;
         let shorter = if first == e1 { e2 } else { e1 };
         events[shorter].edge_type = kept_type;
-        events[right_half_left].in_result = edge_in_result(&events[right_half_left], op);
+        events[nr1].in_result = edge_in_result(&events[nr1], op);
         events[shorter].in_result = edge_in_result(&events[shorter], op);
     } else {
-        // Partial overlap: split each at the other's interior
-        // endpoint.
+        // Partial overlap: split each edge at the other's interior
+        // endpoint. The OVERLAP region is `(second.point,
+        // third.point)`; on each edge it forms the right half of
+        // the split (since first.point and fourth.point are the
+        // outer endpoints of the union of the two segments).
+        //
+        // After divide_segment(first, second.point):
+        //   - `first` represents (first.point, second.point)   non-overlap
+        //   - `nr1`   represents (second.point, third.point)   overlap of e_first
+        // After divide_segment(other_left, third.point):
+        //   - `other_left` represents (second.point, third.point) overlap of e_other
+        //   - `nr2`        represents (third.point, fourth.point) non-overlap
         let split_a = events[second].point;
         let split_b = events[third].point;
-        divide_segment(events, queue, first, split_a);
-        divide_segment(events, queue, events[fourth].other_event, split_b);
-        // The right half of the first edge and the left half of
-        // the other span the overlap. Mark one as kept and the
-        // other as suppressed.
-        let first_right_half_left = events[events[first].other_event].other_event;
-        events[first_right_half_left].edge_type = EdgeType::NonContributing;
-        // The other edge's left half (which now ends at split_b)
-        // is the one we keep — its edge_type stays Normal until
-        // the kept-classification logic above sets it. But we
-        // need to mark it explicitly here since the type was set
-        // before the split. Use `second`'s edge — it's whichever
-        // of e1/e2 was *not* `first`.
+        let other_left = events[fourth].other_event;
+        let (_l1, nr1) = divide_segment(events, queue, first, split_a);
+        let (_l2, _nr2) = divide_segment(events, queue, other_left, split_b);
+        // `nr1` is the overlap copy from `first`'s edge; suppress it.
+        events[nr1].edge_type = EdgeType::NonContributing;
+        // `other_left` (whichever of e1/e2 is NOT `first`) is the
+        // overlap copy from the other edge; this is the kept one.
         let kept_left = if first == e1 { e2 } else { e1 };
         events[kept_left].edge_type = kept_type;
-        events[first_right_half_left].in_result =
-            edge_in_result(&events[first_right_half_left], op);
+        events[nr1].in_result = edge_in_result(&events[nr1], op);
         events[kept_left].in_result = edge_in_result(&events[kept_left], op);
     }
 }
@@ -861,12 +855,29 @@ fn points_eq(a: (f64, f64), b: (f64, f64)) -> bool {
 /// - the new "right of the left half" and "left of the right half"
 ///   events are pushed onto `queue` so they will be processed in
 ///   priority order.
+/// Split an edge at point `p`. Returns `(l_idx, nr_idx)` where:
+///   - `l_idx` is the new *right* event of the left half (at `p`).
+///   - `nr_idx` is the new *left* event of the right half (at `p`).
+///
+/// After the call:
+///   - `edge_left_idx` (unchanged identity) represents the LEFT half
+///     (`orig_left_point` → `p`); its partner is `l_idx`.
+///   - `nr_idx` represents the RIGHT half (`p` → `orig_right_point`);
+///     its partner is the original right event.
+///
+/// Callers that need to refer to the right half (e.g.
+/// [`handle_collinear`] tagging which sub-segment is the suppressed
+/// overlap copy) MUST use `nr_idx` returned here. Walking through
+/// `events[events[edge_left_idx].other_event].other_event` resolves
+/// back to `edge_left_idx`, not to `nr_idx` — that "round trip" via
+/// the new right-of-left-half points back to its own partner, which
+/// is `edge_left_idx`.
 fn divide_segment(
     events: &mut Vec<SweepEvent>,
     queue: &mut Vec<usize>,
     edge_left_idx: usize,
     p: (f64, f64),
-) {
+) -> (usize, usize) {
     let edge_right_idx = events[edge_left_idx].other_event;
     let polygon = events[edge_left_idx].polygon;
 
@@ -887,6 +898,8 @@ fn divide_segment(
 
     queue_push(queue, events, l_idx);
     queue_push(queue, events, nr_idx);
+
+    (l_idx, nr_idx)
 }
 
 /// Populate `in_out` / `other_in_out` for the left event at
@@ -1681,6 +1694,361 @@ mod tests {
             &[(8.0, 8.0), (7.0, 5.0)],
             &[(1.0, 1.0), (3.0, 3.0)],
             Some((0.0, 0.0, 10.0, 10.0)),
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // Algebraic property tests
+    //
+    // These verify identities the four operations are required to
+    // satisfy (commutativity, associativity, decomposition,
+    // involution). Failures here indicate a structural bug rather
+    // than a missed corner case — most often something about how
+    // intermediate results round-trip back through the sweep.
+    //
+    // We compare regions, not vertex sequences. `regions_equal`
+    // accepts any vertex/ring/winding representation as long as the
+    // covered region matches.
+    // -------------------------------------------------------------------
+
+    /// Sample grid covering the bbox of the test fixtures with a
+    /// margin. Used to verify two regions cover the same point set.
+    /// 21×21 = 441 points spaced 1.0 apart over [-2, 18]² is dense
+    /// enough to detect any region-level discrepancy in the test
+    /// fixtures (whose features are all integer-aligned).
+    fn property_sample_grid() -> Vec<(f64, f64)> {
+        let mut pts = Vec::with_capacity(441);
+        for i in -2..=18 {
+            for j in -2..=18 {
+                // Offset by 0.5 so samples land in cell centers and
+                // never on a polygon edge.
+                pts.push((i as f64 + 0.5, j as f64 + 0.5));
+            }
+        }
+        pts
+    }
+
+    /// True iff `p` and `q` represent the same region: same net
+    /// even-odd area (within EPS), same inside/outside answer at
+    /// every sample grid point, same bounding box (when non-empty).
+    ///
+    /// This is the equivalence relation the algorithm contract uses.
+    /// Vertex order, ring order, ring count, and winding are all
+    /// allowed to differ.
+    fn regions_equal(p: &PolygonSet, q: &PolygonSet) -> bool {
+        if !approx_eq(polygon_set_area(p), polygon_set_area(q)) {
+            return false;
+        }
+        for pt in property_sample_grid() {
+            if point_in_polygon_set(p, pt) != point_in_polygon_set(q, pt) {
+                return false;
+            }
+        }
+        match (polygon_set_bbox(p), polygon_set_bbox(q)) {
+            (None, None) => true,
+            (Some(_), None) | (None, Some(_)) => false,
+            (Some(a), Some(b)) => {
+                approx_eq(a.0, b.0)
+                    && approx_eq(a.1, b.1)
+                    && approx_eq(a.2, b.2)
+                    && approx_eq(a.3, b.3)
+            }
+        }
+    }
+
+    /// Assert two regions are equal, with a diagnostic on failure.
+    fn assert_regions_equal(p: &PolygonSet, q: &PolygonSet, label: &str) {
+        assert!(
+            regions_equal(p, q),
+            "{}: regions differ\n  lhs (area {}): {:?}\n  rhs (area {}): {:?}",
+            label,
+            polygon_set_area(p),
+            p,
+            polygon_set_area(q),
+            q,
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // Commutativity: union, intersection, exclude
+    //
+    // Subtract is *not* commutative — see `subtract_is_not_commutative`
+    // below for the negative pin.
+    //
+    // Tested against two non-trivial fixtures: overlapping squares
+    // and a square containing a smaller square. The disjoint case is
+    // omitted because every property is trivially true on it.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn union_commutative_overlapping_squares() {
+        let a = square_a();
+        let b = square_b_overlap();
+        assert_regions_equal(&boolean_union(&a, &b), &boolean_union(&b, &a), "union(a,b) vs union(b,a)");
+    }
+
+    #[test]
+    fn union_commutative_square_with_inside() {
+        let a = square_a();
+        let b = square_inside();
+        assert_regions_equal(&boolean_union(&a, &b), &boolean_union(&b, &a), "union(a,b) vs union(b,a)");
+    }
+
+    #[test]
+    fn intersect_commutative_overlapping_squares() {
+        let a = square_a();
+        let b = square_b_overlap();
+        assert_regions_equal(
+            &boolean_intersect(&a, &b),
+            &boolean_intersect(&b, &a),
+            "intersect(a,b) vs intersect(b,a)",
+        );
+    }
+
+    #[test]
+    fn intersect_commutative_square_with_inside() {
+        let a = square_a();
+        let b = square_inside();
+        assert_regions_equal(
+            &boolean_intersect(&a, &b),
+            &boolean_intersect(&b, &a),
+            "intersect(a,b) vs intersect(b,a)",
+        );
+    }
+
+    #[test]
+    fn exclude_commutative_overlapping_squares() {
+        let a = square_a();
+        let b = square_b_overlap();
+        assert_regions_equal(
+            &boolean_exclude(&a, &b),
+            &boolean_exclude(&b, &a),
+            "exclude(a,b) vs exclude(b,a)",
+        );
+    }
+
+    #[test]
+    fn exclude_commutative_square_with_inside() {
+        let a = square_a();
+        let b = square_inside();
+        assert_regions_equal(
+            &boolean_exclude(&a, &b),
+            &boolean_exclude(&b, &a),
+            "exclude(a,b) vs exclude(b,a)",
+        );
+    }
+
+    /// Pin: subtract is *not* commutative. If this test ever starts
+    /// failing because someone "fixed" the asymmetry, the algorithm
+    /// is wrong, not the test.
+    #[test]
+    fn subtract_is_not_commutative() {
+        let a = square_a();
+        let b = square_b_overlap();
+        // a − b = L-shape, area 75
+        // b − a = L-shape, area 75 (same area, different region!)
+        // They have the same magnitude but cover different points.
+        let ab = boolean_subtract(&a, &b);
+        let ba = boolean_subtract(&b, &a);
+        assert!(
+            !regions_equal(&ab, &ba),
+            "subtract should not be commutative; got equal regions"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // Decomposition: (a − b) ∪ (a ∩ b) = a
+    //
+    // This is the "the parts of a outside b, plus the parts of a
+    // inside b, recover all of a" identity. It's the closest analog
+    // to the user's "subtract then put it back" intuition.
+    //
+    // The naïve form (a − b) ∪ b is *not* equal to a — it equals
+    // a ∪ b, since b's overhang outside a is preserved.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn decomposition_overlapping_squares() {
+        let a = square_a();
+        let b = square_b_overlap();
+        let lhs = boolean_union(&boolean_subtract(&a, &b), &boolean_intersect(&a, &b));
+        assert_regions_equal(&lhs, &a, "(a − b) ∪ (a ∩ b) vs a");
+    }
+
+    #[test]
+    fn decomposition_square_with_inside() {
+        let a = square_a();
+        let b = square_inside();
+        let lhs = boolean_union(&boolean_subtract(&a, &b), &boolean_intersect(&a, &b));
+        assert_regions_equal(&lhs, &a, "(a − b) ∪ (a ∩ b) vs a");
+    }
+
+    // -------------------------------------------------------------------
+    // Involution: (a ⊕ b) ⊕ b = a
+    //
+    // XOR is its own inverse. This exercises the "feed an algorithm
+    // result back into the algorithm" path that single-op tests
+    // never hit.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn exclude_involution_overlapping_squares() {
+        let a = square_a();
+        let b = square_b_overlap();
+        let result = boolean_exclude(&boolean_exclude(&a, &b), &b);
+        assert_regions_equal(&result, &a, "(a ⊕ b) ⊕ b vs a");
+    }
+
+    #[test]
+    fn exclude_involution_square_with_inside() {
+        let a = square_a();
+        let b = square_inside();
+        let result = boolean_exclude(&boolean_exclude(&a, &b), &b);
+        assert_regions_equal(&result, &a, "(a ⊕ b) ⊕ b vs a");
+    }
+
+    // -------------------------------------------------------------------
+    // Associativity (3-input): (a · b) · c = a · (b · c) for · ∈ {∪, ∩, ⊕}
+    //
+    // Subtract is *not* associative; see `subtract_is_not_associative`
+    // below.
+    //
+    // The Venn fixture is three 10×10 squares arranged so all 7
+    // regions of a 3-set Venn diagram are non-empty:
+    //
+    //   A: (0, 0)-(10, 10)
+    //   B: (6, 0)-(16, 10)
+    //   C: (3, 6)-(13, 16)
+    //
+    // Pairwise overlaps:
+    //   A ∩ B = (6, 0)-(10, 10)         area 40
+    //   A ∩ C = (3, 6)-(10, 10)         area 28
+    //   B ∩ C = (6, 6)-(13, 10)         area 28
+    //   A ∩ B ∩ C = (6, 6)-(10, 10)     area 16
+    //
+    // All coordinates are integers, so the algorithm produces
+    // clean rational areas with negligible FP error.
+    // -------------------------------------------------------------------
+
+    fn venn_a() -> PolygonSet {
+        vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]]
+    }
+
+    fn venn_b() -> PolygonSet {
+        vec![vec![(6.0, 0.0), (16.0, 0.0), (16.0, 10.0), (6.0, 10.0)]]
+    }
+
+    fn venn_c() -> PolygonSet {
+        vec![vec![(3.0, 6.0), (13.0, 6.0), (13.0, 16.0), (3.0, 16.0)]]
+    }
+
+    #[test]
+    fn union_associative_three_squares() {
+        let a = venn_a();
+        let b = venn_b();
+        let c = venn_c();
+        let lhs = boolean_union(&boolean_union(&a, &b), &c);
+        let rhs = boolean_union(&a, &boolean_union(&b, &c));
+        assert_regions_equal(&lhs, &rhs, "(a ∪ b) ∪ c vs a ∪ (b ∪ c)");
+    }
+
+    #[test]
+    fn intersect_associative_three_squares() {
+        let a = venn_a();
+        let b = venn_b();
+        let c = venn_c();
+        let lhs = boolean_intersect(&boolean_intersect(&a, &b), &c);
+        let rhs = boolean_intersect(&a, &boolean_intersect(&b, &c));
+        assert_regions_equal(&lhs, &rhs, "(a ∩ b) ∩ c vs a ∩ (b ∩ c)");
+    }
+
+    #[test]
+    fn exclude_associative_three_squares() {
+        let a = venn_a();
+        let b = venn_b();
+        let c = venn_c();
+        let lhs = boolean_exclude(&boolean_exclude(&a, &b), &c);
+        let rhs = boolean_exclude(&a, &boolean_exclude(&b, &c));
+        assert_regions_equal(&lhs, &rhs, "(a ⊕ b) ⊕ c vs a ⊕ (b ⊕ c)");
+    }
+
+    // ---------- Minimal reproducer for the XOR bug ----------
+    //
+    // The failing 3-input associativity test was a red herring: the
+    // bug is a 2-input XOR bug, not anything about chained ops.
+    //
+    // Triggering condition: two operand polygons overlap such that
+    // one or more *whole edges* are collinear with edges of the
+    // other (specifically, the entire top and bottom edges of both
+    // squares lie on the same horizontal lines y=0 and y=10).
+    //
+    // The existing exclude_overlapping_is_two_l_shapes test uses
+    // square_b_overlap=(5,5)-(15,15) where the overlap is at a
+    // *corner* — no full-edge collinearity — and works correctly.
+    //
+    // Diagnostic test below verifies the other three ops on the
+    // same fixture, to confirm the bug is specific to XOR's
+    // collinear-edge classification path.
+    #[test]
+    fn xor_minimal_repro_shared_top_and_bottom_edges() {
+        // a and b overlap on (5,0)-(10,10). Both squares have their
+        // top edge at y=10 and their bottom edge at y=0, so the two
+        // input polygons share four collinear-edge pairs (the parts
+        // of those horizontal edges in the overlap x-range).
+        let a: PolygonSet = vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]];
+        let b: PolygonSet = vec![vec![(5.0, 0.0), (15.0, 0.0), (15.0, 10.0), (5.0, 10.0)]];
+        // Expected XOR region: two disjoint 5x10 strips = (0,0)-(5,10) ∪ (10,0)-(15,10).
+        // Total area: 100.
+        let result = boolean_exclude(&a, &b);
+        let area = polygon_set_area(&result);
+        assert!(
+            (area - 100.0).abs() < EPS,
+            "XOR with shared horizontal edges: expected area 100, got {} (rings: {:?})",
+            area,
+            result
+        );
+    }
+
+    /// All four operations on the shared-edge fixture from
+    /// `xor_minimal_repro_shared_top_and_bottom_edges`. This is the
+    /// regression check for the collinear-shared-edge bug fixed in
+    /// `divide_segment` / `handle_collinear`.
+    #[test]
+    fn shared_edges_all_ops() {
+        let a: PolygonSet = vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]];
+        let b: PolygonSet = vec![vec![(5.0, 0.0), (15.0, 0.0), (15.0, 10.0), (5.0, 10.0)]];
+        // |a∪b| = 150 (rect (0,0)-(15,10))
+        // |a∩b| = 50  (rect (5,0)-(10,10))
+        // |a−b| = 50  (rect (0,0)-(5,10))
+        // |b−a| = 50  (rect (10,0)-(15,10))
+        // |a⊕b| = 100 (the two rects above)
+        assert!((polygon_set_area(&boolean_union(&a, &b)) - 150.0).abs() < EPS);
+        assert!((polygon_set_area(&boolean_intersect(&a, &b)) - 50.0).abs() < EPS);
+        assert!((polygon_set_area(&boolean_subtract(&a, &b)) - 50.0).abs() < EPS);
+        assert!((polygon_set_area(&boolean_subtract(&b, &a)) - 50.0).abs() < EPS);
+        assert!((polygon_set_area(&boolean_exclude(&a, &b)) - 100.0).abs() < EPS);
+    }
+
+    /// Pin: subtract is *not* associative.
+    /// (a − b) − c removes the b-and-c overhangs from a;
+    /// a − (b − c) removes only the part of b that isn't in c, so
+    /// the part of b that *is* in c stays subtracted from a only on
+    /// the right side.
+    #[test]
+    fn subtract_is_not_associative() {
+        // Construction: take a = square_a, b = square_b_overlap,
+        // c = square_b_overlap. Then:
+        //   (a − b) − c = (a − b) − b = a − b           (area 75)
+        //   a − (b − c) = a − (b − b) = a − ∅ = a       (area 100)
+        // Same operands, different result — confirms non-associativity.
+        let a = square_a();
+        let b = square_b_overlap();
+        let c = square_b_overlap();
+        let lhs = boolean_subtract(&boolean_subtract(&a, &b), &c);
+        let rhs = boolean_subtract(&a, &boolean_subtract(&b, &c));
+        assert!(
+            !regions_equal(&lhs, &rhs),
+            "subtract should not be associative; got equal regions"
         );
     }
 }
