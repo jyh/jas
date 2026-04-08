@@ -321,6 +321,54 @@ let () =
     let result = boolean_subtract (bowtie ()) rect in
     assert (approx_eq (polygon_set_area result) 25.0));
 
+  (* Hole / non-axis-aligned / non-commutativity coverage backported from
+     jas_dioxus/src/algorithms/boolean.rs *)
+
+  run "intersect with holed polygon preserves hole" (fun () ->
+    let donut : polygon_set = [
+      [|(0., 0.); (10., 0.); (10., 10.); (0., 10.)|];
+      [|(3., 3.); (7., 3.); (7., 7.); (3., 7.)|];
+    ] in
+    let clip : polygon_set = [ [|(5., 0.); (10., 0.); (10., 10.); (5., 10.)|] ] in
+    let result = boolean_intersect donut clip in
+    assert_region result 42.0
+      ~inside:[(6., 1.); (8., 8.); (9., 5.)]
+      ~outside:[(5.5, 5.); (1., 1.)]
+      ~bbox:(5., 0., 5., 10.));
+
+  run "triangle intersect square clips corner" (fun () ->
+    let triangle : polygon_set = [ [|(0., 0.); (10., 0.); (0., 10.)|] ] in
+    let result = boolean_intersect (square_a ()) triangle in
+    assert_region result 50.0
+      ~inside:[(1., 1.); (3., 3.)] ~outside:[(8., 8.); (6., 6.)]
+      ~bbox:(0., 0., 10., 10.));
+
+  run "triangle subtract square leaves other triangle" (fun () ->
+    let triangle : polygon_set = [ [|(0., 0.); (10., 0.); (0., 10.)|] ] in
+    let result = boolean_subtract (square_a ()) triangle in
+    assert_region result 50.0
+      ~inside:[(8., 8.); (7., 5.)] ~outside:[(1., 1.); (3., 3.)]
+      ~bbox:(0., 0., 10., 10.));
+
+  run "subtract edge touching returns a unchanged" (fun () ->
+    assert_region (boolean_subtract (square_a ()) (square_edge_touching ())) 100.0
+      ~inside:[(5., 5.)] ~outside:[(15., 5.)] ~bbox:(0., 0., 10., 10.));
+
+  run "subtract is not commutative" (fun () ->
+    let a = square_a () in let b = square_b_overlap () in
+    let ab = boolean_subtract a b in
+    let ba = boolean_subtract b a in
+    assert (not (regions_equal ab ba)));
+
+  run "subtract is not associative" (fun () ->
+    (* (a - b) - b = a - b ; a - (b - b) = a *)
+    let a = square_a () in
+    let b = square_b_overlap () in
+    let c = square_b_overlap () in
+    let lhs = boolean_subtract (boolean_subtract a b) c in
+    let rhs = boolean_subtract a (boolean_subtract b c) in
+    assert (not (regions_equal lhs rhs)));
+
   (* Perturbation *)
 
   let perturbed delta : polygon_set * polygon_set =
@@ -337,8 +385,10 @@ let () =
       assert (abs_float (s_area -. 50.0) < 0.1))
   in
   check_perturb 1e-15 "1e-15";
+  check_perturb 1e-11 "1e-11";
   check_perturb 1e-10 "1e-10";
   check_perturb 1e-8 "1e-8";
+  check_perturb 1e-6 "1e-6";
   check_perturb 1e-3 "1e-3";
 
   (* project_onto_segment *)
@@ -359,6 +409,12 @@ let () =
 
   run "project_onto_segment degenerate" (fun () ->
     assert (project_onto_segment (5., 5.) (5., 5.) (100., 100.) = (5., 5.)));
+
+  run "project_onto_segment diagonal" (fun () ->
+    let p = project_onto_segment (0., 0.) (10., 10.) (5., 5. +. 1e-10) in
+    assert (abs_float (fst p -. 5.) < 1e-10);
+    assert (abs_float (snd p -. 5.) < 1e-10);
+    assert (fst p = snd p));
 
   (* Normalizer *)
 
