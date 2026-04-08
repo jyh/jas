@@ -40,7 +40,7 @@ def _layer_children(model: Model) -> tuple:
 class LineToolTest(absltest.TestCase):
     def test_draw_line(self):
         """Press at (10,20), release at (50,60) => creates a Line element."""
-        from tools.drawing_tool import LineTool
+        from tools.line_tool import LineTool
         tool = LineTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -57,7 +57,7 @@ class LineToolTest(absltest.TestCase):
 
     def test_zero_length_line_still_created(self):
         """Press and release at same point => degenerate line still created."""
-        from tools.drawing_tool import LineTool
+        from tools.line_tool import LineTool
         tool = LineTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -72,7 +72,7 @@ class LineToolTest(absltest.TestCase):
 class RectToolTest(absltest.TestCase):
     def test_draw_rect(self):
         """Press at (10,20), release at (110,70) => creates a Rect element."""
-        from tools.drawing_tool import RectTool
+        from tools.rect_tool import RectTool
         tool = RectTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -88,7 +88,7 @@ class RectToolTest(absltest.TestCase):
 
     def test_zero_size_rect_still_created(self):
         """Press and release at same point => degenerate rect still created."""
-        from tools.drawing_tool import RectTool
+        from tools.rect_tool import RectTool
         tool = RectTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -100,7 +100,7 @@ class RectToolTest(absltest.TestCase):
 
     def test_negative_drag_normalizes(self):
         """Dragging right-to-left and bottom-to-top normalizes coordinates."""
-        from tools.drawing_tool import RectTool
+        from tools.rect_tool import RectTool
         tool = RectTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 100, 80)
@@ -117,7 +117,7 @@ class RectToolTest(absltest.TestCase):
 class RoundedRectToolTest(absltest.TestCase):
     def test_draw_rounded_rect(self):
         """Press-drag-release creates a Rect with rx/ry set to default radius."""
-        from tools.drawing_tool import RoundedRectTool, ROUNDED_RECT_RADIUS
+        from tools.rounded_rect_tool import RoundedRectTool, ROUNDED_RECT_RADIUS
         tool = RoundedRectTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -135,7 +135,7 @@ class RoundedRectToolTest(absltest.TestCase):
 
     def test_zero_size_not_created(self):
         """Press and release at same point => no element created."""
-        from tools.drawing_tool import RoundedRectTool
+        from tools.rounded_rect_tool import RoundedRectTool
         tool = RoundedRectTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -144,14 +144,14 @@ class RoundedRectToolTest(absltest.TestCase):
         self.assertEqual(len(children), 0)
 
     def test_radius_default_is_ten(self):
-        from tools.drawing_tool import ROUNDED_RECT_RADIUS
+        from tools.rounded_rect_tool import ROUNDED_RECT_RADIUS
         self.assertEqual(ROUNDED_RECT_RADIUS, 10.0)
 
 
 class StarToolTest(absltest.TestCase):
     def test_draw_star(self):
         """Press-drag-release creates a Polygon with 2 * STAR_POINTS vertices."""
-        from tools.drawing_tool import StarTool, STAR_POINTS
+        from tools.star_tool import StarTool, STAR_POINTS
         tool = StarTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -164,7 +164,7 @@ class StarToolTest(absltest.TestCase):
 
     def test_zero_size_not_created(self):
         """Press and release at same point => no element created."""
-        from tools.drawing_tool import StarTool
+        from tools.star_tool import StarTool
         tool = StarTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -174,7 +174,7 @@ class StarToolTest(absltest.TestCase):
 
     def test_first_vertex_at_top(self):
         """First vertex of the star should be at the top center of the box."""
-        from tools.drawing_tool import StarTool
+        from tools.star_tool import StarTool
         tool = StarTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 0, 0)
@@ -186,7 +186,7 @@ class StarToolTest(absltest.TestCase):
 
     def test_negative_drag_normalizes(self):
         """A drag from a high to a low corner still produces a valid star."""
-        from tools.drawing_tool import StarTool
+        from tools.star_tool import StarTool
         tool = StarTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 100, 100)
@@ -198,7 +198,7 @@ class StarToolTest(absltest.TestCase):
         self.assertAlmostEqual(y, 0.0)
 
     def test_star_points_default_is_five(self):
-        from tools.drawing_tool import STAR_POINTS
+        from tools.star_tool import STAR_POINTS
         self.assertEqual(STAR_POINTS, 5)
 
 
@@ -357,7 +357,7 @@ class SelectionToolTest(absltest.TestCase):
 class ToolStateTest(absltest.TestCase):
     def test_idle_after_release(self):
         """Tool returns to idle state after release."""
-        from tools.drawing_tool import LineTool
+        from tools.line_tool import LineTool
         tool = LineTool()
         ctx, model, ctrl = _make_ctx()
         self.assertIsNone(tool._drag_start)
@@ -368,7 +368,7 @@ class ToolStateTest(absltest.TestCase):
 
     def test_move_without_press_is_noop(self):
         """on_move without prior on_press does nothing."""
-        from tools.drawing_tool import LineTool
+        from tools.line_tool import LineTool
         tool = LineTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_move(ctx, 50, 60, dragging=True)
@@ -378,7 +378,7 @@ class ToolStateTest(absltest.TestCase):
 class PolygonToolTest(absltest.TestCase):
     def test_draw_polygon(self):
         """Press-release creates a polygon."""
-        from tools.drawing_tool import PolygonTool
+        from tools.polygon_tool import PolygonTool
         from geometry.element import Polygon
         tool = PolygonTool()
         ctx, model, ctrl = _make_ctx()

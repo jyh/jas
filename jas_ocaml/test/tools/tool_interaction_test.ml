@@ -39,7 +39,7 @@ let () =
   (* ---- Line tool ---- *)
 
   run_test "line tool: draw line" (fun () ->
-    let tool = new Jas.Drawing_tool.line_tool in
+    let tool = new Jas.Line_tool.line_tool in
     let (ctx, model, _ctrl) = make_ctx () in
     tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
     tool#on_move ctx 30.0 40.0 ~shift:false ~dragging:true;
@@ -55,7 +55,7 @@ let () =
     | _ -> assert false);
 
   run_test "line tool: zero-length line still created" (fun () ->
-    let tool = new Jas.Drawing_tool.line_tool in
+    let tool = new Jas.Line_tool.line_tool in
     let (ctx, model, _ctrl) = make_ctx () in
     tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
     tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
@@ -65,7 +65,7 @@ let () =
   (* ---- Rect tool ---- *)
 
   run_test "rect tool: draw rect" (fun () ->
-    let tool = new Jas.Drawing_tool.rect_tool in
+    let tool = new Jas.Rect_tool.rect_tool in
     let (ctx, model, _ctrl) = make_ctx () in
     tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
     tool#on_release ctx 110.0 70.0 ~shift:false ~alt:false;
@@ -80,7 +80,7 @@ let () =
     | _ -> assert false);
 
   run_test "rect tool: zero-size rect still created" (fun () ->
-    let tool = new Jas.Drawing_tool.rect_tool in
+    let tool = new Jas.Rect_tool.rect_tool in
     let (ctx, model, _ctrl) = make_ctx () in
     tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
     tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
@@ -93,7 +93,7 @@ let () =
     | _ -> assert false);
 
   run_test "rect tool: negative drag normalizes" (fun () ->
-    let tool = new Jas.Drawing_tool.rect_tool in
+    let tool = new Jas.Rect_tool.rect_tool in
     let (ctx, model, _ctrl) = make_ctx () in
     tool#on_press ctx 100.0 80.0 ~shift:false ~alt:false;
     tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
@@ -110,7 +110,7 @@ let () =
   (* ---- Rounded rect tool ---- *)
 
   run_test "rounded rect tool: draw rounded rect" (fun () ->
-    let tool = new Jas.Drawing_tool.rounded_rect_tool in
+    let tool = new Jas.Rounded_rect_tool.rounded_rect_tool in
     let (ctx, model, _ctrl) = make_ctx () in
     tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
     tool#on_release ctx 110.0 70.0 ~shift:false ~alt:false;
@@ -122,12 +122,12 @@ let () =
       assert (y = 20.0);
       assert (width = 100.0);
       assert (height = 50.0);
-      assert (rx = Jas.Drawing_tool.rounded_rect_radius);
-      assert (ry = Jas.Drawing_tool.rounded_rect_radius)
+      assert (rx = Jas.Rounded_rect_tool.rounded_rect_radius);
+      assert (ry = Jas.Rounded_rect_tool.rounded_rect_radius)
     | _ -> assert false);
 
   run_test "rounded rect tool: zero-size not created" (fun () ->
-    let tool = new Jas.Drawing_tool.rounded_rect_tool in
+    let tool = new Jas.Rounded_rect_tool.rounded_rect_tool in
     let (ctx, model, _ctrl) = make_ctx () in
     tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
     tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
@@ -135,7 +135,7 @@ let () =
     assert (Array.length children = 0));
 
   run_test "rounded rect tool: negative drag normalizes" (fun () ->
-    let tool = new Jas.Drawing_tool.rounded_rect_tool in
+    let tool = new Jas.Rounded_rect_tool.rounded_rect_tool in
     let (ctx, model, _ctrl) = make_ctx () in
     tool#on_press ctx 100.0 80.0 ~shift:false ~alt:false;
     tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
@@ -147,14 +147,14 @@ let () =
       assert (y = 20.0);
       assert (width = 90.0);
       assert (height = 60.0);
-      assert (rx = Jas.Drawing_tool.rounded_rect_radius);
-      assert (ry = Jas.Drawing_tool.rounded_rect_radius)
+      assert (rx = Jas.Rounded_rect_tool.rounded_rect_radius);
+      assert (ry = Jas.Rounded_rect_tool.rounded_rect_radius)
     | _ -> assert false);
 
   (* ---- Star tool ---- *)
 
   run_test "star tool: draw star" (fun () ->
-    let tool = new Jas.Drawing_tool.star_tool in
+    let tool = new Jas.Star_tool.star_tool in
     let (ctx, model, _ctrl) = make_ctx () in
     tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
     tool#on_release ctx 110.0 120.0 ~shift:false ~alt:false;
@@ -162,11 +162,11 @@ let () =
     assert (Array.length children = 1);
     match children.(0) with
     | Polygon { points; _ } ->
-      assert (List.length points = 2 * Jas.Drawing_tool.star_points)
+      assert (List.length points = 2 * Jas.Star_tool.star_points)
     | _ -> assert false);
 
   run_test "star tool: zero-size not created" (fun () ->
-    let tool = new Jas.Drawing_tool.star_tool in
+    let tool = new Jas.Star_tool.star_tool in
     let (ctx, model, _ctrl) = make_ctx () in
     tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
     tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
@@ -174,7 +174,7 @@ let () =
     assert (Array.length children = 0));
 
   run_test "star tool: first vertex at top" (fun () ->
-    let tool = new Jas.Drawing_tool.star_tool in
+    let tool = new Jas.Star_tool.star_tool in
     let (ctx, model, _ctrl) = make_ctx () in
     tool#on_press ctx 0.0 0.0 ~shift:false ~alt:false;
     tool#on_release ctx 100.0 100.0 ~shift:false ~alt:false;
@@ -187,13 +187,13 @@ let () =
     | _ -> assert false);
 
   run_test "star tool: default points is 5" (fun () ->
-    assert (Jas.Drawing_tool.star_points = 5)
+    assert (Jas.Star_tool.star_points = 5)
   );
 
   (* ---- Polygon tool ---- *)
 
   run_test "polygon tool: draw polygon" (fun () ->
-    let tool = new Jas.Drawing_tool.polygon_tool in
+    let tool = new Jas.Polygon_tool.polygon_tool in
     let (ctx, model, _ctrl) = make_ctx () in
     tool#on_press ctx 50.0 50.0 ~shift:false ~alt:false;
     tool#on_release ctx 100.0 50.0 ~shift:false ~alt:false;

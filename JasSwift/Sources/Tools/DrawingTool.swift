@@ -1,7 +1,11 @@
 import AppKit
 import Foundation
 
-// MARK: - Drawing tool base
+// Drawing tool base class shared by line / rect / rounded_rect / polygon / star.
+//
+// The individual drawing tools live in their own per-tool files
+// (`LineTool.swift`, `RectTool.swift`, etc.) and inherit from
+// `DrawingToolBase` here. This file holds only the base class.
 
 class DrawingToolBase: CanvasTool {
     var dragStart: (Double, Double)?
@@ -51,132 +55,5 @@ class DrawingToolBase: CanvasTool {
         cgCtx.setLineDash(phase: 0, lengths: [4, 4])
         drawPreview(cgCtx, sx, sy, ex, ey)
         cgCtx.setLineDash(phase: 0, lengths: [])
-    }
-}
-
-// MARK: - Line tool
-
-class LineTool: DrawingToolBase {
-    override func createElement(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
-        .line(Line(x1: sx, y1: sy, x2: ex, y2: ey,
-                      stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)))
-    }
-
-    override func drawPreview(_ cgCtx: CGContext, _ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) {
-        cgCtx.move(to: CGPoint(x: sx, y: sy))
-        cgCtx.addLine(to: CGPoint(x: ex, y: ey))
-        cgCtx.strokePath()
-    }
-}
-
-// MARK: - Rect tool
-
-class RectTool: DrawingToolBase {
-    override func createElement(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
-        .rect(Rect(x: min(sx, ex), y: min(sy, ey),
-                      width: abs(ex - sx), height: abs(ey - sy),
-                      stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)))
-    }
-
-    override func drawPreview(_ cgCtx: CGContext, _ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) {
-        let r = CGRect(x: min(sx, ex), y: min(sy, ey),
-                       width: abs(ex - sx), height: abs(ey - sy))
-        cgCtx.addRect(r)
-        cgCtx.strokePath()
-    }
-}
-
-// MARK: - Rounded Rect tool
-
-/// Default corner radius (in points) for new rounded rectangles.
-let roundedRectRadius: Double = 10.0
-
-class RoundedRectTool: DrawingToolBase {
-    override func createElement(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
-        let w = abs(ex - sx)
-        let h = abs(ey - sy)
-        guard w > 0 && h > 0 else { return nil }
-        return .rect(Rect(x: min(sx, ex), y: min(sy, ey),
-                          width: w, height: h,
-                          rx: roundedRectRadius, ry: roundedRectRadius,
-                          stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)))
-    }
-
-    override func drawPreview(_ cgCtx: CGContext, _ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) {
-        let r = CGRect(x: min(sx, ex), y: min(sy, ey),
-                       width: abs(ex - sx), height: abs(ey - sy))
-        let radius = min(roundedRectRadius, r.width / 2.0, r.height / 2.0)
-        let path = CGPath(roundedRect: r, cornerWidth: radius, cornerHeight: radius, transform: nil)
-        cgCtx.addPath(path)
-        cgCtx.strokePath()
-    }
-}
-
-// MARK: - Star tool
-
-/// Default number of points (outer vertices) for new stars.
-let starPoints = 5
-
-/// Ratio of inner radius to outer radius for stars.
-private let starInnerRatio: Double = 0.4
-
-/// Compute vertices of a star inscribed in the given bounding box. The star
-/// has `n` outer vertices alternating with `n` inner vertices, for `2 * n`
-/// total. The first outer vertex is at the top of the box.
-func starShapePoints(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double,
-                     _ n: Int) -> [(Double, Double)] {
-    let cx = (sx + ex) / 2.0
-    let cy = (sy + ey) / 2.0
-    let rxOuter = abs(ex - sx) / 2.0
-    let ryOuter = abs(ey - sy) / 2.0
-    let rxInner = rxOuter * starInnerRatio
-    let ryInner = ryOuter * starInnerRatio
-    let theta0 = -Double.pi / 2.0
-    return (0..<(2 * n)).map { k in
-        let angle = theta0 + Double.pi * Double(k) / Double(n)
-        let rx = (k % 2 == 0) ? rxOuter : rxInner
-        let ry = (k % 2 == 0) ? ryOuter : ryInner
-        return (cx + rx * cos(angle), cy + ry * sin(angle))
-    }
-}
-
-class StarTool: DrawingToolBase {
-    override func createElement(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
-        guard abs(ex - sx) > 0 && abs(ey - sy) > 0 else { return nil }
-        let pts = starShapePoints(sx, sy, ex, ey, starPoints)
-        return .polygon(Polygon(points: pts,
-                                stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)))
-    }
-
-    override func drawPreview(_ cgCtx: CGContext, _ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) {
-        let pts = starShapePoints(sx, sy, ex, ey, starPoints)
-        guard let first = pts.first else { return }
-        cgCtx.move(to: CGPoint(x: first.0, y: first.1))
-        for i in 1..<pts.count {
-            cgCtx.addLine(to: CGPoint(x: pts[i].0, y: pts[i].1))
-        }
-        cgCtx.closePath()
-        cgCtx.strokePath()
-    }
-}
-
-// MARK: - Polygon tool
-
-class PolygonTool: DrawingToolBase {
-    override func createElement(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
-        let pts = regularPolygonPoints(sx, sy, ex, ey, polygonSides)
-        return .polygon(Polygon(points: pts,
-                                    stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)))
-    }
-
-    override func drawPreview(_ cgCtx: CGContext, _ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) {
-        let pts = regularPolygonPoints(sx, sy, ex, ey, polygonSides)
-        guard let first = pts.first else { return }
-        cgCtx.move(to: CGPoint(x: first.0, y: first.1))
-        for i in 1..<pts.count {
-            cgCtx.addLine(to: CGPoint(x: pts[i].0, y: pts[i].1))
-        }
-        cgCtx.closePath()
-        cgCtx.strokePath()
     }
 }
