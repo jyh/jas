@@ -13,3 +13,7 @@
 (test
  (name path_text_layout_test)
  (libraries jas))
+
+(test
+ (name planar_test)
+ (libraries jas))
