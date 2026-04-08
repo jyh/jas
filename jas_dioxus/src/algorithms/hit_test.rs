@@ -153,3 +153,185 @@ pub fn element_intersects_rect(elem: &Element, rx: f64, ry: f64, rw: f64, rh: f6
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- point_in_rect ----
+
+    #[test]
+    fn point_in_rect_interior() {
+        assert!(point_in_rect(5.0, 5.0, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn point_in_rect_outside() {
+        assert!(!point_in_rect(15.0, 5.0, 0.0, 0.0, 10.0, 10.0));
+        assert!(!point_in_rect(-1.0, 5.0, 0.0, 0.0, 10.0, 10.0));
+        assert!(!point_in_rect(5.0, 15.0, 0.0, 0.0, 10.0, 10.0));
+        assert!(!point_in_rect(5.0, -1.0, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn point_in_rect_on_edge() {
+        // Edges count as inside (closed-interval test).
+        assert!(point_in_rect(0.0, 5.0, 0.0, 0.0, 10.0, 10.0));
+        assert!(point_in_rect(10.0, 5.0, 0.0, 0.0, 10.0, 10.0));
+        assert!(point_in_rect(5.0, 0.0, 0.0, 0.0, 10.0, 10.0));
+        assert!(point_in_rect(5.0, 10.0, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn point_in_rect_on_corner() {
+        assert!(point_in_rect(0.0, 0.0, 0.0, 0.0, 10.0, 10.0));
+        assert!(point_in_rect(10.0, 10.0, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    // ---- segments_intersect ----
+
+    #[test]
+    fn segments_intersect_crossing() {
+        assert!(segments_intersect(0.0, 0.0, 10.0, 10.0, 0.0, 10.0, 10.0, 0.0));
+    }
+
+    #[test]
+    fn segments_intersect_parallel_no() {
+        assert!(!segments_intersect(0.0, 0.0, 10.0, 0.0, 0.0, 1.0, 10.0, 1.0));
+    }
+
+    #[test]
+    fn segments_intersect_separate() {
+        assert!(!segments_intersect(0.0, 0.0, 1.0, 1.0, 5.0, 5.0, 6.0, 6.0));
+    }
+
+    #[test]
+    fn segments_intersect_touching_at_endpoint() {
+        // Sharing an endpoint counts as intersecting.
+        assert!(segments_intersect(0.0, 0.0, 5.0, 5.0, 5.0, 5.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn segments_intersect_t_intersection() {
+        // T: one segment ends where another passes through.
+        assert!(segments_intersect(0.0, 5.0, 10.0, 5.0, 5.0, 5.0, 5.0, 0.0));
+    }
+
+    // ---- segment_intersects_rect ----
+
+    #[test]
+    fn segment_inside_rect() {
+        // Endpoint inside ⇒ true.
+        assert!(segment_intersects_rect(2.0, 2.0, 8.0, 8.0, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn segment_outside_rect() {
+        assert!(!segment_intersects_rect(20.0, 0.0, 30.0, 0.0, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn segment_crosses_rect() {
+        // Diagonal crossing fully through.
+        assert!(segment_intersects_rect(-5.0, 5.0, 15.0, 5.0, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn segment_one_endpoint_inside() {
+        assert!(segment_intersects_rect(5.0, 5.0, 20.0, 20.0, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn segment_endpoint_on_edge() {
+        // Endpoint exactly on the edge.
+        assert!(segment_intersects_rect(10.0, 5.0, 20.0, 5.0, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    // ---- rects_intersect ----
+
+    #[test]
+    fn rects_intersect_overlapping() {
+        assert!(rects_intersect(0.0, 0.0, 10.0, 10.0, 5.0, 5.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn rects_intersect_separate() {
+        assert!(!rects_intersect(0.0, 0.0, 10.0, 10.0, 20.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn rects_intersect_contained() {
+        assert!(rects_intersect(0.0, 0.0, 100.0, 100.0, 25.0, 25.0, 50.0, 50.0));
+    }
+
+    #[test]
+    fn rects_intersect_edge_touching() {
+        // Edge-touching rects do NOT intersect (open-interval rule).
+        assert!(!rects_intersect(0.0, 0.0, 10.0, 10.0, 10.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn rects_intersect_corner_touching() {
+        assert!(!rects_intersect(0.0, 0.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn rects_intersect_identical() {
+        assert!(rects_intersect(0.0, 0.0, 10.0, 10.0, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    // ---- element_intersects_rect on simple elements ----
+    //
+    // These exercise the dispatch into element-specific helpers via the
+    // public Element type. The fixtures use the smallest possible
+    // element constructors so the tests focus on the hit-test logic
+    // rather than the element model.
+
+    use crate::geometry::element::{LineElem, RectElem, CommonProps};
+
+    #[test]
+    fn line_element_intersects_rect_overlapping() {
+        let line = Element::Line(LineElem {
+            common: CommonProps::default(),
+            x1: -5.0, y1: 5.0, x2: 15.0, y2: 5.0,
+            stroke: None,
+        });
+        assert!(element_intersects_rect(&line, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn line_element_outside_rect() {
+        let line = Element::Line(LineElem {
+            common: CommonProps::default(),
+            x1: 20.0, y1: 0.0, x2: 30.0, y2: 0.0,
+            stroke: None,
+        });
+        assert!(!element_intersects_rect(&line, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn rect_element_overlapping_rect() {
+        let rect = Element::Rect(RectElem {
+            common: CommonProps::default(),
+            x: 5.0, y: 5.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+        });
+        assert!(element_intersects_rect(&rect, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn rect_element_outside_rect() {
+        let rect = Element::Rect(RectElem {
+            common: CommonProps::default(),
+            x: 20.0, y: 20.0, width: 5.0, height: 5.0,
+            rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+        });
+        assert!(!element_intersects_rect(&rect, 0.0, 0.0, 10.0, 10.0));
+    }
+}
