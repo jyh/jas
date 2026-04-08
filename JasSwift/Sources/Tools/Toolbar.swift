@@ -678,6 +678,30 @@ public struct ToolbarView {
                 path.closeSubpath()
                 context.stroke(path, with: .color(color), lineWidth: 1.5)
 
+            case .anchorPoint:
+                // Convert Anchor Point: a center anchor square with two
+                // diagonal handle lines, suggesting a smooth/corner convert.
+                let cx = ox + 14, cy = oy + 14
+                // Handle lines (diagonal)
+                var handles = SwiftUI.Path()
+                handles.move(to: CGPoint(x: cx - 10, y: cy - 10))
+                handles.addLine(to: CGPoint(x: cx, y: cy))
+                handles.addLine(to: CGPoint(x: cx + 10, y: cy + 10))
+                context.stroke(handles, with: .color(color), lineWidth: 1.5)
+                // Handle endpoint circles
+                let r: CGFloat = 2.5
+                for (hx, hy) in [(cx - 10, cy - 10), (cx + 10, cy + 10)] {
+                    var hc = SwiftUI.Path()
+                    hc.addEllipse(in: CGRect(x: hx - r, y: hy - r, width: r * 2, height: r * 2))
+                    context.fill(hc, with: .color(color))
+                }
+                // Anchor square (filled)
+                let half: CGFloat = 4
+                var anchor = SwiftUI.Path()
+                anchor.addRect(CGRect(x: cx - half, y: cy - half, width: half * 2, height: half * 2))
+                context.fill(anchor, with: .color(color))
+                context.stroke(anchor, with: .color(.black), lineWidth: 1.0)
+
             case .star:
                 // Star icon from SVG (viewBox 0 0 256 256), scaled to 28x28
                 let s: CGFloat = 28.0 / 256.0
@@ -789,6 +813,8 @@ private struct ArrowSlotButton: View {
         case .groupSelection: return "Group Selection"
         case .pen: return "Pen"
         case .addAnchorPoint: return "Add Anchor Point"
+        case .deleteAnchorPoint: return "Delete Anchor Point"
+        case .anchorPoint: return "Anchor Point"
         case .pencil: return "Pencil"
         case .pathEraser: return "Path Eraser"
         case .smooth: return "Smooth"

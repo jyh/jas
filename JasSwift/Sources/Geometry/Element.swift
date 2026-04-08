@@ -717,6 +717,129 @@ public func movePathHandle(_ d: [PathCommand], anchorIdx: Int, handleType: Strin
     return cmds
 }
 
+/// Move a single handle without reflecting the opposite handle (cusp behavior).
+public func movePathHandleIndependent(_ d: [PathCommand], anchorIdx: Int, handleType: String,
+                                      dx: Double, dy: Double) -> [PathCommand] {
+    var cmdIndices: [Int] = []
+    for (ci, cmd) in d.enumerated() {
+        if case .closePath = cmd { continue }
+        cmdIndices.append(ci)
+    }
+    guard anchorIdx >= 0, anchorIdx < cmdIndices.count else { return d }
+    let ci = cmdIndices[anchorIdx]
+    var cmds = d
+    if handleType == "in" {
+        if case .curveTo(let x1, let y1, let x2, let y2, let x, let y) = cmds[ci] {
+            cmds[ci] = .curveTo(x1: x1, y1: y1, x2: x2 + dx, y2: y2 + dy, x: x, y: y)
+        }
+    } else if handleType == "out" {
+        if ci + 1 < cmds.count,
+           case .curveTo(let x1, let y1, let x2, let y2, let x, let y) = cmds[ci + 1] {
+            cmds[ci + 1] = .curveTo(x1: x1 + dx, y1: y1 + dy, x2: x2, y2: y2, x: x, y: y)
+        }
+    }
+    return cmds
+}
+
+/// True if a path anchor has at least one non-degenerate handle (i.e. is "smooth").
+public func isSmoothPoint(_ d: [PathCommand], anchorIdx: Int) -> Bool {
+    let (hIn, hOut) = pathHandlePositions(d, anchorIdx: anchorIdx)
+    return hIn != nil || hOut != nil
+}
+
+/// Convert a corner point to a smooth point with handles pulled toward (hx, hy).
+/// The outgoing handle is placed at (hx, hy) and the incoming handle is reflected
+/// through the anchor.
+public func convertCornerToSmooth(_ d: [PathCommand], anchorIdx: Int,
+                                  hx: Double, hy: Double) -> [PathCommand] {
+    var cmdIndices: [Int] = []
+    for (ci, cmd) in d.enumerated() {
+        if case .closePath = cmd { continue }
+        cmdIndices.append(ci)
+    }
+    guard anchorIdx >= 0, anchorIdx < cmdIndices.count else { return d }
+    let ci = cmdIndices[anchorIdx]
+    let cmd = d[ci]
+    let ax: Double, ay: Double
+    switch cmd {
+    case .moveTo(let x, let y), .lineTo(let x, let y):
+        ax = x; ay = y
+    case .curveTo(_, _, _, _, let x, let y):
+        ax = x; ay = y
+    default:
+        return d
+    }
+    // Reflected handle: mirror (hx, hy) through the anchor.
+    let rhx = 2.0 * ax - hx
+    let rhy = 2.0 * ay - hy
+    var cmds = d
+    // Set incoming handle (x2, y2) on this command to the reflected position.
+    switch cmds[ci] {
+    case .lineTo(let x, let y):
+        // Use previous anchor as x1,y1 if there is one.
+        var px = x, py = y
+        if ci > 0 {
+            switch d[ci - 1] {
+            case .moveTo(let mx, let my), .lineTo(let mx, let my): px = mx; py = my
+            case .curveTo(_, _, _, _, let cxe, let cye): px = cxe; py = cye
+            default: break
+            }
+        }
+        cmds[ci] = .curveTo(x1: px, y1: py, x2: rhx, y2: rhy, x: x, y: y)
+    case .curveTo(let x1, let y1, _, _, let x, let y):
+        cmds[ci] = .curveTo(x1: x1, y1: y1, x2: rhx, y2: rhy, x: x, y: y)
+    case .moveTo:
+        // No incoming handle on a MoveTo; only outgoing handle is set below.
+        break
+    default:
+        break
+    }
+    // Set outgoing handle (x1, y1) on the next command to (hx, hy).
+    if ci + 1 < cmds.count {
+        switch cmds[ci + 1] {
+        case .lineTo(let x, let y):
+            cmds[ci + 1] = .curveTo(x1: hx, y1: hy, x2: x, y2: y, x: x, y: y)
+        case .curveTo(_, _, let x2, let y2, let x, let y):
+            cmds[ci + 1] = .curveTo(x1: hx, y1: hy, x2: x2, y2: y2, x: x, y: y)
+        default:
+            break
+        }
+    }
+    return cmds
+}
+
+/// Convert a smooth point to a corner point by collapsing both handles to the anchor.
+public func convertSmoothToCorner(_ d: [PathCommand], anchorIdx: Int) -> [PathCommand] {
+    var cmdIndices: [Int] = []
+    for (ci, cmd) in d.enumerated() {
+        if case .closePath = cmd { continue }
+        cmdIndices.append(ci)
+    }
+    guard anchorIdx >= 0, anchorIdx < cmdIndices.count else { return d }
+    let ci = cmdIndices[anchorIdx]
+    let cmd = d[ci]
+    let ax: Double, ay: Double
+    switch cmd {
+    case .moveTo(let x, let y), .lineTo(let x, let y):
+        ax = x; ay = y
+    case .curveTo(_, _, _, _, let x, let y):
+        ax = x; ay = y
+    default:
+        return d
+    }
+    var cmds = d
+    // Collapse incoming handle (x2, y2) on this command to the anchor.
+    if case .curveTo(let x1, let y1, _, _, let x, let y) = cmds[ci] {
+        cmds[ci] = .curveTo(x1: x1, y1: y1, x2: ax, y2: ay, x: x, y: y)
+    }
+    // Collapse outgoing handle (x1, y1) on the next command to the anchor.
+    if ci + 1 < cmds.count,
+       case .curveTo(_, _, let x2, let y2, let x, let y) = cmds[ci + 1] {
+        cmds[ci + 1] = .curveTo(x1: ax, y1: ay, x2: x2, y2: y2, x: x, y: y)
+    }
+    return cmds
+}
+
 /// SVG \<line\> element.
 public struct Line: Equatable {
     public let x1: Double, y1: Double, x2: Double, y2: Double
