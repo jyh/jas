@@ -5,12 +5,23 @@ py_library(
     srcs = [
         "geometry/__init__.py",
         "geometry/element.py",
-        "geometry/fit_curve.py",
-        "geometry/hit_test.py",
         "geometry/measure.py",
         "geometry/svg.py",
     ],
     imports = ["."],
+)
+
+py_library(
+    name = "algorithms",
+    srcs = [
+        "algorithms/__init__.py",
+        "algorithms/fit_curve.py",
+        "algorithms/hit_test.py",
+        "algorithms/path_text_layout.py",
+        "algorithms/text_layout.py",
+    ],
+    imports = ["."],
+    deps = [":geometry"],
 )
 
 py_library(
@@ -22,24 +33,25 @@ py_library(
         "document/model.py",
     ],
     imports = ["."],
-    deps = [":geometry"],
+    deps = [":algorithms", ":geometry"],
 )
 
 py_library(
     name = "tools",
     srcs = [
         "tools/__init__.py",
-        "tools/drawing.py",
-        "tools/pen.py",
-        "tools/pencil.py",
-        "tools/selection.py",
-        "tools/text.py",
-        "tools/type_on_path.py",
+        "tools/drawing_tool.py",
+        "tools/pen_tool.py",
+        "tools/pencil_tool.py",
+        "tools/selection_tool.py",
+        "tools/type_tool.py",
+        "tools/type_on_path_tool.py",
         "tools/tool.py",
         "tools/toolbar.py",
     ],
     imports = ["."],
     deps = [
+        ":algorithms",
         ":document",
         ":geometry",
         "@pip_deps//pyside6",
@@ -54,6 +66,7 @@ py_library(
     ],
     imports = ["."],
     deps = [
+        ":algorithms",
         ":document",
         ":geometry",
         ":tools",
@@ -79,13 +92,13 @@ py_library(
     name = "jas_lib",
     srcs = ["jas_app.py"],
     imports = ["."],
-    deps = [":canvas", ":document", ":geometry", ":menu", ":tools"],
+    deps = [":algorithms", ":canvas", ":document", ":geometry", ":menu", ":tools"],
 )
 
 py_binary(
     name = "jas_app",
     srcs = ["jas_app.py"],
-    deps = [":canvas", ":document", ":geometry", ":menu", ":tools"],
+    deps = [":algorithms", ":canvas", ":document", ":geometry", ":menu", ":tools"],
     main = "jas_app.py",
 )
 

@@ -17,7 +17,7 @@ from geometry.element import (
     control_point_count, control_points, move_control_points,
     move_path_handle as _move_path_handle,
 )
-from geometry.hit_test import (
+from algorithms.hit_test import (
     element_intersects_rect, point_in_rect,
 )
 from document.model import Model

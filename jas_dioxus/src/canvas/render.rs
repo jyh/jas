@@ -278,7 +278,7 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             ctx.set_font(&font);
             let measure = crate::tools::text_measure::make_measurer(&font, e.font_size);
             let max_w = if e.is_area_text() { e.width } else { 0.0 };
-            let layout = crate::geometry::text_layout::layout(
+            let layout = crate::algorithms::text_layout::layout(
                 &e.content,
                 max_w,
                 e.font_size,

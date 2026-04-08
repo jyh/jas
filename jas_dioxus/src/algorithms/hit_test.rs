@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use super::element::{control_point_count, flatten_path_commands, Element};
+use crate::geometry::element::{control_point_count, flatten_path_commands, Element};
 
 // ---------------------------------------------------------------------------
 // Primitive geometry

@@ -5,7 +5,9 @@ bazel*
 
 # Local editor / agent scratch
 transcript/
-.claude/settings.json
+.claude/settings.local.json
+.claude/projects/
+.claude/.credentials.json
 
 # OCaml / dune build artifacts that sometimes leak into the repo root
 *.cmi

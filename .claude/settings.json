@@ -49,7 +49,10 @@
       "Bash(PYTHONPATH=. python -m pytest -x)",
       "Bash(PYTHONPATH=. python __main__.py)",
       "Bash(ls /Users/jyh/projects/claude/jas/jas/*.py)",
-      "Bash(PYTHONPATH=. python jas_app.py)"
+      "Bash(PYTHONPATH=. python jas_app.py)",
+      "Bash(python -m pytest:*)",
+      "Bash(pytest:*)",
+      "Bash(swift build:*)"
     ],
     "additionalDirectories": [
       "/tmp"

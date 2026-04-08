@@ -337,7 +337,7 @@ class PenToolPathTest(absltest.TestCase):
 
     def test_straight_line_two_points(self):
         """Two points with no handle drag produces CurveTo with control points at anchors."""
-        from tools.pen import PenPoint
+        from tools.pen_tool import PenPoint
         p0 = PenPoint(0, 0)
         p1 = PenPoint(100, 0)
         cmds = [MoveTo(p0.x, p0.y)]
@@ -349,7 +349,7 @@ class PenToolPathTest(absltest.TestCase):
 
     def test_handle_drag_creates_smooth_curve(self):
         """Dragging a handle sets symmetric handles on the point."""
-        from tools.pen import PenPoint
+        from tools.pen_tool import PenPoint
         p = PenPoint(50, 50)
         # Simulate drag to (70, 50) — sets hx_out=70, hy_out=50, hx_in=30, hy_in=50
         p.hx_out = 70
@@ -361,7 +361,7 @@ class PenToolPathTest(absltest.TestCase):
 
     def test_closed_path_has_close_command(self):
         """A closed pen path ends with CurveTo back to start and ClosePath."""
-        from tools.pen import PenPoint
+        from tools.pen_tool import PenPoint
         pts = [PenPoint(0, 0), PenPoint(100, 0), PenPoint(50, 50)]
         cmds = [MoveTo(pts[0].x, pts[0].y)]
         for i in range(1, len(pts)):
@@ -377,7 +377,7 @@ class PenToolPathTest(absltest.TestCase):
 
     def test_pen_point_default_handles_at_anchor(self):
         """New PenPoint has all handles at the anchor position."""
-        from tools.pen import PenPoint
+        from tools.pen_tool import PenPoint
         p = PenPoint(42, 99)
         self.assertEqual((p.hx_in, p.hy_in), (42, 99))
         self.assertEqual((p.hx_out, p.hy_out), (42, 99))

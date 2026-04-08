@@ -93,7 +93,7 @@ use crate::document::model::Model;
 use crate::geometry::element::{
     flatten_path_commands, Element, PathCommand, PathElem, FLATTEN_STEPS,
 };
-use crate::geometry::fit_curve::fit_curve;
+use crate::algorithms::fit_curve::fit_curve;
 
 use super::tool::{CanvasTool, SMOOTH_SIZE};
 

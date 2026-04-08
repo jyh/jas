@@ -14,14 +14,14 @@
 //! The editor is split across several files so each piece can be tested
 //! in isolation against a stub measurer with no DOM:
 //!
-//! - [`crate::geometry::text_layout`] — pure word-wrap layout. Given a
+//! - [`crate::algorithms::text_layout`] — pure word-wrap layout. Given a
 //!   string, a max width, a font size, and a `Fn(&str) -> f64` measurer,
 //!   it produces glyph rectangles, line summaries, and APIs for cursor
 //!   movement (`cursor_xy`, `cursor_up`, `cursor_down`, `hit_test`,
 //!   `line_for_cursor`). It is the single source of truth for *visual*
 //!   cursor placement, both for rendering and for keyboard navigation.
 //!
-//! - [`crate::geometry::path_text_layout`] — analogous module for
+//! - [`crate::algorithms::path_text_layout`] — analogous module for
 //!   text-on-path. It walks the arc length of the path, places a glyph
 //!   at each character's center, and exposes `cursor_pos` and `hit_test`
 //!   over arc-length. Up/Down navigation does not apply (single line).
@@ -44,7 +44,7 @@
 //!   `undo`, `redo`) and a single `apply_to_document` that materializes
 //!   a new `Document` with the edited content.
 //!
-//! - [`crate::tools::type_tool`] / [`crate::tools::type_on_path`] — the
+//! - [`crate::tools::type_tool`] / [`crate::tools::type_on_path_tool`] — the
 //!   `CanvasTool` impls that wire mouse and keyboard events to a
 //!   `TextEditSession`. They implement hover detection, click-to-edit,
 //!   click-outside-to-end, drag-to-extend-selection, the printable-key
@@ -184,10 +184,10 @@ use std::collections::VecDeque;
 
 use crate::document::document::{Document, ElementPath};
 use crate::geometry::element::{Element, TextElem, TextPathElem};
-use crate::geometry::text_layout::ordered_range;
+use crate::algorithms::text_layout::ordered_range;
 
 /// Cursor blink half-period in milliseconds (matches the macOS default).
-/// Shared by [`crate::tools::type_tool`] and [`crate::tools::type_on_path`].
+/// Shared by [`crate::tools::type_tool`] and [`crate::tools::type_on_path_tool`].
 pub const BLINK_HALF_PERIOD_MS: f64 = 530.0;
 
 /// Snapshot saved on the per-session undo stack.

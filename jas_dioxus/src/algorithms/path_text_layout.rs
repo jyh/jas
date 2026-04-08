@@ -4,9 +4,9 @@
 //! along an arc-length parameterised path. Returned data supports both
 //! rendering and hit-testing (mouse → cursor index).
 
-use super::element::PathCommand;
-use super::measure::arc_lengths;
-use super::element::flatten_path_commands;
+use crate::geometry::element::PathCommand;
+use crate::geometry::measure::arc_lengths;
+use crate::geometry::element::flatten_path_commands;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PathGlyph {

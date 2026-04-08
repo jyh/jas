@@ -5,7 +5,7 @@ use web_sys::CanvasRenderingContext2d;
 use crate::document::controller::Controller;
 use crate::document::model::Model;
 use crate::geometry::element::{Color, CommonProps, Element, PathCommand, PathElem, Stroke};
-use crate::geometry::fit_curve::fit_curve;
+use crate::algorithms::fit_curve::fit_curve;
 
 use super::tool::CanvasTool;
 

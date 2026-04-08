@@ -22,7 +22,7 @@ from geometry.element import (
     Path, TextPath,
     path_closest_offset, path_distance_to_point, path_point_at_offset,
 )
-from geometry.path_text_layout import layout_path_text, PathTextLayout
+from algorithms.path_text_layout import layout_path_text, PathTextLayout
 from tools.text_edit import EditTarget, TextEditSession, empty_text_path_elem
 from tools.text_measure import make_measurer
 from tools.tool import CanvasTool, KeyMods, ToolContext, DRAG_THRESHOLD, HIT_RADIUS

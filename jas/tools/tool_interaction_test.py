@@ -40,7 +40,7 @@ def _layer_children(model: Model) -> tuple:
 class LineToolTest(absltest.TestCase):
     def test_draw_line(self):
         """Press at (10,20), release at (50,60) => creates a Line element."""
-        from tools.drawing import LineTool
+        from tools.drawing_tool import LineTool
         tool = LineTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -57,7 +57,7 @@ class LineToolTest(absltest.TestCase):
 
     def test_zero_length_line_still_created(self):
         """Press and release at same point => degenerate line still created."""
-        from tools.drawing import LineTool
+        from tools.drawing_tool import LineTool
         tool = LineTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -72,7 +72,7 @@ class LineToolTest(absltest.TestCase):
 class RectToolTest(absltest.TestCase):
     def test_draw_rect(self):
         """Press at (10,20), release at (110,70) => creates a Rect element."""
-        from tools.drawing import RectTool
+        from tools.drawing_tool import RectTool
         tool = RectTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -88,7 +88,7 @@ class RectToolTest(absltest.TestCase):
 
     def test_zero_size_rect_still_created(self):
         """Press and release at same point => degenerate rect still created."""
-        from tools.drawing import RectTool
+        from tools.drawing_tool import RectTool
         tool = RectTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -100,7 +100,7 @@ class RectToolTest(absltest.TestCase):
 
     def test_negative_drag_normalizes(self):
         """Dragging right-to-left and bottom-to-top normalizes coordinates."""
-        from tools.drawing import RectTool
+        from tools.drawing_tool import RectTool
         tool = RectTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 100, 80)
@@ -117,7 +117,7 @@ class RectToolTest(absltest.TestCase):
 class RoundedRectToolTest(absltest.TestCase):
     def test_draw_rounded_rect(self):
         """Press-drag-release creates a Rect with rx/ry set to default radius."""
-        from tools.drawing import RoundedRectTool, ROUNDED_RECT_RADIUS
+        from tools.drawing_tool import RoundedRectTool, ROUNDED_RECT_RADIUS
         tool = RoundedRectTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -135,7 +135,7 @@ class RoundedRectToolTest(absltest.TestCase):
 
     def test_zero_size_not_created(self):
         """Press and release at same point => no element created."""
-        from tools.drawing import RoundedRectTool
+        from tools.drawing_tool import RoundedRectTool
         tool = RoundedRectTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -144,14 +144,14 @@ class RoundedRectToolTest(absltest.TestCase):
         self.assertEqual(len(children), 0)
 
     def test_radius_default_is_ten(self):
-        from tools.drawing import ROUNDED_RECT_RADIUS
+        from tools.drawing_tool import ROUNDED_RECT_RADIUS
         self.assertEqual(ROUNDED_RECT_RADIUS, 10.0)
 
 
 class StarToolTest(absltest.TestCase):
     def test_draw_star(self):
         """Press-drag-release creates a Polygon with 2 * STAR_POINTS vertices."""
-        from tools.drawing import StarTool, STAR_POINTS
+        from tools.drawing_tool import StarTool, STAR_POINTS
         tool = StarTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -164,7 +164,7 @@ class StarToolTest(absltest.TestCase):
 
     def test_zero_size_not_created(self):
         """Press and release at same point => no element created."""
-        from tools.drawing import StarTool
+        from tools.drawing_tool import StarTool
         tool = StarTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -174,7 +174,7 @@ class StarToolTest(absltest.TestCase):
 
     def test_first_vertex_at_top(self):
         """First vertex of the star should be at the top center of the box."""
-        from tools.drawing import StarTool
+        from tools.drawing_tool import StarTool
         tool = StarTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 0, 0)
@@ -186,7 +186,7 @@ class StarToolTest(absltest.TestCase):
 
     def test_negative_drag_normalizes(self):
         """A drag from a high to a low corner still produces a valid star."""
-        from tools.drawing import StarTool
+        from tools.drawing_tool import StarTool
         tool = StarTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 100, 100)
@@ -198,7 +198,7 @@ class StarToolTest(absltest.TestCase):
         self.assertAlmostEqual(y, 0.0)
 
     def test_star_points_default_is_five(self):
-        from tools.drawing import STAR_POINTS
+        from tools.drawing_tool import STAR_POINTS
         self.assertEqual(STAR_POINTS, 5)
 
 
@@ -306,7 +306,7 @@ class TypeToolTest(absltest.TestCase):
 class SelectionToolTest(absltest.TestCase):
     def test_marquee_select(self):
         """Drag marquee over an element => element is selected."""
-        from tools.selection import SelectionTool
+        from tools.selection_tool import SelectionTool
         tool = SelectionTool()
         rect = Rect(x=50, y=50, width=20, height=20,
                     fill=Fill(Color(0, 0, 0)), stroke=None)
@@ -321,7 +321,7 @@ class SelectionToolTest(absltest.TestCase):
 
     def test_marquee_miss(self):
         """Drag marquee away from element => nothing selected."""
-        from tools.selection import SelectionTool
+        from tools.selection_tool import SelectionTool
         tool = SelectionTool()
         rect = Rect(x=50, y=50, width=20, height=20,
                     fill=Fill(Color(0, 0, 0)), stroke=None)
@@ -335,7 +335,7 @@ class SelectionToolTest(absltest.TestCase):
 
     def test_move_selection(self):
         """Press on selected element, drag => element moves."""
-        from tools.selection import SelectionTool
+        from tools.selection_tool import SelectionTool
         tool = SelectionTool()
         rect = Rect(x=50, y=50, width=20, height=20,
                     fill=Fill(Color(0, 0, 0)), stroke=None)
@@ -357,7 +357,7 @@ class SelectionToolTest(absltest.TestCase):
 class ToolStateTest(absltest.TestCase):
     def test_idle_after_release(self):
         """Tool returns to idle state after release."""
-        from tools.drawing import LineTool
+        from tools.drawing_tool import LineTool
         tool = LineTool()
         ctx, model, ctrl = _make_ctx()
         self.assertIsNone(tool._drag_start)
@@ -368,7 +368,7 @@ class ToolStateTest(absltest.TestCase):
 
     def test_move_without_press_is_noop(self):
         """on_move without prior on_press does nothing."""
-        from tools.drawing import LineTool
+        from tools.drawing_tool import LineTool
         tool = LineTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_move(ctx, 50, 60, dragging=True)
@@ -378,7 +378,7 @@ class ToolStateTest(absltest.TestCase):
 class PolygonToolTest(absltest.TestCase):
     def test_draw_polygon(self):
         """Press-release creates a polygon."""
-        from tools.drawing import PolygonTool
+        from tools.drawing_tool import PolygonTool
         from geometry.element import Polygon
         tool = PolygonTool()
         ctx, model, ctrl = _make_ctx()
@@ -409,7 +409,7 @@ class AddAnchorPointToolTest(absltest.TestCase):
 
     def test_click_on_path_adds_point(self):
         """Clicking on a path splits the curve into two segments."""
-        from tools.add_anchor_point import AddAnchorPointTool
+        from tools.add_anchor_point_tool import AddAnchorPointTool
         tool = AddAnchorPointTool()
         doc = self._make_path_doc()
         model = Model(document=doc)
@@ -431,7 +431,7 @@ class AddAnchorPointToolTest(absltest.TestCase):
 
     def test_click_away_from_path_does_nothing(self):
         """Clicking far from any path does not modify the document."""
-        from tools.add_anchor_point import AddAnchorPointTool
+        from tools.add_anchor_point_tool import AddAnchorPointTool
         tool = AddAnchorPointTool()
         doc = self._make_path_doc()
         model = Model(document=doc)
@@ -446,7 +446,7 @@ class AddAnchorPointToolTest(absltest.TestCase):
     def test_split_preserves_endpoints(self):
         """After splitting, the first segment ends near the click and the
         second segment ends at the original endpoint."""
-        from tools.add_anchor_point import AddAnchorPointTool
+        from tools.add_anchor_point_tool import AddAnchorPointTool
         tool = AddAnchorPointTool()
         doc = self._make_path_doc()
         model = Model(document=doc)
@@ -464,7 +464,7 @@ class AddAnchorPointToolTest(absltest.TestCase):
 
     def test_drag_adjusts_handles(self):
         """Press on path, drag to adjust handles, then release."""
-        from tools.add_anchor_point import AddAnchorPointTool
+        from tools.add_anchor_point_tool import AddAnchorPointTool
         tool = AddAnchorPointTool()
         doc = self._make_path_doc()
         model = Model(document=doc)
@@ -489,7 +489,7 @@ class AddAnchorPointToolTest(absltest.TestCase):
 
     def test_drag_cusp_leaves_incoming_handle(self):
         """Alt+drag creates a cusp: only outgoing handle moves."""
-        from tools.add_anchor_point import AddAnchorPointTool, _update_handles
+        from tools.add_anchor_point_tool import AddAnchorPointTool, _update_handles
         tool = AddAnchorPointTool()
         doc = self._make_path_doc()
         model = Model(document=doc)
@@ -516,7 +516,7 @@ class AddAnchorPointToolTest(absltest.TestCase):
 
     def test_insert_updates_selection_indices(self):
         """Inserting a point shifts selection CP indices so handles stay correct."""
-        from tools.add_anchor_point import AddAnchorPointTool
+        from tools.add_anchor_point_tool import AddAnchorPointTool
         tool = AddAnchorPointTool()
         path_elem = Path(
             d=(MoveTo(0, 0), CurveTo(33, 0, 67, 0, 100, 0)),
@@ -543,7 +543,7 @@ class AddAnchorPointToolTest(absltest.TestCase):
 
     def test_split_line_segment(self):
         """Splitting a LineTo segment produces two LineTos."""
-        from tools.add_anchor_point import AddAnchorPointTool
+        from tools.add_anchor_point_tool import AddAnchorPointTool
         tool = AddAnchorPointTool()
         path_elem = Path(
             d=(MoveTo(0, 0), LineTo(100, 0)),
@@ -565,7 +565,7 @@ class AddAnchorPointToolTest(absltest.TestCase):
 
     def test_space_repositions_anchor_during_drag(self):
         """Holding Space during drag repositions the anchor instead of adjusting handles."""
-        from tools.add_anchor_point import AddAnchorPointTool
+        from tools.add_anchor_point_tool import AddAnchorPointTool
         tool = AddAnchorPointTool()
         path_elem = Path(
             d=(MoveTo(0, 0), CurveTo(33, 0, 67, 0, 100, 0)),
@@ -621,7 +621,7 @@ class AddAnchorPointToolTest(absltest.TestCase):
 class PencilToolTest(absltest.TestCase):
     def test_freehand_draw_creates_path(self):
         """Dragging creates a path with MoveTo + CurveTo segments."""
-        from tools.pencil import PencilTool
+        from tools.pencil_tool import PencilTool
         tool = PencilTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 0, 0)
@@ -639,7 +639,7 @@ class PencilToolTest(absltest.TestCase):
 
     def test_click_without_drag_creates_degenerate_path(self):
         """Press+release at same point still produces a path."""
-        from tools.pencil import PencilTool
+        from tools.pencil_tool import PencilTool
         tool = PencilTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -649,7 +649,7 @@ class PencilToolTest(absltest.TestCase):
 
     def test_path_has_stroke(self):
         """Pencil paths have a stroke and no fill."""
-        from tools.pencil import PencilTool
+        from tools.pencil_tool import PencilTool
         tool = PencilTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 0, 0)
@@ -662,7 +662,7 @@ class PencilToolTest(absltest.TestCase):
 
     def test_move_without_press_is_noop(self):
         """Moving without pressing doesn't start drawing."""
-        from tools.pencil import PencilTool
+        from tools.pencil_tool import PencilTool
         tool = PencilTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_move(ctx, 50, 60, dragging=True)
@@ -670,7 +670,7 @@ class PencilToolTest(absltest.TestCase):
 
     def test_release_without_press_is_noop(self):
         """Releasing without pressing creates nothing."""
-        from tools.pencil import PencilTool
+        from tools.pencil_tool import PencilTool
         tool = PencilTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_release(ctx, 50, 60)
@@ -679,7 +679,7 @@ class PencilToolTest(absltest.TestCase):
 
     def test_drawing_state_transitions(self):
         """Drawing flag tracks press/release correctly."""
-        from tools.pencil import PencilTool
+        from tools.pencil_tool import PencilTool
         tool = PencilTool()
         ctx, model, ctrl = _make_ctx()
         self.assertFalse(tool._drawing)
@@ -692,7 +692,7 @@ class PencilToolTest(absltest.TestCase):
 
     def test_points_accumulate_during_draw(self):
         """Points grow during drag, cleared after finish."""
-        from tools.pencil import PencilTool
+        from tools.pencil_tool import PencilTool
         tool = PencilTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 0, 0)
@@ -706,7 +706,7 @@ class PencilToolTest(absltest.TestCase):
 
     def test_path_starts_at_press_point(self):
         """MoveTo uses the initial press coordinates."""
-        from tools.pencil import PencilTool
+        from tools.pencil_tool import PencilTool
         tool = PencilTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 15, 25)
@@ -743,7 +743,7 @@ class PathEraserToolTest(absltest.TestCase):
 
     def test_erase_deletes_small_path(self):
         """A path with bbox smaller than eraser size is deleted entirely."""
-        from tools.path_eraser import PathEraserTool
+        from tools.path_eraser_tool import PathEraserTool
         tool = PathEraserTool()
         small = self._make_line_path(0, 0, 1, 1)
         layer = Layer(name="L", children=(small,))
@@ -756,7 +756,7 @@ class PathEraserToolTest(absltest.TestCase):
 
     def test_erase_splits_open_path(self):
         """Erasing a segment of an open path splits it into two paths."""
-        from tools.path_eraser import PathEraserTool
+        from tools.path_eraser_tool import PathEraserTool
         tool = PathEraserTool()
         path = self._make_long_path()
         layer = Layer(name="L", children=(path,))
@@ -770,7 +770,7 @@ class PathEraserToolTest(absltest.TestCase):
 
     def test_erase_opens_closed_path(self):
         """Erasing a segment of a closed path opens it."""
-        from tools.path_eraser import PathEraserTool
+        from tools.path_eraser_tool import PathEraserTool
         tool = PathEraserTool()
         path = self._make_closed_path()
         layer = Layer(name="L", children=(path,))
@@ -789,7 +789,7 @@ class PathEraserToolTest(absltest.TestCase):
 
     def test_erase_miss_does_nothing(self):
         """Erasing far from a path does not modify it."""
-        from tools.path_eraser import PathEraserTool
+        from tools.path_eraser_tool import PathEraserTool
         tool = PathEraserTool()
         path = self._make_long_path()
         layer = Layer(name="L", children=(path,))
@@ -802,7 +802,7 @@ class PathEraserToolTest(absltest.TestCase):
 
     def test_release_without_press_is_noop(self):
         """Releasing without pressing does nothing."""
-        from tools.path_eraser import PathEraserTool
+        from tools.path_eraser_tool import PathEraserTool
         tool = PathEraserTool()
         path = self._make_long_path()
         layer = Layer(name="L", children=(path,))
@@ -814,7 +814,7 @@ class PathEraserToolTest(absltest.TestCase):
 
     def test_move_without_press_is_noop(self):
         """Moving without pressing does nothing."""
-        from tools.path_eraser import PathEraserTool
+        from tools.path_eraser_tool import PathEraserTool
         tool = PathEraserTool()
         path = self._make_long_path()
         layer = Layer(name="L", children=(path,))
@@ -826,7 +826,7 @@ class PathEraserToolTest(absltest.TestCase):
 
     def test_erasing_state_transitions(self):
         """Erasing flag tracks press/release correctly."""
-        from tools.path_eraser import PathEraserTool
+        from tools.path_eraser_tool import PathEraserTool
         tool = PathEraserTool()
         ctx, model, ctrl = _make_ctx()
         self.assertFalse(tool._erasing)
@@ -837,7 +837,7 @@ class PathEraserToolTest(absltest.TestCase):
 
     def test_locked_path_not_erased(self):
         """A locked path is not affected by the eraser."""
-        from tools.path_eraser import PathEraserTool
+        from tools.path_eraser_tool import PathEraserTool
         tool = PathEraserTool()
         small = Path(
             d=(MoveTo(0, 0), LineTo(1, 1)),
@@ -855,7 +855,7 @@ class PathEraserToolTest(absltest.TestCase):
 
     def test_split_endpoints_hug_eraser(self):
         """Split endpoints should be at the eraser boundary, not at command boundaries."""
-        from tools.path_eraser import PathEraserTool
+        from tools.path_eraser_tool import PathEraserTool
         tool = PathEraserTool()
         # Horizontal path (0,0)→(100,0)→(200,0).
         # Erase at x=50 with ERASER_SIZE=2 => eraser rect x=[48,52].
@@ -883,7 +883,7 @@ class PathEraserToolTest(absltest.TestCase):
 
     def test_split_preserves_curves(self):
         """Splitting a cubic Bezier should produce CurveTo, not LineTo."""
-        from tools.path_eraser import PathEraserTool
+        from tools.path_eraser_tool import PathEraserTool
         tool = PathEraserTool()
         # Cubic curve from (0,0) to (200,0) arching upward.
         path = Path(
@@ -911,7 +911,7 @@ class PathEraserToolTest(absltest.TestCase):
 
     def test_de_casteljau_split_exact(self):
         """De Casteljau split at t=0.5 on a symmetric curve gives the midpoint."""
-        from tools.path_eraser import _split_cubic_at
+        from tools.path_eraser_tool import _split_cubic_at
         first, second = _split_cubic_at(
             (0.0, 0.0), 0.0, 100.0, 100.0, 100.0, 100.0, 0.0, 0.5
         )
@@ -927,14 +927,14 @@ class PathEraserToolTest(absltest.TestCase):
 
 class TypeOnPathToolTest(absltest.TestCase):
     def test_new_tool_is_idle(self):
-        from tools.type_on_path import TypeOnPathTool
+        from tools.type_on_path_tool import TypeOnPathTool
         tool = TypeOnPathTool()
         self.assertIsNone(tool._drag_start)
         self.assertIsNone(tool._control)
         self.assertFalse(tool._offset_dragging)
 
     def test_press_starts_drag_create(self):
-        from tools.type_on_path import TypeOnPathTool
+        from tools.type_on_path_tool import TypeOnPathTool
         tool = TypeOnPathTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 12, 34)
@@ -944,7 +944,7 @@ class TypeOnPathToolTest(absltest.TestCase):
         self.assertIsNone(tool._control)
 
     def test_move_after_press_sets_control_point(self):
-        from tools.type_on_path import TypeOnPathTool
+        from tools.type_on_path_tool import TypeOnPathTool
         tool = TypeOnPathTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -954,7 +954,7 @@ class TypeOnPathToolTest(absltest.TestCase):
         self.assertIsNotNone(tool._control)
 
     def test_tiny_move_does_not_set_control_point(self):
-        from tools.type_on_path import TypeOnPathTool
+        from tools.type_on_path_tool import TypeOnPathTool
         tool = TypeOnPathTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -962,7 +962,7 @@ class TypeOnPathToolTest(absltest.TestCase):
         self.assertIsNone(tool._control)
 
     def test_move_without_press_is_noop(self):
-        from tools.type_on_path import TypeOnPathTool
+        from tools.type_on_path_tool import TypeOnPathTool
         tool = TypeOnPathTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_move(ctx, 50, 60, dragging=True)
@@ -971,7 +971,7 @@ class TypeOnPathToolTest(absltest.TestCase):
 
     def test_drag_creates_textpath_with_curve(self):
         """Drag creates an empty TextPath with a CurveTo and starts an editing session."""
-        from tools.type_on_path import TypeOnPathTool
+        from tools.type_on_path_tool import TypeOnPathTool
         from geometry.element import TextPath
         tool = TypeOnPathTool()
         ctx, model, ctrl = _make_ctx()
@@ -992,7 +992,7 @@ class TypeOnPathToolTest(absltest.TestCase):
     def test_click_on_path_converts_to_textpath(self):
         """Click without drag on a Path converts it to an empty TextPath
         and starts an editing session."""
-        from tools.type_on_path import TypeOnPathTool
+        from tools.type_on_path_tool import TypeOnPathTool
         from geometry.element import TextPath
         tool = TypeOnPathTool()
         existing = Path(
@@ -1011,7 +1011,7 @@ class TypeOnPathToolTest(absltest.TestCase):
 
     def test_click_on_empty_canvas_does_nothing(self):
         """A click (no drag) on empty canvas does NOT create a TextPath."""
-        from tools.type_on_path import TypeOnPathTool
+        from tools.type_on_path_tool import TypeOnPathTool
         tool = TypeOnPathTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)
@@ -1020,7 +1020,7 @@ class TypeOnPathToolTest(absltest.TestCase):
         self.assertIsNone(tool.session)
 
     def test_idle_after_release(self):
-        from tools.type_on_path import TypeOnPathTool
+        from tools.type_on_path_tool import TypeOnPathTool
         tool = TypeOnPathTool()
         ctx, model, ctrl = _make_ctx()
         tool.on_press(ctx, 10, 20)

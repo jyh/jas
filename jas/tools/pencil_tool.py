@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from geometry.element import Color, CurveTo, MoveTo, Path, PathCommand, Stroke
-from geometry.fit_curve import fit_curve
+from algorithms.fit_curve import fit_curve
 from tools.tool import CanvasTool, ToolContext
 
 if TYPE_CHECKING:
