@@ -327,3 +327,220 @@ fn normalize(v: (f64, f64)) -> (f64, f64) {
     }
     (v.0 / length, v.1 / length)
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Sample a cubic Bezier segment at parameter t.
+    fn bezier_at(seg: BezierSegment, t: f64) -> (f64, f64) {
+        let (p1x, p1y, c1x, c1y, c2x, c2y, p2x, p2y) = seg;
+        let mt = 1.0 - t;
+        let b0 = mt * mt * mt;
+        let b1 = 3.0 * t * mt * mt;
+        let b2 = 3.0 * t * t * mt;
+        let b3 = t * t * t;
+        (
+            b0 * p1x + b1 * c1x + b2 * c2x + b3 * p2x,
+            b0 * p1y + b1 * c1y + b2 * c2y + b3 * p2y,
+        )
+    }
+
+    fn approx_eq(a: f64, b: f64, tol: f64) -> bool {
+        (a - b).abs() < tol
+    }
+
+    fn point_approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
+        approx_eq(a.0, b.0, tol) && approx_eq(a.1, b.1, tol)
+    }
+
+    // ---- Degenerate input ----
+
+    #[test]
+    fn fit_empty_returns_empty() {
+        assert!(fit_curve(&[], 1.0).is_empty());
+    }
+
+    #[test]
+    fn fit_single_point_returns_empty() {
+        assert!(fit_curve(&[(0.0, 0.0)], 1.0).is_empty());
+    }
+
+    #[test]
+    fn fit_two_points_returns_one_segment() {
+        let r = fit_curve(&[(0.0, 0.0), (10.0, 0.0)], 1.0);
+        assert_eq!(r.len(), 1);
+    }
+
+    // ---- Endpoints preserved ----
+
+    #[test]
+    fn fit_two_points_endpoints_preserved() {
+        let pts: &[(f64, f64)] = &[(0.0, 0.0), (10.0, 0.0)];
+        let r = fit_curve(pts, 1.0);
+        let seg = r[0];
+        assert!(point_approx_eq((seg.0, seg.1), pts[0], 1e-9));
+        assert!(point_approx_eq((seg.6, seg.7), *pts.last().unwrap(), 1e-9));
+    }
+
+    #[test]
+    fn fit_curve_endpoints_preserved_arc() {
+        // Quarter circle arc, 20 sample points.
+        let pts: Vec<(f64, f64)> = (0..=20)
+            .map(|i| {
+                let t = i as f64 / 20.0 * std::f64::consts::FRAC_PI_2;
+                (10.0 * t.cos(), 10.0 * t.sin())
+            })
+            .collect();
+        let r = fit_curve(&pts, 0.5);
+        assert!(!r.is_empty());
+        assert!(point_approx_eq((r[0].0, r[0].1), pts[0], 1e-9));
+        let last = r[r.len() - 1];
+        assert!(point_approx_eq((last.6, last.7), *pts.last().unwrap(), 1e-9));
+    }
+
+    // ---- Continuity at segment joins ----
+
+    #[test]
+    fn fit_segments_are_c0_continuous() {
+        // S-curve: 30 points along sin(x).
+        let pts: Vec<(f64, f64)> = (0..30)
+            .map(|i| {
+                let x = i as f64;
+                (x, 5.0 * (x * 0.3).sin())
+            })
+            .collect();
+        let r = fit_curve(&pts, 0.5);
+        assert!(r.len() >= 2, "expected at least 2 segments, got {}", r.len());
+        for w in r.windows(2) {
+            let end_prev = (w[0].6, w[0].7);
+            let start_next = (w[1].0, w[1].1);
+            assert!(
+                point_approx_eq(end_prev, start_next, 1e-9),
+                "segment join not C0: {:?} vs {:?}",
+                end_prev,
+                start_next
+            );
+        }
+    }
+
+    // ---- Approximation quality ----
+
+    #[test]
+    fn fit_two_points_segment_passes_through_endpoints() {
+        let pts: &[(f64, f64)] = &[(0.0, 0.0), (100.0, 50.0)];
+        let r = fit_curve(pts, 1.0);
+        let seg = r[0];
+        let p_at_0 = bezier_at(seg, 0.0);
+        let p_at_1 = bezier_at(seg, 1.0);
+        assert!(point_approx_eq(p_at_0, pts[0], 1e-9));
+        assert!(point_approx_eq(p_at_1, pts[1], 1e-9));
+    }
+
+    #[test]
+    fn fit_curve_input_points_within_error_tolerance() {
+        // For a smooth input, every input point should lie within `error`
+        // of *some* sample of the fitted curve. We approximate by sampling
+        // the fit densely and finding the closest sample.
+        let pts: Vec<(f64, f64)> = (0..15)
+            .map(|i| {
+                let x = i as f64;
+                (x, 0.1 * x * x)
+            })
+            .collect();
+        let error = 1.0;
+        let segs = fit_curve(&pts, error);
+        let samples_per_seg = 100;
+        let samples: Vec<(f64, f64)> = segs
+            .iter()
+            .flat_map(|&seg| {
+                (0..=samples_per_seg).map(move |i| {
+                    bezier_at(seg, i as f64 / samples_per_seg as f64)
+                })
+            })
+            .collect();
+        for &p in &pts {
+            let min_dist = samples
+                .iter()
+                .map(|&s| ((s.0 - p.0).powi(2) + (s.1 - p.1).powi(2)).sqrt())
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                min_dist <= error * 2.0,
+                "point {:?} too far from fitted curve: dist {}",
+                p,
+                min_dist
+            );
+        }
+    }
+
+    // ---- Error parameter affects segment count ----
+
+    #[test]
+    fn tighter_error_gives_at_least_as_many_segments() {
+        let pts: Vec<(f64, f64)> = (0..50)
+            .map(|i| {
+                let x = i as f64 * 0.5;
+                (x, 5.0 * (x * 0.5).sin())
+            })
+            .collect();
+        let loose = fit_curve(&pts, 5.0);
+        let tight = fit_curve(&pts, 0.1);
+        assert!(
+            tight.len() >= loose.len(),
+            "tight={} loose={}",
+            tight.len(),
+            loose.len()
+        );
+    }
+
+    // ---- Specific shapes ----
+
+    #[test]
+    fn fit_straight_line_collinear_points() {
+        // 10 evenly spaced collinear points should fit with 1 segment.
+        let pts: Vec<(f64, f64)> = (0..10).map(|i| (i as f64, 2.0 * i as f64)).collect();
+        let r = fit_curve(&pts, 1.0);
+        assert_eq!(r.len(), 1);
+    }
+
+    #[test]
+    fn fit_horizontal_line() {
+        let pts: Vec<(f64, f64)> = (0..10).map(|i| (i as f64, 5.0)).collect();
+        let r = fit_curve(&pts, 1.0);
+        assert_eq!(r.len(), 1);
+        assert!(point_approx_eq((r[0].0, r[0].1), (0.0, 5.0), 1e-9));
+        assert!(point_approx_eq((r[0].6, r[0].7), (9.0, 5.0), 1e-9));
+    }
+
+    #[test]
+    fn fit_vertical_line() {
+        let pts: Vec<(f64, f64)> = (0..10).map(|i| (3.0, i as f64)).collect();
+        let r = fit_curve(&pts, 1.0);
+        assert_eq!(r.len(), 1);
+        assert!(point_approx_eq((r[0].0, r[0].1), (3.0, 0.0), 1e-9));
+        assert!(point_approx_eq((r[0].6, r[0].7), (3.0, 9.0), 1e-9));
+    }
+
+    #[test]
+    fn fit_circular_arc_returns_some_segments() {
+        // Half circle, 60 points.
+        let pts: Vec<(f64, f64)> = (0..=60)
+            .map(|i| {
+                let t = i as f64 / 60.0 * std::f64::consts::PI;
+                (50.0 * t.cos(), 50.0 * t.sin())
+            })
+            .collect();
+        let r = fit_curve(&pts, 0.5);
+        assert!(!r.is_empty());
+        assert!(r.len() <= pts.len());
+    }
+
+    #[test]
+    fn fit_two_coincident_points_does_not_panic() {
+        let _ = fit_curve(&[(5.0, 5.0), (5.0, 5.0)], 1.0);
+    }
+}

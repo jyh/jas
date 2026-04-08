@@ -1,3 +1,15 @@
 (test
  (name boolean_test)
  (libraries jas))
+
+(test
+ (name fit_curve_test)
+ (libraries jas))
+
+(test
+ (name hit_test_test)
+ (libraries jas))
+
+(test
+ (name path_text_layout_test)
+ (libraries jas))
