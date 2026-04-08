@@ -12,7 +12,10 @@
 //!   - Strict: if no candidate fits within tolerance, return `None`.
 //!   - Accepts both raw pencil polylines and Bezier paths (via flatten).
 
-use crate::geometry::element::{flatten_path_commands, PathCommand};
+use crate::geometry::element::{
+    flatten_path_commands, CircleElem, CommonProps, Element, EllipseElem, Fill, LineElem, PathCommand,
+    PathElem, PolygonElem, RectElem, Stroke,
+};
 
 pub type Pt = (f64, f64);
 
@@ -232,6 +235,145 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
 pub fn recognize_path(d: &[PathCommand], cfg: &RecognizeConfig) -> Option<RecognizedShape> {
     let pts = flatten_path_commands(d);
     recognize(&pts, cfg)
+}
+
+/// Extract `(fill, stroke, common)` from any element variant that has them.
+/// Used by [`recognized_to_element`] to inherit the template's appearance.
+fn template_appearance(e: &Element) -> (Option<Fill>, Option<Stroke>, CommonProps) {
+    match e {
+        Element::Line(l) => (None, l.stroke.clone(), l.common.clone()),
+        Element::Rect(r) => (r.fill.clone(), r.stroke.clone(), r.common.clone()),
+        Element::Circle(c) => (c.fill.clone(), c.stroke.clone(), c.common.clone()),
+        Element::Ellipse(e) => (e.fill.clone(), e.stroke.clone(), e.common.clone()),
+        Element::Polyline(p) => (p.fill.clone(), p.stroke.clone(), p.common.clone()),
+        Element::Polygon(p) => (p.fill.clone(), p.stroke.clone(), p.common.clone()),
+        Element::Path(p) => (p.fill.clone(), p.stroke.clone(), p.common.clone()),
+        _ => (None, None, CommonProps::default()),
+    }
+}
+
+/// Build a clean primitive `Element` from a recognized shape, inheriting
+/// the template element's stroke, fill, and common props.
+pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Element {
+    let (fill, stroke, common) = template_appearance(template);
+    match *shape {
+        RecognizedShape::Line { a, b } => Element::Line(LineElem {
+            x1: a.0,
+            y1: a.1,
+            x2: b.0,
+            y2: b.1,
+            stroke,
+            common,
+        }),
+        RecognizedShape::Triangle { pts } => Element::Polygon(PolygonElem {
+            points: pts.to_vec(),
+            fill,
+            stroke,
+            common,
+        }),
+        RecognizedShape::Rectangle { x, y, w, h } => Element::Rect(RectElem {
+            x,
+            y,
+            width: w,
+            height: h,
+            rx: 0.0,
+            ry: 0.0,
+            fill,
+            stroke,
+            common,
+        }),
+        RecognizedShape::RoundRect { x, y, w, h, r } => Element::Rect(RectElem {
+            x,
+            y,
+            width: w,
+            height: h,
+            rx: r,
+            ry: r,
+            fill,
+            stroke,
+            common,
+        }),
+        RecognizedShape::Circle { cx, cy, r } => Element::Circle(CircleElem {
+            cx,
+            cy,
+            r,
+            fill,
+            stroke,
+            common,
+        }),
+        RecognizedShape::Ellipse { cx, cy, rx, ry } => Element::Ellipse(EllipseElem {
+            cx,
+            cy,
+            rx,
+            ry,
+            fill,
+            stroke,
+            common,
+        }),
+        RecognizedShape::Arrow {
+            tail,
+            tip,
+            head_len,
+            head_half_width,
+            shaft_half_width,
+        } => {
+            // Reconstruct the 7-corner outline. The shaft is axis-aligned;
+            // pick perpendicular based on which axis is active.
+            let dx = tip.0 - tail.0;
+            let dy = tip.1 - tail.1;
+            let len = (dx * dx + dy * dy).sqrt();
+            let (ux, uy) = if len > 1e-9 { (dx / len, dy / len) } else { (1.0, 0.0) };
+            let (px, py) = (-uy, ux); // perpendicular
+            let shaft_end = (tip.0 - ux * head_len, tip.1 - uy * head_len);
+            let p = |c: Pt, s: f64| (c.0 + px * s, c.1 + py * s);
+            let points = vec![
+                p(tail, -shaft_half_width),
+                p(shaft_end, -shaft_half_width),
+                p(shaft_end, -head_half_width),
+                tip,
+                p(shaft_end, head_half_width),
+                p(shaft_end, shaft_half_width),
+                p(tail, shaft_half_width),
+            ];
+            Element::Polygon(PolygonElem {
+                points,
+                fill,
+                stroke,
+                common,
+            })
+        }
+        RecognizedShape::Lemniscate { center, a, horizontal } => {
+            // Sample the Gerono parametrization densely as a closed
+            // polyline emitted as a Path of MoveTo + LineTo commands.
+            let n = 96;
+            let mut d: Vec<PathCommand> = Vec::with_capacity(n + 2);
+            for i in 0..=n {
+                let t = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
+                let s = t.sin();
+                let c = t.cos();
+                let denom = 1.0 + s * s;
+                let lx = a * c / denom;
+                let ly = a * s * c / denom;
+                let (x, y) = if horizontal {
+                    (center.0 + lx, center.1 + ly)
+                } else {
+                    (center.0 + ly, center.1 + lx)
+                };
+                if i == 0 {
+                    d.push(PathCommand::MoveTo { x, y });
+                } else {
+                    d.push(PathCommand::LineTo { x, y });
+                }
+            }
+            d.push(PathCommand::ClosePath);
+            Element::Path(PathElem {
+                d,
+                fill,
+                stroke,
+                common,
+            })
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1506,5 +1648,89 @@ mod tests {
         let cfg = RecognizeConfig::default();
         let got = recognize(&skewed, &cfg);
         assert!(got.is_none(), "expected None, got {got:?}");
+    }
+
+    #[test]
+    fn recognized_to_element_preserves_stroke_and_common() {
+        use crate::geometry::element::{Color, CommonProps, PathElem, Stroke, Visibility};
+        let template = Element::Path(PathElem {
+            d: vec![],
+            fill: None,
+            stroke: Some(Stroke::new(Color::BLACK, 2.5)),
+            common: CommonProps {
+                opacity: 0.7,
+                transform: None,
+                locked: false,
+                visibility: Visibility::Preview,
+            },
+        });
+        let shape = RecognizedShape::Rectangle {
+            x: 10.0,
+            y: 20.0,
+            w: 30.0,
+            h: 40.0,
+        };
+        match recognized_to_element(&shape, &template) {
+            Element::Rect(r) => {
+                assert_eq!(r.x, 10.0);
+                assert_eq!(r.width, 30.0);
+                assert_eq!(r.height, 40.0);
+                assert_eq!(r.rx, 0.0);
+                let s = r.stroke.expect("stroke inherited");
+                assert!((s.width - 2.5).abs() < 1e-9);
+                assert!((r.common.opacity - 0.7).abs() < 1e-9);
+            }
+            other => panic!("expected Rect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognized_to_element_round_rect_sets_rx_ry() {
+        let template = Element::Path(PathElem {
+            d: vec![],
+            fill: None,
+            stroke: None,
+            common: CommonProps::default(),
+        });
+        let shape = RecognizedShape::RoundRect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 60.0,
+            r: 12.0,
+        };
+        match recognized_to_element(&shape, &template) {
+            Element::Rect(r) => {
+                assert_eq!(r.rx, 12.0);
+                assert_eq!(r.ry, 12.0);
+            }
+            other => panic!("expected Rect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognized_to_element_arrow_emits_polygon() {
+        let template = Element::Path(PathElem {
+            d: vec![],
+            fill: None,
+            stroke: None,
+            common: CommonProps::default(),
+        });
+        let shape = RecognizedShape::Arrow {
+            tail: (0.0, 0.0),
+            tip: (100.0, 0.0),
+            head_len: 25.0,
+            head_half_width: 20.0,
+            shaft_half_width: 8.0,
+        };
+        match recognized_to_element(&shape, &template) {
+            Element::Polygon(p) => {
+                assert_eq!(p.points.len(), 7);
+                // Tip is the 4th corner.
+                assert!((p.points[3].0 - 100.0).abs() < 1e-9);
+                assert!((p.points[3].1 - 0.0).abs() < 1e-9);
+            }
+            other => panic!("expected Polygon, got {other:?}"),
+        }
     }
 }
