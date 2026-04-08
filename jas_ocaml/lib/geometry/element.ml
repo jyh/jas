@@ -581,6 +581,130 @@ let move_path_handle d anchor_idx handle_type dx dy =
     Array.to_list cmd_arr
   end
 
+(* Move a single handle without reflecting the opposite handle (cusp behavior). *)
+let move_path_handle_independent d anchor_idx handle_type dx dy =
+  let cmd_arr = Array.of_list d in
+  let n = Array.length cmd_arr in
+  let cmd_indices = Array.make n 0 in
+  let count = ref 0 in
+  for ci = 0 to n - 1 do
+    match cmd_arr.(ci) with
+    | ClosePath -> ()
+    | _ -> cmd_indices.(!count) <- ci; incr count
+  done;
+  if anchor_idx < 0 || anchor_idx >= !count then d
+  else begin
+    let ci = cmd_indices.(anchor_idx) in
+    if handle_type = "in" then begin
+      match cmd_arr.(ci) with
+      | CurveTo (x1, y1, x2, y2, x, y) ->
+        cmd_arr.(ci) <- CurveTo (x1, y1, x2 +. dx, y2 +. dy, x, y)
+      | _ -> ()
+    end else if handle_type = "out" then begin
+      if ci + 1 < n then
+        match cmd_arr.(ci + 1) with
+        | CurveTo (x1, y1, x2, y2, x, y) ->
+          cmd_arr.(ci + 1) <- CurveTo (x1 +. dx, y1 +. dy, x2, y2, x, y)
+        | _ -> ()
+    end;
+    Array.to_list cmd_arr
+  end
+
+(* True if a path anchor has at least one non-degenerate handle. *)
+let is_smooth_point d anchor_idx =
+  let (h_in, h_out) = path_handle_positions d anchor_idx in
+  h_in <> None || h_out <> None
+
+(* Convert a corner anchor to a smooth anchor. The outgoing handle is
+   placed at (hx, hy) and the incoming handle is reflected through the
+   anchor. *)
+let convert_corner_to_smooth d anchor_idx hx hy =
+  let cmd_arr = Array.of_list d in
+  let n = Array.length cmd_arr in
+  let cmd_indices = Array.make n 0 in
+  let count = ref 0 in
+  for ci = 0 to n - 1 do
+    match cmd_arr.(ci) with
+    | ClosePath -> ()
+    | _ -> cmd_indices.(!count) <- ci; incr count
+  done;
+  if anchor_idx < 0 || anchor_idx >= !count then d
+  else begin
+    let ci = cmd_indices.(anchor_idx) in
+    let cmd = cmd_arr.(ci) in
+    let anchor = match cmd with
+      | MoveTo (x, y) | LineTo (x, y) -> Some (x, y)
+      | CurveTo (_, _, _, _, x, y) -> Some (x, y)
+      | _ -> None
+    in
+    (match anchor with
+     | None -> ()
+     | Some (ax, ay) ->
+       let rhx = 2.0 *. ax -. hx in
+       let rhy = 2.0 *. ay -. hy in
+       (* Set incoming handle on this command. *)
+       (match cmd_arr.(ci) with
+        | LineTo (x, y) ->
+          let (px, py) =
+            if ci > 0 then
+              match cmd_arr.(ci - 1) with
+              | MoveTo (mx, my) | LineTo (mx, my) -> (mx, my)
+              | CurveTo (_, _, _, _, ex, ey) -> (ex, ey)
+              | _ -> (x, y)
+            else (x, y)
+          in
+          cmd_arr.(ci) <- CurveTo (px, py, rhx, rhy, x, y)
+        | CurveTo (x1, y1, _, _, x, y) ->
+          cmd_arr.(ci) <- CurveTo (x1, y1, rhx, rhy, x, y)
+        | MoveTo _ -> () (* No incoming handle on MoveTo. *)
+        | _ -> ());
+       (* Set outgoing handle on the next command. *)
+       if ci + 1 < n then
+         (match cmd_arr.(ci + 1) with
+          | LineTo (x, y) ->
+            cmd_arr.(ci + 1) <- CurveTo (hx, hy, x, y, x, y)
+          | CurveTo (_, _, x2, y2, x, y) ->
+            cmd_arr.(ci + 1) <- CurveTo (hx, hy, x2, y2, x, y)
+          | _ -> ()));
+    Array.to_list cmd_arr
+  end
+
+(* Convert a smooth anchor to a corner by collapsing both handles to the
+   anchor position. *)
+let convert_smooth_to_corner d anchor_idx =
+  let cmd_arr = Array.of_list d in
+  let n = Array.length cmd_arr in
+  let cmd_indices = Array.make n 0 in
+  let count = ref 0 in
+  for ci = 0 to n - 1 do
+    match cmd_arr.(ci) with
+    | ClosePath -> ()
+    | _ -> cmd_indices.(!count) <- ci; incr count
+  done;
+  if anchor_idx < 0 || anchor_idx >= !count then d
+  else begin
+    let ci = cmd_indices.(anchor_idx) in
+    let cmd = cmd_arr.(ci) in
+    let anchor = match cmd with
+      | MoveTo (x, y) | LineTo (x, y) -> Some (x, y)
+      | CurveTo (_, _, _, _, x, y) -> Some (x, y)
+      | _ -> None
+    in
+    (match anchor with
+     | None -> ()
+     | Some (ax, ay) ->
+       (match cmd_arr.(ci) with
+        | CurveTo (x1, y1, _, _, x, y) ->
+          cmd_arr.(ci) <- CurveTo (x1, y1, ax, ay, x, y)
+        | _ -> ());
+       if ci + 1 < n then
+         (match cmd_arr.(ci + 1) with
+          | CurveTo (_, _, x2, y2, x, y) ->
+            cmd_arr.(ci + 1) <- CurveTo (ax, ay, x2, y2, x, y)
+          | _ -> ()));
+    Array.to_list cmd_arr
+  end
+
 let control_point_count = function
   | Line _ -> 2
   | Rect _ | Circle _ | Ellipse _ -> 4

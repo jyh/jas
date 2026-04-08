@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Pencil | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star
+type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -70,7 +70,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       (match t with
        | Direct_selection | Group_selection ->
          arrow_slot_tool <- t
-       | Pen | Add_anchor_point | Delete_anchor_point ->
+       | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point ->
          pen_slot_tool <- t
        | Pencil | Path_eraser | Smooth ->
          pencil_slot_tool <- t
@@ -554,6 +554,39 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         Cairo.restore cr
       in
 
+      let draw_anchor_point_icon cr ~alloc =
+        (* Convert Anchor Point: a center anchor square with two
+           diagonal handle lines, suggesting a smooth/corner convert. *)
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        let cx = ox +. 14.0 and cy = oy +. 14.0 in
+        Cairo.save cr;
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        (* Diagonal handle line *)
+        Cairo.set_line_width cr 1.5;
+        Cairo.move_to cr (cx -. 10.0) (cy -. 10.0);
+        Cairo.line_to cr cx cy;
+        Cairo.line_to cr (cx +. 10.0) (cy +. 10.0);
+        Cairo.stroke cr;
+        (* Handle endpoint circles *)
+        let r = 2.5 in
+        Cairo.arc cr (cx -. 10.0) (cy -. 10.0) ~r ~a1:0.0 ~a2:(2.0 *. Float.pi);
+        Cairo.fill cr;
+        Cairo.arc cr (cx +. 10.0) (cy +. 10.0) ~r ~a1:0.0 ~a2:(2.0 *. Float.pi);
+        Cairo.fill cr;
+        (* Anchor square (filled, with black outline) *)
+        let half = 4.0 in
+        Cairo.rectangle cr (cx -. half) (cy -. half) ~w:(half *. 2.0) ~h:(half *. 2.0);
+        Cairo.fill cr;
+        Cairo.set_source_rgb cr 0.0 0.0 0.0;
+        Cairo.set_line_width cr 1.0;
+        Cairo.rectangle cr (cx -. half) (cy -. half) ~w:(half *. 2.0) ~h:(half *. 2.0);
+        Cairo.stroke cr;
+        Cairo.restore cr
+      in
+
       let draw_pencil_icon cr ~alloc =
         let bw = float_of_int alloc.Gtk.width in
         let bh = float_of_int alloc.Gtk.height in
@@ -835,6 +868,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
          | Pen -> draw_pen_icon cr ~alloc
          | Add_anchor_point -> draw_add_anchor_point_icon cr ~alloc
          | Delete_anchor_point -> draw_delete_anchor_point_icon cr ~alloc
+         | Anchor_point -> draw_anchor_point_icon cr ~alloc
          | _ -> ());
         (* Alternate triangle *)
         let ox = (bw -. 28.0) /. 2.0 in
@@ -1122,6 +1156,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       add_item "Pen" Pen;
       add_item "Add Anchor Point" Add_anchor_point;
       add_item "Delete Anchor Point" Delete_anchor_point;
+      add_item "Anchor Point" Anchor_point;
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
 
     method private show_arrow_slot_menu =

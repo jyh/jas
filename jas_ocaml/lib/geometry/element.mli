@@ -214,6 +214,12 @@ val path_handle_positions : path_command list -> int ->
   (float * float) option * (float * float) option
 val move_path_handle : path_command list -> int -> string -> float -> float ->
   path_command list
+val move_path_handle_independent :
+  path_command list -> int -> string -> float -> float -> path_command list
+val is_smooth_point : path_command list -> int -> bool
+val convert_corner_to_smooth :
+  path_command list -> int -> float -> float -> path_command list
+val convert_smooth_to_corner : path_command list -> int -> path_command list
 val control_point_count : element -> int
 val control_points : element -> (float * float) list
 

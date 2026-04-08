@@ -13,6 +13,7 @@ let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
   | Toolbar.Pen -> (new Pen_tool.pen_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Add_anchor_point -> (new Add_anchor_point_tool.add_anchor_point_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Delete_anchor_point -> (new Delete_anchor_point_tool.delete_anchor_point_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Anchor_point -> (new Anchor_point_tool.anchor_point_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Pencil -> (new Pencil_tool.pencil_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Path_eraser -> (new Path_eraser_tool.path_eraser_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Smooth -> (new Smooth_tool.smooth_tool :> Canvas_tool.canvas_tool)

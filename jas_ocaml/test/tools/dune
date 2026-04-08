@@ -12,3 +12,8 @@
  (name text_edit_test)
  (modules text_edit_test)
  (libraries jas))
+
+(test
+ (name anchor_point_tool_test)
+ (modules anchor_point_tool_test)
+ (libraries jas))
