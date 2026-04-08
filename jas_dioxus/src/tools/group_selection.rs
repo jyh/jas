@@ -38,14 +38,23 @@ impl GroupSelectionTool {
 
     /// Hit-test any element, traversing into groups.
     fn hit_test_any(model: &Model, x: f64, y: f64) -> Option<ElementPath> {
+        use crate::geometry::element::Visibility;
         let doc = model.document();
         for (li, layer) in doc.layers.iter().enumerate() {
+            let layer_vis = layer.visibility();
+            if layer_vis == Visibility::Invisible {
+                continue;
+            }
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate().rev() {
                     if child.locked() {
                         continue;
                     }
-                    if let Some(path) = hit_recursive(child, &vec![li, ci], x, y) {
+                    let child_vis = std::cmp::min(layer_vis, child.visibility());
+                    if child_vis == Visibility::Invisible {
+                        continue;
+                    }
+                    if let Some(path) = hit_recursive(child, &vec![li, ci], child_vis, x, y) {
                         return Some(path);
                     }
                 }
@@ -70,7 +79,18 @@ impl GroupSelectionTool {
 }
 
 /// Recursively hit-test into groups, returning the deepest leaf element path.
-fn hit_recursive(elem: &Element, path: &ElementPath, x: f64, y: f64) -> Option<ElementPath> {
+fn hit_recursive(
+    elem: &Element,
+    path: &ElementPath,
+    ancestor_vis: crate::geometry::element::Visibility,
+    x: f64,
+    y: f64,
+) -> Option<ElementPath> {
+    use crate::geometry::element::Visibility;
+    let effective = std::cmp::min(ancestor_vis, elem.visibility());
+    if effective == Visibility::Invisible {
+        return None;
+    }
     if elem.is_group_or_layer() {
         if let Some(children) = elem.children() {
             for (i, child) in children.iter().enumerate().rev() {
@@ -79,7 +99,7 @@ fn hit_recursive(elem: &Element, path: &ElementPath, x: f64, y: f64) -> Option<E
                 }
                 let mut child_path = path.clone();
                 child_path.push(i);
-                if let Some(result) = hit_recursive(child, &child_path, x, y) {
+                if let Some(result) = hit_recursive(child, &child_path, effective, x, y) {
                     return Some(result);
                 }
             }

@@ -684,45 +684,13 @@ impl CanvasTool for TypeTool {
             }
         }
 
-        // Editing-element bounding box.
-        //
-        // - Area text always shows the box: the user explicitly
-        //   dragged out a `width × height` rectangle and needs to see
-        //   its extent while editing inside it.
-        // - Point text shows the box only when SHOW_SELECTION_BBOX is
-        //   true (the same flag that gates the selection-overlay
-        //   bounding boxes). The caret, selection highlight, and
-        //   rendered glyphs still draw regardless.
-        //
-        // For area text we honor the explicit (width, height); for
-        // point text we re-measure each line with the real font (so
-        // kerning is accounted for) and use the widest line.
-        if t.is_area_text() {
-            ctx.set_stroke_style_str("rgba(0,120,215,0.6)");
-            ctx.set_line_width(1.0);
-            ctx.stroke_rect(t.x, t.y, t.width.max(1.0), t.height.max(1.0));
-        } else if crate::canvas::render::SHOW_SELECTION_BBOX {
-            ctx.set_stroke_style_str("rgba(0,120,215,0.6)");
-            ctx.set_line_width(1.0);
-            let font = font_string(&t.font_style, &t.font_weight, t.font_size, &t.font_family);
-            let measure = make_measurer(&font, t.font_size);
-            let chars: Vec<char> = t.content.chars().collect();
-            let mut max_w = 0.0_f64;
-            for line in &lay.lines {
-                let s: String = chars[line.start..line.end]
-                    .iter()
-                    .filter(|c| **c != '\n')
-                    .collect();
-                let w = measure(&s);
-                if w > max_w {
-                    max_w = w;
-                }
-            }
-            let h = (lay.lines.len() as f64) * t.font_size;
-            let bw = max_w.max(t.font_size * 0.5);
-            let bh = h.max(t.font_size);
-            ctx.stroke_rect(t.x, t.y, bw, bh);
-        }
+        // The bounding box around the edited text is not drawn
+        // here — the Type tool selects the element when it starts
+        // editing, so the selection overlay (see
+        // `draw_selection_overlays` in `canvas/render.rs`) is
+        // responsible for rendering the box. That keeps the rule
+        // "area text shows its bbox iff the element is selected"
+        // in a single place.
 
         // Caret (only if no selection or anchor==insertion, but we always
         // draw it at the insertion edge — even with a selection — so the

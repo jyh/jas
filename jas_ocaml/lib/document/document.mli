@@ -73,6 +73,13 @@ val default_document : unit -> document
 val bounds : document -> float * float * float * float
 val get_element : document -> element_path -> Element.element
 val replace_element : document -> element_path -> Element.element -> document
+
+(** Effective visibility of the element at [path], computed as the
+    minimum of the visibilities of every element along the path from
+    the root layer down to the target. A parent Group/Layer caps the
+    visibility of everything it contains. *)
+val effective_visibility : document -> element_path -> Element.visibility
+
 val insert_element_after : document -> element_path -> Element.element -> document
 val delete_element : document -> element_path -> document
 val delete_selection : document -> document

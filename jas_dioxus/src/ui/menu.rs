@@ -38,6 +38,9 @@ pub const MENU_BAR: &[(&str, &[MenuItem])] = &[
         SEP,
         ("Lock", "lock", "\u{2318}2"),
         ("Unlock All", "unlock_all", "\u{2325}\u{2318}2"),
+        SEP,
+        ("Hide", "hide", "\u{2318}3"),
+        ("Show All", "show_all", "\u{2325}\u{2318}3"),
     ]),
 ];
 
@@ -49,6 +52,7 @@ pub const DISPATCH_COMMANDS: &[&str] = &[
     "select_all", "delete",
     "group", "ungroup", "ungroup_all",
     "lock", "unlock_all",
+    "hide", "show_all",
 ];
 
 #[cfg(test)]
@@ -199,6 +203,14 @@ mod tests {
     #[test]
     fn total_menu_item_count() {
         let total: usize = MENU_BAR.iter().map(|(_, items)| items.len()).sum();
-        assert_eq!(total, 21); // 5 + 10 + 6
+        assert_eq!(total, 24); // 5 + 10 + 9
+    }
+
+    #[test]
+    fn object_menu_has_hide_and_show_all() {
+        let (_, items) = &MENU_BAR[2];
+        let labels: Vec<&str> = items.iter().map(|(l, _, _)| *l).collect();
+        assert!(labels.contains(&"Hide"));
+        assert!(labels.contains(&"Show All"));
     }
 }

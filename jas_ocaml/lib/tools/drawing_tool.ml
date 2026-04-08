@@ -68,7 +68,7 @@ class line_tool = object
     Some (Element.Line {
       x1 = sx; y1 = sy; x2 = ex; y2 = ey;
       stroke = Canvas_tool.default_stroke;
-      opacity = 1.0; transform = None; locked = false;
+      opacity = 1.0; transform = None; locked = false; visibility = Preview;
     })
 
   method private draw_preview cr sx sy ex ey =
@@ -89,7 +89,7 @@ class rect_tool = object
       width = abs_float (ex -. sx); height = abs_float (ey -. sy);
       rx = 0.0; ry = 0.0;
       fill = None; stroke = Canvas_tool.default_stroke;
-      opacity = 1.0; transform = None; locked = false;
+      opacity = 1.0; transform = None; locked = false; visibility = Preview;
     })
 
   method private draw_preview cr sx sy ex ey =
@@ -118,7 +118,7 @@ class rounded_rect_tool = object
         width = w; height = h;
         rx = rounded_rect_radius; ry = rounded_rect_radius;
         fill = None; stroke = Canvas_tool.default_stroke;
-        opacity = 1.0; transform = None; locked = false;
+        opacity = 1.0; transform = None; locked = false; visibility = Preview;
       })
 
   method private draw_preview cr sx sy ex ey =
@@ -178,7 +178,7 @@ class star_tool = object
       Some (Element.Polygon {
         points = pts;
         fill = None; stroke = Canvas_tool.default_stroke;
-        opacity = 1.0; transform = None; locked = false;
+        opacity = 1.0; transform = None; locked = false; visibility = Preview;
       })
 
   method private draw_preview cr sx sy ex ey =
@@ -203,7 +203,7 @@ class polygon_tool = object
     Some (Element.Polygon {
       points = pts;
       fill = None; stroke = Canvas_tool.default_stroke;
-      opacity = 1.0; transform = None; locked = false;
+      opacity = 1.0; transform = None; locked = false; visibility = Preview;
     })
 
   method private draw_preview cr sx sy ex ey =

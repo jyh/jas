@@ -450,17 +450,13 @@ class TypeTool(CanvasTool):
                 painter.drawRect(QRectF(t.x + x_lo, t.y + line.top,
                                         x_hi - x_lo, line.height))
 
-        # Editing-element bounding box.
-        # - Area text always shows the box (the user explicitly
-        #   dragged out a width × height and needs to see it).
-        # - Point text shows the box only when canvas.SHOW_SELECTION_BBOX
-        #   is true (the same flag the canvas selection overlay uses).
-        is_area = t.is_area_text
-        if is_area or _show_selection_bbox():
-            painter.setPen(QPen(QColor(0, 120, 215, 153), 1.0))
-            painter.setBrush(QBrush())
-            bx, by, bw, bh = _text_draw_bounds(t)
-            painter.drawRect(QRectF(bx, by, bw, bh))
+        # The bounding box around the edited text is not drawn
+        # here — the Type tool selects the element when it starts
+        # editing, so the selection overlay (see
+        # ``_draw_selection_overlays`` in ``canvas/canvas.py``) is
+        # responsible for rendering the box. That keeps the rule
+        # "area text shows its bbox iff the element is selected"
+        # in a single place.
 
         # Caret.
         if _cursor_visible(self.session.blink_epoch_ms):

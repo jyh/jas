@@ -4,7 +4,8 @@
 
 use web_sys::CanvasRenderingContext2d;
 
-use crate::document::document::{Document, SelectionKind};
+use crate::document::document::Document;
+use crate::geometry::element::Visibility;
 use crate::geometry::element::*;
 use crate::geometry::measure::path_point_at_offset;
 use crate::tools::tool::HANDLE_DRAW_SIZE;
@@ -96,22 +97,56 @@ fn build_path(ctx: &CanvasRenderingContext2d, cmds: &[PathCommand]) {
 // Draw a single element
 // ---------------------------------------------------------------------------
 
-fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element) {
+/// Configure `ctx` for an outline-mode draw of a shape: no fill, a
+/// thin black stroke. The spec says "stroke of size 0"; in practice
+/// a canvas stroke width of 0 renders nothing, so we use the minimum
+/// visible width (1 pixel). This is the mode used for every non-Text
+/// element when its effective visibility is [`Visibility::Outline`].
+fn apply_outline_style(ctx: &CanvasRenderingContext2d) {
+    ctx.set_stroke_style_str("rgb(0,0,0)");
+    ctx.set_fill_style_str("transparent");
+    ctx.set_line_width(1.0);
+    ctx.set_line_cap("butt");
+    ctx.set_line_join("miter");
+    ctx.set_line_dash(&wasm_bindgen::JsValue::from(js_sys::Array::new())).ok();
+    ctx.set_miter_limit(10.0);
+}
+
+fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Visibility) {
+    // Effective visibility is the minimum of the inherited (capping)
+    // visibility and this element's own. Groups/Layers propagate the
+    // cap down to their children; Invisible stops the recursion.
+    let effective = std::cmp::min(ancestor_vis, elem.visibility());
+    if effective == Visibility::Invisible {
+        return;
+    }
+    let outline = effective == Visibility::Outline;
+
     ctx.save();
     apply_transform(ctx, elem.transform());
     ctx.set_global_alpha(elem.opacity());
 
     match elem {
         Element::Line(e) => {
-            apply_stroke(ctx, e.stroke.as_ref());
+            if outline {
+                apply_outline_style(ctx);
+            } else {
+                apply_stroke(ctx, e.stroke.as_ref());
+            }
             ctx.begin_path();
             ctx.move_to(e.x1, e.y1);
             ctx.line_to(e.x2, e.y2);
             ctx.stroke();
         }
         Element::Rect(e) => {
-            apply_fill(ctx, e.fill.as_ref());
-            apply_stroke(ctx, e.stroke.as_ref());
+            if outline {
+                apply_outline_style(ctx);
+            } else {
+                apply_fill(ctx, e.fill.as_ref());
+                apply_stroke(ctx, e.stroke.as_ref());
+            }
+            let has_fill = !outline && e.fill.is_some();
+            let has_stroke = outline || e.stroke.is_some();
             if e.rx > 0.0 || e.ry > 0.0 {
                 let rx = e.rx.max(0.0).min(e.width / 2.0);
                 let ry = e.ry.max(0.0).min(e.height / 2.0);
@@ -130,66 +165,82 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element) {
                 ctx.line_to(x, y + ry);
                 ctx.quadratic_curve_to(x, y, x + rx, y);
                 ctx.close_path();
-                if e.fill.is_some() {
+                if has_fill {
                     ctx.fill();
                 }
-                if e.stroke.is_some() {
+                if has_stroke {
                     ctx.stroke();
                 }
             } else {
-                if e.fill.is_some() {
+                if has_fill {
                     ctx.fill_rect(e.x, e.y, e.width, e.height);
                 }
-                if e.stroke.is_some() {
+                if has_stroke {
                     ctx.stroke_rect(e.x, e.y, e.width, e.height);
                 }
             }
         }
         Element::Circle(e) => {
-            apply_fill(ctx, e.fill.as_ref());
-            apply_stroke(ctx, e.stroke.as_ref());
+            if outline {
+                apply_outline_style(ctx);
+            } else {
+                apply_fill(ctx, e.fill.as_ref());
+                apply_stroke(ctx, e.stroke.as_ref());
+            }
             ctx.begin_path();
             ctx.arc(e.cx, e.cy, e.r, 0.0, std::f64::consts::TAU).ok();
-            if e.fill.is_some() {
+            if !outline && e.fill.is_some() {
                 ctx.fill();
             }
-            if e.stroke.is_some() {
+            if outline || e.stroke.is_some() {
                 ctx.stroke();
             }
         }
         Element::Ellipse(e) => {
-            apply_fill(ctx, e.fill.as_ref());
-            apply_stroke(ctx, e.stroke.as_ref());
+            if outline {
+                apply_outline_style(ctx);
+            } else {
+                apply_fill(ctx, e.fill.as_ref());
+                apply_stroke(ctx, e.stroke.as_ref());
+            }
             ctx.begin_path();
             ctx.ellipse(e.cx, e.cy, e.rx, e.ry, 0.0, 0.0, std::f64::consts::TAU)
                 .ok();
-            if e.fill.is_some() {
+            if !outline && e.fill.is_some() {
                 ctx.fill();
             }
-            if e.stroke.is_some() {
+            if outline || e.stroke.is_some() {
                 ctx.stroke();
             }
         }
         Element::Polyline(e) => {
-            apply_fill(ctx, e.fill.as_ref());
-            apply_stroke(ctx, e.stroke.as_ref());
+            if outline {
+                apply_outline_style(ctx);
+            } else {
+                apply_fill(ctx, e.fill.as_ref());
+                apply_stroke(ctx, e.stroke.as_ref());
+            }
             if !e.points.is_empty() {
                 ctx.begin_path();
                 ctx.move_to(e.points[0].0, e.points[0].1);
                 for &(x, y) in &e.points[1..] {
                     ctx.line_to(x, y);
                 }
-                if e.fill.is_some() {
+                if !outline && e.fill.is_some() {
                     ctx.fill();
                 }
-                if e.stroke.is_some() {
+                if outline || e.stroke.is_some() {
                     ctx.stroke();
                 }
             }
         }
         Element::Polygon(e) => {
-            apply_fill(ctx, e.fill.as_ref());
-            apply_stroke(ctx, e.stroke.as_ref());
+            if outline {
+                apply_outline_style(ctx);
+            } else {
+                apply_fill(ctx, e.fill.as_ref());
+                apply_stroke(ctx, e.stroke.as_ref());
+            }
             if !e.points.is_empty() {
                 ctx.begin_path();
                 ctx.move_to(e.points[0].0, e.points[0].1);
@@ -197,23 +248,27 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element) {
                     ctx.line_to(x, y);
                 }
                 ctx.close_path();
-                if e.fill.is_some() {
+                if !outline && e.fill.is_some() {
                     ctx.fill();
                 }
-                if e.stroke.is_some() {
+                if outline || e.stroke.is_some() {
                     ctx.stroke();
                 }
             }
         }
         Element::Path(e) => {
-            apply_fill(ctx, e.fill.as_ref());
-            apply_stroke(ctx, e.stroke.as_ref());
+            if outline {
+                apply_outline_style(ctx);
+            } else {
+                apply_fill(ctx, e.fill.as_ref());
+                apply_stroke(ctx, e.stroke.as_ref());
+            }
             ctx.begin_path();
             build_path(ctx, &e.d);
-            if e.fill.is_some() {
+            if !outline && e.fill.is_some() {
                 ctx.fill();
             }
-            if e.stroke.is_some() {
+            if outline || e.stroke.is_some() {
                 ctx.stroke();
             }
         }
@@ -288,13 +343,16 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element) {
             }
         }
         Element::Group(g) => {
+            // Cap each child's effective visibility by our own
+            // effective visibility (which already incorporates our
+            // ancestor's cap).
             for child in &g.children {
-                draw_element(ctx, child);
+                draw_element(ctx, child, effective);
             }
         }
         Element::Layer(l) => {
             for child in &l.children {
-                draw_element(ctx, child);
+                draw_element(ctx, child, effective);
             }
         }
     }
@@ -305,88 +363,131 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element) {
 // Draw selection overlays
 // ---------------------------------------------------------------------------
 
-/// Whether to draw the blue bounding-box outline around each selected
-/// element. Control-point handles are drawn regardless. Defaults to
-/// `false` so the bbox does not clutter the canvas during normal
-/// selection; flip to `true` to get the old behavior back.
-pub const SHOW_SELECTION_BBOX: bool = false;
-
-fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
-    ctx.set_stroke_style_str("rgba(0, 120, 215, 0.8)");
-    ctx.set_line_width(1.0);
-
-    for es in &doc.selection {
-        if let Some(elem) = doc.get_element(&es.path) {
-            // Two visual conventions:
-            //
-            // - **CP-shape elements** (Path, TextPath, Polygon,
-            //   Polyline, Line): always draw the control-point
-            //   squares because the user can grab and drag them
-            //   directly. No bounding box.
-            //
-            // - **Bounding-box-shape elements** (Rect, Circle,
-            //   Ellipse, Text, TextPath, Group, Layer): the "control
-            //   points" are bounding-box corners. Drawing them as
-            //   little squares without the bounding box itself is
-            //   confusing, so we draw both — the bbox outline and
-            //   the corner squares — only when SHOW_SELECTION_BBOX
-            //   is true. When false (the default) the canvas stays
-            //   uncluttered and the user relies on the existing
-            //   element rendering to tell what's selected.
-            let cp_shape = matches!(
-                elem,
-                Element::Line(_)
-                    | Element::Polyline(_)
-                    | Element::Polygon(_)
-                    | Element::Path(_)
-            );
-
-            if cp_shape {
-                // Always draw the per-vertex/anchor squares.
-                let cps = control_points(elem);
-                let half = HANDLE_DRAW_SIZE / 2.0;
-                for (i, &(px, py)) in cps.iter().enumerate() {
-                    if es.kind.contains(i) {
-                        ctx.set_fill_style_str("rgba(0, 120, 215, 0.8)");
-                    } else {
-                        ctx.set_fill_style_str("white");
-                    }
-                    ctx.fill_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
-                    ctx.stroke_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
-                }
-            } else if matches!(es.kind, SelectionKind::Partial(_)) {
-                // Bbox-shape element with a Partial(*) selection
-                // (including Partial(empty)): draw the bbox-corner
-                // squares so the user can see the grabbable handles,
-                // colored per `contains(i)`. No bbox outline.
-                let cps = control_points(elem);
-                let half = HANDLE_DRAW_SIZE / 2.0;
-                for (i, &(px, py)) in cps.iter().enumerate() {
-                    if es.kind.contains(i) {
-                        ctx.set_fill_style_str("rgba(0, 120, 215, 0.8)");
-                    } else {
-                        ctx.set_fill_style_str("white");
-                    }
-                    ctx.fill_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
-                    ctx.stroke_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
-                }
-            } else if SHOW_SELECTION_BBOX {
-                // Bbox-shape element AND the user opted in.
-                let (bx, by, bw, bh) = elem.bounds();
-                ctx.stroke_rect(bx, by, bw, bh);
-                let cps = control_points(elem);
-                let half = HANDLE_DRAW_SIZE / 2.0;
-                for (i, &(px, py)) in cps.iter().enumerate() {
-                    if es.kind.contains(i) {
-                        ctx.set_fill_style_str("rgba(0, 120, 215, 0.8)");
-                    } else {
-                        ctx.set_fill_style_str("white");
-                    }
-                    ctx.fill_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
-                    ctx.stroke_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
+/// Trace the given element's geometry as a sub-path on `ctx` without
+/// filling or stroking. Used by `draw_selection_overlays` to stroke
+/// the element's path in the selection color.
+///
+/// Text, TextPath, Group, and Layer are not traced here — they use a
+/// bounding-box overlay (Text/TextPath) or rely on their descendants'
+/// individual highlights (Group/Layer).
+fn trace_element_path(ctx: &CanvasRenderingContext2d, elem: &Element) {
+    match elem {
+        Element::Line(e) => {
+            ctx.move_to(e.x1, e.y1);
+            ctx.line_to(e.x2, e.y2);
+        }
+        Element::Rect(e) => {
+            if e.rx > 0.0 || e.ry > 0.0 {
+                let rx = e.rx.max(0.0).min(e.width / 2.0);
+                let ry = e.ry.max(0.0).min(e.height / 2.0);
+                let x = e.x;
+                let y = e.y;
+                let w = e.width;
+                let h = e.height;
+                ctx.move_to(x + rx, y);
+                ctx.line_to(x + w - rx, y);
+                ctx.quadratic_curve_to(x + w, y, x + w, y + ry);
+                ctx.line_to(x + w, y + h - ry);
+                ctx.quadratic_curve_to(x + w, y + h, x + w - rx, y + h);
+                ctx.line_to(x + rx, y + h);
+                ctx.quadratic_curve_to(x, y + h, x, y + h - ry);
+                ctx.line_to(x, y + ry);
+                ctx.quadratic_curve_to(x, y, x + rx, y);
+                ctx.close_path();
+            } else {
+                ctx.rect(e.x, e.y, e.width, e.height);
+            }
+        }
+        Element::Circle(e) => {
+            ctx.move_to(e.cx + e.r, e.cy);
+            ctx.arc(e.cx, e.cy, e.r, 0.0, std::f64::consts::TAU).ok();
+        }
+        Element::Ellipse(e) => {
+            ctx.move_to(e.cx + e.rx, e.cy);
+            ctx.ellipse(e.cx, e.cy, e.rx, e.ry, 0.0, 0.0, std::f64::consts::TAU)
+                .ok();
+        }
+        Element::Polyline(e) => {
+            if !e.points.is_empty() {
+                ctx.move_to(e.points[0].0, e.points[0].1);
+                for &(x, y) in &e.points[1..] {
+                    ctx.line_to(x, y);
                 }
             }
         }
+        Element::Polygon(e) => {
+            if !e.points.is_empty() {
+                ctx.move_to(e.points[0].0, e.points[0].1);
+                for &(x, y) in &e.points[1..] {
+                    ctx.line_to(x, y);
+                }
+                ctx.close_path();
+            }
+        }
+        Element::Path(e) => {
+            build_path(ctx, &e.d);
+        }
+        Element::Text(_)
+        | Element::TextPath(_)
+        | Element::Group(_)
+        | Element::Layer(_) => {
+            // Handled separately.
+        }
+    }
+}
+
+fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
+    let sel_color = "rgba(0, 120, 215, 0.9)";
+    ctx.set_stroke_style_str(sel_color);
+    ctx.set_line_width(1.0);
+
+    for es in &doc.selection {
+        let elem = match doc.get_element(&es.path) {
+            Some(e) => e,
+            None => continue,
+        };
+
+        // Text and TextPath get a bounding-box highlight instead of
+        // a path trace. For area text the bbox aligns with the area
+        // (that's what `bounds()` returns); for point text it wraps
+        // the drawn glyphs; for TextPath it wraps the path the text
+        // follows.
+        let is_text_like = matches!(elem, Element::Text(_) | Element::TextPath(_));
+        // Group/Layer selection highlights are produced by their
+        // descendants, which are themselves in the selection when a
+        // Group is picked (see `select_element`); the container
+        // itself has nothing meaningful to outline.
+        let is_container = matches!(elem, Element::Group(_) | Element::Layer(_));
+
+        if is_text_like {
+            let (bx, by, bw, bh) = elem.bounds();
+            ctx.stroke_rect(bx, by, bw, bh);
+        } else if !is_container {
+            // Stroke the element's own path in bright blue.
+            ctx.begin_path();
+            trace_element_path(ctx, elem);
+            ctx.stroke();
+
+            // Draw the control-point squares. A selected CP (per the
+            // `Partial` set, or any CP when kind is `All`) gets the
+            // solid blue fill; others get white. On `All`, every CP
+            // is filled blue — the whole element is grabbable.
+            let cps = control_points(elem);
+            let half = HANDLE_DRAW_SIZE / 2.0;
+            // Re-apply stroke color (stroke() above may leave it as-is
+            // but be explicit for the rect strokes below).
+            ctx.set_stroke_style_str(sel_color);
+            for (i, &(px, py)) in cps.iter().enumerate() {
+                if es.kind.contains(i) {
+                    ctx.set_fill_style_str(sel_color);
+                } else {
+                    ctx.set_fill_style_str("white");
+                }
+                ctx.fill_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
+                ctx.stroke_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
+            }
+        }
+        // Groups/Layers: nothing here.
     }
 }
 
@@ -400,9 +501,11 @@ pub fn render(ctx: &CanvasRenderingContext2d, width: f64, height: f64, doc: &Doc
     ctx.set_fill_style_str("white");
     ctx.fill_rect(0.0, 0.0, width, height);
 
-    // Draw all layers
+    // Draw all layers, starting with the most permissive ancestor
+    // visibility. Each layer's own visibility caps it further, and
+    // the cap propagates down to descendants.
     for layer in &doc.layers {
-        draw_element(ctx, layer);
+        draw_element(ctx, layer, Visibility::Preview);
     }
 
     // Draw selection overlays

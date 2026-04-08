@@ -55,11 +55,19 @@ impl SelectionTool {
     }
 
     fn hit_test_any(model: &Model, x: f64, y: f64) -> Option<ElementPath> {
+        use crate::geometry::element::Visibility;
         let doc = model.document();
         for (li, layer) in doc.layers.iter().enumerate() {
+            let layer_vis = layer.visibility();
+            if layer_vis == Visibility::Invisible {
+                continue;
+            }
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate().rev() {
                     if child.locked() {
+                        continue;
+                    }
+                    if std::cmp::min(layer_vis, child.visibility()) == Visibility::Invisible {
                         continue;
                     }
                     let (bx, by, bw, bh) = child.bounds();

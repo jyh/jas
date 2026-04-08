@@ -807,6 +807,24 @@ pub fn App() -> Element {
                         }));
                     }
                 }
+                Key::Character(ref c) if (c == "3") && cmd => {
+                    evt.prevent_default();
+                    if mods.alt() {
+                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                            if let Some(tab) = st.tab_mut() {
+                                tab.model.snapshot();
+                                Controller::show_all(&mut tab.model);
+                            }
+                        }));
+                    } else {
+                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                            if let Some(tab) = st.tab_mut() {
+                                tab.model.snapshot();
+                                Controller::hide_selection(&mut tab.model);
+                            }
+                        }));
+                    }
+                }
                 Key::Character(ref c) if (c == "s" || c == "S") && cmd => {
                     evt.prevent_default();
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
@@ -1301,6 +1319,22 @@ pub fn App() -> Element {
                         if let Some(tab) = st.tab_mut() {
                             tab.model.snapshot();
                             Controller::unlock_all(&mut tab.model);
+                        }
+                    }));
+                }
+                "hide" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if let Some(tab) = st.tab_mut() {
+                            tab.model.snapshot();
+                            Controller::hide_selection(&mut tab.model);
+                        }
+                    }));
+                }
+                "show_all" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if let Some(tab) = st.tab_mut() {
+                            tab.model.snapshot();
+                            Controller::show_all(&mut tab.model);
                         }
                     }));
                 }

@@ -162,12 +162,12 @@ let rec translate_element elem dx dy =
   if dx = 0.0 && dy = 0.0 then elem
   else
     match elem with
-    | Element.Group { children; opacity; transform; locked; _ } ->
+    | Element.Group { children; opacity; transform; locked; visibility; _ } ->
       Element.Group { children = Array.map (fun c -> translate_element c dx dy) children;
-                      opacity; transform; locked }
-    | Element.Layer { name; children; opacity; transform; locked; _ } ->
+                      opacity; transform; locked; visibility }
+    | Element.Layer { name; children; opacity; transform; locked; visibility; _ } ->
       Element.Layer { name; children = Array.map (fun c -> translate_element c dx dy) children;
-                      opacity; transform; locked }
+                      opacity; transform; locked; visibility }
     | _ ->
       let n = Element.control_point_count elem in
       let indices = List.init n Fun.id in
@@ -232,8 +232,8 @@ let paste_clipboard (model : Model.model) offset () =
                 !new_sel
             ) children;
             match new_layers.(idx) with
-            | Element.Layer { name = n; children = ec; opacity; transform; locked; _ } ->
-              new_layers.(idx) <- Element.Layer { name = n; children = Array.append ec children; opacity; transform; locked }
+            | Element.Layer { name = n; children = ec; opacity; transform; locked; visibility; _ } ->
+              new_layers.(idx) <- Element.Layer { name = n; children = Array.append ec children; opacity; transform; locked; visibility }
             | _ -> ()
           end
         ) pasted_doc.Document.layers;
@@ -417,6 +417,11 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
     let model = m () in model#snapshot; (new Controller.controller ~model ())#lock_selection));
   ignore (object_factory#add_item "Unlock All" ~callback:(fun () ->
     let model = m () in model#snapshot; (new Controller.controller ~model ())#unlock_all));
+  ignore (object_factory#add_separator ());
+  ignore (object_factory#add_item "Hide" ~key:GdkKeysyms._3 ~callback:(fun () ->
+    let model = m () in model#snapshot; (new Controller.controller ~model ())#hide_selection));
+  ignore (object_factory#add_item "Show All" ~callback:(fun () ->
+    let model = m () in model#snapshot; (new Controller.controller ~model ())#show_all));
 
   (* View menu *)
   let _view_menu = factory#add_submenu "View" in

@@ -355,6 +355,104 @@ class DirectSelectionControllerTest(absltest.TestCase):
         self.assertIsInstance(moved, Rect)
 
 
+class VisibilityControllerTest(absltest.TestCase):
+    """Tests for the Visibility feature: Hide / Show All."""
+
+    def _setup(self):
+        from geometry.element import Line
+        rect = Rect(x=0, y=0, width=10, height=10)
+        line = Line(x1=0, y1=0, x2=5, y2=5)
+        group = Group(children=(Line(x1=1, y1=1, x2=2, y2=2),
+                                 Line(x1=3, y1=3, x2=4, y2=4)))
+        layer = Layer(children=(rect, group, line), name="L0")
+        return Controller(model=Model(document=Document(layers=(layer,))))
+
+    def test_visibility_enum_ordering(self):
+        from geometry.element import Visibility
+        self.assertGreater(Visibility.PREVIEW.value, Visibility.OUTLINE.value)
+        self.assertGreater(Visibility.OUTLINE.value, Visibility.INVISIBLE.value)
+        self.assertEqual(
+            min(Visibility.PREVIEW, Visibility.OUTLINE,
+                key=lambda v: v.value),
+            Visibility.OUTLINE,
+        )
+        self.assertEqual(
+            min(Visibility.OUTLINE, Visibility.INVISIBLE,
+                key=lambda v: v.value),
+            Visibility.INVISIBLE,
+        )
+
+    def test_hide_selection_sets_invisible_and_clears_selection(self):
+        from geometry.element import Visibility
+        ctrl = self._setup()
+        ctrl.select_element((0, 0))
+        ctrl.hide_selection()
+        self.assertEqual(ctrl.document.selection, frozenset())
+        self.assertEqual(
+            ctrl.document.get_element((0, 0)).visibility,
+            Visibility.INVISIBLE,
+        )
+
+    def test_hidden_element_not_selectable_via_rect(self):
+        ctrl = self._setup()
+        ctrl.select_element((0, 0))
+        ctrl.hide_selection()
+        ctrl.select_rect(-1, -1, 12, 12)
+        paths = _sel_paths(ctrl.document.selection)
+        self.assertNotIn((0, 0), paths)
+
+    def test_hidden_element_not_selectable_via_select_element(self):
+        ctrl = self._setup()
+        ctrl.select_element((0, 0))
+        ctrl.hide_selection()
+        ctrl.select_element((0, 0))
+        self.assertEqual(ctrl.document.selection, frozenset())
+
+    def test_invisible_group_caps_children(self):
+        from geometry.element import Visibility
+        ctrl = self._setup()
+        ctrl.select_element((0, 1))
+        # select_element on a group's child expands to the whole
+        # group, but here (0,1) is a direct child of the layer, so
+        # just the group itself is selected.
+        ctrl.hide_selection()
+        doc = ctrl.document
+        self.assertEqual(
+            doc.get_element((0, 1)).visibility, Visibility.INVISIBLE)
+        # A child inside the hidden group: its own flag is unchanged,
+        # but effective visibility is INVISIBLE.
+        self.assertEqual(
+            doc.get_element((0, 1, 0)).visibility, Visibility.PREVIEW)
+        self.assertEqual(
+            doc.effective_visibility((0, 1, 0)), Visibility.INVISIBLE)
+
+    def test_show_all_resets_and_selects_newly_shown(self):
+        from geometry.element import Visibility
+        ctrl = self._setup()
+        # Hide the rect and the line (indices 0 and 2).
+        ctrl.set_selection(frozenset({
+            ElementSelection.all((0, 0)),
+            ElementSelection.all((0, 2)),
+        }))
+        ctrl.hide_selection()
+        # Now Show All.
+        ctrl.show_all()
+        doc = ctrl.document
+        self.assertEqual(
+            doc.get_element((0, 0)).visibility, Visibility.PREVIEW)
+        self.assertEqual(
+            doc.get_element((0, 2)).visibility, Visibility.PREVIEW)
+        paths = _sel_paths(doc.selection)
+        self.assertIn((0, 0), paths)
+        self.assertIn((0, 2), paths)
+        self.assertEqual(len(paths), 2)
+
+    def test_show_all_with_nothing_hidden_leaves_empty_selection(self):
+        ctrl = self._setup()
+        ctrl.show_all()
+        self.assertEqual(ctrl.document.selection, frozenset())
+
+
 class GroupSelectionControllerTest(absltest.TestCase):
 
     def test_group_select_rect_no_group_expansion(self):

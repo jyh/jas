@@ -191,6 +191,32 @@ class Document:
             node = node.children[idx]
         return node
 
+    def effective_visibility(self, path: ElementPath) -> "Visibility":
+        """Return the effective visibility of the element at ``path``.
+
+        Computed as the minimum of the visibilities of every element
+        along the path from the root layer down to the target. A
+        parent Group or Layer caps the visibility of everything it
+        contains: if any ancestor is INVISIBLE, the result is
+        INVISIBLE regardless of the target's own flag.
+        """
+        from geometry.element import Visibility
+        if not path:
+            return Visibility.PREVIEW
+        if path[0] >= len(self.layers):
+            return Visibility.PREVIEW
+        node: Element = self.layers[path[0]]
+        effective = node.visibility
+        for idx in path[1:]:
+            if not isinstance(node, Group):
+                return effective
+            if idx >= len(node.children):
+                return effective
+            node = node.children[idx]
+            if node.visibility.value < effective.value:
+                effective = node.visibility
+        return effective
+
     def replace_element(self, path: ElementPath, new_elem: Element) -> "Document":
         """Return a new Document with the element at path replaced by new_elem."""
         if not path:

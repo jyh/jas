@@ -634,10 +634,14 @@ fn parse_opacity(node: &XmlNode) -> f64 {
 }
 
 fn parse_common(node: &XmlNode) -> CommonProps {
+    // `visibility` is runtime-only state — it is not preserved in
+    // SVG, so it always loads as `Preview`. See SELECTION.md /
+    // DOCUMENT.md for the rationale.
     CommonProps {
         opacity: parse_opacity(node),
         transform: parse_transform(node),
         locked: false,
+        visibility: crate::geometry::element::Visibility::default(),
     }
 }
 

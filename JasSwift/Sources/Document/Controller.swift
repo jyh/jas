@@ -91,8 +91,12 @@ public class Controller {
         let doc = model.document
         var selection: Selection = []
         for (li, layer) in doc.layers.enumerated() {
+            let layerVis = layer.visibility
+            if layerVis == .invisible { continue }
             for (ci, child) in layer.children.enumerated() {
                 if child.isLocked { continue }
+                let childVis = min(layerVis, child.visibility)
+                if childVis == .invisible { continue }
                 if case .group(let g) = child {
                     let anyHit = g.children.contains { elementIntersectsRect($0, x, y, width, height) }
                     if anyHit {
@@ -117,13 +121,15 @@ public class Controller {
         let doc = model.document
         var selection: Selection = []
 
-        func check(_ path: [Int], _ elem: Element) {
+        func check(_ path: [Int], _ elem: Element, _ ancestorVis: Visibility) {
             if elem.isLocked { return }
+            let effective = min(ancestorVis, elem.visibility)
+            if effective == .invisible { return }
             switch elem {
             case .layer(let v):
-                for (i, child) in v.children.enumerated() { check(path + [i], child) }
+                for (i, child) in v.children.enumerated() { check(path + [i], child, effective) }
             case .group(let v):
-                for (i, child) in v.children.enumerated() { check(path + [i], child) }
+                for (i, child) in v.children.enumerated() { check(path + [i], child, effective) }
             default:
                 if elementIntersectsRect(elem, x, y, width, height) {
                     selection.insert(ElementSelection.all(path))
@@ -132,7 +138,7 @@ public class Controller {
         }
 
         for (li, layer) in doc.layers.enumerated() {
-            check([li], .layer(layer))
+            check([li], .layer(layer), .preview)
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
         model.document = Document(layers: doc.layers,
@@ -143,13 +149,15 @@ public class Controller {
         let doc = model.document
         var selection: Selection = []
 
-        func check(_ path: [Int], _ elem: Element) {
+        func check(_ path: [Int], _ elem: Element, _ ancestorVis: Visibility) {
             if elem.isLocked { return }
+            let effective = min(ancestorVis, elem.visibility)
+            if effective == .invisible { return }
             switch elem {
             case .layer(let v):
-                for (i, child) in v.children.enumerated() { check(path + [i], child) }
+                for (i, child) in v.children.enumerated() { check(path + [i], child, effective) }
             case .group(let v):
-                for (i, child) in v.children.enumerated() { check(path + [i], child) }
+                for (i, child) in v.children.enumerated() { check(path + [i], child, effective) }
             default:
                 let cps = elem.controlPointPositions
                 let hitCPs: [Int] = cps.enumerated().compactMap { (i, pt) in
@@ -169,7 +177,7 @@ public class Controller {
         }
 
         for (li, layer) in doc.layers.enumerated() {
-            check([li], .layer(layer))
+            check([li], .layer(layer), .preview)
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
         model.document = Document(layers: doc.layers,
@@ -187,6 +195,7 @@ public class Controller {
         let doc = model.document
         let elem = doc.getElement(path)
         if elem.isLocked { return }
+        if doc.effectiveVisibility(path) == .invisible { return }
         if path.count >= 2 {
             let parentPath = Array(path.dropLast())
             let parent = doc.getElement(parentPath)
@@ -243,7 +252,8 @@ public class Controller {
             switch elem {
             case .group(let g):
                 return .group(Group(children: g.children.map { lockRecursive($0) },
-                                    opacity: g.opacity, transform: g.transform, locked: true))
+                                    opacity: g.opacity, transform: g.transform, locked: true,
+                                    visibility: g.visibility))
             default:
                 return elem.withLocked(true)
             }
@@ -288,11 +298,13 @@ public class Controller {
                 case .group(let g):
                     let children = unlockChildren(g.children)
                     return Element.group(Group(children: children, opacity: g.opacity,
-                                              transform: g.transform, locked: false))
+                                              transform: g.transform, locked: false,
+                                              visibility: g.visibility))
                 case .layer(let l):
                     let children = unlockChildren(l.children)
                     return Element.layer(Layer(name: l.name, children: children,
-                                              opacity: l.opacity, transform: l.transform, locked: false))
+                                              opacity: l.opacity, transform: l.transform, locked: false,
+                                              visibility: l.visibility))
                 default:
                     return elem.isLocked ? elem.withLocked(false) : elem
                 }
@@ -301,7 +313,8 @@ public class Controller {
         let newLayers = doc.layers.map { layer in
             let children = unlockChildren(layer.children)
             return Layer(name: layer.name, children: children,
-                         opacity: layer.opacity, transform: layer.transform, locked: false)
+                         opacity: layer.opacity, transform: layer.transform, locked: false,
+                         visibility: layer.visibility)
         }
         let newDoc = Document(layers: newLayers, selectedLayer: doc.selectedLayer, selection: [])
         var newSelection: Selection = []
@@ -311,6 +324,73 @@ public class Controller {
         }
         model.document = Document(layers: newLayers,
                                      selectedLayer: doc.selectedLayer, selection: newSelection)
+    }
+
+    /// Set every element in the current selection to
+    /// `Visibility.invisible` and clear the selection.
+    ///
+    /// If an element is a Group or Layer, only the container's own
+    /// flag is set — a parent's `.invisible` caps every descendant,
+    /// so the effect reaches the whole subtree without rewriting
+    /// every node.
+    public func hideSelection() {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            doc = doc.replaceElement(es.path, with: elem.withVisibility(.invisible))
+        }
+        model.document = Document(layers: doc.layers,
+                                  selectedLayer: doc.selectedLayer, selection: [])
+    }
+
+    /// Traverse the document, set every element whose own visibility
+    /// is `Visibility.invisible` back to `Visibility.preview`, and
+    /// replace the current selection with exactly the paths that were
+    /// shown. Elements that are effectively invisible only because an
+    /// ancestor is invisible are *not* individually modified — it is
+    /// the ancestor whose own flag is unset, and that cascades.
+    public func showAll() {
+        let doc = model.document
+        var shownPaths: [ElementPath] = []
+
+        func showIn(_ elem: Element, _ path: ElementPath) -> Element {
+            var newElem = elem
+            if elem.visibility == .invisible {
+                newElem = elem.withVisibility(.preview)
+                shownPaths.append(path)
+            }
+            switch newElem {
+            case .group(let g):
+                let newChildren = g.children.enumerated().map { (i, c) in
+                    showIn(c, path + [i])
+                }
+                return .group(Group(children: newChildren, opacity: g.opacity,
+                                    transform: g.transform, locked: g.locked,
+                                    visibility: g.visibility))
+            case .layer(let l):
+                let newChildren = l.children.enumerated().map { (i, c) in
+                    showIn(c, path + [i])
+                }
+                return .layer(Layer(name: l.name, children: newChildren,
+                                    opacity: l.opacity, transform: l.transform, locked: l.locked,
+                                    visibility: l.visibility))
+            default:
+                return newElem
+            }
+        }
+
+        let newLayers: [Layer] = doc.layers.enumerated().map { (li, layer) in
+            let shown = showIn(.layer(layer), [li])
+            guard case .layer(let l) = shown else { fatalError("unreachable") }
+            return l
+        }
+        var newSelection: Selection = []
+        for path in shownPaths {
+            newSelection.insert(ElementSelection.all(path))
+        }
+        model.document = Document(layers: newLayers,
+                                  selectedLayer: doc.selectedLayer, selection: newSelection)
     }
 
     public func copySelection(dx: Double, dy: Double) {

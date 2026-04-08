@@ -173,7 +173,8 @@ let () =
     let fill = Some { fill_color = { r = 1.0; g = 0.0; b = 0.0; a = 1.0 } } in
     let filled_rect = Rect { x = 0.0; y = 0.0; width = 100.0; height = 100.0;
                               rx = 0.0; ry = 0.0; fill;
-                              stroke = None; opacity = 1.0; transform = None; locked = false } in
+                              stroke = None; opacity = 1.0; transform = None; locked = false;
+                              visibility = Jas.Element.Preview } in
     let fr_layer = make_layer ~name:"L0" [|filled_rect|] in
     let fr_doc = Jas.Document.make_document [|fr_layer|] in
     let fr_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:fr_doc ()) () in
@@ -253,6 +254,93 @@ let () =
     let r = make_rect 1.0 2.0 10.0 20.0 in
     let moved = Jas.Element.move_control_points ~is_all:false r [] 5.0 7.0 in
     assert (moved = r));
+
+  (* === Visibility / Hide / Show All tests === *)
+
+  run_test "visibility ordering: Invisible < Outline < Preview" (fun () ->
+    assert (compare Jas.Element.Invisible Jas.Element.Outline < 0);
+    assert (compare Jas.Element.Outline Jas.Element.Preview < 0));
+
+  run_test "hide_selection: sets Invisible and clears selection" (fun () ->
+    let r = make_rect 0.0 0.0 10.0 10.0 in
+    let layer = make_layer ~name:"L0" [|r|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+    ctrl#select_element [0; 0];
+    ctrl#hide_selection;
+    assert (Jas.Document.PathMap.is_empty ctrl#document.Jas.Document.selection);
+    let elem = Jas.Document.get_element ctrl#document [0; 0] in
+    assert (Jas.Element.get_visibility elem = Jas.Element.Invisible));
+
+  run_test "hidden element: not selectable via select_rect" (fun () ->
+    let r = make_rect 0.0 0.0 10.0 10.0 in
+    let layer = make_layer ~name:"L0" [|r|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+    ctrl#select_element [0; 0];
+    ctrl#hide_selection;
+    ctrl#select_rect (-1.0) (-1.0) 12.0 12.0;
+    let paths = sel_paths ctrl#document.Jas.Document.selection in
+    assert (not (Jas.Document.PathSet.mem [0; 0] paths)));
+
+  run_test "hidden element: not selectable via select_element" (fun () ->
+    let r = make_rect 0.0 0.0 10.0 10.0 in
+    let layer = make_layer ~name:"L0" [|r|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+    ctrl#select_element [0; 0];
+    ctrl#hide_selection;
+    ctrl#select_element [0; 0];
+    assert (Jas.Document.PathMap.is_empty ctrl#document.Jas.Document.selection));
+
+  run_test "invisible group caps children effective visibility" (fun () ->
+    let r = make_rect 0.0 0.0 10.0 10.0 in
+    let g = make_group [|r|] in
+    let layer = make_layer ~name:"L0" [|g|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+    ctrl#select_element [0; 0];
+    ctrl#hide_selection;
+    let doc2 = ctrl#document in
+    (* Group itself is Invisible *)
+    assert (Jas.Element.get_visibility (Jas.Document.get_element doc2 [0; 0])
+            = Jas.Element.Invisible);
+    (* Child's own flag is unchanged *)
+    assert (Jas.Element.get_visibility (Jas.Document.get_element doc2 [0; 0; 0])
+            = Jas.Element.Preview);
+    (* But effective visibility of child is Invisible *)
+    assert (Jas.Document.effective_visibility doc2 [0; 0; 0]
+            = Jas.Element.Invisible));
+
+  run_test "show_all: resets invisible elements and selects them" (fun () ->
+    let r1 = make_rect 0.0 0.0 10.0 10.0 in
+    let r2 = make_rect 50.0 50.0 10.0 10.0 in
+    let layer = make_layer ~name:"L0" [|r1; r2|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+    ctrl#set_selection
+      (Jas.Document.PathMap.add [0; 0] (Jas.Document.element_selection_all [0; 0])
+        (Jas.Document.PathMap.add [0; 1] (Jas.Document.element_selection_all [0; 1])
+          Jas.Document.PathMap.empty));
+    ctrl#hide_selection;
+    ctrl#show_all;
+    let doc2 = ctrl#document in
+    assert (Jas.Element.get_visibility (Jas.Document.get_element doc2 [0; 0])
+            = Jas.Element.Preview);
+    assert (Jas.Element.get_visibility (Jas.Document.get_element doc2 [0; 1])
+            = Jas.Element.Preview);
+    let paths = sel_paths doc2.Jas.Document.selection in
+    assert (Jas.Document.PathSet.mem [0; 0] paths);
+    assert (Jas.Document.PathSet.mem [0; 1] paths);
+    assert (Jas.Document.PathSet.cardinal paths = 2));
+
+  run_test "show_all: nothing hidden leaves empty selection" (fun () ->
+    let r = make_rect 0.0 0.0 10.0 10.0 in
+    let layer = make_layer ~name:"L0" [|r|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+    ctrl#show_all;
+    assert (Jas.Document.PathMap.is_empty ctrl#document.Jas.Document.selection));
 
   (* === Group selection tests === *)
 

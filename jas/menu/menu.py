@@ -118,6 +118,16 @@ def create_menus(window: QMainWindow) -> None:
     unlock_all_action.setShortcut(QKeySequence("Ctrl+Alt+2"))
     unlock_all_action.triggered.connect(lambda: _with_model(lambda m: _unlock_all(m)))
 
+    object_menu.addSeparator()
+
+    hide_action = object_menu.addAction("&Hide")
+    hide_action.setShortcut(QKeySequence("Ctrl+3"))
+    hide_action.triggered.connect(lambda: _with_model(lambda m: _hide_selection(m)))
+
+    show_all_action = object_menu.addAction("&Show All")
+    show_all_action.setShortcut(QKeySequence("Ctrl+Alt+3"))
+    show_all_action.triggered.connect(lambda: _with_model(lambda m: _show_all(m)))
+
     # View menu
     view_menu = menubar.addMenu("&View")
 
@@ -239,6 +249,22 @@ def _unlock_all(model: Model) -> None:
     controller = DocumentController(model)
     model.snapshot()
     controller.unlock_all()
+
+
+def _hide_selection(model: Model) -> None:
+    """Hide every element in the current selection."""
+    from document.controller import Controller
+    controller = Controller(model=model)
+    model.snapshot()
+    controller.hide_selection()
+
+
+def _show_all(model: Model) -> None:
+    """Reset every hidden element in the document back to Preview."""
+    from document.controller import Controller
+    controller = Controller(model=model)
+    model.snapshot()
+    controller.show_all()
 
 
 def _group_selection(model: Model) -> None:

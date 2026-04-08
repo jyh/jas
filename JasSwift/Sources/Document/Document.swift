@@ -218,6 +218,26 @@ public struct Document: Equatable {
         return node
     }
 
+    /// Effective visibility of the element at `path`, computed as the
+    /// minimum of the visibilities of every element along the path
+    /// from the root layer down to the target. A parent Group/Layer
+    /// caps the visibility of everything it contains: if any
+    /// ancestor is `.invisible`, the result is `.invisible`
+    /// regardless of the target's own flag.
+    public func effectiveVisibility(_ path: ElementPath) -> Visibility {
+        guard !path.isEmpty else { return .preview }
+        guard path[0] < layers.count else { return .preview }
+        var node: Element = .layer(layers[path[0]])
+        var effective = node.visibility
+        for idx in path.dropFirst() {
+            let children = childrenOf(node)
+            guard idx < children.count else { return effective }
+            node = children[idx]
+            if node.visibility < effective { effective = node.visibility }
+        }
+        return effective
+    }
+
     /// Return a new document with the element at path replaced by newElem.
     public func replaceElement(_ path: ElementPath, with newElem: Element) -> Document {
         guard !path.isEmpty else { fatalError("Path must be non-empty") }

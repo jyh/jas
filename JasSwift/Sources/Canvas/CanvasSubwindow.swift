@@ -270,13 +270,41 @@ private func fillAndStroke(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?) {
     }
 }
 
-private func drawElement(_ ctx: CGContext, _ elem: Element) {
+/// Configure `ctx` for an outline-mode draw of a shape: no fill, a
+/// thin black stroke. The spec says "stroke of size 0"; in practice
+/// a 0-width stroke renders nothing on CGContext, so we use the
+/// minimum visible width (1 point). Used when an element's effective
+/// visibility is `.outline`.
+private func applyOutlineStyle(_ ctx: CGContext) {
+    ctx.setFillColor(CGColor(gray: 0, alpha: 0))
+    ctx.setStrokeColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+    ctx.setLineWidth(1.0)
+    ctx.setLineCap(.butt)
+    ctx.setLineJoin(.miter)
+}
+
+/// Either fill+stroke as configured, or stroke a thin black outline
+/// when `outline == true`. Text and TextPath are not invoked through
+/// this helper — they always render in preview style.
+private func fillStrokeOrOutline(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?, outline: Bool) {
+    if outline {
+        applyOutlineStyle(ctx)
+        ctx.strokePath()
+    } else {
+        fillAndStroke(ctx, fill, stroke)
+    }
+}
+
+private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview) {
+    let effective = min(ancestorVis, elem.visibility)
+    if effective == .invisible { return }
+    let outline = effective == .outline
     ctx.saveGState()
     switch elem {
     case .line(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
-        setStroke(ctx, v.stroke)
+        if outline { applyOutlineStyle(ctx) } else { setStroke(ctx, v.stroke) }
         ctx.move(to: CGPoint(x: v.x1, y: v.y1))
         ctx.addLine(to: CGPoint(x: v.x2, y: v.y2))
         ctx.strokePath()
@@ -291,21 +319,21 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
         } else {
             ctx.addRect(rect)
         }
-        fillAndStroke(ctx, v.fill, v.stroke)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, outline: outline)
 
     case .circle(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
         let rect = CGRect(x: v.cx - v.r, y: v.cy - v.r, width: v.r * 2, height: v.r * 2)
         ctx.addEllipse(in: rect)
-        fillAndStroke(ctx, v.fill, v.stroke)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, outline: outline)
 
     case .ellipse(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
         let rect = CGRect(x: v.cx - v.rx, y: v.cy - v.ry, width: v.rx * 2, height: v.ry * 2)
         ctx.addEllipse(in: rect)
-        fillAndStroke(ctx, v.fill, v.stroke)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, outline: outline)
 
     case .polyline(let v):
         ctx.setAlpha(CGFloat(v.opacity))
@@ -315,7 +343,7 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
         for i in 1..<v.points.count {
             ctx.addLine(to: CGPoint(x: v.points[i].0, y: v.points[i].1))
         }
-        fillAndStroke(ctx, v.fill, v.stroke)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, outline: outline)
 
     case .polygon(let v):
         ctx.setAlpha(CGFloat(v.opacity))
@@ -326,13 +354,13 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
             ctx.addLine(to: CGPoint(x: v.points[i].0, y: v.points[i].1))
         }
         ctx.closePath()
-        fillAndStroke(ctx, v.fill, v.stroke)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, outline: outline)
 
     case .path(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
         buildPath(ctx, v.d)
-        fillAndStroke(ctx, v.fill, v.stroke)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, outline: outline)
 
     case .text(let v):
         ctx.setAlpha(CGFloat(v.opacity))
@@ -476,12 +504,12 @@ private func drawElement(_ ctx: CGContext, _ elem: Element) {
     case .group(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
-        for child in v.children { drawElement(ctx, child) }
+        for child in v.children { drawElement(ctx, child, ancestorVis: effective) }
 
     case .layer(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
-        for child in v.children { drawElement(ctx, child) }
+        for child in v.children { drawElement(ctx, child, ancestorVis: effective) }
     }
     ctx.restoreGState()
 }
@@ -501,69 +529,92 @@ public let showSelectionBBox: Bool = false
 /// Draw an element's selection overlay (outline + control handles).
 /// Internal so tools can call it via the ToolContext. `kind` decides
 /// which control points are highlighted (and gets handle decoration);
-/// pass `.partial(SortedCps())` for "outline but no highlighted CPs".
+/// Draw the selection overlay for one element.
+///
+/// Rule: every selected element (except Text/TextPath) is outlined
+/// by re-tracing its own geometry in bright blue, and its control-
+/// point squares are drawn on top. A CP listed in `kind` is filled
+/// blue; the rest are filled white. On `.all` every CP is filled
+/// blue — the whole element is grabbable.
+///
+/// Text and TextPath are the exception: they get a plain bounding-
+/// box rectangle (for area text the bbox aligns with the explicit
+/// area dimensions; for point text it wraps the glyphs). No CP
+/// squares for Text/TextPath.
+///
+/// Groups and Layers emit no overlay themselves — their descendants
+/// are individually in the selection (see `selectElement`) and draw
+/// their own highlights.
 func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind = .partial(SortedCps())) {
-    // Text and TextPath selections never get the outline + corner
-    // squares — the editing overlay (caret, area-text bbox) is
-    // sufficient and the squares would clutter the rendered glyphs.
-    if case .text = elem { return }
-    if case .textPath = elem { return }
-
     ctx.setStrokeColor(selectionColor)
     ctx.setLineWidth(1.0)
     ctx.setLineDash(phase: 0, lengths: [])
 
-    // Gate the bounding-box outline for non-text elements behind the
-    // showSelectionBBox flag. Bezier handle decoration on path
-    // anchors is drawn unconditionally below.
-    if showSelectionBBox {
-        switch elem {
-        case .line(let v):
-            ctx.move(to: CGPoint(x: v.x1, y: v.y1))
-            ctx.addLine(to: CGPoint(x: v.x2, y: v.y2))
-            ctx.strokePath()
-        case .rect(let v):
-            if v.rx > 0 || v.ry > 0 {
-                let path = CGPath(roundedRect: CGRect(x: v.x, y: v.y, width: v.width, height: v.height),
-                                  cornerWidth: v.rx, cornerHeight: v.ry, transform: nil)
-                ctx.addPath(path)
-            } else {
-                ctx.addRect(CGRect(x: v.x, y: v.y, width: v.width, height: v.height))
-            }
-            ctx.strokePath()
-        case .circle(let v):
-            ctx.addEllipse(in: CGRect(x: v.cx - v.r, y: v.cy - v.r, width: v.r * 2, height: v.r * 2))
-            ctx.strokePath()
-        case .ellipse(let v):
-            ctx.addEllipse(in: CGRect(x: v.cx - v.rx, y: v.cy - v.ry, width: v.rx * 2, height: v.ry * 2))
-            ctx.strokePath()
-        case .polyline(let v):
-            guard !v.points.isEmpty else { break }
+    // Text and TextPath: bounding-box highlight only. No CP squares.
+    if case .text = elem {
+        let b = elem.bounds
+        ctx.addRect(CGRect(x: b.x, y: b.y, width: b.width, height: b.height))
+        ctx.strokePath()
+        return
+    }
+    if case .textPath = elem {
+        let b = elem.bounds
+        ctx.addRect(CGRect(x: b.x, y: b.y, width: b.width, height: b.height))
+        ctx.strokePath()
+        return
+    }
+
+    // Groups and Layers: nothing — descendants draw their own
+    // highlights.
+    if case .group = elem { return }
+    if case .layer = elem { return }
+
+    // All other shapes: stroke the element's own geometry in blue.
+    switch elem {
+    case .line(let v):
+        ctx.move(to: CGPoint(x: v.x1, y: v.y1))
+        ctx.addLine(to: CGPoint(x: v.x2, y: v.y2))
+        ctx.strokePath()
+    case .rect(let v):
+        if v.rx > 0 || v.ry > 0 {
+            let path = CGPath(roundedRect: CGRect(x: v.x, y: v.y, width: v.width, height: v.height),
+                              cornerWidth: v.rx, cornerHeight: v.ry, transform: nil)
+            ctx.addPath(path)
+        } else {
+            ctx.addRect(CGRect(x: v.x, y: v.y, width: v.width, height: v.height))
+        }
+        ctx.strokePath()
+    case .circle(let v):
+        ctx.addEllipse(in: CGRect(x: v.cx - v.r, y: v.cy - v.r, width: v.r * 2, height: v.r * 2))
+        ctx.strokePath()
+    case .ellipse(let v):
+        ctx.addEllipse(in: CGRect(x: v.cx - v.rx, y: v.cy - v.ry, width: v.rx * 2, height: v.ry * 2))
+        ctx.strokePath()
+    case .polyline(let v):
+        if !v.points.isEmpty {
             ctx.move(to: CGPoint(x: v.points[0].0, y: v.points[0].1))
             for i in 1..<v.points.count { ctx.addLine(to: CGPoint(x: v.points[i].0, y: v.points[i].1)) }
             ctx.strokePath()
-        case .polygon(let v):
-            guard !v.points.isEmpty else { break }
+        }
+    case .polygon(let v):
+        if !v.points.isEmpty {
             ctx.move(to: CGPoint(x: v.points[0].0, y: v.points[0].1))
             for i in 1..<v.points.count { ctx.addLine(to: CGPoint(x: v.points[i].0, y: v.points[i].1)) }
             ctx.closePath()
             ctx.strokePath()
-        case .path(let v):
-            buildPath(ctx, v.d)
-            ctx.strokePath()
-        default:
-            let b = elem.bounds
-            ctx.addRect(CGRect(x: b.x, y: b.y, width: b.width, height: b.height))
-            ctx.strokePath()
         }
+    case .path(let v):
+        buildPath(ctx, v.d)
+        ctx.strokePath()
+    default:
+        break
     }
 
-    // Draw Bezier handles for selected path control points
+    // Draw Bezier handles for selected path control points.
     let handleCircleRadius: CGFloat = 3.0
     let pathD: [PathCommand]?
     switch elem {
     case .path(let v): pathD = v.d
-    case .textPath(let v): pathD = v.d
     default: pathD = nil
     }
     let cpHighlight = kind.toSorted(total: elem.controlPointCount).toArray()
@@ -604,37 +655,19 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
         }
     }
 
-    // Draw control-point squares.
-    //
-    // - For "CP-shape" elements (Line, Polyline, Polygon, Path) the
-    //   squares represent draggable per-vertex/anchor handles, so
-    //   they are always shown.
-    // - For "bbox-shape" elements (Rect, Circle, Ellipse, Group, ...)
-    //   the squares represent bounding-box corner handles. They are
-    //   drawn when the kind is `.partial(*)` (including empty) —
-    //   the Direct Selection tool needs the user to see the
-    //   grabbable handles even when none are highlighted — or when
-    //   `showSelectionBBox` is on.
-    let cpShape: Bool
-    switch elem {
-    case .line, .polyline, .polygon, .path: cpShape = true
-    default: cpShape = false
-    }
-    let isPartial: Bool
-    if case .partial = kind { isPartial = true } else { isPartial = false }
-    if cpShape || isPartial || showSelectionBBox {
-        let half = handleSize / 2
-        for (i, (px, py)) in elem.controlPointPositions.enumerated() {
-            let r = CGRect(x: px - half, y: py - half, width: handleSize, height: handleSize)
-            if kind.contains(i) {
-                ctx.setFillColor(selectionColor)
-            } else {
-                ctx.setFillColor(.white)
-            }
-            ctx.fill(r)
-            ctx.setStrokeColor(selectionColor)
-            ctx.stroke(r)
+    // Draw control-point squares for every non-Text, non-container
+    // selected element.
+    let half = handleSize / 2
+    for (i, (px, py)) in elem.controlPointPositions.enumerated() {
+        let r = CGRect(x: px - half, y: py - half, width: handleSize, height: handleSize)
+        if kind.contains(i) {
+            ctx.setFillColor(selectionColor)
+        } else {
+            ctx.setFillColor(.white)
         }
+        ctx.fill(r)
+        ctx.setStrokeColor(selectionColor)
+        ctx.stroke(r)
     }
 }
 

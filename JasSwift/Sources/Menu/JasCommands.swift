@@ -156,6 +156,19 @@ public struct JasCommands: Commands {
                 unlockAll()
             }
             .keyboardShortcut("2", modifiers: [.command, .option])
+
+            Divider()
+
+            Button("Hide") {
+                hideSelection()
+            }
+            .keyboardShortcut("3", modifiers: .command)
+            .disabled(!(hasSelection ?? false))
+
+            Button("Show All") {
+                showAll()
+            }
+            .keyboardShortcut("3", modifiers: [.command, .option])
         }
 
         CommandMenu("View") {
@@ -494,6 +507,22 @@ public struct JasCommands: Commands {
         model.snapshot()
         let controller = Controller(model: model)
         controller.unlockAll()
+    }
+
+    private func hideSelection() {
+        guard let model = model else { return }
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        model.snapshot()
+        let controller = Controller(model: model)
+        controller.hideSelection()
+    }
+
+    private func showAll() {
+        guard let model = model else { return }
+        model.snapshot()
+        let controller = Controller(model: model)
+        controller.showAll()
     }
 
     private func cutSelection() {

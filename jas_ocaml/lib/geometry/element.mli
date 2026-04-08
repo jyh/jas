@@ -14,6 +14,15 @@ type color = {
   a : float;
 }
 
+(** Per-element visibility mode.
+
+    Declaration order is chosen so that [compare] and [min] treat
+    [Invisible] as the smallest and [Preview] as the largest —
+    [min a b] therefore picks the more restrictive mode. That is
+    the rule used to combine an element's own visibility with the
+    cap inherited from its parent Group or Layer. *)
+type visibility = Invisible | Outline | Preview
+
 (** SVG stroke-linecap. *)
 type linecap = Butt | Round_cap | Square
 
@@ -57,6 +66,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Rect of {
       x : float; y : float;
@@ -67,6 +77,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Circle of {
       cx : float; cy : float; r : float;
@@ -75,6 +86,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Ellipse of {
       cx : float; cy : float;
@@ -84,6 +96,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Polyline of {
       points : (float * float) list;
@@ -92,6 +105,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Polygon of {
       points : (float * float) list;
@@ -100,6 +114,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Path of {
       d : path_command list;
@@ -108,6 +123,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Text of {
       x : float; y : float;
@@ -124,6 +140,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Text_path of {
       d : path_command list;
@@ -139,12 +156,14 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Group of {
       children : element array;
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
   | Layer of {
       name : string;
@@ -152,6 +171,7 @@ type element =
       opacity : float;
       transform : transform option;
       locked : bool;
+      visibility : visibility;
     }
 
 (** Return the bounding box as (x, y, width, height). *)
@@ -182,6 +202,11 @@ val make_layer : ?name:string -> ?opacity:float -> ?transform:transform option -
 
 val is_locked : element -> bool
 val set_locked : bool -> element -> element
+
+(** {2 Visibility} *)
+
+val get_visibility : element -> visibility
+val set_visibility : visibility -> element -> element
 
 (** {2 Control points} *)
 

@@ -368,32 +368,13 @@ class TypeTool: CanvasTool {
             }
         }
 
-        // Editing element bounding box.
-        //
-        // - Area text always shows the box: the user explicitly
-        //   dragged out a (width, height) and needs to see its extent
-        //   while editing.
-        // - Point text shows the box only when `showSelectionBBox` is
-        //   true (the same flag the canvas selection overlay uses).
-        //   The caret, selection highlight, and rendered glyphs all
-        //   draw regardless.
-        let isArea = tr.textWidth > 0 && tr.textHeight > 0
-        if isArea || showSelectionBBox {
-            let bw: Double
-            let bh: Double
-            if isArea {
-                bw = max(tr.textWidth, 1)
-                bh = max(tr.textHeight, 1)
-            } else {
-                var maxW: Double = 0
-                for l in lay.lines { maxW = max(maxW, l.width) }
-                bw = max(maxW, tr.fontSize * 0.5)
-                bh = max(Double(lay.lines.count) * tr.fontSize, tr.fontSize)
-            }
-            cgCtx.setStrokeColor(CGColor(red: 0.0, green: 0.47, blue: 0.84, alpha: 0.6))
-            cgCtx.setLineWidth(1.0)
-            cgCtx.stroke(CGRect(x: originX, y: originY, width: bw, height: bh))
-        }
+        // The bounding box around the edited text is not drawn here —
+        // the Type tool selects the element when it starts editing,
+        // so the selection overlay (see `drawElementOverlay` /
+        // `drawSelectionOverlays` in `Canvas/CanvasSubwindow.swift`)
+        // is responsible for rendering the box. That keeps the rule
+        // "area text shows its bbox iff the element is selected" in
+        // a single place.
 
         // Caret
         if cursorVisible(s.blinkEpochMs) {
