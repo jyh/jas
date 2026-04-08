@@ -499,9 +499,17 @@ fn run_boolean(a: &PolygonSet, b: &PolygonSet, op: Operation) -> PolygonSet {
         Some(grid) => (snap_round(&a_norm, grid), snap_round(&b_norm, grid)),
         None => (a_norm, b_norm),
     };
-    let a = &a_final;
-    let b = &b_final;
 
+    run_boolean_sweep(&a_final, &b_final, op)
+}
+
+/// Run just the Martinez sweep + connection step on already-prepared
+/// inputs. Does NOT snap-round, normalize, or otherwise pre-process.
+///
+/// Factored out so tests can exercise the raw sweep on hand-crafted
+/// fixtures where snap-rounding or normalization would otherwise
+/// hide the condition under test.
+fn run_boolean_sweep(a: &PolygonSet, b: &PolygonSet, op: Operation) -> PolygonSet {
     // Trivial cases — handled here so the sweep code can assume both
     // operands are non-empty.
     let a_empty = a.iter().all(|r| r.len() < 3);
@@ -847,6 +855,13 @@ fn handle_collinear(
         } else {
             (e1, p2r)
         };
+        // Project the split point onto the longer edge so the split
+        // lies exactly on the longer's line, not on the (possibly
+        // near-parallel) shorter's line.
+        let longer_left_pt = events[longer_left].point;
+        let longer_right_pt = events[events[longer_left].other_event].point;
+        let shorter_right_pt =
+            project_onto_segment(longer_left_pt, longer_right_pt, shorter_right_pt);
         // Mark the (now-overlap) portion: the shorter is kept; the
         // longer's left half (after splitting) is suppressed.
         if longer_left == e1 {
@@ -873,6 +888,12 @@ fn handle_collinear(
         } else {
             (e2, p1l)
         };
+        // Project the split point onto the longer edge to keep the
+        // sub-edges aligned with the longer's direction.
+        let longer_left_pt = events[longer_left].point;
+        let longer_right_pt = events[events[longer_left].other_event].point;
+        let later_left_pt =
+            project_onto_segment(longer_left_pt, longer_right_pt, later_left_pt);
         let (_l_split, nr_idx) = divide_segment(events, queue, longer_left, later_left_pt);
         // `nr_idx` is the left event of the longer's right half
         // (later_left_pt → shared right). That sub-edge is
@@ -917,8 +938,15 @@ fn handle_collinear(
         // other. Split it twice — once at `second.point` and once
         // at `third.point`. The MIDDLE sub-edge of the longer is
         // the one that overlaps the shorter; mark it suppressed.
-        let mid_left = events[second].point;
-        let mid_right = events[third].point;
+        //
+        // Both split points are endpoints of the CONTAINED edge,
+        // which may be slightly off the containing edge's line.
+        // Project them onto the containing edge to keep the splits
+        // aligned.
+        let first_pt = events[first].point;
+        let first_other_pt = events[events[first].other_event].point;
+        let mid_left = project_onto_segment(first_pt, first_other_pt, events[second].point);
+        let mid_right = project_onto_segment(first_pt, first_other_pt, events[third].point);
         // First split: `first` now represents (first.point, mid_left);
         // `nr1` is the left of the right half (mid_left, fourth.point).
         let (_l1, nr1) = divide_segment(events, queue, first, mid_left);
@@ -946,9 +974,19 @@ fn handle_collinear(
         // After divide_segment(other_left, third.point):
         //   - `other_left` represents (second.point, third.point) overlap of e_other
         //   - `nr2`        represents (third.point, fourth.point) non-overlap
-        let split_a = events[second].point;
-        let split_b = events[third].point;
+        //
+        // Each split point is an endpoint of the OTHER edge and may
+        // be slightly off the edge being split. Project onto the
+        // respective edge to keep all sub-edges exactly aligned.
+        let first_pt = events[first].point;
+        let first_other_pt = events[events[first].other_event].point;
+        let split_a =
+            project_onto_segment(first_pt, first_other_pt, events[second].point);
         let other_left = events[fourth].other_event;
+        let other_left_pt = events[other_left].point;
+        let other_right_pt = events[events[other_left].other_event].point;
+        let split_b =
+            project_onto_segment(other_left_pt, other_right_pt, events[third].point);
         let (_l1, nr1) = divide_segment(events, queue, first, split_a);
         let (_l2, _nr2) = divide_segment(events, queue, other_left, split_b);
         // `nr1` is the overlap copy from `first`'s edge; suppress it.
@@ -967,6 +1005,30 @@ fn handle_collinear(
 fn points_eq(a: (f64, f64), b: (f64, f64)) -> bool {
     const EPS: f64 = 1e-9;
     (a.0 - b.0).abs() < EPS && (a.1 - b.1).abs() < EPS
+}
+
+/// Project `p` onto the line segment from `a` to `b`, clamped to
+/// the segment's endpoints. Returns the point on the segment closest
+/// to `p`.
+///
+/// This is used by [`handle_collinear`] when splitting one edge at
+/// a point that is *supposed to be* on that edge but may be slightly
+/// off because the two edges are only approximately collinear.
+/// Splitting at the raw off-line point produces slanted sub-edges
+/// and corrupts the sweep's invariants downstream (see the long
+/// comment in `handle_collinear` for history). Projecting onto the
+/// edge being split keeps all sub-edges perfectly aligned with the
+/// original edge's direction.
+fn project_onto_segment(a: (f64, f64), b: (f64, f64), p: (f64, f64)) -> (f64, f64) {
+    let dx = b.0 - a.0;
+    let dy = b.1 - a.1;
+    let len_sq = dx * dx + dy * dy;
+    if len_sq == 0.0 {
+        return a;
+    }
+    let t = ((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len_sq;
+    let t = t.clamp(0.0, 1.0);
+    (a.0 + t * dx, a.1 + t * dy)
 }
 
 /// Subdivide the edge whose left event is `edge_left_idx` at point
@@ -2228,6 +2290,66 @@ mod tests {
     #[test]
     fn perturb_1e_minus_3() {
         check_perturbation(1e-3, "1e-3");
+    }
+
+    // -------------------------------------------------------------------
+    // Projection fix: splits inside handle_collinear should produce
+    // sub-edges that are exactly on the edge being split, not off-
+    // line "slanted" sub-edges.
+    //
+    // The projection itself is unit-tested here. End-to-end coverage
+    // of the off-line-split bug is indirect — the snap-rounding
+    // pre-pass in run_boolean fuses sub-grid perturbations before
+    // they can reach handle_collinear, so the ignored perturbation
+    // tests pass via snap-rounding rather than via the projection.
+    // The projection remains as a defence-in-depth fix so the bug
+    // can't resurface if snap-rounding ever misses an input.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn project_onto_segment_horizontal() {
+        // Point sits above a horizontal edge; projection drops it to
+        // the edge's y-coordinate.
+        let p = project_onto_segment((0.0, 0.0), (10.0, 0.0), (5.0, 1e-11));
+        assert_eq!(p, (5.0, 0.0));
+    }
+
+    #[test]
+    fn project_onto_segment_vertical() {
+        // Point sits just right of a vertical edge; projection snaps
+        // to the edge's x-coordinate.
+        let p = project_onto_segment((5.0, 0.0), (5.0, 10.0), (5.0 + 1e-11, 7.0));
+        assert_eq!(p, (5.0, 7.0));
+    }
+
+    #[test]
+    fn project_onto_segment_clamps_to_endpoints() {
+        // Projection of a point before the segment's start clamps to
+        // the start.
+        let p = project_onto_segment((0.0, 0.0), (10.0, 0.0), (-5.0, 0.0));
+        assert_eq!(p, (0.0, 0.0));
+        let q = project_onto_segment((0.0, 0.0), (10.0, 0.0), (15.0, 0.0));
+        assert_eq!(q, (10.0, 0.0));
+    }
+
+    #[test]
+    fn project_onto_segment_diagonal() {
+        // 45-degree edge; point slightly off the line projects
+        // onto the nearest point on the line.
+        let p = project_onto_segment((0.0, 0.0), (10.0, 10.0), (5.0, 5.0 + 1e-10));
+        // Projection of (5, 5+1e-10) onto y=x is ((5+5+1e-10)/2, (5+5+1e-10)/2)
+        //   = (5 + 5e-11, 5 + 5e-11).
+        assert!((p.0 - 5.0).abs() < 1e-10);
+        assert!((p.1 - 5.0).abs() < 1e-10);
+        // Point is on the line exactly:
+        assert_eq!(p.0, p.1);
+    }
+
+    #[test]
+    fn project_onto_segment_degenerate_edge() {
+        // Zero-length "edge": return the start point regardless of p.
+        let p = project_onto_segment((5.0, 5.0), (5.0, 5.0), (100.0, 100.0));
+        assert_eq!(p, (5.0, 5.0));
     }
 
     /// All four operations on the shared-edge fixture from
