@@ -514,3 +514,88 @@ def test_normalize_figure_eight():
     assert approx_eq(total_area(out), 50.0)
     for r in out:
         assert len(r) == 3
+
+
+# ---------------------------------------------------------------------------
+# Additional regression tests backported from jas_dioxus/src/algorithms/boolean.rs
+# ---------------------------------------------------------------------------
+
+
+def test_intersect_with_holed_polygon_preserves_hole():
+    # Donut: outer 10x10 minus inner 4x4.
+    donut = [
+        [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)],
+        [(3.0, 3.0), (7.0, 3.0), (7.0, 7.0), (3.0, 7.0)],
+    ]
+    # Clip rectangle covering the right half, including some of the hole.
+    clip = [[(5.0, 0.0), (10.0, 0.0), (10.0, 10.0), (5.0, 10.0)]]
+    result = boolean_intersect(donut, clip)
+    # Right half of outer (50) minus right half of hole (8) = 42.
+    assert_region(result, 42.0,
+                  inside=[(6, 1), (8, 8), (9, 5)],
+                  outside=[(5.5, 5), (1, 1)],
+                  bbox=(5, 0, 5, 10))
+
+
+def test_triangle_intersect_square_clips_corner():
+    # Right triangle fully inside square_a.
+    triangle = [[(0.0, 0.0), (10.0, 0.0), (0.0, 10.0)]]
+    result = boolean_intersect(square_a(), triangle)
+    assert_region(result, 50.0,
+                  inside=[(1, 1), (3, 3)],
+                  outside=[(8, 8), (6, 6)],
+                  bbox=(0, 0, 10, 10))
+
+
+def test_triangle_subtract_square_leaves_other_triangle():
+    triangle = [[(0.0, 0.0), (10.0, 0.0), (0.0, 10.0)]]
+    result = boolean_subtract(square_a(), triangle)
+    assert_region(result, 50.0,
+                  inside=[(8, 8), (7, 5)],
+                  outside=[(1, 1), (3, 3)],
+                  bbox=(0, 0, 10, 10))
+
+
+def test_subtract_edge_touching_returns_a_unchanged():
+    # Edge-touching means subtract removes nothing.
+    result = boolean_subtract(square_a(), square_edge_touching())
+    assert_region(result, 100.0,
+                  inside=[(5, 5)], outside=[(15, 5)],
+                  bbox=(0, 0, 10, 10))
+
+
+def test_subtract_is_not_commutative():
+    a = square_a()
+    b = square_b_overlap()
+    ab = boolean_subtract(a, b)
+    ba = boolean_subtract(b, a)
+    # Same area (75 each) but different regions.
+    assert not regions_equal(ab, ba)
+
+
+def test_subtract_is_not_associative():
+    # (a - b) - b = a - b (area 75)
+    # a - (b - b) = a - empty = a (area 100)
+    a = square_a()
+    b = square_b_overlap()
+    c = square_b_overlap()
+    lhs = boolean_subtract(boolean_subtract(a, b), c)
+    rhs = boolean_subtract(a, boolean_subtract(b, c))
+    assert not regions_equal(lhs, rhs)
+
+
+def test_perturb_1e_minus_11():
+    _check_perturbation(1e-11)
+
+
+def test_perturb_1e_minus_6():
+    _check_perturbation(1e-6)
+
+
+def test_project_diagonal():
+    # 45-degree edge; point slightly off the line projects onto the line.
+    p = project_onto_segment((0.0, 0.0), (10.0, 10.0), (5.0, 5.0 + 1e-10))
+    assert abs(p[0] - 5.0) < 1e-10
+    assert abs(p[1] - 5.0) < 1e-10
+    # Projected point lies exactly on y=x.
+    assert p[0] == p[1]

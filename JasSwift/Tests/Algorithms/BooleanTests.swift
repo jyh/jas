@@ -421,8 +421,10 @@ private func checkPerturbation(_ delta: Double) {
 }
 
 @Test func perturb1eMinus15() { checkPerturbation(1e-15) }
+@Test func perturb1eMinus11() { checkPerturbation(1e-11) }
 @Test func perturb1eMinus10() { checkPerturbation(1e-10) }
 @Test func perturb1eMinus8()  { checkPerturbation(1e-8)  }
+@Test func perturb1eMinus6()  { checkPerturbation(1e-6)  }
 @Test func perturb1eMinus3()  { checkPerturbation(1e-3)  }
 
 // MARK: - project_onto_segment unit tests
@@ -447,6 +449,76 @@ private func checkPerturbation(_ delta: Double) {
 
 @Test func projectOntoSegmentDegenerate() {
     #expect(projectOntoSegment((5, 5), (5, 5), (100, 100)) == (5, 5))
+}
+
+@Test func projectOntoSegmentDiagonal() {
+    // 45-degree edge; point slightly off the line projects onto the line.
+    let p = projectOntoSegment((0.0, 0.0), (10.0, 10.0), (5.0, 5.0 + 1e-10))
+    #expect(abs(p.0 - 5.0) < 1e-10)
+    #expect(abs(p.1 - 5.0) < 1e-10)
+    #expect(p.0 == p.1)
+}
+
+// MARK: - Hole / non-axis-aligned / non-commutativity coverage
+// Backported from jas_dioxus/src/algorithms/boolean.rs
+
+@Test func intersectWithHoledPolygonPreservesHole() {
+    // Donut: outer 10x10 minus inner 4x4.
+    let donut: BoolPolygonSet = [
+        [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)],
+        [(3.0, 3.0), (7.0, 3.0), (7.0, 7.0), (3.0, 7.0)],
+    ]
+    let clip: BoolPolygonSet = [[(5.0, 0.0), (10.0, 0.0), (10.0, 10.0), (5.0, 10.0)]]
+    let result = booleanIntersect(donut, clip)
+    // Right half of outer (50) minus right half of hole (8) = 42.
+    assertRegion(result, expectedArea: 42.0,
+                 insidePts: [(6, 1), (8, 8), (9, 5)],
+                 outsidePts: [(5.5, 5), (1, 1)],
+                 expectedBbox: (5, 0, 5, 10))
+}
+
+@Test func triangleIntersectSquareClipsCorner() {
+    let triangle: BoolPolygonSet = [[(0.0, 0.0), (10.0, 0.0), (0.0, 10.0)]]
+    let result = booleanIntersect(squareA(), triangle)
+    assertRegion(result, expectedArea: 50.0,
+                 insidePts: [(1, 1), (3, 3)],
+                 outsidePts: [(8, 8), (6, 6)],
+                 expectedBbox: (0, 0, 10, 10))
+}
+
+@Test func triangleSubtractSquareLeavesOtherTriangle() {
+    let triangle: BoolPolygonSet = [[(0.0, 0.0), (10.0, 0.0), (0.0, 10.0)]]
+    let result = booleanSubtract(squareA(), triangle)
+    assertRegion(result, expectedArea: 50.0,
+                 insidePts: [(8, 8), (7, 5)],
+                 outsidePts: [(1, 1), (3, 3)],
+                 expectedBbox: (0, 0, 10, 10))
+}
+
+@Test func subtractEdgeTouchingReturnsAUnchanged() {
+    let result = booleanSubtract(squareA(), squareEdgeTouching())
+    assertRegion(result, expectedArea: 100.0,
+                 insidePts: [(5, 5)], outsidePts: [(15, 5)],
+                 expectedBbox: (0, 0, 10, 10))
+}
+
+@Test func boolSubtractIsNotCommutative() {
+    let a = squareA()
+    let b = squareBOverlap()
+    let ab = booleanSubtract(a, b)
+    let ba = booleanSubtract(b, a)
+    // Same area (75 each) but different regions.
+    #expect(!regionsEqual(ab, ba))
+}
+
+@Test func boolSubtractIsNotAssociative() {
+    // (a - b) - b = a - b ; a - (b - b) = a
+    let a = squareA()
+    let b = squareBOverlap()
+    let c = squareBOverlap()
+    let lhs = booleanSubtract(booleanSubtract(a, b), c)
+    let rhs = booleanSubtract(a, booleanSubtract(b, c))
+    #expect(!regionsEqual(lhs, rhs))
 }
 
 // MARK: - Normalizer tests
