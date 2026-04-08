@@ -494,8 +494,8 @@ fn run_boolean(a: &PolygonSet, b: &PolygonSet, op: Operation) -> PolygonSet {
     // rule, so the sweep below can keep assuming simple input rings.
     // The normalizer is a no-op for inputs that are already simple,
     // which is the common case.
-    let a_norm = crate::algorithms::normalize::normalize(&a_snap);
-    let b_norm = crate::algorithms::normalize::normalize(&b_snap);
+    let a_norm = crate::algorithms::boolean_normalize::normalize(&a_snap);
+    let b_norm = crate::algorithms::boolean_normalize::normalize(&b_snap);
 
     // The normalizer can introduce new vertices at intersection
     // points that don't land on the snap grid. Re-snap so downstream
