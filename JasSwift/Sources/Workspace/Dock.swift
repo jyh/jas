@@ -174,13 +174,14 @@ public struct DockLayout: Codable {
     public var hiddenPanels: [PanelKind]
     public var zOrder: [DockId]
     public var focusedPanel: PanelAddr?
+    public var paneLayout: PaneLayout?
     var nextId: Int
     // Generation tracking (not serialized)
     private var generation: UInt64 = 0
     private var savedGeneration: UInt64 = 0
 
     private enum CodingKeys: String, CodingKey {
-        case name, anchored, floating, hiddenPanels, zOrder, focusedPanel, nextId
+        case name, anchored, floating, hiddenPanels, zOrder, focusedPanel, paneLayout, nextId
     }
 
     // Custom Codable for tuple array
@@ -193,6 +194,7 @@ public struct DockLayout: Codable {
         hiddenPanels = try container.decode([PanelKind].self, forKey: .hiddenPanels)
         zOrder = try container.decode([DockId].self, forKey: .zOrder)
         focusedPanel = try container.decodeIfPresent(PanelAddr.self, forKey: .focusedPanel)
+        paneLayout = try container.decodeIfPresent(PaneLayout.self, forKey: .paneLayout)
         nextId = try container.decode(Int.self, forKey: .nextId)
         generation = 0
         savedGeneration = 0
@@ -207,6 +209,7 @@ public struct DockLayout: Codable {
         try container.encode(hiddenPanels, forKey: .hiddenPanels)
         try container.encode(zOrder, forKey: .zOrder)
         try container.encodeIfPresent(focusedPanel, forKey: .focusedPanel)
+        try container.encodeIfPresent(paneLayout, forKey: .paneLayout)
         try container.encode(nextId, forKey: .nextId)
     }
 
@@ -232,6 +235,7 @@ public struct DockLayout: Codable {
             hiddenPanels: [],
             zOrder: [],
             focusedPanel: nil,
+            paneLayout: nil,
             nextId: 1,
             generation: 0,
             savedGeneration: 0
@@ -240,13 +244,14 @@ public struct DockLayout: Codable {
 
     private init(name: String, anchored: [(DockEdge, Dock)], floating: [FloatingDock],
                  hiddenPanels: [PanelKind], zOrder: [DockId], focusedPanel: PanelAddr?,
-                 nextId: Int, generation: UInt64, savedGeneration: UInt64) {
+                 paneLayout: PaneLayout?, nextId: Int, generation: UInt64, savedGeneration: UInt64) {
         self.name = name
         self.anchored = anchored
         self.floating = floating
         self.hiddenPanels = hiddenPanels
         self.zOrder = zOrder
         self.focusedPanel = focusedPanel
+        self.paneLayout = paneLayout
         self.nextId = nextId
         self.generation = generation
         self.savedGeneration = savedGeneration
@@ -685,6 +690,27 @@ public struct DockLayout: Codable {
         focusedPanel = addrs[prev]
     }
 
+    // MARK: - Pane Layout Integration
+
+    /// Create the default pane layout if absent.
+    public mutating func ensurePaneLayout(viewportW: Double, viewportH: Double) {
+        if paneLayout == nil {
+            paneLayout = PaneLayout.defaultThreePane(viewportW: viewportW, viewportH: viewportH)
+            bump()
+        }
+    }
+
+    /// Read-only access to the pane layout.
+    public func panes() -> PaneLayout? { paneLayout }
+
+    /// Mutating access to the pane layout.
+    public mutating func panesMut(_ body: (inout PaneLayout) -> Void) {
+        if paneLayout != nil {
+            body(&paneLayout!)
+            bump()
+        }
+    }
+
     // MARK: - Safety
 
     public mutating func clampFloatingDocks(viewportW: Double, viewportH: Double) {
@@ -693,6 +719,7 @@ public struct DockLayout: Codable {
             floating[i].x = max(-floating[i].dock.width + minVisible, min(floating[i].x, viewportW - minVisible))
             floating[i].y = max(0, min(floating[i].y, viewportH - minVisible))
         }
+        paneLayout?.clampPanes(viewportW: viewportW, viewportH: viewportH)
         bump()
     }
 

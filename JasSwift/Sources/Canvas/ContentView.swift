@@ -69,85 +69,105 @@ public struct ContentView: View {
     }
 
     public var body: some View {
-        HStack(spacing: 0) {
-            // Toolbar on the left
-            ToolbarPanel(currentTool: $currentTool)
+        GeometryReader { geometry in
+            let pl = workspace.dockLayout.panes()
+            let toolbarVisible = pl?.isPaneVisible(.toolbar) ?? true
+            let dockVisible = pl?.isPaneVisible(.dock) ?? true
+            let canvasMaximized = pl?.canvasMaximized ?? false
+            let toolbarW = canvasMaximized ? 0 : (toolbarVisible ? (pl?.paneByKind(.toolbar)?.width ?? 80) : 0)
+            let dockW = canvasMaximized ? 0 : (dockVisible ? (pl?.paneByKind(.dock)?.width ?? defaultDockWidth) : 0)
 
-            // Tabbed canvas area — SwiftUI's TabView doesn't support closable
-            // tabs, so we build a custom tab bar (CanvasTabLabel views in an
-            // HStack) above a ZStack that shows only the selected canvas.
-            VStack(spacing: 0) {
-                if !workspace.canvases.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 0) {
+            HStack(spacing: 0) {
+                // Toolbar on the left
+                if toolbarVisible && !canvasMaximized {
+                    ToolbarPanel(currentTool: $currentTool)
+                        .frame(width: toolbarW)
+                }
+
+                // Tabbed canvas area
+                VStack(spacing: 0) {
+                    if !workspace.canvases.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 0) {
+                                ForEach(workspace.canvases) { entry in
+                                    CanvasTabLabel(
+                                        model: entry.model,
+                                        isSelected: workspace.selectedTab == entry.id,
+                                        onSelect: { workspace.selectedTab = entry.id },
+                                        onClose: { closeCanvas(entry.id) }
+                                    )
+                                }
+                            }
+                        }
+                        .frame(height: 28)
+                        .background(SwiftUI.Color(nsColor: NSColor(white: 0.20, alpha: 1.0)))
+                    }
+
+                    // Canvas + right dock
+                    HStack(spacing: 0) {
+                        // Canvas content
+                        ZStack {
+                            SwiftUI.Color(nsColor: NSColor(white: 0.50, alpha: 1.0))
                             ForEach(workspace.canvases) { entry in
-                                CanvasTabLabel(
-                                    model: entry.model,
-                                    isSelected: workspace.selectedTab == entry.id,
-                                    onSelect: { workspace.selectedTab = entry.id },
-                                    onClose: { closeCanvas(entry.id) }
-                                )
+                                if entry.id == workspace.selectedTab {
+                                    CanvasTab(
+                                        model: entry.model,
+                                        currentTool: $currentTool,
+                                        onFocus: { workspace.selectedTab = entry.id }
+                                    )
+                                }
                             }
                         }
-                    }
-                    .frame(height: 28)
-                    .background(SwiftUI.Color(nsColor: NSColor(white: 0.20, alpha: 1.0)))
-                }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                // Canvas + right dock
-                HStack(spacing: 0) {
-                    // Canvas content
-                    ZStack {
-                        SwiftUI.Color(nsColor: NSColor(white: 0.50, alpha: 1.0))
-                        ForEach(workspace.canvases) { entry in
-                            if entry.id == workspace.selectedTab {
-                                CanvasTab(
-                                    model: entry.model,
-                                    currentTool: $currentTool,
-                                    onFocus: { workspace.selectedTab = entry.id }
-                                )
-                            }
+                        // Right dock
+                        if dockVisible && !canvasMaximized,
+                           !workspace.canvases.isEmpty,
+                           let rightDock = workspace.dockLayout.anchoredDock(.right),
+                           !rightDock.groups.isEmpty {
+                            DockPanelView(
+                                dockLayout: $workspace.dockLayout,
+                                dockId: rightDock.id,
+                                edge: .right
+                            )
+                            .frame(width: dockW)
                         }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                    // Right dock
-                    if !workspace.canvases.isEmpty,
-                       let rightDock = workspace.dockLayout.anchoredDock(.right),
-                       !rightDock.groups.isEmpty {
-                        DockPanelView(
-                            dockLayout: $workspace.dockLayout,
-                            dockId: rightDock.id,
-                            edge: .right
-                        )
                     }
                 }
             }
-        }
-        .frame(minWidth: 640, minHeight: 480)
-        .overlay {
-            // Floating docks
-            ForEach(Array(workspace.dockLayout.floating.enumerated()), id: \.offset) { _, fd in
-                FloatingDockView(
-                    dockLayout: $workspace.dockLayout,
-                    floatingDock: fd
-                )
+            .frame(minWidth: 640, minHeight: 480)
+            .overlay {
+                // Floating docks
+                ForEach(Array(workspace.dockLayout.floating.enumerated()), id: \.offset) { _, fd in
+                    FloatingDockView(
+                        dockLayout: $workspace.dockLayout,
+                        floatingDock: fd
+                    )
+                }
             }
-        }
-        .overlay {
-            SwiftUI.Color.clear
-                .focusedSceneValue(\.addCanvas, { newModel in addCanvas(newModel) })
-                .focusedSceneValue(\.workspace, workspace)
-                .allowsHitTesting(false)
-        }
-        .overlay {
-            if let model = workspace.activeModel {
-                FocusedModelProvider(model: model)
+            .overlay {
+                SwiftUI.Color.clear
+                    .focusedSceneValue(\.addCanvas, { newModel in addCanvas(newModel) })
+                    .focusedSceneValue(\.workspace, workspace)
+                    .allowsHitTesting(false)
             }
-        }
-        .onAppear {
-            if workspace.selectedTab == nil {
-                workspace.selectedTab = workspace.canvases.first?.id
+            .overlay {
+                if let model = workspace.activeModel {
+                    FocusedModelProvider(model: model)
+                }
+            }
+            .onAppear {
+                workspace.dockLayout.ensurePaneLayout(
+                    viewportW: geometry.size.width,
+                    viewportH: geometry.size.height)
+                if workspace.selectedTab == nil {
+                    workspace.selectedTab = workspace.canvases.first?.id
+                }
+            }
+            .onChange(of: geometry.size) { newSize in
+                workspace.dockLayout.panesMut { pl in
+                    pl.onViewportResize(newW: newSize.width, newH: newSize.height)
+                }
             }
         }
     }
