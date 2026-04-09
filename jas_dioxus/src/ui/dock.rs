@@ -517,6 +517,81 @@ impl DockLayout {
     }
 
     // -----------------------------------------------------------------------
+    // Close / show panels
+    // -----------------------------------------------------------------------
+
+    /// Close a panel: remove it from its group and add to hidden list.
+    pub fn close_panel(&mut self, addr: PanelAddr) {
+        let panel = {
+            let dock = match self.dock_mut(addr.group.dock_id) {
+                Some(d) => d,
+                None => return,
+            };
+            let group = match dock.groups.get_mut(addr.group.group_idx) {
+                Some(g) if addr.panel_idx < g.panels.len() => g,
+                _ => return,
+            };
+            group.panels.remove(addr.panel_idx)
+        };
+        if !self.hidden_panels.contains(&panel) {
+            self.hidden_panels.push(panel);
+        }
+        self.cleanup(addr.group.dock_id);
+    }
+
+    /// Show a hidden panel: remove from hidden list and add to the first
+    /// group of the first anchored dock (or create one if needed).
+    pub fn show_panel(&mut self, kind: PanelKind) {
+        if let Some(pos) = self.hidden_panels.iter().position(|&k| k == kind) {
+            self.hidden_panels.remove(pos);
+        } else {
+            return; // not hidden
+        }
+        // Find the first anchored dock and add to its first group.
+        if let Some((_, dock)) = self.anchored.first_mut() {
+            if let Some(group) = dock.groups.first_mut() {
+                group.panels.push(kind);
+                group.active = group.panels.len() - 1;
+            } else {
+                dock.groups.push(PanelGroup::new(vec![kind]));
+            }
+        }
+    }
+
+    /// Return the list of hidden panels.
+    pub fn hidden_panels(&self) -> &[PanelKind] {
+        &self.hidden_panels
+    }
+
+    /// Check if a panel kind is currently visible (not hidden).
+    pub fn is_panel_visible(&self, kind: PanelKind) -> bool {
+        !self.hidden_panels.contains(&kind)
+    }
+
+    /// Return all panel kinds with their visibility, for a Window menu.
+    pub fn panel_menu_items(&self) -> Vec<(PanelKind, bool)> {
+        let all = [PanelKind::Layers, PanelKind::Color, PanelKind::Stroke, PanelKind::Properties];
+        all.iter().map(|&k| (k, self.is_panel_visible(k))).collect()
+    }
+
+    // -----------------------------------------------------------------------
+    // Z-index management
+    // -----------------------------------------------------------------------
+
+    /// Bring a floating dock to the front of the z-order.
+    pub fn bring_to_front(&mut self, id: DockId) {
+        if let Some(pos) = self.z_order.iter().position(|&zid| zid == id) {
+            self.z_order.remove(pos);
+            self.z_order.push(id);
+        }
+    }
+
+    /// Return the z-index position for a floating dock (0 = back).
+    pub fn z_index_for(&self, id: DockId) -> usize {
+        self.z_order.iter().position(|&zid| zid == id).unwrap_or(0)
+    }
+
+    // -----------------------------------------------------------------------
     // Cleanup
     // -----------------------------------------------------------------------
 
@@ -1157,5 +1232,127 @@ mod tests {
     fn panel_group_active_panel_empty() {
         let group = PanelGroup { panels: vec![], active: 0, collapsed: false, height: None };
         assert_eq!(group.active_panel(), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 2: Close/show panels
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn close_panel_hides_it() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        l.close_panel(pa(id.0, 1, 1)); // close Stroke
+        assert!(l.hidden_panels().contains(&PanelKind::Stroke));
+        assert!(!l.is_panel_visible(PanelKind::Stroke));
+    }
+
+    #[test]
+    fn close_panel_removes_from_group() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        l.close_panel(pa(id.0, 1, 1)); // close Stroke
+        let d = l.dock(id).unwrap();
+        assert_eq!(d.groups[1].panels, vec![PanelKind::Color, PanelKind::Properties]);
+    }
+
+    #[test]
+    fn close_last_panel_removes_group() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        l.close_panel(pa(id.0, 0, 0)); // close Layers (only panel in group 0)
+        let d = l.dock(id).unwrap();
+        assert_eq!(d.groups.len(), 1); // group removed
+        assert!(l.hidden_panels().contains(&PanelKind::Layers));
+    }
+
+    #[test]
+    fn show_panel_adds_to_default_group() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        l.close_panel(pa(id.0, 1, 1)); // close Stroke
+        l.show_panel(PanelKind::Stroke);
+        assert!(!l.hidden_panels().contains(&PanelKind::Stroke));
+        // Stroke should be added to the first group of the anchored dock
+        let d = l.dock(id).unwrap();
+        assert!(d.groups[0].panels.contains(&PanelKind::Stroke));
+    }
+
+    #[test]
+    fn show_panel_removes_from_hidden() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        l.close_panel(pa(id.0, 1, 0)); // close Color
+        assert_eq!(l.hidden_panels().len(), 1);
+        l.show_panel(PanelKind::Color);
+        assert!(l.hidden_panels().is_empty());
+    }
+
+    #[test]
+    fn hidden_panels_default_empty() {
+        let l = DockLayout::default_layout();
+        assert!(l.hidden_panels().is_empty());
+    }
+
+    #[test]
+    fn panel_menu_items_all_visible() {
+        let l = DockLayout::default_layout();
+        let items = l.panel_menu_items();
+        assert_eq!(items.len(), 4);
+        for (_, visible) in &items {
+            assert!(visible);
+        }
+    }
+
+    #[test]
+    fn panel_menu_items_with_hidden() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        l.close_panel(pa(id.0, 1, 1)); // close Stroke
+        let items = l.panel_menu_items();
+        let stroke_item = items.iter().find(|(k, _)| *k == PanelKind::Stroke).unwrap();
+        assert!(!stroke_item.1);
+        let layers_item = items.iter().find(|(k, _)| *k == PanelKind::Layers).unwrap();
+        assert!(layers_item.1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 2: Z-index management
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bring_to_front_moves_to_end() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        let f1 = l.detach_group(ga(id.0, 0), 10.0, 10.0).unwrap();
+        let f2 = l.detach_group(ga(id.0, 0), 20.0, 20.0).unwrap();
+        // z_order is [f1, f2], bring f1 to front
+        l.bring_to_front(f1);
+        assert_eq!(*l.z_order.last().unwrap(), f1);
+    }
+
+    #[test]
+    fn bring_to_front_already_front() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        let f1 = l.detach_group(ga(id.0, 0), 10.0, 10.0).unwrap();
+        let f2 = l.detach_group(ga(id.0, 0), 20.0, 20.0).unwrap();
+        // f2 is already at front
+        l.bring_to_front(f2);
+        assert_eq!(*l.z_order.last().unwrap(), f2);
+        assert_eq!(l.z_order.len(), 2);
+    }
+
+    #[test]
+    fn z_index_for_ordering() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        let f1 = l.detach_group(ga(id.0, 0), 10.0, 10.0).unwrap();
+        let f2 = l.detach_group(ga(id.0, 0), 20.0, 20.0).unwrap();
+        assert_eq!(l.z_index_for(f1), 0);
+        assert_eq!(l.z_index_for(f2), 1);
+        l.bring_to_front(f1);
+        assert_eq!(l.z_index_for(f1), 1);
+        assert_eq!(l.z_index_for(f2), 0);
     }
 }

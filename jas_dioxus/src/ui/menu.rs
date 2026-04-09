@@ -46,6 +46,14 @@ pub const MENU_BAR: &[(&str, &[MenuItem])] = &[
         ("Hide", "hide", "\u{2318}3"),
         ("Show All", "show_all", "\u{2325}\u{2318}3"),
     ]),
+    ("Window", &[
+        ("Layers", "toggle_panel_layers", ""),
+        ("Color", "toggle_panel_color", ""),
+        ("Stroke", "toggle_panel_stroke", ""),
+        ("Properties", "toggle_panel_properties", ""),
+        SEP,
+        ("Reset Panel Layout", "reset_panel_layout", ""),
+    ]),
 ];
 
 /// All known dispatch command strings.
@@ -57,6 +65,9 @@ pub const DISPATCH_COMMANDS: &[&str] = &[
     "group", "ungroup", "ungroup_all",
     "lock", "unlock_all",
     "hide", "show_all",
+    "toggle_panel_layers", "toggle_panel_color",
+    "toggle_panel_stroke", "toggle_panel_properties",
+    "reset_panel_layout",
 ];
 
 #[cfg(test)]
@@ -65,14 +76,14 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn menu_bar_has_three_menus() {
-        assert_eq!(MENU_BAR.len(), 3);
+    fn menu_bar_has_four_menus() {
+        assert_eq!(MENU_BAR.len(), 4);
     }
 
     #[test]
     fn menu_titles() {
         let titles: Vec<&str> = MENU_BAR.iter().map(|(t, _)| *t).collect();
-        assert_eq!(titles, vec!["File", "Edit", "Object"]);
+        assert_eq!(titles, vec!["File", "Edit", "Object", "Window"]);
     }
 
     #[test]
@@ -207,7 +218,7 @@ mod tests {
     #[test]
     fn total_menu_item_count() {
         let total: usize = MENU_BAR.iter().map(|(_, items)| items.len()).sum();
-        assert_eq!(total, 24); // 5 + 10 + 9
+        assert_eq!(total, 30); // 5 + 10 + 9 + 6
     }
 
     #[test]

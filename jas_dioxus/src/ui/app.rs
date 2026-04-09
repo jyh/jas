@@ -509,6 +509,31 @@ fn toolbar_svg_icon(kind: ToolKind) -> String {
     }
 }
 
+/// Find the address of a panel kind in the layout (first occurrence).
+fn find_panel(layout: &super::dock::DockLayout, kind: super::dock::PanelKind) -> Option<super::dock::PanelAddr> {
+    for (_, dock) in &layout.anchored {
+        for (gi, group) in dock.groups.iter().enumerate() {
+            if let Some(pi) = group.panels.iter().position(|&k| k == kind) {
+                return Some(super::dock::PanelAddr {
+                    group: super::dock::GroupAddr { dock_id: dock.id, group_idx: gi },
+                    panel_idx: pi,
+                });
+            }
+        }
+    }
+    for fd in &layout.floating {
+        for (gi, group) in fd.dock.groups.iter().enumerate() {
+            if let Some(pi) = group.panels.iter().position(|&k| k == kind) {
+                return Some(super::dock::PanelAddr {
+                    group: super::dock::GroupAddr { dock_id: fd.dock.id, group_idx: gi },
+                    panel_idx: pi,
+                });
+            }
+        }
+    }
+    None
+}
+
 #[component]
 pub fn App() -> Element {
     let app = use_hook(|| Rc::new(RefCell::new(AppState::new())));
@@ -1000,10 +1025,15 @@ pub fn App() -> Element {
     // Signal for which slot is showing a long-press popup (-1 = none)
     let mut popup_slot = use_signal(|| Option::<usize>::None);
 
-    // Dock drag-and-drop: index of the group being dragged, and the
-    // current drop target position (gap index between/around groups).
-    let mut dock_drag_from = use_signal(|| Option::<usize>::None);
-    let mut dock_drop_target = use_signal(|| Option::<usize>::None);
+    // Dock drag-and-drop state.
+    let mut drag_source = use_signal(|| Option::<super::dock::DragPayload>::None);
+    let mut drop_target_sig = use_signal(|| Option::<super::dock::DropTarget>::None);
+    let mut was_dropped = use_signal(|| false);
+    let mut last_drag_pos = use_signal(|| (0.0f64, 0.0f64));
+    // Floating dock title bar drag (dock_id, offset_x, offset_y).
+    let mut title_drag = use_signal(|| Option::<(super::dock::DockId, f64, f64)>::None);
+    // Resize drag (group above the handle, start_y).
+    let mut resize_drag = use_signal(|| Option::<(super::dock::GroupAddr, f64, f64)>::None); // (addr, start_y, start_height)
 
     // Read revision to trigger re-render when state changes.
     let _ = revision();
@@ -1351,6 +1381,57 @@ pub fn App() -> Element {
                         }
                     }));
                 }
+                // Window menu commands
+                "toggle_panel_layers" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if st.dock_layout.is_panel_visible(super::dock::PanelKind::Layers) {
+                            // Find and close it
+                            if let Some(addr) = find_panel(&st.dock_layout, super::dock::PanelKind::Layers) {
+                                st.dock_layout.close_panel(addr);
+                            }
+                        } else {
+                            st.dock_layout.show_panel(super::dock::PanelKind::Layers);
+                        }
+                    }));
+                }
+                "toggle_panel_color" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if st.dock_layout.is_panel_visible(super::dock::PanelKind::Color) {
+                            if let Some(addr) = find_panel(&st.dock_layout, super::dock::PanelKind::Color) {
+                                st.dock_layout.close_panel(addr);
+                            }
+                        } else {
+                            st.dock_layout.show_panel(super::dock::PanelKind::Color);
+                        }
+                    }));
+                }
+                "toggle_panel_stroke" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if st.dock_layout.is_panel_visible(super::dock::PanelKind::Stroke) {
+                            if let Some(addr) = find_panel(&st.dock_layout, super::dock::PanelKind::Stroke) {
+                                st.dock_layout.close_panel(addr);
+                            }
+                        } else {
+                            st.dock_layout.show_panel(super::dock::PanelKind::Stroke);
+                        }
+                    }));
+                }
+                "toggle_panel_properties" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if st.dock_layout.is_panel_visible(super::dock::PanelKind::Properties) {
+                            if let Some(addr) = find_panel(&st.dock_layout, super::dock::PanelKind::Properties) {
+                                st.dock_layout.close_panel(addr);
+                            }
+                        } else {
+                            st.dock_layout.show_panel(super::dock::PanelKind::Properties);
+                        }
+                    }));
+                }
+                "reset_panel_layout" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.dock_layout = super::dock::DockLayout::default_layout();
+                    }));
+                }
                 _ => {}
             }
         })
@@ -1444,18 +1525,266 @@ pub fn App() -> Element {
         }
     };
 
-    // --- Dock panel groups ---
-    use super::dock::{DockLayout, DockEdge, GroupAddr, PanelAddr};
+    // --- Dock rendering helpers ---
+    use super::dock::{DockLayout, DockEdge, DockId, GroupAddr, PanelAddr, DragPayload, DropTarget};
+
+    // Build panel group nodes for a given dock. Reused for anchored and floating docks.
+    fn build_dock_groups(
+        dock_id: DockId,
+        groups: &[super::dock::PanelGroup],
+        act: &Rc<RefCell<impl FnMut(Box<dyn FnOnce(&mut AppState)>) + 'static>>,
+        mut drag_source: Signal<Option<DragPayload>>,
+        mut drop_target_sig: Signal<Option<DropTarget>>,
+        mut was_dropped: Signal<bool>,
+        mut last_drag_pos: Signal<(f64, f64)>,
+    ) -> Vec<Result<VNode, RenderError>> {
+        let did = dock_id;
+        let group_count = groups.len();
+        let cur_drag = drag_source();
+        let cur_drop = drop_target_sig();
+
+        groups.iter().enumerate().map(|(gi, group)| {
+            let act_tabs = act.clone();
+            let act_chevron = act.clone();
+            let act_collapse = act.clone();
+            let act_drop = act.clone();
+            let group_collapsed = group.collapsed;
+
+            // Tab bar buttons — each tab is individually draggable
+            let tab_nodes: Vec<Result<VNode, RenderError>> = group.panels.iter().enumerate().map(|(pi, &kind)| {
+                let act_dragend = act_tabs.clone();
+                let act_click = act_tabs.clone();
+                let label = DockLayout::panel_label(kind);
+                let is_active = pi == group.active;
+                let bg = if is_active { "#f0f0f0" } else { "#d8d8d8" };
+                let border_bottom = if is_active { "2px solid #f0f0f0" } else { "2px solid #bbb" };
+                let font_weight = if is_active { "bold" } else { "normal" };
+                rsx! {
+                    div {
+                        key: "dock-tab-{gi}-{pi}",
+                        style: "padding:3px 8px; cursor:pointer; font-size:11px; font-weight:{font_weight}; background:{bg}; border-bottom:{border_bottom}; user-select:none;",
+                        draggable: "true",
+                        ondragstart: move |evt: Event<DragData>| {
+                            evt.stop_propagation();
+                            drag_source.set(Some(DragPayload::Panel(PanelAddr {
+                                group: GroupAddr { dock_id: did, group_idx: gi },
+                                panel_idx: pi,
+                            })));
+                            was_dropped.set(false);
+                        },
+                        ondragend: move |_| {
+                            if !was_dropped() {
+                                let (x, y) = last_drag_pos();
+                                (act_dragend.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                    st.dock_layout.detach_panel(PanelAddr {
+                                        group: GroupAddr { dock_id: did, group_idx: gi },
+                                        panel_idx: pi,
+                                    }, x, y);
+                                }));
+                            }
+                            drag_source.set(None);
+                            drop_target_sig.set(None);
+                            was_dropped.set(false);
+                        },
+                        onclick: move |_| {
+                            (act_click.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                st.dock_layout.set_active_panel(PanelAddr {
+                                    group: GroupAddr { dock_id: did, group_idx: gi },
+                                    panel_idx: pi,
+                                });
+                            }));
+                        },
+                        "{label}"
+                        // Close button
+                        {
+                            let act_close = act_click.clone();
+                            rsx! {
+                                span {
+                                    style: "margin-left:4px; color:#aaa; cursor:pointer; font-size:10px; line-height:1;",
+                                    onclick: move |evt: Event<MouseData>| {
+                                        evt.stop_propagation();
+                                        (act_close.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                            st.dock_layout.close_panel(PanelAddr {
+                                                group: GroupAddr { dock_id: did, group_idx: gi },
+                                                panel_idx: pi,
+                                            });
+                                        }));
+                                    },
+                                    "\u{00d7}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }).collect();
+
+            let chevron = if group_collapsed { "\u{25BC}" } else { "\u{25B2}" };
+            let body_label = group.active_panel()
+                .map(|k| DockLayout::panel_label(k))
+                .unwrap_or("");
+
+            // Drop indicator logic
+            let show_drop_before = cur_drag.is_some()
+                && cur_drop == Some(DropTarget::GroupSlot { dock_id: did, group_idx: gi });
+            let drop_indicator_style = if show_drop_before {
+                "height:2px; background:#4a90d9;"
+            } else {
+                "height:0px;"
+            };
+            let show_drop_after = gi == group_count - 1
+                && cur_drag.is_some()
+                && cur_drop == Some(DropTarget::GroupSlot { dock_id: did, group_idx: group_count });
+            let drop_after_style = if show_drop_after {
+                "height:2px; background:#4a90d9;"
+            } else {
+                "height:0px;"
+            };
+            // Highlight tab bar when it's a TabBar drop target
+            let tab_bar_drop = cur_drag.is_some()
+                && cur_drop == Some(DropTarget::TabBar(GroupAddr { dock_id: did, group_idx: gi }));
+            let tab_bar_border = if tab_bar_drop { "2px solid #4a90d9" } else { "1px solid #bbb" };
+
+            let is_dragged_group = matches!(cur_drag,
+                Some(DragPayload::Group(addr)) if addr.dock_id == did && addr.group_idx == gi);
+            let opacity = if is_dragged_group { "0.4" } else { "1.0" };
+
+            rsx! {
+                div {
+                    key: "dock-group-{did:?}-{gi}",
+                    style: "border-bottom:1px solid #ccc; opacity:{opacity};",
+                    ondragover: move |evt: Event<DragData>| {
+                        evt.prevent_default();
+                        let coords = evt.data().page_coordinates();
+                        last_drag_pos.set((coords.x, coords.y));
+                        let y = evt.data().element_coordinates().y;
+                        let mid = 30.0;
+                        if y < mid {
+                            drop_target_sig.set(Some(DropTarget::GroupSlot { dock_id: did, group_idx: gi }));
+                        } else {
+                            drop_target_sig.set(Some(DropTarget::GroupSlot { dock_id: did, group_idx: gi + 1 }));
+                        }
+                    },
+                    ondrop: move |evt: Event<DragData>| {
+                        evt.prevent_default();
+                        was_dropped.set(true);
+                        let src = drag_source();
+                        let tgt = drop_target_sig();
+                        if let (Some(src), Some(tgt)) = (src, tgt) {
+                            (act_drop.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                match (src, tgt) {
+                                    (DragPayload::Group(from), DropTarget::GroupSlot { dock_id: to_dock, group_idx: to_idx }) => {
+                                        if from.dock_id == to_dock {
+                                            st.dock_layout.move_group_within_dock(to_dock, from.group_idx, to_idx);
+                                        } else {
+                                            st.dock_layout.move_group_to_dock(from, to_dock, to_idx);
+                                        }
+                                    }
+                                    (DragPayload::Panel(from), DropTarget::GroupSlot { dock_id: to_dock, group_idx: to_idx }) => {
+                                        st.dock_layout.insert_panel_as_new_group(from, to_dock, to_idx);
+                                    }
+                                    (DragPayload::Group(from), DropTarget::TabBar(to_group)) => {
+                                        // Merge: move all panels from dragged group into target group
+                                        // by moving the group next to the target then transferring panels
+                                        st.dock_layout.move_group_to_dock(from, to_group.dock_id, to_group.group_idx);
+                                    }
+                                    (DragPayload::Panel(from), DropTarget::TabBar(to_group)) => {
+                                        st.dock_layout.move_panel_to_group(from, to_group);
+                                    }
+                                    _ => {}
+                                }
+                            }));
+                        }
+                        drag_source.set(None);
+                        drop_target_sig.set(None);
+                    },
+
+                    div { style: "{drop_indicator_style}" }
+
+                    // Tab bar with grip handle
+                    div {
+                        style: "display:flex; background:#d8d8d8; border-bottom:{tab_bar_border}; align-items:center;",
+                        ondragover: move |evt: Event<DragData>| {
+                            evt.prevent_default();
+                            evt.stop_propagation();
+                            let coords = evt.data().page_coordinates();
+                            last_drag_pos.set((coords.x, coords.y));
+                            drop_target_sig.set(Some(DropTarget::TabBar(GroupAddr { dock_id: did, group_idx: gi })));
+                        },
+
+                        // Grip handle for dragging the whole group
+                        div {
+                            style: "padding:2px 4px; cursor:grab; color:#999; font-size:10px; user-select:none;",
+                            draggable: "true",
+                            ondragstart: move |evt: Event<DragData>| {
+                                evt.stop_propagation();
+                                drag_source.set(Some(DragPayload::Group(GroupAddr {
+                                    dock_id: did,
+                                    group_idx: gi,
+                                })));
+                                was_dropped.set(false);
+                            },
+                            ondragend: move |_| {
+                                if !was_dropped() {
+                                    let (x, y) = last_drag_pos();
+                                    let act_detach = act_collapse.clone();
+                                    (act_detach.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                        st.dock_layout.detach_group(GroupAddr {
+                                            dock_id: did,
+                                            group_idx: gi,
+                                        }, x, y);
+                                    }));
+                                }
+                                drag_source.set(None);
+                                drop_target_sig.set(None);
+                                was_dropped.set(false);
+                            },
+                            "\u{2801}\u{2801}"
+                        }
+
+                        for tab in tab_nodes {
+                            {tab}
+                        }
+
+                        div {
+                            style: "margin-left:auto; padding:3px 6px; cursor:pointer; font-size:9px; color:#888; user-select:none;",
+                            onclick: {
+                                let act = act_chevron.clone();
+                                move |_| {
+                                    (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                        st.dock_layout.toggle_group_collapsed(GroupAddr {
+                                            dock_id: did,
+                                            group_idx: gi,
+                                        });
+                                    }));
+                                }
+                            },
+                            "{chevron}"
+                        }
+                    }
+
+                    if !group_collapsed {
+                        div {
+                            style: "padding:12px; min-height:60px; color:#999; font-size:12px;",
+                            "{body_label}"
+                        }
+                    }
+
+                    div { style: "{drop_after_style}" }
+                }
+            }
+        }).collect()
+    }
+
+    // --- Build dock nodes ---
     let layout_snapshot = app.borrow().dock_layout.clone();
     let right_dock = layout_snapshot.anchored_dock(DockEdge::Right);
     let dock_collapsed = right_dock.map_or(true, |d| d.collapsed);
     let dock_width = if dock_collapsed { 36.0 } else { right_dock.map_or(0.0, |d| d.width) };
-    let dock_id = right_dock.map_or(super::dock::DockId(0), |d| d.id);
+    let dock_id = right_dock.map_or(DockId(0), |d| d.id);
 
     let dock_groups: Vec<Result<VNode, RenderError>> = match right_dock {
         None => vec![],
         Some(dock) if dock.collapsed => {
-            // Collapsed: show a vertical icon strip with panel labels
             let act_dock = act.clone();
             let did = dock.id;
             dock.groups.iter().enumerate().flat_map(|(gi, group)| {
@@ -1485,139 +1814,47 @@ pub fn App() -> Element {
             }).collect()
         }
         Some(dock) => {
-            // Expanded: render panel groups with tab bars and drag-and-drop
-            let act_dock = act.clone();
-            let did = dock.id;
-            let group_count = dock.groups.len();
-            let dragging = dock_drag_from();
-            let drop_at = dock_drop_target();
-            dock.groups.iter().enumerate().map(|(gi, group)| {
-                let act_tabs = act_dock.clone();
-                let act_collapse = act_dock.clone();
-                let act_drop = act_dock.clone();
-                let group_collapsed = group.collapsed;
-
-                // Tab bar buttons
-                let tab_nodes: Vec<Result<VNode, RenderError>> = group.panels.iter().enumerate().map(|(pi, &kind)| {
-                    let act = act_tabs.clone();
-                    let label = DockLayout::panel_label(kind);
-                    let is_active = pi == group.active;
-                    let bg = if is_active { "#f0f0f0" } else { "#d8d8d8" };
-                    let border_bottom = if is_active { "2px solid #f0f0f0" } else { "2px solid #bbb" };
-                    let font_weight = if is_active { "bold" } else { "normal" };
-                    rsx! {
-                        div {
-                            key: "dock-tab-{gi}-{pi}",
-                            style: "padding:3px 8px; cursor:pointer; font-size:11px; font-weight:{font_weight}; background:{bg}; border-bottom:{border_bottom}; user-select:none;",
-                            onclick: move |_| {
-                                (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                    st.dock_layout.set_active_panel(PanelAddr {
-                                        group: GroupAddr { dock_id: did, group_idx: gi },
-                                        panel_idx: pi,
-                                    });
-                                }));
-                            },
-                            "{label}"
-                        }
-                    }
-                }).collect();
-
-                // Collapse chevron
-                let chevron = if group_collapsed { "\u{25BC}" } else { "\u{25B2}" };
-
-                // Active panel placeholder body
-                let body_label = group.active_panel()
-                    .map(|k| DockLayout::panel_label(k))
-                    .unwrap_or("");
-
-                // Drop indicator: show a blue line when this position is the drop target
-                let show_drop_before = dragging.is_some() && drop_at == Some(gi);
-                let drop_indicator_style = if show_drop_before {
-                    "height:2px; background:#4a90d9;"
-                } else {
-                    "height:0px;"
-                };
-                let show_drop_after = gi == group_count - 1
-                    && dragging.is_some()
-                    && drop_at == Some(group_count);
-                let drop_after_style = if show_drop_after {
-                    "height:2px; background:#4a90d9;"
-                } else {
-                    "height:0px;"
-                };
-
-                let opacity = if dragging == Some(gi) { "0.4" } else { "1.0" };
-
-                rsx! {
-                    div {
-                        key: "dock-group-{gi}",
-                        style: "border-bottom:1px solid #ccc; opacity:{opacity};",
-                        draggable: "true",
-                        ondragstart: move |_| {
-                            dock_drag_from.set(Some(gi));
-                        },
-                        ondragend: move |_| {
-                            dock_drag_from.set(None);
-                            dock_drop_target.set(None);
-                        },
-                        ondragover: move |evt: Event<DragData>| {
-                            evt.prevent_default();
-                            let y = evt.data().element_coordinates().y;
-                            let mid = 30.0;
-                            if y < mid {
-                                dock_drop_target.set(Some(gi));
-                            } else {
-                                dock_drop_target.set(Some(gi + 1));
-                            }
-                        },
-                        ondrop: move |evt: Event<DragData>| {
-                            evt.prevent_default();
-                            if let Some(from) = dock_drag_from() {
-                                if let Some(to) = dock_drop_target() {
-                                    (act_drop.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                        st.dock_layout.move_group_within_dock(did, from, to);
-                                    }));
-                                }
-                            }
-                            dock_drag_from.set(None);
-                            dock_drop_target.set(None);
-                        },
-
-                        div { style: "{drop_indicator_style}" }
-
-                        // Tab bar
-                        div {
-                            style: "display:flex; background:#d8d8d8; border-bottom:1px solid #bbb; align-items:center; cursor:grab;",
-                            for tab in tab_nodes {
-                                {tab}
-                            }
-                            div {
-                                style: "margin-left:auto; padding:3px 6px; cursor:pointer; font-size:9px; color:#888; user-select:none;",
-                                onclick: move |_| {
-                                    (act_collapse.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                        st.dock_layout.toggle_group_collapsed(GroupAddr {
-                                            dock_id: did,
-                                            group_idx: gi,
-                                        });
-                                    }));
-                                },
-                                "{chevron}"
-                            }
-                        }
-
-                        if !group_collapsed {
-                            div {
-                                style: "padding:12px; min-height:60px; color:#999; font-size:12px;",
-                                "{body_label}"
-                            }
-                        }
-
-                        div { style: "{drop_after_style}" }
-                    }
-                }
-            }).collect()
+            build_dock_groups(dock.id, &dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos)
         }
     };
+
+    // Build floating dock nodes
+    let floating_nodes: Vec<Result<VNode, RenderError>> = layout_snapshot.floating.iter().map(|fd| {
+        let fid = fd.dock.id;
+        let fx = fd.x;
+        let fy = fd.y;
+        let fw = fd.dock.width;
+        let act_front = act.clone();
+        let fgroups = build_dock_groups(fid, &fd.dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos);
+        let z = 900 + layout_snapshot.z_order.iter().position(|&id| id == fid).unwrap_or(0);
+
+        rsx! {
+            div {
+                key: "floating-{fid:?}",
+                style: "position:fixed; left:{fx}px; top:{fy}px; width:{fw}px; background:#f0f0f0; border:1px solid #aaa; box-shadow:4px 4px 12px rgba(0,0,0,0.2); border-radius:4px; z-index:{z}; display:flex; flex-direction:column; overflow:hidden;",
+                onmousedown: move |evt: Event<MouseData>| {
+                    evt.stop_propagation();
+                    (act_front.borrow_mut())(Box::new(move |st: &mut AppState| {
+                        st.dock_layout.bring_to_front(fid);
+                    }));
+                },
+
+                // Title bar for repositioning
+                div {
+                    style: "height:20px; background:#d0d0d0; cursor:grab; display:flex; align-items:center; padding:0 6px; font-size:10px; color:#666; user-select:none;",
+                    onmousedown: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        let coords = evt.data().page_coordinates();
+                        title_drag.set(Some((fid, coords.x - fx, coords.y - fy)));
+                    },
+                }
+
+                for g in fgroups {
+                    {g}
+                }
+            }
+        }
+    }).collect();
 
     // Dock collapse toggle
     let dock_toggle_label = if dock_collapsed { "\u{25C0}" } else { "\u{25B6}" };
@@ -1635,6 +1872,25 @@ pub fn App() -> Element {
             onkeyup: on_keyup,
             onmousedown: move |_| {
                 popup_slot.set(None);
+            },
+            onmousemove: {
+                let act = act.clone();
+                move |evt: Event<MouseData>| {
+                    if let Some((fid, off_x, off_y)) = title_drag() {
+                        let coords = evt.data().page_coordinates();
+                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                            st.dock_layout.set_floating_position(fid, coords.x - off_x, coords.y - off_y);
+                        }));
+                    }
+                }
+            },
+            onmouseup: move |_| {
+                title_drag.set(None);
+            },
+            ondragover: move |evt: Event<DragData>| {
+                // Track drag position for empty-space drops (don't prevent_default — not a drop target)
+                let coords = evt.data().page_coordinates();
+                last_drag_pos.set((coords.x, coords.y));
             },
             style: "display:flex; height:100vh; outline:none; font-family:sans-serif;",
 
@@ -1726,6 +1982,11 @@ pub fn App() -> Element {
                         }
                     }
                 }
+            }
+
+            // Floating docks (position:fixed overlays)
+            for fdock in floating_nodes {
+                {fdock}
             }
         }
     }
