@@ -501,6 +501,7 @@ public struct PaneLayout: Codable {
         let vw = viewportWidth
         let vh = viewportHeight
 
+        canvasMaximized = false
         hiddenPanes.removeAll()
         var visible: [(PaneId, TileWidth, Double)] = panes.map { ($0.id, $0.config.tileWidth, $0.width) }
         visible.sort { a, b in

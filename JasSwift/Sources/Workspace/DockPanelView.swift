@@ -44,7 +44,6 @@ public struct DockPanelView: View {
 
     public var body: some View {
         if let dock = dock {
-            let width = dock.collapsed ? 36.0 : dock.width
             VStack(spacing: 0) {
                 if dock.collapsed {
                     collapsedView(dock)
@@ -52,17 +51,13 @@ public struct DockPanelView: View {
                     expandedView(dock)
                 }
             }
-            .frame(width: width)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(SwiftUI.Color(nsColor: NSColor(red: 0.235, green: 0.235, blue: 0.235, alpha: 1.0))) // #3c3c3c
-            .overlay(alignment: edge == .right ? .leading : .trailing) {
-                Rectangle().fill(SwiftUI.Color(nsColor: NSColor(white: 0.33, alpha: 1.0))).frame(width: 1) // #555
-            }
         }
     }
 
     private func collapsedView(_ dock: Dock) -> some View {
         VStack(spacing: 2) {
-            collapseToggle()
             ForEach(Array(dock.groups.enumerated()), id: \.offset) { gi, group in
                 ForEach(Array(group.panels.enumerated()), id: \.offset) { pi, kind in
                     collapsedIcon(kind: kind, gi: gi, pi: pi)
@@ -95,7 +90,6 @@ public struct DockPanelView: View {
 
     private func expandedView(_ dock: Dock) -> some View {
         VStack(spacing: 0) {
-            collapseToggle()
             ForEach(Array(dock.groups.enumerated()), id: \.offset) { gi, group in
                 PanelGroupView(
                     dockLayout: $dockLayout,
@@ -108,22 +102,6 @@ public struct DockPanelView: View {
         }
     }
 
-    private func collapseToggle() -> some View {
-        let isCollapsed = dock?.collapsed ?? false
-        let label = isCollapsed ? "\u{25C0}" : "\u{25B6}"
-        return Button(label) {
-            dockLayout.toggleDockCollapsed(dockId)
-            dockLayout.saveIfNeeded()
-        }
-        .font(.system(size: 10))
-        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.53, alpha: 1.0))) // #888
-        .frame(maxWidth: .infinity)
-        .frame(height: 20)
-        .buttonStyle(.plain)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(SwiftUI.Color(nsColor: NSColor(white: 0.33, alpha: 1.0))).frame(height: 1)
-        }
-    }
 }
 
 // MARK: - Panel Group View
@@ -160,6 +138,7 @@ public struct PanelGroupView: View {
                 // Collapse chevron
                 chevronButton()
             }
+            .frame(maxWidth: .infinity)
             .background(SwiftUI.Color(nsColor: NSColor(white: 0.2, alpha: 1.0))) // #333
             .overlay(alignment: .bottom) {
                 Rectangle().fill(SwiftUI.Color(nsColor: NSColor(white: 0.33, alpha: 1.0))).frame(height: 1) // #555
@@ -176,6 +155,7 @@ public struct PanelGroupView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity)
         .overlay(alignment: .bottom) {
             Rectangle().fill(SwiftUI.Color(nsColor: NSColor(white: 0.33, alpha: 1.0))).frame(height: 1) // #555
         }

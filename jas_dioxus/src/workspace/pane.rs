@@ -650,7 +650,8 @@ impl PaneLayout {
         let vw = self.viewport_width;
         let vh = self.viewport_height;
 
-        // Show all panes and sort by tile_order.
+        // Unmaximize and show all panes.
+        self.canvas_maximized = false;
         self.hidden_panes.clear();
         let mut visible: Vec<(PaneId, TileWidth, f64)> = self.panes.iter()
             .map(|p| {
