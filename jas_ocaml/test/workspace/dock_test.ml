@@ -821,6 +821,71 @@ let () =
     assert (c.saved_layouts = ["Default"; "New"]))
 
 (* ================================================================== *)
+(* Pane layout integration                                            *)
+(* ================================================================== *)
+
+let () =
+  run "dock_layout_default_has_no_pane_layout" (fun () ->
+    let l = default_layout () in
+    assert (panes l = None));
+
+  run "ensure_pane_layout_creates_if_none" (fun () ->
+    let l = default_layout () in
+    ensure_pane_layout l ~viewport_w:1000.0 ~viewport_h:700.0;
+    assert (panes l <> None);
+    assert (Array.length (Option.get (panes l)).Jas.Pane.panes = 3));
+
+  run "ensure_pane_layout_noop_if_present" (fun () ->
+    let l = default_layout () in
+    ensure_pane_layout l ~viewport_w:1000.0 ~viewport_h:700.0;
+    mark_saved l;
+    ensure_pane_layout l ~viewport_w:1000.0 ~viewport_h:700.0;
+    assert (not (needs_save l)));
+
+  run "reset_to_default_clears_pane_layout" (fun () ->
+    let l = default_layout () in
+    ensure_pane_layout l ~viewport_w:1000.0 ~viewport_h:700.0;
+    assert (panes l <> None);
+    reset_to_default l;
+    assert (panes l = None));
+
+  run "panes_accessors" (fun () ->
+    let l = default_layout () in
+    assert (panes l = None);
+    ensure_pane_layout l ~viewport_w:1000.0 ~viewport_h:700.0;
+    assert (panes l <> None);
+    panes_mut l (fun pl -> Jas.Pane.hide_pane pl Jas.Pane.Toolbar);
+    assert (not (Jas.Pane.is_pane_visible (Option.get (panes l)) Jas.Pane.Toolbar)));
+
+  run "serde_backward_compat_no_pane_layout" (fun () ->
+    let l = default_layout () in
+    let json = layout_to_json l in
+    let l2 = layout_of_json json in
+    assert (panes l2 = None);
+    assert (List.length l2.anchored = 1));
+
+  run "serde_round_trip_with_pane_layout" (fun () ->
+    let l = default_layout () in
+    ensure_pane_layout l ~viewport_w:1000.0 ~viewport_h:700.0;
+    let json = layout_to_json l in
+    let l2 = layout_of_json json in
+    assert (panes l2 <> None);
+    let pl2 = Option.get (panes l2) in
+    assert (Array.length pl2.Jas.Pane.panes = 3);
+    assert (List.length pl2.snaps = 10));
+
+  run "clamp_floating_docks_also_clamps_panes" (fun () ->
+    let l = default_layout () in
+    ensure_pane_layout l ~viewport_w:1000.0 ~viewport_h:700.0;
+    panes_mut l (fun pl ->
+      let canvas_id = (Option.get (Jas.Pane.pane_by_kind pl Jas.Pane.Canvas)).id in
+      Jas.Pane.set_pane_position pl canvas_id ~x:5000.0 ~y:5000.0);
+    clamp_floating_docks l ~viewport_w:1000.0 ~viewport_h:700.0;
+    let canvas = Option.get (Jas.Pane.pane_by_kind (Option.get (panes l)) Jas.Pane.Canvas) in
+    assert (canvas.x <= 1000.0 -. Jas.Pane.min_pane_visible);
+    assert (canvas.y <= 700.0 -. Jas.Pane.min_pane_visible))
+
+(* ================================================================== *)
 
 let () =
   Printf.printf "\n%d passed, %d failed\n" !pass !fail;

@@ -740,3 +740,66 @@ def test_app_config_round_trip():
 def test_app_config_invalid_json():
     c = AppConfig.from_json("garbage{{{")
     assert c.active_layout == "Default"
+
+
+# -- Pane layout integration --
+
+def test_dock_layout_default_has_no_pane_layout():
+    l = DockLayout.default_layout()
+    assert l.panes() is None
+
+def test_ensure_pane_layout_creates_if_none():
+    l = DockLayout.default_layout()
+    l.ensure_pane_layout(1000, 700)
+    assert l.panes() is not None
+    assert len(l.panes().panes) == 3
+
+def test_ensure_pane_layout_noop_if_present():
+    l = DockLayout.default_layout()
+    l.ensure_pane_layout(1000, 700)
+    l.mark_saved()
+    l.ensure_pane_layout(1000, 700)
+    assert not l.needs_save()
+
+def test_reset_to_default_clears_pane_layout():
+    l = DockLayout.default_layout()
+    l.ensure_pane_layout(1000, 700)
+    assert l.panes() is not None
+    l.reset_to_default()
+    assert l.panes() is None
+
+def test_panes_accessors():
+    l = DockLayout.default_layout()
+    assert l.panes() is None
+    l.ensure_pane_layout(1000, 700)
+    assert l.panes() is not None
+    from workspace.pane import PaneKind as PK
+    l.panes_mut(lambda pl: pl.hide_pane(PK.TOOLBAR))
+    assert not l.panes().is_pane_visible(PK.TOOLBAR)
+
+def test_serde_backward_compat_no_pane_layout():
+    l = DockLayout.default_layout()
+    d = l.to_dict()
+    l2 = DockLayout.from_dict(d)
+    assert l2.panes() is None
+    assert len(l2.anchored) == 1
+
+def test_serde_round_trip_with_pane_layout():
+    l = DockLayout.default_layout()
+    l.ensure_pane_layout(1000, 700)
+    d = l.to_dict()
+    l2 = DockLayout.from_dict(d)
+    assert l2.panes() is not None
+    assert len(l2.panes().panes) == 3
+    assert len(l2.panes().snaps) == 10
+
+def test_clamp_floating_docks_also_clamps_panes():
+    l = DockLayout.default_layout()
+    l.ensure_pane_layout(1000, 700)
+    from workspace.pane import PaneKind as PK, MIN_PANE_VISIBLE
+    cid = l.panes().pane_by_kind(PK.CANVAS).id
+    l.panes_mut(lambda pl: pl.set_pane_position(cid, 5000, 5000))
+    l.clamp_floating_docks(1000, 700)
+    canvas = l.panes().pane_by_kind(PK.CANVAS)
+    assert canvas.x <= 1000 - MIN_PANE_VISIBLE
+    assert canvas.y <= 700 - MIN_PANE_VISIBLE

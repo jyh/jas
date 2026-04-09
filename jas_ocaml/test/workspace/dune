@@ -2,3 +2,8 @@
  (name dock_test)
  (modules dock_test)
  (libraries jas))
+
+(test
+ (name pane_test)
+ (modules pane_test)
+ (libraries jas))

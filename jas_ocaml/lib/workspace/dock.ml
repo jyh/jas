@@ -133,6 +133,7 @@ type dock_layout = {
   mutable hidden_panels : panel_kind list;
   mutable z_order : dock_id list;
   mutable focused_panel : panel_addr option;
+  mutable pane_layout : Pane.pane_layout option;
   mutable next_id : int;
   mutable generation : int;
   mutable saved_generation : int;
@@ -149,6 +150,7 @@ let named name = {
   hidden_panels = [];
   z_order = [];
   focused_panel = None;
+  pane_layout = None;
   next_id = 1;
   generation = 0;
   saved_generation = 0;
@@ -572,6 +574,7 @@ let reset_to_default l =
   l.hidden_panels <- fresh.hidden_panels;
   l.z_order <- fresh.z_order;
   l.focused_panel <- fresh.focused_panel;
+  l.pane_layout <- None;
   l.next_id <- fresh.next_id;
   bump l
 
@@ -636,8 +639,123 @@ let dock_of_json (j : Yojson.Safe.t) =
     width = j |> member "width" |> to_float;
     min_width = min_dock_width; }
 
-let layout_to_json l : Yojson.Safe.t =
+(* -- Pane layout JSON -- *)
+
+let pane_kind_to_json = function
+  | Pane.Toolbar -> "Toolbar" | Pane.Canvas -> "Canvas" | Pane.Dock -> "Dock"
+
+let pane_kind_of_json = function
+  | "Toolbar" -> Pane.Toolbar | "Canvas" -> Pane.Canvas | "Dock" -> Pane.Dock
+  | _ -> Pane.Canvas
+
+let edge_side_to_json = function
+  | Pane.Left -> "Left" | Pane.Right -> "Right" | Pane.Top -> "Top" | Pane.Bottom -> "Bottom"
+
+let edge_side_of_json = function
+  | "Left" -> Pane.Left | "Right" -> Pane.Right | "Top" -> Pane.Top | "Bottom" -> Pane.Bottom
+  | _ -> Pane.Left
+
+let tile_width_to_json : Pane.tile_width -> Yojson.Safe.t = function
+  | Fixed w -> `Assoc ["Fixed", `Float w]
+  | Keep_current -> `String "KeepCurrent"
+  | Flex -> `String "Flex"
+
+let tile_width_of_json (j : Yojson.Safe.t) : Pane.tile_width =
+  match j with
+  | `String "KeepCurrent" -> Keep_current
+  | `String "Flex" -> Flex
+  | `Assoc [("Fixed", `Float w)] -> Fixed w
+  | _ -> Flex
+
+let pane_config_to_json (c : Pane.pane_config) : Yojson.Safe.t =
   `Assoc [
+    "label", `String c.label;
+    "min_width", `Float c.min_width; "min_height", `Float c.min_height;
+    "fixed_width", `Bool c.fixed_width; "closable", `Bool c.closable;
+    "collapsible", `Bool c.collapsible; "maximizable", `Bool c.maximizable;
+    "tile_order", `Int c.tile_order; "tile_width", tile_width_to_json c.tile_width;
+  ]
+
+let pane_config_of_json (j : Yojson.Safe.t) : Pane.pane_config =
+  let open Yojson.Safe.Util in
+  { label = j |> member "label" |> to_string;
+    min_width = j |> member "min_width" |> to_float;
+    min_height = j |> member "min_height" |> to_float;
+    fixed_width = j |> member "fixed_width" |> to_bool;
+    closable = j |> member "closable" |> to_bool;
+    collapsible = j |> member "collapsible" |> to_bool;
+    maximizable = j |> member "maximizable" |> to_bool;
+    tile_order = j |> member "tile_order" |> to_int;
+    tile_width = tile_width_of_json (j |> member "tile_width"); }
+
+let pane_to_json (p : Pane.pane) : Yojson.Safe.t =
+  `Assoc [
+    "id", `Int p.id; "kind", `String (pane_kind_to_json p.kind);
+    "config", pane_config_to_json p.config;
+    "x", `Float p.x; "y", `Float p.y;
+    "width", `Float p.width; "height", `Float p.height;
+  ]
+
+let pane_of_json (j : Yojson.Safe.t) : Pane.pane =
+  let open Yojson.Safe.Util in
+  let kind = pane_kind_of_json (j |> member "kind" |> to_string) in
+  { id = j |> member "id" |> to_int;
+    kind;
+    config = (try pane_config_of_json (j |> member "config")
+              with _ -> Pane.config_for_kind kind);
+    x = j |> member "x" |> to_float; y = j |> member "y" |> to_float;
+    width = j |> member "width" |> to_float; height = j |> member "height" |> to_float; }
+
+let snap_target_to_json : Pane.snap_target -> Yojson.Safe.t = function
+  | Window_target e -> `Assoc ["Window", `String (edge_side_to_json e)]
+  | Pane_target (id, e) -> `Assoc ["Pane", `List [`Int id; `String (edge_side_to_json e)]]
+
+let snap_target_of_json (j : Yojson.Safe.t) : Pane.snap_target =
+  match j with
+  | `Assoc [("Window", `String e)] -> Window_target (edge_side_of_json e)
+  | `Assoc [("Pane", `List [`Int id; `String e])] -> Pane_target (id, edge_side_of_json e)
+  | _ -> Window_target Left
+
+let snap_to_json (s : Pane.snap_constraint) : Yojson.Safe.t =
+  `Assoc [
+    "pane", `Int s.snap_pane;
+    "edge", `String (edge_side_to_json s.edge);
+    "target", snap_target_to_json s.target;
+  ]
+
+let snap_of_json (j : Yojson.Safe.t) : Pane.snap_constraint =
+  let open Yojson.Safe.Util in
+  { snap_pane = j |> member "pane" |> to_int;
+    edge = edge_side_of_json (j |> member "edge" |> to_string);
+    target = snap_target_of_json (j |> member "target"); }
+
+let pane_layout_to_json (pl : Pane.pane_layout) : Yojson.Safe.t =
+  `Assoc [
+    "panes", `List (Array.to_list (Array.map pane_to_json pl.panes));
+    "snaps", `List (List.map snap_to_json pl.snaps);
+    "z_order", `List (List.map (fun id -> `Int id) pl.z_order);
+    "hidden_panes", `List (List.map (fun k -> `String (pane_kind_to_json k)) pl.hidden_panes);
+    "canvas_maximized", `Bool pl.canvas_maximized;
+    "viewport_width", `Float pl.viewport_width;
+    "viewport_height", `Float pl.viewport_height;
+    "next_pane_id", `Int pl.next_pane_id;
+  ]
+
+let pane_layout_of_json (j : Yojson.Safe.t) : Pane.pane_layout =
+  let open Yojson.Safe.Util in
+  { panes = Array.of_list (j |> member "panes" |> to_list |> List.map pane_of_json);
+    snaps = j |> member "snaps" |> to_list |> List.map snap_of_json;
+    z_order = j |> member "z_order" |> to_list |> List.map to_int;
+    hidden_panes = j |> member "hidden_panes" |> to_list |> List.map (fun s -> pane_kind_of_json (to_string s));
+    canvas_maximized = j |> member "canvas_maximized" |> to_bool;
+    viewport_width = j |> member "viewport_width" |> to_float;
+    viewport_height = j |> member "viewport_height" |> to_float;
+    next_pane_id = j |> member "next_pane_id" |> to_int; }
+
+(* -- Dock layout JSON -- *)
+
+let layout_to_json l : Yojson.Safe.t =
+  let base = [
     "name", `String l.name;
     "anchored", `List (List.map (fun (e, d) ->
       `Assoc ["edge", `String (edge_to_json e); "dock", dock_to_json d]) l.anchored);
@@ -646,7 +764,12 @@ let layout_to_json l : Yojson.Safe.t =
     "hidden_panels", `List (List.map (fun k -> `String (kind_to_json k)) l.hidden_panels);
     "z_order", `List (List.map (fun id -> `Int id) l.z_order);
     "next_id", `Int l.next_id;
-  ]
+  ] in
+  let with_pane = match l.pane_layout with
+    | Some pl -> base @ ["pane_layout", pane_layout_to_json pl]
+    | None -> base
+  in
+  `Assoc with_pane
 
 let layout_of_json (j : Yojson.Safe.t) =
   let open Yojson.Safe.Util in
@@ -661,6 +784,7 @@ let layout_of_json (j : Yojson.Safe.t) =
     hidden_panels = j |> member "hidden_panels" |> to_list |> List.map (fun s -> kind_of_json (to_string s));
     z_order = j |> member "z_order" |> to_list |> List.map to_int;
     focused_panel = None;
+    pane_layout = (try Some (pane_layout_of_json (j |> member "pane_layout")) with _ -> None);
     next_id = j |> member "next_id" |> to_int;
     generation = 0;
     saved_generation = 0; }
@@ -778,7 +902,30 @@ let clamp_floating_docks l ~viewport_w ~viewport_h =
     fd.x <- max (-.fd.dock.width +. min_visible) (min fd.x (viewport_w -. min_visible));
     fd.y <- max 0.0 (min fd.y (viewport_h -. min_visible))
   ) l.floating;
+  (match l.pane_layout with
+   | Some pl -> Pane.clamp_panes pl ~viewport_w ~viewport_h
+   | None -> ());
   bump l
+
+(* ------------------------------------------------------------------ *)
+(* Pane layout integration                                            *)
+(* ------------------------------------------------------------------ *)
+
+let ensure_pane_layout l ~viewport_w ~viewport_h =
+  match l.pane_layout with
+  | Some _ -> ()
+  | None ->
+    l.pane_layout <- Some (Pane.default_three_pane ~viewport_w ~viewport_h);
+    bump l
+
+let panes l = l.pane_layout
+
+let panes_mut l f =
+  match l.pane_layout with
+  | Some pl -> f pl; bump l
+  | None -> ()
+
+(* ------------------------------------------------------------------ *)
 
 let set_auto_hide l id ~auto_hide =
   (match find_dock l id with

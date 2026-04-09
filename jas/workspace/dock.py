@@ -152,13 +152,14 @@ class DockLayout:
     def __init__(self, name: str, anchored: list[tuple[DockEdge, Dock]],
                  floating: list[FloatingDock], hidden_panels: list[PanelKind],
                  z_order: list[int], focused_panel: Optional[PanelAddr],
-                 next_id: int):
+                 next_id: int, pane_layout=None):
         self.name = name
         self.anchored = anchored
         self.floating = floating
         self.hidden_panels = hidden_panels
         self.z_order = z_order
         self.focused_panel = focused_panel
+        self.pane_layout = pane_layout
         self._next_id = next_id
         self._generation = 0
         self._saved_generation = 0
@@ -537,6 +538,7 @@ class DockLayout:
         self.hidden_panels = fresh.hidden_panels
         self.z_order = fresh.z_order
         self.focused_panel = fresh.focused_panel
+        self.pane_layout = None
         self._next_id = fresh._next_id
         self._bump()
 
@@ -559,7 +561,7 @@ class DockLayout:
             "collapsed": d.collapsed, "auto_hide": d.auto_hide,
             "width": d.width, "min_width": d.min_width,
         }
-        return {
+        result = {
             "name": self.name,
             "anchored": [{"edge": _edge(e), "dock": _dock(d)} for e, d in self.anchored],
             "floating": [{"dock": _dock(fd.dock), "x": fd.x, "y": fd.y} for fd in self.floating],
@@ -567,6 +569,10 @@ class DockLayout:
             "z_order": self.z_order,
             "next_id": self._next_id,
         }
+        if self.pane_layout is not None:
+            from workspace.pane import pane_layout_to_dict
+            result["pane_layout"] = pane_layout_to_dict(self.pane_layout)
+        return result
 
     @staticmethod
     def from_dict(d: dict) -> 'DockLayout':
@@ -585,6 +591,13 @@ class DockLayout:
                             auto_hide=dd.get("auto_hide", False),
                             width=dd.get("width", DEFAULT_DOCK_WIDTH),
                             min_width=dd.get("min_width", MIN_DOCK_WIDTH))
+            pl = None
+            if "pane_layout" in d:
+                try:
+                    from workspace.pane import pane_layout_from_dict
+                    pl = pane_layout_from_dict(d["pane_layout"])
+                except Exception:
+                    pl = None
             return DockLayout(
                 name=d["name"],
                 anchored=[(_edge(a["edge"]), _dock(a["dock"])) for a in d["anchored"]],
@@ -593,6 +606,7 @@ class DockLayout:
                 z_order=d.get("z_order", []),
                 focused_panel=None,
                 next_id=d.get("next_id", 1),
+                pane_layout=pl,
             )
         except (KeyError, TypeError, ValueError):
             return DockLayout.default_layout()
@@ -685,7 +699,25 @@ class DockLayout:
         for fd in self.floating:
             fd.x = max(-fd.dock.width + min_visible, min(fd.x, viewport_w - min_visible))
             fd.y = max(0.0, min(fd.y, viewport_h - min_visible))
+        if self.pane_layout is not None:
+            self.pane_layout.clamp_panes(viewport_w, viewport_h)
         self._bump()
+
+    # -- Pane layout integration --
+
+    def ensure_pane_layout(self, viewport_w: float, viewport_h: float):
+        if self.pane_layout is None:
+            from workspace.pane import PaneLayout
+            self.pane_layout = PaneLayout.default_three_pane(viewport_w, viewport_h)
+            self._bump()
+
+    def panes(self):
+        return self.pane_layout
+
+    def panes_mut(self, f):
+        if self.pane_layout is not None:
+            f(self.pane_layout)
+            self._bump()
 
     def set_auto_hide(self, id: int, auto_hide: bool):
         d = self.dock(id)
