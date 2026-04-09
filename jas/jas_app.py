@@ -41,11 +41,13 @@ class MainWindow(QMainWindow):
         from workspace.dock import DockLayout
         from workspace.dock_panel import DockPanelWidget
         self.dock_layout = DockLayout.default_layout()
+        self.dock_layout.ensure_pane_layout(1200, 900)
         self.dock_panel = DockPanelWidget(self.dock_layout)
         self.dock_panel.setStyleSheet("background: #f0f0f0;")
         layout.addWidget(self.dock_panel)
 
         self.setCentralWidget(central)
+        self._apply_pane_widths()
 
         # Keyboard shortcuts
         QShortcut(QKeySequence("V"), self,
@@ -74,6 +76,38 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_Backspace), self, self._delete_selection)
         QShortcut(QKeySequence.StandardKey.Undo, self, self._undo)
         QShortcut(QKeySequence.StandardKey.Redo, self, self._redo)
+
+    def _apply_pane_widths(self):
+        """Sync toolbar/dock widget visibility and sizes from pane layout."""
+        pl = self.dock_layout.panes()
+        if not pl:
+            return
+        from workspace.pane import PaneKind
+        maximized = pl.canvas_maximized
+        toolbar_visible = pl.is_pane_visible(PaneKind.TOOLBAR) and not maximized
+        dock_visible = pl.is_pane_visible(PaneKind.DOCK) and not maximized
+        self.toolbar.setVisible(toolbar_visible)
+        if toolbar_visible:
+            tp = pl.pane_by_kind(PaneKind.TOOLBAR)
+            if tp:
+                self.toolbar.setFixedWidth(int(tp.width))
+        self.dock_panel.setVisible(dock_visible)
+        if dock_visible:
+            dp = pl.pane_by_kind(PaneKind.DOCK)
+            if dp:
+                self.dock_panel.setFixedWidth(int(dp.width))
+
+    def refresh_panes(self):
+        """Refresh pane layout and dock panel after a pane mutation."""
+        self._apply_pane_widths()
+        self.dock_panel.rebuild()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        s = event.size()
+        self.dock_layout.panes_mut(
+            lambda pl: pl.on_viewport_resize(s.width(), s.height()))
+        self._apply_pane_widths()
 
     def add_canvas(self, model: Model) -> None:
         """Create a new canvas tab for the given model."""

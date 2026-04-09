@@ -446,6 +446,28 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
      ignore (ws_factory#add_separator ())
    | _ -> ());
 
+  (* Pane toggles *)
+  (match dock_layout, refresh_dock with
+   | Some layout, Some refresh ->
+     let toggle_pane kind label =
+       ignore (window_factory#add_item label ~callback:(fun () ->
+         Dock.panes_mut layout (fun pl ->
+           if Pane.is_pane_visible pl kind then
+             Pane.hide_pane pl kind
+           else
+             Pane.show_pane pl kind);
+         refresh ()
+       ))
+     in
+     toggle_pane Pane.Toolbar "Toggle Toolbar";
+     toggle_pane Pane.Dock "Toggle Panels";
+     ignore (window_factory#add_item "Tile Panes" ~callback:(fun () ->
+       Dock.panes_mut layout (fun pl ->
+         Pane.tile_panes pl ~collapsed_override:None);
+       refresh ()
+     ))
+   | _ -> ());
+
   ignore (window_factory#add_separator ());
 
   (* Panel toggles *)
