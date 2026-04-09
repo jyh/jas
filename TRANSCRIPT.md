@@ -747,8 +747,10 @@ It should be possible to drag tabs within an panel group to reorder them.
 
 [...]
 
-Give the workspace config snapshot a name.
+Name the saved dock layouts. Save a separate app config that includes the name of its dock layout. 
 
 [...]
 
-Create a Workspace submenu in the Window menu, at the top.
+Create a Workspace submenu in the Window menu, place it at the top of the Window menu. The Workspace menu should contain the names of the saved dock layouts, with a check mark next to the dock layout that is currently in use. After the last dock layout, add a separator, and two menu items:
+- "Reset {name of the current dock layout}" (restores the current dock layout to what it was when the app started)
+- "New Workspace..." (brings up a dialogue box to prompt for the workspace name and initializes it with a copy of the current workspace)
