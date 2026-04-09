@@ -31,6 +31,7 @@ use crate::tools::polygon_tool::PolygonTool;
 use crate::tools::star_tool::StarTool;
 use crate::tools::rect_tool::RectTool;
 use crate::tools::rounded_rect_tool::RoundedRectTool;
+use crate::tools::lasso_tool::LassoTool;
 use crate::tools::selection_tool::SelectionTool;
 use crate::tools::type_tool::TypeTool;
 use crate::tools::type_on_path_tool::TypeOnPathTool;
@@ -67,6 +68,7 @@ impl TabState {
         tools.insert(ToolKind::Polygon, Box::new(PolygonTool::new()));
         tools.insert(ToolKind::Star, Box::new(StarTool::new()));
         tools.insert(ToolKind::Line, Box::new(LineTool::new()));
+        tools.insert(ToolKind::Lasso, Box::new(LassoTool::new()));
         Self { model, tools, clipboard: Vec::new() }
     }
 }
@@ -411,6 +413,7 @@ const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (2, 0, &[ToolKind::Type, ToolKind::TypeOnPath]),
     (2, 1, &[ToolKind::Line]),
     (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star]),
+    (3, 1, &[ToolKind::Lasso]),
 ];
 
 /// Long-press threshold in milliseconds.
@@ -498,6 +501,9 @@ fn toolbar_svg_icon(kind: ToolKind) -> String {
             let _c = c;
             r##"<g transform="scale(0.109375)"><polygon points="128 50.18 145.47 103.95 202.01 103.95 156.27 137.18 173.74 190.95 128 157.72 82.26 190.95 99.73 137.18 53.99 103.95 110.53 103.95 128 50.18" fill="none" stroke="rgb(204,204,204)" stroke-miterlimit="10" stroke-width="8"/></g>"##.to_string()
         },
+        // Lasso (freehand loop — placeholder icon)
+        ToolKind::Lasso => format!(
+            r#"<path d="M14,5 C6,5 3,10 3,14 C3,20 8,24 14,22 C20,20 22,16 20,12 C18,8 12,9 12,13 C12,16 16,17 17,15" fill="none" stroke="{c}" stroke-width="1.5" stroke-linecap="round"/>"#),
     }
 }
 

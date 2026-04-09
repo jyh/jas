@@ -40,6 +40,7 @@ pub enum ToolKind {
     RoundedRect,
     Polygon,
     Star,
+    Lasso,
 }
 
 impl ToolKind {
@@ -62,6 +63,7 @@ impl ToolKind {
             ToolKind::RoundedRect => "Rounded Rectangle",
             ToolKind::Polygon => "Polygon",
             ToolKind::Star => "Star",
+            ToolKind::Lasso => "Lasso (Q)",
         }
     }
 
@@ -117,6 +119,7 @@ impl ToolKind {
             ToolKind::DeleteAnchorPoint => Some("-"),
             ToolKind::AnchorPoint => Some("C"),
             ToolKind::PathEraser => Some("E"),
+            ToolKind::Lasso => Some("q"),
             ToolKind::Smooth => None,
             _ => None,
         }
@@ -176,7 +179,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tool_kind_has_seventeen_variants() {
+    fn tool_kind_has_eighteen_variants() {
         let all = [
             ToolKind::Selection,
             ToolKind::DirectSelection,
@@ -195,8 +198,9 @@ mod tests {
             ToolKind::RoundedRect,
             ToolKind::Polygon,
             ToolKind::Star,
+            ToolKind::Lasso,
         ];
-        assert_eq!(all.len(), 17);
+        assert_eq!(all.len(), 18);
     }
 
     #[test]
@@ -230,11 +234,12 @@ mod tests {
             ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::PathEraser,
             ToolKind::Smooth, ToolKind::Type, ToolKind::TypeOnPath, ToolKind::Line,
             ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
+            ToolKind::Lasso,
         ];
         for t in &all {
             set.insert(*t);
         }
-        assert_eq!(set.len(), 17);
+        assert_eq!(set.len(), 18);
     }
 
     #[test]
@@ -245,6 +250,7 @@ mod tests {
             ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::PathEraser,
             ToolKind::Smooth, ToolKind::Type, ToolKind::TypeOnPath, ToolKind::Line,
             ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star,
+            ToolKind::Lasso,
         ];
         for t in &all {
             assert!(!t.label().is_empty(), "{:?} has empty label", t);
@@ -408,7 +414,7 @@ mod tests {
 
     #[test]
     fn toolbar_grid_layout() {
-        // 4 rows x 2 columns, 7 slots total
+        // 4 rows x 2 columns, 8 slots total
         let slots: &[(usize, usize, &[ToolKind])] = &[
             (0, 0, &[ToolKind::Selection]),
             (0, 1, &[ToolKind::DirectSelection, ToolKind::GroupSelection]),
@@ -417,8 +423,9 @@ mod tests {
             (2, 0, &[ToolKind::Type, ToolKind::TypeOnPath]),
             (2, 1, &[ToolKind::Line]),
             (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star]),
+            (3, 1, &[ToolKind::Lasso]),
         ];
-        assert_eq!(slots.len(), 7);
+        assert_eq!(slots.len(), 8);
 
         // Verify max row is 3 (4 rows)
         let max_row = slots.iter().map(|(r, _, _)| *r).max().unwrap();
@@ -432,11 +439,11 @@ mod tests {
         let shared = slots.iter().filter(|(_, _, tools)| tools.len() > 1).count();
         assert_eq!(shared, 5);
 
-        // All 17 tools appear exactly once
+        // All 18 tools appear exactly once
         let mut all_tools: Vec<ToolKind> = slots.iter()
             .flat_map(|(_, _, tools)| tools.iter().copied())
             .collect();
         all_tools.sort_by_key(|t| format!("{:?}", t));
-        assert_eq!(all_tools.len(), 17);
+        assert_eq!(all_tools.len(), 18);
     }
 }
