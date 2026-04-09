@@ -697,3 +697,40 @@ What do you think of this plan? Give me your suggestions.
 
 Let’s write an algorithm that takes a path and converts it to the nearest geometric object, a triangle, square, rectangle, circle, ellipse, figure-8, etc. please give suggestions.
 
+# Lasso tool
+
+Let's implement a lasso tool. This is like the Select Tool, but the selection marquee is drawn freehand. This should go in a new slot in the toolbar. Invent a toolbar icon and mouse cursor. W will replace them later.
+
+# Dock
+
+Let's update the UI. First we define some terms.
+
+- A Dock is a container element that contains a list of Panel Group elements, from top to bottom.
+- A Panel Group is a tabbed container of Panel elements.
+  When multiple individual panels (like Layers, Color, and Stroke)
+  are stacked on top of each other within a single frame, they form
+  a Panel Group. The UI element at the top that allows you to switch
+  between them is the Tab Bar.
+- A Panel is a rectangular window that houses specific tools,
+  information, or controls related to a particular task. For example,
+  a color panel might contain the colors of the selected element. A
+  stroke panel could contain the stroke parameters of the selection.
+- Core Functions of a Dock
+   - Anchoring: It provides a "snapping" point. When you drag a panel near the edge of the screen, the dock grabs it and locks it into place.
+   - Management: It allows you to expand or collapse entire groups of tools at once.
+   - Persistent Location: It ensures that every time you open the app, your "Layers" or "Properties" are exactly where you left them.
+- Key Characteristics of a Panel
+   - Modular: It can often be moved, resized, or grouped with other panels.
+   - Persistent: Unlike a pop-up menu that disappears after you click something, a panel stays visible until you manually close or collapse it.
+   - Functional Focus: Each panel usually has a singular purpose. For example, the Layers Panel only handles layer stack management; the Color Panel only handles color selection.
+   - State-Aware: Panels often update in real-time based on what is selected in the main workspace.
+ - Common Types of Panels
+   - Floating Panels: These "hover" over the workspace and can be dragged anywhere on the screen.
+   - Docked Panels: These are "snapped" into a specific side of the application window (common in IDEs like VS Code or creative suites like Illustrator).
+   - Collapsible Panels: These can be shrunk down to just an icon or a title bar to save screen real estate.
+   - Contextual Panels: These automatically appear or change their content based on what the user is doing (often called "Properties" panels).
+
+The image in examples/ai.png shows a Dock to the right of the canvas, containing several panel groups, with sever panels, for example Color, Color Guide, Swatches in the
+first panel group, Stroke, Gradient, and Transparency in the second group and so forth. To the left of the dock is another dock that has been collapsed.
+
+We want to implement these. Do you understand the concepts? Please give suggestions.

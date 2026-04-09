@@ -78,6 +78,7 @@ struct AppState {
     tabs: Vec<TabState>,
     active_tab: usize,
     active_tool: ToolKind,
+    dock: super::dock::DockState,
 }
 
 impl AppState {
@@ -86,6 +87,7 @@ impl AppState {
             tabs: vec![],
             active_tab: 0,
             active_tool: ToolKind::Selection,
+            dock: super::dock::DockState::default_layout(),
         }
     }
 
@@ -1437,6 +1439,111 @@ pub fn App() -> Element {
         }
     };
 
+    // --- Dock panel groups ---
+    let dock_snapshot = app.borrow().dock.clone();
+    let dock_collapsed = dock_snapshot.collapsed;
+    let dock_width = if dock_collapsed { 36.0 } else { dock_snapshot.width };
+
+    let dock_groups: Vec<Result<VNode, RenderError>> = if dock_collapsed {
+        // Collapsed: show a vertical icon strip with panel labels
+        let act_dock = act.clone();
+        dock_snapshot.groups.iter().enumerate().flat_map(|(gi, group)| {
+            let act_inner = act_dock.clone();
+            group.panels.iter().enumerate().map(move |(pi, &kind)| {
+                let act = act_inner.clone();
+                let label = super::dock::DockState::panel_label(kind);
+                let first_char: String = label.chars().take(1).collect();
+                rsx! {
+                    div {
+                        key: "dock-icon-{gi}-{pi}",
+                        style: "width:28px; height:28px; margin:2px auto; background:#e0e0e0; border-radius:3px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:12px; font-weight:bold; color:#555;",
+                        title: "{label}",
+                        onclick: move |_| {
+                            (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                st.dock.collapsed = false;
+                                st.dock.set_active_panel(gi, pi);
+                            }));
+                        },
+                        "{first_char}"
+                    }
+                }
+            })
+        }).collect()
+    } else {
+        // Expanded: render panel groups with tab bars
+        let act_dock = act.clone();
+        dock_snapshot.groups.iter().enumerate().map(|(gi, group)| {
+            let act_tabs = act_dock.clone();
+            let act_collapse = act_dock.clone();
+            let group_collapsed = group.collapsed;
+
+            // Tab bar buttons
+            let tab_nodes: Vec<Result<VNode, RenderError>> = group.panels.iter().enumerate().map(|(pi, &kind)| {
+                let act = act_tabs.clone();
+                let label = super::dock::DockState::panel_label(kind);
+                let is_active = pi == group.active;
+                let bg = if is_active { "#f0f0f0" } else { "#d8d8d8" };
+                let border_bottom = if is_active { "2px solid #f0f0f0" } else { "2px solid #bbb" };
+                let font_weight = if is_active { "bold" } else { "normal" };
+                rsx! {
+                    div {
+                        key: "dock-tab-{gi}-{pi}",
+                        style: "padding:3px 8px; cursor:pointer; font-size:11px; font-weight:{font_weight}; background:{bg}; border-bottom:{border_bottom}; user-select:none;",
+                        onclick: move |_| {
+                            (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                st.dock.set_active_panel(gi, pi);
+                            }));
+                        },
+                        "{label}"
+                    }
+                }
+            }).collect();
+
+            // Collapse chevron
+            let chevron = if group_collapsed { "\u{25BC}" } else { "\u{25B2}" };
+
+            // Active panel placeholder body
+            let body_label = group.active_panel()
+                .map(|k| super::dock::DockState::panel_label(k))
+                .unwrap_or("");
+
+            rsx! {
+                div {
+                    key: "dock-group-{gi}",
+                    style: "border-bottom:1px solid #ccc;",
+
+                    // Tab bar
+                    div {
+                        style: "display:flex; background:#d8d8d8; border-bottom:1px solid #bbb; align-items:center;",
+                        for tab in tab_nodes {
+                            {tab}
+                        }
+                        div {
+                            style: "margin-left:auto; padding:3px 6px; cursor:pointer; font-size:9px; color:#888; user-select:none;",
+                            onclick: move |_| {
+                                (act_collapse.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                    st.dock.toggle_group_collapsed(gi);
+                                }));
+                            },
+                            "{chevron}"
+                        }
+                    }
+
+                    // Panel body (placeholder)
+                    if !group_collapsed {
+                        div {
+                            style: "padding:12px; min-height:60px; color:#999; font-size:12px;",
+                            "{body_label}"
+                        }
+                    }
+                }
+            }
+        }).collect()
+    };
+
+    // Dock collapse toggle
+    let dock_toggle_label = if dock_collapsed { "\u{25C0}" } else { "\u{25B6}" };
+
     rsx! {
         style { r#"
             #main {{ height: 100%; }}
@@ -1491,17 +1598,53 @@ pub fn App() -> Element {
                     }
                 }
 
-                // Canvas area
+                // Content area (canvas + dock)
                 div {
-                    style: "flex:1; position:relative; overflow:hidden; background:#808080;",
+                    style: "flex:1; display:flex; overflow:hidden;",
+
+                    // Canvas
+                    div {
+                        style: "flex:1; position:relative; overflow:hidden; background:#808080;",
+                        if has_tabs {
+                            canvas {
+                                id: "jas-canvas",
+                                style: "display:block; width:100%; height:100%; cursor:{canvas_cursor};",
+                                onmousedown: on_mousedown,
+                                onmousemove: on_mousemove,
+                                onmouseup: on_mouseup,
+                                ondoubleclick: on_dblclick,
+                            }
+                        }
+                    }
+
+                    // Dock
                     if has_tabs {
-                        canvas {
-                            id: "jas-canvas",
-                            style: "display:block; width:100%; height:100%; cursor:{canvas_cursor};",
-                            onmousedown: on_mousedown,
-                            onmousemove: on_mousemove,
-                            onmouseup: on_mouseup,
-                            ondoubleclick: on_dblclick,
+                        div {
+                            style: "width:{dock_width}px; background:#f0f0f0; border-left:1px solid #ccc; display:flex; flex-direction:column; flex-shrink:0; overflow-y:auto;",
+                            onmousedown: move |evt: Event<MouseData>| {
+                                evt.stop_propagation();
+                            },
+
+                            // Collapse/expand toggle
+                            {
+                                let act = act.clone();
+                                rsx! {
+                                    div {
+                                        style: "padding:4px; cursor:pointer; text-align:center; border-bottom:1px solid #ddd; font-size:10px; color:#888; user-select:none;",
+                                        onclick: move |_| {
+                                            (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                                                st.dock.toggle_dock_collapsed();
+                                            }));
+                                        },
+                                        "{dock_toggle_label}"
+                                    }
+                                }
+                            }
+
+                            // Panel groups
+                            for group in dock_groups {
+                                {group}
+                            }
                         }
                     }
                 }
