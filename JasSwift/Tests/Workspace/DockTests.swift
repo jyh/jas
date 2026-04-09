@@ -934,6 +934,28 @@ private func rightDockId(_ l: DockLayout) -> DockId {
     #expect(l2.panes()!.snaps.count == 10)
 }
 
+@Test func serdeVersionMismatchFallsBackToDefault() {
+    var l = DockLayout.defaultLayout()
+    l.ensurePaneLayout(viewportW: 1000, viewportH: 700)
+    let json = l.toJson()!
+    // Tamper with version to simulate future format
+    let tampered = json.replacingOccurrences(of: "\"version\":1", with: "\"version\":999")
+    let l2 = DockLayout.fromJson(tampered)
+    // Should fall back to default (version mismatch)
+    #expect(l2.version == layoutVersion)
+    #expect(l2.panes() == nil)
+}
+
+@Test func serdeOldJsonWithoutVersionFallsBackToDefault() {
+    // Simulate old JSON that has no version field
+    let l = DockLayout.defaultLayout()
+    let json = l.toJson()!
+    let tampered = json.replacingOccurrences(of: "\"version\":1,", with: "")
+    let l2 = DockLayout.fromJson(tampered)
+    // Old layout without version field should fall back to default
+    #expect(l2.version == layoutVersion)
+}
+
 @Test func clampFloatingDocksAlsoClampsPanes() {
     var l = DockLayout.defaultLayout()
     l.ensurePaneLayout(viewportW: 1000, viewportH: 700)

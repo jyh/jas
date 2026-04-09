@@ -126,7 +126,10 @@ let make_dock id groups width = {
 (* DockLayout                                                         *)
 (* ------------------------------------------------------------------ *)
 
+let layout_version = 1
+
 type dock_layout = {
+  mutable version : int;
   mutable name : string;
   mutable anchored : (dock_edge * dock) list;
   mutable floating : floating_dock list;
@@ -144,6 +147,7 @@ type dock_layout = {
 (* ------------------------------------------------------------------ *)
 
 let named name = {
+  version = layout_version;
   name;
   anchored = [(Right, make_dock 0 [[Layers]; [Color; Stroke; Properties]] default_dock_width)];
   floating = [];
@@ -568,6 +572,7 @@ let panels_for_selection ~has_selection ~has_text:_ =
 let reset_to_default l =
   let n = l.name in
   let fresh = named n in
+  l.version <- fresh.version;
   l.name <- fresh.name;
   l.anchored <- fresh.anchored;
   l.floating <- fresh.floating;
@@ -756,6 +761,7 @@ let pane_layout_of_json (j : Yojson.Safe.t) : Pane.pane_layout =
 
 let layout_to_json l : Yojson.Safe.t =
   let base = [
+    "version", `Int l.version;
     "name", `String l.name;
     "anchored", `List (List.map (fun (e, d) ->
       `Assoc ["edge", `String (edge_to_json e); "dock", dock_to_json d]) l.anchored);
@@ -773,7 +779,8 @@ let layout_to_json l : Yojson.Safe.t =
 
 let layout_of_json (j : Yojson.Safe.t) =
   let open Yojson.Safe.Util in
-  { name = j |> member "name" |> to_string;
+  { version = (try j |> member "version" |> to_int with _ -> 0);
+    name = j |> member "name" |> to_string;
     anchored = j |> member "anchored" |> to_list |> List.map (fun a ->
       (edge_of_json (a |> member "edge" |> to_string),
        dock_of_json (a |> member "dock")));
@@ -803,7 +810,9 @@ let load_layout name =
   try
     let file = layout_file_for name in
     let json = Yojson.Safe.from_file file in
-    layout_of_json json
+    let l = layout_of_json json in
+    if l.version <> layout_version then named name
+    else l
   with _ -> named name
 
 let save_layout_if_needed l =
@@ -912,11 +921,20 @@ let clamp_floating_docks l ~viewport_w ~viewport_h =
 (* ------------------------------------------------------------------ *)
 
 let ensure_pane_layout l ~viewport_w ~viewport_h =
+  (match l.pane_layout with
+   | Some _ -> ()
+   | None ->
+     l.pane_layout <- Some (Pane.default_three_pane ~viewport_w ~viewport_h);
+     bump l);
+  (* Sync PaneConfig for panes deserialized from old format *)
   match l.pane_layout with
-  | Some _ -> ()
-  | None ->
-    l.pane_layout <- Some (Pane.default_three_pane ~viewport_w ~viewport_h);
-    bump l
+  | Some pl ->
+    Array.iter (fun (p : Pane.pane) ->
+      let expected = Pane.config_for_kind p.kind in
+      if p.config.label <> expected.label then
+        p.config <- expected
+    ) pl.panes
+  | None -> ()
 
 let panes l = l.pane_layout
 

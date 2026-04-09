@@ -21,6 +21,10 @@ public let defaultFloatingWidth: Double = 220.0
 public let snapDistance: Double = 20.0
 public let defaultLayoutName = "Default"
 
+/// Current layout format version. Saved layouts with a different version
+/// are rejected and replaced with the default layout.
+public let layoutVersion: Int = 1
+
 // MARK: - Core Types
 
 public struct DockId: Hashable, Codable {
@@ -168,6 +172,7 @@ public struct AppConfig: Codable {
 // MARK: - DockLayout
 
 public struct DockLayout: Codable {
+    public var version: Int
     public var name: String
     public var anchored: [(DockEdge, Dock)]
     public var floating: [FloatingDock]
@@ -181,12 +186,13 @@ public struct DockLayout: Codable {
     private var savedGeneration: UInt64 = 0
 
     private enum CodingKeys: String, CodingKey {
-        case name, anchored, floating, hiddenPanels, zOrder, focusedPanel, paneLayout, nextId
+        case version, name, anchored, floating, hiddenPanels, zOrder, focusedPanel, paneLayout, nextId
     }
 
     // Custom Codable for tuple array
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 0
         name = try container.decode(String.self, forKey: .name)
         let anchoredPairs = try container.decode([AnchoredEntry].self, forKey: .anchored)
         anchored = anchoredPairs.map { ($0.edge, $0.dock) }
@@ -202,6 +208,7 @@ public struct DockLayout: Codable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(version, forKey: .version)
         try container.encode(name, forKey: .name)
         let anchoredPairs = anchored.map { AnchoredEntry(edge: $0.0, dock: $0.1) }
         try container.encode(anchoredPairs, forKey: .anchored)
@@ -226,6 +233,7 @@ public struct DockLayout: Codable {
 
     public static func named(_ name: String) -> DockLayout {
         DockLayout(
+            version: layoutVersion,
             name: name,
             anchored: [(.right, Dock(id: DockId(0), groups: [
                 PanelGroup(panels: [.layers]),
@@ -242,9 +250,10 @@ public struct DockLayout: Codable {
         )
     }
 
-    private init(name: String, anchored: [(DockEdge, Dock)], floating: [FloatingDock],
+    private init(version: Int, name: String, anchored: [(DockEdge, Dock)], floating: [FloatingDock],
                  hiddenPanels: [PanelKind], zOrder: [DockId], focusedPanel: PanelAddr?,
                  paneLayout: PaneLayout?, nextId: Int, generation: UInt64, savedGeneration: UInt64) {
+        self.version = version
         self.name = name
         self.anchored = anchored
         self.floating = floating
@@ -612,7 +621,8 @@ public struct DockLayout: Codable {
 
     public static func fromJson(_ json: String) -> DockLayout {
         guard let data = json.data(using: .utf8),
-              let layout = try? JSONDecoder().decode(DockLayout.self, from: data) else {
+              let layout = try? JSONDecoder().decode(DockLayout.self, from: data),
+              layout.version == layoutVersion else {
             return defaultLayout()
         }
         return layout
@@ -692,11 +702,21 @@ public struct DockLayout: Codable {
 
     // MARK: - Pane Layout Integration
 
-    /// Create the default pane layout if absent.
+    /// Create the default pane layout if absent, and repair configs
+    /// for layouts deserialized from old JSON without config fields.
     public mutating func ensurePaneLayout(viewportW: Double, viewportH: Double) {
         if paneLayout == nil {
             paneLayout = PaneLayout.defaultThreePane(viewportW: viewportW, viewportH: viewportH)
             bump()
+        }
+        // Sync PaneConfig for panes deserialized from old format
+        if paneLayout != nil {
+            for i in paneLayout!.panes.indices {
+                let expected = PaneConfig.forKind(paneLayout!.panes[i].kind)
+                if paneLayout!.panes[i].config.label != expected.label {
+                    paneLayout!.panes[i].config = expected
+                }
+            }
         }
     }
 
