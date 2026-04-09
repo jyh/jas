@@ -176,3 +176,69 @@ public struct PanelGroupView: View {
         .buttonStyle(.plain)
     }
 }
+
+// MARK: - Floating Dock View
+
+public struct FloatingDockView: View {
+    @Binding var dockLayout: DockLayout
+    let floatingDock: FloatingDock
+    @State private var dragOffset: CGSize = .zero
+    @State private var isDragging = false
+
+    public var body: some View {
+        let fid = floatingDock.dock.id
+        let x = floatingDock.x + (isDragging ? Double(dragOffset.width) : 0)
+        let y = floatingDock.y + (isDragging ? Double(dragOffset.height) : 0)
+        let w = floatingDock.dock.width
+        let zIdx = dockLayout.zIndexFor(fid)
+
+        VStack(spacing: 0) {
+            // Title bar
+            HStack {
+                Spacer()
+            }
+            .frame(height: 20)
+            .background(SwiftUI.Color(nsColor: NSColor(white: 0.81, alpha: 1.0)))
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        isDragging = true
+                        dragOffset = value.translation
+                    }
+                    .onEnded { value in
+                        isDragging = false
+                        dragOffset = .zero
+                        dockLayout.setFloatingPosition(fid,
+                            x: floatingDock.x + Double(value.translation.width),
+                            y: floatingDock.y + Double(value.translation.height))
+                        dockLayout.saveIfNeeded()
+                    }
+            )
+            .onTapGesture(count: 2) {
+                dockLayout.redock(fid)
+                dockLayout.saveIfNeeded()
+            }
+
+            // Panel groups
+            ForEach(Array(floatingDock.dock.groups.enumerated()), id: \.offset) { gi, group in
+                PanelGroupView(
+                    dockLayout: $dockLayout,
+                    dockId: fid,
+                    groupIdx: gi,
+                    group: group
+                )
+            }
+        }
+        .frame(width: w)
+        .background(SwiftUI.Color(nsColor: NSColor(white: 0.94, alpha: 1.0)))
+        .cornerRadius(4)
+        .shadow(color: .black.opacity(0.2), radius: 6, x: 2, y: 2)
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(SwiftUI.Color.gray.opacity(0.4), lineWidth: 1))
+        .position(x: x + w / 2, y: y + 50)
+        .zIndex(Double(900 + zIdx))
+        .onTapGesture {
+            dockLayout.bringToFront(fid)
+            dockLayout.saveIfNeeded()
+        }
+    }
+}
