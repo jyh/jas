@@ -1,6 +1,6 @@
 //! Shape recognition: classify a freehand path as the nearest geometric
-//! primitive (line, triangle, rectangle, rounded rectangle, circle,
-//! ellipse, filled-arrow outline, or lemniscate).
+//! primitive (line, scribble, triangle, rectangle, rounded rectangle,
+//! circle, ellipse, filled-arrow outline, or lemniscate).
 //!
 //! The recognizer is a pure function on `&[(f64, f64)]`. It does not
 //! depend on `Element`, `Model`, or any UI state — `recognize_path` and
@@ -13,8 +13,8 @@
 //!   - Accepts both raw pencil polylines and Bezier paths (via flatten).
 
 use crate::geometry::element::{
-    flatten_path_commands, CircleElem, CommonProps, Element, EllipseElem, Fill, LineElem, PathCommand,
-    PathElem, PolygonElem, RectElem, Stroke,
+    flatten_path_commands, CircleElem, CommonProps, Element, EllipseElem, Fill, LineElem,
+    PathCommand, PathElem, PolygonElem, PolylineElem, RectElem, Stroke,
 };
 
 pub type Pt = (f64, f64);
@@ -22,6 +22,22 @@ pub type Pt = (f64, f64);
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
+
+/// Tag-only classification of a recognized shape. Returned by
+/// [`recognize_element`] alongside the replacement `Element`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ShapeKind {
+    Line,
+    Triangle,
+    Rectangle,
+    Square,
+    RoundRect,
+    Circle,
+    Ellipse,
+    Arrow,
+    Lemniscate,
+    Scribble,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecognizedShape {
@@ -71,6 +87,34 @@ pub enum RecognizedShape {
         a: f64,
         horizontal: bool,
     },
+    /// Zigzag scribble: an open polyline of straight segments with at
+    /// least a few back-and-forth direction reversals. Vertices are the
+    /// RDP-simplified turning points.
+    Scribble {
+        points: Vec<Pt>,
+    },
+}
+
+impl RecognizedShape {
+    pub fn kind(&self) -> ShapeKind {
+        match self {
+            RecognizedShape::Line { .. } => ShapeKind::Line,
+            RecognizedShape::Triangle { .. } => ShapeKind::Triangle,
+            RecognizedShape::Rectangle { w, h, .. } => {
+                if (w - h).abs() < 1e-9 {
+                    ShapeKind::Square
+                } else {
+                    ShapeKind::Rectangle
+                }
+            }
+            RecognizedShape::RoundRect { .. } => ShapeKind::RoundRect,
+            RecognizedShape::Circle { .. } => ShapeKind::Circle,
+            RecognizedShape::Ellipse { .. } => ShapeKind::Ellipse,
+            RecognizedShape::Arrow { .. } => ShapeKind::Arrow,
+            RecognizedShape::Lemniscate { .. } => ShapeKind::Lemniscate,
+            RecognizedShape::Scribble { .. } => ShapeKind::Scribble,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +175,16 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
     if let Some((a, b, res)) = fit_line(&pts) {
         if res <= tol_abs {
             candidates.push((res, RecognizedShape::Line { a, b }));
+        }
+    }
+
+    // Scribble (open paths only). A true zigzag has many direction
+    // reversals, which random noise on a straight stroke does not.
+    if !closed {
+        if let Some((segs, res)) = fit_scribble(&pts, diag) {
+            if res <= tol_abs {
+                candidates.push((res, RecognizedShape::Scribble { points: segs }));
+            }
         }
     }
 
@@ -235,6 +289,36 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
 pub fn recognize_path(d: &[PathCommand], cfg: &RecognizeConfig) -> Option<RecognizedShape> {
     let pts = flatten_path_commands(d);
     recognize(&pts, cfg)
+}
+
+/// Try to recognize an `Element` as a cleaner geometric shape, returning
+/// the shape kind and replacement element if successful. Returns `None`
+/// (do nothing) when:
+///   - The element is already a clean primitive (Line, Rect, Circle,
+///     Ellipse, Polygon, Text, TextPath, Group, Layer).
+///   - The element cannot be interpreted as a drawable path (Text, Group, …).
+///
+/// Only `Path` and `Polyline` elements are candidates for recognition.
+pub fn recognize_element(element: &Element, cfg: &RecognizeConfig) -> Option<(ShapeKind, Element)> {
+    let pts: Vec<Pt> = match element {
+        // Path (Beziers / freehand): flatten to polyline then recognize.
+        Element::Path(p) => flatten_path_commands(&p.d),
+        // Polyline (raw pencil stroke): use points directly.
+        Element::Polyline(p) => p.points.clone(),
+        // Everything else is already a clean shape or not path-like.
+        Element::Line(_)
+        | Element::Rect(_)
+        | Element::Circle(_)
+        | Element::Ellipse(_)
+        | Element::Polygon(_)
+        | Element::Text(_)
+        | Element::TextPath(_)
+        | Element::Group(_)
+        | Element::Layer(_) => return None,
+    };
+    let shape = recognize(&pts, cfg)?;
+    let kind = shape.kind();
+    Some((kind, recognized_to_element(&shape, element)))
 }
 
 /// Extract `(fill, stroke, common)` from any element variant that has them.
@@ -342,6 +426,12 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
                 common,
             })
         }
+        RecognizedShape::Scribble { ref points } => Element::Polyline(PolylineElem {
+            points: points.clone(),
+            fill: None,
+            stroke,
+            common,
+        }),
         RecognizedShape::Lemniscate { center, a, horizontal } => {
             // Sample the Gerono parametrization densely as a closed
             // polyline emitted as a Path of MoveTo + LineTo commands.
@@ -950,6 +1040,66 @@ fn fit_lemniscate(pts: &[Pt]) -> Option<(f64, f64, f64, bool, f64)> {
     }
     let rms = (sq_sum / pts.len() as f64).sqrt();
     Some((cx, cy, a, horizontal, rms))
+}
+
+/// Scribble (zigzag) fit. Uses RDP to simplify the path into straight
+/// segments. A scribble must have:
+///   1. at least 5 vertices (≥4 segments after simplification),
+///   2. at least 2 turn-direction sign changes (back-and-forth),
+///   3. path arc length substantially exceeds a straight-line span.
+///
+/// Returns `(simplified_vertices, rms_residual)`.
+fn fit_scribble(pts: &[Pt], diag: f64) -> Option<(Vec<Pt>, f64)> {
+    if pts.len() < 6 {
+        return None;
+    }
+    // Path must meander: arc length at least 1.5× the bbox diagonal.
+    let total_arc = arc_length(pts);
+    if total_arc < 1.5 * diag {
+        return None;
+    }
+    let eps = 0.05 * diag;
+    let simplified = rdp(pts, eps);
+    if simplified.len() < 5 {
+        return None;
+    }
+    // Count turn-direction sign changes to verify zigzag pattern.
+    let mut sign_changes = 0;
+    let mut last_sign = 0.0f64;
+    for i in 1..simplified.len() - 1 {
+        let prev = simplified[i - 1];
+        let curr = simplified[i];
+        let next = simplified[i + 1];
+        let v1 = (curr.0 - prev.0, curr.1 - prev.1);
+        let v2 = (next.0 - curr.0, next.1 - curr.1);
+        let cross = v1.0 * v2.1 - v1.1 * v2.0;
+        if cross.abs() < 1e-9 {
+            continue;
+        }
+        let sign = cross.signum();
+        if last_sign != 0.0 && sign != last_sign {
+            sign_changes += 1;
+        }
+        last_sign = sign;
+    }
+    if sign_changes < 2 {
+        return None;
+    }
+    // Residual: RMS distance from each input point to the nearest
+    // segment of the simplified polyline.
+    let mut sq_sum = 0.0;
+    for &p in pts {
+        let mut min_d = f64::INFINITY;
+        for w in simplified.windows(2) {
+            let d = point_to_segment_dist(p, w[0], w[1]);
+            if d < min_d {
+                min_d = d;
+            }
+        }
+        sq_sum += min_d * min_d;
+    }
+    let rms = (sq_sum / pts.len() as f64).sqrt();
+    Some((simplified, rms))
 }
 
 /// Triangle fit by the "max-pair + farthest perpendicular" heuristic.
@@ -1731,6 +1881,177 @@ mod tests {
                 assert!((p.points[3].1 - 0.0).abs() < 1e-9);
             }
             other => panic!("expected Polygon, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Scribble (zigzag) tests
+    // -----------------------------------------------------------------------
+
+    /// Generate a horizontal zigzag: alternating up/down strokes along x.
+    fn sample_zigzag(
+        x_start: f64,
+        y_center: f64,
+        x_step: f64,
+        y_amplitude: f64,
+        n_zags: usize,
+        pts_per_seg: usize,
+    ) -> Vec<Pt> {
+        let mut vertices = Vec::with_capacity(n_zags + 1);
+        for i in 0..=n_zags {
+            let x = x_start + x_step * i as f64;
+            let y = if i % 2 == 0 {
+                y_center - y_amplitude
+            } else {
+                y_center + y_amplitude
+            };
+            vertices.push((x, y));
+        }
+        // Densely sample between vertices.
+        let mut pts = Vec::new();
+        for w in vertices.windows(2) {
+            let seg = sample_line(w[0], w[1], pts_per_seg);
+            pts.extend_from_slice(&seg[..seg.len() - 1]);
+        }
+        pts.push(*vertices.last().unwrap());
+        pts
+    }
+
+    #[test]
+    fn recognize_clean_zigzag_scribble() {
+        // 8 zags, clear zigzag pattern.
+        let pts = sample_zigzag(0.0, 50.0, 20.0, 30.0, 8, 10);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Scribble { points }) => {
+                // Simplified polyline should have roughly n_zags+1 vertices.
+                assert!(points.len() >= 5, "expected ≥5 vertices, got {}", points.len());
+            }
+            other => panic!("expected Scribble, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognize_noisy_zigzag_scribble() {
+        let clean = sample_zigzag(0.0, 50.0, 15.0, 25.0, 10, 10);
+        let pts = jitter(&clean, 7, 0.02 * bbox_diag(&clean));
+        let cfg = RecognizeConfig::default();
+        assert!(matches!(recognize(&pts, &cfg), Some(RecognizedShape::Scribble { .. })));
+    }
+
+    #[test]
+    fn straight_line_not_scribble() {
+        let pts = sample_line((0.0, 0.0), (200.0, 0.0), 64);
+        let cfg = RecognizeConfig::default();
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Scribble { .. }) => {
+                panic!("straight line should not be classified as Scribble");
+            }
+            Some(RecognizedShape::Line { .. }) => {}
+            other => panic!("expected Line, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn diagonal_line_not_scribble() {
+        let pts = sample_line((0.0, 0.0), (100.0, 80.0), 64);
+        let cfg = RecognizeConfig::default();
+        assert!(matches!(recognize(&pts, &cfg), Some(RecognizedShape::Line { .. })));
+    }
+
+    #[test]
+    fn recognized_to_element_scribble_emits_polyline() {
+        let template = Element::Path(PathElem {
+            d: vec![],
+            fill: None,
+            stroke: None,
+            common: CommonProps::default(),
+        });
+        let shape = RecognizedShape::Scribble {
+            points: vec![(0.0, 0.0), (10.0, 20.0), (20.0, 0.0), (30.0, 20.0), (40.0, 0.0)],
+        };
+        match recognized_to_element(&shape, &template) {
+            Element::Polyline(p) => {
+                assert_eq!(p.points.len(), 5);
+            }
+            other => panic!("expected Polyline, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // recognize_element: skip already-clean shapes
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn recognize_element_skips_line() {
+        let elem = Element::Line(LineElem {
+            x1: 0.0, y1: 0.0, x2: 100.0, y2: 0.0,
+            stroke: None, common: CommonProps::default(),
+        });
+        assert!(recognize_element(&elem, &RecognizeConfig::default()).is_none());
+    }
+
+    #[test]
+    fn recognize_element_skips_rect() {
+        let elem = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 60.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+        });
+        assert!(recognize_element(&elem, &RecognizeConfig::default()).is_none());
+    }
+
+    #[test]
+    fn recognize_element_skips_circle() {
+        let elem = Element::Circle(CircleElem {
+            cx: 50.0, cy: 50.0, r: 30.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+        });
+        assert!(recognize_element(&elem, &RecognizeConfig::default()).is_none());
+    }
+
+    #[test]
+    fn recognize_element_skips_polygon() {
+        let elem = Element::Polygon(PolygonElem {
+            points: vec![(0.0, 0.0), (100.0, 0.0), (50.0, 86.6)],
+            fill: None, stroke: None, common: CommonProps::default(),
+        });
+        assert!(recognize_element(&elem, &RecognizeConfig::default()).is_none());
+    }
+
+    #[test]
+    fn recognize_element_converts_path_circle() {
+        // A circle drawn as a Path should be recognized.
+        let pts = sample_circle(50.0, 50.0, 30.0, 64);
+        let d: Vec<PathCommand> = pts.iter().enumerate().map(|(i, &(x, y))| {
+            if i == 0 { PathCommand::MoveTo { x, y } }
+            else { PathCommand::LineTo { x, y } }
+        }).collect();
+        let elem = Element::Path(PathElem {
+            d, fill: None, stroke: None, common: CommonProps::default(),
+        });
+        match recognize_element(&elem, &RecognizeConfig::default()) {
+            Some((kind, Element::Circle(_))) => {
+                assert_eq!(kind, ShapeKind::Circle);
+            }
+            other => panic!("expected (Circle, Circle), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recognize_element_square_returns_square_kind() {
+        let pts = sample_rect(0.0, 0.0, 80.0, 80.0, 16);
+        let d: Vec<PathCommand> = pts.iter().enumerate().map(|(i, &(x, y))| {
+            if i == 0 { PathCommand::MoveTo { x, y } }
+            else { PathCommand::LineTo { x, y } }
+        }).collect();
+        let elem = Element::Path(PathElem {
+            d, fill: None, stroke: None, common: CommonProps::default(),
+        });
+        match recognize_element(&elem, &RecognizeConfig::default()) {
+            Some((kind, Element::Rect(_))) => {
+                assert_eq!(kind, ShapeKind::Square);
+            }
+            other => panic!("expected (Square, Rect), got {other:?}"),
         }
     }
 }
