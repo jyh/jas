@@ -587,30 +587,99 @@ let config_dir () =
   dir
 
 let layout_file_for name =
-  Filename.concat (config_dir ()) (name ^ ".layout")
+  Filename.concat (config_dir ()) (name ^ ".json")
 
 let config_file () =
-  Filename.concat (config_dir ()) "app_config.dat"
+  Filename.concat (config_dir ()) "app_config.json"
+
+(* -- JSON serialization -- *)
+
+let edge_to_json = function Left -> "Left" | Right -> "Right" | Bottom -> "Bottom"
+let edge_of_json = function "Left" -> Left | "Right" -> Right | _ -> Bottom
+
+let kind_to_json = function
+  | Layers -> "Layers" | Color -> "Color" | Stroke -> "Stroke" | Properties -> "Properties"
+let kind_of_json = function
+  | "Layers" -> Layers | "Color" -> Color | "Stroke" -> Stroke | _ -> Properties
+
+let panel_group_to_json g : Yojson.Safe.t =
+  `Assoc [
+    "panels", `List (Array.to_list (Array.map (fun k -> `String (kind_to_json k)) g.panels));
+    "active", `Int g.active;
+    "collapsed", `Bool g.collapsed;
+    "height", (match g.height with None -> `Null | Some h -> `Float h);
+  ]
+
+let panel_group_of_json (j : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  let panels = j |> member "panels" |> to_list |> List.map (fun s -> kind_of_json (to_string s)) in
+  { panels = Array.of_list panels;
+    active = j |> member "active" |> to_int;
+    collapsed = j |> member "collapsed" |> to_bool;
+    height = (match j |> member "height" with `Null -> None | h -> Some (to_float h)); }
+
+let dock_to_json d : Yojson.Safe.t =
+  `Assoc [
+    "id", `Int d.id;
+    "groups", `List (Array.to_list (Array.map panel_group_to_json d.groups));
+    "collapsed", `Bool d.collapsed;
+    "auto_hide", `Bool d.auto_hide;
+    "width", `Float d.width;
+  ]
+
+let dock_of_json (j : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  { id = j |> member "id" |> to_int;
+    groups = Array.of_list (j |> member "groups" |> to_list |> List.map panel_group_of_json);
+    collapsed = j |> member "collapsed" |> to_bool;
+    auto_hide = j |> member "auto_hide" |> to_bool;
+    width = j |> member "width" |> to_float;
+    min_width = min_dock_width; }
+
+let layout_to_json l : Yojson.Safe.t =
+  `Assoc [
+    "name", `String l.name;
+    "anchored", `List (List.map (fun (e, d) ->
+      `Assoc ["edge", `String (edge_to_json e); "dock", dock_to_json d]) l.anchored);
+    "floating", `List (List.map (fun fd ->
+      `Assoc ["dock", dock_to_json fd.dock; "x", `Float fd.x; "y", `Float fd.y]) l.floating);
+    "hidden_panels", `List (List.map (fun k -> `String (kind_to_json k)) l.hidden_panels);
+    "z_order", `List (List.map (fun id -> `Int id) l.z_order);
+    "next_id", `Int l.next_id;
+  ]
+
+let layout_of_json (j : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  { name = j |> member "name" |> to_string;
+    anchored = j |> member "anchored" |> to_list |> List.map (fun a ->
+      (edge_of_json (a |> member "edge" |> to_string),
+       dock_of_json (a |> member "dock")));
+    floating = j |> member "floating" |> to_list |> List.map (fun f ->
+      { dock = dock_of_json (f |> member "dock");
+        x = f |> member "x" |> to_float;
+        y = f |> member "y" |> to_float });
+    hidden_panels = j |> member "hidden_panels" |> to_list |> List.map (fun s -> kind_of_json (to_string s));
+    z_order = j |> member "z_order" |> to_list |> List.map to_int;
+    focused_panel = None;
+    next_id = j |> member "next_id" |> to_int;
+    generation = 0;
+    saved_generation = 0; }
+
+(* -- File I/O -- *)
 
 let save_layout l =
   try
+    let json = layout_to_json l in
     let file = layout_file_for l.name in
-    let oc = open_out_bin file in
-    Marshal.to_channel oc (l.name, l.anchored, l.floating, l.hidden_panels,
-                           l.z_order, l.next_id) [];
-    close_out oc;
+    Yojson.Safe.to_file file json;
     l.saved_generation <- l.generation
   with _ -> ()
 
 let load_layout name =
   try
     let file = layout_file_for name in
-    let ic = open_in_bin file in
-    let (n, anch, float, hidden, zord, nid) = Marshal.from_channel ic in
-    close_in ic;
-    { name = n; anchored = anch; floating = float; hidden_panels = hidden;
-      z_order = zord; focused_panel = None; next_id = nid;
-      generation = 0; saved_generation = 0 }
+    let json = Yojson.Safe.from_file file in
+    layout_of_json json
   with _ -> named name
 
 let save_layout_if_needed l =
@@ -618,19 +687,19 @@ let save_layout_if_needed l =
 
 let save_app_config config =
   try
-    let file = config_file () in
-    let oc = open_out_bin file in
-    Marshal.to_channel oc (config.active_layout, config.saved_layouts) [];
-    close_out oc
+    let json : Yojson.Safe.t = `Assoc [
+      "active_layout", `String config.active_layout;
+      "saved_layouts", `List (List.map (fun s -> `String s) config.saved_layouts);
+    ] in
+    Yojson.Safe.to_file (config_file ()) json
   with _ -> ()
 
 let load_app_config () =
   try
-    let file = config_file () in
-    let ic = open_in_bin file in
-    let (active, saved) = Marshal.from_channel ic in
-    close_in ic;
-    { active_layout = active; saved_layouts = saved }
+    let json = Yojson.Safe.from_file (config_file ()) in
+    let open Yojson.Safe.Util in
+    { active_layout = json |> member "active_layout" |> to_string;
+      saved_layouts = json |> member "saved_layouts" |> to_list |> List.map to_string }
   with _ -> default_app_config ()
 
 (* ------------------------------------------------------------------ *)
