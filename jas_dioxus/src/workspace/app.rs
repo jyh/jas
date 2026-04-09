@@ -1569,10 +1569,14 @@ pub fn App() -> Element {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         let dock_collapsed = st.dock_layout.anchored_dock(super::dock::DockEdge::Right)
                             .map_or(false, |d| d.collapsed);
-                        let collapsed_w = if dock_collapsed { Some(36.0) } else { None };
                         if let Some(ref mut pl) = st.dock_layout.pane_layout {
                             pl.canvas_maximized = false;
-                            pl.tile_panes(collapsed_w);
+                            let override_id = if dock_collapsed {
+                                pl.pane_by_kind(super::dock::PaneKind::Dock).map(|p| (p.id, 36.0))
+                            } else {
+                                None
+                            };
+                            pl.tile_panes(override_id);
                         }
                     }));
                 }
@@ -2304,6 +2308,10 @@ pub fn App() -> Element {
         .and_then(|pl| pl.pane_by_kind(PaneKind::Toolbar))
         .map(|p| p.id)
         .unwrap_or(PaneId(0));
+    let toolbar_config = pane_snapshot.as_ref()
+        .and_then(|pl| pl.pane_by_kind(PaneKind::Toolbar))
+        .map(|p| p.config.clone())
+        .unwrap_or_else(|| super::dock::PaneConfig::for_kind(PaneKind::Toolbar));
 
     let (cx, cy, cw, ch, canvas_z) = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Canvas))
@@ -2320,6 +2328,10 @@ pub fn App() -> Element {
         .and_then(|pl| pl.pane_by_kind(PaneKind::Canvas))
         .map(|p| p.id)
         .unwrap_or(PaneId(1));
+    let canvas_config = pane_snapshot.as_ref()
+        .and_then(|pl| pl.pane_by_kind(PaneKind::Canvas))
+        .map(|p| p.config.clone())
+        .unwrap_or_else(|| super::dock::PaneConfig::for_kind(PaneKind::Canvas));
     let canvas_border = if canvas_maximized { "none" } else { "1px solid #555" };
 
     let collapsed_dock_width = 36.0;
@@ -2341,6 +2353,10 @@ pub fn App() -> Element {
         .and_then(|pl| pl.pane_by_kind(PaneKind::Dock))
         .map(|p| p.id)
         .unwrap_or(PaneId(2));
+    let dock_config = pane_snapshot.as_ref()
+        .and_then(|pl| pl.pane_by_kind(PaneKind::Dock))
+        .map(|p| p.config.clone())
+        .unwrap_or_else(|| super::dock::PaneConfig::for_kind(PaneKind::Dock));
 
     // Collect shared border positions for rendering drag handles
     // Each entry: (snap_idx, x, y, w, h, cursor_css)
@@ -2356,8 +2372,8 @@ pub fn App() -> Element {
             if !is_vertical && !is_horizontal { continue; }
             let pane_a = match pl.pane(snap.pane) { Some(p) => p, None => continue };
             let pane_b = match pl.pane(other_id) { Some(p) => p, None => continue };
-            // Skip borders involving the toolbar (fixed width, not draggable)
-            if pane_a.kind == PaneKind::Toolbar || pane_b.kind == PaneKind::Toolbar { continue; }
+            // Skip borders involving fixed-width panes (not draggable)
+            if pane_a.config.fixed_width || pane_b.config.fixed_width { continue; }
             if is_vertical {
                 let bx = pane_a.x + pane_a.width;
                 let by = pane_a.y.max(pane_b.y);
@@ -2470,9 +2486,9 @@ pub fn App() -> Element {
                                         pl.resize_pane(pid, start_w + dx, start_h);
                                     }
                                     EdgeSide::Left => {
-                                        let new_w = (start_w - dx).max(PaneLayout::min_size(
-                                            pl.pane(pid).map(|p| p.kind).unwrap_or(PaneKind::Canvas)
-                                        ).0);
+                                        let new_w = (start_w - dx).max(
+                                            pl.pane(pid).map(|p| p.config.min_width).unwrap_or(200.0)
+                                        );
                                         let actual_dx = start_w - new_w;
                                         if let Some(p) = pl.pane_mut(pid) {
                                             p.x = start_px + actual_dx;
@@ -2483,9 +2499,9 @@ pub fn App() -> Element {
                                         pl.resize_pane(pid, start_w, start_h + dy);
                                     }
                                     EdgeSide::Top => {
-                                        let new_h = (start_h - dy).max(PaneLayout::min_size(
-                                            pl.pane(pid).map(|p| p.kind).unwrap_or(PaneKind::Canvas)
-                                        ).1);
+                                        let new_h = (start_h - dy).max(
+                                            pl.pane(pid).map(|p| p.config.min_height).unwrap_or(200.0)
+                                        );
                                         let actual_dy = start_h - new_h;
                                         if let Some(p) = pl.pane_mut(pid) {
                                             p.y = start_py + actual_dy;
@@ -2579,21 +2595,25 @@ pub fn App() -> Element {
                         let coords = evt.data().page_coordinates();
                         pane_drag.set(Some((toolbar_pane_id, coords.x - tx, coords.y - ty)));
                     },
-                    div { style: "flex:1; font-size:10px; color:{THEME_TEXT_DIM}; overflow:hidden; white-space:nowrap;", "Tools" }
-                    {
-                        let act = act.clone();
-                        rsx! {
-                            div {
-                                style: "cursor:pointer; font-size:12px; color:{THEME_TEXT_BUTTON}; padding:0 2px;",
-                                onmousedown: move |evt: Event<MouseData>| {
-                                    evt.stop_propagation();
-                                    (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                        if let Some(ref mut pl) = st.dock_layout.pane_layout {
-                                            pl.hide_pane(PaneKind::Toolbar);
-                                        }
-                                    }));
-                                },
-                                "\u{00D7}" // ×
+                    { let lbl = toolbar_config.label.clone(); rsx! {
+                        div { style: "flex:1; font-size:10px; color:{THEME_TEXT_DIM}; overflow:hidden; white-space:nowrap;", "{lbl}" }
+                    }}
+                    if toolbar_config.closable {
+                        {
+                            let act = act.clone();
+                            rsx! {
+                                div {
+                                    style: "cursor:pointer; font-size:12px; color:{THEME_TEXT_BUTTON}; padding:0 2px;",
+                                    onmousedown: move |evt: Event<MouseData>| {
+                                        evt.stop_propagation();
+                                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                                pl.hide_pane(PaneKind::Toolbar);
+                                            }
+                                        }));
+                                    },
+                                    "\u{00D7}" // ×
+                                }
                             }
                         }
                     }
@@ -2643,7 +2663,9 @@ pub fn App() -> Element {
                         },
                         ondoubleclick: {
                             let act = act.clone();
+                            let maximizable = canvas_config.maximizable;
                             move |evt: Event<MouseData>| {
+                                if !maximizable { return; }
                                 evt.stop_propagation();
                                 pane_drag.set(None);
                                 (act.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -2653,7 +2675,9 @@ pub fn App() -> Element {
                                 }));
                             }
                         },
-                        div { style: "flex:1; font-size:10px; color:{THEME_TEXT}; overflow:hidden; white-space:nowrap;", "Canvas" }
+                        { let lbl = canvas_config.label.clone(); rsx! {
+                            div { style: "flex:1; font-size:10px; color:{THEME_TEXT}; overflow:hidden; white-space:nowrap;", "{lbl}" }
+                        }}
                     }
                 }
 
@@ -2725,40 +2749,46 @@ pub fn App() -> Element {
                         let coords = evt.data().page_coordinates();
                         pane_drag.set(Some((dock_pane_id, coords.x - dx, coords.y - dy)));
                     },
-                    div { style: "flex:1; font-size:10px; color:{THEME_TEXT_DIM}; overflow:hidden; white-space:nowrap;", "Panels" }
-                    // Collapse chevron
-                    {
-                        let act = act.clone();
-                        let chevron = if dock_collapsed { "\u{00BB}" } else { "\u{00AB}" }; // » or «
-                        rsx! {
-                            div {
-                                style: "cursor:pointer; font-size:12px; color:{THEME_TEXT_BUTTON}; padding:0 4px;",
-                                title: "Collapse",
-                                onmousedown: move |evt: Event<MouseData>| {
-                                    evt.stop_propagation();
-                                    (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                        st.dock_layout.toggle_dock_collapsed(dock_id);
-                                    }));
-                                },
-                                "{chevron}"
+                    { let lbl = dock_config.label.clone(); rsx! {
+                        div { style: "flex:1; font-size:10px; color:{THEME_TEXT_DIM}; overflow:hidden; white-space:nowrap;", "{lbl}" }
+                    }}
+                    // Collapse chevron (if config.collapsible)
+                    if dock_config.collapsible {
+                        {
+                            let act = act.clone();
+                            let chevron = if dock_collapsed { "\u{00BB}" } else { "\u{00AB}" }; // >> or <<
+                            rsx! {
+                                div {
+                                    style: "cursor:pointer; font-size:12px; color:{THEME_TEXT_BUTTON}; padding:0 4px;",
+                                    title: "Collapse",
+                                    onmousedown: move |evt: Event<MouseData>| {
+                                        evt.stop_propagation();
+                                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                            st.dock_layout.toggle_dock_collapsed(dock_id);
+                                        }));
+                                    },
+                                    "{chevron}"
+                                }
                             }
                         }
                     }
-                    // Close button
-                    {
-                        let act = act.clone();
-                        rsx! {
-                            div {
-                                style: "cursor:pointer; font-size:12px; color:{THEME_TEXT_BUTTON}; padding:0 2px;",
-                                onmousedown: move |evt: Event<MouseData>| {
-                                    evt.stop_propagation();
-                                    (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                        if let Some(ref mut pl) = st.dock_layout.pane_layout {
-                                            pl.hide_pane(PaneKind::Dock);
-                                        }
-                                    }));
-                                },
-                                "\u{00D7}" // ×
+                    // Close button (if config.closable)
+                    if dock_config.closable {
+                        {
+                            let act = act.clone();
+                            rsx! {
+                                div {
+                                    style: "cursor:pointer; font-size:12px; color:{THEME_TEXT_BUTTON}; padding:0 2px;",
+                                    onmousedown: move |evt: Event<MouseData>| {
+                                        evt.stop_propagation();
+                                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                                pl.hide_pane(PaneKind::Dock);
+                                            }
+                                        }));
+                                    },
+                                    "\u{00D7}" // x
+                                }
                             }
                         }
                     }
