@@ -1567,6 +1567,74 @@ impl PaneLayout {
             p.y = p.y.clamp(-p.height + MIN_PANE_VISIBLE, viewport_h - MIN_PANE_VISIBLE);
         }
     }
+
+    /// Re-establish snap constraints between panes whose edges are touching
+    /// but have no existing snap. Also snaps pane edges touching window edges.
+    /// Call on load to repair layouts saved with missing snaps.
+    pub fn repair_snaps(&mut self, viewport_w: f64, viewport_h: f64) {
+        let tolerance = SNAP_DISTANCE;
+        let pane_copies: Vec<Pane> = self.panes.clone();
+
+        for a in &pane_copies {
+            // Check against window edges
+            for &edge in &[EdgeSide::Left, EdgeSide::Right, EdgeSide::Top, EdgeSide::Bottom] {
+                let coord = Self::pane_edge_coord(a, edge);
+                let win_coord = Self::window_edge_coord(edge, viewport_w, viewport_h);
+                if (coord - win_coord).abs() <= tolerance {
+                    let exists = self.snaps.iter().any(|s|
+                        s.pane == a.id && s.edge == edge && s.target == SnapTarget::Window(edge)
+                    );
+                    if !exists {
+                        self.snaps.push(SnapConstraint {
+                            pane: a.id,
+                            edge,
+                            target: SnapTarget::Window(edge),
+                        });
+                    }
+                }
+            }
+
+            // Check against other panes (canonical Right->Left / Bottom->Top)
+            for b in &pane_copies {
+                if a.id == b.id { continue; }
+
+                // Vertical: a.Right near b.Left
+                if (Self::pane_edge_coord(a, EdgeSide::Right) - Self::pane_edge_coord(b, EdgeSide::Left)).abs() <= tolerance {
+                    // Check perpendicular overlap
+                    if a.y < b.y + b.height && a.y + a.height > b.y {
+                        let exists = self.snaps.iter().any(|s|
+                            s.pane == a.id && s.edge == EdgeSide::Right
+                            && s.target == SnapTarget::Pane(b.id, EdgeSide::Left)
+                        );
+                        if !exists {
+                            self.snaps.push(SnapConstraint {
+                                pane: a.id,
+                                edge: EdgeSide::Right,
+                                target: SnapTarget::Pane(b.id, EdgeSide::Left),
+                            });
+                        }
+                    }
+                }
+
+                // Horizontal: a.Bottom near b.Top
+                if (Self::pane_edge_coord(a, EdgeSide::Bottom) - Self::pane_edge_coord(b, EdgeSide::Top)).abs() <= tolerance {
+                    if a.x < b.x + b.width && a.x + a.width > b.x {
+                        let exists = self.snaps.iter().any(|s|
+                            s.pane == a.id && s.edge == EdgeSide::Bottom
+                            && s.target == SnapTarget::Pane(b.id, EdgeSide::Top)
+                        );
+                        if !exists {
+                            self.snaps.push(SnapConstraint {
+                                pane: a.id,
+                                edge: EdgeSide::Bottom,
+                                target: SnapTarget::Pane(b.id, EdgeSide::Top),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
