@@ -2257,6 +2257,22 @@ pub fn App() -> Element {
         .map(|p| p.id)
         .unwrap_or(PaneId(2));
 
+    // Track which pane edges have shared borders (skip resize handles for those)
+    let snapped_edges: Vec<(PaneId, EdgeSide)> = pane_snapshot.as_ref().map(|pl| {
+        let mut edges = Vec::new();
+        for snap in &pl.snaps {
+            if let SnapTarget::Pane(other_id, other_edge) = snap.target {
+                edges.push((snap.pane, snap.edge));
+                edges.push((other_id, other_edge));
+            }
+        }
+        edges
+    }).unwrap_or_default();
+    let toolbar_right_snapped = snapped_edges.iter().any(|&(pid, e)| pid == toolbar_pane_id && e == EdgeSide::Right);
+    let canvas_left_snapped = snapped_edges.iter().any(|&(pid, e)| pid == canvas_pane_id && e == EdgeSide::Left);
+    let canvas_right_snapped = snapped_edges.iter().any(|&(pid, e)| pid == canvas_pane_id && e == EdgeSide::Right);
+    let dock_left_snapped = snapped_edges.iter().any(|&(pid, e)| pid == dock_pane_id && e == EdgeSide::Left);
+
     // Collect shared border positions for rendering drag handles
     // Each entry: (snap_idx, x, y, w, h, cursor_css)
     let shared_borders: Vec<(usize, f64, f64, f64, f64, String)> = pane_snapshot.as_ref().map(|pl| {
@@ -2483,14 +2499,16 @@ pub fn App() -> Element {
                     }
                 }
 
-                // Right edge resize handle
-                div {
-                    style: "position:absolute; top:0; right:0; width:4px; height:100%; cursor:ew-resize;",
-                    onmousedown: move |evt: Event<MouseData>| {
-                        evt.stop_propagation();
-                        let coords = evt.data().page_coordinates();
-                        pane_resize.set(Some((toolbar_pane_id, EdgeSide::Right, coords.x, coords.y, tw, th, tx, ty)));
-                    },
+                // Right edge resize handle (skip if shared border exists)
+                if !toolbar_right_snapped {
+                    div {
+                        style: "position:absolute; top:0; right:0; width:4px; height:100%; cursor:ew-resize;",
+                        onmousedown: move |evt: Event<MouseData>| {
+                            evt.stop_propagation();
+                            let coords = evt.data().page_coordinates();
+                            pane_resize.set(Some((toolbar_pane_id, EdgeSide::Right, coords.x, coords.y, tw, th, tx, ty)));
+                        },
+                    }
                 }
             }
 
@@ -2556,22 +2574,26 @@ pub fn App() -> Element {
                     }
                 }
 
-                // Edge resize handles
-                div {
-                    style: "position:absolute; top:0; left:0; width:4px; height:100%; cursor:ew-resize;",
-                    onmousedown: move |evt: Event<MouseData>| {
-                        evt.stop_propagation();
-                        let coords = evt.data().page_coordinates();
-                        pane_resize.set(Some((canvas_pane_id, EdgeSide::Left, coords.x, coords.y, cw, ch, cx, cy)));
-                    },
+                // Edge resize handles (skip edges with shared borders)
+                if !canvas_left_snapped {
+                    div {
+                        style: "position:absolute; top:0; left:0; width:4px; height:100%; cursor:ew-resize;",
+                        onmousedown: move |evt: Event<MouseData>| {
+                            evt.stop_propagation();
+                            let coords = evt.data().page_coordinates();
+                            pane_resize.set(Some((canvas_pane_id, EdgeSide::Left, coords.x, coords.y, cw, ch, cx, cy)));
+                        },
+                    }
                 }
-                div {
-                    style: "position:absolute; top:0; right:0; width:4px; height:100%; cursor:ew-resize;",
-                    onmousedown: move |evt: Event<MouseData>| {
-                        evt.stop_propagation();
-                        let coords = evt.data().page_coordinates();
-                        pane_resize.set(Some((canvas_pane_id, EdgeSide::Right, coords.x, coords.y, cw, ch, cx, cy)));
-                    },
+                if !canvas_right_snapped {
+                    div {
+                        style: "position:absolute; top:0; right:0; width:4px; height:100%; cursor:ew-resize;",
+                        onmousedown: move |evt: Event<MouseData>| {
+                            evt.stop_propagation();
+                            let coords = evt.data().page_coordinates();
+                            pane_resize.set(Some((canvas_pane_id, EdgeSide::Right, coords.x, coords.y, cw, ch, cx, cy)));
+                        },
+                    }
                 }
             }
 
@@ -2624,14 +2646,16 @@ pub fn App() -> Element {
                     }
                 }
 
-                // Left edge resize handle
-                div {
-                    style: "position:absolute; top:0; left:0; width:4px; height:100%; cursor:ew-resize;",
-                    onmousedown: move |evt: Event<MouseData>| {
-                        evt.stop_propagation();
-                        let coords = evt.data().page_coordinates();
-                        pane_resize.set(Some((dock_pane_id, EdgeSide::Left, coords.x, coords.y, dw, dh, dx, dy)));
-                    },
+                // Left edge resize handle (skip if shared border exists)
+                if !dock_left_snapped {
+                    div {
+                        style: "position:absolute; top:0; left:0; width:4px; height:100%; cursor:ew-resize;",
+                        onmousedown: move |evt: Event<MouseData>| {
+                            evt.stop_propagation();
+                            let coords = evt.data().page_coordinates();
+                            pane_resize.set(Some((dock_pane_id, EdgeSide::Left, coords.x, coords.y, dw, dh, dx, dy)));
+                        },
+                    }
                 }
             }
 
