@@ -1575,11 +1575,19 @@ pub fn App() -> Element {
                         ondragend: move |_| {
                             if !was_dropped() {
                                 let (x, y) = last_drag_pos();
+                                let cur_tgt = drop_target_sig();
                                 (act_dragend.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                    st.dock_layout.detach_panel(PanelAddr {
+                                    let addr = PanelAddr {
                                         group: GroupAddr { dock_id: did, group_idx: gi },
                                         panel_idx: pi,
-                                    }, x, y);
+                                    };
+                                    if let Some(DropTarget::Edge(edge)) = cur_tgt {
+                                        if let Some(fid) = st.dock_layout.detach_panel(addr, x, y) {
+                                            st.dock_layout.snap_to_edge(fid, edge);
+                                        }
+                                    } else {
+                                        st.dock_layout.detach_panel(addr, x, y);
+                                    }
                                 }));
                             }
                             drag_source.set(None);
@@ -1726,12 +1734,18 @@ pub fn App() -> Element {
                             ondragend: move |_| {
                                 if !was_dropped() {
                                     let (x, y) = last_drag_pos();
+                                    let cur_tgt = drop_target_sig();
                                     let act_detach = act_collapse.clone();
                                     (act_detach.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                        st.dock_layout.detach_group(GroupAddr {
-                                            dock_id: did,
-                                            group_idx: gi,
-                                        }, x, y);
+                                        let addr = GroupAddr { dock_id: did, group_idx: gi };
+                                        if let Some(DropTarget::Edge(edge)) = cur_tgt {
+                                            // Detach then snap to edge
+                                            if let Some(fid) = st.dock_layout.detach_group(addr, x, y) {
+                                                st.dock_layout.snap_to_edge(fid, edge);
+                                            }
+                                        } else {
+                                            st.dock_layout.detach_group(addr, x, y);
+                                        }
                                     }));
                                 }
                                 drag_source.set(None);
@@ -1825,6 +1839,7 @@ pub fn App() -> Element {
         let fy = fd.y;
         let fw = fd.dock.width;
         let act_front = act.clone();
+        let act_redock = act.clone();
         let fgroups = build_dock_groups(fid, &fd.dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos);
         let z = 900 + layout_snapshot.z_order.iter().position(|&id| id == fid).unwrap_or(0);
 
@@ -1839,13 +1854,20 @@ pub fn App() -> Element {
                     }));
                 },
 
-                // Title bar for repositioning
+                // Title bar: drag to reposition, double-click to redock
                 div {
                     style: "height:20px; background:#d0d0d0; cursor:grab; display:flex; align-items:center; padding:0 6px; font-size:10px; color:#666; user-select:none;",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
                         let coords = evt.data().page_coordinates();
                         title_drag.set(Some((fid, coords.x - fx, coords.y - fy)));
+                    },
+                    ondoubleclick: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        title_drag.set(None);
+                        (act_redock.borrow_mut())(Box::new(move |st: &mut AppState| {
+                            st.dock_layout.redock(fid);
+                        }));
                     },
                 }
 
@@ -1855,6 +1877,34 @@ pub fn App() -> Element {
             }
         }
     }).collect();
+
+    // Left dock
+    let left_dock = layout_snapshot.anchored_dock(DockEdge::Left);
+    let left_dock_groups: Vec<Result<VNode, RenderError>> = match left_dock {
+        Some(dock) if !dock.groups.is_empty() => {
+            build_dock_groups(dock.id, &dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos)
+        }
+        _ => vec![],
+    };
+    let left_dock_width = left_dock.map_or(0.0, |d| if d.collapsed { 36.0 } else { d.width });
+    let has_left_dock = left_dock.map_or(false, |d| !d.groups.is_empty());
+
+    // Bottom dock
+    let bottom_dock = layout_snapshot.anchored_dock(DockEdge::Bottom);
+    let bottom_dock_groups: Vec<Result<VNode, RenderError>> = match bottom_dock {
+        Some(dock) if !dock.groups.is_empty() => {
+            build_dock_groups(dock.id, &dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos)
+        }
+        _ => vec![],
+    };
+    let bottom_dock_height = bottom_dock.map_or(0.0, |d| if d.collapsed { 28.0 } else { 150.0 });
+    let has_bottom_dock = bottom_dock.map_or(false, |d| !d.groups.is_empty());
+
+    // Snap indicator: show a highlight on the edge being targeted during drag
+    let snap_edge = match drop_target_sig() {
+        Some(DropTarget::Edge(edge)) => Some(edge),
+        _ => None,
+    };
 
     // Dock collapse toggle
     let dock_toggle_label = if dock_collapsed { "\u{25C0}" } else { "\u{25B6}" };
@@ -1888,9 +1938,20 @@ pub fn App() -> Element {
                 title_drag.set(None);
             },
             ondragover: move |evt: Event<DragData>| {
-                // Track drag position for empty-space drops (don't prevent_default — not a drop target)
+                // Track drag position and detect edge snapping
                 let coords = evt.data().page_coordinates();
                 last_drag_pos.set((coords.x, coords.y));
+                // Check if near a screen edge for snap-to-dock
+                #[cfg(target_arch = "wasm32")]
+                {
+                    if let Some(win) = web_sys::window() {
+                        let vw = win.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
+                        let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
+                        if let Some(edge) = DockLayout::is_near_edge(coords.x, coords.y, vw, vh) {
+                            drop_target_sig.set(Some(DropTarget::Edge(edge)));
+                        }
+                    }
+                }
             },
             style: "display:flex; height:100vh; outline:none; font-family:sans-serif;",
 
@@ -1932,13 +1993,27 @@ pub fn App() -> Element {
                     }
                 }
 
-                // Content area (canvas + dock)
+                // Content area (left dock + canvas + right dock)
                 div {
-                    style: "flex:1; display:flex; overflow:hidden;",
+                    style: "flex:1; display:flex; flex-direction:column; overflow:hidden;",
 
-                    // Canvas
                     div {
-                        style: "flex:1; position:relative; overflow:hidden; background:#808080;",
+                        style: "flex:1; display:flex; overflow:hidden;",
+
+                        // Left dock
+                        if has_left_dock {
+                            div {
+                                style: "width:{left_dock_width}px; background:#f0f0f0; border-right:1px solid #ccc; display:flex; flex-direction:column; flex-shrink:0; overflow-y:auto;",
+                                onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                                for group in left_dock_groups {
+                                    {group}
+                                }
+                            }
+                        }
+
+                        // Canvas
+                        div {
+                            style: "flex:1; position:relative; overflow:hidden; background:#808080;",
                         if has_tabs {
                             canvas {
                                 id: "jas-canvas",
@@ -1981,7 +2056,19 @@ pub fn App() -> Element {
                             }
                         }
                     }
-                }
+                    } // close inner flex row (left + canvas + right)
+
+                    // Bottom dock
+                    if has_bottom_dock {
+                        div {
+                            style: "height:{bottom_dock_height}px; background:#f0f0f0; border-top:1px solid #ccc; display:flex; flex-direction:row; flex-shrink:0; overflow-x:auto;",
+                            onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                            for group in bottom_dock_groups {
+                                {group}
+                            }
+                        }
+                    }
+                } // close content area column
             }
 
             // Floating docks (position:fixed overlays)
