@@ -46,9 +46,7 @@ let () =
   let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 toolbar_fixed in
   toolbar_ref := Some toolbar;
 
-  (* Dock panel *)
-  let dock_layout = Jas.Dock.default_layout () in
-  let _refresh_dock = Jas.Dock_panel.create dock_box dock_layout in
+  ignore dock_box; (* Dock panel is created inside create_main_window *)
 
   (* Update active model/canvas when switching tabs *)
   notebook#connect#switch_page ~callback:(fun page_num ->
