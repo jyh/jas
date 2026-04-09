@@ -4,7 +4,7 @@ import Testing
 // MARK: - Tool enum tests
 
 @Test func toolEnumHasTenCases() {
-    #expect(Tool.allCases.count == 17)
+    #expect(Tool.allCases.count == 18)
 }
 
 @Test func toolEnumContainsAllExpected() {
@@ -22,8 +22,11 @@ import Testing
     #expect(tools.contains(.line))
     #expect(tools.contains(.rect))
     #expect(tools.contains(.roundedRect))
+    #expect(tools.contains(.pathEraser))
+    #expect(tools.contains(.smooth))
     #expect(tools.contains(.polygon))
     #expect(tools.contains(.star))
+    #expect(tools.contains(.lasso))
 }
 
 @Test func toolRawValuesUnique() {
@@ -34,7 +37,7 @@ import Testing
 @Test func toolConformsToHashable() {
     var set = Set<Tool>()
     for tool in Tool.allCases { set.insert(tool) }
-    #expect(set.count == 17)
+    #expect(set.count == 18)
 }
 
 // MARK: - Tool constants

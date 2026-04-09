@@ -19,7 +19,7 @@ class ToolbarTest(absltest.TestCase):
 
     def test_tool_enum_values(self):
         tools = list(Tool)
-        self.assertEqual(len(tools), 17)
+        self.assertEqual(len(tools), 18)
         self.assertIn(Tool.SELECTION, tools)
         self.assertIn(Tool.DIRECT_SELECTION, tools)
         self.assertIn(Tool.GROUP_SELECTION, tools)
@@ -37,6 +37,7 @@ class ToolbarTest(absltest.TestCase):
         self.assertIn(Tool.ROUNDED_RECT, tools)
         self.assertIn(Tool.POLYGON, tools)
         self.assertIn(Tool.STAR, tools)
+        self.assertIn(Tool.LASSO, tools)
 
     def test_tool_selection_value(self):
         self.assertEqual(Tool.SELECTION.value, 1)

@@ -9,7 +9,7 @@ import AppKit
 
 @Test func toolEnumCases() {
     let tools = Tool.allCases
-    #expect(tools.count == 17)
+    #expect(tools.count == 18)
     #expect(tools.contains(.selection))
     #expect(tools.contains(.directSelection))
     #expect(tools.contains(.groupSelection))
@@ -18,6 +18,8 @@ import AppKit
     #expect(tools.contains(.deleteAnchorPoint))
     #expect(tools.contains(.anchorPoint))
     #expect(tools.contains(.pencil))
+    #expect(tools.contains(.pathEraser))
+    #expect(tools.contains(.smooth))
     #expect(tools.contains(.typeTool))
     #expect(tools.contains(.typeOnPath))
     #expect(tools.contains(.line))
@@ -25,6 +27,7 @@ import AppKit
     #expect(tools.contains(.roundedRect))
     #expect(tools.contains(.polygon))
     #expect(tools.contains(.star))
+    #expect(tools.contains(.lasso))
 }
 
 @Test func contentViewInitializes() {

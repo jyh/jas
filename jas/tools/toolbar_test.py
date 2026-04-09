@@ -23,7 +23,7 @@ class ToolEnumTest(absltest.TestCase):
     """Tests for the Tool enum."""
 
     def test_tool_count(self):
-        self.assertEqual(len(Tool), 17)
+        self.assertEqual(len(Tool), 18)
 
     def test_all_tools_present(self):
         expected = {
@@ -31,7 +31,7 @@ class ToolEnumTest(absltest.TestCase):
             "PEN", "ADD_ANCHOR_POINT", "DELETE_ANCHOR_POINT", "ANCHOR_POINT",
             "PENCIL", "PATH_ERASER", "SMOOTH",
             "TYPE", "TYPE_ON_PATH",
-            "LINE", "RECT", "ROUNDED_RECT", "POLYGON", "STAR",
+            "LINE", "RECT", "ROUNDED_RECT", "POLYGON", "STAR", "LASSO",
         }
         actual = {t.name for t in Tool}
         self.assertEqual(actual, expected)
