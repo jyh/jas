@@ -1360,13 +1360,13 @@ pub fn App() -> Element {
     let tab_buttons: Vec<Result<VNode, RenderError>> = tab_info.iter().map(|(i, name, is_active)| {
         let idx = *i;
         let act = act.clone();
-        let bg = if *is_active { "#fff" } else { "#e0e0e0" };
-        let border_bottom = if *is_active { "2px solid #fff" } else { "2px solid #ccc" };
+        let bg = if *is_active { "#4a4a4a" } else { "#353535" };
+        let border_bottom = if *is_active { "2px solid #4a4a4a" } else { "2px solid #555" };
         let display_name = name.clone();
         rsx! {
             div {
                 key: "tab-{idx}",
-                style: "display:inline-flex; align-items:center; padding:4px 8px; margin-right:1px; background:{bg}; border:1px solid #ccc; border-bottom:{border_bottom}; cursor:pointer; font-size:12px; user-select:none;",
+                style: "display:inline-flex; align-items:center; padding:4px 8px; margin-right:1px; background:{bg}; border:1px solid #555; border-bottom:{border_bottom}; cursor:pointer; font-size:12px; color:#ccc; user-select:none;",
                 onclick: move |_| {
                     let act = act.clone();
                     (act.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -1658,7 +1658,7 @@ pub fn App() -> Element {
                 if label == "---" {
                     vec![rsx! {
                         div {
-                            style: "height:1px; background:#ddd; margin:4px 8px;",
+                            style: "height:1px; background:#555; margin:4px 8px;",
                         }
                     }]
                 } else if cmd == "workspace_submenu" {
@@ -1681,13 +1681,13 @@ pub fn App() -> Element {
 
                                 div {
                                     class: "jas-menu-item",
-                                    style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                                    style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; color:#ccc; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
                                     span { "{label}" }
                                 }
 
                                 if sub_open {
                                     div {
-                                        style: "position:absolute; left:100%; top:0; background:#fff; border:1px solid #ccc; box-shadow:2px 2px 8px rgba(0,0,0,0.15); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
+                                        style: "position:absolute; left:100%; top:0; background:#3c3c3c; border:1px solid #555; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
                                         onmouseenter: move |_| { workspace_submenu_open.set(true); },
 
                                         // List saved layouts with check mark
@@ -1702,7 +1702,7 @@ pub fn App() -> Element {
                                                 rsx! {
                                                     div {
                                                         class: "jas-menu-item",
-                                                        style: "padding:4px 16px; cursor:pointer; font-size:13px; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                                                        style: "padding:4px 16px; cursor:pointer; font-size:13px; color:#ccc; white-space:nowrap; border-radius:3px; margin:0 4px;",
                                                         onmousedown: move |evt: Event<MouseData>| {
                                                             evt.stop_propagation();
                                                             let n = name_clone.clone();
@@ -1728,7 +1728,7 @@ pub fn App() -> Element {
                                             rsx! {
                                                 div {
                                                     class: "jas-menu-item",
-                                                    style: "padding:4px 16px; cursor:pointer; font-size:13px; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                                                    style: "padding:4px 16px; cursor:pointer; font-size:13px; color:#ccc; white-space:nowrap; border-radius:3px; margin:0 4px;",
                                                     onmousedown: move |evt: Event<MouseData>| {
                                                         evt.stop_propagation();
                                                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
@@ -1748,7 +1748,7 @@ pub fn App() -> Element {
                                             rsx! {
                                                 div {
                                                     class: "jas-menu-item",
-                                                    style: "padding:4px 16px; cursor:pointer; font-size:13px; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                                                    style: "padding:4px 16px; cursor:pointer; font-size:13px; color:#ccc; white-space:nowrap; border-radius:3px; margin:0 4px;",
                                                     onmousedown: move |evt: Event<MouseData>| {
                                                         evt.stop_propagation();
                                                         new_workspace_dialog.set(Some(String::new()));
@@ -1790,7 +1790,7 @@ pub fn App() -> Element {
                     vec![rsx! {
                         div {
                             class: "jas-menu-item",
-                            style: "padding:4px 24px 4px 8px; cursor:pointer; font-size:13px; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                            style: "padding:4px 24px 4px 8px; cursor:pointer; font-size:13px; color:#ccc; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
                             onmousedown: move |evt: Event<MouseData>| {
                                 evt.stop_propagation();
                                 dispatch(&cmd);
@@ -1798,7 +1798,7 @@ pub fn App() -> Element {
                             },
                             span { "{display_label}" }
                             span {
-                                style: "color:#999; margin-left:24px; font-size:12px;",
+                                style: "color:#777; margin-left:24px; font-size:12px;",
                                 "{shortcut}"
                             }
                         }
@@ -1809,14 +1809,14 @@ pub fn App() -> Element {
             Vec::new()
         };
 
-        let bg = if is_open { "#d0d0d0" } else { "transparent" };
+        let bg = if is_open { "#505050" } else { "transparent" };
         rsx! {
             div {
                 key: "menu-{mi}",
                 style: "position:relative; display:inline-block;",
                 div {
                     class: "jas-menu-title",
-                    style: "padding:3px 8px; cursor:pointer; font-size:13px; user-select:none; border-radius:3px; background:{bg};",
+                    style: "padding:3px 8px; cursor:pointer; font-size:13px; color:#ccc; user-select:none; border-radius:3px; background:{bg};",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
                         let name = menu_name_str2.clone();
@@ -1830,7 +1830,7 @@ pub fn App() -> Element {
                 }
                 if is_open {
                     div {
-                        style: "position:absolute; top:100%; left:0; background:#fff; border:1px solid #ccc; box-shadow:2px 2px 8px rgba(0,0,0,0.15); min-width:200px; z-index:1000; padding:4px 0;",
+                        style: "position:absolute; top:100%; left:0; background:#3c3c3c; border:1px solid #555; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:200px; z-index:1000; padding:4px 0;",
                         for node in item_nodes {
                             {node}
                         }
@@ -1892,8 +1892,8 @@ pub fn App() -> Element {
                 let act_click = act_tabs.clone();
                 let label = DockLayout::panel_label(kind);
                 let is_active = pi == group.active;
-                let bg = if is_active { "#f0f0f0" } else { "#d8d8d8" };
-                let border_bottom = if is_active { "2px solid #f0f0f0" } else { "2px solid #bbb" };
+                let bg = if is_active { "#4a4a4a" } else { "#353535" };
+                let border_bottom = if is_active { "2px solid #4a4a4a" } else { "2px solid #555" };
                 let font_weight = if is_active { "bold" } else { "normal" };
                 let is_focused = focused == Some(PanelAddr {
                     group: GroupAddr { dock_id: did, group_idx: gi },
@@ -1915,7 +1915,7 @@ pub fn App() -> Element {
                 nodes.push(rsx! {
                     div {
                         key: "dock-tab-{gi}-{pi}",
-                        style: "padding:3px 8px; cursor:pointer; font-size:11px; font-weight:{font_weight}; background:{bg}; border-bottom:{border_bottom}; user-select:none; {outline}",
+                        style: "padding:3px 8px; cursor:pointer; font-size:11px; color:#ccc; font-weight:{font_weight}; background:{bg}; border-bottom:{border_bottom}; user-select:none; {outline}",
                         draggable: "true",
                         ondragstart: move |evt: Event<DragData>| {
                             evt.stop_propagation();
@@ -2027,7 +2027,7 @@ pub fn App() -> Element {
             // Highlight tab bar when it's a TabBar drop target
             let tab_bar_drop = cur_drag.is_some()
                 && matches!(cur_drop, Some(DropTarget::TabBar { group, .. }) if group == GroupAddr { dock_id: did, group_idx: gi });
-            let tab_bar_border = if tab_bar_drop { "2px solid #4a90d9" } else { "1px solid #bbb" };
+            let tab_bar_border = if tab_bar_drop { "2px solid #4a90d9" } else { "1px solid #555" };
 
             let is_dragged_group = matches!(cur_drag,
                 Some(DragPayload::Group(addr)) if addr.dock_id == did && addr.group_idx == gi);
@@ -2036,7 +2036,7 @@ pub fn App() -> Element {
             rsx! {
                 div {
                     key: "dock-group-{did:?}-{gi}",
-                    style: "border-bottom:1px solid #ccc; opacity:{opacity};",
+                    style: "border-bottom:1px solid #555; opacity:{opacity};",
                     ondragover: move |evt: Event<DragData>| {
                         evt.prevent_default();
                         let coords = evt.data().page_coordinates();
@@ -2091,7 +2091,7 @@ pub fn App() -> Element {
                     // Tab bar with grip handle
                     {let panel_count = group.panels.len();
                     rsx! { div {
-                        style: "display:flex; background:#d8d8d8; border-bottom:{tab_bar_border}; align-items:center; overflow-x:auto; overflow-y:hidden; min-height:24px;",
+                        style: "display:flex; background:#333; border-bottom:{tab_bar_border}; align-items:center; overflow-x:auto; overflow-y:hidden; min-height:24px;",
                         ondragover: move |evt: Event<DragData>| {
                             evt.prevent_default();
                             evt.stop_propagation();
@@ -2102,7 +2102,7 @@ pub fn App() -> Element {
 
                         // Grip handle for dragging the whole group
                         div {
-                            style: "padding:2px 4px; cursor:grab; color:#999; font-size:10px; user-select:none;",
+                            style: "padding:2px 4px; cursor:grab; color:#777; font-size:10px; user-select:none;",
                             draggable: "true",
                             ondragstart: move |evt: Event<DragData>| {
                                 evt.stop_propagation();
@@ -2159,7 +2159,7 @@ pub fn App() -> Element {
 
                     if !group_collapsed {
                         div {
-                            style: "padding:12px; min-height:60px; color:#999; font-size:12px;",
+                            style: "padding:12px; min-height:60px; color:#aaa; font-size:12px;",
                             "{body_label}"
                         }
                     }
@@ -2191,7 +2191,7 @@ pub fn App() -> Element {
                     rsx! {
                         div {
                             key: "dock-icon-{gi}-{pi}",
-                            style: "width:28px; height:28px; margin:2px auto; background:#e0e0e0; border-radius:3px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:12px; font-weight:bold; color:#555;",
+                            style: "width:28px; height:28px; margin:2px auto; background:#4a4a4a; border-radius:3px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:12px; font-weight:bold; color:#ccc;",
                             title: "{label}",
                             onclick: move |_| {
                                 (act.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -2227,7 +2227,7 @@ pub fn App() -> Element {
         rsx! {
             div {
                 key: "floating-{fid:?}",
-                style: "position:fixed; left:{fx}px; top:{fy}px; width:{fw}px; background:#f0f0f0; border:1px solid #aaa; box-shadow:4px 4px 12px rgba(0,0,0,0.2); border-radius:4px; z-index:{z}; display:flex; flex-direction:column; overflow:hidden;",
+                style: "position:fixed; left:{fx}px; top:{fy}px; width:{fw}px; background:#3c3c3c; border:1px solid #555; box-shadow:4px 4px 12px rgba(0,0,0,0.4); border-radius:4px; z-index:{z}; display:flex; flex-direction:column; overflow:hidden;",
                 onmousedown: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
                     (act_front.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -2237,7 +2237,7 @@ pub fn App() -> Element {
 
                 // Title bar: drag to reposition, double-click to redock
                 div {
-                    style: "height:20px; background:#d0d0d0; cursor:grab; display:flex; align-items:center; padding:0 6px; font-size:10px; color:#666; user-select:none;",
+                    style: "height:20px; background:#333; cursor:grab; display:flex; align-items:center; padding:0 6px; font-size:10px; color:#999; user-select:none;",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
                         let coords = evt.data().page_coordinates();
@@ -2293,9 +2293,18 @@ pub fn App() -> Element {
         .map(|p| p.id)
         .unwrap_or(PaneId(1));
 
+    let collapsed_dock_width = 36.0;
     let (dx, dy, dw, dh, dock_z) = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Dock))
-        .map(|p| (p.x, p.y, p.width, p.height, pane_snapshot.as_ref().unwrap().pane_z_index(p.id)))
+        .map(|p| {
+            let z = pane_snapshot.as_ref().unwrap().pane_z_index(p.id);
+            if dock_collapsed {
+                // Hug right: shift x so the right edge stays put
+                (p.x + p.width - collapsed_dock_width, p.y, collapsed_dock_width, p.height, z)
+            } else {
+                (p.x, p.y, p.width, p.height, z)
+            }
+        })
         .unwrap_or((760.0, 0.0, 240.0, 700.0, 0));
     let dock_pane_id = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Dock))
@@ -2348,13 +2357,13 @@ pub fn App() -> Element {
         style { r#"
             html, body {{ margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; }}
             #main {{ height: 100%; }}
-            .jas-menu-title:hover {{ background: #d0d0d0; }}
-            .jas-menu-item:hover {{ background: #e8e8e8; }}
+            .jas-menu-title:hover {{ background: #505050; }}
+            .jas-menu-item:hover {{ background: #505050; }}
             .jas-tool-popup-item:hover {{ background: #606060 !important; }}
             .jas-dock-group {{ transition: max-height 0.15s ease, opacity 0.15s ease; }}
             .jas-dock {{ transition: width 0.15s ease; }}
             .jas-floating-dock {{ transition: opacity 0.15s ease; }}
-            .jas-tab:hover {{ background: #e8e8e8 !important; }}
+            .jas-tab:hover {{ background: #505050 !important; }}
             .jas-border-handle {{ background: transparent; }}
             .jas-border-handle:hover {{ background: rgba(74,144,217,0.3); }}
             .jas-border-handle:active {{ background: rgba(74,144,217,0.5); }}
@@ -2498,7 +2507,22 @@ pub fn App() -> Element {
                     }
                 }
             },
-            style: "position:relative; width:100%; height:100%; overflow:hidden; outline:none; font-family:sans-serif; border-left:{snap_left}; border-right:{snap_right}; border-bottom:{snap_bottom}; box-sizing:border-box;",
+            style: "position:relative; width:100%; height:100%; overflow:hidden; outline:none; font-family:sans-serif; border-left:{snap_left}; border-right:{snap_right}; border-bottom:{snap_bottom}; box-sizing:border-box; display:flex; flex-direction:column;",
+
+            // ===== Menu bar (full width, top of window) =====
+            div {
+                style: "display:flex; background:#3c3c3c; border-bottom:1px solid #555; padding:0 4px; min-height:24px; align-items:center; flex-shrink:0; z-index:300;",
+                onmousedown: move |evt: Event<MouseData>| {
+                    evt.stop_propagation();
+                },
+                for node in menu_nodes {
+                    {node}
+                }
+            }
+
+            // ===== Pane container (fills remaining space) =====
+            div {
+                style: "flex:1; position:relative; overflow:hidden;",
 
             // ===== Toolbar pane (position:absolute) =====
             if pane_snapshot.as_ref().map_or(true, |pl| pl.is_pane_visible(PaneKind::Toolbar)) {
@@ -2563,7 +2587,7 @@ pub fn App() -> Element {
 
             // ===== Canvas pane (position:absolute) =====
             div {
-                style: "position:absolute; left:{cx}px; top:{cy}px; width:{cw}px; height:{ch}px; z-index:{canvas_z}; display:flex; flex-direction:column; overflow:hidden; background:#808080; border:1px solid #999; box-sizing:border-box;",
+                style: "position:absolute; left:{cx}px; top:{cy}px; width:{cw}px; height:{ch}px; z-index:{canvas_z}; display:flex; flex-direction:column; overflow:hidden; background:#3c3c3c; border:1px solid #555; box-sizing:border-box;",
                 onmousedown: {
                     let act = act.clone();
                     move |_: Event<MouseData>| {
@@ -2579,7 +2603,7 @@ pub fn App() -> Element {
 
                 // Title bar
                 div {
-                    style: "height:20px; min-height:20px; cursor:grab; background:#707070; flex-shrink:0; display:flex; align-items:center; padding:0 4px; user-select:none;",
+                    style: "height:20px; min-height:20px; cursor:grab; background:#333; flex-shrink:0; display:flex; align-items:center; padding:0 4px; user-select:none;",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
                         let coords = evt.data().page_coordinates();
@@ -2588,17 +2612,9 @@ pub fn App() -> Element {
                     div { style: "flex:1; font-size:10px; color:#ddd; overflow:hidden; white-space:nowrap;", "Canvas" }
                 }
 
-                // Menu bar
-                div {
-                    style: "display:flex; background:#f0f0f0; border-bottom:1px solid #ddd; padding:0 4px; min-height:24px; align-items:center; flex-shrink:0;",
-                    for node in menu_nodes {
-                        {node}
-                    }
-                }
-
                 // Tab bar
                 div {
-                    style: "display:flex; background:#e8e8e8; border-bottom:1px solid #ccc; padding:2px 4px 0; min-height:28px; align-items:flex-end; flex-shrink:0;",
+                    style: "display:flex; background:#333; border-bottom:1px solid #555; padding:2px 4px 0; min-height:28px; align-items:flex-end; flex-shrink:0;",
                     for btn in tab_buttons {
                         {btn}
                     }
@@ -2643,7 +2659,7 @@ pub fn App() -> Element {
             // ===== Dock pane (position:absolute) =====
             if pane_snapshot.as_ref().map_or(true, |pl| pl.is_pane_visible(PaneKind::Dock)) {
             div {
-                style: "position:absolute; left:{dx}px; top:{dy}px; width:{dw}px; height:{dh}px; z-index:{dock_z}; display:flex; flex-direction:column; overflow:hidden; background:#f0f0f0; border:1px solid #ccc; box-sizing:border-box;",
+                style: "position:absolute; left:{dx}px; top:{dy}px; width:{dw}px; height:{dh}px; z-index:{dock_z}; display:flex; flex-direction:column; overflow:hidden; background:#3c3c3c; border:1px solid #555; box-sizing:border-box;",
                 onmousedown: {
                     let act = act.clone();
                     move |evt: Event<MouseData>| {
@@ -2658,13 +2674,13 @@ pub fn App() -> Element {
 
                 // Title bar with collapse chevron and close button
                 div {
-                    style: "height:20px; min-height:20px; cursor:grab; background:#d0d0d0; flex-shrink:0; display:flex; align-items:center; padding:0 4px; user-select:none; border-bottom:1px solid #ccc;",
+                    style: "height:20px; min-height:20px; cursor:grab; background:#333; flex-shrink:0; display:flex; align-items:center; padding:0 4px; user-select:none; border-bottom:1px solid #555;",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
                         let coords = evt.data().page_coordinates();
                         pane_drag.set(Some((dock_pane_id, coords.x - dx, coords.y - dy)));
                     },
-                    div { style: "flex:1; font-size:10px; color:#666; overflow:hidden; white-space:nowrap;", "Panels" }
+                    div { style: "flex:1; font-size:10px; color:#999; overflow:hidden; white-space:nowrap;", "Panels" }
                     // Collapse chevron
                     {
                         let act = act.clone();
@@ -2755,6 +2771,8 @@ pub fn App() -> Element {
             for fdock in floating_nodes {
                 {fdock}
             }
+
+            } // close pane container div
 
             // New Workspace dialog
             if let Some(initial_name) = new_workspace_dialog() {
