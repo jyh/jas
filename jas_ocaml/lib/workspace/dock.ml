@@ -579,6 +579,60 @@ let storage_prefix = "jas_layout:"
 let storage_key l = storage_prefix ^ l.name
 let storage_key_for name = storage_prefix ^ name
 
+let config_dir () =
+  let home = try Sys.getenv "HOME" with Not_found -> "/tmp" in
+  let dir = Filename.concat home ".config/jas" in
+  (try Unix.mkdir (Filename.concat home ".config") 0o755 with Unix.Unix_error _ -> ());
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error _ -> ());
+  dir
+
+let layout_file_for name =
+  Filename.concat (config_dir ()) (name ^ ".layout")
+
+let config_file () =
+  Filename.concat (config_dir ()) "app_config.dat"
+
+let save_layout l =
+  try
+    let file = layout_file_for l.name in
+    let oc = open_out_bin file in
+    Marshal.to_channel oc (l.name, l.anchored, l.floating, l.hidden_panels,
+                           l.z_order, l.next_id) [];
+    close_out oc;
+    l.saved_generation <- l.generation
+  with _ -> ()
+
+let load_layout name =
+  try
+    let file = layout_file_for name in
+    let ic = open_in_bin file in
+    let (n, anch, float, hidden, zord, nid) = Marshal.from_channel ic in
+    close_in ic;
+    { name = n; anchored = anch; floating = float; hidden_panels = hidden;
+      z_order = zord; focused_panel = None; next_id = nid;
+      generation = 0; saved_generation = 0 }
+  with _ -> named name
+
+let save_layout_if_needed l =
+  if needs_save l then save_layout l
+
+let save_app_config config =
+  try
+    let file = config_file () in
+    let oc = open_out_bin file in
+    Marshal.to_channel oc (config.active_layout, config.saved_layouts) [];
+    close_out oc
+  with _ -> ()
+
+let load_app_config () =
+  try
+    let file = config_file () in
+    let ic = open_in_bin file in
+    let (active, saved) = Marshal.from_channel ic in
+    close_in ic;
+    { active_layout = active; saved_layouts = saved }
+  with _ -> default_app_config ()
+
 (* ------------------------------------------------------------------ *)
 (* Focus                                                              *)
 (* ------------------------------------------------------------------ *)
