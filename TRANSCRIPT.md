@@ -734,3 +734,9 @@ The image in examples/ai.png shows a Dock to the right of the canvas, containing
 first panel group, Stroke, Gradient, and Transparency in the second group and so forth. To the left of the dock is another dock that has been collapsed.
 
 We want to implement these. Do you understand the concepts? Please give suggestions.
+
+[...]
+
+The panel groups should be draggable so they can be repositioned. They can also be dragged into another dock.
+When a panel group is dragged out of a dock, it creates a new floating dock. A panel can be dragged into another 
+panel group. When a panel is dragged into empty space, it creates a new floating panel group and dock.
