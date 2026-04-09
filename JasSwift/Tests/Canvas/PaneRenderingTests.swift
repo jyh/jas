@@ -65,15 +65,9 @@ import Testing
     let pl = PaneLayout.defaultThreePane(viewportW: 1000, viewportH: 700)
     let rs = RenderingState.from(pl)
     // Default layout has toolbar|canvas and canvas|dock borders
-    // But toolbar is fixed_width, so toolbar|canvas border is excluded
-    // Only canvas|dock border should appear
-    #expect(rs.borders.count == 1)
-    let border = rs.borders[0]
-    #expect(border.isVertical)
-    // Border should be at canvas right edge
-    let canvas = pl.paneByKind(.canvas)!
-    #expect(abs(border.x - (canvas.x + canvas.width - 3)) < 0.001)
-    #expect(border.height == 700)
+    #expect(rs.borders.count == 2)
+    #expect(rs.borders.allSatisfy { $0.isVertical })
+    #expect(rs.borders.allSatisfy { $0.height == 700 })
 }
 
 @Test func renderingStateNoBordersWhenMaximized() {

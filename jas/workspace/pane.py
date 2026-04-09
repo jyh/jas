@@ -371,6 +371,7 @@ class PaneLayout:
 
     def tile_panes(self, collapsed_override: Optional[tuple[int, float]] = None):
         vw, vh = self.viewport_width, self.viewport_height
+        self.canvas_maximized = False
         self.hidden_panes = []
         visible = [(p.id, p.config.tile_width, p.width, p.config.tile_order) for p in self.panes]
         visible.sort(key=lambda t: t[3])

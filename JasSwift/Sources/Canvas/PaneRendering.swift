@@ -47,7 +47,9 @@ public struct RenderingState {
     public let borders: [SharedBorder]
     public let canvasMaximized: Bool
 
-    public static func from(_ pl: PaneLayout?) -> RenderingState {
+    public static let collapsedDockWidth: Double = 36
+
+    public static func from(_ pl: PaneLayout?, dockCollapsed: Bool = false) -> RenderingState {
         guard let pl = pl else {
             return RenderingState(panes: [], borders: [], canvasMaximized: false)
         }
@@ -66,6 +68,12 @@ public struct RenderingState {
             let (px, py, pw, ph, pz): (Double, Double, Double, Double, Int)
             if p.kind == .canvas && maximized {
                 (px, py, pw, ph, pz) = (0, 0, pl.viewportWidth, pl.viewportHeight, 0)
+            } else if maximized {
+                (px, py, pw, ph, pz) = (p.x, p.y, p.width, p.height, pl.paneZIndex(p.id) + 50)
+            } else if p.kind == .dock && dockCollapsed {
+                // Collapsed dock hugs its contents at fixed width, anchored to its right edge
+                let cw = Self.collapsedDockWidth
+                (px, py, pw, ph, pz) = (p.x + p.width - cw, p.y, cw, p.height, pl.paneZIndex(p.id))
             } else {
                 (px, py, pw, ph, pz) = (p.x, p.y, p.width, p.height, pl.paneZIndex(p.id))
             }
@@ -87,8 +95,8 @@ public struct RenderingState {
                 if !isVert && !isHoriz { continue }
 
                 guard let paneA = pl.pane(snap.pane), let paneB = pl.pane(otherId) else { continue }
-                // Skip borders involving fixed-width panes
-                if paneA.config.fixedWidth || paneB.config.fixedWidth { continue }
+                // Skip borders involving collapsed dock
+                if (paneA.kind == .dock || paneB.kind == .dock) && dockCollapsed { continue }
 
                 if isVert {
                     let bx = paneA.x + paneA.width
@@ -143,6 +151,34 @@ let paneButtonColor = NSColor(white: 0.65, alpha: 1.0)
 let snapLineColor = NSColor(red: 50/255, green: 120/255, blue: 220/255, alpha: 0.8)
 
 // ---------------------------------------------------------------------------
+// BorderHandleView — shared border between snapped panes
+// ---------------------------------------------------------------------------
+
+struct BorderHandleView: View {
+    let border: SharedBorder
+    let isDragging: Bool
+    @Binding var hoveredBorder: Int?
+
+    var body: some View {
+        let fillColor: SwiftUI.Color = isDragging
+            ? SwiftUI.Color(red: 74/255, green: 144/255, blue: 217/255).opacity(0.5)
+            : SwiftUI.Color.clear
+
+        Rectangle()
+            .fill(fillColor)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                hoveredBorder = hovering ? border.snapIdx : nil
+                if hovering {
+                    (border.isVertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).set()
+                } else {
+                    NSCursor.arrow.set()
+                }
+            }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PaneFrameView — wraps content with title bar + edge handles
 // ---------------------------------------------------------------------------
 
@@ -154,6 +190,8 @@ struct PaneFrameView<Content: View>: View {
 
     // Drag state bindings (owned by parent)
     @Binding var paneDrag: (paneId: PaneId, offX: Double, offY: Double)?
+    @Binding var edgeResize: (paneId: PaneId, edge: EdgeSide, startX: Double, startY: Double, startW: Double, startH: Double)?
+    @Binding var edgeSnappedCoord: Double?
     @Binding var snapPreview: [SnapConstraint]
 
     var body: some View {
@@ -189,6 +227,12 @@ struct PaneFrameView<Content: View>: View {
                 Button(action: {
                     if let rightDock = workspace.dockLayout.anchoredDock(.right) {
                         workspace.dockLayout.toggleDockCollapsed(rightDock.id)
+                        let collapsed = workspace.dockLayout.anchoredDock(.right)?.collapsed ?? false
+                        let dockPaneId = geo.id
+                        let cw = RenderingState.collapsedDockWidth
+                        workspace.dockLayout.panesMut { pl in
+                            pl.tilePanes(collapsedOverride: collapsed ? (dockPaneId, cw) : nil)
+                        }
                     }
                 }) {
                     SwiftUI.Text("\u{00AB}")
@@ -274,69 +318,120 @@ struct PaneFrameView<Content: View>: View {
             // Right edge
             edgeHandle(edge: .right,
                        x: geo.width - paneEdgeHandleSize, y: 0,
-                       w: paneEdgeHandleSize, h: geo.height,
-                       cursor: .resizeLeftRight)
+                       w: paneEdgeHandleSize, h: geo.height)
             // Left edge
             edgeHandle(edge: .left,
                        x: 0, y: 0,
-                       w: paneEdgeHandleSize, h: geo.height,
-                       cursor: .resizeLeftRight)
+                       w: paneEdgeHandleSize, h: geo.height)
             // Bottom edge
             edgeHandle(edge: .bottom,
                        x: 0, y: geo.height - paneEdgeHandleSize,
-                       w: geo.width, h: paneEdgeHandleSize,
-                       cursor: .resizeUpDown)
+                       w: geo.width, h: paneEdgeHandleSize)
             // Top edge
             edgeHandle(edge: .top,
                        x: 0, y: 0,
-                       w: geo.width, h: paneEdgeHandleSize,
-                       cursor: .resizeUpDown)
+                       w: geo.width, h: paneEdgeHandleSize)
         }
     }
 
     private func edgeHandle(edge: EdgeSide, x: Double, y: Double,
-                            w: Double, h: Double, cursor: NSCursor) -> some View {
-        SwiftUI.Color.clear
+                            w: Double, h: Double) -> some View {
+        return SwiftUI.Color.clear
             .frame(width: w, height: h)
             .contentShape(Rectangle())
             .position(x: x + w / 2, y: y + h / 2)
-            .onHover { hovering in
-                if hovering { cursor.push() } else { NSCursor.pop() }
-            }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .named("paneContainer"))
                     .onChanged { value in
-                        let dx = value.location.x - value.startLocation.x
-                        let dy = value.location.y - value.startLocation.y
-                        workspace.dockLayout.panesMut { pl in
-                            guard let p = pl.pane(geo.id) else { return }
-                            switch edge {
-                            case .right:
-                                let startW = paneDrag == nil ? p.width : p.width
-                                pl.resizePane(geo.id, width: p.width + dx - (paneDrag != nil ? 0 : 0), height: p.height)
-                            case .left:
-                                let newW = max(geo.width - dx, p.config.minWidth)
-                                let actualDx = geo.width - newW
-                                pl.paneMut(geo.id) { pp in
-                                    pp.x = geo.x + actualDx
-                                    pp.width = newW
-                                }
-                            case .bottom:
-                                pl.resizePane(geo.id, width: p.width, height: p.height + dy)
-                            case .top:
-                                let newH = max(geo.height - dy, p.config.minHeight)
-                                let actualDy = geo.height - newH
-                                pl.paneMut(geo.id) { pp in
-                                    pp.y = geo.y + actualDy
-                                    pp.height = newH
-                                }
+                        // Capture initial geometry on first call
+                        if edgeResize == nil {
+                            workspace.dockLayout.panesMut { pl in
+                                guard let p = pl.pane(geo.id) else { return }
+                                edgeResize = (geo.id, edge, p.x, p.y, p.width, p.height)
                             }
                         }
+                        guard let start = edgeResize else { return }
+                        let dx = Double(value.translation.width)
+                        let dy = Double(value.translation.height)
+                        var snappedAt: Double? = nil
+                        workspace.dockLayout.panesMut { pl in
+                            let minW = pl.pane(geo.id)?.config.minWidth ?? 200
+                            let minH = pl.pane(geo.id)?.config.minHeight ?? 200
+                            // Compute raw (unsnapped) edge position
+                            switch edge {
+                            case .right:
+                                let rawW = max(start.startW + dx, minW)
+                                let rawRight = start.startX + rawW
+                                let snapped = Self.findEdgeSnap(pl: pl, paneId: geo.id, edge: edge, coord: rawRight)
+                                snappedAt = snapped
+                                let finalW = (snapped ?? rawRight) - start.startX
+                                pl.paneMut(geo.id) { pp in pp.width = max(finalW, minW) }
+                            case .left:
+                                let rawX = start.startX + dx
+                                let snapped = Self.findEdgeSnap(pl: pl, paneId: geo.id, edge: edge, coord: rawX)
+                                snappedAt = snapped
+                                let finalX = snapped ?? rawX
+                                let finalW = max(start.startX + start.startW - finalX, minW)
+                                let clampedX = start.startX + start.startW - finalW
+                                pl.paneMut(geo.id) { pp in pp.x = clampedX; pp.width = finalW }
+                            case .bottom:
+                                let rawH = max(start.startH + dy, minH)
+                                let rawBottom = start.startY + rawH
+                                let snapped = Self.findEdgeSnap(pl: pl, paneId: geo.id, edge: edge, coord: rawBottom)
+                                snappedAt = snapped
+                                let finalH = (snapped ?? rawBottom) - start.startY
+                                pl.paneMut(geo.id) { pp in pp.height = max(finalH, minH) }
+                            case .top:
+                                let rawY = start.startY + dy
+                                let snapped = Self.findEdgeSnap(pl: pl, paneId: geo.id, edge: edge, coord: rawY)
+                                snappedAt = snapped
+                                let finalY = snapped ?? rawY
+                                let finalH = max(start.startY + start.startH - finalY, minH)
+                                let clampedY = start.startY + start.startH - finalH
+                                pl.paneMut(geo.id) { pp in pp.y = clampedY; pp.height = finalH }
+                            }
+                        }
+                        edgeSnappedCoord = snappedAt
                     }
                     .onEnded { _ in
+                        edgeResize = nil
+                        edgeSnappedCoord = nil
                         workspace.dockLayout.saveIfNeeded()
                     }
             )
+    }
+
+    /// Find a snap target for a specific edge coordinate. Returns the snap
+    /// coordinate if within snap distance, or nil if no snap found.
+    static func findEdgeSnap(pl: PaneLayout, paneId: PaneId, edge: EdgeSide, coord: Double) -> Double? {
+        let dist = snapDistance
+        let vw = pl.viewportWidth
+        let vh = pl.viewportHeight
+
+        // Check window edges
+        let windowCoord: Double
+        switch edge {
+        case .left: windowCoord = 0
+        case .right: windowCoord = vw
+        case .top: windowCoord = 0
+        case .bottom: windowCoord = vh
+        }
+        if abs(coord - windowCoord) <= dist { return windowCoord }
+
+        // Check other pane edges
+        for other in pl.panes {
+            if other.id == paneId { continue }
+            let otherCoord: Double
+            switch edge {
+            case .right: otherCoord = other.x           // snap right edge to other's left
+            case .left: otherCoord = other.x + other.width  // snap left edge to other's right
+            case .bottom: otherCoord = other.y
+            case .top: otherCoord = other.y + other.height
+            }
+            if abs(coord - otherCoord) <= dist { return otherCoord }
+        }
+
+        return nil
     }
 }
 

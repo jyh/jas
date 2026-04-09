@@ -65,6 +65,9 @@ public struct ContentView: View {
     @State private var currentTool: Tool = .selection
     @State private var paneDrag: (paneId: PaneId, offX: Double, offY: Double)?
     @State private var borderDrag: (snapIdx: Int, startCoord: Double)?
+    @State private var edgeResize: (paneId: PaneId, edge: EdgeSide, startX: Double, startY: Double, startW: Double, startH: Double)?
+    @State private var edgeSnappedCoord: Double?
+    @State private var hoveredBorder: Int?
     @State private var snapPreview: [SnapConstraint] = []
 
     public init(workspace: WorkspaceState) {
@@ -73,7 +76,8 @@ public struct ContentView: View {
 
     public var body: some View {
         GeometryReader { geometry in
-            let rs = RenderingState.from(workspace.dockLayout.panes())
+            let dockCollapsed = workspace.dockLayout.anchoredDock(.right)?.collapsed ?? false
+            let rs = RenderingState.from(workspace.dockLayout.panes(), dockCollapsed: dockCollapsed)
             let snapLines = RenderingState.snapLines(from: snapPreview,
                                                       paneLayout: workspace.dockLayout.panes())
 
@@ -93,17 +97,15 @@ public struct ContentView: View {
 
                 // Shared border handles
                 ForEach(rs.borders) { border in
-                    SwiftUI.Color.clear
+                    let isActive = borderDrag?.snapIdx == border.snapIdx
+                        || hoveredBorder == border.snapIdx
+                        || (edgeResize != nil && edgeSnappedCoord != nil && {
+                            let center = border.isVertical ? border.x + 3 : border.y + 3
+                            return abs(center - edgeSnappedCoord!) < 1
+                        }())
+                    BorderHandleView(border: border, isDragging: isActive, hoveredBorder: $hoveredBorder)
                         .frame(width: border.width, height: border.height)
-                        .contentShape(Rectangle())
                         .position(x: border.x + border.width / 2, y: border.y + border.height / 2)
-                        .onHover { hovering in
-                            if hovering {
-                                (border.isVertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push()
-                            } else {
-                                NSCursor.pop()
-                            }
-                        }
                         .gesture(borderDragGesture(border: border))
                         .zIndex(100)
                 }
@@ -160,15 +162,15 @@ public struct ContentView: View {
         case .toolbar:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: true,
                           content: { ToolbarPanel(currentTool: $currentTool) },
-                          paneDrag: $paneDrag, snapPreview: $snapPreview)
+                          paneDrag: $paneDrag, edgeResize: $edgeResize, edgeSnappedCoord: $edgeSnappedCoord, snapPreview: $snapPreview)
         case .canvas:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: !rs.canvasMaximized,
                           content: { canvasContent },
-                          paneDrag: $paneDrag, snapPreview: $snapPreview)
+                          paneDrag: $paneDrag, edgeResize: $edgeResize, edgeSnappedCoord: $edgeSnappedCoord, snapPreview: $snapPreview)
         case .dock:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: true,
                           content: { dockContent },
-                          paneDrag: $paneDrag, snapPreview: $snapPreview)
+                          paneDrag: $paneDrag, edgeResize: $edgeResize, edgeSnappedCoord: $edgeSnappedCoord, snapPreview: $snapPreview)
         }
     }
 

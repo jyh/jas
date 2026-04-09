@@ -414,6 +414,7 @@ let toggle_canvas_maximized pl =
 let tile_panes pl ~collapsed_override =
   let vw = pl.viewport_width in
   let vh = pl.viewport_height in
+  pl.canvas_maximized <- false;
   pl.hidden_panes <- [];
   let visible = Array.to_list pl.panes
     |> List.map (fun p -> (p.id, p.config.tile_width, p.width, p.config.tile_order))
