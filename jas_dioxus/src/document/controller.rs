@@ -14,7 +14,7 @@ use crate::geometry::element::{
     control_point_count, control_points, move_control_points,
     move_path_handle, Element,
 };
-use crate::algorithms::hit_test::{element_intersects_rect, point_in_rect};
+use crate::algorithms::hit_test::{element_intersects_polygon, element_intersects_rect, point_in_rect};
 
 // ---------------------------------------------------------------------------
 // Controller
@@ -83,6 +83,57 @@ impl Controller {
                             }
                         }
                     } else if element_intersects_rect(child, x, y, width, height) {
+                        entries.push(ElementSelection::all(vec![li, ci]));
+                    }
+                }
+            }
+        }
+        let new_sel = if extend {
+            toggle_selection(&doc.selection, &entries)
+        } else {
+            entries
+        };
+        let mut new_doc = doc;
+        new_doc.selection = new_sel;
+        model.set_document(new_doc);
+    }
+
+    /// Select all elements whose bounds intersect the given polygon.
+    pub fn select_polygon(
+        model: &mut Model,
+        polygon: &[(f64, f64)],
+        extend: bool,
+    ) {
+        use crate::geometry::element::Visibility;
+        let doc = model.document().clone();
+        let mut entries: Selection = Vec::new();
+        for (li, layer) in doc.layers.iter().enumerate() {
+            let layer_vis = layer.visibility();
+            if layer_vis == Visibility::Invisible {
+                continue;
+            }
+            if let Some(children) = layer.children() {
+                for (ci, child) in children.iter().enumerate() {
+                    if child.locked() {
+                        continue;
+                    }
+                    let child_vis = std::cmp::min(layer_vis, child.visibility());
+                    if child_vis == Visibility::Invisible {
+                        continue;
+                    }
+                    if child.is_group() {
+                        if let Some(grandchildren) = child.children() {
+                            if grandchildren
+                                .iter()
+                                .any(|gc| element_intersects_polygon(gc, polygon))
+                            {
+                                entries.push(ElementSelection::all(vec![li, ci]));
+                                for (gi, _gc) in grandchildren.iter().enumerate() {
+                                    entries.push(ElementSelection::all(vec![li, ci, gi]));
+                                }
+                            }
+                        }
+                    } else if element_intersects_polygon(child, polygon) {
                         entries.push(ElementSelection::all(vec![li, ci]));
                     }
                 }

@@ -66,6 +66,120 @@ pub fn rects_intersect(
 }
 
 // ---------------------------------------------------------------------------
+// Polygon geometry
+// ---------------------------------------------------------------------------
+
+/// Ray-casting (even-odd) point-in-polygon test.
+pub fn point_in_polygon(px: f64, py: f64, poly: &[(f64, f64)]) -> bool {
+    let n = poly.len();
+    if n < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = n - 1;
+    for i in 0..n {
+        let (xi, yi) = poly[i];
+        let (xj, yj) = poly[j];
+        if ((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+pub fn segment_intersects_polygon(
+    x1: f64, y1: f64, x2: f64, y2: f64, poly: &[(f64, f64)],
+) -> bool {
+    if point_in_polygon(x1, y1, poly) || point_in_polygon(x2, y2, poly) {
+        return true;
+    }
+    let n = poly.len();
+    for i in 0..n {
+        let j = (i + 1) % n;
+        if segments_intersect(x1, y1, x2, y2, poly[i].0, poly[i].1, poly[j].0, poly[j].1) {
+            return true;
+        }
+    }
+    false
+}
+
+pub fn element_intersects_polygon(elem: &Element, poly: &[(f64, f64)]) -> bool {
+    match elem {
+        Element::Line(e) => {
+            segment_intersects_polygon(e.x1, e.y1, e.x2, e.y2, poly)
+        }
+        Element::Rect(e) => {
+            if e.fill.is_some() {
+                // Filled rect: check if any rect corner is in polygon,
+                // any polygon vertex is in rect, or any edges cross.
+                let corners = [
+                    (e.x, e.y),
+                    (e.x + e.width, e.y),
+                    (e.x + e.width, e.y + e.height),
+                    (e.x, e.y + e.height),
+                ];
+                if corners.iter().any(|&(cx, cy)| point_in_polygon(cx, cy, poly)) {
+                    return true;
+                }
+                if poly.iter().any(|&(px, py)| point_in_rect(px, py, e.x, e.y, e.width, e.height)) {
+                    return true;
+                }
+                let segs = segments_of_element(elem);
+                segs.iter().any(|&(x1, y1, x2, y2)| segment_intersects_polygon(x1, y1, x2, y2, poly))
+            } else {
+                segments_of_element(elem)
+                    .iter()
+                    .any(|&(x1, y1, x2, y2)| segment_intersects_polygon(x1, y1, x2, y2, poly))
+            }
+        }
+        Element::Text(_) | Element::TextPath(_) | Element::Group(_) | Element::Layer(_) => {
+            let (bx, by, bw, bh) = elem.bounds();
+            let corners = [
+                (bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh),
+            ];
+            if corners.iter().any(|&(cx, cy)| point_in_polygon(cx, cy, poly)) {
+                return true;
+            }
+            if poly.iter().any(|&(px, py)| point_in_rect(px, py, bx, by, bw, bh)) {
+                return true;
+            }
+            let rect_segs = [
+                (bx, by, bx + bw, by),
+                (bx + bw, by, bx + bw, by + bh),
+                (bx + bw, by + bh, bx, by + bh),
+                (bx, by + bh, bx, by),
+            ];
+            rect_segs.iter().any(|&(x1, y1, x2, y2)| segment_intersects_polygon(x1, y1, x2, y2, poly))
+        }
+        _ => {
+            if elem.fill().is_some() {
+                let segs = segments_of_element(elem);
+                let endpoints: Vec<(f64, f64)> = segs
+                    .iter()
+                    .flat_map(|&(x1, y1, x2, y2)| vec![(x1, y1), (x2, y2)])
+                    .collect();
+                if endpoints.iter().any(|&(px, py)| point_in_polygon(px, py, poly)) {
+                    return true;
+                }
+                if poly.iter().any(|&(px, py)| {
+                    let b = elem.bounds();
+                    point_in_rect(px, py, b.0, b.1, b.2, b.3)
+                }) {
+                    return true;
+                }
+                segs.iter()
+                    .any(|&(x1, y1, x2, y2)| segment_intersects_polygon(x1, y1, x2, y2, poly))
+            } else {
+                segments_of_element(elem)
+                    .iter()
+                    .any(|&(x1, y1, x2, y2)| segment_intersects_polygon(x1, y1, x2, y2, poly))
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Element-level queries
 // ---------------------------------------------------------------------------
 
@@ -333,5 +447,107 @@ mod tests {
             fill: None, stroke: None,
         });
         assert!(!element_intersects_rect(&rect, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    // ---- point_in_polygon ----
+
+    #[test]
+    fn point_in_polygon_interior() {
+        let tri = [(0.0, 0.0), (10.0, 0.0), (5.0, 10.0)];
+        assert!(point_in_polygon(5.0, 3.0, &tri));
+    }
+
+    #[test]
+    fn point_in_polygon_outside() {
+        let tri = [(0.0, 0.0), (10.0, 0.0), (5.0, 10.0)];
+        assert!(!point_in_polygon(20.0, 5.0, &tri));
+    }
+
+    #[test]
+    fn point_in_polygon_concave() {
+        // L-shaped polygon
+        let poly = [
+            (0.0, 0.0), (10.0, 0.0), (10.0, 5.0),
+            (5.0, 5.0), (5.0, 10.0), (0.0, 10.0),
+        ];
+        assert!(point_in_polygon(2.0, 8.0, &poly));   // in the lower part
+        assert!(point_in_polygon(8.0, 2.0, &poly));   // in the upper-right arm
+        assert!(!point_in_polygon(8.0, 8.0, &poly));  // in the concave notch
+    }
+
+    #[test]
+    fn point_in_polygon_degenerate() {
+        assert!(!point_in_polygon(0.0, 0.0, &[]));
+        assert!(!point_in_polygon(0.0, 0.0, &[(0.0, 0.0), (1.0, 1.0)]));
+    }
+
+    // ---- segment_intersects_polygon ----
+
+    #[test]
+    fn segment_inside_polygon() {
+        let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        assert!(segment_intersects_polygon(2.0, 2.0, 8.0, 8.0, &sq));
+    }
+
+    #[test]
+    fn segment_crossing_polygon() {
+        let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        assert!(segment_intersects_polygon(-5.0, 5.0, 15.0, 5.0, &sq));
+    }
+
+    #[test]
+    fn segment_outside_polygon() {
+        let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        assert!(!segment_intersects_polygon(20.0, 0.0, 30.0, 0.0, &sq));
+    }
+
+    // ---- element_intersects_polygon ----
+
+    #[test]
+    fn line_element_intersects_polygon() {
+        let line = Element::Line(LineElem {
+            common: CommonProps::default(),
+            x1: -5.0, y1: 5.0, x2: 15.0, y2: 5.0,
+            stroke: None,
+        });
+        let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        assert!(element_intersects_polygon(&line, &sq));
+    }
+
+    #[test]
+    fn line_element_outside_polygon() {
+        let line = Element::Line(LineElem {
+            common: CommonProps::default(),
+            x1: 20.0, y1: 0.0, x2: 30.0, y2: 0.0,
+            stroke: None,
+        });
+        let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        assert!(!element_intersects_polygon(&line, &sq));
+    }
+
+    #[test]
+    fn filled_rect_inside_polygon() {
+        use crate::geometry::element::{Color, Fill};
+        let rect = Element::Rect(RectElem {
+            common: CommonProps::default(),
+            x: 2.0, y: 2.0, width: 3.0, height: 3.0,
+            rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+        });
+        let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        assert!(element_intersects_polygon(&rect, &sq));
+    }
+
+    #[test]
+    fn rect_element_outside_polygon() {
+        let rect = Element::Rect(RectElem {
+            common: CommonProps::default(),
+            x: 20.0, y: 20.0, width: 5.0, height: 5.0,
+            rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+        });
+        let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        assert!(!element_intersects_polygon(&rect, &sq));
     }
 }
