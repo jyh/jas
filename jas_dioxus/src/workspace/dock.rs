@@ -149,9 +149,16 @@ pub enum DropTarget {
 // DockLayout
 // ---------------------------------------------------------------------------
 
+/// Current layout format version. Saved layouts with a different version
+/// are rejected and replaced with the default layout.
+pub const LAYOUT_VERSION: u32 = 1;
+
 /// Top-level layout: anchored docks on screen edges + floating docks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DockLayout {
+    /// Format version. Must match LAYOUT_VERSION or the layout is rejected.
+    #[serde(default)]
+    pub version: u32,
     pub name: String,
     pub anchored: Vec<(DockEdge, Dock)>,
     pub floating: Vec<FloatingDock>,
@@ -223,6 +230,7 @@ impl DockLayout {
     /// Create the default layout with a custom name.
     pub fn named(name: &str) -> Self {
         Self {
+            version: LAYOUT_VERSION,
             name: name.to_string(),
             anchored: vec![(
                 DockEdge::Right,
@@ -800,9 +808,12 @@ impl DockLayout {
     }
 
     /// Deserialize a layout from a JSON string. Returns the default
-    /// layout if the JSON is invalid.
+    /// layout if the JSON is invalid or the version doesn't match.
     pub fn from_json(json: &str) -> Self {
-        serde_json::from_str(json).unwrap_or_else(|_| Self::default_layout())
+        match serde_json::from_str::<Self>(json) {
+            Ok(layout) if layout.version == LAYOUT_VERSION => layout,
+            _ => Self::default_layout(),
+        }
     }
 
     /// localStorage key prefix for dock layouts.
@@ -935,6 +946,16 @@ impl DockLayout {
             self.pane_layout = Some(PaneLayout::default_three_pane(viewport_w, viewport_h));
             self.bump();
         }
+        // Ensure each pane's config matches its kind (fixes layouts
+        // deserialized from old JSON without config fields).
+        if let Some(ref mut pl) = self.pane_layout {
+            for p in &mut pl.panes {
+                let expected = PaneConfig::for_kind(p.kind);
+                if p.config.label != expected.label {
+                    p.config = expected;
+                }
+            }
+        }
     }
 
     /// Shorthand access to the pane layout.
@@ -1017,11 +1038,85 @@ pub enum PaneKind {
     Dock,
 }
 
-/// A floating pane with position and size.
+/// How a pane's width is allocated during the Tile operation.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum TileWidth {
+    /// Always this exact width (e.g., Toolbar at 72px).
+    Fixed(f64),
+    /// Keep the pane's current width (e.g., Dock).
+    KeepCurrent,
+    /// Fill all remaining space (e.g., Canvas).
+    Flex,
+}
+
+/// Configuration that drives generic pane management behavior.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaneConfig {
+    pub label: String,
+    pub min_width: f64,
+    pub min_height: f64,
+    pub fixed_width: bool,
+    pub closable: bool,
+    pub collapsible: bool,
+    pub maximizable: bool,
+    pub tile_order: usize,
+    pub tile_width: TileWidth,
+}
+
+impl PaneConfig {
+    /// Return the default config for a given pane kind.
+    pub fn for_kind(kind: PaneKind) -> Self {
+        match kind {
+            PaneKind::Toolbar => Self {
+                label: "Tools".into(),
+                min_width: MIN_TOOLBAR_WIDTH,
+                min_height: MIN_TOOLBAR_HEIGHT,
+                fixed_width: true,
+                closable: true,
+                collapsible: false,
+                maximizable: false,
+                tile_order: 0,
+                tile_width: TileWidth::Fixed(DEFAULT_TOOLBAR_WIDTH),
+            },
+            PaneKind::Canvas => Self {
+                label: "Canvas".into(),
+                min_width: MIN_CANVAS_WIDTH,
+                min_height: MIN_CANVAS_HEIGHT,
+                fixed_width: false,
+                closable: false,
+                collapsible: false,
+                maximizable: true,
+                tile_order: 1,
+                tile_width: TileWidth::Flex,
+            },
+            PaneKind::Dock => Self {
+                label: "Panels".into(),
+                min_width: MIN_PANE_DOCK_WIDTH,
+                min_height: MIN_PANE_DOCK_HEIGHT,
+                fixed_width: false,
+                closable: true,
+                collapsible: true,
+                maximizable: false,
+                tile_order: 2,
+                tile_width: TileWidth::KeepCurrent,
+            },
+        }
+    }
+}
+
+impl Default for PaneConfig {
+    fn default() -> Self {
+        Self::for_kind(PaneKind::Canvas)
+    }
+}
+
+/// A floating pane with position, size, and configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pane {
     pub id: PaneId,
     pub kind: PaneKind,
+    #[serde(default)]
+    pub config: PaneConfig,
     pub x: f64,
     pub y: f64,
     pub width: f64,
@@ -1088,9 +1183,9 @@ impl PaneLayout {
         let dock_id = PaneId(2);
 
         let panes = vec![
-            Pane { id: toolbar_id, kind: PaneKind::Toolbar, x: 0.0, y: 0.0, width: toolbar_w, height: viewport_h },
-            Pane { id: canvas_id, kind: PaneKind::Canvas, x: toolbar_w, y: 0.0, width: canvas_w, height: viewport_h },
-            Pane { id: dock_id, kind: PaneKind::Dock, x: toolbar_w + canvas_w, y: 0.0, width: dock_w, height: viewport_h },
+            Pane { id: toolbar_id, kind: PaneKind::Toolbar, config: PaneConfig::for_kind(PaneKind::Toolbar), x: 0.0, y: 0.0, width: toolbar_w, height: viewport_h },
+            Pane { id: canvas_id, kind: PaneKind::Canvas, config: PaneConfig::for_kind(PaneKind::Canvas), x: toolbar_w, y: 0.0, width: canvas_w, height: viewport_h },
+            Pane { id: dock_id, kind: PaneKind::Dock, config: PaneConfig::for_kind(PaneKind::Dock), x: toolbar_w + canvas_w, y: 0.0, width: dock_w, height: viewport_h },
         ];
 
         let snaps = vec![
@@ -1143,18 +1238,7 @@ impl PaneLayout {
         self.panes.iter_mut().find(|p| p.kind == kind)
     }
 
-    // -----------------------------------------------------------------------
-    // Min sizes
-    // -----------------------------------------------------------------------
-
-    /// Return (min_width, min_height) for a pane kind.
-    pub fn min_size(kind: PaneKind) -> (f64, f64) {
-        match kind {
-            PaneKind::Toolbar => (MIN_TOOLBAR_WIDTH, MIN_TOOLBAR_HEIGHT),
-            PaneKind::Canvas => (MIN_CANVAS_WIDTH, MIN_CANVAS_HEIGHT),
-            PaneKind::Dock => (MIN_PANE_DOCK_WIDTH, MIN_PANE_DOCK_HEIGHT),
-        }
-    }
+    // min sizes are now read from pane.config.min_width / pane.config.min_height
 
     // -----------------------------------------------------------------------
     // Move
@@ -1177,7 +1261,7 @@ impl PaneLayout {
     /// Set a pane's size, clamped to its minimum.
     pub fn resize_pane(&mut self, id: PaneId, width: f64, height: f64) {
         if let Some(p) = self.pane_mut(id) {
-            let (min_w, min_h) = Self::min_size(p.kind);
+            let (min_w, min_h) = (p.config.min_width, p.config.min_height);
             p.width = width.max(min_w);
             p.height = height.max(min_h);
         }
@@ -1445,17 +1529,17 @@ impl PaneLayout {
             _ => return,
         };
 
-        // Read kinds for min-size enforcement
-        let a_kind = match self.pane(snap.pane) { Some(p) => p.kind, None => return };
-        let b_kind = match self.pane(other_id) { Some(p) => p.kind, None => return };
-        let (a_min_w, a_min_h) = Self::min_size(a_kind);
-        let (b_min_w, b_min_h) = Self::min_size(b_kind);
+        // Read config for min-size and fixed-width enforcement
+        let (a_min_w, a_min_h, a_fixed) = match self.pane(snap.pane) {
+            Some(p) => (p.config.min_width, p.config.min_height, p.config.fixed_width),
+            None => return,
+        };
+        let (b_min_w, b_min_h, b_fixed) = match self.pane(other_id) {
+            Some(p) => (p.config.min_width, p.config.min_height, p.config.fixed_width),
+            None => return,
+        };
 
         let is_vertical = snap.edge == EdgeSide::Right;
-
-        // Toolbar pane has fixed width/height — skip resizing it.
-        let a_fixed = a_kind == PaneKind::Toolbar;
-        let b_fixed = b_kind == PaneKind::Toolbar;
 
         if is_vertical {
             let a_w = self.pane(snap.pane).unwrap().width;
@@ -1561,51 +1645,61 @@ impl PaneLayout {
     /// the viewport. Hidden panes are skipped; their space is given to
     /// the remaining panes.
     /// `dock_collapsed_width`: if `Some(w)`, the dock is collapsed and
-    /// should tile at that width instead of its full width.
-    pub fn tile_panes(&mut self, dock_collapsed_width: Option<f64>) {
+    /// `collapsed_override`: if `Some((pane_id, width))`, override that
+    /// pane's KeepCurrent width with the given value (e.g., collapsed dock).
+    pub fn tile_panes(&mut self, collapsed_override: Option<(PaneId, f64)>) {
         let vw = self.viewport_width;
         let vh = self.viewport_height;
 
-        // Show all panes and tile in left-to-right order: Toolbar, Canvas, Dock
+        // Show all panes and sort by tile_order.
         self.hidden_panes.clear();
-        let order = [PaneKind::Toolbar, PaneKind::Canvas, PaneKind::Dock];
-        let visible: Vec<(PaneKind, PaneId)> = order.iter()
-            .filter_map(|&k| {
-                let id = self.pane_by_kind(k)?.id;
-                Some((k, id))
+        let mut visible: Vec<(PaneId, TileWidth, f64)> = self.panes.iter()
+            .map(|p| {
+                let current_w = p.width;
+                (p.id, p.config.tile_width, current_w)
             })
             .collect();
+        // Sort by tile_order from config
+        visible.sort_by_key(|&(id, _, _)| {
+            self.pane(id).map(|p| p.config.tile_order).unwrap_or(0)
+        });
         if visible.is_empty() {
             return;
         }
 
-        // Toolbar and Dock keep their widths; Canvas gets the remainder.
-        // A collapsed dock uses its collapsed width for tiling.
-        let mut fixed_width = 0.0;
-        let widths: Vec<f64> = visible.iter().map(|&(kind, id)| {
-            match kind {
-                PaneKind::Toolbar => {
-                    let w = DEFAULT_TOOLBAR_WIDTH;
-                    fixed_width += w;
+        // Compute widths: Fixed and KeepCurrent are allocated first, Flex gets the rest.
+        let mut fixed_total = 0.0;
+        let mut flex_count = 0;
+        let widths: Vec<f64> = visible.iter().map(|&(id, tile_w, current_w)| {
+            match tile_w {
+                TileWidth::Fixed(w) => { fixed_total += w; w }
+                TileWidth::KeepCurrent => {
+                    let w = collapsed_override
+                        .filter(|&(oid, _)| oid == id)
+                        .map(|(_, cw)| cw)
+                        .unwrap_or(current_w);
+                    fixed_total += w;
                     w
                 }
-                PaneKind::Dock => {
-                    let w = dock_collapsed_width
-                        .unwrap_or_else(|| self.pane(id).map(|p| p.width).unwrap_or(DEFAULT_DOCK_WIDTH));
-                    fixed_width += w;
-                    w
-                }
-                PaneKind::Canvas => 0.0, // placeholder, computed below
+                TileWidth::Flex => { flex_count += 1; 0.0 }
             }
         }).collect();
-        let canvas_width = (vw - fixed_width).max(MIN_CANVAS_WIDTH);
-        let widths: Vec<f64> = visible.iter().zip(&widths).map(|(&(kind, _), &w)| {
-            if kind == PaneKind::Canvas { canvas_width } else { w }
+        let flex_each = if flex_count > 0 {
+            let min_flex = self.panes.iter()
+                .filter(|p| p.config.tile_width == TileWidth::Flex)
+                .map(|p| p.config.min_width)
+                .fold(0.0_f64, f64::max);
+            ((vw - fixed_total) / flex_count as f64).max(min_flex)
+        } else {
+            0.0
+        };
+        let widths: Vec<f64> = visible.iter().zip(&widths).map(|(&(_, tile_w, _), &w)| {
+            if tile_w == TileWidth::Flex { flex_each } else { w }
         }).collect();
 
         // Assign positions to panes
         let mut x = 0.0;
-        for (i, &(_, id)) in visible.iter().enumerate() {
+        for (i, &(id, _, _)) in visible.iter().enumerate() {
             let w = widths[i];
             if let Some(p) = self.pane_mut(id) {
                 p.x = x;
@@ -1618,7 +1712,7 @@ impl PaneLayout {
 
         // Rebuild all snap constraints
         self.snaps.clear();
-        for (i, &(_, id)) in visible.iter().enumerate() {
+        for (i, &(id, _, _)) in visible.iter().enumerate() {
             // Left edge: first pane snaps to window left
             if i == 0 {
                 self.snaps.push(SnapConstraint { pane: id, edge: EdgeSide::Left, target: SnapTarget::Window(EdgeSide::Left) });
@@ -1632,7 +1726,7 @@ impl PaneLayout {
             self.snaps.push(SnapConstraint { pane: id, edge: EdgeSide::Bottom, target: SnapTarget::Window(EdgeSide::Bottom) });
             // Pane-to-pane snap to next visible pane
             if i + 1 < visible.len() {
-                let next_id = visible[i + 1].1;
+                let next_id = visible[i + 1].0;
                 self.snaps.push(SnapConstraint { pane: id, edge: EdgeSide::Right, target: SnapTarget::Pane(next_id, EdgeSide::Left) });
             }
         }
@@ -1659,14 +1753,7 @@ impl PaneLayout {
         !self.hidden_panes.contains(&kind)
     }
 
-    /// Human-readable label for a pane kind.
-    pub fn pane_label(kind: PaneKind) -> &'static str {
-        match kind {
-            PaneKind::Toolbar => "Tools",
-            PaneKind::Canvas => "Canvas",
-            PaneKind::Dock => "Panels",
-        }
-    }
+    // pane labels are now read from pane.config.label
 
     // -----------------------------------------------------------------------
     // Z-order
@@ -1699,7 +1786,7 @@ impl PaneLayout {
         let sx = new_w / self.viewport_width;
         let sy = new_h / self.viewport_height;
         for p in &mut self.panes {
-            let (min_w, min_h) = Self::min_size(p.kind);
+            let (min_w, min_h) = (p.config.min_width, p.config.min_height);
             p.x *= sx;
             p.y *= sy;
             p.width = (p.width * sx).max(min_w);
@@ -3286,7 +3373,7 @@ mod tests {
         pl.on_viewport_resize(100.0, 100.0);
         // All panes should still meet minimum sizes
         for p in &pl.panes {
-            let (min_w, min_h) = PaneLayout::min_size(p.kind);
+            let (min_w, min_h) = (p.config.min_width, p.config.min_height);
             assert!(p.width >= min_w);
             assert!(p.height >= min_h);
         }
@@ -3306,10 +3393,24 @@ mod tests {
     }
 
     #[test]
-    fn min_size_values() {
-        assert_eq!(PaneLayout::min_size(PaneKind::Toolbar), (MIN_TOOLBAR_WIDTH, MIN_TOOLBAR_HEIGHT));
-        assert_eq!(PaneLayout::min_size(PaneKind::Canvas), (MIN_CANVAS_WIDTH, MIN_CANVAS_HEIGHT));
-        assert_eq!(PaneLayout::min_size(PaneKind::Dock), (MIN_PANE_DOCK_WIDTH, MIN_PANE_DOCK_HEIGHT));
+    fn pane_config_defaults() {
+        let tc = PaneConfig::for_kind(PaneKind::Toolbar);
+        assert_eq!(tc.min_width, MIN_TOOLBAR_WIDTH);
+        assert!(tc.fixed_width);
+        assert!(tc.closable);
+        assert!(!tc.maximizable);
+
+        let cc = PaneConfig::for_kind(PaneKind::Canvas);
+        assert_eq!(cc.min_width, MIN_CANVAS_WIDTH);
+        assert!(!cc.fixed_width);
+        assert!(!cc.closable);
+        assert!(cc.maximizable);
+
+        let dc = PaneConfig::for_kind(PaneKind::Dock);
+        assert_eq!(dc.min_width, MIN_PANE_DOCK_WIDTH);
+        assert!(!dc.fixed_width);
+        assert!(dc.closable);
+        assert!(dc.collapsible);
     }
 
     // -----------------------------------------------------------------------
@@ -3385,6 +3486,35 @@ mod tests {
         assert_eq!(pl.panes.len(), 3);
         assert_eq!(pl.snaps.len(), 10);
         assert!((pl.viewport_width - 1000.0).abs() < 0.001);
+        // Config should round-trip
+        let toolbar = pl.pane_by_kind(PaneKind::Toolbar).unwrap();
+        assert!(toolbar.config.fixed_width);
+        assert_eq!(toolbar.config.label, "Tools");
+    }
+
+    #[test]
+    fn serde_pane_config_backwards_compat() {
+        // Simulate old JSON without config field on panes
+        let mut l = DockLayout::default_layout();
+        l.ensure_pane_layout(1000.0, 700.0);
+        let json = l.to_json().unwrap();
+        // Remove config fields from panes to simulate old format
+        let mut val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        if let Some(pl) = val.get_mut("pane_layout").and_then(|v| v.as_object_mut()) {
+            if let Some(panes) = pl.get_mut("panes").and_then(|v| v.as_array_mut()) {
+                for pane in panes {
+                    pane.as_object_mut().unwrap().remove("config");
+                }
+            }
+        }
+        let old_json = serde_json::to_string(&val).unwrap();
+        let restored = DockLayout::from_json(&old_json);
+        let pl = restored.pane_layout.unwrap();
+        // Panes should deserialize with default config (Canvas defaults)
+        assert_eq!(pl.panes.len(), 3);
+        // Default config is Canvas — check it applied
+        let toolbar = pl.pane_by_kind(PaneKind::Toolbar).unwrap();
+        assert_eq!(toolbar.config.label, "Canvas"); // default, not "Tools"
     }
 
     #[test]
@@ -3428,7 +3558,8 @@ mod tests {
     #[test]
     fn tile_panes_collapsed_dock() {
         let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
-        pl.tile_panes(Some(36.0));
+        let dock_id = pl.pane_by_kind(PaneKind::Dock).unwrap().id;
+        pl.tile_panes(Some((dock_id, 36.0)));
         let d = pl.pane_by_kind(PaneKind::Dock).unwrap();
         let c = pl.pane_by_kind(PaneKind::Canvas).unwrap();
         assert_eq!(d.width, 36.0);
