@@ -63,6 +63,9 @@ public class WorkspaceState: ObservableObject {
 public struct ContentView: View {
     @ObservedObject var workspace: WorkspaceState
     @State private var currentTool: Tool = .selection
+    @State private var paneDrag: (paneId: PaneId, offX: Double, offY: Double)?
+    @State private var borderDrag: (snapIdx: Int, startCoord: Double)?
+    @State private var snapPreview: [SnapConstraint] = []
 
     public init(workspace: WorkspaceState) {
         self.workspace = workspace
@@ -70,73 +73,50 @@ public struct ContentView: View {
 
     public var body: some View {
         GeometryReader { geometry in
-            let pl = workspace.dockLayout.panes()
-            let toolbarVisible = pl?.isPaneVisible(.toolbar) ?? true
-            let dockVisible = pl?.isPaneVisible(.dock) ?? true
-            let canvasMaximized = pl?.canvasMaximized ?? false
-            let toolbarW = canvasMaximized ? 0 : (toolbarVisible ? (pl?.paneByKind(.toolbar)?.width ?? 80) : 0)
-            let dockW = canvasMaximized ? 0 : (dockVisible ? (pl?.paneByKind(.dock)?.width ?? defaultDockWidth) : 0)
+            let rs = RenderingState.from(workspace.dockLayout.panes())
+            let snapLines = RenderingState.snapLines(from: snapPreview,
+                                                      paneLayout: workspace.dockLayout.panes())
 
-            HStack(spacing: 0) {
-                // Toolbar on the left
-                if toolbarVisible && !canvasMaximized {
-                    ToolbarPanel(currentTool: $currentTool)
-                        .frame(width: toolbarW)
-                }
+            ZStack {
+                // Background
+                SwiftUI.Color(nsColor: NSColor(white: 0.18, alpha: 1.0))
 
-                // Tabbed canvas area
-                VStack(spacing: 0) {
-                    if !workspace.canvases.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 0) {
-                                ForEach(workspace.canvases) { entry in
-                                    CanvasTabLabel(
-                                        model: entry.model,
-                                        isSelected: workspace.selectedTab == entry.id,
-                                        onSelect: { workspace.selectedTab = entry.id },
-                                        onClose: { closeCanvas(entry.id) }
-                                    )
-                                }
-                            }
-                        }
-                        .frame(height: 28)
-                        .background(SwiftUI.Color(nsColor: NSColor(white: 0.20, alpha: 1.0)))
-                    }
-
-                    // Canvas + right dock
-                    HStack(spacing: 0) {
-                        // Canvas content
-                        ZStack {
-                            SwiftUI.Color(nsColor: NSColor(white: 0.50, alpha: 1.0))
-                            ForEach(workspace.canvases) { entry in
-                                if entry.id == workspace.selectedTab {
-                                    CanvasTab(
-                                        model: entry.model,
-                                        currentTool: $currentTool,
-                                        onFocus: { workspace.selectedTab = entry.id }
-                                    )
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                        // Right dock
-                        if dockVisible && !canvasMaximized,
-                           !workspace.canvases.isEmpty,
-                           let rightDock = workspace.dockLayout.anchoredDock(.right),
-                           !rightDock.groups.isEmpty {
-                            DockPanelView(
-                                dockLayout: $workspace.dockLayout,
-                                dockId: rightDock.id,
-                                edge: .right
-                            )
-                            .frame(width: dockW)
-                        }
+                // Panes
+                ForEach(rs.panes) { geo in
+                    if geo.visible {
+                        paneView(geo: geo, rs: rs)
+                            .frame(width: geo.width, height: geo.height)
+                            .position(x: geo.x + geo.width / 2, y: geo.y + geo.height / 2)
+                            .zIndex(Double(geo.zIndex))
                     }
                 }
-            }
-            .frame(minWidth: 640, minHeight: 480)
-            .overlay {
+
+                // Shared border handles
+                ForEach(rs.borders) { border in
+                    SwiftUI.Color.clear
+                        .frame(width: border.width, height: border.height)
+                        .contentShape(Rectangle())
+                        .position(x: border.x + border.width / 2, y: border.y + border.height / 2)
+                        .onHover { hovering in
+                            if hovering {
+                                (border.isVertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push()
+                            } else {
+                                NSCursor.pop()
+                            }
+                        }
+                        .gesture(borderDragGesture(border: border))
+                        .zIndex(100)
+                }
+
+                // Snap preview lines
+                ForEach(snapLines) { line in
+                    SwiftUI.Color(nsColor: snapLineColor)
+                        .frame(width: line.width, height: line.height)
+                        .position(x: line.x + line.width / 2, y: line.y + line.height / 2)
+                        .allowsHitTesting(false)
+                        .zIndex(200)
+                }
+
                 // Floating docks
                 ForEach(Array(workspace.dockLayout.floating.enumerated()), id: \.offset) { _, fd in
                     FloatingDockView(
@@ -145,6 +125,8 @@ public struct ContentView: View {
                     )
                 }
             }
+            .coordinateSpace(name: "paneContainer")
+            .frame(minWidth: 640, minHeight: 480)
             .overlay {
                 SwiftUI.Color.clear
                     .focusedSceneValue(\.addCanvas, { newModel in addCanvas(newModel) })
@@ -170,6 +152,95 @@ public struct ContentView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func paneView(geo: PaneGeometry, rs: RenderingState) -> some View {
+        switch geo.kind {
+        case .toolbar:
+            PaneFrameView(geo: geo, workspace: workspace, showTitleBar: true,
+                          content: { ToolbarPanel(currentTool: $currentTool) },
+                          paneDrag: $paneDrag, snapPreview: $snapPreview)
+        case .canvas:
+            PaneFrameView(geo: geo, workspace: workspace, showTitleBar: !rs.canvasMaximized,
+                          content: { canvasContent },
+                          paneDrag: $paneDrag, snapPreview: $snapPreview)
+        case .dock:
+            PaneFrameView(geo: geo, workspace: workspace, showTitleBar: true,
+                          content: { dockContent },
+                          paneDrag: $paneDrag, snapPreview: $snapPreview)
+        }
+    }
+
+    private var canvasContent: some View {
+        VStack(spacing: 0) {
+            if !workspace.canvases.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        ForEach(workspace.canvases) { entry in
+                            CanvasTabLabel(
+                                model: entry.model,
+                                isSelected: workspace.selectedTab == entry.id,
+                                onSelect: { workspace.selectedTab = entry.id },
+                                onClose: { closeCanvas(entry.id) }
+                            )
+                        }
+                    }
+                }
+                .frame(height: 28)
+                .background(SwiftUI.Color(nsColor: NSColor(white: 0.20, alpha: 1.0)))
+            }
+
+            ZStack {
+                SwiftUI.Color(nsColor: NSColor(white: 0.50, alpha: 1.0))
+                ForEach(workspace.canvases) { entry in
+                    if entry.id == workspace.selectedTab {
+                        CanvasTab(
+                            model: entry.model,
+                            currentTool: $currentTool,
+                            onFocus: { workspace.selectedTab = entry.id }
+                        )
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var dockContent: some View {
+        if let rightDock = workspace.dockLayout.anchoredDock(.right),
+           !rightDock.groups.isEmpty {
+            DockPanelView(
+                dockLayout: $workspace.dockLayout,
+                dockId: rightDock.id,
+                edge: .right
+            )
+        } else {
+            SwiftUI.Color.clear
+        }
+    }
+
+    private func borderDragGesture(border: SharedBorder) -> some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: .named("paneContainer"))
+            .onChanged { value in
+                if borderDrag == nil {
+                    let start = Double(border.isVertical ? value.startLocation.x : value.startLocation.y)
+                    borderDrag = (border.snapIdx, start)
+                }
+                if let drag = borderDrag {
+                    let current = Double(border.isVertical ? value.location.x : value.location.y)
+                    let delta = current - drag.startCoord
+                    borderDrag = (drag.snapIdx, current)
+                    workspace.dockLayout.panesMut { pl in
+                        pl.dragSharedBorder(snapIdx: drag.snapIdx, delta: delta)
+                    }
+                }
+            }
+            .onEnded { _ in
+                borderDrag = nil
+                workspace.dockLayout.saveIfNeeded()
+            }
     }
 
     /// Add a canvas for the given model. If a canvas for the same file
