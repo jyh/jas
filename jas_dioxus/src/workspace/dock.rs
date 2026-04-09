@@ -158,6 +158,9 @@ pub struct DockLayout {
     pub hidden_panels: Vec<PanelKind>,
     pub z_order: Vec<DockId>,
     pub focused_panel: Option<PanelAddr>,
+    /// Floating pane positions for toolbar/canvas/dock. `None` for legacy layouts.
+    #[serde(default)]
+    pub pane_layout: Option<PaneLayout>,
     next_id: usize,
     /// Incremented on every mutation. Used to detect when a save is needed.
     #[serde(skip)]
@@ -240,6 +243,7 @@ impl DockLayout {
             hidden_panels: vec![],
             z_order: vec![],
             focused_panel: None,
+            pane_layout: None,
             next_id: 1,
             generation: 0,
             saved_generation: 0,
@@ -912,14 +916,35 @@ impl DockLayout {
     // Safety
     // -----------------------------------------------------------------------
 
-    /// Clamp all floating docks to be within the viewport.
+    /// Clamp all floating docks and panes to be within the viewport.
     pub fn clamp_floating_docks(&mut self, viewport_w: f64, viewport_h: f64) {
         for fd in &mut self.floating {
             let min_visible = 50.0;
             fd.x = fd.x.clamp(-fd.dock.width + min_visible, viewport_w - min_visible);
             fd.y = fd.y.clamp(0.0, viewport_h - min_visible);
         }
+        if let Some(ref mut pl) = self.pane_layout {
+            pl.clamp_panes(viewport_w, viewport_h);
+        }
         self.bump();
+    }
+
+    /// Ensure a PaneLayout exists, creating the default if absent.
+    pub fn ensure_pane_layout(&mut self, viewport_w: f64, viewport_h: f64) {
+        if self.pane_layout.is_none() {
+            self.pane_layout = Some(PaneLayout::default_three_pane(viewport_w, viewport_h));
+            self.bump();
+        }
+    }
+
+    /// Shorthand access to the pane layout.
+    pub fn panes(&self) -> Option<&PaneLayout> {
+        self.pane_layout.as_ref()
+    }
+
+    /// Mutable access to the pane layout.
+    pub fn panes_mut(&mut self) -> Option<&mut PaneLayout> {
+        self.pane_layout.as_mut()
     }
 
     /// Set auto-hide for a dock.
@@ -960,6 +985,511 @@ impl DockLayout {
             .collect();
         self.floating.retain(|fd| !fd.dock.groups.is_empty());
         self.z_order.retain(|id| !removed.contains(id));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pane layout: floating, movable, resizable panes for toolbar/canvas/dock
+// ---------------------------------------------------------------------------
+
+pub const MIN_TOOLBAR_WIDTH: f64 = 72.0;
+pub const MIN_TOOLBAR_HEIGHT: f64 = 200.0;
+pub const MIN_CANVAS_HEIGHT: f64 = 200.0;
+pub const MIN_PANE_DOCK_WIDTH: f64 = 150.0;
+pub const MIN_PANE_DOCK_HEIGHT: f64 = 100.0;
+pub const DEFAULT_TOOLBAR_WIDTH: f64 = 72.0;
+pub const BORDER_HIT_TOLERANCE: f64 = 6.0;
+pub const MIN_PANE_VISIBLE: f64 = 50.0;
+
+/// Stable identifier for a pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PaneId(pub usize);
+
+/// Which top-level region a pane represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PaneKind {
+    Toolbar,
+    Canvas,
+    Dock,
+}
+
+/// A floating pane with position and size.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pane {
+    pub id: PaneId,
+    pub kind: PaneKind,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Which side of a rectangle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EdgeSide {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+/// What a pane edge is snapped to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SnapTarget {
+    /// Snapped to a window edge.
+    Window(EdgeSide),
+    /// Snapped to another pane's edge.
+    Pane(PaneId, EdgeSide),
+}
+
+/// A snap constraint: one pane edge is attached to a target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapConstraint {
+    pub pane: PaneId,
+    pub edge: EdgeSide,
+    pub target: SnapTarget,
+}
+
+/// Layout of the three top-level panes (toolbar, canvas, dock).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaneLayout {
+    pub panes: Vec<Pane>,
+    pub snaps: Vec<SnapConstraint>,
+    pub z_order: Vec<PaneId>,
+    pub viewport_width: f64,
+    pub viewport_height: f64,
+    next_pane_id: usize,
+}
+
+impl PaneLayout {
+    // -----------------------------------------------------------------------
+    // Construction
+    // -----------------------------------------------------------------------
+
+    /// Create the default three-pane layout filling the viewport left-to-right:
+    /// toolbar(72px) | canvas(flex) | dock(240px).
+    pub fn default_three_pane(viewport_w: f64, viewport_h: f64) -> Self {
+        let toolbar_w = DEFAULT_TOOLBAR_WIDTH;
+        let dock_w = DEFAULT_DOCK_WIDTH;
+        let canvas_w = (viewport_w - toolbar_w - dock_w).max(MIN_CANVAS_WIDTH);
+
+        let toolbar_id = PaneId(0);
+        let canvas_id = PaneId(1);
+        let dock_id = PaneId(2);
+
+        let panes = vec![
+            Pane { id: toolbar_id, kind: PaneKind::Toolbar, x: 0.0, y: 0.0, width: toolbar_w, height: viewport_h },
+            Pane { id: canvas_id, kind: PaneKind::Canvas, x: toolbar_w, y: 0.0, width: canvas_w, height: viewport_h },
+            Pane { id: dock_id, kind: PaneKind::Dock, x: toolbar_w + canvas_w, y: 0.0, width: dock_w, height: viewport_h },
+        ];
+
+        let snaps = vec![
+            // Toolbar: left to window, right to canvas, top/bottom to window
+            SnapConstraint { pane: toolbar_id, edge: EdgeSide::Left, target: SnapTarget::Window(EdgeSide::Left) },
+            SnapConstraint { pane: toolbar_id, edge: EdgeSide::Top, target: SnapTarget::Window(EdgeSide::Top) },
+            SnapConstraint { pane: toolbar_id, edge: EdgeSide::Bottom, target: SnapTarget::Window(EdgeSide::Bottom) },
+            SnapConstraint { pane: toolbar_id, edge: EdgeSide::Right, target: SnapTarget::Pane(canvas_id, EdgeSide::Left) },
+            // Canvas: top/bottom to window, right to dock (left covered by toolbar snap)
+            SnapConstraint { pane: canvas_id, edge: EdgeSide::Top, target: SnapTarget::Window(EdgeSide::Top) },
+            SnapConstraint { pane: canvas_id, edge: EdgeSide::Bottom, target: SnapTarget::Window(EdgeSide::Bottom) },
+            SnapConstraint { pane: canvas_id, edge: EdgeSide::Right, target: SnapTarget::Pane(dock_id, EdgeSide::Left) },
+            // Dock: right to window, top/bottom to window (left covered by canvas snap)
+            SnapConstraint { pane: dock_id, edge: EdgeSide::Right, target: SnapTarget::Window(EdgeSide::Right) },
+            SnapConstraint { pane: dock_id, edge: EdgeSide::Top, target: SnapTarget::Window(EdgeSide::Top) },
+            SnapConstraint { pane: dock_id, edge: EdgeSide::Bottom, target: SnapTarget::Window(EdgeSide::Bottom) },
+        ];
+
+        let z_order = vec![canvas_id, toolbar_id, dock_id];
+
+        Self {
+            panes,
+            snaps,
+            z_order,
+            viewport_width: viewport_w,
+            viewport_height: viewport_h,
+            next_pane_id: 3,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Lookup
+    // -----------------------------------------------------------------------
+
+    pub fn pane(&self, id: PaneId) -> Option<&Pane> {
+        self.panes.iter().find(|p| p.id == id)
+    }
+
+    pub fn pane_mut(&mut self, id: PaneId) -> Option<&mut Pane> {
+        self.panes.iter_mut().find(|p| p.id == id)
+    }
+
+    pub fn pane_by_kind(&self, kind: PaneKind) -> Option<&Pane> {
+        self.panes.iter().find(|p| p.kind == kind)
+    }
+
+    pub fn pane_by_kind_mut(&mut self, kind: PaneKind) -> Option<&mut Pane> {
+        self.panes.iter_mut().find(|p| p.kind == kind)
+    }
+
+    // -----------------------------------------------------------------------
+    // Min sizes
+    // -----------------------------------------------------------------------
+
+    /// Return (min_width, min_height) for a pane kind.
+    pub fn min_size(kind: PaneKind) -> (f64, f64) {
+        match kind {
+            PaneKind::Toolbar => (MIN_TOOLBAR_WIDTH, MIN_TOOLBAR_HEIGHT),
+            PaneKind::Canvas => (MIN_CANVAS_WIDTH, MIN_CANVAS_HEIGHT),
+            PaneKind::Dock => (MIN_PANE_DOCK_WIDTH, MIN_PANE_DOCK_HEIGHT),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Move
+    // -----------------------------------------------------------------------
+
+    /// Move a pane to a new position. Removes all snap constraints for
+    /// this pane (since the user manually repositioned it).
+    pub fn set_pane_position(&mut self, id: PaneId, x: f64, y: f64) {
+        if let Some(p) = self.pane_mut(id) {
+            p.x = x;
+            p.y = y;
+        }
+        self.snaps.retain(|s| s.pane != id && !matches!(s.target, SnapTarget::Pane(pid, _) if pid == id));
+    }
+
+    // -----------------------------------------------------------------------
+    // Resize
+    // -----------------------------------------------------------------------
+
+    /// Set a pane's size, clamped to its minimum.
+    pub fn resize_pane(&mut self, id: PaneId, width: f64, height: f64) {
+        if let Some(p) = self.pane_mut(id) {
+            let (min_w, min_h) = Self::min_size(p.kind);
+            p.width = width.max(min_w);
+            p.height = height.max(min_h);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Snap detection
+    // -----------------------------------------------------------------------
+
+    /// Return the coordinate of a pane edge.
+    pub fn pane_edge_coord(pane: &Pane, edge: EdgeSide) -> f64 {
+        match edge {
+            EdgeSide::Left => pane.x,
+            EdgeSide::Right => pane.x + pane.width,
+            EdgeSide::Top => pane.y,
+            EdgeSide::Bottom => pane.y + pane.height,
+        }
+    }
+
+    /// Return the coordinate of a window edge.
+    fn window_edge_coord(edge: EdgeSide, vw: f64, vh: f64) -> f64 {
+        match edge {
+            EdgeSide::Left | EdgeSide::Top => 0.0,
+            EdgeSide::Right => vw,
+            EdgeSide::Bottom => vh,
+        }
+    }
+
+    /// True if two edges are parallel and on opposite sides (can snap together).
+    fn edges_can_snap(a: EdgeSide, b: EdgeSide) -> bool {
+        matches!(
+            (a, b),
+            (EdgeSide::Right, EdgeSide::Left)
+            | (EdgeSide::Left, EdgeSide::Right)
+            | (EdgeSide::Bottom, EdgeSide::Top)
+            | (EdgeSide::Top, EdgeSide::Bottom)
+        )
+    }
+
+    /// True if an edge faces a window boundary of the same orientation.
+    fn edge_faces_window(edge: EdgeSide, window_edge: EdgeSide) -> bool {
+        edge == window_edge
+    }
+
+    /// Detect potential snap constraints for a pane at its current position.
+    /// Returns constraints that would form if released now.
+    pub fn detect_snaps(
+        &self,
+        dragged: PaneId,
+        viewport_w: f64,
+        viewport_h: f64,
+    ) -> Vec<SnapConstraint> {
+        let dp = match self.pane(dragged) {
+            Some(p) => p.clone(),
+            None => return vec![],
+        };
+        let mut result = Vec::new();
+
+        // Check against window edges
+        for &edge in &[EdgeSide::Left, EdgeSide::Right, EdgeSide::Top, EdgeSide::Bottom] {
+            let coord = Self::pane_edge_coord(&dp, edge);
+            let window_coord = Self::window_edge_coord(edge, viewport_w, viewport_h);
+            if (coord - window_coord).abs() <= SNAP_DISTANCE {
+                result.push(SnapConstraint {
+                    pane: dragged,
+                    edge,
+                    target: SnapTarget::Window(edge),
+                });
+            }
+        }
+
+        // Check against other panes
+        for other in &self.panes {
+            if other.id == dragged {
+                continue;
+            }
+            // Check if the panes overlap on the perpendicular axis (so the snap is meaningful)
+            for &d_edge in &[EdgeSide::Left, EdgeSide::Right, EdgeSide::Top, EdgeSide::Bottom] {
+                for &o_edge in &[EdgeSide::Left, EdgeSide::Right, EdgeSide::Top, EdgeSide::Bottom] {
+                    if !Self::edges_can_snap(d_edge, o_edge) {
+                        continue;
+                    }
+                    let d_coord = Self::pane_edge_coord(&dp, d_edge);
+                    let o_coord = Self::pane_edge_coord(other, o_edge);
+                    if (d_coord - o_coord).abs() <= SNAP_DISTANCE {
+                        // Check perpendicular overlap
+                        let overlaps = match d_edge {
+                            EdgeSide::Left | EdgeSide::Right => {
+                                dp.y < other.y + other.height && dp.y + dp.height > other.y
+                            }
+                            EdgeSide::Top | EdgeSide::Bottom => {
+                                dp.x < other.x + other.width && dp.x + dp.width > other.x
+                            }
+                        };
+                        if overlaps {
+                            result.push(SnapConstraint {
+                                pane: dragged,
+                                edge: d_edge,
+                                target: SnapTarget::Pane(other.id, o_edge),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    // -----------------------------------------------------------------------
+    // Snap application
+    // -----------------------------------------------------------------------
+
+    /// Remove old snaps for a pane and apply new ones, aligning the pane's
+    /// position to match the snap targets exactly.
+    pub fn apply_snaps(
+        &mut self,
+        pane_id: PaneId,
+        new_snaps: Vec<SnapConstraint>,
+        viewport_w: f64,
+        viewport_h: f64,
+    ) {
+        // Remove existing snaps involving this pane
+        self.snaps.retain(|s| s.pane != pane_id && !matches!(s.target, SnapTarget::Pane(pid, _) if pid == pane_id));
+
+        // Align pane position to each snap target
+        for snap in &new_snaps {
+            if snap.pane != pane_id {
+                continue;
+            }
+            let target_coord = match snap.target {
+                SnapTarget::Window(we) => Self::window_edge_coord(we, viewport_w, viewport_h),
+                SnapTarget::Pane(other_id, other_edge) => {
+                    match self.pane(other_id) {
+                        Some(other) => Self::pane_edge_coord(other, other_edge),
+                        None => continue,
+                    }
+                }
+            };
+            if let Some(p) = self.pane_mut(pane_id) {
+                match snap.edge {
+                    EdgeSide::Left => p.x = target_coord,
+                    EdgeSide::Right => p.x = target_coord - p.width,
+                    EdgeSide::Top => p.y = target_coord,
+                    EdgeSide::Bottom => p.y = target_coord - p.height,
+                }
+            }
+        }
+
+        self.snaps.extend(new_snaps);
+    }
+
+    // -----------------------------------------------------------------------
+    // Shared border
+    // -----------------------------------------------------------------------
+
+    /// Find a snap constraint representing a shared border at (x, y).
+    /// Returns the snap index and the orientation of the border.
+    /// A "shared border" is a pane-to-pane snap where one pane's Right
+    /// meets another's Left (vertical border) or Bottom meets Top
+    /// (horizontal border).
+    pub fn shared_border_at(
+        &self,
+        x: f64,
+        y: f64,
+        tolerance: f64,
+    ) -> Option<(usize, EdgeSide)> {
+        for (i, snap) in self.snaps.iter().enumerate() {
+            let (other_id, other_edge) = match snap.target {
+                SnapTarget::Pane(pid, oe) => (pid, oe),
+                _ => continue,
+            };
+
+            // Only Right->Left or Bottom->Top borders are draggable
+            let is_vertical = snap.edge == EdgeSide::Right && other_edge == EdgeSide::Left;
+            let is_horizontal = snap.edge == EdgeSide::Bottom && other_edge == EdgeSide::Top;
+            if !is_vertical && !is_horizontal {
+                continue;
+            }
+
+            let pane_a = match self.pane(snap.pane) {
+                Some(p) => p,
+                None => continue,
+            };
+            let pane_b = match self.pane(other_id) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            if is_vertical {
+                let border_x = pane_a.x + pane_a.width;
+                let min_y = pane_a.y.max(pane_b.y);
+                let max_y = (pane_a.y + pane_a.height).min(pane_b.y + pane_b.height);
+                if (x - border_x).abs() <= tolerance && y >= min_y && y <= max_y {
+                    return Some((i, EdgeSide::Left)); // vertical border
+                }
+            } else {
+                let border_y = pane_a.y + pane_a.height;
+                let min_x = pane_a.x.max(pane_b.x);
+                let max_x = (pane_a.x + pane_a.width).min(pane_b.x + pane_b.width);
+                if (y - border_y).abs() <= tolerance && x >= min_x && x <= max_x {
+                    return Some((i, EdgeSide::Top)); // horizontal border
+                }
+            }
+        }
+        None
+    }
+
+    /// Drag a shared border by `delta` pixels. For a vertical border (Right->Left),
+    /// positive delta widens the left pane and narrows the right pane.
+    /// For a horizontal border (Bottom->Top), positive delta grows the top pane
+    /// and shrinks the bottom pane.
+    pub fn drag_shared_border(
+        &mut self,
+        snap_idx: usize,
+        delta: f64,
+    ) {
+        let snap = match self.snaps.get(snap_idx) {
+            Some(s) => *s,
+            None => return,
+        };
+        let (other_id, _other_edge) = match snap.target {
+            SnapTarget::Pane(pid, oe) => (pid, oe),
+            _ => return,
+        };
+
+        // Read kinds for min-size enforcement
+        let a_kind = match self.pane(snap.pane) { Some(p) => p.kind, None => return };
+        let b_kind = match self.pane(other_id) { Some(p) => p.kind, None => return };
+        let (a_min_w, a_min_h) = Self::min_size(a_kind);
+        let (b_min_w, b_min_h) = Self::min_size(b_kind);
+
+        let is_vertical = snap.edge == EdgeSide::Right;
+
+        if is_vertical {
+            // Read current values
+            let a_w = self.pane(snap.pane).unwrap().width;
+            let b_x = self.pane(other_id).unwrap().x;
+            let b_w = self.pane(other_id).unwrap().width;
+
+            // Clamp delta so neither pane goes below min width
+            let max_expand = b_w - b_min_w;
+            let max_shrink = a_w - a_min_w;
+            let clamped = delta.clamp(-max_shrink, max_expand);
+
+            if let Some(a) = self.pane_mut(snap.pane) {
+                a.width += clamped;
+            }
+            if let Some(b) = self.pane_mut(other_id) {
+                b.x = b_x + clamped;
+                b.width -= clamped;
+            }
+        } else {
+            // Horizontal: Bottom->Top
+            let a_h = self.pane(snap.pane).unwrap().height;
+            let b_y = self.pane(other_id).unwrap().y;
+            let b_h = self.pane(other_id).unwrap().height;
+
+            let max_expand = b_h - b_min_h;
+            let max_shrink = a_h - a_min_h;
+            let clamped = delta.clamp(-max_shrink, max_expand);
+
+            if let Some(a) = self.pane_mut(snap.pane) {
+                a.height += clamped;
+            }
+            if let Some(b) = self.pane_mut(other_id) {
+                b.y = b_y + clamped;
+                b.height -= clamped;
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Z-order
+    // -----------------------------------------------------------------------
+
+    /// Bring a pane to the front of the z-order.
+    pub fn bring_pane_to_front(&mut self, id: PaneId) {
+        if let Some(pos) = self.z_order.iter().position(|&zid| zid == id) {
+            self.z_order.remove(pos);
+            self.z_order.push(id);
+        }
+    }
+
+    /// Return the z-index position for a pane (0 = back).
+    pub fn pane_z_index(&self, id: PaneId) -> usize {
+        self.z_order.iter().position(|&zid| zid == id).unwrap_or(0)
+    }
+
+    // -----------------------------------------------------------------------
+    // Viewport resize
+    // -----------------------------------------------------------------------
+
+    /// Proportionally rescale all panes when the viewport changes size.
+    pub fn on_viewport_resize(&mut self, new_w: f64, new_h: f64) {
+        if self.viewport_width <= 0.0 || self.viewport_height <= 0.0 {
+            self.viewport_width = new_w;
+            self.viewport_height = new_h;
+            return;
+        }
+        let sx = new_w / self.viewport_width;
+        let sy = new_h / self.viewport_height;
+        for p in &mut self.panes {
+            let (min_w, min_h) = Self::min_size(p.kind);
+            p.x *= sx;
+            p.y *= sy;
+            p.width = (p.width * sx).max(min_w);
+            p.height = (p.height * sy).max(min_h);
+        }
+        self.viewport_width = new_w;
+        self.viewport_height = new_h;
+        self.clamp_panes(new_w, new_h);
+    }
+
+    // -----------------------------------------------------------------------
+    // Clamping
+    // -----------------------------------------------------------------------
+
+    /// Ensure every pane has at least MIN_PANE_VISIBLE pixels within the viewport.
+    pub fn clamp_panes(&mut self, viewport_w: f64, viewport_h: f64) {
+        for p in &mut self.panes {
+            p.x = p.x.clamp(-p.width + MIN_PANE_VISIBLE, viewport_w - MIN_PANE_VISIBLE);
+            p.y = p.y.clamp(-p.height + MIN_PANE_VISIBLE, viewport_h - MIN_PANE_VISIBLE);
+        }
     }
 }
 
@@ -2070,5 +2600,413 @@ mod tests {
     fn app_config_invalid_json() {
         let c = AppConfig::from_json("garbage{{{");
         assert_eq!(c.active_layout, "Default"); // falls back to default
+    }
+
+    // -----------------------------------------------------------------------
+    // PaneLayout
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn default_three_pane_fills_viewport() {
+        let pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        assert_eq!(pl.panes.len(), 3);
+        // Toolbar starts at x=0, canvas follows, dock ends at viewport width
+        let toolbar = pl.pane_by_kind(PaneKind::Toolbar).unwrap();
+        let canvas = pl.pane_by_kind(PaneKind::Canvas).unwrap();
+        let dock = pl.pane_by_kind(PaneKind::Dock).unwrap();
+        assert_eq!(toolbar.x, 0.0);
+        assert_eq!(toolbar.width, DEFAULT_TOOLBAR_WIDTH);
+        assert_eq!(canvas.x, toolbar.x + toolbar.width);
+        assert_eq!(dock.x, canvas.x + canvas.width);
+        // Widths sum to viewport width
+        let total = toolbar.width + canvas.width + dock.width;
+        assert!((total - 1000.0).abs() < 0.001);
+        // All full height
+        assert_eq!(toolbar.height, 700.0);
+        assert_eq!(canvas.height, 700.0);
+        assert_eq!(dock.height, 700.0);
+    }
+
+    #[test]
+    fn default_three_pane_snap_count() {
+        let pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        // 10 snaps: toolbar(4) + canvas(2 to window + 1 to dock) + dock(3)
+        assert_eq!(pl.snaps.len(), 10);
+    }
+
+    #[test]
+    fn pane_lookup_by_id() {
+        let pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        assert!(pl.pane(PaneId(0)).is_some());
+        assert!(pl.pane(PaneId(1)).is_some());
+        assert!(pl.pane(PaneId(2)).is_some());
+    }
+
+    #[test]
+    fn pane_lookup_by_kind() {
+        let pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        assert_eq!(pl.pane_by_kind(PaneKind::Toolbar).unwrap().kind, PaneKind::Toolbar);
+        assert_eq!(pl.pane_by_kind(PaneKind::Canvas).unwrap().kind, PaneKind::Canvas);
+        assert_eq!(pl.pane_by_kind(PaneKind::Dock).unwrap().kind, PaneKind::Dock);
+    }
+
+    #[test]
+    fn pane_lookup_invalid_id() {
+        let pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        assert!(pl.pane(PaneId(99)).is_none());
+    }
+
+    #[test]
+    fn set_pane_position_moves_pane() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        pl.set_pane_position(id, 100.0, 50.0);
+        let p = pl.pane(id).unwrap();
+        assert_eq!(p.x, 100.0);
+        assert_eq!(p.y, 50.0);
+    }
+
+    #[test]
+    fn set_pane_position_clears_snaps() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        let snaps_before = pl.snaps.len();
+        assert!(snaps_before > 0);
+        pl.set_pane_position(canvas_id, 200.0, 200.0);
+        // All snaps involving canvas should be gone
+        let has_canvas_snap = pl.snaps.iter().any(|s| {
+            s.pane == canvas_id || matches!(s.target, SnapTarget::Pane(pid, _) if pid == canvas_id)
+        });
+        assert!(!has_canvas_snap);
+        assert!(pl.snaps.len() < snaps_before);
+    }
+
+    #[test]
+    fn resize_pane_clamps_min_toolbar() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let id = pl.pane_by_kind(PaneKind::Toolbar).unwrap().id;
+        pl.resize_pane(id, 10.0, 10.0);
+        let p = pl.pane(id).unwrap();
+        assert_eq!(p.width, MIN_TOOLBAR_WIDTH);
+        assert_eq!(p.height, MIN_TOOLBAR_HEIGHT);
+    }
+
+    #[test]
+    fn resize_pane_clamps_min_canvas() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        pl.resize_pane(id, 10.0, 10.0);
+        let p = pl.pane(id).unwrap();
+        assert_eq!(p.width, MIN_CANVAS_WIDTH);
+        assert_eq!(p.height, MIN_CANVAS_HEIGHT);
+    }
+
+    #[test]
+    fn resize_pane_clamps_min_dock() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let id = pl.pane_by_kind(PaneKind::Dock).unwrap().id;
+        pl.resize_pane(id, 10.0, 10.0);
+        let p = pl.pane(id).unwrap();
+        assert_eq!(p.width, MIN_PANE_DOCK_WIDTH);
+        assert_eq!(p.height, MIN_PANE_DOCK_HEIGHT);
+    }
+
+    #[test]
+    fn resize_pane_accepts_large_values() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        pl.resize_pane(id, 800.0, 600.0);
+        let p = pl.pane(id).unwrap();
+        assert_eq!(p.width, 800.0);
+        assert_eq!(p.height, 600.0);
+    }
+
+    #[test]
+    fn detect_snaps_near_window_edge() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        // Move canvas to near the left window edge
+        pl.set_pane_position(canvas_id, 5.0, 0.0);
+        let snaps = pl.detect_snaps(canvas_id, 1000.0, 700.0);
+        // Should detect left edge snap to window
+        assert!(snaps.iter().any(|s|
+            s.pane == canvas_id
+            && s.edge == EdgeSide::Left
+            && s.target == SnapTarget::Window(EdgeSide::Left)
+        ));
+    }
+
+    #[test]
+    fn detect_snaps_near_other_pane() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        let toolbar = pl.pane_by_kind(PaneKind::Toolbar).unwrap();
+        let toolbar_right = toolbar.x + toolbar.width;
+        let toolbar_id = toolbar.id;
+        // Move canvas so its left edge is near toolbar's right edge
+        pl.set_pane_position(canvas_id, toolbar_right + 5.0, 0.0);
+        let snaps = pl.detect_snaps(canvas_id, 1000.0, 700.0);
+        assert!(snaps.iter().any(|s|
+            s.pane == canvas_id
+            && s.edge == EdgeSide::Left
+            && s.target == SnapTarget::Pane(toolbar_id, EdgeSide::Right)
+        ));
+    }
+
+    #[test]
+    fn detect_snaps_no_match() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        // Move canvas far from everything
+        pl.set_pane_position(canvas_id, 400.0, 300.0);
+        pl.resize_pane(canvas_id, 200.0, 200.0);
+        let snaps = pl.detect_snaps(canvas_id, 1000.0, 700.0);
+        // Should not snap to any window edges or panes
+        assert!(snaps.is_empty());
+    }
+
+    #[test]
+    fn apply_snaps_aligns_position() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        // Move canvas slightly off from left window edge
+        pl.set_pane_position(canvas_id, 5.0, 3.0);
+        let new_snaps = vec![
+            SnapConstraint { pane: canvas_id, edge: EdgeSide::Left, target: SnapTarget::Window(EdgeSide::Left) },
+            SnapConstraint { pane: canvas_id, edge: EdgeSide::Top, target: SnapTarget::Window(EdgeSide::Top) },
+        ];
+        pl.apply_snaps(canvas_id, new_snaps, 1000.0, 700.0);
+        let p = pl.pane(canvas_id).unwrap();
+        assert_eq!(p.x, 0.0); // aligned to left
+        assert_eq!(p.y, 0.0); // aligned to top
+    }
+
+    #[test]
+    fn apply_snaps_replaces_old() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        let old_count = pl.snaps.len();
+        // Apply a single new snap
+        let new_snaps = vec![
+            SnapConstraint { pane: canvas_id, edge: EdgeSide::Left, target: SnapTarget::Window(EdgeSide::Left) },
+        ];
+        pl.apply_snaps(canvas_id, new_snaps, 1000.0, 700.0);
+        // Old canvas snaps removed, one new added. Should be fewer total.
+        assert!(pl.snaps.len() < old_count);
+        // The new snap is present
+        assert!(pl.snaps.iter().any(|s|
+            s.pane == canvas_id && s.edge == EdgeSide::Left
+        ));
+    }
+
+    #[test]
+    fn shared_border_at_vertical() {
+        let pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let toolbar = pl.pane_by_kind(PaneKind::Toolbar).unwrap();
+        let border_x = toolbar.x + toolbar.width;
+        // Hit the vertical border between toolbar and canvas
+        let result = pl.shared_border_at(border_x, 350.0, BORDER_HIT_TOLERANCE);
+        assert!(result.is_some());
+        let (_, orientation) = result.unwrap();
+        assert_eq!(orientation, EdgeSide::Left); // vertical border
+    }
+
+    #[test]
+    fn shared_border_at_miss() {
+        let pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        // Click in the middle of the canvas (far from any border)
+        let result = pl.shared_border_at(500.0, 350.0, BORDER_HIT_TOLERANCE);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn drag_shared_border_widens_left_narrows_right() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let toolbar = pl.pane_by_kind(PaneKind::Toolbar).unwrap();
+        let border_x = toolbar.x + toolbar.width;
+        let (snap_idx, _) = pl.shared_border_at(border_x, 350.0, BORDER_HIT_TOLERANCE).unwrap();
+
+        let toolbar_w_before = pl.pane_by_kind(PaneKind::Toolbar).unwrap().width;
+        let canvas_w_before = pl.pane_by_kind(PaneKind::Canvas).unwrap().width;
+        let canvas_x_before = pl.pane_by_kind(PaneKind::Canvas).unwrap().x;
+
+        pl.drag_shared_border(snap_idx, 30.0);
+
+        let toolbar_w_after = pl.pane_by_kind(PaneKind::Toolbar).unwrap().width;
+        let canvas_w_after = pl.pane_by_kind(PaneKind::Canvas).unwrap().width;
+        let canvas_x_after = pl.pane_by_kind(PaneKind::Canvas).unwrap().x;
+
+        assert!((toolbar_w_after - (toolbar_w_before + 30.0)).abs() < 0.001);
+        assert!((canvas_w_after - (canvas_w_before - 30.0)).abs() < 0.001);
+        assert!((canvas_x_after - (canvas_x_before + 30.0)).abs() < 0.001);
+    }
+
+    #[test]
+    fn drag_shared_border_respects_min_size() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let toolbar = pl.pane_by_kind(PaneKind::Toolbar).unwrap();
+        let border_x = toolbar.x + toolbar.width;
+        let (snap_idx, _) = pl.shared_border_at(border_x, 350.0, BORDER_HIT_TOLERANCE).unwrap();
+
+        // Try to shrink toolbar below min width (drag left by a huge amount)
+        pl.drag_shared_border(snap_idx, -5000.0);
+
+        let toolbar = pl.pane_by_kind(PaneKind::Toolbar).unwrap();
+        assert!(toolbar.width >= MIN_TOOLBAR_WIDTH);
+    }
+
+    #[test]
+    fn bring_pane_to_front() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let toolbar_id = pl.pane_by_kind(PaneKind::Toolbar).unwrap().id;
+        let dock_id = pl.pane_by_kind(PaneKind::Dock).unwrap().id;
+        // Dock is last in z_order by default
+        assert_eq!(*pl.z_order.last().unwrap(), dock_id);
+        // Bring toolbar to front
+        pl.bring_pane_to_front(toolbar_id);
+        assert_eq!(*pl.z_order.last().unwrap(), toolbar_id);
+    }
+
+    #[test]
+    fn pane_z_index_ordering() {
+        let pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        let toolbar_id = pl.pane_by_kind(PaneKind::Toolbar).unwrap().id;
+        let dock_id = pl.pane_by_kind(PaneKind::Dock).unwrap().id;
+        // Default order: canvas(back), toolbar, dock(front)
+        assert!(pl.pane_z_index(canvas_id) < pl.pane_z_index(toolbar_id));
+        assert!(pl.pane_z_index(toolbar_id) < pl.pane_z_index(dock_id));
+    }
+
+    #[test]
+    fn on_viewport_resize_proportional() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let canvas_w_before = pl.pane_by_kind(PaneKind::Canvas).unwrap().width;
+        // Double the viewport width
+        pl.on_viewport_resize(2000.0, 700.0);
+        let canvas_w_after = pl.pane_by_kind(PaneKind::Canvas).unwrap().width;
+        // Canvas should roughly double in width
+        assert!((canvas_w_after - canvas_w_before * 2.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn on_viewport_resize_clamps_min() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        // Shrink to very small viewport
+        pl.on_viewport_resize(100.0, 100.0);
+        // All panes should still meet minimum sizes
+        for p in &pl.panes {
+            let (min_w, min_h) = PaneLayout::min_size(p.kind);
+            assert!(p.width >= min_w);
+            assert!(p.height >= min_h);
+        }
+    }
+
+    #[test]
+    fn clamp_panes_offscreen() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        // Push canvas way off screen
+        pl.set_pane_position(id, 5000.0, 5000.0);
+        pl.clamp_panes(1000.0, 700.0);
+        let p = pl.pane(id).unwrap();
+        // Should be clamped so at least 50px is visible
+        assert!(p.x <= 1000.0 - MIN_PANE_VISIBLE);
+        assert!(p.y <= 700.0 - MIN_PANE_VISIBLE);
+    }
+
+    #[test]
+    fn min_size_values() {
+        assert_eq!(PaneLayout::min_size(PaneKind::Toolbar), (MIN_TOOLBAR_WIDTH, MIN_TOOLBAR_HEIGHT));
+        assert_eq!(PaneLayout::min_size(PaneKind::Canvas), (MIN_CANVAS_WIDTH, MIN_CANVAS_HEIGHT));
+        assert_eq!(PaneLayout::min_size(PaneKind::Dock), (MIN_PANE_DOCK_WIDTH, MIN_PANE_DOCK_HEIGHT));
+    }
+
+    // -----------------------------------------------------------------------
+    // DockLayout + PaneLayout integration
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dock_layout_default_has_no_pane_layout() {
+        let l = DockLayout::default_layout();
+        assert!(l.pane_layout.is_none());
+    }
+
+    #[test]
+    fn ensure_pane_layout_creates_if_none() {
+        let mut l = DockLayout::default_layout();
+        assert!(l.pane_layout.is_none());
+        l.ensure_pane_layout(1000.0, 700.0);
+        assert!(l.pane_layout.is_some());
+        assert_eq!(l.panes().unwrap().panes.len(), 3);
+    }
+
+    #[test]
+    fn ensure_pane_layout_noop_if_present() {
+        let mut l = DockLayout::default_layout();
+        l.ensure_pane_layout(1000.0, 700.0);
+        let gen_before = l.generation;
+        l.ensure_pane_layout(1000.0, 700.0);
+        // Should not bump generation again
+        assert_eq!(l.generation, gen_before);
+    }
+
+    #[test]
+    fn reset_to_default_clears_pane_layout() {
+        let mut l = DockLayout::default_layout();
+        l.ensure_pane_layout(1000.0, 700.0);
+        assert!(l.pane_layout.is_some());
+        l.reset_to_default();
+        assert!(l.pane_layout.is_none());
+    }
+
+    #[test]
+    fn panes_accessors() {
+        let mut l = DockLayout::default_layout();
+        assert!(l.panes().is_none());
+        assert!(l.panes_mut().is_none());
+        l.ensure_pane_layout(1000.0, 700.0);
+        assert!(l.panes().is_some());
+        assert!(l.panes_mut().is_some());
+    }
+
+    #[test]
+    fn serde_backwards_compat_no_pane_layout() {
+        // Simulate old JSON without pane_layout field
+        let mut l = DockLayout::default_layout();
+        l.ensure_pane_layout(1000.0, 700.0);
+        let json = l.to_json().unwrap();
+        // Remove pane_layout from JSON to simulate old format
+        let mut val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        val.as_object_mut().unwrap().remove("pane_layout");
+        let old_json = serde_json::to_string(&val).unwrap();
+        let restored = DockLayout::from_json(&old_json);
+        assert!(restored.pane_layout.is_none());
+    }
+
+    #[test]
+    fn serde_round_trip_with_pane_layout() {
+        let mut l = DockLayout::default_layout();
+        l.ensure_pane_layout(1000.0, 700.0);
+        let json = l.to_json().unwrap();
+        let restored = DockLayout::from_json(&json);
+        assert!(restored.pane_layout.is_some());
+        let pl = restored.pane_layout.unwrap();
+        assert_eq!(pl.panes.len(), 3);
+        assert_eq!(pl.snaps.len(), 10);
+        assert!((pl.viewport_width - 1000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn clamp_floating_docks_also_clamps_panes() {
+        let mut l = DockLayout::default_layout();
+        l.ensure_pane_layout(1000.0, 700.0);
+        // Push a pane off-screen
+        let canvas_id = l.panes().unwrap().pane_by_kind(PaneKind::Canvas).unwrap().id;
+        l.panes_mut().unwrap().set_pane_position(canvas_id, 5000.0, 5000.0);
+        l.clamp_floating_docks(1000.0, 700.0);
+        let p = l.panes().unwrap().pane(canvas_id).unwrap();
+        assert!(p.x <= 1000.0 - MIN_PANE_VISIBLE);
+        assert!(p.y <= 700.0 - MIN_PANE_VISIBLE);
     }
 }
