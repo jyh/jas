@@ -1,16 +1,72 @@
 import sys
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QRect
+from PySide6.QtGui import QKeySequence, QShortcut, QMouseEvent, QPainter, QColor, QCursor
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QMainWindow, QMessageBox, QTabWidget, QWidget,
+    QApplication, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+    QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from canvas.canvas import CanvasWidget
+from canvas.pane_rendering import compute_pane_geometries, compute_shared_borders, compute_snap_lines
 from document.controller import Controller
 from menu.menu import create_menus
 from document.model import Model
 from tools.toolbar import Tool, Toolbar
+from workspace.pane import PaneKind, EdgeSide
+
+
+TITLE_BAR_HEIGHT = 20
+
+
+class PaneTitleBar(QWidget):
+    """Title bar for a pane: label + optional close button."""
+
+    def __init__(self, label: str, closable: bool, maximizable: bool,
+                 pane_id: int = 0, on_close=None, on_maximize_toggle=None,
+                 on_drag_start=None, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(TITLE_BAR_HEIGHT)
+        self._pane_id = pane_id
+        self._on_maximize_toggle = on_maximize_toggle
+        self._on_drag_start = on_drag_start
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 0, 4, 0)
+        layout.setSpacing(4)
+        lbl = QLabel(label)
+        lbl.setStyleSheet("color: #d9d9d9; font-size: 11px;")
+        layout.addWidget(lbl, stretch=1)
+        if closable and on_close:
+            btn = QPushButton("\u00D7")
+            btn.setFixedSize(16, 16)
+            btn.setStyleSheet("color: #a5a5a5; border: none; font-size: 12px;")
+            btn.clicked.connect(on_close)
+            layout.addWidget(btn)
+        self.setStyleSheet("background: #383838;")
+        self.setCursor(QCursor(Qt.OpenHandCursor))
+
+    def mousePressEvent(self, event):
+        if self._on_drag_start:
+            self._on_drag_start(self._pane_id, event.globalPosition().x(), event.globalPosition().y())
+
+    def mouseDoubleClickEvent(self, event):
+        if self._on_maximize_toggle:
+            self._on_maximize_toggle()
+
+
+class PaneFrame(QWidget):
+    """A pane frame with title bar wrapping content."""
+
+    def __init__(self, title_bar: PaneTitleBar, content: QWidget, parent=None):
+        super().__init__(parent)
+        self.title_bar = title_bar
+        self.content = content
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(title_bar)
+        layout.addWidget(content, stretch=1)
+        self.setStyleSheet("border: 1px solid #555;")
 
 
 class MainWindow(QMainWindow):
@@ -18,36 +74,65 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Jas")
 
-        # Menubar (uses active_model for focused canvas)
-        create_menus(self)
+        # Drag state
+        self._pane_drag = None      # (pane_id, off_x, off_y)
+        self._border_drag = None    # (snap_idx, start_coord, is_vertical)
+        self._snap_preview = []
 
-        # Central layout: toolbar on the left, tab widget on the right
-        central = QWidget()
-        layout = QHBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # Toolbar
-        self.toolbar = Toolbar()
-        layout.addWidget(self.toolbar)
-
-        # Tabbed canvas container
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setTabsClosable(True)
-        self.tab_widget.tabCloseRequested.connect(self._close_tab)
-        layout.addWidget(self.tab_widget, stretch=1)
-
-        # Dock panel (right side)
+        # Dock layout
         from workspace.dock import DockLayout
         from workspace.dock_panel import DockPanelWidget
         self.dock_layout = DockLayout.default_layout()
         self.dock_layout.ensure_pane_layout(1200, 900)
+
+        # Menubar
+        create_menus(self)
+
+        # Pane container (no layout manager — absolute positioning)
+        self._pane_container = QWidget()
+        self._pane_container.setStyleSheet("background: #2e2e2e;")
+        self._pane_container.setMouseTracking(True)
+        self.setCentralWidget(self._pane_container)
+
+        # Get pane IDs
+        pl = self.dock_layout.panes()
+        tid = pl.pane_by_kind(PaneKind.TOOLBAR).id if pl else 0
+        cid = pl.pane_by_kind(PaneKind.CANVAS).id if pl else 1
+        did = pl.pane_by_kind(PaneKind.DOCK).id if pl else 2
+
+        # Toolbar pane
+        self.toolbar = Toolbar()
+        self._toolbar_title = PaneTitleBar(
+            "Tools", closable=True, maximizable=False, pane_id=tid,
+            on_close=lambda: self._hide_pane(PaneKind.TOOLBAR),
+            on_drag_start=self._start_pane_drag)
+        self._toolbar_frame = PaneFrame(self._toolbar_title, self.toolbar, self._pane_container)
+
+        # Canvas pane
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setTabsClosable(True)
+        self.tab_widget.tabCloseRequested.connect(self._close_tab)
+        self._canvas_title = PaneTitleBar(
+            "Canvas", closable=False, maximizable=True, pane_id=cid,
+            on_maximize_toggle=self._toggle_canvas_maximized,
+            on_drag_start=self._start_pane_drag)
+        self._canvas_frame = PaneFrame(self._canvas_title, self.tab_widget, self._pane_container)
+
+        # Dock pane
         self.dock_panel = DockPanelWidget(self.dock_layout)
         self.dock_panel.setStyleSheet("background: #f0f0f0;")
-        layout.addWidget(self.dock_panel)
+        self._dock_title = PaneTitleBar(
+            "Panels", closable=True, maximizable=False, pane_id=did,
+            on_close=lambda: self._hide_pane(PaneKind.DOCK),
+            on_drag_start=self._start_pane_drag)
+        self._dock_frame = PaneFrame(self._dock_title, self.dock_panel, self._pane_container)
 
-        self.setCentralWidget(central)
-        self._apply_pane_widths()
+        # Border handle widgets
+        self._border_widgets: list[QWidget] = []
+        # Snap preview widgets
+        self._snap_widgets: list[QWidget] = []
+
+        self._refresh_pane_positions()
 
         # Keyboard shortcuts
         QShortcut(QKeySequence("V"), self,
@@ -77,37 +162,148 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence.StandardKey.Undo, self, self._undo)
         QShortcut(QKeySequence.StandardKey.Redo, self, self._redo)
 
-    def _apply_pane_widths(self):
-        """Sync toolbar/dock widget visibility and sizes from pane layout."""
+    def _refresh_pane_positions(self):
+        """Position all pane frames from PaneLayout coordinates."""
+        pl = self.dock_layout.panes()
+        geos = compute_pane_geometries(pl)
+        borders = compute_shared_borders(pl)
+        maximized = pl.canvas_maximized if pl else False
+
+        for geo in geos:
+            frame = self._frame_for_kind(geo.kind)
+            if geo.visible:
+                frame.setGeometry(int(geo.x), int(geo.y), int(geo.width), int(geo.height))
+                frame.show()
+                frame.title_bar.setVisible(not (geo.kind == PaneKind.CANVAS and maximized))
+            else:
+                frame.hide()
+
+        # Z-order
+        sorted_geos = sorted(geos, key=lambda g: g.z_index)
+        for geo in sorted_geos:
+            self._frame_for_kind(geo.kind).raise_()
+
+        # Remove old border handles
+        for w in self._border_widgets:
+            w.deleteLater()
+        self._border_widgets = []
+
+        # Add border handles
+        for b in borders:
+            handle = QWidget(self._pane_container)
+            handle.setGeometry(int(b.x), int(b.y), int(b.width), int(b.height))
+            cursor = Qt.SplitHCursor if b.is_vertical else Qt.SplitVCursor
+            handle.setCursor(QCursor(cursor))
+            handle.setMouseTracking(True)
+            handle._snap_idx = b.snap_idx
+            handle._is_vertical = b.is_vertical
+            handle.mousePressEvent = lambda ev, si=b.snap_idx, iv=b.is_vertical: self._start_border_drag(ev, si, iv)
+            handle.show()
+            handle.raise_()
+            self._border_widgets.append(handle)
+
+        # Remove old snap lines
+        for w in self._snap_widgets:
+            w.deleteLater()
+        self._snap_widgets = []
+
+        # Add snap preview lines
+        if pl and self._snap_preview:
+            lines = compute_snap_lines(self._snap_preview, pl)
+            for line in lines:
+                w = QWidget(self._pane_container)
+                w.setGeometry(int(line.x), int(line.y), int(line.width), int(line.height))
+                w.setStyleSheet("background: rgba(50, 120, 220, 200);")
+                w.setAttribute(Qt.WA_TransparentForMouseEvents)
+                w.show()
+                w.raise_()
+                self._snap_widgets.append(w)
+
+    def _frame_for_kind(self, kind):
+        if kind == PaneKind.TOOLBAR: return self._toolbar_frame
+        if kind == PaneKind.CANVAS: return self._canvas_frame
+        return self._dock_frame
+
+    def _hide_pane(self, kind):
+        self.dock_layout.panes_mut(lambda pl: pl.hide_pane(kind))
+        self._refresh_pane_positions()
+
+    def _toggle_canvas_maximized(self):
+        self.dock_layout.panes_mut(lambda pl: pl.toggle_canvas_maximized())
+        self._refresh_pane_positions()
+
+    def _start_pane_drag(self, pane_id, global_x, global_y):
+        """Start dragging a pane from its title bar."""
         pl = self.dock_layout.panes()
         if not pl:
             return
-        from workspace.pane import PaneKind
-        maximized = pl.canvas_maximized
-        toolbar_visible = pl.is_pane_visible(PaneKind.TOOLBAR) and not maximized
-        dock_visible = pl.is_pane_visible(PaneKind.DOCK) and not maximized
-        self.toolbar.setVisible(toolbar_visible)
-        if toolbar_visible:
-            tp = pl.pane_by_kind(PaneKind.TOOLBAR)
-            if tp:
-                self.toolbar.setFixedWidth(int(tp.width))
-        self.dock_panel.setVisible(dock_visible)
-        if dock_visible:
-            dp = pl.pane_by_kind(PaneKind.DOCK)
-            if dp:
-                self.dock_panel.setFixedWidth(int(dp.width))
+        p = pl.find_pane(pane_id)
+        if not p:
+            return
+        self._pane_drag = (pane_id, global_x - p.x, global_y - p.y)
+        self.dock_layout.panes_mut(lambda pl: pl.bring_pane_to_front(pane_id))
+        self._refresh_pane_positions()
+        self.grabMouse()
+
+    def _start_border_drag(self, event, snap_idx, is_vertical):
+        coord = event.globalPosition().x() if is_vertical else event.globalPosition().y()
+        self._border_drag = (snap_idx, coord, is_vertical)
 
     def refresh_panes(self):
         """Refresh pane layout and dock panel after a pane mutation."""
-        self._apply_pane_widths()
+        self._refresh_pane_positions()
         self.dock_panel.rebuild()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        s = event.size()
-        self.dock_layout.panes_mut(
-            lambda pl: pl.on_viewport_resize(s.width(), s.height()))
-        self._apply_pane_widths()
+        # Use the pane container size (central widget minus menubar)
+        w = self._pane_container.width()
+        h = self._pane_container.height()
+        if w > 0 and h > 0:
+            self.dock_layout.panes_mut(
+                lambda pl: pl.on_viewport_resize(w, h))
+            self._refresh_pane_positions()
+
+    def mouseMoveEvent(self, event):
+        mx = event.globalPosition().x()
+        my = event.globalPosition().y()
+        if self._pane_drag:
+            pid, off_x, off_y = self._pane_drag
+            new_x = mx - off_x
+            new_y = my - off_y
+            self.dock_layout.panes_mut(lambda pl: self._do_pane_drag(pl, pid, new_x, new_y))
+            self._refresh_pane_positions()
+        elif self._border_drag:
+            snap_idx, start_coord, is_vert = self._border_drag
+            current = mx if is_vert else my
+            delta = current - start_coord
+            self._border_drag = (snap_idx, current, is_vert)
+            self.dock_layout.panes_mut(
+                lambda pl: pl.drag_shared_border(snap_idx, delta))
+            self._refresh_pane_positions()
+
+    def _do_pane_drag(self, pl, pid, new_x, new_y):
+        from workspace.pane import PaneLayout
+        pl.set_pane_position(pid, new_x, new_y)
+        preview = pl.detect_snaps(pid, pl.viewport_width, pl.viewport_height)
+        if preview:
+            pl.align_to_snaps(pid, preview, pl.viewport_width, pl.viewport_height)
+        self._snap_preview = preview
+
+    def mouseReleaseEvent(self, event):
+        if self._pane_drag:
+            self.releaseMouse()
+            pid = self._pane_drag[0]
+            preview = self._snap_preview
+            if preview:
+                self.dock_layout.panes_mut(
+                    lambda pl: pl.apply_snaps(pid, preview, pl.viewport_width, pl.viewport_height))
+            self._snap_preview = []
+            self._pane_drag = None
+            self._refresh_pane_positions()
+        elif self._border_drag:
+            self._border_drag = None
+            self._refresh_pane_positions()
 
     def add_canvas(self, model: Model) -> None:
         """Create a new canvas tab for the given model."""
