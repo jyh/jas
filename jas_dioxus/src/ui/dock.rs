@@ -768,6 +768,26 @@ impl DockLayout {
     }
 
     // -----------------------------------------------------------------------
+    // Context-sensitive panels
+    // -----------------------------------------------------------------------
+
+    /// Suggest which panels are relevant for the current selection.
+    /// Always includes Layers; includes Properties when anything is
+    /// selected; includes Stroke/Color for shapes; all four for text.
+    pub fn panels_for_selection(has_selection: bool, has_text: bool) -> Vec<PanelKind> {
+        let mut panels = vec![PanelKind::Layers];
+        if has_selection {
+            panels.push(PanelKind::Properties);
+            panels.push(PanelKind::Color);
+            panels.push(PanelKind::Stroke);
+        }
+        if has_text {
+            // All panels relevant for text (already included above)
+        }
+        panels
+    }
+
+    // -----------------------------------------------------------------------
     // Safety
     // -----------------------------------------------------------------------
 

@@ -1719,17 +1719,17 @@ pub fn App() -> Element {
             let show_drop_before = cur_drag.is_some()
                 && cur_drop == Some(DropTarget::GroupSlot { dock_id: did, group_idx: gi });
             let drop_indicator_style = if show_drop_before {
-                "height:2px; background:#4a90d9;"
+                "height:3px; background:#4a90d9; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;"
             } else {
-                "height:0px;"
+                "height:0px; margin:0 4px; transition:height 0.1s ease;"
             };
             let show_drop_after = gi == group_count - 1
                 && cur_drag.is_some()
                 && cur_drop == Some(DropTarget::GroupSlot { dock_id: did, group_idx: group_count });
             let drop_after_style = if show_drop_after {
-                "height:2px; background:#4a90d9;"
+                "height:3px; background:#4a90d9; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;"
             } else {
-                "height:0px;"
+                "height:0px; margin:0 4px; transition:height 0.1s ease;"
             };
             // Highlight tab bar when it's a TabBar drop target
             let tab_bar_drop = cur_drag.is_some()
@@ -1794,7 +1794,7 @@ pub fn App() -> Element {
 
                     // Tab bar with grip handle
                     div {
-                        style: "display:flex; background:#d8d8d8; border-bottom:{tab_bar_border}; align-items:center;",
+                        style: "display:flex; background:#d8d8d8; border-bottom:{tab_bar_border}; align-items:center; overflow-x:auto; overflow-y:hidden; min-height:24px;",
                         ondragover: move |evt: Event<DragData>| {
                             evt.prevent_default();
                             evt.stop_propagation();
@@ -1994,12 +1994,21 @@ pub fn App() -> Element {
     // Dock collapse toggle
     let dock_toggle_label = if dock_collapsed { "\u{25C0}" } else { "\u{25B6}" };
 
+    // Snap edge indicator styles
+    let snap_left = if snap_edge == Some(DockEdge::Left) { "4px solid #4a90d9" } else { "none" };
+    let snap_right = if snap_edge == Some(DockEdge::Right) { "4px solid #4a90d9" } else { "none" };
+    let snap_bottom = if snap_edge == Some(DockEdge::Bottom) { "4px solid #4a90d9" } else { "none" };
+
     rsx! {
         style { r#"
             #main {{ height: 100%; }}
             .jas-menu-title:hover {{ background: #d0d0d0; }}
             .jas-menu-item:hover {{ background: #e8e8e8; }}
             .jas-tool-popup-item:hover {{ background: #606060 !important; }}
+            .jas-dock-group {{ transition: max-height 0.15s ease, opacity 0.15s ease; }}
+            .jas-dock {{ transition: width 0.15s ease; }}
+            .jas-floating-dock {{ transition: opacity 0.15s ease; }}
+            .jas-tab:hover {{ background: #e8e8e8 !important; }}
         "#  }
         div {
             tabindex: "0",
@@ -2038,7 +2047,7 @@ pub fn App() -> Element {
                     }
                 }
             },
-            style: "display:flex; height:100vh; outline:none; font-family:sans-serif;",
+            style: "display:flex; height:100vh; outline:none; font-family:sans-serif; border-left:{snap_left}; border-right:{snap_right}; border-bottom:{snap_bottom}; box-sizing:border-box;",
 
             // Toolbar
             div {
