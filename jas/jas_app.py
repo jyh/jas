@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
 
         # Dock pane
         self.dock_panel = DockPanelWidget(self.dock_layout)
-        self.dock_panel.setStyleSheet("background: #f0f0f0;")
+        self.dock_panel.setStyleSheet("background: #3c3c3c;")
         self._dock_title = PaneTitleBar(
             "Panels", closable=True, maximizable=False, pane_id=did,
             on_close=lambda: self._hide_pane(PaneKind.DOCK),

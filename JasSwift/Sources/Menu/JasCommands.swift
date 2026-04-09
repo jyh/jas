@@ -180,7 +180,8 @@ public struct JasCommands: Commands {
             .keyboardShortcut("3", modifiers: [.command, .option])
         }
 
-        CommandMenu("View") {
+        // Replace default toolbar section in View menu with our zoom items
+        CommandGroup(replacing: .toolbar) {
             Button("Zoom In") {
                 print("Zoom in")
             }
@@ -197,7 +198,8 @@ public struct JasCommands: Commands {
             .keyboardShortcut("0", modifiers: .command)
         }
 
-        CommandMenu("Window") {
+        // Replace default window list with our workspace/pane items
+        CommandGroup(replacing: .windowList) {
             if let ws = workspace {
                 Menu("Workspace \u{25B6}") {
                     ForEach(ws.appConfig.savedLayouts, id: \.self) { name in
@@ -247,7 +249,7 @@ public struct JasCommands: Commands {
                 Divider()
             }
 
-            if let ws = workspace, ws.dockLayout.panes() != nil {
+            if let ws = workspace {
                 Button("Tile") {
                     ws.dockLayout.panesMut { pl in
                         pl.tilePanes(collapsedOverride: nil)
