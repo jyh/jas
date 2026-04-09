@@ -1,6 +1,37 @@
 /// SwiftUI views for rendering dock panels.
 
 import SwiftUI
+import UniformTypeIdentifiers
+
+// MARK: - Drag Payload Encoding
+
+private let dockDragUTType = UTType.plainText
+
+private func encodeGroupDrag(_ addr: GroupAddr) -> String {
+    "group:\(addr.dockId.value):\(addr.groupIdx)"
+}
+
+private func encodePanelDrag(_ addr: PanelAddr) -> String {
+    "panel:\(addr.group.dockId.value):\(addr.group.groupIdx):\(addr.panelIdx)"
+}
+
+private enum DecodedDrag {
+    case group(GroupAddr)
+    case panel(PanelAddr)
+}
+
+private func decodeDrag(_ s: String) -> DecodedDrag? {
+    let parts = s.split(separator: ":")
+    if parts.count == 3, parts[0] == "group",
+       let did = Int(parts[1]), let gi = Int(parts[2]) {
+        return .group(GroupAddr(dockId: DockId(did), groupIdx: gi))
+    }
+    if parts.count == 4, parts[0] == "panel",
+       let did = Int(parts[1]), let gi = Int(parts[2]), let pi = Int(parts[3]) {
+        return .panel(PanelAddr(group: GroupAddr(dockId: DockId(did), groupIdx: gi), panelIdx: pi))
+    }
+    return nil
+}
 
 // MARK: - Dock Panel View (anchored dock)
 
@@ -107,15 +138,21 @@ public struct PanelGroupView: View {
         VStack(spacing: 0) {
             // Tab bar
             HStack(spacing: 0) {
-                // Grip handle
+                // Grip handle (drag to reorder/detach group)
                 SwiftUI.Text(verbatim: "\u{2801}\u{2801}")
                     .font(.system(size: 10))
                     .foregroundColor(.gray)
                     .padding(.horizontal, 4)
+                    .onDrag {
+                        NSItemProvider(object: encodeGroupDrag(GroupAddr(dockId: dockId, groupIdx: groupIdx)) as NSString)
+                    }
 
-                // Tab buttons
+                // Tab buttons (drag to reorder/move panels)
                 ForEach(Array(group.panels.enumerated()), id: \.offset) { pi, kind in
                     tabButton(pi: pi, kind: kind)
+                        .onDrag {
+                            NSItemProvider(object: encodePanelDrag(PanelAddr(group: GroupAddr(dockId: dockId, groupIdx: groupIdx), panelIdx: pi)) as NSString)
+                        }
                 }
 
                 Spacer()
@@ -142,6 +179,36 @@ public struct PanelGroupView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(SwiftUI.Color.gray.opacity(0.2)).frame(height: 1)
         }
+        .onDrop(of: [dockDragUTType], isTargeted: nil) { providers in
+            handleDrop(providers)
+        }
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        provider.loadObject(ofClass: NSString.self) { obj, _ in
+            guard let s = obj as? String, let decoded = decodeDrag(s) else { return }
+            DispatchQueue.main.async {
+                let targetGroup = GroupAddr(dockId: dockId, groupIdx: groupIdx)
+                switch decoded {
+                case .group(let from):
+                    if from.dockId == dockId {
+                        dockLayout.moveGroupWithinDock(dockId, from: from.groupIdx, to: groupIdx)
+                    } else {
+                        dockLayout.moveGroupToDock(from, toDock: dockId, toIdx: groupIdx)
+                    }
+                case .panel(let from):
+                    if from.group == targetGroup {
+                        // Reorder within same group — drop at end
+                        dockLayout.reorderPanel(targetGroup, from: from.panelIdx, to: group.panels.count)
+                    } else {
+                        dockLayout.movePanelToGroup(from, to: targetGroup)
+                    }
+                }
+                dockLayout.saveIfNeeded()
+            }
+        }
+        return true
     }
 
     private func tabButton(pi: Int, kind: PanelKind) -> some View {
