@@ -547,6 +547,88 @@ class DockLayout:
     def storage_key_for(name: str) -> str:
         return f"{STORAGE_PREFIX}{name}"
 
+    def to_dict(self) -> dict:
+        def _panel(k): return k.name
+        def _edge(e): return e.name
+        def _group(g): return {
+            "panels": [_panel(p) for p in g.panels],
+            "active": g.active, "collapsed": g.collapsed, "height": g.height,
+        }
+        def _dock(d): return {
+            "id": d.id, "groups": [_group(g) for g in d.groups],
+            "collapsed": d.collapsed, "auto_hide": d.auto_hide,
+            "width": d.width, "min_width": d.min_width,
+        }
+        return {
+            "name": self.name,
+            "anchored": [{"edge": _edge(e), "dock": _dock(d)} for e, d in self.anchored],
+            "floating": [{"dock": _dock(fd.dock), "x": fd.x, "y": fd.y} for fd in self.floating],
+            "hidden_panels": [_panel(k) for k in self.hidden_panels],
+            "z_order": self.z_order,
+            "next_id": self._next_id,
+        }
+
+    @staticmethod
+    def from_dict(d: dict) -> 'DockLayout':
+        try:
+            _pk = lambda s: PanelKind[s]
+            _edge = lambda s: DockEdge[s]
+            def _group(gd):
+                g = PanelGroup(panels=[_pk(p) for p in gd["panels"]])
+                g.active = gd.get("active", 0)
+                g.collapsed = gd.get("collapsed", False)
+                g.height = gd.get("height")
+                return g
+            def _dock(dd):
+                return Dock(id=dd["id"], groups=[_group(g) for g in dd["groups"]],
+                            collapsed=dd.get("collapsed", False),
+                            auto_hide=dd.get("auto_hide", False),
+                            width=dd.get("width", DEFAULT_DOCK_WIDTH),
+                            min_width=dd.get("min_width", MIN_DOCK_WIDTH))
+            return DockLayout(
+                name=d["name"],
+                anchored=[(_edge(a["edge"]), _dock(a["dock"])) for a in d["anchored"]],
+                floating=[FloatingDock(dock=_dock(f["dock"]), x=f["x"], y=f["y"]) for f in d["floating"]],
+                hidden_panels=[_pk(k) for k in d.get("hidden_panels", [])],
+                z_order=d.get("z_order", []),
+                focused_panel=None,
+                next_id=d.get("next_id", 1),
+            )
+        except (KeyError, TypeError, ValueError):
+            return DockLayout.default_layout()
+
+    @staticmethod
+    def _config_dir() -> str:
+        import os
+        home = os.path.expanduser("~")
+        d = os.path.join(home, ".config", "jas")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def save_to_file(self):
+        import os
+        path = os.path.join(self._config_dir(), f"{self.name}.json")
+        try:
+            with open(path, "w") as f:
+                json.dump(self.to_dict(), f)
+            self._saved_generation = self._generation
+        except OSError:
+            pass
+
+    @staticmethod
+    def load_from_file(name: str) -> 'DockLayout':
+        import os
+        path = os.path.join(DockLayout._config_dir(), f"{name}.json")
+        try:
+            with open(path) as f:
+                return DockLayout.from_dict(json.load(f))
+        except (OSError, json.JSONDecodeError):
+            return DockLayout.named(name)
+
+    def save_if_needed(self):
+        if self.needs_save():
+            self.save_to_file()
+
     # -- Focus --
 
     def set_focused_panel(self, addr: Optional[PanelAddr]):

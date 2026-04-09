@@ -10,7 +10,8 @@ let create_main_window ~get_model ~on_open () =
   let vbox = GPack.vbox ~packing:window#add () in
 
   (* Dock layout + panel (created before menubar so menu can reference it) *)
-  let dock_layout = Dock.default_layout () in
+  let app_config = Dock.load_app_config () in
+  let dock_layout = Dock.load_layout app_config.active_layout in
   let dock_refresh = ref (fun () -> ()) in
 
   (* Create menubar with dock references *)
@@ -25,7 +26,8 @@ let create_main_window ~get_model ~on_open () =
 
   (* Initialize dock panel *)
   let refresh = Dock_panel.create dock_box dock_layout in
-  dock_refresh := refresh;
+  let refresh_and_save () = refresh (); Dock.save_layout_if_needed dock_layout in
+  dock_refresh := refresh_and_save;
 
   let css = new GObj.css_provider (GtkData.CssProvider.create ()) in
   css#load_from_data "notebook, notebook header, notebook stack { background-color: #a0a0a0; }";
