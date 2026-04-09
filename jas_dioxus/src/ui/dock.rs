@@ -592,6 +592,83 @@ impl DockLayout {
     }
 
     // -----------------------------------------------------------------------
+    // Snap & re-dock
+    // -----------------------------------------------------------------------
+
+    /// Snap a floating dock to a screen edge, creating or merging into
+    /// an anchored dock at that edge. The floating dock is removed.
+    pub fn snap_to_edge(&mut self, id: DockId, edge: DockEdge) {
+        // Find and remove the floating dock.
+        let pos = match self.floating.iter().position(|fd| fd.dock.id == id) {
+            Some(p) => p,
+            None => return,
+        };
+        let fdock = self.floating.remove(pos);
+        self.z_order.retain(|&zid| zid != id);
+
+        // Merge groups into existing anchored dock at this edge, or create one.
+        if let Some((_, dock)) = self.anchored.iter_mut().find(|(e, _)| *e == edge) {
+            for group in fdock.dock.groups {
+                dock.groups.push(group);
+            }
+        } else {
+            self.anchored.push((edge, fdock.dock));
+        }
+    }
+
+    /// Re-dock a floating dock by merging it into the Right anchored dock.
+    pub fn redock(&mut self, id: DockId) {
+        self.snap_to_edge(id, DockEdge::Right);
+    }
+
+    /// Detect if a position is near a screen edge. Returns the edge if
+    /// within SNAP_DISTANCE pixels.
+    pub fn is_near_edge(x: f64, y: f64, viewport_w: f64, viewport_h: f64) -> Option<DockEdge> {
+        if x <= SNAP_DISTANCE {
+            Some(DockEdge::Left)
+        } else if x >= viewport_w - SNAP_DISTANCE {
+            Some(DockEdge::Right)
+        } else if y >= viewport_h - SNAP_DISTANCE {
+            Some(DockEdge::Bottom)
+        } else {
+            None
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Multi-edge anchored docks
+    // -----------------------------------------------------------------------
+
+    /// Add a new empty anchored dock at the given edge. Returns its id.
+    /// If one already exists at that edge, returns its existing id.
+    pub fn add_anchored_dock(&mut self, edge: DockEdge) -> DockId {
+        if let Some((_, dock)) = self.anchored.iter().find(|(e, _)| *e == edge) {
+            return dock.id;
+        }
+        let id = self.next_dock_id();
+        self.anchored.push((edge, Dock::new(id, vec![], DEFAULT_DOCK_WIDTH)));
+        id
+    }
+
+    /// Remove an anchored dock at the given edge. Its groups become a
+    /// floating dock. Returns None if no dock at that edge.
+    pub fn remove_anchored_dock(&mut self, edge: DockEdge) -> Option<DockId> {
+        let pos = self.anchored.iter().position(|(e, _)| *e == edge)?;
+        let (_, dock) = self.anchored.remove(pos);
+        if dock.groups.is_empty() {
+            return None;
+        }
+        let fid = self.next_dock_id();
+        self.floating.push(FloatingDock {
+            dock: Dock::new(fid, dock.groups, dock.width),
+            x: 100.0,
+            y: 100.0,
+        });
+        self.z_order.push(fid);
+        Some(fid)
+    }
+
+    // -----------------------------------------------------------------------
     // Cleanup
     // -----------------------------------------------------------------------
 
@@ -1354,5 +1431,123 @@ mod tests {
         l.bring_to_front(f1);
         assert_eq!(l.z_index_for(f1), 1);
         assert_eq!(l.z_index_for(f2), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 3: Snap & re-dock
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn snap_to_right_edge() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
+        let right_groups_before = l.anchored_dock(DockEdge::Right).unwrap().groups.len();
+        l.snap_to_edge(fid, DockEdge::Right);
+        // Floating dock removed, groups merged into right anchored
+        assert!(l.floating_dock(fid).is_none());
+        assert!(l.anchored_dock(DockEdge::Right).unwrap().groups.len() > right_groups_before);
+    }
+
+    #[test]
+    fn snap_to_left_edge() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
+        l.snap_to_edge(fid, DockEdge::Left);
+        // Should create a new anchored dock on the left
+        assert!(l.anchored_dock(DockEdge::Left).is_some());
+        assert!(l.floating_dock(fid).is_none());
+    }
+
+    #[test]
+    fn snap_creates_anchored_dock() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        assert!(l.anchored_dock(DockEdge::Bottom).is_none());
+        let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
+        l.snap_to_edge(fid, DockEdge::Bottom);
+        assert!(l.anchored_dock(DockEdge::Bottom).is_some());
+        assert_eq!(l.anchored_dock(DockEdge::Bottom).unwrap().groups[0].panels, vec![PanelKind::Layers]);
+    }
+
+    #[test]
+    fn redock_merges_into_right() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
+        l.redock(fid);
+        assert!(l.floating.is_empty());
+        // Layers group should be back in right dock
+        let right = l.anchored_dock(DockEdge::Right).unwrap();
+        assert!(right.groups.iter().any(|g| g.panels.contains(&PanelKind::Layers)));
+    }
+
+    #[test]
+    fn redock_invalid_id() {
+        let mut l = DockLayout::default_layout();
+        l.redock(DockId(99)); // no panic, no change
+        assert_eq!(l.anchored.len(), 1);
+    }
+
+    #[test]
+    fn is_near_edge_detection() {
+        assert_eq!(DockLayout::is_near_edge(5.0, 500.0, 1000.0, 800.0), Some(DockEdge::Left));
+        assert_eq!(DockLayout::is_near_edge(990.0, 500.0, 1000.0, 800.0), Some(DockEdge::Right));
+        assert_eq!(DockLayout::is_near_edge(500.0, 790.0, 1000.0, 800.0), Some(DockEdge::Bottom));
+    }
+
+    #[test]
+    fn is_near_edge_not_near() {
+        assert_eq!(DockLayout::is_near_edge(500.0, 400.0, 1000.0, 800.0), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 3: Multi-edge anchored docks
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn add_anchored_left() {
+        let mut l = DockLayout::default_layout();
+        let id = l.add_anchored_dock(DockEdge::Left);
+        assert!(l.anchored_dock(DockEdge::Left).is_some());
+        assert_eq!(l.anchored_dock(DockEdge::Left).unwrap().id, id);
+    }
+
+    #[test]
+    fn add_anchored_existing_returns_id() {
+        let mut l = DockLayout::default_layout();
+        let id1 = l.add_anchored_dock(DockEdge::Left);
+        let id2 = l.add_anchored_dock(DockEdge::Left);
+        assert_eq!(id1, id2);
+        assert_eq!(l.anchored.len(), 2); // Right + Left, not duplicated
+    }
+
+    #[test]
+    fn add_anchored_bottom() {
+        let mut l = DockLayout::default_layout();
+        l.add_anchored_dock(DockEdge::Bottom);
+        assert!(l.anchored_dock(DockEdge::Bottom).is_some());
+        assert_eq!(l.anchored.len(), 2);
+    }
+
+    #[test]
+    fn remove_anchored_moves_to_floating() {
+        let mut l = DockLayout::default_layout();
+        let lid = l.add_anchored_dock(DockEdge::Left);
+        // Add a group to it so removal creates a floating dock
+        l.dock_mut(lid).unwrap().groups.push(PanelGroup::new(vec![PanelKind::Layers]));
+        let fid = l.remove_anchored_dock(DockEdge::Left);
+        assert!(fid.is_some());
+        assert!(l.anchored_dock(DockEdge::Left).is_none());
+        assert!(l.floating_dock(fid.unwrap()).is_some());
+    }
+
+    #[test]
+    fn remove_anchored_empty_returns_none() {
+        let mut l = DockLayout::default_layout();
+        l.add_anchored_dock(DockEdge::Left); // empty dock
+        let fid = l.remove_anchored_dock(DockEdge::Left);
+        assert!(fid.is_none()); // no groups, no floating dock created
     }
 }
