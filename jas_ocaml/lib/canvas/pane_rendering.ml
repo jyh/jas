@@ -32,13 +32,12 @@ type snap_line = {
 let pane_geometries (pl : Pane.pane_layout) : pane_geometry list =
   let maximized = pl.canvas_maximized in
   Array.to_list pl.panes |> List.map (fun (p : Pane.pane) ->
-    let visible = match p.kind with
-      | Pane.Canvas -> true
-      | k -> Pane.is_pane_visible pl k
-    in
+    let visible = p.config.always_visible || Pane.is_pane_visible pl p.kind in
     let x, y, w, h, z =
-      if p.kind = Pane.Canvas && maximized then
+      if p.config.maximizable && maximized then
         (0.0, 0.0, pl.viewport_width, pl.viewport_height, 0)
+      else if maximized then
+        (p.x, p.y, p.width, p.height, Pane.pane_z_index pl p.id + 50)
       else
         (p.x, p.y, p.width, p.height, Pane.pane_z_index pl p.id)
     in

@@ -47,8 +47,6 @@ public struct RenderingState {
     public let borders: [SharedBorder]
     public let canvasMaximized: Bool
 
-    public static let collapsedDockWidth: Double = 36
-
     public static func from(_ pl: PaneLayout?, dockCollapsed: Bool = false) -> RenderingState {
         guard let pl = pl else {
             return RenderingState(panes: [], borders: [], canvasMaximized: false)
@@ -59,20 +57,14 @@ public struct RenderingState {
         // Build pane geometries
         var paneGeos: [PaneGeometry] = []
         for p in pl.panes {
-            let visible: Bool
-            switch p.kind {
-            case .canvas: visible = true
-            default: visible = pl.isPaneVisible(p.kind)
-            }
+            let visible = p.config.alwaysVisible || pl.isPaneVisible(p.kind)
 
             let (px, py, pw, ph, pz): (Double, Double, Double, Double, Int)
-            if p.kind == .canvas && maximized {
+            if p.config.maximizable && maximized {
                 (px, py, pw, ph, pz) = (0, 0, pl.viewportWidth, pl.viewportHeight, 0)
             } else if maximized {
                 (px, py, pw, ph, pz) = (p.x, p.y, p.width, p.height, pl.paneZIndex(p.id) + 50)
-            } else if p.kind == .dock && dockCollapsed {
-                // Collapsed dock hugs its contents at fixed width, anchored to its right edge
-                let cw = Self.collapsedDockWidth
+            } else if dockCollapsed, let cw = p.config.collapsedWidth {
                 (px, py, pw, ph, pz) = (p.x + p.width - cw, p.y, cw, p.height, pl.paneZIndex(p.id))
             } else {
                 (px, py, pw, ph, pz) = (p.x, p.y, p.width, p.height, pl.paneZIndex(p.id))
@@ -95,8 +87,8 @@ public struct RenderingState {
                 if !isVert && !isHoriz { continue }
 
                 guard let paneA = pl.pane(snap.pane), let paneB = pl.pane(otherId) else { continue }
-                // Skip borders involving collapsed dock
-                if (paneA.kind == .dock || paneB.kind == .dock) && dockCollapsed { continue }
+                // Skip borders involving collapsed panes
+                if dockCollapsed && (paneA.config.collapsedWidth != nil || paneB.config.collapsedWidth != nil) { continue }
 
                 if isVert {
                     let bx = paneA.x + paneA.width
@@ -229,7 +221,7 @@ struct PaneFrameView<Content: View>: View {
                         workspace.dockLayout.toggleDockCollapsed(rightDock.id)
                         let collapsed = workspace.dockLayout.anchoredDock(.right)?.collapsed ?? false
                         let dockPaneId = geo.id
-                        let cw = RenderingState.collapsedDockWidth
+                        let cw = geo.config.collapsedWidth ?? 36
                         workspace.dockLayout.panesMut { pl in
                             pl.tilePanes(collapsedOverride: collapsed ? (dockPaneId, cw) : nil)
                         }

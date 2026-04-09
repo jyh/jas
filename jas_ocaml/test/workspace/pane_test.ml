@@ -67,7 +67,15 @@ let () =
     assert (dc.min_width = min_pane_dock_width);
     assert (not dc.fixed_width);
     assert dc.closable;
-    assert dc.collapsible)
+    assert dc.collapsible;
+    (* always_visible *)
+    assert (not tc.always_visible);
+    assert cc.always_visible;
+    assert (not dc.always_visible);
+    (* collapsed_width *)
+    assert (tc.collapsed_width = None);
+    assert (cc.collapsed_width = None);
+    assert (dc.collapsed_width = Some 36.0))
 
 (* ================================================================== *)
 (* Position & sizing                                                  *)

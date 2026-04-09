@@ -58,6 +58,12 @@ pub struct PaneConfig {
     pub closable: bool,
     pub collapsible: bool,
     pub maximizable: bool,
+    /// Pane cannot be hidden via hide_pane.
+    #[serde(default)]
+    pub always_visible: bool,
+    /// Width when in collapsed state; None means not collapsible to fixed width.
+    #[serde(default)]
+    pub collapsed_width: Option<f64>,
     pub tile_order: usize,
     pub tile_width: TileWidth,
 }
@@ -74,6 +80,8 @@ impl PaneConfig {
                 closable: true,
                 collapsible: false,
                 maximizable: false,
+                always_visible: false,
+                collapsed_width: None,
                 tile_order: 0,
                 tile_width: TileWidth::Fixed(DEFAULT_TOOLBAR_WIDTH),
             },
@@ -85,6 +93,8 @@ impl PaneConfig {
                 closable: false,
                 collapsible: false,
                 maximizable: true,
+                always_visible: true,
+                collapsed_width: None,
                 tile_order: 1,
                 tile_width: TileWidth::Flex,
             },
@@ -96,6 +106,8 @@ impl PaneConfig {
                 closable: true,
                 collapsible: true,
                 maximizable: false,
+                always_visible: false,
+                collapsed_width: Some(36.0),
                 tile_order: 2,
                 tile_width: TileWidth::KeepCurrent,
             },
@@ -1310,6 +1322,16 @@ mod tests {
         assert!(!dc.fixed_width);
         assert!(dc.closable);
         assert!(dc.collapsible);
+
+        // always_visible
+        assert!(!tc.always_visible);
+        assert!(cc.always_visible);
+        assert!(!dc.always_visible);
+
+        // collapsed_width
+        assert!(tc.collapsed_width.is_none());
+        assert!(cc.collapsed_width.is_none());
+        assert_eq!(dc.collapsed_width, Some(36.0));
     }
 
 

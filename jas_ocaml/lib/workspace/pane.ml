@@ -42,6 +42,8 @@ type pane_config = {
   closable : bool;
   collapsible : bool;
   maximizable : bool;
+  always_visible : bool;
+  collapsed_width : float option;
   tile_order : int;
   tile_width : tile_width;
 }
@@ -87,16 +89,19 @@ let config_for_kind = function
   | Toolbar -> {
       label = "Tools"; min_width = min_toolbar_width; min_height = min_toolbar_height;
       fixed_width = true; closable = true; collapsible = false; maximizable = false;
+      always_visible = false; collapsed_width = None;
       tile_order = 0; tile_width = Fixed default_toolbar_width;
     }
   | Canvas -> {
       label = "Canvas"; min_width = min_canvas_width; min_height = min_canvas_height;
       fixed_width = false; closable = false; collapsible = false; maximizable = true;
+      always_visible = true; collapsed_width = None;
       tile_order = 1; tile_width = Flex;
     }
   | Dock -> {
       label = "Panels"; min_width = min_pane_dock_width; min_height = min_pane_dock_height;
       fixed_width = false; closable = true; collapsible = true; maximizable = false;
+      always_visible = false; collapsed_width = Some 36.0;
       tile_order = 2; tile_width = Keep_current;
     }
 

@@ -174,7 +174,7 @@ class MainWindow(QMainWindow):
             if geo.visible:
                 frame.setGeometry(int(geo.x), int(geo.y), int(geo.width), int(geo.height))
                 frame.show()
-                frame.title_bar.setVisible(not (geo.kind == PaneKind.CANVAS and maximized))
+                frame.title_bar.setVisible(not (geo.config.maximizable and maximized))
             else:
                 frame.hide()
 

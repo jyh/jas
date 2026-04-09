@@ -52,6 +52,8 @@ public struct PaneConfig: Codable {
     public var closable: Bool
     public var collapsible: Bool
     public var maximizable: Bool
+    public var alwaysVisible: Bool
+    public var collapsedWidth: Double?
     public var tileOrder: Int
     public var tileWidth: TileWidth
 
@@ -61,16 +63,19 @@ public struct PaneConfig: Codable {
             return PaneConfig(
                 label: "Tools", minWidth: minToolbarWidth, minHeight: minToolbarHeight,
                 fixedWidth: true, closable: true, collapsible: false, maximizable: false,
+                alwaysVisible: false, collapsedWidth: nil,
                 tileOrder: 0, tileWidth: .fixed(defaultToolbarWidth))
         case .canvas:
             return PaneConfig(
                 label: "Canvas", minWidth: minCanvasWidth, minHeight: minCanvasHeight,
                 fixedWidth: false, closable: false, collapsible: false, maximizable: true,
+                alwaysVisible: true, collapsedWidth: nil,
                 tileOrder: 1, tileWidth: .flex)
         case .dock:
             return PaneConfig(
                 label: "Panels", minWidth: minPaneDockWidth, minHeight: minPaneDockHeight,
                 fixedWidth: false, closable: true, collapsible: true, maximizable: false,
+                alwaysVisible: false, collapsedWidth: 36.0,
                 tileOrder: 2, tileWidth: .keepCurrent)
         }
     }
