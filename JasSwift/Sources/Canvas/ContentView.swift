@@ -224,16 +224,14 @@ public struct ContentView: View {
     private func borderDragGesture(border: SharedBorder) -> some Gesture {
         DragGesture(minimumDistance: 1, coordinateSpace: .named("paneContainer"))
             .onChanged { value in
-                if borderDrag == nil {
-                    let start = Double(border.isVertical ? value.startLocation.x : value.startLocation.y)
-                    borderDrag = (border.snapIdx, start)
-                }
-                if let drag = borderDrag {
-                    let current = Double(border.isVertical ? value.location.x : value.location.y)
-                    let delta = current - drag.startCoord
-                    borderDrag = (drag.snapIdx, current)
+                let translation = border.isVertical ? value.translation.width : value.translation.height
+                let newAccum = Double(translation)
+                let prevAccum = borderDrag?.startCoord ?? 0
+                let delta = newAccum - prevAccum
+                borderDrag = (border.snapIdx, newAccum)
+                if abs(delta) > 0.001 {
                     workspace.dockLayout.panesMut { pl in
-                        pl.dragSharedBorder(snapIdx: drag.snapIdx, delta: delta)
+                        pl.dragSharedBorder(snapIdx: border.snapIdx, delta: delta)
                     }
                 }
             }
