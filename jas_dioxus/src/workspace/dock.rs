@@ -942,8 +942,12 @@ impl DockLayout {
         self.pane_layout.as_ref()
     }
 
-    /// Mutable access to the pane layout.
+    /// Mutable access to the pane layout. Marks the layout as dirty
+    /// so changes are persisted.
     pub fn panes_mut(&mut self) -> Option<&mut PaneLayout> {
+        if self.pane_layout.is_some() {
+            self.bump();
+        }
         self.pane_layout.as_mut()
     }
 
@@ -1213,11 +1217,6 @@ impl PaneLayout {
         )
     }
 
-    /// True if an edge faces a window boundary of the same orientation.
-    fn edge_faces_window(edge: EdgeSide, window_edge: EdgeSide) -> bool {
-        edge == window_edge
-    }
-
     /// Detect potential snap constraints for a pane at its current position.
     /// Returns constraints that would form if released now.
     pub fn detect_snaps(
@@ -1298,9 +1297,10 @@ impl PaneLayout {
     // Snap application
     // -----------------------------------------------------------------------
 
-    /// Align a pane's position to match snap targets without modifying
-    /// the snap list. Used for live snapping during drag.
-    pub fn align_to_snaps(
+    /// Align a pane's position to match snap constraint targets.
+    /// Handles both direct snaps (pane == pane_id) and normalized
+    /// pane-to-pane snaps (pane_id appears in the target field).
+    fn align_pane_impl(
         &mut self,
         pane_id: PaneId,
         snaps: &[SnapConstraint],
@@ -1345,6 +1345,18 @@ impl PaneLayout {
         }
     }
 
+    /// Align a pane's position to match snap targets without modifying
+    /// the snap list. Used for live snapping during drag.
+    pub fn align_to_snaps(
+        &mut self,
+        pane_id: PaneId,
+        snaps: &[SnapConstraint],
+        viewport_w: f64,
+        viewport_h: f64,
+    ) {
+        self.align_pane_impl(pane_id, snaps, viewport_w, viewport_h);
+    }
+
     /// Remove old snaps for a pane and apply new ones, aligning the pane's
     /// position to match the snap targets exactly.
     pub fn apply_snaps(
@@ -1354,52 +1366,8 @@ impl PaneLayout {
         viewport_w: f64,
         viewport_h: f64,
     ) {
-        // Remove existing snaps involving this pane
         self.snaps.retain(|s| s.pane != pane_id && !matches!(s.target, SnapTarget::Pane(pid, _) if pid == pane_id));
-
-        // Align pane position to each snap target.
-        // Normalized pane-to-pane snaps may have the dragged pane in
-        // either the `pane` or `target` field, so handle both.
-        for snap in &new_snaps {
-            if snap.pane == pane_id {
-                // pane_id's edge snapped to a target
-                let target_coord = match snap.target {
-                    SnapTarget::Window(we) => Self::window_edge_coord(we, viewport_w, viewport_h),
-                    SnapTarget::Pane(other_id, other_edge) => {
-                        match self.pane(other_id) {
-                            Some(other) => Self::pane_edge_coord(other, other_edge),
-                            None => continue,
-                        }
-                    }
-                };
-                if let Some(p) = self.pane_mut(pane_id) {
-                    match snap.edge {
-                        EdgeSide::Left => p.x = target_coord,
-                        EdgeSide::Right => p.x = target_coord - p.width,
-                        EdgeSide::Top => p.y = target_coord,
-                        EdgeSide::Bottom => p.y = target_coord - p.height,
-                    }
-                }
-            } else if let SnapTarget::Pane(target_pid, target_edge) = snap.target {
-                if target_pid == pane_id {
-                    // pane_id appears in the target (normalized form).
-                    // snap.pane's snap.edge is at pane_id's target_edge.
-                    let anchor_coord = match self.pane(snap.pane) {
-                        Some(other) => Self::pane_edge_coord(other, snap.edge),
-                        None => continue,
-                    };
-                    if let Some(p) = self.pane_mut(pane_id) {
-                        match target_edge {
-                            EdgeSide::Left => p.x = anchor_coord,
-                            EdgeSide::Right => p.x = anchor_coord - p.width,
-                            EdgeSide::Top => p.y = anchor_coord,
-                            EdgeSide::Bottom => p.y = anchor_coord - p.height,
-                        }
-                    }
-                }
-            }
-        }
-
+        self.align_pane_impl(pane_id, &new_snaps, viewport_w, viewport_h);
         self.snaps.extend(new_snaps);
     }
 
@@ -1510,7 +1478,7 @@ impl PaneLayout {
                 }
             }
             // Propagate: shift panes snapped to B's right edge
-            self.propagate_border_shift(other_id, EdgeSide::Right, clamped, true);
+            self.propagate_border_shift(other_id, EdgeSide::Right, true);
         } else {
             let a_h = self.pane(snap.pane).unwrap().height;
             let b_y = self.pane(other_id).unwrap().y;
@@ -1532,7 +1500,7 @@ impl PaneLayout {
                 }
             }
             // Propagate: shift panes snapped to B's bottom edge
-            self.propagate_border_shift(other_id, EdgeSide::Bottom, clamped, false);
+            self.propagate_border_shift(other_id, EdgeSide::Bottom, false);
         }
     }
 
@@ -1543,7 +1511,6 @@ impl PaneLayout {
         &mut self,
         source_pane: PaneId,
         source_edge: EdgeSide,
-        _delta: f64,
         is_vertical: bool,
     ) {
         // Find snaps where source_pane's source_edge connects to another pane
@@ -3431,5 +3398,164 @@ mod tests {
         let p = l.panes().unwrap().pane(canvas_id).unwrap();
         assert!(p.x <= 1000.0 - MIN_PANE_VISIBLE);
         assert!(p.y <= 700.0 - MIN_PANE_VISIBLE);
+    }
+
+    // -----------------------------------------------------------------------
+    // tile_panes
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tile_panes_fills_viewport() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        pl.tile_panes(None);
+        let t = pl.pane_by_kind(PaneKind::Toolbar).unwrap();
+        let c = pl.pane_by_kind(PaneKind::Canvas).unwrap();
+        let d = pl.pane_by_kind(PaneKind::Dock).unwrap();
+        // Positions are left-to-right
+        assert_eq!(t.x, 0.0);
+        assert_eq!(c.x, t.x + t.width);
+        assert_eq!(d.x, c.x + c.width);
+        // Widths sum to viewport
+        assert!((t.width + c.width + d.width - 1000.0).abs() < 0.001);
+        // All full height
+        assert_eq!(t.height, 700.0);
+        assert_eq!(c.height, 700.0);
+        assert_eq!(d.height, 700.0);
+        // Toolbar keeps default width
+        assert_eq!(t.width, DEFAULT_TOOLBAR_WIDTH);
+    }
+
+    #[test]
+    fn tile_panes_collapsed_dock() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        pl.tile_panes(Some(36.0));
+        let d = pl.pane_by_kind(PaneKind::Dock).unwrap();
+        let c = pl.pane_by_kind(PaneKind::Canvas).unwrap();
+        assert_eq!(d.width, 36.0);
+        // Canvas fills the rest
+        assert!((c.width - (1000.0 - DEFAULT_TOOLBAR_WIDTH - 36.0)).abs() < 0.001);
+        // Dock right edge at viewport
+        assert!((d.x + d.width - 1000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn tile_panes_clears_hidden() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        pl.hide_pane(PaneKind::Toolbar);
+        pl.hide_pane(PaneKind::Dock);
+        assert_eq!(pl.hidden_panes.len(), 2);
+        pl.tile_panes(None);
+        assert!(pl.hidden_panes.is_empty());
+    }
+
+    #[test]
+    fn tile_panes_rebuilds_snaps() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        pl.snaps.clear();
+        pl.tile_panes(None);
+        // Should have pane-to-pane + window snaps
+        assert!(!pl.snaps.is_empty());
+        // Toolbar-canvas pane snap
+        let toolbar_id = pl.pane_by_kind(PaneKind::Toolbar).unwrap().id;
+        let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        assert!(pl.snaps.iter().any(|s|
+            s.pane == toolbar_id && s.edge == EdgeSide::Right
+            && s.target == SnapTarget::Pane(canvas_id, EdgeSide::Left)
+        ));
+    }
+
+    // -----------------------------------------------------------------------
+    // hide_pane / show_pane / is_pane_visible
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn hide_show_pane_round_trip() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        assert!(pl.is_pane_visible(PaneKind::Toolbar));
+        pl.hide_pane(PaneKind::Toolbar);
+        assert!(!pl.is_pane_visible(PaneKind::Toolbar));
+        pl.show_pane(PaneKind::Toolbar);
+        assert!(pl.is_pane_visible(PaneKind::Toolbar));
+    }
+
+    #[test]
+    fn hide_pane_idempotent() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        pl.hide_pane(PaneKind::Dock);
+        pl.hide_pane(PaneKind::Dock);
+        assert_eq!(pl.hidden_panes.len(), 1);
+    }
+
+    #[test]
+    fn show_pane_not_hidden_is_noop() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let count_before = pl.hidden_panes.len();
+        pl.show_pane(PaneKind::Canvas);
+        assert_eq!(pl.hidden_panes.len(), count_before);
+    }
+
+    // -----------------------------------------------------------------------
+    // toggle_canvas_maximized
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn toggle_canvas_maximized() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        assert!(!pl.canvas_maximized);
+        pl.toggle_canvas_maximized();
+        assert!(pl.canvas_maximized);
+        pl.toggle_canvas_maximized();
+        assert!(!pl.canvas_maximized);
+    }
+
+    // -----------------------------------------------------------------------
+    // align_to_snaps
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn align_to_snaps_does_not_modify_snap_list() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        let toolbar_id = pl.pane_by_kind(PaneKind::Toolbar).unwrap().id;
+        pl.set_pane_position(canvas_id, 80.0, 5.0);
+        let snaps_before = pl.snaps.len();
+        let new_snaps = vec![
+            SnapConstraint { pane: toolbar_id, edge: EdgeSide::Right, target: SnapTarget::Pane(canvas_id, EdgeSide::Left) },
+            SnapConstraint { pane: canvas_id, edge: EdgeSide::Top, target: SnapTarget::Window(EdgeSide::Top) },
+        ];
+        pl.align_to_snaps(canvas_id, &new_snaps, 1000.0, 700.0);
+        // Snap list unchanged
+        assert_eq!(pl.snaps.len(), snaps_before);
+        // But pane position aligned
+        let p = pl.pane(canvas_id).unwrap();
+        assert!((p.x - 72.0).abs() < 0.001);
+        assert_eq!(p.y, 0.0);
+    }
+
+    // -----------------------------------------------------------------------
+    // repair_snaps
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn repair_snaps_adds_missing() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        pl.snaps.clear();
+        pl.repair_snaps(1000.0, 700.0);
+        // Should have re-established toolbar-canvas and canvas-dock snaps
+        let toolbar_id = pl.pane_by_kind(PaneKind::Toolbar).unwrap().id;
+        let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        assert!(pl.snaps.iter().any(|s|
+            s.pane == toolbar_id && s.edge == EdgeSide::Right
+            && s.target == SnapTarget::Pane(canvas_id, EdgeSide::Left)
+        ));
+    }
+
+    #[test]
+    fn repair_snaps_no_duplicates() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let count_before = pl.snaps.len();
+        pl.repair_snaps(1000.0, 700.0);
+        // Should not add duplicates
+        assert_eq!(pl.snaps.len(), count_before);
     }
 }
