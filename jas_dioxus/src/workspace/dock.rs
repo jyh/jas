@@ -1261,10 +1261,21 @@ impl PaneLayout {
                             }
                         };
                         if overlaps {
+                            // Normalize pane-to-pane snaps to canonical
+                            // Right->Left / Bottom->Top so that
+                            // shared_border_at and drag_shared_border
+                            // always find them.
+                            let (norm_pane, norm_edge, norm_other, norm_oedge) =
+                                if d_edge == EdgeSide::Right || d_edge == EdgeSide::Bottom {
+                                    (dragged, d_edge, other.id, o_edge)
+                                } else {
+                                    // Flip: Left->Right becomes other.Right->dragged.Left
+                                    (other.id, o_edge, dragged, d_edge)
+                                };
                             result.push(SnapConstraint {
-                                pane: dragged,
-                                edge: d_edge,
-                                target: SnapTarget::Pane(other.id, o_edge),
+                                pane: norm_pane,
+                                edge: norm_edge,
+                                target: SnapTarget::Pane(norm_other, norm_oedge),
                             });
                         }
                     }
@@ -1291,26 +1302,45 @@ impl PaneLayout {
         // Remove existing snaps involving this pane
         self.snaps.retain(|s| s.pane != pane_id && !matches!(s.target, SnapTarget::Pane(pid, _) if pid == pane_id));
 
-        // Align pane position to each snap target
+        // Align pane position to each snap target.
+        // Normalized pane-to-pane snaps may have the dragged pane in
+        // either the `pane` or `target` field, so handle both.
         for snap in &new_snaps {
-            if snap.pane != pane_id {
-                continue;
-            }
-            let target_coord = match snap.target {
-                SnapTarget::Window(we) => Self::window_edge_coord(we, viewport_w, viewport_h),
-                SnapTarget::Pane(other_id, other_edge) => {
-                    match self.pane(other_id) {
-                        Some(other) => Self::pane_edge_coord(other, other_edge),
-                        None => continue,
+            if snap.pane == pane_id {
+                // pane_id's edge snapped to a target
+                let target_coord = match snap.target {
+                    SnapTarget::Window(we) => Self::window_edge_coord(we, viewport_w, viewport_h),
+                    SnapTarget::Pane(other_id, other_edge) => {
+                        match self.pane(other_id) {
+                            Some(other) => Self::pane_edge_coord(other, other_edge),
+                            None => continue,
+                        }
+                    }
+                };
+                if let Some(p) = self.pane_mut(pane_id) {
+                    match snap.edge {
+                        EdgeSide::Left => p.x = target_coord,
+                        EdgeSide::Right => p.x = target_coord - p.width,
+                        EdgeSide::Top => p.y = target_coord,
+                        EdgeSide::Bottom => p.y = target_coord - p.height,
                     }
                 }
-            };
-            if let Some(p) = self.pane_mut(pane_id) {
-                match snap.edge {
-                    EdgeSide::Left => p.x = target_coord,
-                    EdgeSide::Right => p.x = target_coord - p.width,
-                    EdgeSide::Top => p.y = target_coord,
-                    EdgeSide::Bottom => p.y = target_coord - p.height,
+            } else if let SnapTarget::Pane(target_pid, target_edge) = snap.target {
+                if target_pid == pane_id {
+                    // pane_id appears in the target (normalized form).
+                    // snap.pane's snap.edge is at pane_id's target_edge.
+                    let anchor_coord = match self.pane(snap.pane) {
+                        Some(other) => Self::pane_edge_coord(other, snap.edge),
+                        None => continue,
+                    };
+                    if let Some(p) = self.pane_mut(pane_id) {
+                        match target_edge {
+                            EdgeSide::Left => p.x = anchor_coord,
+                            EdgeSide::Right => p.x = anchor_coord - p.width,
+                            EdgeSide::Top => p.y = anchor_coord,
+                            EdgeSide::Bottom => p.y = anchor_coord - p.height,
+                        }
+                    }
                 }
             }
         }
@@ -2746,10 +2776,11 @@ mod tests {
         // Move canvas so its left edge is near toolbar's right edge
         pl.set_pane_position(canvas_id, toolbar_right + 5.0, 0.0);
         let snaps = pl.detect_snaps(canvas_id, 1000.0, 700.0);
+        // Normalized: toolbar.Right -> canvas.Left (canonical Right->Left form)
         assert!(snaps.iter().any(|s|
-            s.pane == canvas_id
-            && s.edge == EdgeSide::Left
-            && s.target == SnapTarget::Pane(toolbar_id, EdgeSide::Right)
+            s.pane == toolbar_id
+            && s.edge == EdgeSide::Right
+            && s.target == SnapTarget::Pane(canvas_id, EdgeSide::Left)
         ));
     }
 
@@ -2779,6 +2810,23 @@ mod tests {
         let p = pl.pane(canvas_id).unwrap();
         assert_eq!(p.x, 0.0); // aligned to left
         assert_eq!(p.y, 0.0); // aligned to top
+    }
+
+    #[test]
+    fn apply_snaps_aligns_via_normalized_pane_snap() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        let toolbar_id = pl.pane_by_kind(PaneKind::Toolbar).unwrap().id;
+        // Move canvas slightly away from toolbar
+        pl.set_pane_position(canvas_id, 80.0, 0.0);
+        // Normalized snap: toolbar.Right -> canvas.Left (canvas is in target)
+        let new_snaps = vec![
+            SnapConstraint { pane: toolbar_id, edge: EdgeSide::Right, target: SnapTarget::Pane(canvas_id, EdgeSide::Left) },
+        ];
+        pl.apply_snaps(canvas_id, new_snaps, 1000.0, 700.0);
+        let p = pl.pane(canvas_id).unwrap();
+        // Canvas left edge should align to toolbar's right edge (72px)
+        assert!((p.x - 72.0).abs() < 0.001);
     }
 
     #[test]
