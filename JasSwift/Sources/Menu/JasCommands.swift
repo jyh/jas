@@ -247,10 +247,40 @@ public struct JasCommands: Commands {
                 Divider()
             }
 
+            if let ws = workspace, ws.dockLayout.panes() != nil {
+                paneToggle(ws, .toolbar, "Toolbar")
+                paneToggle(ws, .dock, "Panels")
+
+                Button("Tile Panes") {
+                    ws.dockLayout.panesMut { pl in
+                        pl.tilePanes(collapsedOverride: nil)
+                    }
+                    ws.dockLayout.saveIfNeeded()
+                }
+
+                Divider()
+            }
+
             panelToggle(.layers, "Layers")
             panelToggle(.color, "Color")
             panelToggle(.stroke, "Stroke")
             panelToggle(.properties, "Properties")
+        }
+    }
+
+    @ViewBuilder
+    private func paneToggle(_ ws: WorkspaceState, _ kind: PaneKind, _ label: String) -> some View {
+        let visible = ws.dockLayout.panes()?.isPaneVisible(kind) ?? true
+        let prefix = visible ? "\u{2713} " : "    "
+        Button(prefix + label) {
+            ws.dockLayout.panesMut { pl in
+                if pl.isPaneVisible(kind) {
+                    pl.hidePane(kind)
+                } else {
+                    pl.showPane(kind)
+                }
+            }
+            ws.dockLayout.saveIfNeeded()
         }
     }
 

@@ -874,3 +874,75 @@ private func rightDockId(_ l: DockLayout) -> DockId {
     let c = AppConfig.fromJson("garbage{{{")
     #expect(c.activeLayout == "Default")
 }
+
+// MARK: - PaneLayout Integration
+
+@Test func dockLayoutDefaultHasNoPaneLayout() {
+    let l = DockLayout.defaultLayout()
+    #expect(l.panes() == nil)
+}
+
+@Test func ensurePaneLayoutCreatesIfNone() {
+    var l = DockLayout.defaultLayout()
+    l.ensurePaneLayout(viewportW: 1000, viewportH: 700)
+    #expect(l.panes() != nil)
+    #expect(l.panes()!.panes.count == 3)
+}
+
+@Test func ensurePaneLayoutNoopIfPresent() {
+    var l = DockLayout.defaultLayout()
+    l.ensurePaneLayout(viewportW: 1000, viewportH: 700)
+    l.markSaved()
+    l.ensurePaneLayout(viewportW: 1000, viewportH: 700)
+    #expect(!l.needsSave())
+}
+
+@Test func resetToDefaultClearsPaneLayout() {
+    var l = DockLayout.defaultLayout()
+    l.ensurePaneLayout(viewportW: 1000, viewportH: 700)
+    #expect(l.panes() != nil)
+    l.resetToDefault()
+    #expect(l.panes() == nil)
+}
+
+@Test func panesAccessors() {
+    var l = DockLayout.defaultLayout()
+    #expect(l.panes() == nil)
+    l.ensurePaneLayout(viewportW: 1000, viewportH: 700)
+    #expect(l.panes() != nil)
+    l.panesMut { pl in
+        pl.hidePane(.toolbar)
+    }
+    #expect(!l.panes()!.isPaneVisible(.toolbar))
+}
+
+@Test func serdeBackwardCompatNoPaneLayout() {
+    let l = DockLayout.defaultLayout()
+    let json = l.toJson()!
+    let l2 = DockLayout.fromJson(json)
+    #expect(l2.panes() == nil)
+    #expect(l2.anchored.count == 1)
+}
+
+@Test func serdeRoundTripWithPaneLayout() {
+    var l = DockLayout.defaultLayout()
+    l.ensurePaneLayout(viewportW: 1000, viewportH: 700)
+    let json = l.toJson()!
+    let l2 = DockLayout.fromJson(json)
+    #expect(l2.panes() != nil)
+    #expect(l2.panes()!.panes.count == 3)
+    #expect(l2.panes()!.snaps.count == 10)
+}
+
+@Test func clampFloatingDocksAlsoClampsPanes() {
+    var l = DockLayout.defaultLayout()
+    l.ensurePaneLayout(viewportW: 1000, viewportH: 700)
+    l.panesMut { pl in
+        let canvasId = pl.paneByKind(.canvas)!.id
+        pl.setPanePosition(canvasId, x: 5000, y: 5000)
+    }
+    l.clampFloatingDocks(viewportW: 1000, viewportH: 700)
+    let canvas = l.panes()!.paneByKind(.canvas)!
+    #expect(canvas.x <= 1000 - minPaneVisible)
+    #expect(canvas.y <= 700 - minPaneVisible)
+}
