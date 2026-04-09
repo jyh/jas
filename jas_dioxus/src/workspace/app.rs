@@ -1189,21 +1189,25 @@ pub fn App() -> Element {
     let _ = revision();
 
     // Ensure pane layout exists (lazily, when we know viewport dims).
+    // Also repair any missing snap constraints from saved layouts.
     {
         let mut st = app.borrow_mut();
+        #[cfg(target_arch = "wasm32")]
+        let (vw, vh) = web_sys::window()
+            .map(|w| {
+                let vw = w.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
+                let vh = w.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
+                (vw, vh)
+            })
+            .unwrap_or((1000.0, 700.0));
+        #[cfg(not(target_arch = "wasm32"))]
+        let (vw, vh) = (1000.0, 700.0);
+
         if st.dock_layout.pane_layout.is_none() {
-            #[cfg(target_arch = "wasm32")]
-            {
-                if let Some(win) = web_sys::window() {
-                    let vw = win.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
-                    let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
-                    st.dock_layout.ensure_pane_layout(vw, vh);
-                }
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                st.dock_layout.ensure_pane_layout(1000.0, 700.0);
-            }
+            st.dock_layout.ensure_pane_layout(vw, vh);
+        }
+        if let Some(ref mut pl) = st.dock_layout.pane_layout {
+            pl.repair_snaps(vw, vh);
         }
     }
 
