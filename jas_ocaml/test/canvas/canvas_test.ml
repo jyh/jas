@@ -6,7 +6,7 @@ let () =
   ignore (GMain.init ());
 
   let model = Jas.Model.create () in
-  let main_window, toolbar_fixed, notebook = Jas.Canvas.create_main_window ~get_model:(fun () -> model) ~on_open:(fun _ -> ()) () in
+  let main_window, toolbar_fixed, notebook, _dock_box = Jas.Canvas.create_main_window ~get_model:(fun () -> model) ~on_open:(fun _ -> ()) () in
   let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:10 ~y:10 toolbar_fixed in
   let controller = Jas.Controller.create ~model () in
   let canvas = Jas.Canvas_subwindow.create

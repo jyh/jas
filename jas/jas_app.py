@@ -37,6 +37,14 @@ class MainWindow(QMainWindow):
         self.tab_widget.tabCloseRequested.connect(self._close_tab)
         layout.addWidget(self.tab_widget, stretch=1)
 
+        # Dock panel (right side)
+        from workspace.dock import DockLayout
+        from workspace.dock_panel import DockPanelWidget
+        self.dock_layout = DockLayout.default_layout()
+        self.dock_panel = DockPanelWidget(self.dock_layout)
+        self.dock_panel.setStyleSheet("background: #f0f0f0;")
+        layout.addWidget(self.dock_panel)
+
         self.setCentralWidget(central)
 
         # Keyboard shortcuts
