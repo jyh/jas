@@ -47,12 +47,12 @@ pub const MENU_BAR: &[(&str, &[MenuItem])] = &[
         ("Show All", "show_all", "\u{2325}\u{2318}3"),
     ]),
     ("Window", &[
+        ("Workspace \u{25B6}", "workspace_submenu", ""),
+        SEP,
         ("Layers", "toggle_panel_layers", ""),
         ("Color", "toggle_panel_color", ""),
         ("Stroke", "toggle_panel_stroke", ""),
         ("Properties", "toggle_panel_properties", ""),
-        SEP,
-        ("Reset Panel Layout", "reset_panel_layout", ""),
     ]),
 ];
 
@@ -65,9 +65,9 @@ pub const DISPATCH_COMMANDS: &[&str] = &[
     "group", "ungroup", "ungroup_all",
     "lock", "unlock_all",
     "hide", "show_all",
+    "workspace_submenu",
     "toggle_panel_layers", "toggle_panel_color",
     "toggle_panel_stroke", "toggle_panel_properties",
-    "reset_panel_layout",
 ];
 
 #[cfg(test)]

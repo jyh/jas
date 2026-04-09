@@ -152,6 +152,7 @@ pub enum DropTarget {
 /// Top-level layout: anchored docks on screen edges + floating docks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DockLayout {
+    pub name: String,
     pub anchored: Vec<(DockEdge, Dock)>,
     pub floating: Vec<FloatingDock>,
     pub hidden_panels: Vec<PanelKind>,
@@ -166,6 +167,46 @@ pub struct DockLayout {
     saved_generation: u64,
 }
 
+/// Application configuration, saved separately from dock layouts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppConfig {
+    /// Name of the active dock layout.
+    pub active_layout: String,
+    /// Names of all saved dock layouts, in display order.
+    pub saved_layouts: Vec<String>,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            active_layout: DEFAULT_LAYOUT_NAME.to_string(),
+            saved_layouts: vec![DEFAULT_LAYOUT_NAME.to_string()],
+        }
+    }
+}
+
+impl AppConfig {
+    pub const STORAGE_KEY: &'static str = "jas_app_config";
+
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    pub fn from_json(json: &str) -> Self {
+        serde_json::from_str(json).unwrap_or_default()
+    }
+
+    /// Ensure a layout name is in the saved list.
+    pub fn register_layout(&mut self, name: &str) {
+        if !self.saved_layouts.iter().any(|n| n == name) {
+            self.saved_layouts.push(name.to_string());
+        }
+    }
+}
+
+/// Default layout name.
+pub const DEFAULT_LAYOUT_NAME: &str = "Default";
+
 impl DockLayout {
     // -----------------------------------------------------------------------
     // Construction
@@ -173,7 +214,13 @@ impl DockLayout {
 
     /// Create the default layout: one Right-anchored dock with two groups.
     pub fn default_layout() -> Self {
+        Self::named(DEFAULT_LAYOUT_NAME)
+    }
+
+    /// Create the default layout with a custom name.
+    pub fn named(name: &str) -> Self {
         Self {
+            name: name.to_string(),
             anchored: vec![(
                 DockEdge::Right,
                 Dock::new(
@@ -736,9 +783,10 @@ impl DockLayout {
     // Persistence
     // -----------------------------------------------------------------------
 
-    /// Reset to the default layout, discarding all customizations.
+    /// Reset to the default layout, preserving the name.
     pub fn reset_to_default(&mut self) {
-        *self = Self::default_layout();
+        let name = self.name.clone();
+        *self = Self::named(&name);
         self.bump();
     }
 
@@ -753,8 +801,18 @@ impl DockLayout {
         serde_json::from_str(json).unwrap_or_else(|_| Self::default_layout())
     }
 
-    /// Key used for localStorage.
-    pub const STORAGE_KEY: &'static str = "jas_dock_layout";
+    /// localStorage key prefix for dock layouts.
+    const STORAGE_PREFIX: &'static str = "jas_layout:";
+
+    /// Return the localStorage key for this layout.
+    pub fn storage_key(&self) -> String {
+        format!("{}{}", Self::STORAGE_PREFIX, self.name)
+    }
+
+    /// Return the localStorage key for a named layout.
+    pub fn storage_key_for(name: &str) -> String {
+        format!("{}{}", Self::STORAGE_PREFIX, name)
+    }
 
     // -----------------------------------------------------------------------
     // Focus & keyboard navigation
@@ -1945,5 +2003,72 @@ mod tests {
         let id = right_dock_id(&l);
         l.reorder_panel(ga(id.0, 1), 99, 0); // no panic
         l.reorder_panel(ga(99, 0), 0, 1);     // no panic
+    }
+
+    // -----------------------------------------------------------------------
+    // Named layouts & AppConfig
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn default_layout_name() {
+        let l = DockLayout::default_layout();
+        assert_eq!(l.name, "Default");
+    }
+
+    #[test]
+    fn named_layout() {
+        let l = DockLayout::named("My Workspace");
+        assert_eq!(l.name, "My Workspace");
+        assert_eq!(l.anchored.len(), 1); // same structure as default
+    }
+
+    #[test]
+    fn storage_key_includes_name() {
+        let l = DockLayout::named("Editing");
+        assert_eq!(l.storage_key(), "jas_layout:Editing");
+    }
+
+    #[test]
+    fn storage_key_for_static() {
+        assert_eq!(DockLayout::storage_key_for("Drawing"), "jas_layout:Drawing");
+    }
+
+    #[test]
+    fn reset_preserves_name() {
+        let mut l = DockLayout::named("Custom");
+        let id = right_dock_id(&l);
+        l.detach_group(ga(id.0, 0), 50.0, 50.0);
+        assert!(!l.floating.is_empty());
+        l.reset_to_default();
+        assert_eq!(l.name, "Custom"); // name preserved
+        assert!(l.floating.is_empty());
+    }
+
+    #[test]
+    fn json_round_trip_preserves_name() {
+        let l = DockLayout::named("Test Layout");
+        let json = l.to_json().unwrap();
+        let l2 = DockLayout::from_json(&json);
+        assert_eq!(l2.name, "Test Layout");
+    }
+
+    #[test]
+    fn app_config_default() {
+        let c = AppConfig::default();
+        assert_eq!(c.active_layout, "Default");
+    }
+
+    #[test]
+    fn app_config_round_trip() {
+        let c = AppConfig { active_layout: "My Layout".to_string(), saved_layouts: vec!["My Layout".to_string()] };
+        let json = c.to_json().unwrap();
+        let c2 = AppConfig::from_json(&json);
+        assert_eq!(c2.active_layout, "My Layout");
+    }
+
+    #[test]
+    fn app_config_invalid_json() {
+        let c = AppConfig::from_json("garbage{{{");
+        assert_eq!(c.active_layout, "Default"); // falls back to default
     }
 }

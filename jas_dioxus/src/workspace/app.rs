@@ -78,46 +78,99 @@ struct AppState {
     tabs: Vec<TabState>,
     active_tab: usize,
     active_tool: ToolKind,
+    app_config: super::dock::AppConfig,
     dock_layout: super::dock::DockLayout,
 }
 
 impl AppState {
     fn new() -> Self {
-        let dock_layout = Self::load_dock_layout();
+        let app_config = Self::load_app_config();
+        let dock_layout = Self::load_dock_layout(&app_config.active_layout);
         Self {
             tabs: vec![],
             active_tab: 0,
             active_tool: ToolKind::Selection,
+            app_config,
             dock_layout,
         }
     }
 
-    /// Load dock layout from localStorage, or return default.
-    fn load_dock_layout() -> super::dock::DockLayout {
+    /// Load app config from localStorage, or return default.
+    fn load_app_config() -> super::dock::AppConfig {
         #[cfg(target_arch = "wasm32")]
         {
             if let Some(json) = web_sys::window()
                 .and_then(|w| w.local_storage().ok()?)
-                .and_then(|s| s.get_item(super::dock::DockLayout::STORAGE_KEY).ok()?)
+                .and_then(|s| s.get_item(super::dock::AppConfig::STORAGE_KEY).ok()?)
+            {
+                return super::dock::AppConfig::from_json(&json);
+            }
+        }
+        super::dock::AppConfig::default()
+    }
+
+    /// Save app config to localStorage.
+    fn save_app_config(&self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Ok(json) = self.app_config.to_json() {
+                if let Some(storage) = web_sys::window()
+                    .and_then(|w| w.local_storage().ok()?)
+                {
+                    let _ = storage.set_item(super::dock::AppConfig::STORAGE_KEY, &json);
+                }
+            }
+        }
+    }
+
+    /// Load a named dock layout from localStorage, or return default.
+    fn load_dock_layout(name: &str) -> super::dock::DockLayout {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let key = super::dock::DockLayout::storage_key_for(name);
+            if let Some(json) = web_sys::window()
+                .and_then(|w| w.local_storage().ok()?)
+                .and_then(|s| s.get_item(&key).ok()?)
             {
                 return super::dock::DockLayout::from_json(&json);
             }
         }
-        super::dock::DockLayout::default_layout()
+        super::dock::DockLayout::named(name)
     }
 
-    /// Save dock layout to localStorage.
+    /// Save dock layout to localStorage under its name.
     fn save_dock_layout(&self) {
         #[cfg(target_arch = "wasm32")]
         {
+            let key = self.dock_layout.storage_key();
             if let Ok(json) = self.dock_layout.to_json() {
                 if let Some(storage) = web_sys::window()
                     .and_then(|w| w.local_storage().ok()?)
                 {
-                    let _ = storage.set_item(super::dock::DockLayout::STORAGE_KEY, &json);
+                    let _ = storage.set_item(&key, &json);
                 }
             }
         }
+    }
+
+    /// Switch to a different named layout.
+    fn switch_layout(&mut self, name: &str) {
+        // Save current layout first
+        #[cfg(target_arch = "wasm32")]
+        {
+            let key = self.dock_layout.storage_key();
+            if let Ok(json) = self.dock_layout.to_json() {
+                if let Some(storage) = web_sys::window()
+                    .and_then(|w| w.local_storage().ok()?)
+                {
+                    let _ = storage.set_item(&key, &json);
+                }
+            }
+        }
+        // Load the new layout
+        self.dock_layout = Self::load_dock_layout(name);
+        self.app_config.active_layout = name.to_string();
+        self.save_app_config();
     }
 
     fn tab(&self) -> Option<&TabState> {
@@ -1511,10 +1564,8 @@ pub fn App() -> Element {
                         }
                     }));
                 }
-                "reset_panel_layout" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.dock_layout = super::dock::DockLayout::default_layout();
-                    }));
+                "workspace_submenu" => {
+                    // Handled by dynamic submenu rendering, not dispatch
                 }
                 _ => {}
             }
@@ -1523,8 +1574,15 @@ pub fn App() -> Element {
 
     // --- Menu bar data ---
     let mut open_menu = use_signal(|| Option::<String>::None);
+    let mut workspace_submenu_open = use_signal(|| false);
+    let mut new_workspace_dialog = use_signal(|| Option::<String>::None); // Some(initial_name) when open
 
     let menus = super::menu::MENU_BAR;
+
+    // Workspace data for dynamic submenu
+    let config_snapshot = app.borrow().app_config.clone();
+    let active_layout_name = config_snapshot.active_layout.clone();
+    let saved_layout_names = config_snapshot.saved_layouts.clone();
 
     // Pre-build each menu dropdown as a complete VNode
     let menu_nodes: Vec<Result<VNode, RenderError>> = menus.iter().enumerate().map(|(mi, (menu_name, items))| {
@@ -1536,18 +1594,122 @@ pub fn App() -> Element {
 
         // Pre-build item nodes for this menu
         let item_nodes: Vec<Result<VNode, RenderError>> = if is_open {
-            items.iter().map(|&(label, cmd, shortcut)| {
+            items.iter().flat_map(|&(label, cmd, shortcut)| {
                 if label == "---" {
-                    rsx! {
+                    vec![rsx! {
                         div {
                             style: "height:1px; background:#ddd; margin:4px 8px;",
                         }
-                    }
+                    }]
+                } else if cmd == "workspace_submenu" {
+                    // Dynamic workspace submenu
+                    let act_ws = act.clone();
+                    let mut open_menu_ws = open_menu_sig.clone();
+                    let active_name = active_layout_name.clone();
+                    let reset_label = format!("Reset \u{201C}{}\u{201D}", active_name);
+
+                    let mut items: Vec<Result<VNode, RenderError>> = Vec::new();
+
+                    // Submenu trigger with nested flyout
+                    items.push({
+                        let sub_open = workspace_submenu_open();
+                        rsx! {
+                            div {
+                                style: "position:relative;",
+                                onmouseenter: move |_| { workspace_submenu_open.set(true); },
+                                onmouseleave: move |_| { workspace_submenu_open.set(false); },
+
+                                div {
+                                    class: "jas-menu-item",
+                                    style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                                    span { "{label}" }
+                                }
+
+                                if sub_open {
+                                    div {
+                                        style: "position:absolute; left:100%; top:0; background:#fff; border:1px solid #ccc; box-shadow:2px 2px 8px rgba(0,0,0,0.15); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
+                                        onmouseenter: move |_| { workspace_submenu_open.set(true); },
+
+                                        // List saved layouts with check mark
+                                        for name in saved_layout_names.clone() {
+                                            {
+                                                let act = act_ws.clone();
+                                                let is_active = name == active_name;
+                                                let check = if is_active { "\u{2713} " } else { "    " };
+                                                let display = format!("{check}{name}");
+                                                let name_clone = name.clone();
+                                                let mut open_menu_cl = open_menu_ws.clone();
+                                                rsx! {
+                                                    div {
+                                                        class: "jas-menu-item",
+                                                        style: "padding:4px 16px; cursor:pointer; font-size:13px; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                                                        onmousedown: move |evt: Event<MouseData>| {
+                                                            evt.stop_propagation();
+                                                            let n = name_clone.clone();
+                                                            (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                                                st.switch_layout(&n);
+                                                            }));
+                                                            open_menu_cl.set(None);
+                                                            workspace_submenu_open.set(false);
+                                                        },
+                                                        "{display}"
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Separator
+                                        div { style: "height:1px; background:#ddd; margin:4px 8px;" }
+
+                                        // Reset current layout
+                                        {
+                                            let act = act_ws.clone();
+                                            let mut open_menu_cl = open_menu_ws.clone();
+                                            rsx! {
+                                                div {
+                                                    class: "jas-menu-item",
+                                                    style: "padding:4px 16px; cursor:pointer; font-size:13px; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                                                    onmousedown: move |evt: Event<MouseData>| {
+                                                        evt.stop_propagation();
+                                                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                                                            st.dock_layout.reset_to_default();
+                                                        }));
+                                                        open_menu_cl.set(None);
+                                                        workspace_submenu_open.set(false);
+                                                    },
+                                                    "{reset_label}"
+                                                }
+                                            }
+                                        }
+
+                                        // New Workspace...
+                                        {
+                                            let mut open_menu_cl = open_menu_ws.clone();
+                                            rsx! {
+                                                div {
+                                                    class: "jas-menu-item",
+                                                    style: "padding:4px 16px; cursor:pointer; font-size:13px; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                                                    onmousedown: move |evt: Event<MouseData>| {
+                                                        evt.stop_propagation();
+                                                        new_workspace_dialog.set(Some(String::new()));
+                                                        open_menu_cl.set(None);
+                                                        workspace_submenu_open.set(false);
+                                                    },
+                                                    "New Workspace\u{2026}"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    items
                 } else {
                     let dispatch = dispatch.clone();
                     let cmd = cmd.to_string();
                     let mut open_menu_sig2 = open_menu_sig.clone();
-                    rsx! {
+                    vec![rsx! {
                         div {
                             class: "jas-menu-item",
                             style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
@@ -1562,7 +1724,7 @@ pub fn App() -> Element {
                                 "{shortcut}"
                             }
                         }
-                    }
+                    }]
                 }
             }).collect()
         } else {
@@ -2225,6 +2387,106 @@ pub fn App() -> Element {
             // Floating docks (position:fixed overlays)
             for fdock in floating_nodes {
                 {fdock}
+            }
+
+            // New Workspace dialog
+            if let Some(initial_name) = new_workspace_dialog() {
+                {
+                    let act = act.clone();
+                    rsx! {
+                        div {
+                            style: "position:fixed; inset:0; background:rgba(0,0,0,0.3); z-index:2000; display:flex; align-items:center; justify-content:center;",
+                            onmousedown: move |evt: Event<MouseData>| {
+                                evt.stop_propagation();
+                                new_workspace_dialog.set(None);
+                            },
+
+                            div {
+                                style: "background:#fff; border-radius:8px; padding:20px; box-shadow:0 8px 32px rgba(0,0,0,0.25); min-width:300px;",
+                                onmousedown: move |evt: Event<MouseData>| {
+                                    evt.stop_propagation(); // don't close when clicking inside
+                                },
+
+                                div {
+                                    style: "font-size:14px; font-weight:bold; margin-bottom:12px;",
+                                    "New Workspace"
+                                }
+
+                                input {
+                                    r#type: "text",
+                                    placeholder: "Workspace name",
+                                    value: "{initial_name}",
+                                    autofocus: true,
+                                    style: "width:100%; padding:6px 8px; font-size:13px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;",
+                                    oninput: move |evt: Event<FormData>| {
+                                        new_workspace_dialog.set(Some(evt.value().to_string()));
+                                    },
+                                    onkeydown: move |evt: Event<KeyboardData>| {
+                                        if evt.data().key() == Key::Enter {
+                                            let name = new_workspace_dialog().unwrap_or_default();
+                                            if !name.trim().is_empty() {
+                                                let name = name.trim().to_string();
+                                                (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                                    // Save current layout, create new one as a copy
+                                                    st.save_dock_layout();
+                                                    st.dock_layout.name = name.clone();
+                                                    st.app_config.register_layout(&name);
+                                                    st.app_config.active_layout = name;
+                                                    st.save_app_config();
+                                                    st.save_dock_layout();
+                                                }));
+                                            }
+                                            new_workspace_dialog.set(None);
+                                        } else if evt.data().key() == Key::Escape {
+                                            new_workspace_dialog.set(None);
+                                        }
+                                    },
+                                }
+
+                                div {
+                                    style: "display:flex; justify-content:flex-end; gap:8px; margin-top:12px;",
+
+                                    // Cancel button
+                                    div {
+                                        style: "padding:6px 16px; cursor:pointer; font-size:13px; border:1px solid #ccc; border-radius:4px; user-select:none;",
+                                        onmousedown: move |evt: Event<MouseData>| {
+                                            evt.stop_propagation();
+                                            new_workspace_dialog.set(None);
+                                        },
+                                        "Cancel"
+                                    }
+
+                                    // OK button
+                                    {
+                                        let act = act.clone();
+                                        rsx! {
+                                            div {
+                                                style: "padding:6px 16px; cursor:pointer; font-size:13px; background:#4a90d9; color:#fff; border-radius:4px; user-select:none;",
+                                                onmousedown: move |evt: Event<MouseData>| {
+                                                    evt.stop_propagation();
+                                                    let name = new_workspace_dialog().unwrap_or_default();
+                                                    if !name.trim().is_empty() {
+                                                        let name = name.trim().to_string();
+                                                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                                            st.save_dock_layout();
+                                                            st.dock_layout.name = name.clone();
+                                                            st.app_config.register_layout(&name);
+                                                            st.app_config.active_layout = name;
+                                                            st.save_app_config();
+                                                            st.save_dock_layout();
+                                                        }));
+                                                    }
+                                                    new_workspace_dialog.set(None);
+                                                },
+                                                "OK"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
