@@ -248,15 +248,17 @@ public struct JasCommands: Commands {
             }
 
             if let ws = workspace, ws.dockLayout.panes() != nil {
-                paneToggle(ws, .toolbar, "Toolbar")
-                paneToggle(ws, .dock, "Panels")
-
-                Button("Tile Panes") {
+                Button("Tile") {
                     ws.dockLayout.panesMut { pl in
                         pl.tilePanes(collapsedOverride: nil)
                     }
                     ws.dockLayout.saveIfNeeded()
                 }
+
+                Divider()
+
+                paneToggle(ws, .toolbar, "Toolbar")
+                paneToggle(ws, .dock, "Panels")
 
                 Divider()
             }
