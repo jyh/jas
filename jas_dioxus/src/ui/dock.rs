@@ -694,6 +694,101 @@ impl DockLayout {
     pub const STORAGE_KEY: &'static str = "jas_dock_layout";
 
     // -----------------------------------------------------------------------
+    // Focus & keyboard navigation
+    // -----------------------------------------------------------------------
+
+    /// Set the focused panel.
+    pub fn set_focused_panel(&mut self, addr: Option<PanelAddr>) {
+        self.focused_panel = addr;
+    }
+
+    /// Return the focused panel.
+    pub fn focused_panel(&self) -> Option<PanelAddr> {
+        self.focused_panel
+    }
+
+    /// Collect all valid PanelAddrs in a stable order (anchored docks
+    /// then floating, by group then panel index).
+    fn all_panel_addrs(&self) -> Vec<PanelAddr> {
+        let mut addrs = Vec::new();
+        for (_, dock) in &self.anchored {
+            for (gi, group) in dock.groups.iter().enumerate() {
+                for pi in 0..group.panels.len() {
+                    addrs.push(PanelAddr {
+                        group: GroupAddr { dock_id: dock.id, group_idx: gi },
+                        panel_idx: pi,
+                    });
+                }
+            }
+        }
+        for fd in &self.floating {
+            for (gi, group) in fd.dock.groups.iter().enumerate() {
+                for pi in 0..group.panels.len() {
+                    addrs.push(PanelAddr {
+                        group: GroupAddr { dock_id: fd.dock.id, group_idx: gi },
+                        panel_idx: pi,
+                    });
+                }
+            }
+        }
+        addrs
+    }
+
+    /// Move focus to the next panel (wraps around).
+    pub fn focus_next_panel(&mut self) {
+        let addrs = self.all_panel_addrs();
+        if addrs.is_empty() {
+            self.focused_panel = None;
+            return;
+        }
+        let cur_idx = self.focused_panel
+            .and_then(|fp| addrs.iter().position(|a| *a == fp));
+        let next = match cur_idx {
+            Some(i) => (i + 1) % addrs.len(),
+            None => 0,
+        };
+        self.focused_panel = Some(addrs[next]);
+    }
+
+    /// Move focus to the previous panel (wraps around).
+    pub fn focus_prev_panel(&mut self) {
+        let addrs = self.all_panel_addrs();
+        if addrs.is_empty() {
+            self.focused_panel = None;
+            return;
+        }
+        let cur_idx = self.focused_panel
+            .and_then(|fp| addrs.iter().position(|a| *a == fp));
+        let prev = match cur_idx {
+            Some(0) => addrs.len() - 1,
+            Some(i) => i - 1,
+            None => addrs.len() - 1,
+        };
+        self.focused_panel = Some(addrs[prev]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Safety
+    // -----------------------------------------------------------------------
+
+    /// Clamp all floating docks to be within the viewport.
+    pub fn clamp_floating_docks(&mut self, viewport_w: f64, viewport_h: f64) {
+        for fd in &mut self.floating {
+            // Keep at least 50px visible on screen
+            let min_visible = 50.0;
+            fd.x = fd.x.clamp(-fd.dock.width + min_visible, viewport_w - min_visible);
+            fd.y = fd.y.clamp(0.0, viewport_h - min_visible);
+        }
+    }
+
+    /// Set auto-hide for a dock.
+    pub fn set_auto_hide(&mut self, id: DockId, auto_hide: bool) {
+        if let Some(d) = self.dock_mut(id) {
+            d.auto_hide = auto_hide;
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Cleanup
     // -----------------------------------------------------------------------
 
@@ -1624,5 +1719,95 @@ mod tests {
         assert!(l.floating.is_empty());
         assert!(l.hidden_panels.is_empty());
         assert_eq!(l.anchored_dock(DockEdge::Right).unwrap().groups.len(), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 5: Focus & keyboard navigation
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn set_focused_panel() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        let addr = pa(id.0, 1, 2);
+        l.set_focused_panel(Some(addr));
+        assert_eq!(l.focused_panel(), Some(addr));
+        l.set_focused_panel(None);
+        assert_eq!(l.focused_panel(), None);
+    }
+
+    #[test]
+    fn focus_next_wraps() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        // Default: 2 groups, [Layers] and [Color, Stroke, Properties] = 4 panels total
+        l.set_focused_panel(None);
+        l.focus_next_panel();
+        // Should focus the first panel (Layers)
+        assert_eq!(l.focused_panel(), Some(pa(id.0, 0, 0)));
+        // Advance through all 4
+        l.focus_next_panel(); // Color
+        l.focus_next_panel(); // Stroke
+        l.focus_next_panel(); // Properties
+        assert_eq!(l.focused_panel(), Some(pa(id.0, 1, 2)));
+        // Next should wrap to Layers
+        l.focus_next_panel();
+        assert_eq!(l.focused_panel(), Some(pa(id.0, 0, 0)));
+    }
+
+    #[test]
+    fn focus_prev_wraps() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        l.set_focused_panel(None);
+        l.focus_prev_panel();
+        // Should focus the last panel (Properties)
+        assert_eq!(l.focused_panel(), Some(pa(id.0, 1, 2)));
+        l.focus_prev_panel(); // Stroke
+        l.focus_prev_panel(); // Color
+        l.focus_prev_panel(); // Layers
+        assert_eq!(l.focused_panel(), Some(pa(id.0, 0, 0)));
+        // Prev should wrap to Properties
+        l.focus_prev_panel();
+        assert_eq!(l.focused_panel(), Some(pa(id.0, 1, 2)));
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 5: Safety
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn clamp_floating_within_viewport() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        let fid = l.detach_group(ga(id.0, 0), 2000.0, 1500.0).unwrap();
+        l.clamp_floating_docks(1000.0, 800.0);
+        let fd = l.floating_dock(fid).unwrap();
+        assert!(fd.x <= 1000.0 - 50.0);
+        assert!(fd.y <= 800.0 - 50.0);
+    }
+
+    #[test]
+    fn clamp_floating_partially_offscreen() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        let fid = l.detach_group(ga(id.0, 0), -500.0, -100.0).unwrap();
+        l.clamp_floating_docks(1000.0, 800.0);
+        let fd = l.floating_dock(fid).unwrap();
+        // x should be clamped so at least 50px is visible
+        let dock_width = fd.dock.width;
+        assert!(fd.x >= -dock_width + 50.0);
+        assert!(fd.y >= 0.0);
+    }
+
+    #[test]
+    fn set_auto_hide() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        assert!(!l.dock(id).unwrap().auto_hide);
+        l.set_auto_hide(id, true);
+        assert!(l.dock(id).unwrap().auto_hide);
+        l.set_auto_hide(id, false);
+        assert!(!l.dock(id).unwrap().auto_hide);
     }
 }
