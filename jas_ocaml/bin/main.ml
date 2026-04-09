@@ -40,11 +40,15 @@ let () =
   in
 
   let get_model () = !active_model in
-  let main_window, toolbar_fixed, notebook = Jas.Canvas.create_main_window ~get_model ~on_open:add_canvas () in
+  let main_window, toolbar_fixed, notebook, dock_box = Jas.Canvas.create_main_window ~get_model ~on_open:add_canvas () in
   main_window_ref := Some main_window;
   notebook_ref := Some notebook;
   let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 toolbar_fixed in
   toolbar_ref := Some toolbar;
+
+  (* Dock panel *)
+  let dock_layout = Jas.Dock.default_layout () in
+  let _refresh_dock = Jas.Dock_panel.create dock_box dock_layout in
 
   (* Update active model/canvas when switching tabs *)
   notebook#connect#switch_page ~callback:(fun page_num ->
