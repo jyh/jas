@@ -3,11 +3,80 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QMimeData
+from PySide6.QtGui import QDrag
 
 from workspace.dock import (
     DockLayout, DockEdge, PanelKind, GroupAddr, PanelAddr,
 )
+
+DOCK_DRAG_MIME = "application/x-jas-dock-drag"
+
+
+class DraggableGrip(QLabel):
+    """Grip handle that starts a group drag on mouse press+move."""
+    def __init__(self, payload: str, parent=None):
+        super().__init__("\u2801\u2801", parent)
+        self._payload = payload
+        self.setStyleSheet("color: #999; font-size: 10px; padding: 2px 4px;")
+        self.setCursor(Qt.OpenHandCursor)
+
+    def mouseMoveEvent(self, event):
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData(DOCK_DRAG_MIME, self._payload.encode())
+        drag.setMimeData(mime)
+        drag.exec(Qt.MoveAction)
+
+
+class DraggableTabButton(QPushButton):
+    """Tab button that starts a panel drag on mouse press+move."""
+    def __init__(self, label: str, payload: str, parent=None):
+        super().__init__(label, parent)
+        self._payload = payload
+        self.setFlat(True)
+
+    def mouseMoveEvent(self, event):
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData(DOCK_DRAG_MIME, self._payload.encode())
+        drag.setMimeData(mime)
+        drag.exec(Qt.MoveAction)
+
+
+class DroppablePanelGroup(QWidget):
+    """Panel group widget that accepts dock DnD drops."""
+    def __init__(self, dock_layout, dock_id, gi, group, rebuild_fn, parent=None):
+        super().__init__(parent)
+        self._layout_data = dock_layout
+        self._dock_id = dock_id
+        self._gi = gi
+        self._group = group
+        self._rebuild = rebuild_fn
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat(DOCK_DRAG_MIME):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        data = bytes(event.mimeData().data(DOCK_DRAG_MIME)).decode()
+        parts = data.split(":")
+        target = GroupAddr(dock_id=self._dock_id, group_idx=self._gi)
+        if parts[0] == "group" and len(parts) == 3:
+            from_addr = GroupAddr(dock_id=int(parts[1]), group_idx=int(parts[2]))
+            if from_addr.dock_id == self._dock_id:
+                self._layout_data.move_group_within_dock(self._dock_id, from_addr.group_idx, self._gi)
+            else:
+                self._layout_data.move_group_to_dock(from_addr, self._dock_id, self._gi)
+        elif parts[0] == "panel" and len(parts) == 4:
+            from_addr = PanelAddr(group=GroupAddr(dock_id=int(parts[1]), group_idx=int(parts[2])), panel_idx=int(parts[3]))
+            if from_addr.group == target:
+                self._layout_data.reorder_panel(target, from_addr.panel_idx, len(self._group.panels))
+            else:
+                self._layout_data.move_panel_to_group(from_addr, target)
+        event.acceptProposedAction()
+        self._rebuild()
 
 
 class DockPanelWidget(QWidget):
@@ -78,7 +147,7 @@ class DockPanelWidget(QWidget):
         self._vbox.addStretch()
 
     def _build_panel_group(self, dock_id, gi, group):
-        widget = QWidget()
+        widget = DroppablePanelGroup(self._layout_data, dock_id, gi, group, self.rebuild)
         vbox = QVBoxLayout(widget)
         vbox.setContentsMargins(0, 0, 0, 0)
         vbox.setSpacing(0)
@@ -90,16 +159,14 @@ class DockPanelWidget(QWidget):
         hbox.setContentsMargins(0, 0, 0, 0)
         hbox.setSpacing(0)
 
-        # Grip
-        grip = QLabel("\u2801\u2801")
-        grip.setStyleSheet("color: #999; font-size: 10px; padding: 2px 4px;")
+        # Grip (draggable — drags whole group)
+        grip = DraggableGrip(f"group:{dock_id}:{gi}")
         hbox.addWidget(grip)
 
-        # Tab buttons
+        # Tab buttons (draggable — drags individual panel)
         for pi, kind in enumerate(group.panels):
             label = DockLayout.panel_label(kind)
-            btn = QPushButton(label)
-            btn.setFlat(True)
+            btn = DraggableTabButton(label, f"panel:{dock_id}:{gi}:{pi}")
             is_active = pi == group.active
             weight = "bold" if is_active else "normal"
             bg = "#f0f0f0" if is_active else "#d8d8d8"

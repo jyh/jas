@@ -7,7 +7,15 @@ open Dock
 
 (** Build the dock panel widget inside the given container.
     Returns a refresh function that rebuilds the dock UI when the layout changes. *)
+(* Drag state: shared mutable ref for tracking what's being dragged *)
+type drag_state =
+  | No_drag
+  | Dragging_group of group_addr
+  | Dragging_panel of panel_addr
+
 let create (dock_box : GPack.box) (layout : dock_layout) =
+  let drag_ref = ref No_drag in
+
   let rec rebuild () =
     (* Clear existing children *)
     List.iter (fun w -> w#destroy ()) dock_box#children;
@@ -46,25 +54,39 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
       end else begin
         (* Expanded: render panel groups *)
         Array.iteri (fun gi group ->
-          let group_box = GPack.vbox ~packing:(dock_box#pack ~expand:false) () in
+          let group_eb = GBin.event_box ~packing:(dock_box#pack ~expand:false) () in
+          let group_box = GPack.vbox ~packing:group_eb#add () in
 
           (* Tab bar *)
           let tab_bar = GPack.hbox ~packing:(group_box#pack ~expand:false) () in
 
           (* Grip handle *)
-          let grip = GMisc.label ~text:"\xE2\xA0\x81\xE2\xA0\x81" ~packing:(tab_bar#pack ~expand:false) () in
+          (* Grip handle — set drag state on press *)
+          let grip_eb = GBin.event_box ~packing:(tab_bar#pack ~expand:false) () in
+          let grip = GMisc.label ~text:"\xE2\xA0\x81\xE2\xA0\x81" ~packing:grip_eb#add () in
           grip#misc#set_size_request ~width:20 ();
+          grip_eb#event#connect#button_press ~callback:(fun _ ->
+            drag_ref := Dragging_group { dock_id = dock.id; group_idx = gi }; false
+          ) |> ignore;
+          grip_eb#event#add [`BUTTON_PRESS];
 
-          (* Tab buttons *)
+          (* Tab buttons — set drag state on press, click to activate *)
           Array.iteri (fun pi kind ->
             let label = panel_label kind in
             let btn = GButton.button ~label ~packing:(tab_bar#pack ~expand:false) () in
             if pi = group.active then
               btn#misc#modify_bg [`NORMAL, `NAME "#f0f0f0"];
             btn#connect#clicked ~callback:(fun () ->
-              set_active_panel layout { group = { dock_id = dock.id; group_idx = gi }; panel_idx = pi };
-              rebuild ()
-            ) |> ignore
+              (match !drag_ref with
+               | No_drag ->
+                 set_active_panel layout { group = { dock_id = dock.id; group_idx = gi }; panel_idx = pi };
+                 rebuild ()
+               | _ -> ())
+            ) |> ignore;
+            btn#event#connect#button_press ~callback:(fun _ ->
+              drag_ref := Dragging_panel { group = { dock_id = dock.id; group_idx = gi }; panel_idx = pi }; false
+            ) |> ignore;
+            btn#event#add [`BUTTON_PRESS]
           ) group.panels;
 
           (* Collapse chevron *)
@@ -88,7 +110,29 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
 
           (* Separator *)
           let _sep = GMisc.separator `HORIZONTAL ~packing:(group_box#pack ~expand:false) () in
-          ()
+
+          (* Drop handling: button_release on the group event_box *)
+          group_eb#event#connect#button_release ~callback:(fun _ ->
+            let target_group = { dock_id = dock.id; group_idx = gi } in
+            (match !drag_ref with
+             | Dragging_group from ->
+               if from.dock_id = dock.id then
+                 move_group_within_dock layout dock.id ~from:from.group_idx ~to_:gi
+               else
+                 move_group_to_dock layout ~from ~to_dock:dock.id ~to_idx:gi;
+               drag_ref := No_drag;
+               rebuild ()
+             | Dragging_panel from ->
+               if from.group = target_group then
+                 reorder_panel layout ~group:target_group ~from:from.panel_idx ~to_:(Array.length group.panels)
+               else
+                 move_panel_to_group layout ~from ~to_:target_group;
+               drag_ref := No_drag;
+               rebuild ()
+             | No_drag -> ());
+            false
+          ) |> ignore;
+          group_eb#event#add [`BUTTON_RELEASE]
         ) dock.groups
       end
   in
