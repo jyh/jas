@@ -13,6 +13,23 @@ type drag_state =
   | Dragging_group of group_addr
   | Dragging_panel of panel_addr
 
+(* Dark theme colors matching Rust *)
+let theme_bg = "#3c3c3c"
+let theme_bg_dark = "#333333"
+let theme_bg_tab = "#4a4a4a"
+let theme_bg_tab_inactive = "#353535"
+let theme_border = "#555555"
+let theme_text = "#cccccc"
+let theme_text_dim = "#999999"
+let theme_text_body = "#aaaaaa"
+let theme_text_hint = "#777777"
+let theme_text_button = "#888888"
+
+let apply_dark_css w css_str =
+  let css = new GObj.css_provider (GtkData.CssProvider.create ()) in
+  css#load_from_data css_str;
+  w#misc#style_context#add_provider css 600
+
 let create (dock_box : GPack.box) (layout : dock_layout) =
   let drag_ref = ref No_drag in
 
@@ -24,13 +41,15 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
     | None -> ()
     | Some dock when Array.length dock.groups = 0 -> ()
     | Some dock ->
-      (* Set dock width *)
+      (* Set dock width and dark background *)
       dock_box#misc#set_size_request ~width:(int_of_float dock.width) ();
+      apply_dark_css dock_box (Printf.sprintf "* { background-color: %s; }" theme_bg);
 
       (* Collapse/expand toggle *)
       let toggle_btn = GButton.button ~packing:(dock_box#pack ~expand:false) () in
       toggle_btn#set_label (if dock.collapsed then "\xE2\x97\x80" else "\xE2\x96\xB6");
       toggle_btn#misc#set_size_request ~height:20 ();
+      apply_dark_css toggle_btn (Printf.sprintf "* { color: %s; background-color: %s; border-bottom: 1px solid %s; }" theme_text_button theme_bg theme_border);
       toggle_btn#connect#clicked ~callback:(fun () ->
         toggle_dock_collapsed layout dock.id;
         rebuild ()
@@ -44,6 +63,7 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
             let first = String.sub label 0 1 in
             let btn = GButton.button ~label:first ~packing:(dock_box#pack ~expand:false) () in
             btn#misc#set_size_request ~width:28 ~height:28 ();
+            apply_dark_css btn (Printf.sprintf "* { color: %s; background-color: #505050; }" theme_text_dim);
             btn#connect#clicked ~callback:(fun () ->
               toggle_dock_collapsed layout dock.id;
               set_active_panel layout { group = { dock_id = dock.id; group_idx = gi }; panel_idx = pi };
@@ -61,10 +81,13 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
           let tab_bar = GPack.hbox ~packing:(group_box#pack ~expand:false) () in
 
           (* Grip handle *)
+          apply_dark_css tab_bar (Printf.sprintf "* { background-color: %s; border-bottom: 1px solid %s; }" theme_bg_dark theme_border);
+
           (* Grip handle — set drag state on press *)
           let grip_eb = GBin.event_box ~packing:(tab_bar#pack ~expand:false) () in
           let grip = GMisc.label ~text:"\xE2\xA0\x81\xE2\xA0\x81" ~packing:grip_eb#add () in
           grip#misc#set_size_request ~width:20 ();
+          apply_dark_css grip (Printf.sprintf "* { color: %s; }" theme_text_hint);
           grip_eb#event#connect#button_press ~callback:(fun _ ->
             drag_ref := Dragging_group { dock_id = dock.id; group_idx = gi }; false
           ) |> ignore;
@@ -74,8 +97,8 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
           Array.iteri (fun pi kind ->
             let label = panel_label kind in
             let btn = GButton.button ~label ~packing:(tab_bar#pack ~expand:false) () in
-            if pi = group.active then
-              btn#misc#modify_bg [`NORMAL, `NAME "#f0f0f0"];
+            let tab_bg = if pi = group.active then theme_bg_tab else theme_bg_tab_inactive in
+            apply_dark_css btn (Printf.sprintf "* { color: %s; background-color: %s; font-size: 11px; padding: 3px 8px; }" theme_text tab_bg);
             btn#connect#clicked ~callback:(fun () ->
               (match !drag_ref with
                | No_drag ->
@@ -92,6 +115,7 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
           (* Collapse chevron *)
           let chevron_label = if group.collapsed then "\xE2\x96\xBC" else "\xE2\x96\xB2" in
           let chevron = GButton.button ~label:chevron_label ~packing:(tab_bar#pack ~from:`END ~expand:false) () in
+          apply_dark_css chevron (Printf.sprintf "* { color: %s; font-size: 9px; }" theme_text_button);
           chevron#connect#clicked ~callback:(fun () ->
             toggle_group_collapsed layout { dock_id = dock.id; group_idx = gi };
             rebuild ()
@@ -104,12 +128,14 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
               let body = GMisc.label ~text:(panel_label kind) ~packing:(group_box#pack ~expand:false) () in
               body#misc#set_size_request ~height:60 ();
               body#set_xalign 0.0;
-              body#set_yalign 0.0
+              body#set_yalign 0.0;
+              apply_dark_css body (Printf.sprintf "* { color: %s; font-size: 12px; padding: 12px; }" theme_text_body)
             | None -> ()
           end;
 
           (* Separator *)
           let _sep = GMisc.separator `HORIZONTAL ~packing:(group_box#pack ~expand:false) () in
+          apply_dark_css _sep (Printf.sprintf "* { background-color: %s; }" theme_border);
 
           (* Drop handling: button_release on the group event_box *)
           group_eb#event#connect#button_release ~callback:(fun _ ->
@@ -158,7 +184,7 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
       let title_bar = GBin.event_box ~packing:(vbox#pack ~expand:false) () in
       let title_label = GMisc.label ~text:" " ~packing:title_bar#add () in
       title_label#misc#set_size_request ~height:20 ();
-      title_bar#misc#modify_bg [`NORMAL, `NAME "#d0d0d0"];
+      apply_dark_css title_bar (Printf.sprintf "* { background-color: %s; color: %s; }" theme_bg_dark theme_text_dim);
 
       (* Drag to reposition *)
       let drag_start = ref None in
@@ -201,13 +227,15 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
       Array.iteri (fun gi (group : Dock.panel_group) ->
         let group_box = GPack.vbox ~packing:(vbox#pack ~expand:false) () in
         let tab_bar = GPack.hbox ~packing:(group_box#pack ~expand:false) () in
+        apply_dark_css tab_bar (Printf.sprintf "* { background-color: %s; }" theme_bg_dark);
         let grip = GMisc.label ~text:"\xE2\xA0\x81\xE2\xA0\x81" ~packing:(tab_bar#pack ~expand:false) () in
         grip#misc#set_size_request ~width:20 ();
+        apply_dark_css grip (Printf.sprintf "* { color: %s; }" theme_text_hint);
         Array.iteri (fun pi kind ->
           let label = Dock.panel_label kind in
           let btn = GButton.button ~label ~packing:(tab_bar#pack ~expand:false) () in
-          if pi = group.active then
-            btn#misc#modify_bg [`NORMAL, `NAME "#f0f0f0"];
+          let tab_bg = if pi = group.active then theme_bg_tab else theme_bg_tab_inactive in
+          apply_dark_css btn (Printf.sprintf "* { color: %s; background-color: %s; }" theme_text tab_bg);
           btn#connect#clicked ~callback:(fun () ->
             Dock.set_active_panel layout { group = { dock_id = fid; group_idx = gi }; panel_idx = pi };
             rebuild_floating ()
@@ -218,7 +246,8 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
           | Some kind ->
             let body = GMisc.label ~text:(Dock.panel_label kind) ~packing:(group_box#pack ~expand:false) () in
             body#misc#set_size_request ~height:60 ();
-            body#set_xalign 0.0
+            body#set_xalign 0.0;
+            apply_dark_css body (Printf.sprintf "* { color: %s; font-size: 12px; }" theme_text_body)
           | None -> ()
         end
       ) fd.dock.groups;

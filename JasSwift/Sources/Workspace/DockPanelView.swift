@@ -53,9 +53,9 @@ public struct DockPanelView: View {
                 }
             }
             .frame(width: width)
-            .background(SwiftUI.Color(nsColor: NSColor(white: 0.94, alpha: 1.0)))
+            .background(SwiftUI.Color(nsColor: NSColor(red: 0.235, green: 0.235, blue: 0.235, alpha: 1.0))) // #3c3c3c
             .overlay(alignment: edge == .right ? .leading : .trailing) {
-                Rectangle().fill(SwiftUI.Color.gray.opacity(0.3)).frame(width: 1)
+                Rectangle().fill(SwiftUI.Color(nsColor: NSColor(white: 0.33, alpha: 1.0))).frame(width: 1) // #555
             }
         }
     }
@@ -85,9 +85,9 @@ public struct DockPanelView: View {
             dockLayout.saveIfNeeded()
         }
         .font(.system(size: 12, weight: .bold))
-        .foregroundColor(.gray)
+        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.6, alpha: 1.0))) // #999
         .frame(width: 28, height: 28)
-        .background(SwiftUI.Color(nsColor: NSColor(white: 0.88, alpha: 1.0)))
+        .background(SwiftUI.Color(nsColor: NSColor(white: 0.314, alpha: 1.0))) // #505050
         .cornerRadius(3)
         .buttonStyle(.plain)
         .help(label)
@@ -116,12 +116,12 @@ public struct DockPanelView: View {
             dockLayout.saveIfNeeded()
         }
         .font(.system(size: 10))
-        .foregroundColor(.gray)
+        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.53, alpha: 1.0))) // #888
         .frame(maxWidth: .infinity)
         .frame(height: 20)
         .buttonStyle(.plain)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(SwiftUI.Color.gray.opacity(0.3)).frame(height: 1)
+            Rectangle().fill(SwiftUI.Color(nsColor: NSColor(white: 0.33, alpha: 1.0))).frame(height: 1)
         }
     }
 }
@@ -141,7 +141,7 @@ public struct PanelGroupView: View {
                 // Grip handle (drag to reorder/detach group)
                 SwiftUI.Text(verbatim: "\u{2801}\u{2801}")
                     .font(.system(size: 10))
-                    .foregroundColor(.gray)
+                    .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.47, alpha: 1.0))) // #777
                     .padding(.horizontal, 4)
                     .onDrag {
                         NSItemProvider(object: encodeGroupDrag(GroupAddr(dockId: dockId, groupIdx: groupIdx)) as NSString)
@@ -160,9 +160,9 @@ public struct PanelGroupView: View {
                 // Collapse chevron
                 chevronButton()
             }
-            .background(SwiftUI.Color(nsColor: NSColor(white: 0.85, alpha: 1.0)))
+            .background(SwiftUI.Color(nsColor: NSColor(white: 0.2, alpha: 1.0))) // #333
             .overlay(alignment: .bottom) {
-                Rectangle().fill(SwiftUI.Color.gray.opacity(0.3)).frame(height: 1)
+                Rectangle().fill(SwiftUI.Color(nsColor: NSColor(white: 0.33, alpha: 1.0))).frame(height: 1) // #555
             }
 
             // Panel body (placeholder)
@@ -170,14 +170,14 @@ public struct PanelGroupView: View {
                 if let kind = group.activePanel() {
                     SwiftUI.Text(verbatim: DockLayout.panelLabel(kind))
                         .font(.system(size: 12))
-                        .foregroundColor(.gray)
+                        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.67, alpha: 1.0))) // #aaa
                         .frame(maxWidth: .infinity, minHeight: 60, alignment: .topLeading)
                         .padding(12)
                 }
             }
         }
         .overlay(alignment: .bottom) {
-            Rectangle().fill(SwiftUI.Color.gray.opacity(0.2)).frame(height: 1)
+            Rectangle().fill(SwiftUI.Color(nsColor: NSColor(white: 0.33, alpha: 1.0))).frame(height: 1) // #555
         }
         .onDrop(of: [dockDragUTType], isTargeted: nil) { providers in
             handleDrop(providers)
@@ -214,7 +214,7 @@ public struct PanelGroupView: View {
     private func tabButton(pi: Int, kind: PanelKind) -> some View {
         let isActive = pi == group.active
         let label = DockLayout.panelLabel(kind)
-        let bg = isActive ? NSColor(white: 0.94, alpha: 1.0) : NSColor(white: 0.85, alpha: 1.0)
+        let bg = isActive ? NSColor(white: 0.29, alpha: 1.0) : NSColor(white: 0.21, alpha: 1.0) // #4a4a4a / #353535
         return Button(label) {
             dockLayout.setActivePanel(PanelAddr(
                 group: GroupAddr(dockId: dockId, groupIdx: groupIdx),
@@ -223,7 +223,7 @@ public struct PanelGroupView: View {
             dockLayout.saveIfNeeded()
         }
         .font(.system(size: 11, weight: isActive ? .bold : .regular))
-        .foregroundColor(.primary)
+        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.8, alpha: 1.0))) // #ccc
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(SwiftUI.Color(nsColor: bg))
@@ -237,7 +237,7 @@ public struct PanelGroupView: View {
             dockLayout.saveIfNeeded()
         }
         .font(.system(size: 9))
-        .foregroundColor(.gray)
+        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.53, alpha: 1.0))) // #888
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
         .buttonStyle(.plain)

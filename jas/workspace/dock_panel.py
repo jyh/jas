@@ -12,13 +12,25 @@ from workspace.dock import (
 
 DOCK_DRAG_MIME = "application/x-jas-dock-drag"
 
+# Dark theme colors matching Rust
+THEME_BG = "#3c3c3c"
+THEME_BG_DARK = "#333"
+THEME_BG_TAB = "#4a4a4a"
+THEME_BG_TAB_INACTIVE = "#353535"
+THEME_BORDER = "#555"
+THEME_TEXT = "#ccc"
+THEME_TEXT_DIM = "#999"
+THEME_TEXT_BODY = "#aaa"
+THEME_TEXT_HINT = "#777"
+THEME_TEXT_BUTTON = "#888"
+
 
 class DraggableGrip(QLabel):
     """Grip handle that starts a group drag on mouse press+move."""
     def __init__(self, payload: str, parent=None):
         super().__init__("\u2801\u2801", parent)
         self._payload = payload
-        self.setStyleSheet("color: #999; font-size: 10px; padding: 2px 4px;")
+        self.setStyleSheet(f"color: {THEME_TEXT_HINT}; font-size: 10px; padding: 2px 4px;")
         self.setCursor(Qt.OpenHandCursor)
 
     def mouseMoveEvent(self, event):
@@ -154,7 +166,7 @@ class DockPanelWidget(QWidget):
 
         # Tab bar
         tab_bar = QWidget()
-        tab_bar.setStyleSheet("background: #d8d8d8;")
+        tab_bar.setStyleSheet(f"background: {THEME_BG_DARK}; border-bottom: 1px solid {THEME_BORDER};")
         hbox = QHBoxLayout(tab_bar)
         hbox.setContentsMargins(0, 0, 0, 0)
         hbox.setSpacing(0)
@@ -169,8 +181,8 @@ class DockPanelWidget(QWidget):
             btn = DraggableTabButton(label, f"panel:{dock_id}:{gi}:{pi}")
             is_active = pi == group.active
             weight = "bold" if is_active else "normal"
-            bg = "#f0f0f0" if is_active else "#d8d8d8"
-            btn.setStyleSheet(f"font-size: 11px; font-weight: {weight}; background: {bg}; padding: 3px 8px;")
+            bg = THEME_BG_TAB if is_active else THEME_BG_TAB_INACTIVE
+            btn.setStyleSheet(f"font-size: 11px; font-weight: {weight}; color: {THEME_TEXT}; background: {bg}; padding: 3px 8px;")
             btn.clicked.connect(lambda _, d=dock_id, g=gi, p=pi: self._set_active(d, g, p))
             hbox.addWidget(btn)
 
@@ -179,7 +191,7 @@ class DockPanelWidget(QWidget):
         # Chevron
         chevron = QPushButton("\u25BC" if group.collapsed else "\u25B2")
         chevron.setFlat(True)
-        chevron.setStyleSheet("font-size: 9px; color: #888; padding: 3px 6px;")
+        chevron.setStyleSheet(f"font-size: 9px; color: {THEME_TEXT_BUTTON}; padding: 3px 6px;")
         chevron.clicked.connect(lambda _, d=dock_id, g=gi: self._toggle_group(d, g))
         hbox.addWidget(chevron)
 
@@ -190,7 +202,7 @@ class DockPanelWidget(QWidget):
             active = group.active_panel()
             if active is not None:
                 body = QLabel(DockLayout.panel_label(active))
-                body.setStyleSheet("color: #999; font-size: 12px; padding: 12px;")
+                body.setStyleSheet(f"color: {THEME_TEXT_BODY}; font-size: 12px; padding: 12px;")
                 body.setMinimumHeight(60)
                 body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
                 vbox.addWidget(body)
@@ -198,7 +210,7 @@ class DockPanelWidget(QWidget):
         # Separator
         sep = QWidget()
         sep.setFixedHeight(1)
-        sep.setStyleSheet("background: #ccc;")
+        sep.setStyleSheet(f"background: {THEME_BORDER};")
         vbox.addWidget(sep)
 
         return widget
@@ -256,7 +268,7 @@ class FloatingDockWindow(QWidget):
         self._drag_start = None
 
         self.setGeometry(int(fd.x), int(fd.y), int(fd.dock.width), 200)
-        self.setStyleSheet("background: #f0f0f0; border: 1px solid #aaa;")
+        self.setStyleSheet(f"background: {THEME_BG}; border: 1px solid {THEME_BORDER};")
 
         vbox = QVBoxLayout(self)
         vbox.setContentsMargins(0, 0, 0, 0)
@@ -265,7 +277,7 @@ class FloatingDockWindow(QWidget):
         # Title bar
         title = QWidget()
         title.setFixedHeight(20)
-        title.setStyleSheet("background: #d0d0d0;")
+        title.setStyleSheet(f"background: {THEME_BG_DARK}; color: {THEME_TEXT_DIM};")
         title.setCursor(Qt.OpenHandCursor)
         vbox.addWidget(title)
 
@@ -284,13 +296,13 @@ class FloatingDockWindow(QWidget):
         vbox.setSpacing(0)
 
         tab_bar = QWidget()
-        tab_bar.setStyleSheet("background: #d8d8d8;")
+        tab_bar.setStyleSheet(f"background: {THEME_BG_DARK}; border-bottom: 1px solid {THEME_BORDER};")
         hbox = QHBoxLayout(tab_bar)
         hbox.setContentsMargins(0, 0, 0, 0)
         hbox.setSpacing(0)
 
         grip = QLabel("\u2801\u2801")
-        grip.setStyleSheet("color: #999; font-size: 10px; padding: 2px 4px;")
+        grip.setStyleSheet(f"color: {THEME_TEXT_HINT}; font-size: 10px; padding: 2px 4px;")
         hbox.addWidget(grip)
 
         for pi, kind in enumerate(group.panels):
@@ -299,8 +311,8 @@ class FloatingDockWindow(QWidget):
             btn.setFlat(True)
             is_active = pi == group.active
             weight = "bold" if is_active else "normal"
-            bg = "#f0f0f0" if is_active else "#d8d8d8"
-            btn.setStyleSheet(f"font-size: 11px; font-weight: {weight}; background: {bg}; padding: 3px 8px;")
+            bg = THEME_BG_TAB if is_active else THEME_BG_TAB_INACTIVE
+            btn.setStyleSheet(f"font-size: 11px; font-weight: {weight}; color: {THEME_TEXT}; background: {bg}; padding: 3px 8px;")
             btn.clicked.connect(lambda _, d=dock_id, g=gi, p=pi: self._set_active(d, g, p))
             hbox.addWidget(btn)
 
@@ -311,7 +323,7 @@ class FloatingDockWindow(QWidget):
             active = group.active_panel()
             if active is not None:
                 body = QLabel(DockLayout.panel_label(active))
-                body.setStyleSheet("color: #999; font-size: 12px; padding: 12px;")
+                body.setStyleSheet(f"color: {THEME_TEXT_BODY}; font-size: 12px; padding: 12px;")
                 body.setMinimumHeight(60)
                 body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
                 vbox.addWidget(body)
