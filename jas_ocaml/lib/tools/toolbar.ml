@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star
+type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star | Lasso
 
 let tool_button_size = 32
 let title_bar_height = 24
@@ -26,6 +26,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
   let text_btn = GMisc.drawing_area () in
   let line_btn = GMisc.drawing_area () in
   let shape_btn = GMisc.drawing_area () in
+  let lasso_btn = GMisc.drawing_area () in
   let () =
     selection_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     direct_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
@@ -34,13 +35,15 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
     text_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     line_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     shape_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
+    lasso_btn#misc#set_size_request ~width:tool_button_size ~height:tool_button_size ();
     grid#attach ~left:0 ~top:0 selection_btn#coerce;
     grid#attach ~left:1 ~top:0 direct_btn#coerce;
     grid#attach ~left:0 ~top:1 pen_btn#coerce;
     grid#attach ~left:1 ~top:1 pencil_btn#coerce;
     grid#attach ~left:0 ~top:2 text_btn#coerce;
     grid#attach ~left:1 ~top:2 line_btn#coerce;
-    grid#attach ~left:0 ~top:3 shape_btn#coerce
+    grid#attach ~left:0 ~top:3 shape_btn#coerce;
+    grid#attach ~left:1 ~top:3 lasso_btn#coerce
   in
   object (self)
     val mutable pos_x = x
@@ -88,7 +91,8 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
       pencil_btn#misc#queue_draw ();
       text_btn#misc#queue_draw ();
       line_btn#misc#queue_draw ();
-      shape_btn#misc#queue_draw ()
+      shape_btn#misc#queue_draw ();
+      lasso_btn#misc#queue_draw ()
 
     initializer
       fixed#put frame#coerce ~x:pos_x ~y:pos_y;
@@ -288,6 +292,23 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
           else Cairo.line_to cr px py
         done;
         Cairo.Path.close cr;
+        Cairo.stroke cr
+      in
+
+      let draw_lasso_icon cr ~alloc =
+        let bw = float_of_int alloc.Gtk.width in
+        let bh = float_of_int alloc.Gtk.height in
+        let ox = (bw -. 28.0) /. 2.0 in
+        let oy = (bh -. 28.0) /. 2.0 in
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.set_line_width cr 1.5;
+        Cairo.set_line_cap cr Cairo.ROUND;
+        Cairo.move_to cr (ox +. 14.0) (oy +. 5.0);
+        Cairo.curve_to cr (ox +. 6.0) (oy +. 5.0) (ox +. 3.0) (oy +. 10.0) (ox +. 3.0) (oy +. 14.0);
+        Cairo.curve_to cr (ox +. 3.0) (oy +. 20.0) (ox +. 8.0) (oy +. 24.0) (ox +. 14.0) (oy +. 22.0);
+        Cairo.curve_to cr (ox +. 20.0) (oy +. 20.0) (ox +. 22.0) (oy +. 16.0) (ox +. 20.0) (oy +. 12.0);
+        Cairo.curve_to cr (ox +. 18.0) (oy +. 8.0) (ox +. 12.0) (oy +. 9.0) (ox +. 12.0) (oy +. 13.0);
+        Cairo.curve_to cr (ox +. 12.0) (oy +. 16.0) (ox +. 16.0) (oy +. 17.0) (ox +. 17.0) (oy +. 15.0);
         Cairo.stroke cr
       in
 
@@ -1064,6 +1085,8 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         end else false
       ) |> ignore;
       connect_click line_btn Line;
+      draw_tool_button lasso_btn Lasso draw_lasso_icon;
+      connect_click lasso_btn Lasso;
 
       (* Arrow slot: click selects, long press shows menu *)
       direct_btn#event#add [`BUTTON_PRESS; `BUTTON_RELEASE];

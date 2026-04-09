@@ -149,6 +149,36 @@ class Controller:
             new_sel = self._toggle_selection(doc.selection, new_sel)
         self._model.document = replace(doc, selection=new_sel)
 
+    def select_polygon(self, polygon: list[tuple[float, float]], *,
+                       extend: bool = False) -> None:
+        """Select all elements intersecting the given polygon."""
+        from geometry.element import Visibility
+        from algorithms.hit_test import element_intersects_polygon
+        doc = self._model.document
+        entries: list[ElementSelection] = []
+        for li, layer in enumerate(doc.layers):
+            layer_vis = layer.visibility
+            if layer_vis == Visibility.INVISIBLE:
+                continue
+            for ci, child in enumerate(layer.children):
+                if child.locked:
+                    continue
+                child_vis = min(layer_vis, child.visibility)
+                if child_vis == Visibility.INVISIBLE:
+                    continue
+                if isinstance(child, Group) and not isinstance(child, Layer):
+                    if any(element_intersects_polygon(gc, polygon)
+                           for gc in child.children):
+                        entries.append(ElementSelection.all((li, ci)))
+                        for gi in range(len(child.children)):
+                            entries.append(ElementSelection.all((li, ci, gi)))
+                elif element_intersects_polygon(child, polygon):
+                    entries.append(ElementSelection.all((li, ci)))
+        new_sel = frozenset(entries)
+        if extend:
+            new_sel = self._toggle_selection(doc.selection, new_sel)
+        self._model.document = replace(doc, selection=new_sel)
+
     def group_select_rect(self, x: float, y: float, width: float, height: float,
                           *, extend: bool = False) -> None:
         """Group selection marquee: selects individual elements with all

@@ -186,3 +186,78 @@ def element_intersects_rect(elem: Element,
 
         case _:
             return rects_intersect(*elem.bounds(), rx, ry, rw, rh)
+
+
+# ---------------------------------------------------------------------------
+# Polygon geometry
+# ---------------------------------------------------------------------------
+
+def point_in_polygon(px: float, py: float, poly: list[tuple[float, float]]) -> bool:
+    """Ray-casting (even-odd) point-in-polygon test."""
+    n = len(poly)
+    if n < 3:
+        return False
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def segment_intersects_polygon(x1: float, y1: float, x2: float, y2: float,
+                               poly: list[tuple[float, float]]) -> bool:
+    if point_in_polygon(x1, y1, poly) or point_in_polygon(x2, y2, poly):
+        return True
+    n = len(poly)
+    for i in range(n):
+        j = (i + 1) % n
+        if segments_intersect(x1, y1, x2, y2, poly[i][0], poly[i][1], poly[j][0], poly[j][1]):
+            return True
+    return False
+
+
+def element_intersects_polygon(elem: Element,
+                               poly: list[tuple[float, float]]) -> bool:
+    """Test whether the visible drawn portion of elem intersects the polygon."""
+    match elem:
+        case Line():
+            return segment_intersects_polygon(elem.x1, elem.y1, elem.x2, elem.y2, poly)
+        case Rect():
+            if elem.fill is not None:
+                corners = [(elem.x, elem.y), (elem.x + elem.width, elem.y),
+                           (elem.x + elem.width, elem.y + elem.height),
+                           (elem.x, elem.y + elem.height)]
+                if any(point_in_polygon(cx, cy, poly) for cx, cy in corners):
+                    return True
+                if any(point_in_rect(px, py, elem.x, elem.y, elem.width, elem.height)
+                       for px, py in poly):
+                    return True
+                return any(segment_intersects_polygon(*seg, poly)
+                           for seg in segments_of_element(elem))
+            return any(segment_intersects_polygon(*seg, poly)
+                       for seg in segments_of_element(elem))
+        case Text() | Group() | Layer():
+            bx, by, bw, bh = elem.bounds()
+            corners = [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)]
+            if any(point_in_polygon(cx, cy, poly) for cx, cy in corners):
+                return True
+            if any(point_in_rect(px, py, bx, by, bw, bh) for px, py in poly):
+                return True
+            rect_segs = [(bx, by, bx + bw, by), (bx + bw, by, bx + bw, by + bh),
+                         (bx + bw, by + bh, bx, by + bh), (bx, by + bh, bx, by)]
+            return any(segment_intersects_polygon(*seg, poly) for seg in rect_segs)
+        case _:
+            if elem.fill is not None:
+                segs = segments_of_element(elem)
+                endpoints = [(s[0], s[1]) for s in segs] + [(s[2], s[3]) for s in segs]
+                if any(point_in_polygon(px, py, poly) for px, py in endpoints):
+                    return True
+                if any(point_in_rect(px, py, *elem.bounds()) for px, py in poly):
+                    return True
+                return any(segment_intersects_polygon(*seg, poly) for seg in segs)
+            return any(segment_intersects_polygon(*seg, poly)
+                       for seg in segments_of_element(elem))

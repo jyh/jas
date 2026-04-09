@@ -27,6 +27,7 @@ class Tool(Enum):
     ROUNDED_RECT = auto()
     POLYGON = auto()
     STAR = auto()
+    LASSO = auto()
 
 
 def _draw_arrow_path() -> QPainterPath:
@@ -106,6 +107,8 @@ class ToolButton(QToolButton):
             self._draw_polygon_tool(painter)
         elif self.tool == Tool.STAR:
             self._draw_star_tool(painter)
+        elif self.tool == Tool.LASSO:
+            self._draw_lasso_tool(painter)
 
         if self.has_alternates:
             self._draw_alternate_triangle(painter)
@@ -740,6 +743,22 @@ class ToolButton(QToolButton):
         painter.drawPolygon([QPointF(x, y) for x, y in pts])
         painter.restore()
 
+    def _draw_lasso_tool(self, painter):
+        """Lasso icon — freehand loop placeholder."""
+        from PySide6.QtCore import QPointF
+        pen = QPen(QColor("#cccccc"), 1.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        path = QPainterPath()
+        path.moveTo(14, 5)
+        path.cubicTo(6, 5, 3, 10, 3, 14)
+        path.cubicTo(3, 20, 8, 24, 14, 22)
+        path.cubicTo(20, 20, 22, 16, 20, 12)
+        path.cubicTo(18, 8, 12, 9, 12, 13)
+        path.cubicTo(12, 16, 16, 17, 17, 15)
+        painter.drawPath(path)
+
     def _draw_alternate_triangle(self, painter):
         """Small filled triangle in the lower-right corner indicating alternates."""
         tri = QPainterPath()
@@ -808,6 +827,7 @@ class Toolbar(QWidget):
             (Tool.TYPE, 2, 0),
             (Tool.LINE, 2, 1),
             (Tool.RECT, 3, 0),
+            (Tool.LASSO, 3, 1),
         ]
         for tool, row, col in tools:
             has_alt = tool in _ARROW_SLOT_TOOLS or tool in _PEN_SLOT_TOOLS or tool in _PENCIL_SLOT_TOOLS or tool in _TEXT_SLOT_TOOLS or tool in _SHAPE_SLOT_TOOLS

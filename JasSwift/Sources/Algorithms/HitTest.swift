@@ -179,3 +179,112 @@ public func elementIntersectsRect(_ elem: Element,
         return rectsIntersect(b.x, b.y, b.width, b.height, rx, ry, rw, rh)
     }
 }
+
+// MARK: - Polygon geometry
+
+public func pointInPolygon(_ px: Double, _ py: Double, _ poly: [(Double, Double)]) -> Bool {
+    let n = poly.count
+    if n < 3 { return false }
+    var inside = false
+    var j = n - 1
+    for i in 0..<n {
+        let (xi, yi) = poly[i]
+        let (xj, yj) = poly[j]
+        if ((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+            inside = !inside
+        }
+        j = i
+    }
+    return inside
+}
+
+public func segmentIntersectsPolygon(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double,
+                                     _ poly: [(Double, Double)]) -> Bool {
+    if pointInPolygon(x1, y1, poly) || pointInPolygon(x2, y2, poly) { return true }
+    let n = poly.count
+    for i in 0..<n {
+        let j = (i + 1) % n
+        if segmentsIntersect(x1, y1, x2, y2, poly[i].0, poly[i].1, poly[j].0, poly[j].1) {
+            return true
+        }
+    }
+    return false
+}
+
+public func elementIntersectsPolygon(_ elem: Element, _ poly: [(Double, Double)]) -> Bool {
+    switch elem {
+    case .line(let v):
+        return segmentIntersectsPolygon(v.x1, v.y1, v.x2, v.y2, poly)
+    case .rect(let v):
+        if v.fill != nil {
+            let corners = [(v.x, v.y), (v.x + v.width, v.y),
+                           (v.x + v.width, v.y + v.height), (v.x, v.y + v.height)]
+            if corners.contains(where: { pointInPolygon($0.0, $0.1, poly) }) { return true }
+            if poly.contains(where: { pointInRect($0.0, $0.1, v.x, v.y, v.width, v.height) }) { return true }
+            return segmentsOfElement(elem).contains { s in
+                segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
+            }
+        }
+        return segmentsOfElement(elem).contains { s in
+            segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
+        }
+    case .circle(let v):
+        let filled = v.fill != nil
+        let segs = segmentsOfElement(elem)
+        let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
+        if endpoints.contains(where: { pointInPolygon($0.s, $0.t, poly) }) { return true }
+        if filled, poly.contains(where: { let b = elem.bounds; return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
+        return segs.contains { s in segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly) }
+    case .ellipse(let v):
+        let filled = v.fill != nil
+        let segs = segmentsOfElement(elem)
+        let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
+        if endpoints.contains(where: { pointInPolygon($0.s, $0.t, poly) }) { return true }
+        if filled, poly.contains(where: { let b = elem.bounds; return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
+        return segs.contains { s in segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly) }
+    case .polyline(let v):
+        if v.fill != nil {
+            let segs = segmentsOfElement(elem)
+            let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
+            if endpoints.contains(where: { pointInPolygon($0.s, $0.t, poly) }) { return true }
+            if poly.contains(where: { let b = elem.bounds; return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
+            return segs.contains { s in segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly) }
+        }
+        return segmentsOfElement(elem).contains { s in
+            segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
+        }
+    case .polygon(let v):
+        if v.fill != nil {
+            if v.points.contains(where: { pointInPolygon($0.0, $0.1, poly) }) { return true }
+            if poly.contains(where: { let b = elem.bounds; return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
+            return segmentsOfElement(elem).contains { s in
+                segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
+            }
+        }
+        return segmentsOfElement(elem).contains { s in
+            segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
+        }
+    case .path(let v):
+        let segs = segmentsOfElement(elem)
+        if v.fill != nil {
+            let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
+            if endpoints.contains(where: { pointInPolygon($0.s, $0.t, poly) }) { return true }
+            if poly.contains(where: { let b = elem.bounds; return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
+            return segs.contains { s in segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly) }
+        }
+        return segs.contains { s in
+            segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
+        }
+    case .text, .textPath, .group, .layer:
+        let b = elem.bounds
+        let corners = [(b.x, b.y), (b.x + b.width, b.y),
+                       (b.x + b.width, b.y + b.height), (b.x, b.y + b.height)]
+        if corners.contains(where: { pointInPolygon($0.0, $0.1, poly) }) { return true }
+        if poly.contains(where: { pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
+        let rectSegs = [(b.x, b.y, b.x + b.width, b.y),
+                        (b.x + b.width, b.y, b.x + b.width, b.y + b.height),
+                        (b.x + b.width, b.y + b.height, b.x, b.y + b.height),
+                        (b.x, b.y + b.height, b.x, b.y)]
+        return rectSegs.contains { s in segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly) }
+    }
+}

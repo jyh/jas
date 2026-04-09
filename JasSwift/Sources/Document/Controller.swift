@@ -117,6 +117,36 @@ public class Controller {
                                      selectedLayer: doc.selectedLayer, selection: finalSel)
     }
 
+    public func selectPolygon(polygon: [(Double, Double)], extend: Bool = false) {
+        let doc = model.document
+        var selection: Selection = []
+        for (li, layer) in doc.layers.enumerated() {
+            let layerVis = layer.visibility
+            if layerVis == .invisible { continue }
+            for (ci, child) in layer.children.enumerated() {
+                if child.isLocked { continue }
+                let childVis = min(layerVis, child.visibility)
+                if childVis == .invisible { continue }
+                if case .group(let g) = child {
+                    let anyHit = g.children.contains { elementIntersectsPolygon($0, polygon) }
+                    if anyHit {
+                        selection.insert(ElementSelection.all([li, ci]))
+                        for gi in 0..<g.children.count {
+                            selection.insert(ElementSelection.all([li, ci, gi]))
+                        }
+                    }
+                } else {
+                    if elementIntersectsPolygon(child, polygon) {
+                        selection.insert(ElementSelection.all([li, ci]))
+                    }
+                }
+            }
+        }
+        let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
+        model.document = Document(layers: doc.layers,
+                                     selectedLayer: doc.selectedLayer, selection: finalSel)
+    }
+
     public func groupSelectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
         let doc = model.document
         var selection: Selection = []

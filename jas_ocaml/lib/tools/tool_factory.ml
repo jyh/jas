@@ -19,3 +19,4 @@ let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
   | Toolbar.Smooth -> (new Smooth_tool.smooth_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Type_tool -> (new Type_tool.type_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Type_on_path -> (new Type_on_path_tool.type_on_path_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Lasso -> (new Lasso_tool.lasso_tool :> Canvas_tool.canvas_tool)
