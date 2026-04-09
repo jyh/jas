@@ -2830,6 +2830,43 @@ mod tests {
     }
 
     #[test]
+    fn drag_canvas_snap_to_toolbar_full_workflow() {
+        // Simulate: drag canvas away, then drag it back near toolbar
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        let toolbar_id = pl.pane_by_kind(PaneKind::Toolbar).unwrap().id;
+
+        // 1. Drag canvas away (clears snaps)
+        pl.set_pane_position(canvas_id, 300.0, 100.0);
+        assert!(pl.snaps.iter().all(|s| {
+            s.pane != canvas_id && !matches!(s.target, SnapTarget::Pane(pid, _) if pid == canvas_id)
+        }));
+
+        // 2. Drag canvas back near toolbar's right edge
+        pl.set_pane_position(canvas_id, 77.0, 0.0);
+
+        // 3. Detect snaps
+        let snaps = pl.detect_snaps(canvas_id, 1000.0, 700.0);
+        // Should find toolbar.Right -> canvas.Left (normalized)
+        let toolbar_snap = snaps.iter().find(|s|
+            s.edge == EdgeSide::Right
+            && matches!(s.target, SnapTarget::Pane(pid, EdgeSide::Left) if pid == canvas_id)
+        );
+        assert!(toolbar_snap.is_some(), "Expected toolbar-canvas snap, got: {:?}", snaps);
+
+        // 4. Apply snaps
+        pl.apply_snaps(canvas_id, snaps, 1000.0, 700.0);
+
+        // 5. Canvas should be aligned to toolbar's right edge
+        let canvas = pl.pane(canvas_id).unwrap();
+        assert!((canvas.x - 72.0).abs() < 0.001, "canvas.x = {}", canvas.x);
+
+        // 6. Shared border should be findable
+        let border = pl.shared_border_at(72.0, 350.0, BORDER_HIT_TOLERANCE);
+        assert!(border.is_some(), "Shared border not found after re-snap");
+    }
+
+    #[test]
     fn apply_snaps_replaces_old() {
         let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
         let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
