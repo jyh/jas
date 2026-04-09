@@ -685,6 +685,9 @@ pub fn App() -> Element {
                         let vw = win.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
                         let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
                         if let Ok(mut st) = app_r.try_borrow_mut() {
+                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                pl.on_viewport_resize(vw, vh);
+                            }
                             st.dock_layout.clamp_floating_docks(vw, vh);
                             if st.dock_layout.needs_save() {
                                 st.save_dock_layout();
@@ -1170,10 +1173,40 @@ pub fn App() -> Element {
     // Floating dock title bar drag (dock_id, offset_x, offset_y).
     let mut title_drag = use_signal(|| Option::<(super::dock::DockId, f64, f64)>::None);
     // Resize drag (group above the handle, start_y).
-    let mut resize_drag = use_signal(|| Option::<(super::dock::GroupAddr, f64, f64)>::None); // (addr, start_y, start_height)
+    let _resize_drag = use_signal(|| Option::<(super::dock::GroupAddr, f64, f64)>::None); // (addr, start_y, start_height)
+
+    // Pane drag-and-drop state.
+    // (pane_id, offset_x, offset_y)
+    let mut pane_drag = use_signal(|| Option::<(super::dock::PaneId, f64, f64)>::None);
+    // (snap_idx, start_coord)
+    let mut border_drag = use_signal(|| Option::<(usize, f64)>::None);
+    // Pane edge resize: (pane_id, edge, start_mouse_x, start_mouse_y, start_pane_width, start_pane_height, start_pane_x, start_pane_y)
+    let mut pane_resize = use_signal(|| Option::<(super::dock::PaneId, super::dock::EdgeSide, f64, f64, f64, f64, f64, f64)>::None);
+    // Snap preview lines shown during drag
+    let mut snap_preview = use_signal(|| Vec::<super::dock::SnapConstraint>::new());
 
     // Read revision to trigger re-render when state changes.
     let _ = revision();
+
+    // Ensure pane layout exists (lazily, when we know viewport dims).
+    {
+        let mut st = app.borrow_mut();
+        if st.dock_layout.pane_layout.is_none() {
+            #[cfg(target_arch = "wasm32")]
+            {
+                if let Some(win) = web_sys::window() {
+                    let vw = win.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
+                    let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
+                    st.dock_layout.ensure_pane_layout(vw, vh);
+                }
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                st.dock_layout.ensure_pane_layout(1000.0, 700.0);
+            }
+        }
+    }
+
     let active_tool = app.borrow().active_tool;
     // Per-frame cursor: tools may override (e.g. Type tool returns the
     // text-insertion SVG when hovering text, and "none" while editing).
@@ -1763,10 +1796,10 @@ pub fn App() -> Element {
     }).collect();
 
     // Close menu/popup when clicking anywhere outside
-    let on_main_mousedown = {
-        let mut open_menu_sig = open_menu.clone();
+    let _on_main_mousedown = {
+        let open_menu_sig = open_menu.clone();
         move |_: Event<MouseData>| {
-            open_menu_sig.set(None);
+            let _ = open_menu_sig;
             popup_slot.set(None);
         }
     };
@@ -2097,7 +2130,6 @@ pub fn App() -> Element {
     let focused_panel = layout_snapshot.focused_panel();
     let right_dock = layout_snapshot.anchored_dock(DockEdge::Right);
     let dock_collapsed = right_dock.map_or(true, |d| d.collapsed);
-    let dock_width = if dock_collapsed { 36.0 } else { right_dock.map_or(0.0, |d| d.width) };
     let dock_id = right_dock.map_or(DockId(0), |d| d.id);
 
     let dock_groups: Vec<Result<VNode, RenderError>> = match right_dock {
@@ -2182,41 +2214,88 @@ pub fn App() -> Element {
         }
     }).collect();
 
-    // Left dock
-    let left_dock = layout_snapshot.anchored_dock(DockEdge::Left);
-    let left_dock_groups: Vec<Result<VNode, RenderError>> = match left_dock {
-        Some(dock) if !dock.groups.is_empty() => {
-            build_dock_groups(dock.id, &dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos, focused_panel)
-        }
-        _ => vec![],
-    };
-    let left_dock_width = left_dock.map_or(0.0, |d| if d.collapsed { 36.0 } else { d.width });
-    let has_left_dock = left_dock.map_or(false, |d| !d.groups.is_empty());
-
-    // Bottom dock
-    let bottom_dock = layout_snapshot.anchored_dock(DockEdge::Bottom);
-    let bottom_dock_groups: Vec<Result<VNode, RenderError>> = match bottom_dock {
-        Some(dock) if !dock.groups.is_empty() => {
-            build_dock_groups(dock.id, &dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos, focused_panel)
-        }
-        _ => vec![],
-    };
-    let bottom_dock_height = bottom_dock.map_or(0.0, |d| if d.collapsed { 28.0 } else { 150.0 });
-    let has_bottom_dock = bottom_dock.map_or(false, |d| !d.groups.is_empty());
+    // Dock collapse toggle
+    let dock_toggle_label = if dock_collapsed { "\u{25C0}" } else { "\u{25B6}" };
 
     // Snap indicator: show a highlight on the edge being targeted during drag
     let snap_edge = match drop_target_sig() {
         Some(DropTarget::Edge(edge)) => Some(edge),
         _ => None,
     };
-
-    // Dock collapse toggle
-    let dock_toggle_label = if dock_collapsed { "\u{25C0}" } else { "\u{25B6}" };
-
-    // Snap edge indicator styles
     let snap_left = if snap_edge == Some(DockEdge::Left) { "4px solid #4a90d9" } else { "none" };
     let snap_right = if snap_edge == Some(DockEdge::Right) { "4px solid #4a90d9" } else { "none" };
     let snap_bottom = if snap_edge == Some(DockEdge::Bottom) { "4px solid #4a90d9" } else { "none" };
+
+    // --- Pane positions ---
+    use super::dock::{PaneKind, PaneId, EdgeSide, SnapTarget, PaneLayout};
+
+    let pane_snapshot = layout_snapshot.pane_layout.clone();
+    let (tx, ty, tw, th, toolbar_z) = pane_snapshot.as_ref()
+        .and_then(|pl| pl.pane_by_kind(PaneKind::Toolbar))
+        .map(|p| (p.x, p.y, p.width, p.height, pane_snapshot.as_ref().unwrap().pane_z_index(p.id)))
+        .unwrap_or((0.0, 0.0, 72.0, 700.0, 0));
+    let toolbar_pane_id = pane_snapshot.as_ref()
+        .and_then(|pl| pl.pane_by_kind(PaneKind::Toolbar))
+        .map(|p| p.id)
+        .unwrap_or(PaneId(0));
+
+    let (cx, cy, cw, ch, canvas_z) = pane_snapshot.as_ref()
+        .and_then(|pl| pl.pane_by_kind(PaneKind::Canvas))
+        .map(|p| (p.x, p.y, p.width, p.height, pane_snapshot.as_ref().unwrap().pane_z_index(p.id)))
+        .unwrap_or((72.0, 0.0, 688.0, 700.0, 0));
+    let canvas_pane_id = pane_snapshot.as_ref()
+        .and_then(|pl| pl.pane_by_kind(PaneKind::Canvas))
+        .map(|p| p.id)
+        .unwrap_or(PaneId(1));
+
+    let (dx, dy, dw, dh, dock_z) = pane_snapshot.as_ref()
+        .and_then(|pl| pl.pane_by_kind(PaneKind::Dock))
+        .map(|p| (p.x, p.y, p.width, p.height, pane_snapshot.as_ref().unwrap().pane_z_index(p.id)))
+        .unwrap_or((760.0, 0.0, 240.0, 700.0, 0));
+    let dock_pane_id = pane_snapshot.as_ref()
+        .and_then(|pl| pl.pane_by_kind(PaneKind::Dock))
+        .map(|p| p.id)
+        .unwrap_or(PaneId(2));
+
+    // Collect shared border positions for rendering drag handles
+    // Each entry: (snap_idx, x, y, w, h, cursor_css)
+    let shared_borders: Vec<(usize, f64, f64, f64, f64, String)> = pane_snapshot.as_ref().map(|pl| {
+        let mut borders = Vec::new();
+        for (i, snap) in pl.snaps.iter().enumerate() {
+            let (other_id, other_edge) = match snap.target {
+                SnapTarget::Pane(pid, oe) => (pid, oe),
+                _ => continue,
+            };
+            let is_vertical = snap.edge == EdgeSide::Right && other_edge == EdgeSide::Left;
+            let is_horizontal = snap.edge == EdgeSide::Bottom && other_edge == EdgeSide::Top;
+            if !is_vertical && !is_horizontal { continue; }
+            let pane_a = match pl.pane(snap.pane) { Some(p) => p, None => continue };
+            let pane_b = match pl.pane(other_id) { Some(p) => p, None => continue };
+            if is_vertical {
+                let bx = pane_a.x + pane_a.width;
+                let by = pane_a.y.max(pane_b.y);
+                let bh = (pane_a.y + pane_a.height).min(pane_b.y + pane_b.height) - by;
+                if bh > 0.0 { borders.push((i, bx - 3.0, by, 6.0, bh, "col-resize".to_string())); }
+            } else {
+                let by = pane_a.y + pane_a.height;
+                let bx = pane_a.x.max(pane_b.x);
+                let bw = (pane_a.x + pane_a.width).min(pane_b.x + pane_b.width) - bx;
+                if bw > 0.0 { borders.push((i, bx, by - 3.0, bw, 6.0, "row-resize".to_string())); }
+            }
+        }
+        borders
+    }).unwrap_or_default();
+
+    // Snap preview lines: (x, y, width, height)
+    let snap_lines: Vec<(f64, f64, f64, f64)> = snap_preview().iter().filter_map(|snap| {
+        let pl = pane_snapshot.as_ref()?;
+        let pane = pl.pane(snap.pane)?;
+        let coord = PaneLayout::pane_edge_coord(pane, snap.edge);
+        match snap.edge {
+            EdgeSide::Left | EdgeSide::Right => Some((coord, pane.y, 2.0, pane.height)),
+            EdgeSide::Top | EdgeSide::Bottom => Some((pane.x, coord, pane.width, 2.0)),
+        }
+    }).collect();
 
     rsx! {
         style { r#"
@@ -2239,16 +2318,119 @@ pub fn App() -> Element {
             onmousemove: {
                 let act = act.clone();
                 move |evt: Event<MouseData>| {
+                    let coords = evt.data().page_coordinates();
+                    // Floating dock title bar drag
                     if let Some((fid, off_x, off_y)) = title_drag() {
-                        let coords = evt.data().page_coordinates();
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                             st.dock_layout.set_floating_position(fid, coords.x - off_x, coords.y - off_y);
                         }));
+                        return;
+                    }
+                    // Pane drag (move)
+                    if let Some((pid, off_x, off_y)) = pane_drag() {
+                        let new_x = coords.x - off_x;
+                        let new_y = coords.y - off_y;
+                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                pl.set_pane_position(pid, new_x, new_y);
+                                // Show snap preview
+                                let vw = pl.viewport_width;
+                                let vh = pl.viewport_height;
+                                let preview = pl.detect_snaps(pid, vw, vh);
+                                // Store preview outside — we'll set signal after borrow
+                                snap_preview.set(preview);
+                            }
+                        }));
+                        return;
+                    }
+                    // Shared border drag
+                    if let Some((snap_idx, start_coord)) = border_drag() {
+                        // Determine if vertical or horizontal from snap data
+                        let delta = {
+                            let st = act.borrow_mut();
+                            // We need to check the snap to figure direction
+                            drop(st);
+                            let snap_copy = pane_snapshot.as_ref().and_then(|pl| pl.snaps.get(snap_idx).copied());
+                            if let Some(snap) = snap_copy {
+                                if snap.edge == EdgeSide::Right {
+                                    coords.x - start_coord // vertical border
+                                } else {
+                                    coords.y - start_coord // horizontal border
+                                }
+                            } else {
+                                return;
+                            }
+                        };
+                        border_drag.set(Some((snap_idx, if pane_snapshot.as_ref().and_then(|pl| pl.snaps.get(snap_idx)).map(|s| s.edge == EdgeSide::Right).unwrap_or(true) { coords.x } else { coords.y })));
+                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                pl.drag_shared_border(snap_idx, delta);
+                            }
+                        }));
+                        return;
+                    }
+                    // Pane edge resize
+                    if let Some((pid, edge, start_mx, start_my, start_w, start_h, start_px, start_py)) = pane_resize() {
+                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                let dx = coords.x - start_mx;
+                                let dy = coords.y - start_my;
+                                match edge {
+                                    EdgeSide::Right => {
+                                        pl.resize_pane(pid, start_w + dx, start_h);
+                                    }
+                                    EdgeSide::Left => {
+                                        let new_w = (start_w - dx).max(PaneLayout::min_size(
+                                            pl.pane(pid).map(|p| p.kind).unwrap_or(PaneKind::Canvas)
+                                        ).0);
+                                        let actual_dx = start_w - new_w;
+                                        if let Some(p) = pl.pane_mut(pid) {
+                                            p.x = start_px + actual_dx;
+                                            p.width = new_w;
+                                        }
+                                    }
+                                    EdgeSide::Bottom => {
+                                        pl.resize_pane(pid, start_w, start_h + dy);
+                                    }
+                                    EdgeSide::Top => {
+                                        let new_h = (start_h - dy).max(PaneLayout::min_size(
+                                            pl.pane(pid).map(|p| p.kind).unwrap_or(PaneKind::Canvas)
+                                        ).1);
+                                        let actual_dy = start_h - new_h;
+                                        if let Some(p) = pl.pane_mut(pid) {
+                                            p.y = start_py + actual_dy;
+                                            p.height = new_h;
+                                        }
+                                    }
+                                }
+                            }
+                        }));
+                        return;
                     }
                 }
             },
-            onmouseup: move |_| {
-                title_drag.set(None);
+            onmouseup: {
+                let act = act.clone();
+                move |_| {
+                    // Finalize pane drag: apply snaps
+                    if let Some((pid, _, _)) = pane_drag() {
+                        let preview = snap_preview();
+                        if !preview.is_empty() {
+                            (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                    let vw = pl.viewport_width;
+                                    let vh = pl.viewport_height;
+                                    pl.apply_snaps(pid, preview, vw, vh);
+                                }
+                            }));
+                        }
+                        snap_preview.set(vec![]);
+                    }
+                    pane_drag.set(None);
+                    border_drag.set(None);
+                    pane_resize.set(None);
+                    title_drag.set(None);
+                }
             },
             ondragover: move |evt: Event<DragData>| {
                 // Track drag position and detect edge snapping
@@ -2266,17 +2448,49 @@ pub fn App() -> Element {
                     }
                 }
             },
-            style: "display:flex; height:100vh; outline:none; font-family:sans-serif; border-left:{snap_left}; border-right:{snap_right}; border-bottom:{snap_bottom}; box-sizing:border-box;",
+            style: "position:relative; width:100vw; height:100vh; overflow:hidden; outline:none; font-family:sans-serif; border-left:{snap_left}; border-right:{snap_right}; border-bottom:{snap_bottom}; box-sizing:border-box;",
 
-            // Toolbar
+            // ===== Toolbar pane (position:absolute) =====
             div {
-                style: "width:72px; background:#3c3c3c; border-right:1px solid #555; padding:4px 2px; display:grid; grid-template-columns:32px 32px; grid-auto-rows:32px; gap:2px; justify-content:center; align-content:start;",
-                onmousedown: move |_| {
-                    // Close menu dropdowns when clicking on toolbar
-                    open_menu.set(None);
+                style: "position:absolute; left:{tx}px; top:{ty}px; width:{tw}px; height:{th}px; z-index:{toolbar_z}; display:flex; flex-direction:column; overflow:hidden; background:#3c3c3c; border:1px solid #555; box-sizing:border-box;",
+                onmousedown: {
+                    let act = act.clone();
+                    move |_| {
+                        open_menu.set(None);
+                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                pl.bring_pane_to_front(toolbar_pane_id);
+                            }
+                        }));
+                    }
                 },
-                for btn in tool_buttons {
-                    {btn}
+
+                // Drag handle
+                div {
+                    style: "height:8px; min-height:8px; cursor:grab; background:#333; flex-shrink:0;",
+                    onmousedown: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        let coords = evt.data().page_coordinates();
+                        pane_drag.set(Some((toolbar_pane_id, coords.x - tx, coords.y - ty)));
+                    },
+                }
+
+                // Tool buttons
+                div {
+                    style: "flex:1; padding:4px 2px; display:grid; grid-template-columns:32px 32px; grid-auto-rows:32px; gap:2px; justify-content:center; align-content:start; overflow-y:auto;",
+                    for btn in tool_buttons {
+                        {btn}
+                    }
+                }
+
+                // Right edge resize handle
+                div {
+                    style: "position:absolute; top:0; right:0; width:4px; height:100%; cursor:ew-resize;",
+                    onmousedown: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        let coords = evt.data().page_coordinates();
+                        pane_resize.set(Some((toolbar_pane_id, EdgeSide::Right, coords.x, coords.y, tw, th, tx, ty)));
+                    },
                 }
             }
 
@@ -2285,14 +2499,35 @@ pub fn App() -> Element {
                 {popup}
             }
 
-            // Main area (menu + tabs + canvas)
+            // ===== Canvas pane (position:absolute) =====
             div {
-                style: "flex:1; display:flex; flex-direction:column; overflow:hidden;",
-                onmousedown: on_main_mousedown,
+                style: "position:absolute; left:{cx}px; top:{cy}px; width:{cw}px; height:{ch}px; z-index:{canvas_z}; display:flex; flex-direction:column; overflow:hidden; background:#808080; border:1px solid #999; box-sizing:border-box;",
+                onmousedown: {
+                    let act = act.clone();
+                    move |_: Event<MouseData>| {
+                        open_menu.set(None);
+                        popup_slot.set(None);
+                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                pl.bring_pane_to_front(canvas_pane_id);
+                            }
+                        }));
+                    }
+                },
+
+                // Drag handle
+                div {
+                    style: "height:8px; min-height:8px; cursor:grab; background:#888; flex-shrink:0;",
+                    onmousedown: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        let coords = evt.data().page_coordinates();
+                        pane_drag.set(Some((canvas_pane_id, coords.x - cx, coords.y - cy)));
+                    },
+                }
 
                 // Menu bar
                 div {
-                    style: "display:flex; background:#f0f0f0; border-bottom:1px solid #ddd; padding:0 4px; min-height:24px; align-items:center;",
+                    style: "display:flex; background:#f0f0f0; border-bottom:1px solid #ddd; padding:0 4px; min-height:24px; align-items:center; flex-shrink:0;",
                     for node in menu_nodes {
                         {node}
                     }
@@ -2300,88 +2535,131 @@ pub fn App() -> Element {
 
                 // Tab bar
                 div {
-                    style: "display:flex; background:#e8e8e8; border-bottom:1px solid #ccc; padding:2px 4px 0; min-height:28px; align-items:flex-end;",
+                    style: "display:flex; background:#e8e8e8; border-bottom:1px solid #ccc; padding:2px 4px 0; min-height:28px; align-items:flex-end; flex-shrink:0;",
                     for btn in tab_buttons {
                         {btn}
                     }
                 }
 
-                // Content area (left dock + canvas + right dock)
+                // Canvas
                 div {
-                    style: "flex:1; display:flex; flex-direction:column; overflow:hidden;",
-
-                    div {
-                        style: "flex:1; display:flex; overflow:hidden;",
-
-                        // Left dock
-                        if has_left_dock {
-                            div {
-                                style: "width:{left_dock_width}px; background:#f0f0f0; border-right:1px solid #ccc; display:flex; flex-direction:column; flex-shrink:0; overflow-y:auto;",
-                                onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
-                                for group in left_dock_groups {
-                                    {group}
-                                }
-                            }
-                        }
-
-                        // Canvas
-                        div {
-                            style: "flex:1; position:relative; overflow:hidden; background:#808080;",
-                        if has_tabs {
-                            canvas {
-                                id: "jas-canvas",
-                                style: "display:block; width:100%; height:100%; cursor:{canvas_cursor};",
-                                onmousedown: on_mousedown,
-                                onmousemove: on_mousemove,
-                                onmouseup: on_mouseup,
-                                ondoubleclick: on_dblclick,
-                            }
+                    style: "flex:1; position:relative; overflow:hidden;",
+                    if has_tabs {
+                        canvas {
+                            id: "jas-canvas",
+                            style: "display:block; width:100%; height:100%; cursor:{canvas_cursor};",
+                            onmousedown: on_mousedown,
+                            onmousemove: on_mousemove,
+                            onmouseup: on_mouseup,
+                            ondoubleclick: on_dblclick,
                         }
                     }
+                }
 
-                    // Dock
-                    if has_tabs {
+                // Edge resize handles
+                div {
+                    style: "position:absolute; top:0; left:0; width:4px; height:100%; cursor:ew-resize;",
+                    onmousedown: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        let coords = evt.data().page_coordinates();
+                        pane_resize.set(Some((canvas_pane_id, EdgeSide::Left, coords.x, coords.y, cw, ch, cx, cy)));
+                    },
+                }
+                div {
+                    style: "position:absolute; top:0; right:0; width:4px; height:100%; cursor:ew-resize;",
+                    onmousedown: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        let coords = evt.data().page_coordinates();
+                        pane_resize.set(Some((canvas_pane_id, EdgeSide::Right, coords.x, coords.y, cw, ch, cx, cy)));
+                    },
+                }
+            }
+
+            // ===== Dock pane (position:absolute) =====
+            div {
+                style: "position:absolute; left:{dx}px; top:{dy}px; width:{dw}px; height:{dh}px; z-index:{dock_z}; display:flex; flex-direction:column; overflow:hidden; background:#f0f0f0; border:1px solid #ccc; box-sizing:border-box;",
+                onmousedown: {
+                    let act = act.clone();
+                    move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                pl.bring_pane_to_front(dock_pane_id);
+                            }
+                        }));
+                    }
+                },
+
+                // Drag handle
+                div {
+                    style: "height:8px; min-height:8px; cursor:grab; background:#d0d0d0; flex-shrink:0;",
+                    onmousedown: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        let coords = evt.data().page_coordinates();
+                        pane_drag.set(Some((dock_pane_id, coords.x - dx, coords.y - dy)));
+                    },
+                }
+
+                // Collapse/expand toggle
+                {
+                    let act = act.clone();
+                    rsx! {
                         div {
-                            style: "width:{dock_width}px; background:#f0f0f0; border-left:1px solid #ccc; display:flex; flex-direction:column; flex-shrink:0; overflow-y:auto;",
+                            style: "padding:4px; cursor:pointer; text-align:center; border-bottom:1px solid #ddd; font-size:10px; color:#888; user-select:none; flex-shrink:0;",
+                            onclick: move |_| {
+                                (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                    st.dock_layout.toggle_dock_collapsed(dock_id);
+                                }));
+                            },
+                            "{dock_toggle_label}"
+                        }
+                    }
+                }
+
+                // Panel groups
+                div {
+                    style: "flex:1; overflow-y:auto;",
+                    for group in dock_groups {
+                        {group}
+                    }
+                }
+
+                // Left edge resize handle
+                div {
+                    style: "position:absolute; top:0; left:0; width:4px; height:100%; cursor:ew-resize;",
+                    onmousedown: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        let coords = evt.data().page_coordinates();
+                        pane_resize.set(Some((dock_pane_id, EdgeSide::Left, coords.x, coords.y, dw, dh, dx, dy)));
+                    },
+                }
+            }
+
+            // ===== Shared border drag handles =====
+            for (snap_idx, bx, by, bw, bh, cursor_css) in shared_borders {
+                {
+                    let is_vert = cursor_css == "col-resize";
+                    rsx! {
+                        div {
+                            key: "border-{snap_idx}",
+                            style: "position:absolute; left:{bx}px; top:{by}px; width:{bw}px; height:{bh}px; cursor:{cursor_css}; z-index:100;",
                             onmousedown: move |evt: Event<MouseData>| {
                                 evt.stop_propagation();
+                                let coords = evt.data().page_coordinates();
+                                let start = if is_vert { coords.x } else { coords.y };
+                                border_drag.set(Some((snap_idx, start)));
                             },
-
-                            // Collapse/expand toggle
-                            {
-                                let act = act.clone();
-                                rsx! {
-                                    div {
-                                        style: "padding:4px; cursor:pointer; text-align:center; border-bottom:1px solid #ddd; font-size:10px; color:#888; user-select:none;",
-                                        onclick: move |_| {
-                                            (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                                st.dock_layout.toggle_dock_collapsed(dock_id);
-                                            }));
-                                        },
-                                        "{dock_toggle_label}"
-                                    }
-                                }
-                            }
-
-                            // Panel groups
-                            for group in dock_groups {
-                                {group}
-                            }
                         }
                     }
-                    } // close inner flex row (left + canvas + right)
+                }
+            }
 
-                    // Bottom dock
-                    if has_bottom_dock {
-                        div {
-                            style: "height:{bottom_dock_height}px; background:#f0f0f0; border-top:1px solid #ccc; display:flex; flex-direction:row; flex-shrink:0; overflow-x:auto;",
-                            onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
-                            for group in bottom_dock_groups {
-                                {group}
-                            }
-                        }
-                    }
-                } // close content area column
+            // ===== Snap preview lines =====
+            for (i, (sl_x, sl_y, sl_w, sl_h)) in snap_lines.iter().enumerate() {
+                div {
+                    key: "snap-line-{i}",
+                    style: "position:absolute; left:{sl_x}px; top:{sl_y}px; width:{sl_w}px; height:{sl_h}px; background:rgba(74,144,217,0.6); pointer-events:none; z-index:200;",
+                }
             }
 
             // Floating docks (position:fixed overlays)
