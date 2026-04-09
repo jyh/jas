@@ -633,7 +633,10 @@ pub fn App() -> Element {
                         let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
                         if let Ok(mut st) = app_r.try_borrow_mut() {
                             st.dock_layout.clamp_floating_docks(vw, vh);
-                            st.save_dock_layout();
+                            if st.dock_layout.needs_save() {
+                                st.save_dock_layout();
+                                st.dock_layout.mark_saved();
+                            }
                         }
                         rev_r += 1;
                     }
@@ -658,7 +661,10 @@ pub fn App() -> Element {
             {
                 let mut st = app.borrow_mut();
                 f(&mut st);
-                st.save_dock_layout();
+                if st.dock_layout.needs_save() {
+                    st.save_dock_layout();
+                    st.dock_layout.mark_saved();
+                }
             }
             revision += 1;
         }
