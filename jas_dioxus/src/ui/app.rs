@@ -83,11 +83,40 @@ struct AppState {
 
 impl AppState {
     fn new() -> Self {
+        let dock_layout = Self::load_dock_layout();
         Self {
             tabs: vec![],
             active_tab: 0,
             active_tool: ToolKind::Selection,
-            dock_layout: super::dock::DockLayout::default_layout(),
+            dock_layout,
+        }
+    }
+
+    /// Load dock layout from localStorage, or return default.
+    fn load_dock_layout() -> super::dock::DockLayout {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(json) = web_sys::window()
+                .and_then(|w| w.local_storage().ok()?)
+                .and_then(|s| s.get_item(super::dock::DockLayout::STORAGE_KEY).ok()?)
+            {
+                return super::dock::DockLayout::from_json(&json);
+            }
+        }
+        super::dock::DockLayout::default_layout()
+    }
+
+    /// Save dock layout to localStorage.
+    fn save_dock_layout(&self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Ok(json) = self.dock_layout.to_json() {
+                if let Some(storage) = web_sys::window()
+                    .and_then(|w| w.local_storage().ok()?)
+                {
+                    let _ = storage.set_item(super::dock::DockLayout::STORAGE_KEY, &json);
+                }
+            }
         }
     }
 
@@ -594,7 +623,11 @@ pub fn App() -> Element {
     let act = {
         let app = app.clone();
         move |f: Box<dyn FnOnce(&mut AppState)>| {
-            f(&mut app.borrow_mut());
+            {
+                let mut st = app.borrow_mut();
+                f(&mut st);
+                st.save_dock_layout();
+            }
             revision += 1;
         }
     };

@@ -8,6 +8,8 @@
 //! This module contains only pure data types and state operations — no
 //! rendering code.
 
+use serde::{Serialize, Deserialize};
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -25,11 +27,11 @@ pub const SNAP_DISTANCE: f64 = 20.0;
 // ---------------------------------------------------------------------------
 
 /// Stable identifier for a dock.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DockId(pub usize);
 
 /// Which screen edge an anchored dock is attached to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DockEdge {
     Left,
     Right,
@@ -37,7 +39,7 @@ pub enum DockEdge {
 }
 
 /// Identifies a panel type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PanelKind {
     Layers,
     Color,
@@ -46,7 +48,7 @@ pub enum PanelKind {
 }
 
 /// A group of panels sharing a tab bar.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PanelGroup {
     pub panels: Vec<PanelKind>,
     pub active: usize,
@@ -72,7 +74,7 @@ impl PanelGroup {
 }
 
 /// A single dock: a vertical stack of panel groups.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dock {
     pub id: DockId,
     pub groups: Vec<PanelGroup>,
@@ -96,7 +98,7 @@ impl Dock {
 }
 
 /// A floating dock: a [`Dock`] plus screen position.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FloatingDock {
     pub dock: Dock,
     pub x: f64,
@@ -108,14 +110,14 @@ pub struct FloatingDock {
 // ---------------------------------------------------------------------------
 
 /// Locates a panel group: which dock and which group index within it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupAddr {
     pub dock_id: DockId,
     pub group_idx: usize,
 }
 
 /// Locates a single panel tab.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PanelAddr {
     pub group: GroupAddr,
     pub panel_idx: usize,
@@ -148,7 +150,7 @@ pub enum DropTarget {
 // ---------------------------------------------------------------------------
 
 /// Top-level layout: anchored docks on screen edges + floating docks.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DockLayout {
     pub anchored: Vec<(DockEdge, Dock)>,
     pub floating: Vec<FloatingDock>,
@@ -667,6 +669,29 @@ impl DockLayout {
         self.z_order.push(fid);
         Some(fid)
     }
+
+    // -----------------------------------------------------------------------
+    // Persistence
+    // -----------------------------------------------------------------------
+
+    /// Reset to the default layout, discarding all customizations.
+    pub fn reset_to_default(&mut self) {
+        *self = Self::default_layout();
+    }
+
+    /// Serialize the layout to a JSON string.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    /// Deserialize a layout from a JSON string. Returns the default
+    /// layout if the JSON is invalid.
+    pub fn from_json(json: &str) -> Self {
+        serde_json::from_str(json).unwrap_or_else(|_| Self::default_layout())
+    }
+
+    /// Key used for localStorage.
+    pub const STORAGE_KEY: &'static str = "jas_dock_layout";
 
     // -----------------------------------------------------------------------
     // Cleanup
@@ -1549,5 +1574,55 @@ mod tests {
         l.add_anchored_dock(DockEdge::Left); // empty dock
         let fid = l.remove_anchored_dock(DockEdge::Left);
         assert!(fid.is_none()); // no groups, no floating dock created
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 4: Persistence
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn to_json_round_trip() {
+        let l = DockLayout::default_layout();
+        let json = l.to_json().unwrap();
+        let l2 = DockLayout::from_json(&json);
+        assert_eq!(l2.anchored.len(), 1);
+        assert_eq!(l2.anchored[0].0, DockEdge::Right);
+        let d = l2.anchored_dock(DockEdge::Right).unwrap();
+        assert_eq!(d.groups.len(), 2);
+        assert_eq!(d.groups[0].panels, vec![PanelKind::Layers]);
+    }
+
+    #[test]
+    fn from_json_with_floating() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        l.detach_group(ga(id.0, 0), 100.0, 200.0);
+        let json = l.to_json().unwrap();
+        let l2 = DockLayout::from_json(&json);
+        assert_eq!(l2.floating.len(), 1);
+        assert_eq!(l2.floating[0].x, 100.0);
+        assert_eq!(l2.floating[0].y, 200.0);
+    }
+
+    #[test]
+    fn from_json_invalid_graceful() {
+        let l = DockLayout::from_json("not valid json{{{");
+        // Should return default layout
+        assert_eq!(l.anchored.len(), 1);
+        assert_eq!(l.anchored_dock(DockEdge::Right).unwrap().groups.len(), 2);
+    }
+
+    #[test]
+    fn reset_to_default() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        l.detach_group(ga(id.0, 0), 50.0, 50.0);
+        l.close_panel(pa(id.0, 0, 0));
+        assert!(!l.floating.is_empty());
+        assert!(!l.hidden_panels.is_empty());
+        l.reset_to_default();
+        assert!(l.floating.is_empty());
+        assert!(l.hidden_panels.is_empty());
+        assert_eq!(l.anchored_dock(DockEdge::Right).unwrap().groups.len(), 2);
     }
 }
