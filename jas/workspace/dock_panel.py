@@ -154,3 +154,128 @@ class DockPanelWidget(QWidget):
         self._layout_data.set_active_panel(
             PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx))
         self.rebuild()
+
+    # -- Floating docks --
+
+    def rebuild_floating(self):
+        """Rebuild all floating dock windows."""
+        # Close existing
+        for w in self._floating_windows:
+            w.close()
+            w.deleteLater()
+        self._floating_windows = []
+
+        for fd in self._layout_data.floating:
+            win = FloatingDockWindow(self._layout_data, fd, self)
+            win.show()
+            self._floating_windows.append(win)
+
+    def rebuild_all(self):
+        """Rebuild anchored dock and all floating docks."""
+        self.rebuild()
+        self.rebuild_floating()
+
+    _floating_windows: list = []
+
+
+class FloatingDockWindow(QWidget):
+    """A floating dock rendered as a tool window."""
+
+    def __init__(self, dock_layout: DockLayout, fd, parent_panel):
+        super().__init__(None, Qt.Tool | Qt.FramelessWindowHint)
+        self._layout_data = dock_layout
+        self._fd = fd
+        self._parent_panel = parent_panel
+        self._drag_start = None
+
+        self.setGeometry(int(fd.x), int(fd.y), int(fd.dock.width), 200)
+        self.setStyleSheet("background: #f0f0f0; border: 1px solid #aaa;")
+
+        vbox = QVBoxLayout(self)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
+
+        # Title bar
+        title = QWidget()
+        title.setFixedHeight(20)
+        title.setStyleSheet("background: #d0d0d0;")
+        title.setCursor(Qt.OpenHandCursor)
+        vbox.addWidget(title)
+
+        # Panel groups
+        fid = fd.dock.id
+        for gi, group in enumerate(fd.dock.groups):
+            group_widget = self._build_group(fid, gi, group)
+            vbox.addWidget(group_widget)
+
+        vbox.addStretch()
+
+    def _build_group(self, dock_id, gi, group):
+        widget = QWidget()
+        vbox = QVBoxLayout(widget)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
+
+        tab_bar = QWidget()
+        tab_bar.setStyleSheet("background: #d8d8d8;")
+        hbox = QHBoxLayout(tab_bar)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.setSpacing(0)
+
+        grip = QLabel("\u2801\u2801")
+        grip.setStyleSheet("color: #999; font-size: 10px; padding: 2px 4px;")
+        hbox.addWidget(grip)
+
+        for pi, kind in enumerate(group.panels):
+            label = DockLayout.panel_label(kind)
+            btn = QPushButton(label)
+            btn.setFlat(True)
+            is_active = pi == group.active
+            weight = "bold" if is_active else "normal"
+            bg = "#f0f0f0" if is_active else "#d8d8d8"
+            btn.setStyleSheet(f"font-size: 11px; font-weight: {weight}; background: {bg}; padding: 3px 8px;")
+            btn.clicked.connect(lambda _, d=dock_id, g=gi, p=pi: self._set_active(d, g, p))
+            hbox.addWidget(btn)
+
+        hbox.addStretch()
+        vbox.addWidget(tab_bar)
+
+        if not group.collapsed:
+            active = group.active_panel()
+            if active is not None:
+                body = QLabel(DockLayout.panel_label(active))
+                body.setStyleSheet("color: #999; font-size: 12px; padding: 12px;")
+                body.setMinimumHeight(60)
+                body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+                vbox.addWidget(body)
+
+        return widget
+
+    def _set_active(self, dock_id, group_idx, panel_idx):
+        self._layout_data.set_active_panel(
+            PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx))
+        self._parent_panel.rebuild_floating()
+
+    def mousePressEvent(self, event):
+        if event.y() < 20:  # Title bar area
+            self._drag_start = event.globalPosition().toPoint() - self.pos()
+            self._layout_data.bring_to_front(self._fd.dock.id)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_start is not None:
+            new_pos = event.globalPosition().toPoint() - self._drag_start
+            self.move(new_pos)
+            self._layout_data.set_floating_position(
+                self._fd.dock.id, float(new_pos.x()), float(new_pos.y()))
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_start = None
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.y() < 20:  # Double-click title bar to redock
+            self._layout_data.redock(self._fd.dock.id)
+            self._parent_panel.rebuild_all()
+        super().mouseDoubleClickEvent(event)

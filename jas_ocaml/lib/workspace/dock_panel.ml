@@ -92,5 +92,98 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
         ) dock.groups
       end
   in
-  rebuild ();
-  rebuild
+  (* Floating dock windows *)
+  let floating_windows : GWindow.window list ref = ref [] in
+
+  let rec rebuild_floating () =
+    List.iter (fun w -> w#destroy ()) !floating_windows;
+    floating_windows := [];
+    List.iter (fun (fd : Dock.floating_dock) ->
+      let fid = fd.dock.id in
+      let win = GWindow.window
+        ~type_hint:`UTILITY
+        ~decorated:false
+        ~width:(int_of_float fd.dock.width)
+        ~height:200
+        () in
+      win#move ~x:(int_of_float fd.x) ~y:(int_of_float fd.y);
+
+      let vbox = GPack.vbox ~packing:win#add () in
+
+      (* Title bar *)
+      let title_bar = GBin.event_box ~packing:(vbox#pack ~expand:false) () in
+      let title_label = GMisc.label ~text:" " ~packing:title_bar#add () in
+      title_label#misc#set_size_request ~height:20 ();
+      title_bar#misc#modify_bg [`NORMAL, `NAME "#d0d0d0"];
+
+      (* Drag to reposition *)
+      let drag_start = ref None in
+      title_bar#event#connect#button_press ~callback:(fun ev ->
+        let mx = GdkEvent.Button.x_root ev in
+        let my = GdkEvent.Button.y_root ev in
+        drag_start := Some (mx -. fd.x, my -. fd.y);
+        Dock.bring_to_front layout fid;
+        true
+      ) |> ignore;
+      title_bar#event#connect#motion_notify ~callback:(fun ev ->
+        (match !drag_start with
+         | Some (off_x, off_y) ->
+           let mx = GdkEvent.Motion.x_root ev in
+           let my = GdkEvent.Motion.y_root ev in
+           let nx = mx -. off_x in
+           let ny = my -. off_y in
+           Dock.set_floating_position layout fid ~x:nx ~y:ny;
+           win#move ~x:(int_of_float nx) ~y:(int_of_float ny)
+         | None -> ());
+        true
+      ) |> ignore;
+      title_bar#event#connect#button_release ~callback:(fun _ ->
+        drag_start := None; true
+      ) |> ignore;
+      title_bar#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION];
+
+      (* Double-click to redock *)
+      title_bar#event#connect#button_press ~callback:(fun ev ->
+        if GdkEvent.Button.button ev = 1 &&
+           GdkEvent.get_type (ev :> GdkEvent.any) = `TWO_BUTTON_PRESS then begin
+          Dock.redock layout fid;
+          rebuild ();
+          rebuild_floating ();
+          true
+        end else false
+      ) |> ignore;
+
+      (* Panel groups *)
+      Array.iteri (fun gi (group : Dock.panel_group) ->
+        let group_box = GPack.vbox ~packing:(vbox#pack ~expand:false) () in
+        let tab_bar = GPack.hbox ~packing:(group_box#pack ~expand:false) () in
+        let grip = GMisc.label ~text:"\xE2\xA0\x81\xE2\xA0\x81" ~packing:(tab_bar#pack ~expand:false) () in
+        grip#misc#set_size_request ~width:20 ();
+        Array.iteri (fun pi kind ->
+          let label = Dock.panel_label kind in
+          let btn = GButton.button ~label ~packing:(tab_bar#pack ~expand:false) () in
+          if pi = group.active then
+            btn#misc#modify_bg [`NORMAL, `NAME "#f0f0f0"];
+          btn#connect#clicked ~callback:(fun () ->
+            Dock.set_active_panel layout { group = { dock_id = fid; group_idx = gi }; panel_idx = pi };
+            rebuild_floating ()
+          ) |> ignore
+        ) group.panels;
+        if not group.collapsed then begin
+          match Dock.active_panel group with
+          | Some kind ->
+            let body = GMisc.label ~text:(Dock.panel_label kind) ~packing:(group_box#pack ~expand:false) () in
+            body#misc#set_size_request ~height:60 ();
+            body#set_xalign 0.0
+          | None -> ()
+        end
+      ) fd.dock.groups;
+
+      win#show ();
+      floating_windows := win :: !floating_windows
+    ) layout.floating
+  in
+
+  let rebuild_all () = rebuild (); rebuild_floating () in
+  rebuild_all ();
+  rebuild_all

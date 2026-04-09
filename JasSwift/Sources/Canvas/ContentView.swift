@@ -126,6 +126,15 @@ public struct ContentView: View {
         }
         .frame(minWidth: 640, minHeight: 480)
         .overlay {
+            // Floating docks
+            ForEach(Array(workspace.dockLayout.floating.enumerated()), id: \.offset) { _, fd in
+                FloatingDockView(
+                    dockLayout: $workspace.dockLayout,
+                    floatingDock: fd
+                )
+            }
+        }
+        .overlay {
             SwiftUI.Color.clear
                 .focusedSceneValue(\.addCanvas, { newModel in addCanvas(newModel) })
                 .focusedSceneValue(\.workspace, workspace)
