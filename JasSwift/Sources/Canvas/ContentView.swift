@@ -37,8 +37,14 @@ public struct CanvasEntry: Identifiable {
 public class WorkspaceState: ObservableObject {
     @Published public var canvases: [CanvasEntry] = []
     @Published public var selectedTab: UUID?
+    @Published public var dockLayout: DockLayout
+    @Published public var appConfig: AppConfig
 
-    public init() {}
+    public init() {
+        let config = AppConfig.load()
+        self.appConfig = config
+        self.dockLayout = DockLayout.load(name: config.activeLayout)
+    }
 
     public var activeModel: Model? {
         if let id = selectedTab, let entry = canvases.first(where: { $0.id == id }) {
@@ -88,26 +94,41 @@ public struct ContentView: View {
                     .background(SwiftUI.Color(nsColor: NSColor(white: 0.20, alpha: 1.0)))
                 }
 
-                // Canvas content
-                ZStack {
-                    SwiftUI.Color(nsColor: NSColor(white: 0.50, alpha: 1.0))
-                    ForEach(workspace.canvases) { entry in
-                        if entry.id == workspace.selectedTab {
-                            CanvasTab(
-                                model: entry.model,
-                                currentTool: $currentTool,
-                                onFocus: { workspace.selectedTab = entry.id }
-                            )
+                // Canvas + right dock
+                HStack(spacing: 0) {
+                    // Canvas content
+                    ZStack {
+                        SwiftUI.Color(nsColor: NSColor(white: 0.50, alpha: 1.0))
+                        ForEach(workspace.canvases) { entry in
+                            if entry.id == workspace.selectedTab {
+                                CanvasTab(
+                                    model: entry.model,
+                                    currentTool: $currentTool,
+                                    onFocus: { workspace.selectedTab = entry.id }
+                                )
+                            }
                         }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    // Right dock
+                    if !workspace.canvases.isEmpty,
+                       let rightDock = workspace.dockLayout.anchoredDock(.right),
+                       !rightDock.groups.isEmpty {
+                        DockPanelView(
+                            dockLayout: $workspace.dockLayout,
+                            dockId: rightDock.id,
+                            edge: .right
+                        )
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(minWidth: 640, minHeight: 480)
         .overlay {
             SwiftUI.Color.clear
                 .focusedSceneValue(\.addCanvas, { newModel in addCanvas(newModel) })
+                .focusedSceneValue(\.workspace, workspace)
                 .allowsHitTesting(false)
         }
         .overlay {
