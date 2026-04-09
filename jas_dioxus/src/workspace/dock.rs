@@ -1407,7 +1407,7 @@ impl PaneLayout {
     /// Drag a shared border by `delta` pixels. For a vertical border (Right->Left),
     /// positive delta widens the left pane and narrows the right pane.
     /// For a horizontal border (Bottom->Top), positive delta grows the top pane
-    /// and shrinks the bottom pane.
+    /// and shrinks the bottom pane. Propagates changes through chained snaps.
     pub fn drag_shared_border(
         &mut self,
         snap_idx: usize,
@@ -1431,12 +1431,10 @@ impl PaneLayout {
         let is_vertical = snap.edge == EdgeSide::Right;
 
         if is_vertical {
-            // Read current values
             let a_w = self.pane(snap.pane).unwrap().width;
             let b_x = self.pane(other_id).unwrap().x;
             let b_w = self.pane(other_id).unwrap().width;
 
-            // Clamp delta so neither pane goes below min width
             let max_expand = b_w - b_min_w;
             let max_shrink = a_w - a_min_w;
             let clamped = delta.clamp(-max_shrink, max_expand);
@@ -1448,8 +1446,9 @@ impl PaneLayout {
                 b.x = b_x + clamped;
                 b.width -= clamped;
             }
+            // Propagate: shift panes snapped to B's right edge
+            self.propagate_border_shift(other_id, EdgeSide::Right, clamped, true);
         } else {
-            // Horizontal: Bottom->Top
             let a_h = self.pane(snap.pane).unwrap().height;
             let b_y = self.pane(other_id).unwrap().y;
             let b_h = self.pane(other_id).unwrap().height;
@@ -1464,6 +1463,53 @@ impl PaneLayout {
             if let Some(b) = self.pane_mut(other_id) {
                 b.y = b_y + clamped;
                 b.height -= clamped;
+            }
+            // Propagate: shift panes snapped to B's bottom edge
+            self.propagate_border_shift(other_id, EdgeSide::Bottom, clamped, false);
+        }
+    }
+
+    /// After a border drag changes pane B's position, find any panes
+    /// snapped to B's far edge and shift them by the same delta.
+    /// This keeps chained snaps (e.g., toolbar|canvas|dock) in sync.
+    fn propagate_border_shift(
+        &mut self,
+        source_pane: PaneId,
+        source_edge: EdgeSide,
+        _delta: f64,
+        is_vertical: bool,
+    ) {
+        // Find snaps where source_pane's source_edge connects to another pane
+        let chained: Vec<(PaneId, EdgeSide)> = self.snaps.iter().filter_map(|s| {
+            if s.pane == source_pane && s.edge == source_edge {
+                if let SnapTarget::Pane(pid, pe) = s.target {
+                    return Some((pid, pe));
+                }
+            }
+            None
+        }).collect();
+
+        // Align chained panes to the new edge position
+        let edge_coord = match self.pane(source_pane) {
+            Some(p) => Self::pane_edge_coord(p, source_edge),
+            None => return,
+        };
+
+        for (pid, pe) in chained {
+            if let Some(p) = self.pane_mut(pid) {
+                if is_vertical {
+                    match pe {
+                        EdgeSide::Left => p.x = edge_coord,
+                        EdgeSide::Right => p.x = edge_coord - p.width,
+                        _ => {}
+                    }
+                } else {
+                    match pe {
+                        EdgeSide::Top => p.y = edge_coord,
+                        EdgeSide::Bottom => p.y = edge_coord - p.height,
+                        _ => {}
+                    }
+                }
             }
         }
     }
@@ -2938,6 +2984,26 @@ mod tests {
 
         let toolbar = pl.pane_by_kind(PaneKind::Toolbar).unwrap();
         assert!(toolbar.width >= MIN_TOOLBAR_WIDTH);
+    }
+
+    #[test]
+    fn drag_shared_border_propagates_to_chained_pane() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let toolbar = pl.pane_by_kind(PaneKind::Toolbar).unwrap();
+        let border_x = toolbar.x + toolbar.width;
+        let (snap_idx, _) = pl.shared_border_at(border_x, 350.0, BORDER_HIT_TOLERANCE).unwrap();
+
+        let dock_x_before = pl.pane_by_kind(PaneKind::Dock).unwrap().x;
+
+        // Drag toolbar/canvas border right by 30px
+        pl.drag_shared_border(snap_idx, 30.0);
+
+        // Canvas shrinks and shifts right, dock should also shift right
+        let canvas = pl.pane_by_kind(PaneKind::Canvas).unwrap();
+        let dock = pl.pane_by_kind(PaneKind::Dock).unwrap();
+        // Canvas right edge should still meet dock left edge
+        assert!((canvas.x + canvas.width - dock.x).abs() < 0.001,
+            "canvas right ({}) != dock left ({})", canvas.x + canvas.width, dock.x);
     }
 
     #[test]
