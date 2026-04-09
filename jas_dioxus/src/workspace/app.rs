@@ -1555,6 +1555,17 @@ pub fn App() -> Element {
                         }
                     }));
                 }
+                "tile_panes" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        let dock_collapsed = st.dock_layout.anchored_dock(super::dock::DockEdge::Right)
+                            .map_or(false, |d| d.collapsed);
+                        let collapsed_w = if dock_collapsed { Some(36.0) } else { None };
+                        if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                            pl.canvas_maximized = false;
+                            pl.tile_panes(collapsed_w);
+                        }
+                    }));
+                }
                 // Window menu: pane visibility
                 "toggle_pane_toolbar" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
@@ -1770,7 +1781,7 @@ pub fn App() -> Element {
                     let cmd = cmd.to_string();
                     let mut open_menu_sig2 = open_menu_sig.clone();
                     // Add checkmark prefix for toggle items
-                    let display_label = {
+                    let (display_label, is_disabled) = {
                         let st = app.borrow();
                         let checked = match cmd.as_str() {
                             "toggle_pane_toolbar" => st.dock_layout.pane_layout.as_ref().map_or(true, |pl| pl.is_pane_visible(super::dock::PaneKind::Toolbar)),
@@ -1781,18 +1792,23 @@ pub fn App() -> Element {
                             "toggle_panel_properties" => st.dock_layout.is_panel_visible(super::dock::PanelKind::Properties),
                             _ => false,
                         };
-                        if cmd.starts_with("toggle_") {
+                        let disabled = false;
+                        let lbl = if cmd.starts_with("toggle_") {
                             if checked { format!("\u{2713} {}", label) } else { format!("    {}", label) }
                         } else {
-                            label.to_string()
-                        }
+                            format!("    {}", label)
+                        };
+                        (lbl, disabled)
                     };
+                    let item_color = if is_disabled { "#666" } else { "#ccc" };
+                    let item_cursor = if is_disabled { "default" } else { "pointer" };
                     vec![rsx! {
                         div {
                             class: "jas-menu-item",
-                            style: "padding:4px 24px 4px 8px; cursor:pointer; font-size:13px; color:#ccc; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                            style: "padding:4px 24px 4px 8px; cursor:{item_cursor}; font-size:13px; color:{item_color}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
                             onmousedown: move |evt: Event<MouseData>| {
                                 evt.stop_propagation();
+                                if is_disabled { return; }
                                 dispatch(&cmd);
                                 open_menu_sig2.set(None);
                             },
@@ -2275,9 +2291,16 @@ pub fn App() -> Element {
     use super::dock::{PaneKind, PaneId, EdgeSide, SnapTarget, PaneLayout};
 
     let pane_snapshot = layout_snapshot.pane_layout.clone();
+    let canvas_maximized = pane_snapshot.as_ref().map_or(false, |pl| pl.canvas_maximized);
+
     let (tx, ty, tw, th, toolbar_z) = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Toolbar))
-        .map(|p| (p.x, p.y, p.width, p.height, pane_snapshot.as_ref().unwrap().pane_z_index(p.id)))
+        .map(|p| {
+            let z = pane_snapshot.as_ref().unwrap().pane_z_index(p.id);
+            // When canvas is maximized, toolbar floats on top
+            let z = if canvas_maximized { z + 50 } else { z };
+            (p.x, p.y, p.width, p.height, z)
+        })
         .unwrap_or((0.0, 0.0, 72.0, 700.0, 0));
     let toolbar_pane_id = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Toolbar))
@@ -2286,21 +2309,31 @@ pub fn App() -> Element {
 
     let (cx, cy, cw, ch, canvas_z) = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Canvas))
-        .map(|p| (p.x, p.y, p.width, p.height, pane_snapshot.as_ref().unwrap().pane_z_index(p.id)))
+        .map(|p| {
+            let pl = pane_snapshot.as_ref().unwrap();
+            if canvas_maximized {
+                (0.0, 0.0, pl.viewport_width, pl.viewport_height, 0)
+            } else {
+                (p.x, p.y, p.width, p.height, pl.pane_z_index(p.id))
+            }
+        })
         .unwrap_or((72.0, 0.0, 688.0, 700.0, 0));
     let canvas_pane_id = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Canvas))
         .map(|p| p.id)
         .unwrap_or(PaneId(1));
+    let canvas_border = if canvas_maximized { "none" } else { "1px solid #555" };
 
     let collapsed_dock_width = 36.0;
     let (dx, dy, dw, dh, dock_z) = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Dock))
         .map(|p| {
             let z = pane_snapshot.as_ref().unwrap().pane_z_index(p.id);
+            let z = if canvas_maximized { z + 50 } else { z };
             if dock_collapsed {
-                // Hug right: shift x so the right edge stays put
-                (p.x + p.width - collapsed_dock_width, p.y, collapsed_dock_width, p.height, z)
+                // Anchor collapsed dock at its right edge
+                let right = p.x + p.width;
+                (right - collapsed_dock_width, p.y, collapsed_dock_width, p.height, z)
             } else {
                 (p.x, p.y, p.width, p.height, z)
             }
@@ -2587,7 +2620,7 @@ pub fn App() -> Element {
 
             // ===== Canvas pane (position:absolute) =====
             div {
-                style: "position:absolute; left:{cx}px; top:{cy}px; width:{cw}px; height:{ch}px; z-index:{canvas_z}; display:flex; flex-direction:column; overflow:hidden; background:#3c3c3c; border:1px solid #555; box-sizing:border-box;",
+                style: "position:absolute; left:{cx}px; top:{cy}px; width:{cw}px; height:{ch}px; z-index:{canvas_z}; display:flex; flex-direction:column; overflow:hidden; background:#3c3c3c; border:{canvas_border}; box-sizing:border-box;",
                 onmousedown: {
                     let act = act.clone();
                     move |_: Event<MouseData>| {
@@ -2601,15 +2634,29 @@ pub fn App() -> Element {
                     }
                 },
 
-                // Title bar
-                div {
-                    style: "height:20px; min-height:20px; cursor:grab; background:#333; flex-shrink:0; display:flex; align-items:center; padding:0 4px; user-select:none;",
-                    onmousedown: move |evt: Event<MouseData>| {
-                        evt.stop_propagation();
-                        let coords = evt.data().page_coordinates();
-                        pane_drag.set(Some((canvas_pane_id, coords.x - cx, coords.y - cy)));
-                    },
-                    div { style: "flex:1; font-size:10px; color:#ddd; overflow:hidden; white-space:nowrap;", "Canvas" }
+                // Title bar (hidden when maximized)
+                if !canvas_maximized {
+                    div {
+                        style: "height:20px; min-height:20px; cursor:grab; background:#333; flex-shrink:0; display:flex; align-items:center; padding:0 4px; user-select:none;",
+                        onmousedown: move |evt: Event<MouseData>| {
+                            evt.stop_propagation();
+                            let coords = evt.data().page_coordinates();
+                            pane_drag.set(Some((canvas_pane_id, coords.x - cx, coords.y - cy)));
+                        },
+                        ondoubleclick: {
+                            let act = act.clone();
+                            move |evt: Event<MouseData>| {
+                                evt.stop_propagation();
+                                pane_drag.set(None);
+                                (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                    if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                        pl.toggle_canvas_maximized();
+                                    }
+                                }));
+                            }
+                        },
+                        div { style: "flex:1; font-size:10px; color:#ddd; overflow:hidden; white-space:nowrap;", "Canvas" }
+                    }
                 }
 
                 // Tab bar
