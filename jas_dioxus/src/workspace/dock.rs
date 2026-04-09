@@ -158,6 +158,12 @@ pub struct DockLayout {
     pub z_order: Vec<DockId>,
     pub focused_panel: Option<PanelAddr>,
     next_id: usize,
+    /// Incremented on every mutation. Used to detect when a save is needed.
+    #[serde(skip)]
+    generation: u64,
+    /// The generation at which we last saved.
+    #[serde(skip)]
+    saved_generation: u64,
 }
 
 impl DockLayout {
@@ -188,7 +194,24 @@ impl DockLayout {
             z_order: vec![],
             focused_panel: None,
             next_id: 1,
+            generation: 0,
+            saved_generation: 0,
         }
+    }
+
+    /// Bump the generation counter. Call after every layout mutation.
+    fn bump(&mut self) {
+        self.generation += 1;
+    }
+
+    /// True if the layout has been modified since the last save.
+    pub fn needs_save(&self) -> bool {
+        self.generation != self.saved_generation
+    }
+
+    /// Mark the layout as saved (call after writing to storage).
+    pub fn mark_saved(&mut self) {
+        self.saved_generation = self.generation;
     }
 
     fn next_dock_id(&mut self) -> DockId {
@@ -260,6 +283,7 @@ impl DockLayout {
         if let Some(d) = self.dock_mut(id) {
             d.collapsed = !d.collapsed;
         }
+        self.bump();
     }
 
     /// Toggle a group's collapsed state.
@@ -269,6 +293,7 @@ impl DockLayout {
                 g.collapsed = !g.collapsed;
             }
         }
+        self.bump();
     }
 
     // -----------------------------------------------------------------------
@@ -284,6 +309,7 @@ impl DockLayout {
                 }
             }
         }
+        self.bump();
     }
 
     // -----------------------------------------------------------------------
@@ -300,6 +326,7 @@ impl DockLayout {
             let to = to.min(d.groups.len());
             d.groups.insert(to, group);
         }
+        self.bump();
     }
 
     // -----------------------------------------------------------------------
@@ -328,6 +355,7 @@ impl DockLayout {
             return;
         }
         self.cleanup(from.dock_id);
+        self.bump();
     }
 
     // -----------------------------------------------------------------------
@@ -351,6 +379,7 @@ impl DockLayout {
         });
         self.z_order.push(id);
         self.cleanup(from.dock_id);
+        self.bump();
         Some(id)
     }
 
@@ -372,6 +401,7 @@ impl DockLayout {
                 g.active = to;
             }
         }
+        self.bump();
     }
 
     // -----------------------------------------------------------------------
@@ -422,6 +452,7 @@ impl DockLayout {
             return;
         }
         self.cleanup(from.group.dock_id);
+        self.bump();
     }
 
     // -----------------------------------------------------------------------
@@ -464,6 +495,7 @@ impl DockLayout {
             return;
         }
         self.cleanup(from.group.dock_id);
+        self.bump();
     }
 
     // -----------------------------------------------------------------------
@@ -488,6 +520,7 @@ impl DockLayout {
         });
         self.z_order.push(id);
         self.cleanup(from.group.dock_id);
+        self.bump();
         Some(id)
     }
 
@@ -501,6 +534,7 @@ impl DockLayout {
             fd.x = x;
             fd.y = y;
         }
+        self.bump();
     }
 
     // -----------------------------------------------------------------------
@@ -514,6 +548,7 @@ impl DockLayout {
                 g.height = Some(height.max(MIN_GROUP_HEIGHT));
             }
         }
+        self.bump();
     }
 
     /// Set a dock's width. Clamped to [min_width, MAX_DOCK_WIDTH].
@@ -522,6 +557,7 @@ impl DockLayout {
             let min = d.min_width;
             d.width = width.clamp(min, MAX_DOCK_WIDTH);
         }
+        self.bump();
     }
 
     // -----------------------------------------------------------------------
@@ -559,6 +595,7 @@ impl DockLayout {
             self.hidden_panels.push(panel);
         }
         self.cleanup(addr.group.dock_id);
+        self.bump();
     }
 
     /// Show a hidden panel: remove from hidden list and add to the first
@@ -578,6 +615,7 @@ impl DockLayout {
                 dock.groups.push(PanelGroup::new(vec![kind]));
             }
         }
+        self.bump();
     }
 
     /// Return the list of hidden panels.
@@ -606,6 +644,7 @@ impl DockLayout {
             self.z_order.remove(pos);
             self.z_order.push(id);
         }
+        self.bump();
     }
 
     /// Return the z-index position for a floating dock (0 = back).
@@ -636,6 +675,7 @@ impl DockLayout {
         } else {
             self.anchored.push((edge, fdock.dock));
         }
+        self.bump();
     }
 
     /// Re-dock a floating dock by merging it into the Right anchored dock.
@@ -669,6 +709,7 @@ impl DockLayout {
         }
         let id = self.next_dock_id();
         self.anchored.push((edge, Dock::new(id, vec![], DEFAULT_DOCK_WIDTH)));
+        self.bump();
         id
     }
 
@@ -687,6 +728,7 @@ impl DockLayout {
             y: 100.0,
         });
         self.z_order.push(fid);
+        self.bump();
         Some(fid)
     }
 
@@ -697,6 +739,7 @@ impl DockLayout {
     /// Reset to the default layout, discarding all customizations.
     pub fn reset_to_default(&mut self) {
         *self = Self::default_layout();
+        self.bump();
     }
 
     /// Serialize the layout to a JSON string.
@@ -814,11 +857,11 @@ impl DockLayout {
     /// Clamp all floating docks to be within the viewport.
     pub fn clamp_floating_docks(&mut self, viewport_w: f64, viewport_h: f64) {
         for fd in &mut self.floating {
-            // Keep at least 50px visible on screen
             let min_visible = 50.0;
             fd.x = fd.x.clamp(-fd.dock.width + min_visible, viewport_w - min_visible);
             fd.y = fd.y.clamp(0.0, viewport_h - min_visible);
         }
+        self.bump();
     }
 
     /// Set auto-hide for a dock.
@@ -826,6 +869,7 @@ impl DockLayout {
         if let Some(d) = self.dock_mut(id) {
             d.auto_hide = auto_hide;
         }
+        self.bump();
     }
 
     // -----------------------------------------------------------------------

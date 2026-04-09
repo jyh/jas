@@ -740,3 +740,15 @@ We want to implement these. Do you understand the concepts? Please give suggesti
 The panel groups should be draggable so they can be repositioned. They can also be dragged into another dock.
 When a panel group is dragged out of a dock, it creates a new floating dock. A panel can be dragged into another 
 panel group. When a panel is dragged into empty space, it creates a new floating panel group and dock.
+
+[...]
+
+It should be possible to drag tabs within an panel group to reorder them.
+
+[...]
+
+Give the workspace config snapshot a name.
+
+[...]
+
+Create a Workspace submenu in the Window menu, at the top.
