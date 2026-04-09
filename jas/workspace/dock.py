@@ -27,6 +27,7 @@ DEFAULT_DOCK_WIDTH = 240.0
 DEFAULT_FLOATING_WIDTH = 220.0
 SNAP_DISTANCE = 20.0
 DEFAULT_LAYOUT_NAME = "Default"
+LAYOUT_VERSION = 1
 
 # ---------------------------------------------------------------------------
 # Core types
@@ -152,7 +153,8 @@ class DockLayout:
     def __init__(self, name: str, anchored: list[tuple[DockEdge, Dock]],
                  floating: list[FloatingDock], hidden_panels: list[PanelKind],
                  z_order: list[int], focused_panel: Optional[PanelAddr],
-                 next_id: int, pane_layout=None):
+                 next_id: int, pane_layout=None, version: int = LAYOUT_VERSION):
+        self.version = version
         self.name = name
         self.anchored = anchored
         self.floating = floating
@@ -532,6 +534,7 @@ class DockLayout:
     def reset_to_default(self):
         name = self.name
         fresh = DockLayout.named(name)
+        self.version = fresh.version
         self.name = fresh.name
         self.anchored = fresh.anchored
         self.floating = fresh.floating
@@ -562,6 +565,7 @@ class DockLayout:
             "width": d.width, "min_width": d.min_width,
         }
         result = {
+            "version": self.version,
             "name": self.name,
             "anchored": [{"edge": _edge(e), "dock": _dock(d)} for e, d in self.anchored],
             "floating": [{"dock": _dock(fd.dock), "x": fd.x, "y": fd.y} for fd in self.floating],
@@ -598,6 +602,9 @@ class DockLayout:
                     pl = pane_layout_from_dict(d["pane_layout"])
                 except Exception:
                     pl = None
+            ver = d.get("version", 0)
+            if ver != LAYOUT_VERSION:
+                return DockLayout.default_layout()
             return DockLayout(
                 name=d["name"],
                 anchored=[(_edge(a["edge"]), _dock(a["dock"])) for a in d["anchored"]],
@@ -607,6 +614,7 @@ class DockLayout:
                 focused_panel=None,
                 next_id=d.get("next_id", 1),
                 pane_layout=pl,
+                version=ver,
             )
         except (KeyError, TypeError, ValueError):
             return DockLayout.default_layout()
@@ -710,6 +718,13 @@ class DockLayout:
             from workspace.pane import PaneLayout
             self.pane_layout = PaneLayout.default_three_pane(viewport_w, viewport_h)
             self._bump()
+        # Sync PaneConfig for panes deserialized from old format
+        if self.pane_layout is not None:
+            from workspace.pane import PaneConfig
+            for p in self.pane_layout.panes:
+                expected = PaneConfig.for_kind(p.kind)
+                if p.config.label != expected.label:
+                    p.config = expected
 
     def panes(self):
         return self.pane_layout
