@@ -62,6 +62,16 @@ import Testing
     #expect(!dc.fixedWidth)
     #expect(dc.closable)
     #expect(dc.collapsible)
+
+    // alwaysVisible
+    #expect(!tc.alwaysVisible)
+    #expect(cc.alwaysVisible)
+    #expect(!dc.alwaysVisible)
+
+    // collapsedWidth
+    #expect(tc.collapsedWidth == nil)
+    #expect(cc.collapsedWidth == nil)
+    #expect(dc.collapsedWidth == 36.0)
 }
 
 // MARK: - Position & Sizing

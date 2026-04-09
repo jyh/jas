@@ -98,3 +98,40 @@ import Testing
     #expect(rs.borders.isEmpty)
     #expect(!rs.canvasMaximized)
 }
+
+// MARK: - Config-driven behavior
+
+@Test func alwaysVisibleOverridesHidden() {
+    var pl = PaneLayout.defaultThreePane(viewportW: 1000, viewportH: 700)
+    pl.hidePane(.canvas)
+    let rs = RenderingState.from(pl)
+    // Canvas has alwaysVisible=true, so it stays visible even when hidden
+    let canvas = rs.panes.first { $0.kind == .canvas }!
+    #expect(canvas.visible)
+    // Toolbar does not have alwaysVisible
+    pl.hidePane(.toolbar)
+    let rs2 = RenderingState.from(pl)
+    let toolbar = rs2.panes.first { $0.kind == .toolbar }!
+    #expect(!toolbar.visible)
+}
+
+@Test func collapsedDockUsesConfigWidth() {
+    let pl = PaneLayout.defaultThreePane(viewportW: 1000, viewportH: 700)
+    let rs = RenderingState.from(pl, dockCollapsed: true)
+    let dock = rs.panes.first { $0.kind == .dock }!
+    // Dock config has collapsedWidth=36
+    #expect(dock.width == 36)
+}
+
+@Test func maximizableUsesConfig() {
+    var pl = PaneLayout.defaultThreePane(viewportW: 1000, viewportH: 700)
+    pl.toggleCanvasMaximized()
+    let rs = RenderingState.from(pl)
+    // Canvas (maximizable=true) fills viewport at z=0
+    let canvas = rs.panes.first { $0.kind == .canvas }!
+    #expect(canvas.width == 1000)
+    #expect(canvas.zIndex == 0)
+    // Toolbar (maximizable=false) gets z+50
+    let toolbar = rs.panes.first { $0.kind == .toolbar }!
+    #expect(toolbar.zIndex >= 50)
+}

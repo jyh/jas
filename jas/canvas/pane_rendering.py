@@ -46,9 +46,11 @@ def compute_pane_geometries(pl: PaneLayout | None) -> list[PaneGeometry]:
     maximized = pl.canvas_maximized
     result = []
     for p in pl.panes:
-        visible = True if p.kind == PaneKind.CANVAS else pl.is_pane_visible(p.kind)
-        if p.kind == PaneKind.CANVAS and maximized:
+        visible = p.config.always_visible or pl.is_pane_visible(p.kind)
+        if p.config.maximizable and maximized:
             x, y, w, h, z = 0, 0, pl.viewport_width, pl.viewport_height, 0
+        elif maximized:
+            x, y, w, h, z = p.x, p.y, p.width, p.height, pl.pane_z_index(p.id) + 50
         else:
             x, y, w, h, z = p.x, p.y, p.width, p.height, pl.pane_z_index(p.id)
         result.append(PaneGeometry(

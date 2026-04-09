@@ -164,7 +164,7 @@ public struct ContentView: View {
                           content: { ToolbarPanel(currentTool: $currentTool) },
                           paneDrag: $paneDrag, edgeResize: $edgeResize, edgeSnappedCoord: $edgeSnappedCoord, snapPreview: $snapPreview)
         case .canvas:
-            PaneFrameView(geo: geo, workspace: workspace, showTitleBar: !rs.canvasMaximized,
+            PaneFrameView(geo: geo, workspace: workspace, showTitleBar: !(geo.config.maximizable && rs.canvasMaximized),
                           content: { canvasContent },
                           paneDrag: $paneDrag, edgeResize: $edgeResize, edgeSnappedCoord: $edgeSnappedCoord, snapPreview: $snapPreview)
         case .dock:

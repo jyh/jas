@@ -57,6 +57,8 @@ class PaneConfig:
     closable: bool
     collapsible: bool
     maximizable: bool
+    always_visible: bool
+    collapsed_width: float | None
     tile_order: int
     tile_width: object  # TileFixed | TileWidth.KEEP_CURRENT | TileWidth.FLEX
 
@@ -64,13 +66,16 @@ class PaneConfig:
     def for_kind(kind: PaneKind) -> PaneConfig:
         if kind == PaneKind.TOOLBAR:
             return PaneConfig("Tools", MIN_TOOLBAR_WIDTH, MIN_TOOLBAR_HEIGHT,
-                              True, True, False, False, 0, TileFixed(DEFAULT_TOOLBAR_WIDTH))
+                              True, True, False, False, False, None,
+                              0, TileFixed(DEFAULT_TOOLBAR_WIDTH))
         elif kind == PaneKind.CANVAS:
             return PaneConfig("Canvas", MIN_CANVAS_WIDTH, MIN_CANVAS_HEIGHT,
-                              False, False, False, True, 1, TileWidth.FLEX)
+                              False, False, False, True, True, None,
+                              1, TileWidth.FLEX)
         else:
             return PaneConfig("Panels", MIN_PANE_DOCK_WIDTH, MIN_PANE_DOCK_HEIGHT,
-                              False, True, True, False, 2, TileWidth.KEEP_CURRENT)
+                              False, True, True, False, False, 36.0,
+                              2, TileWidth.KEEP_CURRENT)
 
 @dataclass
 class Pane:
@@ -516,10 +521,14 @@ def pane_layout_to_dict(pl: PaneLayout) -> dict:
             tw_d = "KeepCurrent"
         else:
             tw_d = "Flex"
-        return {"label": c.label, "min_width": c.min_width, "min_height": c.min_height,
+        result = {"label": c.label, "min_width": c.min_width, "min_height": c.min_height,
                 "fixed_width": c.fixed_width, "closable": c.closable,
                 "collapsible": c.collapsible, "maximizable": c.maximizable,
+                "always_visible": c.always_visible,
                 "tile_order": c.tile_order, "tile_width": tw_d}
+        if c.collapsed_width is not None:
+            result["collapsed_width"] = c.collapsed_width
+        return result
     def _pane(p):
         return {"id": p.id, "kind": p.kind.name, "config": _config(p.config),
                 "x": p.x, "y": p.y, "width": p.width, "height": p.height}
@@ -551,7 +560,10 @@ def pane_layout_from_dict(d: dict) -> PaneLayout:
         try:
             return PaneConfig(cd["label"], cd["min_width"], cd["min_height"],
                               cd["fixed_width"], cd["closable"], cd["collapsible"],
-                              cd["maximizable"], cd["tile_order"], _tw(cd["tile_width"]))
+                              cd["maximizable"],
+                              cd.get("always_visible", False),
+                              cd.get("collapsed_width"),
+                              cd["tile_order"], _tw(cd["tile_width"]))
         except (KeyError, TypeError):
             return PaneConfig.for_kind(kind)
     def _pane(pd):

@@ -673,13 +673,19 @@ let tile_width_of_json (j : Yojson.Safe.t) : Pane.tile_width =
   | _ -> Flex
 
 let pane_config_to_json (c : Pane.pane_config) : Yojson.Safe.t =
-  `Assoc [
+  let base = [
     "label", `String c.label;
     "min_width", `Float c.min_width; "min_height", `Float c.min_height;
     "fixed_width", `Bool c.fixed_width; "closable", `Bool c.closable;
     "collapsible", `Bool c.collapsible; "maximizable", `Bool c.maximizable;
+    "always_visible", `Bool c.always_visible;
     "tile_order", `Int c.tile_order; "tile_width", tile_width_to_json c.tile_width;
-  ]
+  ] in
+  let with_cw = match c.collapsed_width with
+    | Some w -> base @ ["collapsed_width", `Float w]
+    | None -> base
+  in
+  `Assoc with_cw
 
 let pane_config_of_json (j : Yojson.Safe.t) : Pane.pane_config =
   let open Yojson.Safe.Util in
@@ -690,6 +696,8 @@ let pane_config_of_json (j : Yojson.Safe.t) : Pane.pane_config =
     closable = j |> member "closable" |> to_bool;
     collapsible = j |> member "collapsible" |> to_bool;
     maximizable = j |> member "maximizable" |> to_bool;
+    always_visible = (try j |> member "always_visible" |> to_bool with _ -> false);
+    collapsed_width = (try Some (j |> member "collapsed_width" |> to_float) with _ -> None);
     tile_order = j |> member "tile_order" |> to_int;
     tile_width = tile_width_of_json (j |> member "tile_width"); }
 
