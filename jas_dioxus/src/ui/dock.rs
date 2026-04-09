@@ -139,8 +139,8 @@ pub enum DragPayload {
 pub enum DropTarget {
     /// Insert a group at this position within a dock.
     GroupSlot { dock_id: DockId, group_idx: usize },
-    /// Add a panel to an existing group's tab bar.
-    TabBar(GroupAddr),
+    /// Add a panel to an existing group's tab bar at a position.
+    TabBar { group: GroupAddr, index: usize },
     /// Snap to a screen edge (create or merge into anchored dock).
     Edge(DockEdge),
 }
@@ -352,6 +352,26 @@ impl DockLayout {
         self.z_order.push(id);
         self.cleanup(from.dock_id);
         Some(id)
+    }
+
+    // -----------------------------------------------------------------------
+    // Reorder panel within a group
+    // -----------------------------------------------------------------------
+
+    /// Reorder a panel within its group. Removes the panel at `from` and
+    /// re-inserts at `to` (clamped). Sets `active` to the new position.
+    pub fn reorder_panel(&mut self, group: GroupAddr, from: usize, to: usize) {
+        if let Some(d) = self.dock_mut(group.dock_id) {
+            if let Some(g) = d.groups.get_mut(group.group_idx) {
+                if from >= g.panels.len() {
+                    return;
+                }
+                let panel = g.panels.remove(from);
+                let to = to.min(g.panels.len());
+                g.panels.insert(to, panel);
+                g.active = to;
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1829,5 +1849,57 @@ mod tests {
         assert!(l.dock(id).unwrap().auto_hide);
         l.set_auto_hide(id, false);
         assert!(!l.dock(id).unwrap().auto_hide);
+    }
+
+    // -----------------------------------------------------------------------
+    // Reorder panels within a group
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn reorder_panel_forward() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        // Group 1: [Color, Stroke, Properties] → move Color to position 2
+        l.reorder_panel(ga(id.0, 1), 0, 2);
+        let g = &l.dock(id).unwrap().groups[1];
+        assert_eq!(g.panels, vec![PanelKind::Stroke, PanelKind::Properties, PanelKind::Color]);
+        assert_eq!(g.active, 2); // active follows the moved panel
+    }
+
+    #[test]
+    fn reorder_panel_backward() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        // Group 1: [Color, Stroke, Properties] → move Properties to position 0
+        l.reorder_panel(ga(id.0, 1), 2, 0);
+        let g = &l.dock(id).unwrap().groups[1];
+        assert_eq!(g.panels, vec![PanelKind::Properties, PanelKind::Color, PanelKind::Stroke]);
+        assert_eq!(g.active, 0);
+    }
+
+    #[test]
+    fn reorder_panel_same_position() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        l.reorder_panel(ga(id.0, 1), 1, 1);
+        let g = &l.dock(id).unwrap().groups[1];
+        assert_eq!(g.panels, vec![PanelKind::Color, PanelKind::Stroke, PanelKind::Properties]);
+    }
+
+    #[test]
+    fn reorder_panel_clamped() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        l.reorder_panel(ga(id.0, 1), 0, 99);
+        let g = &l.dock(id).unwrap().groups[1];
+        assert_eq!(g.panels[2], PanelKind::Color); // moved to end
+    }
+
+    #[test]
+    fn reorder_panel_out_of_bounds() {
+        let mut l = DockLayout::default_layout();
+        let id = right_dock_id(&l);
+        l.reorder_panel(ga(id.0, 1), 99, 0); // no panic
+        l.reorder_panel(ga(99, 0), 0, 1);     // no panic
     }
 }

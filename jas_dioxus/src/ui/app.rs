@@ -1629,8 +1629,19 @@ pub fn App() -> Element {
             let act_drop = act.clone();
             let group_collapsed = group.collapsed;
 
+            // Tab insertion indicator: which index has the drop caret?
+            let tab_drop_idx: Option<usize> = if cur_drag.is_some() {
+                match cur_drop {
+                    Some(DropTarget::TabBar { group: g, index }) if g == (GroupAddr { dock_id: did, group_idx: gi }) => Some(index),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            let panel_count = group.panels.len();
+
             // Tab bar buttons — each tab is individually draggable
-            let tab_nodes: Vec<Result<VNode, RenderError>> = group.panels.iter().enumerate().map(|(pi, &kind)| {
+            let tab_nodes: Vec<Result<VNode, RenderError>> = group.panels.iter().enumerate().flat_map(|(pi, &kind)| {
                 let act_dragend = act_tabs.clone();
                 let act_click = act_tabs.clone();
                 let label = DockLayout::panel_label(kind);
@@ -1643,7 +1654,19 @@ pub fn App() -> Element {
                     panel_idx: pi,
                 });
                 let outline = if is_focused { "outline:2px solid #4a90d9; outline-offset:-2px;" } else { "" };
-                rsx! {
+
+                // Insertion indicator before this tab
+                let show_caret = tab_drop_idx == Some(pi);
+                let mut nodes: Vec<Result<VNode, RenderError>> = Vec::new();
+                if show_caret {
+                    nodes.push(rsx! {
+                        div {
+                            key: "tab-caret-{gi}-{pi}",
+                            style: "width:3px; align-self:stretch; background:#4a90d9; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
+                        }
+                    });
+                }
+                nodes.push(rsx! {
                     div {
                         key: "dock-tab-{gi}-{pi}",
                         style: "padding:3px 8px; cursor:pointer; font-size:11px; font-weight:{font_weight}; background:{bg}; border-bottom:{border_bottom}; user-select:none; {outline}",
@@ -1678,6 +1701,20 @@ pub fn App() -> Element {
                             drop_target_sig.set(None);
                             was_dropped.set(false);
                         },
+                        ondragover: move |evt: Event<DragData>| {
+                            evt.prevent_default();
+                            evt.stop_propagation();
+                            let coords = evt.data().page_coordinates();
+                            last_drag_pos.set((coords.x, coords.y));
+                            // Left half → insert before this tab; right half → insert after
+                            let x = evt.data().element_coordinates().x;
+                            let mid = 30.0; // approximate tab half-width
+                            let idx = if x < mid { pi } else { pi + 1 };
+                            drop_target_sig.set(Some(DropTarget::TabBar {
+                                group: GroupAddr { dock_id: did, group_idx: gi },
+                                index: idx,
+                            }));
+                        },
                         onclick: move |_| {
                             (act_click.borrow_mut())(Box::new(move |st: &mut AppState| {
                                 st.dock_layout.set_active_panel(PanelAddr {
@@ -1707,7 +1744,17 @@ pub fn App() -> Element {
                             }
                         }
                     }
+                });
+                // After-last caret (only on the final tab)
+                if pi == panel_count - 1 && tab_drop_idx == Some(panel_count) {
+                    nodes.push(rsx! {
+                        div {
+                            key: "tab-caret-{gi}-end",
+                            style: "width:3px; align-self:stretch; background:#4a90d9; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
+                        }
+                    });
                 }
+                nodes
             }).collect();
 
             let chevron = if group_collapsed { "\u{25BC}" } else { "\u{25B2}" };
@@ -1733,7 +1780,7 @@ pub fn App() -> Element {
             };
             // Highlight tab bar when it's a TabBar drop target
             let tab_bar_drop = cur_drag.is_some()
-                && cur_drop == Some(DropTarget::TabBar(GroupAddr { dock_id: did, group_idx: gi }));
+                && matches!(cur_drop, Some(DropTarget::TabBar { group, .. }) if group == GroupAddr { dock_id: did, group_idx: gi });
             let tab_bar_border = if tab_bar_drop { "2px solid #4a90d9" } else { "1px solid #bbb" };
 
             let is_dragged_group = matches!(cur_drag,
@@ -1774,13 +1821,16 @@ pub fn App() -> Element {
                                     (DragPayload::Panel(from), DropTarget::GroupSlot { dock_id: to_dock, group_idx: to_idx }) => {
                                         st.dock_layout.insert_panel_as_new_group(from, to_dock, to_idx);
                                     }
-                                    (DragPayload::Group(from), DropTarget::TabBar(to_group)) => {
-                                        // Merge: move all panels from dragged group into target group
-                                        // by moving the group next to the target then transferring panels
+                                    (DragPayload::Group(from), DropTarget::TabBar { group: to_group, .. }) => {
                                         st.dock_layout.move_group_to_dock(from, to_group.dock_id, to_group.group_idx);
                                     }
-                                    (DragPayload::Panel(from), DropTarget::TabBar(to_group)) => {
-                                        st.dock_layout.move_panel_to_group(from, to_group);
+                                    (DragPayload::Panel(from), DropTarget::TabBar { group: to_group, index: to_idx }) => {
+                                        if from.group == to_group {
+                                            // Same group: reorder
+                                            st.dock_layout.reorder_panel(to_group, from.panel_idx, to_idx);
+                                        } else {
+                                            st.dock_layout.move_panel_to_group(from, to_group);
+                                        }
                                     }
                                     _ => {}
                                 }
@@ -1793,14 +1843,15 @@ pub fn App() -> Element {
                     div { style: "{drop_indicator_style}" }
 
                     // Tab bar with grip handle
-                    div {
+                    {let panel_count = group.panels.len();
+                    rsx! { div {
                         style: "display:flex; background:#d8d8d8; border-bottom:{tab_bar_border}; align-items:center; overflow-x:auto; overflow-y:hidden; min-height:24px;",
                         ondragover: move |evt: Event<DragData>| {
                             evt.prevent_default();
                             evt.stop_propagation();
                             let coords = evt.data().page_coordinates();
                             last_drag_pos.set((coords.x, coords.y));
-                            drop_target_sig.set(Some(DropTarget::TabBar(GroupAddr { dock_id: did, group_idx: gi })));
+                            drop_target_sig.set(Some(DropTarget::TabBar { group: GroupAddr { dock_id: did, group_idx: gi }, index: panel_count }));
                         },
 
                         // Grip handle for dragging the whole group
@@ -1858,7 +1909,7 @@ pub fn App() -> Element {
                             },
                             "{chevron}"
                         }
-                    }
+                    } } } // close tab bar div, rsx!, let
 
                     if !group_collapsed {
                         div {
