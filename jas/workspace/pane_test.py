@@ -62,6 +62,14 @@ def test_pane_config_defaults():
     assert not dc.fixed_width
     assert dc.closable
     assert dc.collapsible
+    # always_visible
+    assert not tc.always_visible
+    assert cc.always_visible
+    assert not dc.always_visible
+    # collapsed_width
+    assert tc.collapsed_width is None
+    assert cc.collapsed_width is None
+    assert dc.collapsed_width == 36.0
 
 
 # -- Position & sizing --
