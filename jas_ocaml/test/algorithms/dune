@@ -17,3 +17,7 @@
 (test
  (name planar_test)
  (libraries jas))
+
+(test
+ (name shape_recognize_test)
+ (libraries jas))
