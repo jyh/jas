@@ -166,6 +166,32 @@ def create_menus(window: QMainWindow) -> None:
 
     ws_menu.aboutToShow.connect(_rebuild_workspace_menu)
 
+    # Pane toggles
+    def _toggle_pane(kind):
+        if not hasattr(window, 'dock_layout'):
+            return
+        layout = window.dock_layout
+        layout.panes_mut(lambda pl: (
+            pl.hide_pane(kind) if pl.is_pane_visible(kind) else pl.show_pane(kind)))
+        if hasattr(window, 'refresh_panes'):
+            window.refresh_panes()
+
+    from workspace.pane import PaneKind as PK
+    toolbar_action = window_menu.addAction("Toggle Toolbar")
+    toolbar_action.triggered.connect(lambda: _toggle_pane(PK.TOOLBAR))
+    panels_action = window_menu.addAction("Toggle Panels")
+    panels_action.triggered.connect(lambda: _toggle_pane(PK.DOCK))
+
+    def _tile_panes():
+        if not hasattr(window, 'dock_layout'):
+            return
+        window.dock_layout.panes_mut(lambda pl: pl.tile_panes())
+        if hasattr(window, 'refresh_panes'):
+            window.refresh_panes()
+
+    tile_action = window_menu.addAction("Tile Panes")
+    tile_action.triggered.connect(_tile_panes)
+
     window_menu.addSeparator()
 
     # Panel toggles
@@ -199,7 +225,9 @@ def create_menus(window: QMainWindow) -> None:
 def _reset_layout(window):
     if hasattr(window, 'dock_layout'):
         window.dock_layout.reset_to_default()
-        if hasattr(window, 'dock_panel'):
+        if hasattr(window, 'refresh_panes'):
+            window.refresh_panes()
+        elif hasattr(window, 'dock_panel'):
             window.dock_panel.rebuild()
 
 
