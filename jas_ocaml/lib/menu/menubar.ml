@@ -376,7 +376,7 @@ let revert (get_model : unit -> Model.model) (parent : GWindow.window) () =
     | _ -> ()
   end
 
-let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open (vbox : GPack.box) =
+let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open ?(dock_layout : Dock.dock_layout option) ?(refresh_dock : (unit -> unit) option) (vbox : GPack.box) =
   let m () = get_model () in
   (* Menubar *)
   let menubar = GMenu.menu_bar ~packing:(fun w -> vbox#pack w) () in
@@ -428,4 +428,61 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   let view_factory = new GMenu.factory _view_menu in
   ignore (view_factory#add_item "Zoom In" ~key:GdkKeysyms._plus ~callback:(fun () -> print_endline "Zoom In"));
   ignore (view_factory#add_item "Zoom Out" ~key:GdkKeysyms._minus ~callback:(fun () -> print_endline "Zoom Out"));
-  ignore (view_factory#add_item "Fit in Window" ~key:GdkKeysyms._0 ~callback:(fun () -> print_endline "Fit in Window"))
+  ignore (view_factory#add_item "Fit in Window" ~key:GdkKeysyms._0 ~callback:(fun () -> print_endline "Fit in Window"));
+
+  (* Window menu *)
+  let _window_menu = factory#add_submenu "Window" in
+  let window_factory = new GMenu.factory _window_menu in
+
+  (* Workspace submenu *)
+  (match dock_layout, refresh_dock with
+   | Some layout, Some refresh ->
+     let _ws_menu = window_factory#add_submenu "Workspace" in
+     let ws_factory = new GMenu.factory _ws_menu in
+     ignore (ws_factory#add_item ("Reset \xE2\x80\x9C" ^ layout.Dock.name ^ "\xE2\x80\x9D") ~callback:(fun () ->
+       Dock.reset_to_default layout;
+       refresh ()
+     ));
+     ignore (ws_factory#add_separator ())
+   | _ -> ());
+
+  ignore (window_factory#add_separator ());
+
+  (* Panel toggles *)
+  let toggle_panel kind label =
+    ignore (window_factory#add_item label ~callback:(fun () ->
+      match dock_layout, refresh_dock with
+      | Some layout, Some refresh ->
+        if Dock.is_panel_visible layout kind then begin
+          (* Find and close the panel *)
+          let found = ref false in
+          List.iter (fun (_, (d : Dock.dock)) ->
+            Array.iteri (fun gi (g : Dock.panel_group) ->
+              Array.iteri (fun pi k ->
+                if k = kind && not !found then begin
+                  Dock.close_panel layout { group = { dock_id = d.id; group_idx = gi }; panel_idx = pi };
+                  found := true
+                end
+              ) g.panels
+            ) d.groups
+          ) layout.anchored;
+          List.iter (fun (fd : Dock.floating_dock) ->
+            Array.iteri (fun gi (g : Dock.panel_group) ->
+              Array.iteri (fun pi k ->
+                if k = kind && not !found then begin
+                  Dock.close_panel layout { group = { dock_id = fd.dock.id; group_idx = gi }; panel_idx = pi };
+                  found := true
+                end
+              ) g.panels
+            ) fd.dock.groups
+          ) layout.floating
+        end else
+          Dock.show_panel layout kind;
+        refresh ()
+      | _ -> ()
+    ))
+  in
+  toggle_panel Dock.Layers "Layers";
+  toggle_panel Dock.Color "Color";
+  toggle_panel Dock.Stroke "Stroke";
+  toggle_panel Dock.Properties "Properties"

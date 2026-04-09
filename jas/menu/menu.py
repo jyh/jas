@@ -143,6 +143,75 @@ def create_menus(window: QMainWindow) -> None:
     fit_action.setShortcut(QKeySequence("Ctrl+0"))
     fit_action.triggered.connect(lambda: print("Fit in window"))
 
+    # --- Window menu ---
+    window_menu = menubar.addMenu("&Window")
+
+    # Workspace submenu
+    ws_menu = window_menu.addMenu("Workspace")
+
+    def _rebuild_workspace_menu():
+        ws_menu.clear()
+        if not hasattr(window, 'dock_layout'):
+            return
+        layout = window.dock_layout
+        # Saved layout entries (just current for now)
+        active_name = layout.name
+        check = "\u2713 "
+        ws_menu.addAction(check + active_name)
+        ws_menu.addSeparator()
+        reset_action = ws_menu.addAction(f"Reset \u201C{active_name}\u201D")
+        reset_action.triggered.connect(lambda: _reset_layout(window))
+        new_action = ws_menu.addAction("New Workspace\u2026")
+        new_action.triggered.connect(lambda: _new_workspace(window))
+
+    ws_menu.aboutToShow.connect(_rebuild_workspace_menu)
+
+    window_menu.addSeparator()
+
+    # Panel toggles
+    def _toggle_panel(kind):
+        if not hasattr(window, 'dock_layout'):
+            return
+        from workspace.dock import DockLayout, GroupAddr, PanelAddr
+        layout = window.dock_layout
+        if layout.is_panel_visible(kind):
+            # Find and close
+            for _, dock in layout.anchored:
+                for gi, group in enumerate(dock.groups):
+                    for pi, k in enumerate(group.panels):
+                        if k == kind:
+                            layout.close_panel(PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=gi), panel_idx=pi))
+                            if hasattr(window, 'dock_panel'):
+                                window.dock_panel.rebuild()
+                            return
+        else:
+            layout.show_panel(kind)
+            if hasattr(window, 'dock_panel'):
+                window.dock_panel.rebuild()
+
+    from workspace.dock import PanelKind
+    for kind, label in [(PanelKind.LAYERS, "&Layers"), (PanelKind.COLOR, "&Color"),
+                        (PanelKind.STROKE, "&Stroke"), (PanelKind.PROPERTIES, "&Properties")]:
+        action = window_menu.addAction(label)
+        action.triggered.connect(lambda checked=False, k=kind: _toggle_panel(k))
+
+
+def _reset_layout(window):
+    if hasattr(window, 'dock_layout'):
+        window.dock_layout.reset_to_default()
+        if hasattr(window, 'dock_panel'):
+            window.dock_panel.rebuild()
+
+
+def _new_workspace(window):
+    from PySide6.QtWidgets import QInputDialog
+    name, ok = QInputDialog.getText(window, "New Workspace", "Workspace name:")
+    if ok and name.strip():
+        if hasattr(window, 'dock_layout'):
+            window.dock_layout.name = name.strip()
+            if hasattr(window, 'dock_panel'):
+                window.dock_panel.rebuild()
+
 
 def _open_file(window: QMainWindow) -> None:
     """Show Open dialog and load an SVG file into a new canvas.

@@ -6,4 +6,4 @@ val save : Model.model -> GWindow.window -> unit -> unit
 
 val revert : (unit -> Model.model) -> GWindow.window -> unit -> unit
 
-val create : (unit -> Model.model) -> GWindow.window -> on_open:(Model.model -> unit) -> GPack.box -> unit
+val create : (unit -> Model.model) -> GWindow.window -> on_open:(Model.model -> unit) -> ?dock_layout:Dock.dock_layout -> ?refresh_dock:(unit -> unit) -> GPack.box -> unit
