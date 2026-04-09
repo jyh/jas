@@ -2323,6 +2323,9 @@ pub fn App() -> Element {
             .jas-dock {{ transition: width 0.15s ease; }}
             .jas-floating-dock {{ transition: opacity 0.15s ease; }}
             .jas-tab:hover {{ background: #e8e8e8 !important; }}
+            .jas-border-handle {{ background: transparent; }}
+            .jas-border-handle:hover {{ background: rgba(74,144,217,0.3); }}
+            .jas-border-handle:active {{ background: rgba(74,144,217,0.5); }}
         "#  }
         div {
             tabindex: "0",
@@ -2333,6 +2336,7 @@ pub fn App() -> Element {
             },
             onmousemove: {
                 let act = act.clone();
+                let app = app.clone();
                 move |evt: Event<MouseData>| {
                     let coords = evt.data().page_coordinates();
                     // Floating dock title bar drag
@@ -2361,23 +2365,17 @@ pub fn App() -> Element {
                     }
                     // Shared border drag
                     if let Some((snap_idx, start_coord)) = border_drag() {
-                        // Determine if vertical or horizontal from snap data
-                        let delta = {
-                            let st = act.borrow_mut();
-                            // We need to check the snap to figure direction
-                            drop(st);
-                            let snap_copy = pane_snapshot.as_ref().and_then(|pl| pl.snaps.get(snap_idx).copied());
-                            if let Some(snap) = snap_copy {
-                                if snap.edge == EdgeSide::Right {
-                                    coords.x - start_coord // vertical border
-                                } else {
-                                    coords.y - start_coord // horizontal border
-                                }
-                            } else {
-                                return;
-                            }
+                        // Read snap direction from live state (not stale snapshot)
+                        let is_vert = {
+                            let st = app.borrow();
+                            st.dock_layout.pane_layout.as_ref()
+                                .and_then(|pl| pl.snaps.get(snap_idx))
+                                .map(|s| s.edge == EdgeSide::Right)
+                                .unwrap_or(true)
                         };
-                        border_drag.set(Some((snap_idx, if pane_snapshot.as_ref().and_then(|pl| pl.snaps.get(snap_idx)).map(|s| s.edge == EdgeSide::Right).unwrap_or(true) { coords.x } else { coords.y })));
+                        let delta = if is_vert { coords.x - start_coord } else { coords.y - start_coord };
+                        let new_start = if is_vert { coords.x } else { coords.y };
+                        border_drag.set(Some((snap_idx, new_start)));
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                             if let Some(ref mut pl) = st.dock_layout.pane_layout {
                                 pl.drag_shared_border(snap_idx, delta);
@@ -2493,7 +2491,7 @@ pub fn App() -> Element {
 
                 // Tool buttons
                 div {
-                    style: "flex:1; padding:4px 2px; display:grid; grid-template-columns:32px 32px; grid-auto-rows:32px; gap:2px; justify-content:center; align-content:start; overflow-y:auto;",
+                    style: "flex:1; padding:4px 2px; display:grid; grid-template-columns:repeat(auto-fill, 32px); grid-auto-rows:32px; gap:2px; justify-content:center; align-content:start; overflow-y:auto;",
                     for btn in tool_buttons {
                         {btn}
                     }
@@ -2666,6 +2664,7 @@ pub fn App() -> Element {
                     rsx! {
                         div {
                             key: "border-{snap_idx}",
+                            class: "jas-border-handle",
                             style: "position:absolute; left:{bx}px; top:{by}px; width:{bw}px; height:{bh}px; cursor:{cursor_css}; z-index:100;",
                             onmousedown: move |evt: Event<MouseData>| {
                                 evt.stop_propagation();
