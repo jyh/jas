@@ -1175,6 +1175,7 @@ class CanvasNSView: NSView {
                 case "t": onToolChange?(.typeTool)
                 case "\\": onToolChange?(.line)
                 case "m": onToolChange?(.rect)
+                case "q": onToolChange?(.lasso)
                 case "=", "+": onToolChange?(.addAnchorPoint)
                 case "-", "_": onToolChange?(.deleteAnchorPoint)
                 default: super.keyDown(with: event)

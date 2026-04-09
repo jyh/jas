@@ -11,6 +11,7 @@ class controller : ?model:Model.model -> unit -> object
   method remove_layer : int -> unit
   method add_element : Element.element -> unit
   method select_rect : ?extend:bool -> float -> float -> float -> float -> unit
+  method select_polygon : ?extend:bool -> (float * float) array -> unit
   method group_select_rect : ?extend:bool -> float -> float -> float -> float -> unit
   method direct_select_rect : ?extend:bool -> float -> float -> float -> float -> unit
   method set_selection : Document.selection -> unit

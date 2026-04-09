@@ -148,5 +148,6 @@ func createTools() -> [Tool: CanvasTool] {
         .roundedRect: RoundedRectTool(),
         .polygon: PolygonTool(),
         .star: StarTool(),
+        .lasso: LassoTool(),
     ]
 }

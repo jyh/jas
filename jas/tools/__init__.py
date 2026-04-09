@@ -20,6 +20,7 @@ from tools.path_eraser_tool import PathEraserTool
 from tools.smooth_tool import SmoothTool
 from tools.type_tool import TypeTool
 from tools.type_on_path_tool import TypeOnPathTool
+from tools.lasso_tool import LassoTool
 
 
 def create_tools() -> dict[Tool, CanvasTool]:
@@ -42,4 +43,5 @@ def create_tools() -> dict[Tool, CanvasTool]:
         Tool.ROUNDED_RECT: RoundedRectTool(),
         Tool.POLYGON: PolygonTool(),
         Tool.STAR: StarTool(),
+        Tool.LASSO: LassoTool(),
     }

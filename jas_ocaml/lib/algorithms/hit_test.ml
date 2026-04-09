@@ -165,3 +165,82 @@ let element_intersects_rect (elem : Element.element) rx ry rw rh =
   | _ ->
     let (bx, by, bw, bh) = Element.bounds elem in
     rects_intersect bx by bw bh rx ry rw rh
+
+(* ------------------------------------------------------------------ *)
+(* Polygon geometry                                                    *)
+(* ------------------------------------------------------------------ *)
+
+let point_in_polygon px py poly =
+  let n = Array.length poly in
+  if n < 3 then false
+  else
+    let inside = ref false in
+    let j = ref (n - 1) in
+    for i = 0 to n - 1 do
+      let (xi, yi) = poly.(i) in
+      let (xj, yj) = poly.(!j) in
+      if ((yi > py) <> (yj > py)) && (px < (xj -. xi) *. (py -. yi) /. (yj -. yi) +. xi) then
+        inside := not !inside;
+      j := i
+    done;
+    !inside
+
+let segment_intersects_polygon x1 y1 x2 y2 poly =
+  if point_in_polygon x1 y1 poly || point_in_polygon x2 y2 poly then true
+  else
+    let n = Array.length poly in
+    let found = ref false in
+    for i = 0 to n - 1 do
+      let j = (i + 1) mod n in
+      if segments_intersect x1 y1 x2 y2
+           (fst poly.(i)) (snd poly.(i)) (fst poly.(j)) (snd poly.(j)) then
+        found := true
+    done;
+    !found
+
+let element_intersects_polygon (elem : Element.element) poly =
+  let open Element in
+  match elem with
+  | Line { x1; y1; x2; y2; _ } ->
+    segment_intersects_polygon x1 y1 x2 y2 poly
+  | Rect { x; y; width; height; fill; _ } ->
+    if fill <> None then begin
+      let corners = [| (x, y); (x +. width, y);
+                       (x +. width, y +. height); (x, y +. height) |] in
+      if Array.exists (fun (cx, cy) -> point_in_polygon cx cy poly) corners then true
+      else if Array.exists (fun (px, py) -> point_in_rect px py x y width height) poly then true
+      else List.exists (fun (sx1, sy1, sx2, sy2) ->
+        segment_intersects_polygon sx1 sy1 sx2 sy2 poly
+      ) (segments_of_element elem)
+    end else
+      List.exists (fun (sx1, sy1, sx2, sy2) ->
+        segment_intersects_polygon sx1 sy1 sx2 sy2 poly
+      ) (segments_of_element elem)
+  | Text _ | Group _ | Layer _ ->
+    let (bx, by, bw, bh) = Element.bounds elem in
+    let corners = [| (bx, by); (bx +. bw, by);
+                     (bx +. bw, by +. bh); (bx, by +. bh) |] in
+    if Array.exists (fun (cx, cy) -> point_in_polygon cx cy poly) corners then true
+    else if Array.exists (fun (px, py) -> point_in_rect px py bx by bw bh) poly then true
+    else
+      let rect_segs = [
+        (bx, by, bx +. bw, by); (bx +. bw, by, bx +. bw, by +. bh);
+        (bx +. bw, by +. bh, bx, by +. bh); (bx, by +. bh, bx, by)
+      ] in
+      List.exists (fun (sx1, sy1, sx2, sy2) ->
+        segment_intersects_polygon sx1 sy1 sx2 sy2 poly
+      ) rect_segs
+  | _ ->
+    let (bx, by, bw, bh) = Element.bounds elem in
+    let corners = [| (bx, by); (bx +. bw, by);
+                     (bx +. bw, by +. bh); (bx, by +. bh) |] in
+    if Array.exists (fun (cx, cy) -> point_in_polygon cx cy poly) corners then true
+    else if Array.exists (fun (px, py) -> point_in_rect px py bx by bw bh) poly then true
+    else
+      let rect_segs = [
+        (bx, by, bx +. bw, by); (bx +. bw, by, bx +. bw, by +. bh);
+        (bx +. bw, by +. bh, bx, by +. bh); (bx, by +. bh, bx, by)
+      ] in
+      List.exists (fun (sx1, sy1, sx2, sy2) ->
+        segment_intersects_polygon sx1 sy1 sx2 sy2 poly
+      ) rect_segs

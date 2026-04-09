@@ -22,6 +22,7 @@ public enum Tool: String, CaseIterable {
     case roundedRect
     case polygon
     case star
+    case lasso
 }
 
 // MARK: - Canvas entry for multi-canvas workspace
@@ -290,6 +291,7 @@ struct ToolbarPanel: View {
                         visibleTool: $shapeSlotTool,
                         alternates: [.rect, .roundedRect, .polygon, .star]
                     )
+                    ToolbarView.toolButton(currentTool: $currentTool, tool: .lasso)
                 }
             }
             .padding(4)

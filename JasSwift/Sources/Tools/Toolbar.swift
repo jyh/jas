@@ -720,6 +720,27 @@ public struct ToolbarView {
                 path.closeSubpath()
                 let transformed = path.applying(transform)
                 context.stroke(transformed, with: .color(color), lineWidth: 8.0 * s)
+
+            case .lasso:
+                // Lasso (freehand loop — placeholder icon)
+                var path = SwiftUI.Path()
+                path.move(to: CGPoint(x: ox + 14, y: oy + 5))
+                path.addCurve(to: CGPoint(x: ox + 3, y: oy + 14),
+                              control1: CGPoint(x: ox + 6, y: oy + 5),
+                              control2: CGPoint(x: ox + 3, y: oy + 10))
+                path.addCurve(to: CGPoint(x: ox + 14, y: oy + 22),
+                              control1: CGPoint(x: ox + 3, y: oy + 20),
+                              control2: CGPoint(x: ox + 8, y: oy + 24))
+                path.addCurve(to: CGPoint(x: ox + 20, y: oy + 12),
+                              control1: CGPoint(x: ox + 20, y: oy + 20),
+                              control2: CGPoint(x: ox + 22, y: oy + 16))
+                path.addCurve(to: CGPoint(x: ox + 12, y: oy + 13),
+                              control1: CGPoint(x: ox + 18, y: oy + 8),
+                              control2: CGPoint(x: ox + 12, y: oy + 9))
+                path.addCurve(to: CGPoint(x: ox + 17, y: oy + 15),
+                              control1: CGPoint(x: ox + 12, y: oy + 16),
+                              control2: CGPoint(x: ox + 16, y: oy + 17))
+                context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
             }
         }
     }
@@ -824,6 +845,7 @@ private struct ArrowSlotButton: View {
         case .roundedRect: return "Rounded Rectangle"
         case .polygon: return "Polygon"
         case .star: return "Star"
+        case .lasso: return "Lasso"
         default: return tool.rawValue
         }
     }

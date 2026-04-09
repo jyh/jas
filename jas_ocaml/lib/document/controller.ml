@@ -6,6 +6,7 @@
 
 let point_in_rect = Hit_test.point_in_rect
 let element_intersects_rect = Hit_test.element_intersects_rect
+let element_intersects_polygon = Hit_test.element_intersects_polygon
 
 (* Move helper: collapse a SelectionKind into the (is_all, indices)
    pair that [Element.move_control_points] consumes. *)
@@ -123,6 +124,49 @@ class controller ?(model = Model.create ()) () =
               end
             | _ ->
               if element_intersects_rect child x y w h then
+                let path = [li; ci] in
+                selection := Document.PathMap.add path
+                  (Document.element_selection_all path) !selection
+          ) children
+        | _ -> ()
+      ) doc.Document.layers;
+      let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
+      model#set_document { doc with Document.selection = new_sel }
+
+    method select_polygon ?(extend=false) (polygon : (float * float) array) =
+      let doc = model#document in
+      let selection = ref Document.PathMap.empty in
+      Array.iteri (fun li layer ->
+        match layer with
+        | Element.Layer { children; visibility = layer_vis; _ } ->
+          if layer_vis = Element.Invisible then ()
+          else
+          Array.iteri (fun ci child ->
+            if Element.is_locked child then ()
+            else
+            let child_vis =
+              let cv = Element.get_visibility child in
+              if compare cv layer_vis < 0 then cv else layer_vis
+            in
+            if child_vis = Element.Invisible then ()
+            else
+            match child with
+            | Element.Group { children = gc; _ } ->
+              let any_hit = Array.exists (fun c ->
+                element_intersects_polygon c polygon
+              ) gc in
+              if any_hit then begin
+                let grp_path = [li; ci] in
+                selection := Document.PathMap.add grp_path
+                  (Document.element_selection_all grp_path) !selection;
+                Array.iteri (fun gi _gc_elem ->
+                  let path = [li; ci; gi] in
+                  selection := Document.PathMap.add path
+                    (Document.element_selection_all path) !selection
+                ) gc
+              end
+            | _ ->
+              if element_intersects_polygon child polygon then
                 let path = [li; ci] in
                 selection := Document.PathMap.add path
                   (Document.element_selection_all path) !selection
