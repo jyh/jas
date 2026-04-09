@@ -1,9 +1,9 @@
-//! Dock and panel infrastructure.
+//! Workspace layout infrastructure.
 //!
-//! A [`DockLayout`] manages multiple docks: anchored docks snapped to screen
-//! edges and floating docks at arbitrary positions. Each [`Dock`] contains a
-//! vertical list of [`PanelGroup`]s. Each group has tabbed [`PanelKind`]
-//! entries, one of which is active at a time.
+//! A [`WorkspaceLayout`] manages the overall window layout: pane positions
+//! and snap constraints for the toolbar, canvas, and dock panes, plus
+//! anchored and floating docks with panel groups. Each [`Dock`] contains
+//! a vertical list of [`PanelGroup`]s with tabbed [`PanelKind`] entries.
 //!
 //! This module contains only pure data types and state operations — no
 //! rendering code.
@@ -146,7 +146,7 @@ pub enum DropTarget {
 }
 
 // ---------------------------------------------------------------------------
-// DockLayout
+// WorkspaceLayout
 // ---------------------------------------------------------------------------
 
 /// Current layout format version. Saved layouts with a different version
@@ -155,7 +155,7 @@ pub const LAYOUT_VERSION: u32 = 1;
 
 /// Top-level layout: anchored docks on screen edges + floating docks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DockLayout {
+pub struct WorkspaceLayout {
     /// Format version. Must match LAYOUT_VERSION or the layout is rejected.
     #[serde(default)]
     pub version: u32,
@@ -217,7 +217,7 @@ impl AppConfig {
 /// Default layout name.
 pub const DEFAULT_LAYOUT_NAME: &str = "Default";
 
-impl DockLayout {
+impl WorkspaceLayout {
     // -----------------------------------------------------------------------
     // Construction
     // -----------------------------------------------------------------------
@@ -1895,7 +1895,7 @@ mod tests {
         PanelAddr { group: ga(dock_id, group_idx), panel_idx }
     }
 
-    fn right_dock_id(layout: &DockLayout) -> DockId {
+    fn right_dock_id(layout: &WorkspaceLayout) -> DockId {
         layout.anchored_dock(DockEdge::Right).unwrap().id
     }
 
@@ -1905,7 +1905,7 @@ mod tests {
 
     #[test]
     fn default_layout_one_anchored_right() {
-        let l = DockLayout::default_layout();
+        let l = WorkspaceLayout::default_layout();
         assert_eq!(l.anchored.len(), 1);
         assert_eq!(l.anchored[0].0, DockEdge::Right);
         assert!(l.floating.is_empty());
@@ -1913,7 +1913,7 @@ mod tests {
 
     #[test]
     fn default_layout_two_groups() {
-        let l = DockLayout::default_layout();
+        let l = WorkspaceLayout::default_layout();
         let d = l.anchored_dock(DockEdge::Right).unwrap();
         assert_eq!(d.groups.len(), 2);
         assert_eq!(d.groups[0].panels, vec![PanelKind::Layers]);
@@ -1922,7 +1922,7 @@ mod tests {
 
     #[test]
     fn default_not_collapsed() {
-        let l = DockLayout::default_layout();
+        let l = WorkspaceLayout::default_layout();
         let d = l.anchored_dock(DockEdge::Right).unwrap();
         assert!(!d.collapsed);
         for g in &d.groups {
@@ -1932,21 +1932,21 @@ mod tests {
 
     #[test]
     fn default_dock_width() {
-        let l = DockLayout::default_layout();
+        let l = WorkspaceLayout::default_layout();
         let d = l.anchored_dock(DockEdge::Right).unwrap();
         assert_eq!(d.width, DEFAULT_DOCK_WIDTH);
     }
 
     #[test]
     fn dock_lookup_anchored() {
-        let l = DockLayout::default_layout();
+        let l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         assert!(l.dock(id).is_some());
     }
 
     #[test]
     fn dock_lookup_floating() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), 100.0, 100.0).unwrap();
         assert!(l.dock(fid).is_some());
@@ -1955,13 +1955,13 @@ mod tests {
 
     #[test]
     fn dock_lookup_invalid() {
-        let l = DockLayout::default_layout();
+        let l = WorkspaceLayout::default_layout();
         assert!(l.dock(DockId(99)).is_none());
     }
 
     #[test]
     fn anchored_dock_by_edge() {
-        let l = DockLayout::default_layout();
+        let l = WorkspaceLayout::default_layout();
         assert!(l.anchored_dock(DockEdge::Right).is_some());
         assert!(l.anchored_dock(DockEdge::Left).is_none());
         assert!(l.anchored_dock(DockEdge::Bottom).is_none());
@@ -1973,7 +1973,7 @@ mod tests {
 
     #[test]
     fn toggle_dock_collapsed() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         assert!(!l.dock(id).unwrap().collapsed);
         l.toggle_dock_collapsed(id);
@@ -1984,7 +1984,7 @@ mod tests {
 
     #[test]
     fn toggle_group_collapsed() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.toggle_group_collapsed(ga(id.0, 0));
         assert!(l.dock(id).unwrap().groups[0].collapsed);
@@ -1995,14 +1995,14 @@ mod tests {
 
     #[test]
     fn toggle_group_out_of_bounds() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         l.toggle_group_collapsed(ga(0, 99)); // no panic
         l.toggle_group_collapsed(ga(99, 0)); // no panic
     }
 
     #[test]
     fn set_active_panel() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.set_active_panel(pa(id.0, 1, 2));
         assert_eq!(l.dock(id).unwrap().groups[1].active, 2);
@@ -2010,7 +2010,7 @@ mod tests {
 
     #[test]
     fn set_active_panel_out_of_bounds() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.set_active_panel(pa(id.0, 1, 99)); // invalid panel
         assert_eq!(l.dock(id).unwrap().groups[1].active, 0);
@@ -2024,7 +2024,7 @@ mod tests {
 
     #[test]
     fn move_group_forward() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.move_group_within_dock(id, 0, 1);
         let d = l.dock(id).unwrap();
@@ -2034,7 +2034,7 @@ mod tests {
 
     #[test]
     fn move_group_backward() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.move_group_within_dock(id, 1, 0);
         let d = l.dock(id).unwrap();
@@ -2044,7 +2044,7 @@ mod tests {
 
     #[test]
     fn move_group_same_position() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.move_group_within_dock(id, 0, 0);
         assert_eq!(l.dock(id).unwrap().groups[0].panels, vec![PanelKind::Layers]);
@@ -2052,7 +2052,7 @@ mod tests {
 
     #[test]
     fn move_group_clamped() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.move_group_within_dock(id, 0, 99);
         assert_eq!(l.dock(id).unwrap().groups[1].panels, vec![PanelKind::Layers]);
@@ -2060,7 +2060,7 @@ mod tests {
 
     #[test]
     fn move_group_out_of_bounds() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.move_group_within_dock(id, 99, 0); // no panic
         assert_eq!(l.dock(id).unwrap().groups.len(), 2);
@@ -2068,7 +2068,7 @@ mod tests {
 
     #[test]
     fn move_group_preserves_state() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.dock_mut(id).unwrap().groups[1].active = 2;
         l.dock_mut(id).unwrap().groups[1].collapsed = true;
@@ -2084,7 +2084,7 @@ mod tests {
 
     #[test]
     fn move_group_between_docks() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
         // Now move group 0 from anchored (which is now [Color,Stroke,Properties]) to floating
@@ -2095,7 +2095,7 @@ mod tests {
 
     #[test]
     fn move_group_inserts_at_position() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Detach both groups to create floating docks
         let f1 = l.detach_group(ga(id.0, 0), 10.0, 10.0).unwrap();
@@ -2112,7 +2112,7 @@ mod tests {
 
     #[test]
     fn move_group_same_dock_is_reorder() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.move_group_to_dock(ga(id.0, 0), id, 1);
         let d = l.dock(id).unwrap();
@@ -2122,7 +2122,7 @@ mod tests {
 
     #[test]
     fn move_group_invalid_source() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.move_group_to_dock(ga(id.0, 99), id, 0); // no panic
         assert_eq!(l.dock(id).unwrap().groups.len(), 2);
@@ -2130,7 +2130,7 @@ mod tests {
 
     #[test]
     fn move_group_invalid_target() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.move_group_to_dock(ga(id.0, 0), DockId(99), 0);
         // Group should be put back — source still has 2 groups
@@ -2143,7 +2143,7 @@ mod tests {
 
     #[test]
     fn detach_group_creates_floating() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), 100.0, 200.0);
         assert!(fid.is_some());
@@ -2154,7 +2154,7 @@ mod tests {
 
     #[test]
     fn detach_group_position() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), 100.0, 200.0).unwrap();
         let fd = l.floating_dock(fid).unwrap();
@@ -2164,7 +2164,7 @@ mod tests {
 
     #[test]
     fn detach_group_unique_ids() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let f1 = l.detach_group(ga(id.0, 0), 10.0, 10.0).unwrap();
         let f2 = l.detach_group(ga(id.0, 0), 20.0, 20.0).unwrap();
@@ -2173,7 +2173,7 @@ mod tests {
 
     #[test]
     fn detach_last_group_floating_removes_dock() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let f1 = l.detach_group(ga(id.0, 0), 10.0, 10.0).unwrap();
         // f1 has one group. Detach it elsewhere.
@@ -2184,7 +2184,7 @@ mod tests {
 
     #[test]
     fn detach_last_group_anchored_keeps_dock() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.detach_group(ga(id.0, 0), 10.0, 10.0);
         l.detach_group(ga(id.0, 0), 20.0, 20.0);
@@ -2199,7 +2199,7 @@ mod tests {
 
     #[test]
     fn move_panel_same_dock() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Move Stroke (group 1, panel 1) to group 0
         l.move_panel_to_group(pa(id.0, 1, 1), ga(id.0, 0));
@@ -2210,7 +2210,7 @@ mod tests {
 
     #[test]
     fn move_panel_becomes_active() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.move_panel_to_group(pa(id.0, 1, 1), ga(id.0, 0));
         assert_eq!(l.dock(id).unwrap().groups[0].active, 1); // newly added panel
@@ -2218,7 +2218,7 @@ mod tests {
 
     #[test]
     fn move_panel_cross_dock() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
         // Move Color from anchored group 0 (now [Color, Stroke, Properties]) to floating group 0
@@ -2231,7 +2231,7 @@ mod tests {
 
     #[test]
     fn move_last_panel_removes_group() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Move the only panel in group 0 (Layers) to group 1
         l.move_panel_to_group(pa(id.0, 0, 0), ga(id.0, 1));
@@ -2242,7 +2242,7 @@ mod tests {
 
     #[test]
     fn move_last_panel_removes_floating() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
         // Floating has one group with one panel (Layers). Move it to anchored.
@@ -2253,7 +2253,7 @@ mod tests {
 
     #[test]
     fn move_panel_clamps_active() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Set active to 2 (Properties) in group 1
         l.dock_mut(id).unwrap().groups[1].active = 2;
@@ -2265,7 +2265,7 @@ mod tests {
 
     #[test]
     fn move_panel_invalid_source() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.move_panel_to_group(pa(id.0, 1, 99), ga(id.0, 0)); // no panic
         l.move_panel_to_group(pa(99, 0, 0), ga(id.0, 0));      // no panic
@@ -2273,7 +2273,7 @@ mod tests {
 
     #[test]
     fn move_panel_invalid_target() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.move_panel_to_group(pa(id.0, 1, 0), ga(99, 0));
         // Panel should be put back — unchanged
@@ -2286,7 +2286,7 @@ mod tests {
 
     #[test]
     fn insert_panel_creates_group() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Insert Stroke as a new group at position 0
         l.insert_panel_as_new_group(pa(id.0, 1, 1), id, 0);
@@ -2297,7 +2297,7 @@ mod tests {
 
     #[test]
     fn insert_panel_cleans_source() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Group 0 has only Layers. Insert it as new group at end.
         l.insert_panel_as_new_group(pa(id.0, 0, 0), id, 99);
@@ -2310,7 +2310,7 @@ mod tests {
 
     #[test]
     fn insert_panel_invalid() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.insert_panel_as_new_group(pa(id.0, 1, 99), id, 0); // no panic
         l.insert_panel_as_new_group(pa(99, 0, 0), id, 0);      // no panic
@@ -2323,7 +2323,7 @@ mod tests {
 
     #[test]
     fn detach_panel_creates_floating() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_panel(pa(id.0, 1, 1), 300.0, 150.0);
         assert!(fid.is_some());
@@ -2334,7 +2334,7 @@ mod tests {
 
     #[test]
     fn detach_panel_position() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_panel(pa(id.0, 1, 0), 300.0, 150.0).unwrap();
         let fd = l.floating_dock(fid).unwrap();
@@ -2344,7 +2344,7 @@ mod tests {
 
     #[test]
     fn detach_panel_last_removes_group() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Detach the only panel in group 0
         l.detach_panel(pa(id.0, 0, 0), 50.0, 50.0);
@@ -2353,7 +2353,7 @@ mod tests {
 
     #[test]
     fn detach_panel_last_removes_floating() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let f1 = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
         // f1 has one group with one panel (Layers). Detach it.
@@ -2368,7 +2368,7 @@ mod tests {
 
     #[test]
     fn set_floating_position() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), 10.0, 10.0).unwrap();
         l.set_floating_position(fid, 200.0, 300.0);
@@ -2379,14 +2379,14 @@ mod tests {
 
     #[test]
     fn set_position_anchored_ignored() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.set_floating_position(id, 999.0, 999.0); // no-op, no panic
     }
 
     #[test]
     fn set_position_invalid_id() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         l.set_floating_position(DockId(99), 0.0, 0.0); // no panic
     }
 
@@ -2396,7 +2396,7 @@ mod tests {
 
     #[test]
     fn resize_group_sets_height() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.resize_group(ga(id.0, 0), 150.0);
         assert_eq!(l.dock(id).unwrap().groups[0].height, Some(150.0));
@@ -2404,7 +2404,7 @@ mod tests {
 
     #[test]
     fn resize_group_clamps_min() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.resize_group(ga(id.0, 0), 5.0);
         assert_eq!(l.dock(id).unwrap().groups[0].height, Some(MIN_GROUP_HEIGHT));
@@ -2412,14 +2412,14 @@ mod tests {
 
     #[test]
     fn resize_group_invalid_addr() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         l.resize_group(ga(99, 0), 100.0); // no panic
         l.resize_group(ga(0, 99), 100.0); // no panic
     }
 
     #[test]
     fn default_group_height_is_none() {
-        let l = DockLayout::default_layout();
+        let l = WorkspaceLayout::default_layout();
         let d = l.anchored_dock(DockEdge::Right).unwrap();
         for g in &d.groups {
             assert_eq!(g.height, None);
@@ -2428,7 +2428,7 @@ mod tests {
 
     #[test]
     fn set_dock_width_clamped() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.set_dock_width(id, 50.0);
         assert_eq!(l.dock(id).unwrap().width, MIN_DOCK_WIDTH);
@@ -2444,7 +2444,7 @@ mod tests {
 
     #[test]
     fn cleanup_clamps_active() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Set active beyond range, then trigger cleanup via a move
         l.dock_mut(id).unwrap().groups[1].active = 2; // Properties
@@ -2455,7 +2455,7 @@ mod tests {
 
     #[test]
     fn cleanup_multiple_empty_groups() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Manually empty both groups
         l.dock_mut(id).unwrap().groups[0].panels.clear();
@@ -2470,10 +2470,10 @@ mod tests {
 
     #[test]
     fn panel_label_values() {
-        assert_eq!(DockLayout::panel_label(PanelKind::Layers), "Layers");
-        assert_eq!(DockLayout::panel_label(PanelKind::Color), "Color");
-        assert_eq!(DockLayout::panel_label(PanelKind::Stroke), "Stroke");
-        assert_eq!(DockLayout::panel_label(PanelKind::Properties), "Properties");
+        assert_eq!(WorkspaceLayout::panel_label(PanelKind::Layers), "Layers");
+        assert_eq!(WorkspaceLayout::panel_label(PanelKind::Color), "Color");
+        assert_eq!(WorkspaceLayout::panel_label(PanelKind::Stroke), "Stroke");
+        assert_eq!(WorkspaceLayout::panel_label(PanelKind::Properties), "Properties");
     }
 
     #[test]
@@ -2494,7 +2494,7 @@ mod tests {
 
     #[test]
     fn close_panel_hides_it() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.close_panel(pa(id.0, 1, 1)); // close Stroke
         assert!(l.hidden_panels().contains(&PanelKind::Stroke));
@@ -2503,7 +2503,7 @@ mod tests {
 
     #[test]
     fn close_panel_removes_from_group() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.close_panel(pa(id.0, 1, 1)); // close Stroke
         let d = l.dock(id).unwrap();
@@ -2512,7 +2512,7 @@ mod tests {
 
     #[test]
     fn close_last_panel_removes_group() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.close_panel(pa(id.0, 0, 0)); // close Layers (only panel in group 0)
         let d = l.dock(id).unwrap();
@@ -2522,7 +2522,7 @@ mod tests {
 
     #[test]
     fn show_panel_adds_to_default_group() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.close_panel(pa(id.0, 1, 1)); // close Stroke
         l.show_panel(PanelKind::Stroke);
@@ -2534,7 +2534,7 @@ mod tests {
 
     #[test]
     fn show_panel_removes_from_hidden() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.close_panel(pa(id.0, 1, 0)); // close Color
         assert_eq!(l.hidden_panels().len(), 1);
@@ -2544,13 +2544,13 @@ mod tests {
 
     #[test]
     fn hidden_panels_default_empty() {
-        let l = DockLayout::default_layout();
+        let l = WorkspaceLayout::default_layout();
         assert!(l.hidden_panels().is_empty());
     }
 
     #[test]
     fn panel_menu_items_all_visible() {
-        let l = DockLayout::default_layout();
+        let l = WorkspaceLayout::default_layout();
         let items = l.panel_menu_items();
         assert_eq!(items.len(), 4);
         for (_, visible) in &items {
@@ -2560,7 +2560,7 @@ mod tests {
 
     #[test]
     fn panel_menu_items_with_hidden() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.close_panel(pa(id.0, 1, 1)); // close Stroke
         let items = l.panel_menu_items();
@@ -2576,7 +2576,7 @@ mod tests {
 
     #[test]
     fn bring_to_front_moves_to_end() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let f1 = l.detach_group(ga(id.0, 0), 10.0, 10.0).unwrap();
         let f2 = l.detach_group(ga(id.0, 0), 20.0, 20.0).unwrap();
@@ -2587,7 +2587,7 @@ mod tests {
 
     #[test]
     fn bring_to_front_already_front() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let f1 = l.detach_group(ga(id.0, 0), 10.0, 10.0).unwrap();
         let f2 = l.detach_group(ga(id.0, 0), 20.0, 20.0).unwrap();
@@ -2599,7 +2599,7 @@ mod tests {
 
     #[test]
     fn z_index_for_ordering() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let f1 = l.detach_group(ga(id.0, 0), 10.0, 10.0).unwrap();
         let f2 = l.detach_group(ga(id.0, 0), 20.0, 20.0).unwrap();
@@ -2616,7 +2616,7 @@ mod tests {
 
     #[test]
     fn snap_to_right_edge() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
         let right_groups_before = l.anchored_dock(DockEdge::Right).unwrap().groups.len();
@@ -2628,7 +2628,7 @@ mod tests {
 
     #[test]
     fn snap_to_left_edge() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
         l.snap_to_edge(fid, DockEdge::Left);
@@ -2639,7 +2639,7 @@ mod tests {
 
     #[test]
     fn snap_creates_anchored_dock() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         assert!(l.anchored_dock(DockEdge::Bottom).is_none());
         let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
@@ -2650,7 +2650,7 @@ mod tests {
 
     #[test]
     fn redock_merges_into_right() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
         l.redock(fid);
@@ -2662,21 +2662,21 @@ mod tests {
 
     #[test]
     fn redock_invalid_id() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         l.redock(DockId(99)); // no panic, no change
         assert_eq!(l.anchored.len(), 1);
     }
 
     #[test]
     fn is_near_edge_detection() {
-        assert_eq!(DockLayout::is_near_edge(5.0, 500.0, 1000.0, 800.0), Some(DockEdge::Left));
-        assert_eq!(DockLayout::is_near_edge(990.0, 500.0, 1000.0, 800.0), Some(DockEdge::Right));
-        assert_eq!(DockLayout::is_near_edge(500.0, 790.0, 1000.0, 800.0), Some(DockEdge::Bottom));
+        assert_eq!(WorkspaceLayout::is_near_edge(5.0, 500.0, 1000.0, 800.0), Some(DockEdge::Left));
+        assert_eq!(WorkspaceLayout::is_near_edge(990.0, 500.0, 1000.0, 800.0), Some(DockEdge::Right));
+        assert_eq!(WorkspaceLayout::is_near_edge(500.0, 790.0, 1000.0, 800.0), Some(DockEdge::Bottom));
     }
 
     #[test]
     fn is_near_edge_not_near() {
-        assert_eq!(DockLayout::is_near_edge(500.0, 400.0, 1000.0, 800.0), None);
+        assert_eq!(WorkspaceLayout::is_near_edge(500.0, 400.0, 1000.0, 800.0), None);
     }
 
     // -----------------------------------------------------------------------
@@ -2685,7 +2685,7 @@ mod tests {
 
     #[test]
     fn add_anchored_left() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = l.add_anchored_dock(DockEdge::Left);
         assert!(l.anchored_dock(DockEdge::Left).is_some());
         assert_eq!(l.anchored_dock(DockEdge::Left).unwrap().id, id);
@@ -2693,7 +2693,7 @@ mod tests {
 
     #[test]
     fn add_anchored_existing_returns_id() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id1 = l.add_anchored_dock(DockEdge::Left);
         let id2 = l.add_anchored_dock(DockEdge::Left);
         assert_eq!(id1, id2);
@@ -2702,7 +2702,7 @@ mod tests {
 
     #[test]
     fn add_anchored_bottom() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         l.add_anchored_dock(DockEdge::Bottom);
         assert!(l.anchored_dock(DockEdge::Bottom).is_some());
         assert_eq!(l.anchored.len(), 2);
@@ -2710,7 +2710,7 @@ mod tests {
 
     #[test]
     fn remove_anchored_moves_to_floating() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let lid = l.add_anchored_dock(DockEdge::Left);
         // Add a group to it so removal creates a floating dock
         l.dock_mut(lid).unwrap().groups.push(PanelGroup::new(vec![PanelKind::Layers]));
@@ -2722,7 +2722,7 @@ mod tests {
 
     #[test]
     fn remove_anchored_empty_returns_none() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         l.add_anchored_dock(DockEdge::Left); // empty dock
         let fid = l.remove_anchored_dock(DockEdge::Left);
         assert!(fid.is_none()); // no groups, no floating dock created
@@ -2734,9 +2734,9 @@ mod tests {
 
     #[test]
     fn to_json_round_trip() {
-        let l = DockLayout::default_layout();
+        let l = WorkspaceLayout::default_layout();
         let json = l.to_json().unwrap();
-        let l2 = DockLayout::from_json(&json);
+        let l2 = WorkspaceLayout::from_json(&json);
         assert_eq!(l2.anchored.len(), 1);
         assert_eq!(l2.anchored[0].0, DockEdge::Right);
         let d = l2.anchored_dock(DockEdge::Right).unwrap();
@@ -2746,11 +2746,11 @@ mod tests {
 
     #[test]
     fn from_json_with_floating() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.detach_group(ga(id.0, 0), 100.0, 200.0);
         let json = l.to_json().unwrap();
-        let l2 = DockLayout::from_json(&json);
+        let l2 = WorkspaceLayout::from_json(&json);
         assert_eq!(l2.floating.len(), 1);
         assert_eq!(l2.floating[0].x, 100.0);
         assert_eq!(l2.floating[0].y, 200.0);
@@ -2758,7 +2758,7 @@ mod tests {
 
     #[test]
     fn from_json_invalid_graceful() {
-        let l = DockLayout::from_json("not valid json{{{");
+        let l = WorkspaceLayout::from_json("not valid json{{{");
         // Should return default layout
         assert_eq!(l.anchored.len(), 1);
         assert_eq!(l.anchored_dock(DockEdge::Right).unwrap().groups.len(), 2);
@@ -2766,7 +2766,7 @@ mod tests {
 
     #[test]
     fn reset_to_default() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.detach_group(ga(id.0, 0), 50.0, 50.0);
         l.close_panel(pa(id.0, 0, 0));
@@ -2784,7 +2784,7 @@ mod tests {
 
     #[test]
     fn set_focused_panel() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let addr = pa(id.0, 1, 2);
         l.set_focused_panel(Some(addr));
@@ -2795,7 +2795,7 @@ mod tests {
 
     #[test]
     fn focus_next_wraps() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Default: 2 groups, [Layers] and [Color, Stroke, Properties] = 4 panels total
         l.set_focused_panel(None);
@@ -2814,7 +2814,7 @@ mod tests {
 
     #[test]
     fn focus_prev_wraps() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.set_focused_panel(None);
         l.focus_prev_panel();
@@ -2835,7 +2835,7 @@ mod tests {
 
     #[test]
     fn clamp_floating_within_viewport() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), 2000.0, 1500.0).unwrap();
         l.clamp_floating_docks(1000.0, 800.0);
@@ -2846,7 +2846,7 @@ mod tests {
 
     #[test]
     fn clamp_floating_partially_offscreen() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), -500.0, -100.0).unwrap();
         l.clamp_floating_docks(1000.0, 800.0);
@@ -2859,7 +2859,7 @@ mod tests {
 
     #[test]
     fn set_auto_hide() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         assert!(!l.dock(id).unwrap().auto_hide);
         l.set_auto_hide(id, true);
@@ -2874,7 +2874,7 @@ mod tests {
 
     #[test]
     fn reorder_panel_forward() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Group 1: [Color, Stroke, Properties] → move Color to position 2
         l.reorder_panel(ga(id.0, 1), 0, 2);
@@ -2885,7 +2885,7 @@ mod tests {
 
     #[test]
     fn reorder_panel_backward() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Group 1: [Color, Stroke, Properties] → move Properties to position 0
         l.reorder_panel(ga(id.0, 1), 2, 0);
@@ -2896,7 +2896,7 @@ mod tests {
 
     #[test]
     fn reorder_panel_same_position() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.reorder_panel(ga(id.0, 1), 1, 1);
         let g = &l.dock(id).unwrap().groups[1];
@@ -2905,7 +2905,7 @@ mod tests {
 
     #[test]
     fn reorder_panel_clamped() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.reorder_panel(ga(id.0, 1), 0, 99);
         let g = &l.dock(id).unwrap().groups[1];
@@ -2914,7 +2914,7 @@ mod tests {
 
     #[test]
     fn reorder_panel_out_of_bounds() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         l.reorder_panel(ga(id.0, 1), 99, 0); // no panic
         l.reorder_panel(ga(99, 0), 0, 1);     // no panic
@@ -2926,31 +2926,31 @@ mod tests {
 
     #[test]
     fn default_layout_name() {
-        let l = DockLayout::default_layout();
+        let l = WorkspaceLayout::default_layout();
         assert_eq!(l.name, "Default");
     }
 
     #[test]
     fn named_layout() {
-        let l = DockLayout::named("My Workspace");
+        let l = WorkspaceLayout::named("My Workspace");
         assert_eq!(l.name, "My Workspace");
         assert_eq!(l.anchored.len(), 1); // same structure as default
     }
 
     #[test]
     fn storage_key_includes_name() {
-        let l = DockLayout::named("Editing");
+        let l = WorkspaceLayout::named("Editing");
         assert_eq!(l.storage_key(), "jas_layout:Editing");
     }
 
     #[test]
     fn storage_key_for_static() {
-        assert_eq!(DockLayout::storage_key_for("Drawing"), "jas_layout:Drawing");
+        assert_eq!(WorkspaceLayout::storage_key_for("Drawing"), "jas_layout:Drawing");
     }
 
     #[test]
     fn reset_preserves_name() {
-        let mut l = DockLayout::named("Custom");
+        let mut l = WorkspaceLayout::named("Custom");
         let id = right_dock_id(&l);
         l.detach_group(ga(id.0, 0), 50.0, 50.0);
         assert!(!l.floating.is_empty());
@@ -2961,9 +2961,9 @@ mod tests {
 
     #[test]
     fn json_round_trip_preserves_name() {
-        let l = DockLayout::named("Test Layout");
+        let l = WorkspaceLayout::named("Test Layout");
         let json = l.to_json().unwrap();
-        let l2 = DockLayout::from_json(&json);
+        let l2 = WorkspaceLayout::from_json(&json);
         assert_eq!(l2.name, "Test Layout");
     }
 
@@ -3414,18 +3414,18 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // DockLayout + PaneLayout integration
+    // WorkspaceLayout + PaneLayout integration
     // -----------------------------------------------------------------------
 
     #[test]
     fn dock_layout_default_has_no_pane_layout() {
-        let l = DockLayout::default_layout();
+        let l = WorkspaceLayout::default_layout();
         assert!(l.pane_layout.is_none());
     }
 
     #[test]
     fn ensure_pane_layout_creates_if_none() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         assert!(l.pane_layout.is_none());
         l.ensure_pane_layout(1000.0, 700.0);
         assert!(l.pane_layout.is_some());
@@ -3434,7 +3434,7 @@ mod tests {
 
     #[test]
     fn ensure_pane_layout_noop_if_present() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         l.ensure_pane_layout(1000.0, 700.0);
         let gen_before = l.generation;
         l.ensure_pane_layout(1000.0, 700.0);
@@ -3444,7 +3444,7 @@ mod tests {
 
     #[test]
     fn reset_to_default_clears_pane_layout() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         l.ensure_pane_layout(1000.0, 700.0);
         assert!(l.pane_layout.is_some());
         l.reset_to_default();
@@ -3453,7 +3453,7 @@ mod tests {
 
     #[test]
     fn panes_accessors() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         assert!(l.panes().is_none());
         assert!(l.panes_mut().is_none());
         l.ensure_pane_layout(1000.0, 700.0);
@@ -3464,23 +3464,23 @@ mod tests {
     #[test]
     fn serde_backwards_compat_no_pane_layout() {
         // Simulate old JSON without pane_layout field
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         l.ensure_pane_layout(1000.0, 700.0);
         let json = l.to_json().unwrap();
         // Remove pane_layout from JSON to simulate old format
         let mut val: serde_json::Value = serde_json::from_str(&json).unwrap();
         val.as_object_mut().unwrap().remove("pane_layout");
         let old_json = serde_json::to_string(&val).unwrap();
-        let restored = DockLayout::from_json(&old_json);
+        let restored = WorkspaceLayout::from_json(&old_json);
         assert!(restored.pane_layout.is_none());
     }
 
     #[test]
     fn serde_round_trip_with_pane_layout() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         l.ensure_pane_layout(1000.0, 700.0);
         let json = l.to_json().unwrap();
-        let restored = DockLayout::from_json(&json);
+        let restored = WorkspaceLayout::from_json(&json);
         assert!(restored.pane_layout.is_some());
         let pl = restored.pane_layout.unwrap();
         assert_eq!(pl.panes.len(), 3);
@@ -3495,7 +3495,7 @@ mod tests {
     #[test]
     fn serde_pane_config_backwards_compat() {
         // Simulate old JSON without config field on panes
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         l.ensure_pane_layout(1000.0, 700.0);
         let json = l.to_json().unwrap();
         // Remove config fields from panes to simulate old format
@@ -3508,7 +3508,7 @@ mod tests {
             }
         }
         let old_json = serde_json::to_string(&val).unwrap();
-        let restored = DockLayout::from_json(&old_json);
+        let restored = WorkspaceLayout::from_json(&old_json);
         let pl = restored.pane_layout.unwrap();
         // Panes should deserialize with default config (Canvas defaults)
         assert_eq!(pl.panes.len(), 3);
@@ -3519,7 +3519,7 @@ mod tests {
 
     #[test]
     fn clamp_floating_docks_also_clamps_panes() {
-        let mut l = DockLayout::default_layout();
+        let mut l = WorkspaceLayout::default_layout();
         l.ensure_pane_layout(1000.0, 700.0);
         // Push a pane off-screen
         let canvas_id = l.panes().unwrap().pane_by_kind(PaneKind::Canvas).unwrap().id;

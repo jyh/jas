@@ -96,35 +96,35 @@ struct AppState {
     tabs: Vec<TabState>,
     active_tab: usize,
     active_tool: ToolKind,
-    app_config: super::dock::AppConfig,
-    dock_layout: super::dock::DockLayout,
+    app_config: super::workspace::AppConfig,
+    workspace_layout: super::workspace::WorkspaceLayout,
 }
 
 impl AppState {
     fn new() -> Self {
         let app_config = Self::load_app_config();
-        let dock_layout = Self::load_dock_layout(&app_config.active_layout);
+        let workspace_layout = Self::load_workspace_layout(&app_config.active_layout);
         Self {
             tabs: vec![],
             active_tab: 0,
             active_tool: ToolKind::Selection,
             app_config,
-            dock_layout,
+            workspace_layout,
         }
     }
 
     /// Load app config from localStorage, or return default.
-    fn load_app_config() -> super::dock::AppConfig {
+    fn load_app_config() -> super::workspace::AppConfig {
         #[cfg(target_arch = "wasm32")]
         {
             if let Some(json) = web_sys::window()
                 .and_then(|w| w.local_storage().ok()?)
-                .and_then(|s| s.get_item(super::dock::AppConfig::STORAGE_KEY).ok()?)
+                .and_then(|s| s.get_item(super::workspace::AppConfig::STORAGE_KEY).ok()?)
             {
-                return super::dock::AppConfig::from_json(&json);
+                return super::workspace::AppConfig::from_json(&json);
             }
         }
-        super::dock::AppConfig::default()
+        super::workspace::AppConfig::default()
     }
 
     /// Save app config to localStorage.
@@ -135,33 +135,33 @@ impl AppState {
                 if let Some(storage) = web_sys::window()
                     .and_then(|w| w.local_storage().ok()?)
                 {
-                    let _ = storage.set_item(super::dock::AppConfig::STORAGE_KEY, &json);
+                    let _ = storage.set_item(super::workspace::AppConfig::STORAGE_KEY, &json);
                 }
             }
         }
     }
 
     /// Load a named dock layout from localStorage, or return default.
-    fn load_dock_layout(name: &str) -> super::dock::DockLayout {
+    fn load_workspace_layout(name: &str) -> super::workspace::WorkspaceLayout {
         #[cfg(target_arch = "wasm32")]
         {
-            let key = super::dock::DockLayout::storage_key_for(name);
+            let key = super::workspace::WorkspaceLayout::storage_key_for(name);
             if let Some(json) = web_sys::window()
                 .and_then(|w| w.local_storage().ok()?)
                 .and_then(|s| s.get_item(&key).ok()?)
             {
-                return super::dock::DockLayout::from_json(&json);
+                return super::workspace::WorkspaceLayout::from_json(&json);
             }
         }
-        super::dock::DockLayout::named(name)
+        super::workspace::WorkspaceLayout::named(name)
     }
 
     /// Save dock layout to localStorage under its name.
-    fn save_dock_layout(&self) {
+    fn save_workspace_layout(&self) {
         #[cfg(target_arch = "wasm32")]
         {
-            let key = self.dock_layout.storage_key();
-            if let Ok(json) = self.dock_layout.to_json() {
+            let key = self.workspace_layout.storage_key();
+            if let Ok(json) = self.workspace_layout.to_json() {
                 if let Some(storage) = web_sys::window()
                     .and_then(|w| w.local_storage().ok()?)
                 {
@@ -176,8 +176,8 @@ impl AppState {
         // Save current layout first
         #[cfg(target_arch = "wasm32")]
         {
-            let key = self.dock_layout.storage_key();
-            if let Ok(json) = self.dock_layout.to_json() {
+            let key = self.workspace_layout.storage_key();
+            if let Ok(json) = self.workspace_layout.to_json() {
                 if let Some(storage) = web_sys::window()
                     .and_then(|w| w.local_storage().ok()?)
                 {
@@ -186,7 +186,7 @@ impl AppState {
             }
         }
         // Load the new layout
-        self.dock_layout = Self::load_dock_layout(name);
+        self.workspace_layout = Self::load_workspace_layout(name);
         self.app_config.active_layout = name.to_string();
         self.save_app_config();
     }
@@ -610,12 +610,12 @@ fn toolbar_svg_icon(kind: ToolKind) -> String {
 }
 
 /// Find the address of a panel kind in the layout (first occurrence).
-fn find_panel(layout: &super::dock::DockLayout, kind: super::dock::PanelKind) -> Option<super::dock::PanelAddr> {
+fn find_panel(layout: &super::workspace::WorkspaceLayout, kind: super::workspace::PanelKind) -> Option<super::workspace::PanelAddr> {
     for (_, dock) in &layout.anchored {
         for (gi, group) in dock.groups.iter().enumerate() {
             if let Some(pi) = group.panels.iter().position(|&k| k == kind) {
-                return Some(super::dock::PanelAddr {
-                    group: super::dock::GroupAddr { dock_id: dock.id, group_idx: gi },
+                return Some(super::workspace::PanelAddr {
+                    group: super::workspace::GroupAddr { dock_id: dock.id, group_idx: gi },
                     panel_idx: pi,
                 });
             }
@@ -624,8 +624,8 @@ fn find_panel(layout: &super::dock::DockLayout, kind: super::dock::PanelKind) ->
     for fd in &layout.floating {
         for (gi, group) in fd.dock.groups.iter().enumerate() {
             if let Some(pi) = group.panels.iter().position(|&k| k == kind) {
-                return Some(super::dock::PanelAddr {
-                    group: super::dock::GroupAddr { dock_id: fd.dock.id, group_idx: gi },
+                return Some(super::workspace::PanelAddr {
+                    group: super::workspace::GroupAddr { dock_id: fd.dock.id, group_idx: gi },
                     panel_idx: pi,
                 });
             }
@@ -703,13 +703,13 @@ pub fn App() -> Element {
                         let vw = win.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
                         let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
                         if let Ok(mut st) = app_r.try_borrow_mut() {
-                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                 pl.on_viewport_resize(vw, vh);
                             }
-                            st.dock_layout.clamp_floating_docks(vw, vh);
-                            if st.dock_layout.needs_save() {
-                                st.save_dock_layout();
-                                st.dock_layout.mark_saved();
+                            st.workspace_layout.clamp_floating_docks(vw, vh);
+                            if st.workspace_layout.needs_save() {
+                                st.save_workspace_layout();
+                                st.workspace_layout.mark_saved();
                             }
                         }
                         rev_r += 1;
@@ -735,9 +735,9 @@ pub fn App() -> Element {
             {
                 let mut st = app.borrow_mut();
                 f(&mut st);
-                if st.dock_layout.needs_save() {
-                    st.save_dock_layout();
-                    st.dock_layout.mark_saved();
+                if st.workspace_layout.needs_save() {
+                    st.save_workspace_layout();
+                    st.workspace_layout.mark_saved();
                 }
             }
             revision += 1;
@@ -901,11 +901,11 @@ pub fn App() -> Element {
                     evt.prevent_default();
                     if mods.shift() {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.dock_layout.focus_prev_panel();
+                            st.workspace_layout.focus_prev_panel();
                         }));
                     } else {
                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                            st.dock_layout.focus_next_panel();
+                            st.workspace_layout.focus_next_panel();
                         }));
                     }
                 }
@@ -1184,21 +1184,21 @@ pub fn App() -> Element {
     let mut popup_slot = use_signal(|| Option::<usize>::None);
 
     // Dock drag-and-drop state.
-    let mut drag_source = use_signal(|| Option::<super::dock::DragPayload>::None);
-    let mut drop_target_sig = use_signal(|| Option::<super::dock::DropTarget>::None);
+    let mut drag_source = use_signal(|| Option::<super::workspace::DragPayload>::None);
+    let mut drop_target_sig = use_signal(|| Option::<super::workspace::DropTarget>::None);
     let mut was_dropped = use_signal(|| false);
     let mut last_drag_pos = use_signal(|| (0.0f64, 0.0f64));
     // Floating dock title bar drag (dock_id, offset_x, offset_y).
-    let mut title_drag = use_signal(|| Option::<(super::dock::DockId, f64, f64)>::None);
+    let mut title_drag = use_signal(|| Option::<(super::workspace::DockId, f64, f64)>::None);
     // Pane drag-and-drop state.
     // (pane_id, offset_x, offset_y)
-    let mut pane_drag = use_signal(|| Option::<(super::dock::PaneId, f64, f64)>::None);
+    let mut pane_drag = use_signal(|| Option::<(super::workspace::PaneId, f64, f64)>::None);
     // (snap_idx, start_coord)
     let mut border_drag = use_signal(|| Option::<(usize, f64)>::None);
     // Pane edge resize: (pane_id, edge, start_mouse_x, start_mouse_y, start_pane_width, start_pane_height, start_pane_x, start_pane_y)
-    let mut pane_resize = use_signal(|| Option::<(super::dock::PaneId, super::dock::EdgeSide, f64, f64, f64, f64, f64, f64)>::None);
+    let mut pane_resize = use_signal(|| Option::<(super::workspace::PaneId, super::workspace::EdgeSide, f64, f64, f64, f64, f64, f64)>::None);
     // Snap preview lines shown during drag
-    let mut snap_preview = use_signal(|| Vec::<super::dock::SnapConstraint>::new());
+    let mut snap_preview = use_signal(|| Vec::<super::workspace::SnapConstraint>::new());
 
     // Read revision to trigger re-render when state changes.
     let _ = revision();
@@ -1206,22 +1206,22 @@ pub fn App() -> Element {
     // Ensure pane layout exists and repair snaps once on init.
     {
         let mut st = app.borrow_mut();
-        if st.dock_layout.pane_layout.is_none() {
+        if st.workspace_layout.pane_layout.is_none() {
             #[cfg(target_arch = "wasm32")]
             {
                 if let Some(win) = web_sys::window() {
                     let vw = win.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
                     let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
-                    st.dock_layout.ensure_pane_layout(vw, vh);
-                    if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                    st.workspace_layout.ensure_pane_layout(vw, vh);
+                    if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                         pl.repair_snaps(vw, vh);
                     }
                 }
             }
             #[cfg(not(target_arch = "wasm32"))]
             {
-                st.dock_layout.ensure_pane_layout(1000.0, 700.0);
-                if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                st.workspace_layout.ensure_pane_layout(1000.0, 700.0);
+                if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                     pl.repair_snaps(1000.0, 700.0);
                 }
             }
@@ -1567,12 +1567,12 @@ pub fn App() -> Element {
                 }
                 "tile_panes" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let dock_collapsed = st.dock_layout.anchored_dock(super::dock::DockEdge::Right)
+                        let dock_collapsed = st.workspace_layout.anchored_dock(super::workspace::DockEdge::Right)
                             .map_or(false, |d| d.collapsed);
-                        if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                        if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                             pl.canvas_maximized = false;
                             let override_id = if dock_collapsed {
-                                pl.pane_by_kind(super::dock::PaneKind::Dock).map(|p| (p.id, 36.0))
+                                pl.pane_by_kind(super::workspace::PaneKind::Dock).map(|p| (p.id, 36.0))
                             } else {
                                 None
                             };
@@ -1583,22 +1583,22 @@ pub fn App() -> Element {
                 // Window menu: pane visibility
                 "toggle_pane_toolbar" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(ref mut pl) = st.dock_layout.pane_layout {
-                            if pl.is_pane_visible(super::dock::PaneKind::Toolbar) {
-                                pl.hide_pane(super::dock::PaneKind::Toolbar);
+                        if let Some(ref mut pl) = st.workspace_layout.pane_layout {
+                            if pl.is_pane_visible(super::workspace::PaneKind::Toolbar) {
+                                pl.hide_pane(super::workspace::PaneKind::Toolbar);
                             } else {
-                                pl.show_pane(super::dock::PaneKind::Toolbar);
+                                pl.show_pane(super::workspace::PaneKind::Toolbar);
                             }
                         }
                     }));
                 }
                 "toggle_pane_dock" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(ref mut pl) = st.dock_layout.pane_layout {
-                            if pl.is_pane_visible(super::dock::PaneKind::Dock) {
-                                pl.hide_pane(super::dock::PaneKind::Dock);
+                        if let Some(ref mut pl) = st.workspace_layout.pane_layout {
+                            if pl.is_pane_visible(super::workspace::PaneKind::Dock) {
+                                pl.hide_pane(super::workspace::PaneKind::Dock);
                             } else {
-                                pl.show_pane(super::dock::PaneKind::Dock);
+                                pl.show_pane(super::workspace::PaneKind::Dock);
                             }
                         }
                     }));
@@ -1606,46 +1606,46 @@ pub fn App() -> Element {
                 // Window menu: panel visibility
                 "toggle_panel_layers" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.dock_layout.is_panel_visible(super::dock::PanelKind::Layers) {
+                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Layers) {
                             // Find and close it
-                            if let Some(addr) = find_panel(&st.dock_layout, super::dock::PanelKind::Layers) {
-                                st.dock_layout.close_panel(addr);
+                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Layers) {
+                                st.workspace_layout.close_panel(addr);
                             }
                         } else {
-                            st.dock_layout.show_panel(super::dock::PanelKind::Layers);
+                            st.workspace_layout.show_panel(super::workspace::PanelKind::Layers);
                         }
                     }));
                 }
                 "toggle_panel_color" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.dock_layout.is_panel_visible(super::dock::PanelKind::Color) {
-                            if let Some(addr) = find_panel(&st.dock_layout, super::dock::PanelKind::Color) {
-                                st.dock_layout.close_panel(addr);
+                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Color) {
+                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Color) {
+                                st.workspace_layout.close_panel(addr);
                             }
                         } else {
-                            st.dock_layout.show_panel(super::dock::PanelKind::Color);
+                            st.workspace_layout.show_panel(super::workspace::PanelKind::Color);
                         }
                     }));
                 }
                 "toggle_panel_stroke" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.dock_layout.is_panel_visible(super::dock::PanelKind::Stroke) {
-                            if let Some(addr) = find_panel(&st.dock_layout, super::dock::PanelKind::Stroke) {
-                                st.dock_layout.close_panel(addr);
+                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Stroke) {
+                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Stroke) {
+                                st.workspace_layout.close_panel(addr);
                             }
                         } else {
-                            st.dock_layout.show_panel(super::dock::PanelKind::Stroke);
+                            st.workspace_layout.show_panel(super::workspace::PanelKind::Stroke);
                         }
                     }));
                 }
                 "toggle_panel_properties" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.dock_layout.is_panel_visible(super::dock::PanelKind::Properties) {
-                            if let Some(addr) = find_panel(&st.dock_layout, super::dock::PanelKind::Properties) {
-                                st.dock_layout.close_panel(addr);
+                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Properties) {
+                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Properties) {
+                                st.workspace_layout.close_panel(addr);
                             }
                         } else {
-                            st.dock_layout.show_panel(super::dock::PanelKind::Properties);
+                            st.workspace_layout.show_panel(super::workspace::PanelKind::Properties);
                         }
                     }));
                 }
@@ -1757,7 +1757,7 @@ pub fn App() -> Element {
                                                     onmousedown: move |evt: Event<MouseData>| {
                                                         evt.stop_propagation();
                                                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                                                            st.dock_layout.reset_to_default();
+                                                            st.workspace_layout.reset_to_default();
                                                         }));
                                                         open_menu_cl.set(None);
                                                         workspace_submenu_open.set(false);
@@ -1798,12 +1798,12 @@ pub fn App() -> Element {
                     let display_label = {
                         let st = app.borrow();
                         let checked = match cmd.as_str() {
-                            "toggle_pane_toolbar" => st.dock_layout.pane_layout.as_ref().map_or(false, |pl| pl.is_pane_visible(super::dock::PaneKind::Toolbar)),
-                            "toggle_pane_dock" => st.dock_layout.pane_layout.as_ref().map_or(false, |pl| pl.is_pane_visible(super::dock::PaneKind::Dock)),
-                            "toggle_panel_layers" => st.dock_layout.is_panel_visible(super::dock::PanelKind::Layers),
-                            "toggle_panel_color" => st.dock_layout.is_panel_visible(super::dock::PanelKind::Color),
-                            "toggle_panel_stroke" => st.dock_layout.is_panel_visible(super::dock::PanelKind::Stroke),
-                            "toggle_panel_properties" => st.dock_layout.is_panel_visible(super::dock::PanelKind::Properties),
+                            "toggle_pane_toolbar" => st.workspace_layout.pane_layout.as_ref().map_or(false, |pl| pl.is_pane_visible(super::workspace::PaneKind::Toolbar)),
+                            "toggle_pane_dock" => st.workspace_layout.pane_layout.as_ref().map_or(false, |pl| pl.is_pane_visible(super::workspace::PaneKind::Dock)),
+                            "toggle_panel_layers" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Layers),
+                            "toggle_panel_color" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Color),
+                            "toggle_panel_stroke" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Stroke),
+                            "toggle_panel_properties" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Properties),
                             _ => false,
                         };
                         if cmd.starts_with("toggle_") {
@@ -1868,12 +1868,12 @@ pub fn App() -> Element {
 
 
     // --- Dock rendering helpers ---
-    use super::dock::{DockLayout, DockEdge, DockId, GroupAddr, PanelAddr, DragPayload, DropTarget};
+    use super::workspace::{WorkspaceLayout, DockEdge, DockId, GroupAddr, PanelAddr, DragPayload, DropTarget};
 
     // Build panel group nodes for a given dock. Reused for anchored and floating docks.
     fn build_dock_groups(
         dock_id: DockId,
-        groups: &[super::dock::PanelGroup],
+        groups: &[super::workspace::PanelGroup],
         act: &Rc<RefCell<impl FnMut(Box<dyn FnOnce(&mut AppState)>) + 'static>>,
         mut drag_source: Signal<Option<DragPayload>>,
         mut drop_target_sig: Signal<Option<DropTarget>>,
@@ -1908,7 +1908,7 @@ pub fn App() -> Element {
             let tab_nodes: Vec<Result<VNode, RenderError>> = group.panels.iter().enumerate().flat_map(|(pi, &kind)| {
                 let act_dragend = act_tabs.clone();
                 let act_click = act_tabs.clone();
-                let label = DockLayout::panel_label(kind);
+                let label = WorkspaceLayout::panel_label(kind);
                 let is_active = pi == group.active;
                 let bg = if is_active { THEME_BG_TAB } else { THEME_BG_TAB_INACTIVE };
                 let border_bottom = if is_active { "2px solid #4a4a4a" } else { "2px solid #555" };
@@ -1953,11 +1953,11 @@ pub fn App() -> Element {
                                         panel_idx: pi,
                                     };
                                     if let Some(DropTarget::Edge(edge)) = cur_tgt {
-                                        if let Some(fid) = st.dock_layout.detach_panel(addr, x, y) {
-                                            st.dock_layout.snap_to_edge(fid, edge);
+                                        if let Some(fid) = st.workspace_layout.detach_panel(addr, x, y) {
+                                            st.workspace_layout.snap_to_edge(fid, edge);
                                         }
                                     } else {
-                                        st.dock_layout.detach_panel(addr, x, y);
+                                        st.workspace_layout.detach_panel(addr, x, y);
                                     }
                                 }));
                             }
@@ -1981,7 +1981,7 @@ pub fn App() -> Element {
                         },
                         onclick: move |_| {
                             (act_click.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                st.dock_layout.set_active_panel(PanelAddr {
+                                st.workspace_layout.set_active_panel(PanelAddr {
                                     group: GroupAddr { dock_id: did, group_idx: gi },
                                     panel_idx: pi,
                                 });
@@ -1997,7 +1997,7 @@ pub fn App() -> Element {
                                     onclick: move |evt: Event<MouseData>| {
                                         evt.stop_propagation();
                                         (act_close.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                            st.dock_layout.close_panel(PanelAddr {
+                                            st.workspace_layout.close_panel(PanelAddr {
                                                 group: GroupAddr { dock_id: did, group_idx: gi },
                                                 panel_idx: pi,
                                             });
@@ -2023,7 +2023,7 @@ pub fn App() -> Element {
 
             let chevron = if group_collapsed { "\u{25BC}" } else { "\u{25B2}" };
             let body_label = group.active_panel()
-                .map(|k| DockLayout::panel_label(k))
+                .map(|k| WorkspaceLayout::panel_label(k))
                 .unwrap_or("");
 
             // Drop indicator logic
@@ -2077,23 +2077,23 @@ pub fn App() -> Element {
                                 match (src, tgt) {
                                     (DragPayload::Group(from), DropTarget::GroupSlot { dock_id: to_dock, group_idx: to_idx }) => {
                                         if from.dock_id == to_dock {
-                                            st.dock_layout.move_group_within_dock(to_dock, from.group_idx, to_idx);
+                                            st.workspace_layout.move_group_within_dock(to_dock, from.group_idx, to_idx);
                                         } else {
-                                            st.dock_layout.move_group_to_dock(from, to_dock, to_idx);
+                                            st.workspace_layout.move_group_to_dock(from, to_dock, to_idx);
                                         }
                                     }
                                     (DragPayload::Panel(from), DropTarget::GroupSlot { dock_id: to_dock, group_idx: to_idx }) => {
-                                        st.dock_layout.insert_panel_as_new_group(from, to_dock, to_idx);
+                                        st.workspace_layout.insert_panel_as_new_group(from, to_dock, to_idx);
                                     }
                                     (DragPayload::Group(from), DropTarget::TabBar { group: to_group, .. }) => {
-                                        st.dock_layout.move_group_to_dock(from, to_group.dock_id, to_group.group_idx);
+                                        st.workspace_layout.move_group_to_dock(from, to_group.dock_id, to_group.group_idx);
                                     }
                                     (DragPayload::Panel(from), DropTarget::TabBar { group: to_group, index: to_idx }) => {
                                         if from.group == to_group {
                                             // Same group: reorder
-                                            st.dock_layout.reorder_panel(to_group, from.panel_idx, to_idx);
+                                            st.workspace_layout.reorder_panel(to_group, from.panel_idx, to_idx);
                                         } else {
-                                            st.dock_layout.move_panel_to_group(from, to_group);
+                                            st.workspace_layout.move_panel_to_group(from, to_group);
                                         }
                                     }
                                     _ => {}
@@ -2139,11 +2139,11 @@ pub fn App() -> Element {
                                         let addr = GroupAddr { dock_id: did, group_idx: gi };
                                         if let Some(DropTarget::Edge(edge)) = cur_tgt {
                                             // Detach then snap to edge
-                                            if let Some(fid) = st.dock_layout.detach_group(addr, x, y) {
-                                                st.dock_layout.snap_to_edge(fid, edge);
+                                            if let Some(fid) = st.workspace_layout.detach_group(addr, x, y) {
+                                                st.workspace_layout.snap_to_edge(fid, edge);
                                             }
                                         } else {
-                                            st.dock_layout.detach_group(addr, x, y);
+                                            st.workspace_layout.detach_group(addr, x, y);
                                         }
                                     }));
                                 }
@@ -2164,7 +2164,7 @@ pub fn App() -> Element {
                                 let act = act_chevron.clone();
                                 move |_| {
                                     (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                        st.dock_layout.toggle_group_collapsed(GroupAddr {
+                                        st.workspace_layout.toggle_group_collapsed(GroupAddr {
                                             dock_id: did,
                                             group_idx: gi,
                                         });
@@ -2189,7 +2189,7 @@ pub fn App() -> Element {
     }
 
     // --- Build dock nodes ---
-    let layout_snapshot = app.borrow().dock_layout.clone();
+    let layout_snapshot = app.borrow().workspace_layout.clone();
     let focused_panel = layout_snapshot.focused_panel();
     let right_dock = layout_snapshot.anchored_dock(DockEdge::Right);
     let dock_collapsed = right_dock.map_or(true, |d| d.collapsed);
@@ -2204,7 +2204,7 @@ pub fn App() -> Element {
                 let act_inner = act_dock.clone();
                 group.panels.iter().enumerate().map(move |(pi, &kind)| {
                     let act = act_inner.clone();
-                    let label = DockLayout::panel_label(kind);
+                    let label = WorkspaceLayout::panel_label(kind);
                     let first_char: String = label.chars().take(1).collect();
                     rsx! {
                         div {
@@ -2213,8 +2213,8 @@ pub fn App() -> Element {
                             title: "{label}",
                             onclick: move |_| {
                                 (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                    st.dock_layout.toggle_dock_collapsed(did);
-                                    st.dock_layout.set_active_panel(PanelAddr {
+                                    st.workspace_layout.toggle_dock_collapsed(did);
+                                    st.workspace_layout.set_active_panel(PanelAddr {
                                         group: GroupAddr { dock_id: did, group_idx: gi },
                                         panel_idx: pi,
                                     });
@@ -2249,7 +2249,7 @@ pub fn App() -> Element {
                 onmousedown: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
                     (act_front.borrow_mut())(Box::new(move |st: &mut AppState| {
-                        st.dock_layout.bring_to_front(fid);
+                        st.workspace_layout.bring_to_front(fid);
                     }));
                 },
 
@@ -2265,7 +2265,7 @@ pub fn App() -> Element {
                         evt.stop_propagation();
                         title_drag.set(None);
                         (act_redock.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            st.dock_layout.redock(fid);
+                            st.workspace_layout.redock(fid);
                         }));
                     },
                 }
@@ -2290,7 +2290,7 @@ pub fn App() -> Element {
     let snap_bottom = if snap_edge == Some(DockEdge::Bottom) { "4px solid #4a90d9" } else { "none" };
 
     // --- Pane positions ---
-    use super::dock::{PaneKind, PaneId, EdgeSide, SnapTarget, PaneLayout};
+    use super::workspace::{PaneKind, PaneId, EdgeSide, SnapTarget, PaneLayout};
 
     let pane_snapshot = layout_snapshot.pane_layout.clone();
     let canvas_maximized = pane_snapshot.as_ref().map_or(false, |pl| pl.canvas_maximized);
@@ -2311,7 +2311,7 @@ pub fn App() -> Element {
     let toolbar_config = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Toolbar))
         .map(|p| p.config.clone())
-        .unwrap_or_else(|| super::dock::PaneConfig::for_kind(PaneKind::Toolbar));
+        .unwrap_or_else(|| super::workspace::PaneConfig::for_kind(PaneKind::Toolbar));
 
     let (cx, cy, cw, ch, canvas_z) = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Canvas))
@@ -2331,7 +2331,7 @@ pub fn App() -> Element {
     let canvas_config = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Canvas))
         .map(|p| p.config.clone())
-        .unwrap_or_else(|| super::dock::PaneConfig::for_kind(PaneKind::Canvas));
+        .unwrap_or_else(|| super::workspace::PaneConfig::for_kind(PaneKind::Canvas));
     let canvas_border = if canvas_maximized { "none" } else { "1px solid #555" };
 
     let collapsed_dock_width = 36.0;
@@ -2356,7 +2356,7 @@ pub fn App() -> Element {
     let dock_config = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Dock))
         .map(|p| p.config.clone())
-        .unwrap_or_else(|| super::dock::PaneConfig::for_kind(PaneKind::Dock));
+        .unwrap_or_else(|| super::workspace::PaneConfig::for_kind(PaneKind::Dock));
 
     // Collect shared border positions for rendering drag handles
     // Each entry: (snap_idx, x, y, w, h, cursor_css)
@@ -2430,7 +2430,7 @@ pub fn App() -> Element {
                     // Floating dock title bar drag
                     if let Some((fid, off_x, off_y)) = title_drag() {
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            st.dock_layout.set_floating_position(fid, coords.x - off_x, coords.y - off_y);
+                            st.workspace_layout.set_floating_position(fid, coords.x - off_x, coords.y - off_y);
                         }));
                         return;
                     }
@@ -2439,7 +2439,7 @@ pub fn App() -> Element {
                         let new_x = coords.x - off_x;
                         let new_y = coords.y - off_y;
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                 // Move to raw mouse position first
                                 pl.set_pane_position(pid, new_x, new_y);
                                 // Detect snaps at raw position
@@ -2460,7 +2460,7 @@ pub fn App() -> Element {
                         // Read snap direction from live state (not stale snapshot)
                         let is_vert = {
                             let st = app.borrow();
-                            st.dock_layout.pane_layout.as_ref()
+                            st.workspace_layout.pane_layout.as_ref()
                                 .and_then(|pl| pl.snaps.get(snap_idx))
                                 .map(|s| s.edge == EdgeSide::Right)
                                 .unwrap_or(true)
@@ -2469,7 +2469,7 @@ pub fn App() -> Element {
                         let new_start = if is_vert { coords.x } else { coords.y };
                         border_drag.set(Some((snap_idx, new_start)));
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                 pl.drag_shared_border(snap_idx, delta);
                             }
                         }));
@@ -2478,7 +2478,7 @@ pub fn App() -> Element {
                     // Pane edge resize
                     if let Some((pid, edge, start_mx, start_my, start_w, start_h, start_px, start_py)) = pane_resize() {
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                 let dx = coords.x - start_mx;
                                 let dy = coords.y - start_my;
                                 match edge {
@@ -2523,7 +2523,7 @@ pub fn App() -> Element {
                         let preview = snap_preview();
                         if !preview.is_empty() {
                             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                     let vw = pl.viewport_width;
                                     let vh = pl.viewport_height;
                                     pl.apply_snaps(pid, preview, vw, vh);
@@ -2548,7 +2548,7 @@ pub fn App() -> Element {
                     if let Some(win) = web_sys::window() {
                         let vw = win.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
                         let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
-                        if let Some(edge) = DockLayout::is_near_edge(coords.x, coords.y, vw, vh) {
+                        if let Some(edge) = WorkspaceLayout::is_near_edge(coords.x, coords.y, vw, vh) {
                             drop_target_sig.set(Some(DropTarget::Edge(edge)));
                         }
                     }
@@ -2580,7 +2580,7 @@ pub fn App() -> Element {
                     move |_| {
                         open_menu.set(None);
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                 pl.bring_pane_to_front(toolbar_pane_id);
                             }
                         }));
@@ -2607,7 +2607,7 @@ pub fn App() -> Element {
                                     onmousedown: move |evt: Event<MouseData>| {
                                         evt.stop_propagation();
                                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                                 pl.hide_pane(PaneKind::Toolbar);
                                             }
                                         }));
@@ -2645,7 +2645,7 @@ pub fn App() -> Element {
                         open_menu.set(None);
                         popup_slot.set(None);
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                 pl.bring_pane_to_front(canvas_pane_id);
                             }
                         }));
@@ -2669,7 +2669,7 @@ pub fn App() -> Element {
                                 evt.stop_propagation();
                                 pane_drag.set(None);
                                 (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                    if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                    if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                         pl.toggle_canvas_maximized();
                                     }
                                 }));
@@ -2734,7 +2734,7 @@ pub fn App() -> Element {
                     move |evt: Event<MouseData>| {
                         evt.stop_propagation();
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                 pl.bring_pane_to_front(dock_pane_id);
                             }
                         }));
@@ -2764,7 +2764,7 @@ pub fn App() -> Element {
                                     onmousedown: move |evt: Event<MouseData>| {
                                         evt.stop_propagation();
                                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                            st.dock_layout.toggle_dock_collapsed(dock_id);
+                                            st.workspace_layout.toggle_dock_collapsed(dock_id);
                                         }));
                                     },
                                     "{chevron}"
@@ -2782,7 +2782,7 @@ pub fn App() -> Element {
                                     onmousedown: move |evt: Event<MouseData>| {
                                         evt.stop_propagation();
                                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                            if let Some(ref mut pl) = st.dock_layout.pane_layout {
+                                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                                 pl.hide_pane(PaneKind::Dock);
                                             }
                                         }));
@@ -2888,12 +2888,12 @@ pub fn App() -> Element {
                                                 let name = name.trim().to_string();
                                                 (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                                                     // Save current layout, create new one as a copy
-                                                    st.save_dock_layout();
-                                                    st.dock_layout.name = name.clone();
+                                                    st.save_workspace_layout();
+                                                    st.workspace_layout.name = name.clone();
                                                     st.app_config.register_layout(&name);
                                                     st.app_config.active_layout = name;
                                                     st.save_app_config();
-                                                    st.save_dock_layout();
+                                                    st.save_workspace_layout();
                                                 }));
                                             }
                                             new_workspace_dialog.set(None);
@@ -2928,12 +2928,12 @@ pub fn App() -> Element {
                                                     if !name.trim().is_empty() {
                                                         let name = name.trim().to_string();
                                                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                                            st.save_dock_layout();
-                                                            st.dock_layout.name = name.clone();
+                                                            st.save_workspace_layout();
+                                                            st.workspace_layout.name = name.clone();
                                                             st.app_config.register_layout(&name);
                                                             st.app_config.active_layout = name;
                                                             st.save_app_config();
-                                                            st.save_dock_layout();
+                                                            st.save_workspace_layout();
                                                         }));
                                                     }
                                                     new_workspace_dialog.set(None);
