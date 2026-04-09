@@ -1,0 +1,4 @@
+(test
+ (name dock_test)
+ (modules dock_test)
+ (libraries jas))
