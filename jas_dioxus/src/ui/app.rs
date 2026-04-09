@@ -619,6 +619,38 @@ pub fn App() -> Element {
         });
     }
 
+    // Window resize listener: clamp floating docks to viewport.
+    {
+        let app_r = app.clone();
+        let mut rev_r = revision;
+        use_hook(move || {
+            #[cfg(target_arch = "wasm32")]
+            {
+                use wasm_bindgen::closure::Closure;
+                let cb = Closure::<dyn FnMut()>::new(move || {
+                    if let Some(win) = web_sys::window() {
+                        let vw = win.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
+                        let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
+                        if let Ok(mut st) = app_r.try_borrow_mut() {
+                            st.dock_layout.clamp_floating_docks(vw, vh);
+                            st.save_dock_layout();
+                        }
+                        rev_r += 1;
+                    }
+                });
+                if let Some(window) = web_sys::window() {
+                    let _ = window.add_event_listener_with_callback(
+                        "resize",
+                        cb.as_ref().unchecked_ref(),
+                    );
+                }
+                cb.forget();
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            { let _ = (&app_r, &mut rev_r); }
+        });
+    }
+
     // Macro-like helper: mutate state, then bump revision to trigger repaint.
     let act = {
         let app = app.clone();
@@ -784,6 +816,19 @@ pub fn App() -> Element {
             }
 
             match key {
+                // --- Panel focus navigation ---
+                Key::Tab if !tool_captures => {
+                    evt.prevent_default();
+                    if mods.shift() {
+                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                            st.dock_layout.focus_prev_panel();
+                        }));
+                    } else {
+                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                            st.dock_layout.focus_next_panel();
+                        }));
+                    }
+                }
                 // --- Modifier shortcuts ---
                 Key::Character(ref c) if (c == "z" || c == "Z") && cmd => {
                     evt.prevent_default();
@@ -1570,6 +1615,7 @@ pub fn App() -> Element {
         mut drop_target_sig: Signal<Option<DropTarget>>,
         mut was_dropped: Signal<bool>,
         mut last_drag_pos: Signal<(f64, f64)>,
+        focused: Option<PanelAddr>,
     ) -> Vec<Result<VNode, RenderError>> {
         let did = dock_id;
         let group_count = groups.len();
@@ -1592,10 +1638,15 @@ pub fn App() -> Element {
                 let bg = if is_active { "#f0f0f0" } else { "#d8d8d8" };
                 let border_bottom = if is_active { "2px solid #f0f0f0" } else { "2px solid #bbb" };
                 let font_weight = if is_active { "bold" } else { "normal" };
+                let is_focused = focused == Some(PanelAddr {
+                    group: GroupAddr { dock_id: did, group_idx: gi },
+                    panel_idx: pi,
+                });
+                let outline = if is_focused { "outline:2px solid #4a90d9; outline-offset:-2px;" } else { "" };
                 rsx! {
                     div {
                         key: "dock-tab-{gi}-{pi}",
-                        style: "padding:3px 8px; cursor:pointer; font-size:11px; font-weight:{font_weight}; background:{bg}; border-bottom:{border_bottom}; user-select:none;",
+                        style: "padding:3px 8px; cursor:pointer; font-size:11px; font-weight:{font_weight}; background:{bg}; border-bottom:{border_bottom}; user-select:none; {outline}",
                         draggable: "true",
                         ondragstart: move |evt: Event<DragData>| {
                             evt.stop_propagation();
@@ -1824,6 +1875,7 @@ pub fn App() -> Element {
 
     // --- Build dock nodes ---
     let layout_snapshot = app.borrow().dock_layout.clone();
+    let focused_panel = layout_snapshot.focused_panel();
     let right_dock = layout_snapshot.anchored_dock(DockEdge::Right);
     let dock_collapsed = right_dock.map_or(true, |d| d.collapsed);
     let dock_width = if dock_collapsed { 36.0 } else { right_dock.map_or(0.0, |d| d.width) };
@@ -1861,7 +1913,7 @@ pub fn App() -> Element {
             }).collect()
         }
         Some(dock) => {
-            build_dock_groups(dock.id, &dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos)
+            build_dock_groups(dock.id, &dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos, focused_panel)
         }
     };
 
@@ -1873,7 +1925,7 @@ pub fn App() -> Element {
         let fw = fd.dock.width;
         let act_front = act.clone();
         let act_redock = act.clone();
-        let fgroups = build_dock_groups(fid, &fd.dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos);
+        let fgroups = build_dock_groups(fid, &fd.dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos, focused_panel);
         let z = 900 + layout_snapshot.z_order.iter().position(|&id| id == fid).unwrap_or(0);
 
         rsx! {
@@ -1915,7 +1967,7 @@ pub fn App() -> Element {
     let left_dock = layout_snapshot.anchored_dock(DockEdge::Left);
     let left_dock_groups: Vec<Result<VNode, RenderError>> = match left_dock {
         Some(dock) if !dock.groups.is_empty() => {
-            build_dock_groups(dock.id, &dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos)
+            build_dock_groups(dock.id, &dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos, focused_panel)
         }
         _ => vec![],
     };
@@ -1926,7 +1978,7 @@ pub fn App() -> Element {
     let bottom_dock = layout_snapshot.anchored_dock(DockEdge::Bottom);
     let bottom_dock_groups: Vec<Result<VNode, RenderError>> = match bottom_dock {
         Some(dock) if !dock.groups.is_empty() => {
-            build_dock_groups(dock.id, &dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos)
+            build_dock_groups(dock.id, &dock.groups, &act, drag_source, drop_target_sig, was_dropped, last_drag_pos, focused_panel)
         }
         _ => vec![],
     };
