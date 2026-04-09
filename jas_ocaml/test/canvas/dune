@@ -1,3 +1,7 @@
 (test
  (name canvas_test)
  (libraries jas lablgtk3))
+
+(test
+ (name pane_rendering_test)
+ (libraries jas))
