@@ -1059,6 +1059,9 @@ pub struct PaneLayout {
     /// Pane kinds that are currently hidden (closed).
     #[serde(default)]
     pub hidden_panes: Vec<PaneKind>,
+    /// Whether the canvas pane is maximized to fill the window.
+    #[serde(default)]
+    pub canvas_maximized: bool,
     pub viewport_width: f64,
     pub viewport_height: f64,
     next_pane_id: usize,
@@ -1109,6 +1112,7 @@ impl PaneLayout {
             snaps,
             z_order,
             hidden_panes: vec![],
+            canvas_maximized: false,
             viewport_width: viewport_w,
             viewport_height: viewport_h,
             next_pane_id: 3,
@@ -1573,6 +1577,96 @@ impl PaneLayout {
                         _ => {}
                     }
                 }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Canvas maximization
+    // -----------------------------------------------------------------------
+
+    /// Toggle canvas maximized state.
+    pub fn toggle_canvas_maximized(&mut self) {
+        self.canvas_maximized = !self.canvas_maximized;
+    }
+
+    /// Tile all visible panes left-to-right, snapped together, filling
+    /// the viewport. Hidden panes are skipped; their space is given to
+    /// the remaining panes.
+    /// `dock_collapsed_width`: if `Some(w)`, the dock is collapsed and
+    /// should tile at that width instead of its full width.
+    pub fn tile_panes(&mut self, dock_collapsed_width: Option<f64>) {
+        let vw = self.viewport_width;
+        let vh = self.viewport_height;
+
+        // Show all panes and tile in left-to-right order: Toolbar, Canvas, Dock
+        self.hidden_panes.clear();
+        let order = [PaneKind::Toolbar, PaneKind::Canvas, PaneKind::Dock];
+        let visible: Vec<(PaneKind, PaneId)> = order.iter()
+            .filter_map(|&k| {
+                let id = self.pane_by_kind(k)?.id;
+                Some((k, id))
+            })
+            .collect();
+        if visible.is_empty() {
+            return;
+        }
+
+        // Toolbar and Dock keep their widths; Canvas gets the remainder.
+        // A collapsed dock uses its collapsed width for tiling.
+        let mut fixed_width = 0.0;
+        let widths: Vec<f64> = visible.iter().map(|&(kind, id)| {
+            match kind {
+                PaneKind::Toolbar => {
+                    let w = DEFAULT_TOOLBAR_WIDTH;
+                    fixed_width += w;
+                    w
+                }
+                PaneKind::Dock => {
+                    let w = dock_collapsed_width
+                        .unwrap_or_else(|| self.pane(id).map(|p| p.width).unwrap_or(DEFAULT_DOCK_WIDTH));
+                    fixed_width += w;
+                    w
+                }
+                PaneKind::Canvas => 0.0, // placeholder, computed below
+            }
+        }).collect();
+        let canvas_width = (vw - fixed_width).max(MIN_CANVAS_WIDTH);
+        let widths: Vec<f64> = visible.iter().zip(&widths).map(|(&(kind, _), &w)| {
+            if kind == PaneKind::Canvas { canvas_width } else { w }
+        }).collect();
+
+        // Assign positions to panes
+        let mut x = 0.0;
+        for (i, &(_, id)) in visible.iter().enumerate() {
+            let w = widths[i];
+            if let Some(p) = self.pane_mut(id) {
+                p.x = x;
+                p.y = 0.0;
+                p.width = w;
+                p.height = vh;
+            }
+            x += w;
+        }
+
+        // Rebuild all snap constraints
+        self.snaps.clear();
+        for (i, &(_, id)) in visible.iter().enumerate() {
+            // Left edge: first pane snaps to window left
+            if i == 0 {
+                self.snaps.push(SnapConstraint { pane: id, edge: EdgeSide::Left, target: SnapTarget::Window(EdgeSide::Left) });
+            }
+            // Right edge: last pane snaps to window right
+            if i == visible.len() - 1 {
+                self.snaps.push(SnapConstraint { pane: id, edge: EdgeSide::Right, target: SnapTarget::Window(EdgeSide::Right) });
+            }
+            // Top/bottom snap to window
+            self.snaps.push(SnapConstraint { pane: id, edge: EdgeSide::Top, target: SnapTarget::Window(EdgeSide::Top) });
+            self.snaps.push(SnapConstraint { pane: id, edge: EdgeSide::Bottom, target: SnapTarget::Window(EdgeSide::Bottom) });
+            // Pane-to-pane snap to next visible pane
+            if i + 1 < visible.len() {
+                let next_id = visible[i + 1].1;
+                self.snaps.push(SnapConstraint { pane: id, edge: EdgeSide::Right, target: SnapTarget::Pane(next_id, EdgeSide::Left) });
             }
         }
     }
