@@ -150,6 +150,19 @@ public struct AppConfig: Codable {
             savedLayouts.append(name)
         }
     }
+
+    public func save() {
+        if let json = toJson() {
+            UserDefaults.standard.set(json, forKey: AppConfig.storageKey)
+        }
+    }
+
+    public static func load() -> AppConfig {
+        guard let json = UserDefaults.standard.string(forKey: AppConfig.storageKey) else {
+            return AppConfig()
+        }
+        return fromJson(json)
+    }
 }
 
 // MARK: - DockLayout
@@ -608,6 +621,27 @@ public struct DockLayout: Codable {
 
     public static func storageKeyFor(_ name: String) -> String {
         "\(storagePrefix)\(name)"
+    }
+
+    public func save() {
+        if let json = toJson() {
+            UserDefaults.standard.set(json, forKey: storageKey())
+        }
+    }
+
+    public static func load(name: String) -> DockLayout {
+        guard let json = UserDefaults.standard.string(forKey: storageKeyFor(name)) else {
+            return named(name)
+        }
+        return fromJson(json)
+    }
+
+    /// Save if generation changed, then reset saved_generation.
+    public mutating func saveIfNeeded() {
+        if needsSave() {
+            save()
+            markSaved()
+        }
     }
 
     // MARK: - Focus

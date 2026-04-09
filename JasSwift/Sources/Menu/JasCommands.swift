@@ -24,7 +24,15 @@ public struct FocusedAddCanvasKey: FocusedValueKey {
     public typealias Value = (Model) -> Void
 }
 
+public struct FocusedWorkspaceKey: FocusedValueKey {
+    public typealias Value = WorkspaceState
+}
+
 public extension FocusedValues {
+    var workspace: WorkspaceState? {
+        get { self[FocusedWorkspaceKey.self] }
+        set { self[FocusedWorkspaceKey.self] = newValue }
+    }
     var jasModel: Model? {
         get { self[FocusedModelKey.self] }
         set { self[FocusedModelKey.self] = newValue }
@@ -54,6 +62,7 @@ public struct JasCommands: Commands {
     @FocusedValue(\.canUndo) private var canUndo
     @FocusedValue(\.canRedo) private var canRedo
     @FocusedValue(\.addCanvas) private var addCanvas
+    @FocusedValue(\.workspace) private var workspace
 
     public init() {}
 
@@ -187,6 +196,97 @@ public struct JasCommands: Commands {
             }
             .keyboardShortcut("0", modifiers: .command)
         }
+
+        CommandMenu("Window") {
+            if let ws = workspace {
+                Menu("Workspace \u{25B6}") {
+                    ForEach(ws.appConfig.savedLayouts, id: \.self) { name in
+                        let isActive = name == ws.appConfig.activeLayout
+                        let prefix = isActive ? "\u{2713} " : "    "
+                        Button(prefix + name) {
+                            ws.dockLayout.save()
+                            ws.dockLayout = DockLayout.load(name: name)
+                            ws.appConfig.activeLayout = name
+                            ws.appConfig.save()
+                        }
+                    }
+
+                    Divider()
+
+                    Button("Reset \u{201C}\(ws.appConfig.activeLayout)\u{201D}") {
+                        ws.dockLayout.resetToDefault()
+                        ws.dockLayout.saveIfNeeded()
+                    }
+
+                    Button("New Workspace\u{2026}") {
+                        let alert = NSAlert()
+                        alert.messageText = "New Workspace"
+                        alert.informativeText = "Enter a name for the new workspace:"
+                        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 250, height: 24))
+                        input.stringValue = ""
+                        input.placeholderString = "Workspace name"
+                        alert.accessoryView = input
+                        alert.addButton(withTitle: "OK")
+                        alert.addButton(withTitle: "Cancel")
+                        alert.window.initialFirstResponder = input
+                        let response = alert.runModal()
+                        if response == .alertFirstButtonReturn {
+                            let name = input.stringValue.trimmingCharacters(in: .whitespaces)
+                            if !name.isEmpty {
+                                ws.dockLayout.save()
+                                ws.dockLayout.name = name
+                                ws.appConfig.registerLayout(name)
+                                ws.appConfig.activeLayout = name
+                                ws.appConfig.save()
+                                ws.dockLayout.save()
+                            }
+                        }
+                    }
+                }
+
+                Divider()
+            }
+
+            panelToggle(.layers, "Layers")
+            panelToggle(.color, "Color")
+            panelToggle(.stroke, "Stroke")
+            panelToggle(.properties, "Properties")
+        }
+    }
+
+    @ViewBuilder
+    private func panelToggle(_ kind: PanelKind, _ label: String) -> some View {
+        let visible = workspace?.dockLayout.isPanelVisible(kind) ?? true
+        let prefix = visible ? "\u{2713} " : "    "
+        Button(prefix + label) {
+            guard let ws = workspace else { return }
+            if ws.dockLayout.isPanelVisible(kind) {
+                if let addr = findPanel(ws.dockLayout, kind) {
+                    ws.dockLayout.closePanel(addr)
+                }
+            } else {
+                ws.dockLayout.showPanel(kind)
+            }
+            ws.dockLayout.saveIfNeeded()
+        }
+    }
+
+    private func findPanel(_ layout: DockLayout, _ kind: PanelKind) -> PanelAddr? {
+        for (_, dock) in layout.anchored {
+            for (gi, group) in dock.groups.enumerated() {
+                if let pi = group.panels.firstIndex(of: kind) {
+                    return PanelAddr(group: GroupAddr(dockId: dock.id, groupIdx: gi), panelIdx: pi)
+                }
+            }
+        }
+        for fd in layout.floating {
+            for (gi, group) in fd.dock.groups.enumerated() {
+                if let pi = group.panels.firstIndex(of: kind) {
+                    return PanelAddr(group: GroupAddr(dockId: fd.dock.id, groupIdx: gi), panelIdx: pi)
+                }
+            }
+        }
+        return nil
     }
 
     private func save() {
