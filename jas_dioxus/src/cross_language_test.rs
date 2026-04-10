@@ -373,4 +373,325 @@ mod tests {
     fn operation_controller_ops() {
         run_operation_fixture("operations/controller_ops.json");
     }
+
+    // ---------------------------------------------------------------
+    // Workspace layout equivalence tests
+    // ---------------------------------------------------------------
+
+    use crate::workspace::test_json::{
+        workspace_to_test_json, test_json_to_workspace,
+        toolbar_structure_json, menu_structure_json,
+    };
+    use crate::workspace::workspace::WorkspaceLayout;
+
+    fn assert_workspace_fixture(name: &str, json: &str) {
+        let expected = read_fixture(&format!("expected/{}.json", name));
+        let expected = expected.trim();
+        if json != expected {
+            eprintln!("=== EXPECTED ({}) ===", name);
+            eprintln!("{}", expected);
+            eprintln!("=== ACTUAL ({}) ===", name);
+            eprintln!("{}", json);
+            panic!("Workspace test '{}' failed: canonical JSON mismatch", name);
+        }
+    }
+
+    #[test]
+    fn workspace_default_layout() {
+        let layout = WorkspaceLayout::default_layout();
+        let json = workspace_to_test_json(&layout);
+        assert_workspace_fixture("workspace_default", &json);
+    }
+
+    #[test]
+    fn workspace_default_with_panes() {
+        let mut layout = WorkspaceLayout::default_layout();
+        layout.ensure_pane_layout(1200.0, 800.0);
+        let json = workspace_to_test_json(&layout);
+        assert_workspace_fixture("workspace_default_with_panes", &json);
+    }
+
+    #[test]
+    fn workspace_json_roundtrip() {
+        for name in &["workspace_default", "workspace_default_with_panes"] {
+            let fixture = read_fixture(&format!("expected/{}.json", name));
+            let fixture = fixture.trim();
+            let parsed = test_json_to_workspace(fixture);
+            let reserialized = workspace_to_test_json(&parsed);
+            assert_eq!(fixture, reserialized,
+                "Workspace JSON roundtrip failed for '{}'", name);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Workspace operation equivalence tests
+    // ---------------------------------------------------------------
+
+    use crate::workspace::workspace::{
+        DockId, GroupAddr, PanelAddr, PanelKind, PaneId, PaneKind,
+    };
+
+    fn parse_panel_kind(s: &str) -> PanelKind {
+        match s {
+            "color" => PanelKind::Color,
+            "stroke" => PanelKind::Stroke,
+            "properties" => PanelKind::Properties,
+            _ => PanelKind::Layers,
+        }
+    }
+
+    fn parse_pane_kind(s: &str) -> PaneKind {
+        match s {
+            "toolbar" => PaneKind::Toolbar,
+            "dock" => PaneKind::Dock,
+            _ => PaneKind::Canvas,
+        }
+    }
+
+    fn apply_workspace_op(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
+        let name = op["op"].as_str().unwrap();
+        match name {
+            // Panel/dock operations
+            "toggle_group_collapsed" => {
+                layout.toggle_group_collapsed(GroupAddr {
+                    dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
+                    group_idx: op["group_idx"].as_u64().unwrap() as usize,
+                });
+            }
+            "set_active_panel" => {
+                layout.set_active_panel(PanelAddr {
+                    group: GroupAddr {
+                        dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
+                        group_idx: op["group_idx"].as_u64().unwrap() as usize,
+                    },
+                    panel_idx: op["panel_idx"].as_u64().unwrap() as usize,
+                });
+            }
+            "close_panel" => {
+                layout.close_panel(PanelAddr {
+                    group: GroupAddr {
+                        dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
+                        group_idx: op["group_idx"].as_u64().unwrap() as usize,
+                    },
+                    panel_idx: op["panel_idx"].as_u64().unwrap() as usize,
+                });
+            }
+            "show_panel" => {
+                let kind = parse_panel_kind(op["kind"].as_str().unwrap());
+                layout.show_panel(kind);
+            }
+            "reorder_panel" => {
+                layout.reorder_panel(
+                    GroupAddr {
+                        dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
+                        group_idx: op["group_idx"].as_u64().unwrap() as usize,
+                    },
+                    op["from"].as_u64().unwrap() as usize,
+                    op["to"].as_u64().unwrap() as usize,
+                );
+            }
+            "move_panel_to_group" => {
+                layout.move_panel_to_group(
+                    PanelAddr {
+                        group: GroupAddr {
+                            dock_id: DockId(op["from_dock_id"].as_u64().unwrap() as usize),
+                            group_idx: op["from_group_idx"].as_u64().unwrap() as usize,
+                        },
+                        panel_idx: op["from_panel_idx"].as_u64().unwrap() as usize,
+                    },
+                    GroupAddr {
+                        dock_id: DockId(op["to_dock_id"].as_u64().unwrap() as usize),
+                        group_idx: op["to_group_idx"].as_u64().unwrap() as usize,
+                    },
+                );
+            }
+            "detach_group" => {
+                layout.detach_group(
+                    GroupAddr {
+                        dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
+                        group_idx: op["group_idx"].as_u64().unwrap() as usize,
+                    },
+                    op["x"].as_f64().unwrap(),
+                    op["y"].as_f64().unwrap(),
+                );
+            }
+            "redock" => {
+                layout.redock(DockId(op["dock_id"].as_u64().unwrap() as usize));
+            }
+            // Pane operations
+            "set_pane_position" => {
+                let pl = layout.pane_layout.as_mut().unwrap();
+                pl.set_pane_position(
+                    PaneId(op["pane_id"].as_u64().unwrap() as usize),
+                    op["x"].as_f64().unwrap(),
+                    op["y"].as_f64().unwrap(),
+                );
+            }
+            "tile_panes" => {
+                let pl = layout.pane_layout.as_mut().unwrap();
+                pl.tile_panes(None);
+            }
+            "toggle_canvas_maximized" => {
+                let pl = layout.pane_layout.as_mut().unwrap();
+                pl.toggle_canvas_maximized();
+            }
+            "resize_pane" => {
+                let pl = layout.pane_layout.as_mut().unwrap();
+                pl.resize_pane(
+                    PaneId(op["pane_id"].as_u64().unwrap() as usize),
+                    op["width"].as_f64().unwrap(),
+                    op["height"].as_f64().unwrap(),
+                );
+            }
+            "hide_pane" => {
+                let pl = layout.pane_layout.as_mut().unwrap();
+                let kind = parse_pane_kind(op["kind"].as_str().unwrap());
+                pl.hide_pane(kind);
+            }
+            "show_pane" => {
+                let pl = layout.pane_layout.as_mut().unwrap();
+                let kind = parse_pane_kind(op["kind"].as_str().unwrap());
+                pl.show_pane(kind);
+            }
+            "bring_pane_to_front" => {
+                let pl = layout.pane_layout.as_mut().unwrap();
+                pl.bring_pane_to_front(PaneId(op["pane_id"].as_u64().unwrap() as usize));
+            }
+            _ => panic!("Unknown workspace op: {}", name),
+        }
+    }
+
+    fn run_workspace_operation_test(tc: &serde_json::Value) -> String {
+        let setup_name = tc["setup"].as_str().unwrap();
+        let setup_json = read_fixture(&format!("expected/{}", setup_name));
+        let mut layout = test_json_to_workspace(setup_json.trim());
+
+        for op in tc["ops"].as_array().unwrap() {
+            apply_workspace_op(&mut layout, op);
+        }
+
+        workspace_to_test_json(&layout)
+    }
+
+    fn assert_workspace_operation_test(tc: &serde_json::Value) {
+        let name = tc["name"].as_str().unwrap();
+        let expected_file = tc["expected_json"].as_str().unwrap();
+        let expected = read_fixture(&format!("workspace_operations/{}", expected_file));
+        let expected = expected.trim();
+        let actual = run_workspace_operation_test(tc);
+
+        if actual != expected {
+            eprintln!("=== EXPECTED ({}) ===", name);
+            eprintln!("{}", expected);
+            eprintln!("=== ACTUAL ({}) ===", name);
+            eprintln!("{}", actual);
+            panic!("Workspace operation test '{}' failed: canonical JSON mismatch", name);
+        }
+    }
+
+    fn run_workspace_operation_fixture(fixture: &str) {
+        let json_str = read_fixture(fixture);
+        let tests: serde_json::Value = serde_json::from_str(&json_str)
+            .unwrap_or_else(|e| panic!("Failed to parse {}: {}", fixture, e));
+        for tc in tests.as_array().unwrap() {
+            assert_workspace_operation_test(tc);
+        }
+    }
+
+    /// Bootstrap: generate expected JSON for workspace operation tests.
+    #[test]
+    #[ignore]
+    fn generate_workspace_operation_expected() {
+        for fixture in &["workspace_operations/panel_ops.json",
+                         "workspace_operations/pane_ops.json"] {
+            let json_str = read_fixture(fixture);
+            let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+            for tc in tests.as_array().unwrap() {
+                let name = tc["name"].as_str().unwrap();
+                let expected_file = tc["expected_json"].as_str().unwrap();
+                let actual = run_workspace_operation_test(tc);
+                let path = format!("{}/workspace_operations/{}", FIXTURES, expected_file);
+                std::fs::write(&path, &actual)
+                    .unwrap_or_else(|e| panic!("Failed to write {}: {}", path, e));
+                eprintln!("Generated: {} -> {}", name, expected_file);
+            }
+        }
+    }
+
+    #[test]
+    fn workspace_panel_ops() {
+        run_workspace_operation_fixture("workspace_operations/panel_ops.json");
+    }
+
+    #[test]
+    fn workspace_pane_ops() {
+        run_workspace_operation_fixture("workspace_operations/pane_ops.json");
+    }
+
+    // ---------------------------------------------------------------
+    // Pane geometry algorithm test vectors
+    // ---------------------------------------------------------------
+
+    use crate::workspace::pane::{Pane, PaneConfig, EdgeSide};
+
+    fn parse_edge_side(s: &str) -> EdgeSide {
+        match s {
+            "right" => EdgeSide::Right,
+            "top" => EdgeSide::Top,
+            "bottom" => EdgeSide::Bottom,
+            _ => EdgeSide::Left,
+        }
+    }
+
+    #[test]
+    fn algorithm_pane_geometry_vectors() {
+        use crate::workspace::pane::PaneLayout;
+
+        let json_str = read_fixture("algorithms/pane_geometry.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        for tc in tests.as_array().unwrap() {
+            let name = tc["name"].as_str().unwrap();
+            let func = tc["function"].as_str().unwrap();
+            let args = &tc["args"];
+            let expected = tc["expected"].as_f64().unwrap();
+
+            let actual = match func {
+                "pane_edge_coord" => {
+                    let pane = Pane {
+                        id: PaneId(0),
+                        kind: PaneKind::Canvas,
+                        config: PaneConfig::default(),
+                        x: args["x"].as_f64().unwrap(),
+                        y: args["y"].as_f64().unwrap(),
+                        width: args["width"].as_f64().unwrap(),
+                        height: args["height"].as_f64().unwrap(),
+                    };
+                    let edge = parse_edge_side(args["edge"].as_str().unwrap());
+                    PaneLayout::pane_edge_coord(&pane, edge)
+                }
+                _ => panic!("Unknown function: {}", func),
+            };
+
+            assert!((actual - expected).abs() < 0.0001,
+                "Pane geometry '{}' failed: expected {}, got {}", name, expected, actual);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Toolbar and menu structure tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn toolbar_structure() {
+        let json = toolbar_structure_json();
+        assert_workspace_fixture("toolbar_structure", &json);
+    }
+
+    #[test]
+    fn menu_structure() {
+        let json = menu_structure_json();
+        assert_workspace_fixture("menu_structure", &json);
+    }
 }

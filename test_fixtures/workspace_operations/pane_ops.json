@@ -1,0 +1,52 @@
+[
+  {
+    "name": "tile_panes",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "set_pane_position", "pane_id": 1, "x": 50.0, "y": 50.0},
+      {"op": "tile_panes"}
+    ],
+    "expected_json": "pane_tile.json"
+  },
+  {
+    "name": "toggle_canvas_maximized",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "toggle_canvas_maximized"}
+    ],
+    "expected_json": "pane_maximize.json"
+  },
+  {
+    "name": "resize_pane",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "resize_pane", "pane_id": 2, "width": 300.0, "height": 800.0}
+    ],
+    "expected_json": "pane_resize.json"
+  },
+  {
+    "name": "move_pane",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "set_pane_position", "pane_id": 0, "x": 100.0, "y": 50.0}
+    ],
+    "expected_json": "pane_move.json"
+  },
+  {
+    "name": "hide_and_show_pane",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "hide_pane", "kind": "dock"},
+      {"op": "show_pane", "kind": "dock"}
+    ],
+    "expected_json": "pane_hide_show.json"
+  },
+  {
+    "name": "bring_pane_to_front",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "bring_pane_to_front", "pane_id": 0}
+    ],
+    "expected_json": "pane_bring_to_front.json"
+  }
+]

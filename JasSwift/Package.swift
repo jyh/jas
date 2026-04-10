@@ -20,6 +20,11 @@ let package = Package(
             dependencies: ["JasLib"],
             path: "Tools"
         ),
+        .executableTarget(
+            name: "WorkspaceRoundtrip",
+            dependencies: ["JasLib"],
+            path: "ToolsWorkspace"
+        ),
         .testTarget(
             name: "JasTests",
             dependencies: ["JasLib"],

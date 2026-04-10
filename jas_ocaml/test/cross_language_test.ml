@@ -228,4 +228,231 @@ let () =
   run_test "controller_ops operations" (fun () ->
     run_operation_fixture "controller_ops.json");
 
+  (* --------------------------------------------------------------- *)
+  (* Workspace layout tests                                           *)
+  (* --------------------------------------------------------------- *)
+
+  Printf.printf "Workspace layout tests:\n";
+
+  run_test "workspace_default_layout" (fun () ->
+    let expected = read_fixture "expected/workspace_default.json" in
+    let layout = Jas.Workspace_layout.default_layout () in
+    let actual = Jas.Workspace_test_json.workspace_to_test_json layout in
+    if actual <> expected then begin
+      Printf.eprintf "=== EXPECTED (workspace_default) ===\n%s\n" expected;
+      Printf.eprintf "=== ACTUAL (workspace_default) ===\n%s\n" actual;
+      assert false
+    end);
+
+  run_test "workspace_default_with_panes" (fun () ->
+    let expected = read_fixture "expected/workspace_default_with_panes.json" in
+    let layout = Jas.Workspace_layout.default_layout () in
+    Jas.Workspace_layout.ensure_pane_layout layout ~viewport_w:1200.0 ~viewport_h:800.0;
+    let actual = Jas.Workspace_test_json.workspace_to_test_json layout in
+    if actual <> expected then begin
+      Printf.eprintf "=== EXPECTED (workspace_default_with_panes) ===\n%s\n" expected;
+      Printf.eprintf "=== ACTUAL (workspace_default_with_panes) ===\n%s\n" actual;
+      assert false
+    end);
+
+  run_test "workspace_json_roundtrip" (fun () ->
+    let json1 = read_fixture "expected/workspace_default_with_panes.json" in
+    let layout = Jas.Workspace_test_json.test_json_to_workspace json1 in
+    let json2 = Jas.Workspace_test_json.workspace_to_test_json layout in
+    if json1 <> json2 then begin
+      Printf.eprintf "=== EXPECTED (workspace_json_roundtrip) ===\n%s\n" json1;
+      Printf.eprintf "=== ACTUAL (workspace_json_roundtrip) ===\n%s\n" json2;
+      assert false
+    end);
+
+  run_test "toolbar_structure" (fun () ->
+    let expected = read_fixture "expected/toolbar_structure.json" in
+    let actual = Jas.Workspace_test_json.toolbar_structure_json () in
+    if actual <> expected then begin
+      Printf.eprintf "=== EXPECTED (toolbar_structure) ===\n%s\n" expected;
+      Printf.eprintf "=== ACTUAL (toolbar_structure) ===\n%s\n" actual;
+      assert false
+    end);
+
+  run_test "menu_structure" (fun () ->
+    let expected = read_fixture "expected/menu_structure.json" in
+    let actual = Jas.Workspace_test_json.menu_structure_json () in
+    if actual <> expected then begin
+      Printf.eprintf "=== EXPECTED (menu_structure) ===\n%s\n" expected;
+      Printf.eprintf "=== ACTUAL (menu_structure) ===\n%s\n" actual;
+      assert false
+    end);
+
+  (* --------------------------------------------------------------- *)
+  (* Workspace operation tests                                        *)
+  (* --------------------------------------------------------------- *)
+
+  Printf.printf "Workspace operation tests:\n";
+
+  let apply_workspace_op layout op =
+    let open Yojson.Safe.Util in
+    let to_num j = try to_float j with _ -> float_of_int (to_int j) in
+    let name = op |> member "op" |> to_string in
+    match name with
+    | "toggle_group_collapsed" ->
+      Jas.Workspace_layout.toggle_group_collapsed layout
+        { dock_id = op |> member "dock_id" |> to_int;
+          group_idx = op |> member "group_idx" |> to_int }
+    | "set_active_panel" ->
+      Jas.Workspace_layout.set_active_panel layout
+        { group = { dock_id = op |> member "dock_id" |> to_int;
+                    group_idx = op |> member "group_idx" |> to_int };
+          panel_idx = op |> member "panel_idx" |> to_int }
+    | "close_panel" ->
+      Jas.Workspace_layout.close_panel layout
+        { group = { dock_id = op |> member "dock_id" |> to_int;
+                    group_idx = op |> member "group_idx" |> to_int };
+          panel_idx = op |> member "panel_idx" |> to_int }
+    | "show_panel" ->
+      let kind = Jas.Workspace_test_json.parse_panel_kind_str
+        (op |> member "kind" |> to_string) in
+      Jas.Workspace_layout.show_panel layout kind
+    | "reorder_panel" ->
+      Jas.Workspace_layout.reorder_panel layout
+        ~group:{ dock_id = op |> member "dock_id" |> to_int;
+                 group_idx = op |> member "group_idx" |> to_int }
+        ~from:(op |> member "from" |> to_int)
+        ~to_:(op |> member "to" |> to_int)
+    | "move_panel_to_group" ->
+      Jas.Workspace_layout.move_panel_to_group layout
+        ~from:{ group = { dock_id = op |> member "from_dock_id" |> to_int;
+                          group_idx = op |> member "from_group_idx" |> to_int };
+                panel_idx = op |> member "from_panel_idx" |> to_int }
+        ~to_:{ dock_id = op |> member "to_dock_id" |> to_int;
+               group_idx = op |> member "to_group_idx" |> to_int }
+    | "detach_group" ->
+      ignore (Jas.Workspace_layout.detach_group layout
+        ~from:{ dock_id = op |> member "dock_id" |> to_int;
+                group_idx = op |> member "group_idx" |> to_int }
+        ~x:(op |> member "x" |> to_num)
+        ~y:(op |> member "y" |> to_num))
+    | "redock" ->
+      Jas.Workspace_layout.redock layout
+        (op |> member "dock_id" |> to_int)
+    | "set_pane_position" ->
+      (match layout.Jas.Workspace_layout.pane_layout with
+       | Some pl ->
+         Jas.Pane.set_pane_position pl
+           (op |> member "pane_id" |> to_int)
+           ~x:(op |> member "x" |> to_num)
+           ~y:(op |> member "y" |> to_num)
+       | None -> ())
+    | "tile_panes" ->
+      (match layout.Jas.Workspace_layout.pane_layout with
+       | Some pl -> Jas.Pane.tile_panes pl ~collapsed_override:None
+       | None -> ())
+    | "toggle_canvas_maximized" ->
+      (match layout.Jas.Workspace_layout.pane_layout with
+       | Some pl -> Jas.Pane.toggle_canvas_maximized pl
+       | None -> ())
+    | "resize_pane" ->
+      (match layout.Jas.Workspace_layout.pane_layout with
+       | Some pl ->
+         Jas.Pane.resize_pane pl
+           (op |> member "pane_id" |> to_int)
+           ~width:(op |> member "width" |> to_num)
+           ~height:(op |> member "height" |> to_num)
+       | None -> ())
+    | "hide_pane" ->
+      (match layout.Jas.Workspace_layout.pane_layout with
+       | Some pl ->
+         let kind = Jas.Workspace_test_json.parse_pane_kind_str
+           (op |> member "kind" |> to_string) in
+         Jas.Pane.hide_pane pl kind
+       | None -> ())
+    | "show_pane" ->
+      (match layout.Jas.Workspace_layout.pane_layout with
+       | Some pl ->
+         let kind = Jas.Workspace_test_json.parse_pane_kind_str
+           (op |> member "kind" |> to_string) in
+         Jas.Pane.show_pane pl kind
+       | None -> ())
+    | "bring_pane_to_front" ->
+      (match layout.Jas.Workspace_layout.pane_layout with
+       | Some pl ->
+         Jas.Pane.bring_pane_to_front pl
+           (op |> member "pane_id" |> to_int)
+       | None -> ())
+    | _ -> failwith (Printf.sprintf "Unknown workspace op: %s" name)
+  in
+
+  let run_workspace_operation_fixture fixture_name =
+    let json_str = read_fixture (Printf.sprintf "workspace_operations/%s" fixture_name) in
+    let json = Yojson.Safe.from_string json_str in
+    let tests = Yojson.Safe.Util.to_list json in
+    List.iter (fun tc ->
+      let open Yojson.Safe.Util in
+      let name = tc |> member "name" |> to_string in
+      let setup_name = tc |> member "setup" |> to_string in
+      let expected_file = tc |> member "expected_json" |> to_string in
+      let ops = tc |> member "ops" |> to_list in
+      let setup_json = read_fixture (Printf.sprintf "expected/%s" setup_name) in
+      let expected = read_fixture (Printf.sprintf "workspace_operations/%s" expected_file) in
+      let layout = Jas.Workspace_test_json.test_json_to_workspace setup_json in
+      List.iter (fun op -> apply_workspace_op layout op) ops;
+      let actual = Jas.Workspace_test_json.workspace_to_test_json layout in
+      if actual <> expected then begin
+        Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name expected;
+        Printf.eprintf "=== ACTUAL (%s) ===\n%s\n" name actual;
+        assert false
+      end
+    ) tests
+  in
+
+  run_test "workspace_panel_ops" (fun () ->
+    run_workspace_operation_fixture "panel_ops.json");
+
+  run_test "workspace_pane_ops" (fun () ->
+    run_workspace_operation_fixture "pane_ops.json");
+
+  (* --------------------------------------------------------------- *)
+  (* Pane geometry algorithm tests                                    *)
+  (* --------------------------------------------------------------- *)
+
+  Printf.printf "Pane geometry algorithm tests:\n";
+
+  run_test "algorithm_pane_geometry" (fun () ->
+    let json_str = read_fixture "algorithms/pane_geometry.json" in
+    let json = Yojson.Safe.from_string json_str in
+    let tests = Yojson.Safe.Util.to_list json in
+    List.iter (fun tc ->
+      let open Yojson.Safe.Util in
+      let name = tc |> member "name" |> to_string in
+      let func = tc |> member "function" |> to_string in
+      let args = tc |> member "args" in
+      let expected = tc |> member "expected" |> to_float in
+      let actual = match func with
+        | "pane_edge_coord" ->
+          let x = args |> member "x" |> to_float in
+          let y = args |> member "y" |> to_float in
+          let width = args |> member "width" |> to_float in
+          let height = args |> member "height" |> to_float in
+          let edge_str = args |> member "edge" |> to_string in
+          let p : Jas.Pane.pane = {
+            id = 0;
+            kind = Jas.Pane.Canvas;
+            config = Jas.Pane.config_for_kind Jas.Pane.Canvas;
+            x; y; width; height;
+          } in
+          let edge = match edge_str with
+            | "right" -> Jas.Pane.Right
+            | "top" -> Jas.Pane.Top
+            | "bottom" -> Jas.Pane.Bottom
+            | _ -> Jas.Pane.Left
+          in
+          Jas.Pane.pane_edge_coord p edge
+        | _ -> failwith (Printf.sprintf "Unknown function: %s" func)
+      in
+      if actual <> expected then begin
+        Printf.eprintf "Pane geometry '%s' failed: expected %f, got %f\n"
+          name expected actual;
+        assert false
+      end
+    ) tests);
+
   Printf.printf "All cross-language tests passed.\n"

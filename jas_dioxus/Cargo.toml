@@ -16,6 +16,10 @@ required-features = ["web"]
 name = "svg_roundtrip"
 path = "src/bin/svg_roundtrip.rs"
 
+[[bin]]
+name = "workspace_roundtrip"
+path = "src/bin/workspace_roundtrip.rs"
+
 [features]
 default = ["web"]
 web = ["dep:dioxus", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:dioxus-logger"]

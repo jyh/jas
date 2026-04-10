@@ -1,0 +1,38 @@
+[
+  {
+    "name": "pane_edge_left",
+    "function": "pane_edge_coord",
+    "args": {"x": 10.0, "y": 20.0, "width": 100.0, "height": 200.0, "edge": "left"},
+    "expected": 10.0
+  },
+  {
+    "name": "pane_edge_right",
+    "function": "pane_edge_coord",
+    "args": {"x": 10.0, "y": 20.0, "width": 100.0, "height": 200.0, "edge": "right"},
+    "expected": 110.0
+  },
+  {
+    "name": "pane_edge_top",
+    "function": "pane_edge_coord",
+    "args": {"x": 10.0, "y": 20.0, "width": 100.0, "height": 200.0, "edge": "top"},
+    "expected": 20.0
+  },
+  {
+    "name": "pane_edge_bottom",
+    "function": "pane_edge_coord",
+    "args": {"x": 10.0, "y": 20.0, "width": 100.0, "height": 200.0, "edge": "bottom"},
+    "expected": 220.0
+  },
+  {
+    "name": "pane_edge_zero_origin",
+    "function": "pane_edge_coord",
+    "args": {"x": 0.0, "y": 0.0, "width": 72.0, "height": 800.0, "edge": "right"},
+    "expected": 72.0
+  },
+  {
+    "name": "pane_edge_large_values",
+    "function": "pane_edge_coord",
+    "args": {"x": 500.0, "y": 0.0, "width": 240.0, "height": 800.0, "edge": "bottom"},
+    "expected": 800.0
+  }
+]

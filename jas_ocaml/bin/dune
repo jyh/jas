@@ -5,3 +5,7 @@
 (executable
  (name svg_roundtrip)
  (libraries jas))
+
+(executable
+ (name workspace_roundtrip)
+ (libraries jas yojson))

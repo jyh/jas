@@ -253,6 +253,262 @@ private func runOperationFixture(_ fixture: String) throws {
     try runOperationFixture("controller_ops.json")
 }
 
+// MARK: - Workspace layout equivalence tests
+
+private func assertWorkspaceFixture(_ name: String, _ json: String) {
+    let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
+    if json != expected {
+        print("=== EXPECTED (\(name)) ===")
+        print(expected)
+        print("=== ACTUAL (\(name)) ===")
+        print(json)
+    }
+    #expect(json == expected, "Workspace test '\(name)' failed: canonical JSON mismatch")
+}
+
+@Test func testWorkspaceDefaultLayout() {
+    let layout = WorkspaceLayout.defaultLayout()
+    let json = workspaceToTestJson(layout)
+    assertWorkspaceFixture("workspace_default", json)
+}
+
+@Test func testWorkspaceDefaultWithPanes() {
+    var layout = WorkspaceLayout.defaultLayout()
+    layout.ensurePaneLayout(viewportW: 1200, viewportH: 800)
+    let json = workspaceToTestJson(layout)
+    assertWorkspaceFixture("workspace_default_with_panes", json)
+}
+
+@Test func testWorkspaceJsonRoundtrip() {
+    for name in ["workspace_default", "workspace_default_with_panes"] {
+        let fixture = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsed = testJsonToWorkspace(fixture)
+        let reserialized = workspaceToTestJson(parsed)
+        #expect(fixture == reserialized, "Workspace JSON roundtrip failed for '\(name)'")
+    }
+}
+
+@Test func testToolbarStructure() {
+    let json = toolbarStructureJson()
+    assertWorkspaceFixture("toolbar_structure", json)
+}
+
+@Test func testMenuStructure() {
+    let json = menuStructureJson()
+    assertWorkspaceFixture("menu_structure", json)
+}
+
+// MARK: - Workspace operation equivalence tests
+
+private func applyWorkspaceOp(_ layout: inout WorkspaceLayout, _ op: [String: Any]) {
+    let name = op["op"] as! String
+    switch name {
+    // Panel/dock operations
+    case "toggle_group_collapsed":
+        layout.toggleGroupCollapsed(GroupAddr(
+            dockId: DockId(op["dock_id"] as! Int),
+            groupIdx: op["group_idx"] as! Int
+        ))
+    case "set_active_panel":
+        layout.setActivePanel(PanelAddr(
+            group: GroupAddr(
+                dockId: DockId(op["dock_id"] as! Int),
+                groupIdx: op["group_idx"] as! Int
+            ),
+            panelIdx: op["panel_idx"] as! Int
+        ))
+    case "close_panel":
+        layout.closePanel(PanelAddr(
+            group: GroupAddr(
+                dockId: DockId(op["dock_id"] as! Int),
+                groupIdx: op["group_idx"] as! Int
+            ),
+            panelIdx: op["panel_idx"] as! Int
+        ))
+    case "show_panel":
+        let kind = parsePanelKindOp(op["kind"] as! String)
+        layout.showPanel(kind)
+    case "reorder_panel":
+        layout.reorderPanel(
+            GroupAddr(
+                dockId: DockId(op["dock_id"] as! Int),
+                groupIdx: op["group_idx"] as! Int
+            ),
+            from: op["from"] as! Int,
+            to: op["to"] as! Int
+        )
+    case "move_panel_to_group":
+        layout.movePanelToGroup(
+            PanelAddr(
+                group: GroupAddr(
+                    dockId: DockId(op["from_dock_id"] as! Int),
+                    groupIdx: op["from_group_idx"] as! Int
+                ),
+                panelIdx: op["from_panel_idx"] as! Int
+            ),
+            to: GroupAddr(
+                dockId: DockId(op["to_dock_id"] as! Int),
+                groupIdx: op["to_group_idx"] as! Int
+            )
+        )
+    case "detach_group":
+        layout.detachGroup(
+            GroupAddr(
+                dockId: DockId(op["dock_id"] as! Int),
+                groupIdx: op["group_idx"] as! Int
+            ),
+            x: op["x"] as! Double,
+            y: op["y"] as! Double
+        )
+    case "redock":
+        layout.redock(DockId(op["dock_id"] as! Int))
+    // Pane operations
+    case "set_pane_position":
+        layout.panesMut { pl in
+            pl.setPanePosition(
+                PaneId(op["pane_id"] as! Int),
+                x: op["x"] as! Double,
+                y: op["y"] as! Double
+            )
+        }
+    case "tile_panes":
+        layout.panesMut { pl in
+            pl.tilePanes(collapsedOverride: nil)
+        }
+    case "toggle_canvas_maximized":
+        layout.panesMut { pl in
+            pl.toggleCanvasMaximized()
+        }
+    case "resize_pane":
+        layout.panesMut { pl in
+            pl.resizePane(
+                PaneId(op["pane_id"] as! Int),
+                width: op["width"] as! Double,
+                height: op["height"] as! Double
+            )
+        }
+    case "hide_pane":
+        let kind = parsePaneKindOp(op["kind"] as! String)
+        layout.panesMut { pl in
+            pl.hidePane(kind)
+        }
+    case "show_pane":
+        let kind = parsePaneKindOp(op["kind"] as! String)
+        layout.panesMut { pl in
+            pl.showPane(kind)
+        }
+    case "bring_pane_to_front":
+        layout.panesMut { pl in
+            pl.bringPaneToFront(PaneId(op["pane_id"] as! Int))
+        }
+    default:
+        Issue.record("Unknown workspace op: \(name)")
+    }
+}
+
+private func parsePanelKindOp(_ s: String) -> PanelKind {
+    switch s {
+    case "color": return .color
+    case "stroke": return .stroke
+    case "properties": return .properties
+    default: return .layers
+    }
+}
+
+private func parsePaneKindOp(_ s: String) -> PaneKind {
+    switch s {
+    case "toolbar": return .toolbar
+    case "dock": return .dock
+    default: return .canvas
+    }
+}
+
+private func runWorkspaceOperationFixture(_ fixture: String) throws {
+    let json = readFixture("workspace_operations/\(fixture)")
+    let data = json.data(using: .utf8)!
+    let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    for tc in tests {
+        let name = tc["name"] as! String
+        let setupName = tc["setup"] as! String
+        let expectedFile = tc["expected_json"] as! String
+        let ops = tc["ops"] as! [[String: Any]]
+
+        let setupJson = readFixture("expected/\(setupName)").trimmingCharacters(in: .whitespacesAndNewlines)
+        var layout = testJsonToWorkspace(setupJson)
+
+        for op in ops {
+            applyWorkspaceOp(&layout, op)
+        }
+
+        let actual = workspaceToTestJson(layout)
+        let expected = readFixture("workspace_operations/\(expectedFile)").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if actual != expected {
+            print("=== EXPECTED (\(name)) ===")
+            print(expected)
+            print("=== ACTUAL (\(name)) ===")
+            print(actual)
+        }
+        #expect(actual == expected, "Workspace operation test '\(name)' failed")
+    }
+}
+
+@Test func testWorkspacePanelOps() throws {
+    try runWorkspaceOperationFixture("panel_ops.json")
+}
+
+@Test func testWorkspacePaneOps() throws {
+    try runWorkspaceOperationFixture("pane_ops.json")
+}
+
+// MARK: - Pane geometry algorithm test vectors
+
+private func parseEdgeSideOp(_ s: String) -> EdgeSide {
+    switch s {
+    case "right": return .right
+    case "top": return .top
+    case "bottom": return .bottom
+    default: return .left
+    }
+}
+
+@Test func testAlgorithmPaneGeometry() throws {
+    let json = readFixture("algorithms/pane_geometry.json")
+    let data = json.data(using: .utf8)!
+    let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    for tc in tests {
+        let name = tc["name"] as! String
+        let function = tc["function"] as! String
+        let args = tc["args"] as! [String: Any]
+        let expected = tc["expected"] as! Double
+
+        let actual: Double
+        switch function {
+        case "pane_edge_coord":
+            let pane = Pane(
+                id: PaneId(0),
+                kind: .canvas,
+                config: .forKind(.canvas),
+                x: args["x"] as! Double,
+                y: args["y"] as! Double,
+                width: args["width"] as! Double,
+                height: args["height"] as! Double
+            )
+            let edge = parseEdgeSideOp(args["edge"] as! String)
+            actual = PaneLayout.paneEdgeCoord(pane, edge)
+        default:
+            Issue.record("Unknown function: \(function)")
+            continue
+        }
+        #expect(abs(actual - expected) < 0.0001,
+            "Pane geometry '\(name)' failed: expected \(expected), got \(actual)")
+    }
+}
+
+// MARK: - Hit test algorithm vectors
+
 @Test func algorithmHitTestVectors() throws {
     let json = readFixture("algorithms/hit_test.json")
     let data = json.data(using: .utf8)!
