@@ -76,7 +76,12 @@ def compute_shared_borders(pl: PaneLayout | None) -> list[SharedBorder]:
         pb = pl.find_pane(other_id)
         if not pa or not pb:
             continue
-        if pa.config.fixed_width or pb.config.fixed_width:
+        if pa.config.fixed_width and pb.config.fixed_width:
+            continue
+        # Skip stale snaps where edges have separated
+        if is_vert and abs(pa.x + pa.width - pb.x) > 1.0:
+            continue
+        if is_horiz and abs(pa.y + pa.height - pb.y) > 1.0:
             continue
         if is_vert:
             bx = pa.x + pa.width
