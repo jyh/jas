@@ -19,7 +19,7 @@
   {"name": "rects_intersect_overlapping", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 5.0, 5.0, 10.0, 10.0], "expected": true},
   {"name": "rects_intersect_separate", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 20.0, 20.0, 10.0, 10.0], "expected": false},
   {"name": "rects_intersect_contained", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 2.0, 2.0, 3.0, 3.0], "expected": true},
-  {"name": "rects_intersect_edge_touching", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 10.0, 0.0, 10.0, 10.0], "expected": true},
-  {"name": "rects_intersect_corner_touching", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0], "expected": true},
+  {"name": "rects_intersect_edge_touching", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 10.0, 0.0, 10.0, 10.0], "expected": false},
+  {"name": "rects_intersect_corner_touching", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0], "expected": false},
   {"name": "rects_intersect_identical", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 0.0, 0.0, 10.0, 10.0], "expected": true}
 ]

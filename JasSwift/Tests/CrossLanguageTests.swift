@@ -57,3 +57,37 @@ private func assertSvgParse(_ name: String) {
 @Test func svgParseTransformRotate() { assertSvgParse("transform_rotate") }
 @Test func svgParseMultiLayer() { assertSvgParse("multi_layer") }
 @Test func svgParseComplexDocument() { assertSvgParse("complex_document") }
+
+// MARK: - Algorithm test vectors
+
+private struct HitTestCase: Decodable {
+    let name: String
+    let function: String
+    let args: [Double]
+    let expected: Bool
+}
+
+@Test func algorithmHitTestVectors() throws {
+    let json = readFixture("algorithms/hit_test.json")
+    let data = json.data(using: .utf8)!
+    let tests = try JSONDecoder().decode([HitTestCase].self, from: data)
+
+    for tc in tests {
+        let a = tc.args
+        let actual: Bool
+        switch tc.function {
+        case "point_in_rect":
+            actual = pointInRect(a[0], a[1], a[2], a[3], a[4], a[5])
+        case "segments_intersect":
+            actual = segmentsIntersect(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
+        case "segment_intersects_rect":
+            actual = segmentIntersectsRect(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
+        case "rects_intersect":
+            actual = rectsIntersect(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
+        default:
+            Issue.record("Unknown function: \(tc.function)")
+            continue
+        }
+        #expect(actual == tc.expected, "Hit test '\(tc.name)' failed: expected \(tc.expected), got \(actual)")
+    }
+}
