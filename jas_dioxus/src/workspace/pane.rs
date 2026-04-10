@@ -38,12 +38,13 @@ pub enum PaneKind {
 }
 
 /// How a pane's width is allocated during the Tile operation.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum TileWidth {
-    /// Always this exact width (e.g., Toolbar at 72px).
+/// Derived at tile time from PaneConfig fields, not stored.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TileWidth {
+    /// Keep current width (fixed-width or collapsible panes).
     Fixed(f64),
-    /// Keep the pane's current width (e.g., Dock).
-    KeepCurrent,
+    /// Keep current width (collapsible panes like Dock).
+    KeepCurrent(f64),
     /// Fill all remaining space (e.g., Canvas).
     Flex,
 }
@@ -73,8 +74,6 @@ pub struct PaneConfig {
     /// Action triggered by double-clicking the title bar.
     #[serde(default)]
     pub double_click_action: DoubleClickAction,
-    pub tile_order: usize,
-    pub tile_width: TileWidth,
 }
 
 impl PaneConfig {
@@ -88,8 +87,6 @@ impl PaneConfig {
                 fixed_width: true,
                 collapsed_width: None,
                 double_click_action: DoubleClickAction::None,
-                tile_order: 0,
-                tile_width: TileWidth::Fixed(DEFAULT_TOOLBAR_WIDTH),
             },
             PaneKind::Canvas => Self {
                 label: "Canvas".into(),
@@ -98,8 +95,6 @@ impl PaneConfig {
                 fixed_width: false,
                 collapsed_width: None,
                 double_click_action: DoubleClickAction::Maximize,
-                tile_order: 1,
-                tile_width: TileWidth::Flex,
             },
             PaneKind::Dock => Self {
                 label: "Panels".into(),
@@ -108,8 +103,6 @@ impl PaneConfig {
                 fixed_width: false,
                 collapsed_width: Some(36.0),
                 double_click_action: DoubleClickAction::Redock,
-                tile_order: 2,
-                tile_width: TileWidth::KeepCurrent,
             },
         }
     }
@@ -666,48 +659,50 @@ impl PaneLayout {
         // Unmaximize and show all panes.
         self.canvas_maximized = false;
         self.hidden_panes.clear();
-        let mut visible: Vec<(PaneId, TileWidth, f64)> = self.panes.iter()
-            .map(|p| {
-                let current_w = p.width;
-                (p.id, p.config.tile_width, current_w)
-            })
+
+        // Sort panes by position: ascending x, tiebreak by descending y.
+        let mut visible: Vec<(PaneId, f64, f64)> = self.panes.iter()
+            .map(|p| (p.id, p.x, p.y))
             .collect();
-        // Sort by tile_order from config
-        visible.sort_by_key(|&(id, _, _)| {
-            self.pane(id).map(|p| p.config.tile_order).unwrap_or(0)
+        visible.sort_by(|a, b| {
+            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+                .then(b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal))
         });
         if visible.is_empty() {
             return;
         }
 
-        // Compute widths: Fixed and KeepCurrent are allocated first, Flex gets the rest.
+        // Derive tile width from config and compute widths.
         let mut fixed_total = 0.0;
         let mut flex_count = 0;
-        let widths: Vec<f64> = visible.iter().map(|&(id, tile_w, current_w)| {
-            match tile_w {
+        let tile_widths: Vec<TileWidth> = visible.iter().map(|&(id, _, _)| {
+            if let Some((oid, cw)) = collapsed_override {
+                if oid == id { return TileWidth::Fixed(cw); }
+            }
+            match self.pane(id) {
+                Some(p) if p.config.fixed_width => TileWidth::Fixed(p.width),
+                Some(p) if p.config.collapsed_width.is_some() => TileWidth::KeepCurrent(p.width),
+                _ => TileWidth::Flex,
+            }
+        }).collect();
+        let widths: Vec<f64> = tile_widths.iter().map(|tw| {
+            match *tw {
                 TileWidth::Fixed(w) => { fixed_total += w; w }
-                TileWidth::KeepCurrent => {
-                    let w = collapsed_override
-                        .filter(|&(oid, _)| oid == id)
-                        .map(|(_, cw)| cw)
-                        .unwrap_or(current_w);
-                    fixed_total += w;
-                    w
-                }
+                TileWidth::KeepCurrent(w) => { fixed_total += w; w }
                 TileWidth::Flex => { flex_count += 1; 0.0 }
             }
         }).collect();
         let flex_each = if flex_count > 0 {
-            let min_flex = self.panes.iter()
-                .filter(|p| p.config.tile_width == TileWidth::Flex)
-                .map(|p| p.config.min_width)
+            let min_flex = visible.iter().zip(&tile_widths)
+                .filter(|(_, tw)| matches!(tw, TileWidth::Flex))
+                .filter_map(|(&(id, _, _), _)| self.pane(id).map(|p| p.config.min_width))
                 .fold(0.0_f64, f64::max);
             ((vw - fixed_total) / flex_count as f64).max(min_flex)
         } else {
             0.0
         };
-        let widths: Vec<f64> = visible.iter().zip(&widths).map(|(&(_, tile_w, _), &w)| {
-            if tile_w == TileWidth::Flex { flex_each } else { w }
+        let widths: Vec<f64> = tile_widths.iter().zip(&widths).map(|(tw, &w)| {
+            if matches!(tw, TileWidth::Flex) { flex_each } else { w }
         }).collect();
 
         // Assign positions to panes
@@ -725,7 +720,7 @@ impl PaneLayout {
 
         // Rebuild all snap constraints
         self.snaps.clear();
-        for (i, &(id, _, _)) in visible.iter().enumerate() {
+        for (i, &(id, ..)) in visible.iter().enumerate() {
             // Left edge: first pane snaps to window left
             if i == 0 {
                 self.snaps.push(SnapConstraint { pane: id, edge: EdgeSide::Left, target: SnapTarget::Window(EdgeSide::Left) });
