@@ -438,9 +438,10 @@ class type_tool = object (_self)
           | Some f -> f.fill_color
           | None -> match tr.tr_stroke with
             | Some st -> st.stroke_color
-            | None -> { Element.r = 0.0; g = 0.0; b = 0.0; a = 1.0 }
+            | None -> Element.black
         in
-        Cairo.set_source_rgba cr color.r color.g color.b 1.0;
+        let (r, g, b, _) = Element.color_to_rgba color in
+        Cairo.set_source_rgba cr r g b 1.0;
         Cairo.set_line_width cr 1.5;
         Cairo.move_to cr (tr.tr_x +. cx) (tr.tr_y +. cy -. ch *. 0.8);
         Cairo.line_to cr (tr.tr_x +. cx) (tr.tr_y +. cy +. ch *. 0.2);

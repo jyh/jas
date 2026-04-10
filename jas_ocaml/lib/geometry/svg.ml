@@ -17,10 +17,11 @@ let fmt v =
   String.sub s 0 (!i + 1)
 
 let color_str (c : Element.color) =
-  let r = int_of_float (Float.round (c.r *. 255.0)) in
-  let g = int_of_float (Float.round (c.g *. 255.0)) in
-  let b = int_of_float (Float.round (c.b *. 255.0)) in
-  if c.a < 1.0 then Printf.sprintf "rgba(%d,%d,%d,%s)" r g b (fmt c.a)
+  let (rv, gv, bv, av) = Element.color_to_rgba c in
+  let r = int_of_float (Float.round (rv *. 255.0)) in
+  let g = int_of_float (Float.round (gv *. 255.0)) in
+  let b = int_of_float (Float.round (bv *. 255.0)) in
+  if av < 1.0 then Printf.sprintf "rgba(%d,%d,%d,%s)" r g b (fmt av)
   else Printf.sprintf "rgb(%d,%d,%d)" r g b
 
 let escape_xml s =

@@ -23,10 +23,11 @@ private func fmt(_ v: Double) -> String {
 }
 
 private func colorStr(_ c: Color) -> String {
-    let r = Int(round(c.r * 255))
-    let g = Int(round(c.g * 255))
-    let b = Int(round(c.b * 255))
-    if c.a < 1.0 { return "rgba(\(r),\(g),\(b),\(fmt(c.a)))" }
+    let (cr, cg, cb, ca) = c.toRgba()
+    let r = Int(round(cr * 255))
+    let g = Int(round(cg * 255))
+    let b = Int(round(cb * 255))
+    if ca < 1.0 { return "rgba(\(r),\(g),\(b),\(fmt(ca)))" }
     return "rgb(\(r),\(g),\(b))"
 }
 

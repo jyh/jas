@@ -89,10 +89,30 @@ fn json_array(items: &[String]) -> String {
 
 fn color_json(c: &Color) -> String {
     let mut o = JsonObj::new();
-    o.num("a", c.a);
-    o.num("b", c.b);
-    o.num("g", c.g);
-    o.num("r", c.r);
+    match c {
+        Color::Rgb { r, g, b, a } => {
+            o.num("a", *a);
+            o.num("b", *b);
+            o.num("g", *g);
+            o.num("r", *r);
+            o.str_val("space", "rgb");
+        }
+        Color::Hsb { h, s, b, a } => {
+            o.num("a", *a);
+            o.num("b", *b);
+            o.num("h", *h);
+            o.num("s", *s);
+            o.str_val("space", "hsb");
+        }
+        Color::Cmyk { c, m, y, k, a } => {
+            o.num("a", *a);
+            o.num("c", *c);
+            o.num("k", *k);
+            o.num("m", *m);
+            o.str_val("space", "cmyk");
+            o.num("y", *y);
+        }
+    }
     o.build()
 }
 
@@ -406,7 +426,27 @@ fn parse_f(v: &serde_json::Value) -> f64 {
 }
 
 fn parse_color(v: &serde_json::Value) -> Color {
-    Color::new(parse_f(&v["r"]), parse_f(&v["g"]), parse_f(&v["b"]), parse_f(&v["a"]))
+    match v["space"].as_str().unwrap_or("rgb") {
+        "hsb" => Color::Hsb {
+            h: parse_f(&v["h"]),
+            s: parse_f(&v["s"]),
+            b: parse_f(&v["b"]),
+            a: parse_f(&v["a"]),
+        },
+        "cmyk" => Color::Cmyk {
+            c: parse_f(&v["c"]),
+            m: parse_f(&v["m"]),
+            y: parse_f(&v["y"]),
+            k: parse_f(&v["k"]),
+            a: parse_f(&v["a"]),
+        },
+        _ => Color::Rgb {
+            r: parse_f(&v["r"]),
+            g: parse_f(&v["g"]),
+            b: parse_f(&v["b"]),
+            a: parse_f(&v["a"]),
+        },
+    }
 }
 
 fn parse_fill(v: &serde_json::Value) -> Option<Fill> {
@@ -656,7 +696,7 @@ mod tests {
         });
         let json = element_json(&rect);
         assert!(json.contains("\"type\":\"rect\""));
-        assert!(json.contains("\"fill\":{\"color\":{\"a\":1.0,\"b\":0.0,\"g\":0.0,\"r\":1.0}}"));
+        assert!(json.contains("\"fill\":{\"color\":{\"a\":1.0,\"b\":0.0,\"g\":0.0,\"r\":1.0,\"space\":\"rgb\"}}"));
         assert!(json.contains("\"stroke\":null"));
     }
 

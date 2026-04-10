@@ -20,26 +20,145 @@ pub const APPROX_CHAR_WIDTH_FACTOR: f64 = 0.6;
 // SVG presentation attributes
 // ---------------------------------------------------------------------------
 
-/// RGBA color with components in [0, 1].
+/// Color with support for RGB, HSB, and CMYK color spaces.
+///
+/// Components are normalized to [0, 1] except HSB hue which is [0, 360).
+/// Each variant carries its own alpha in [0, 1].
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Color {
-    pub r: f64,
-    pub g: f64,
-    pub b: f64,
-    pub a: f64,
+pub enum Color {
+    /// Red, green, blue, alpha — all in [0, 1].
+    Rgb { r: f64, g: f64, b: f64, a: f64 },
+    /// Hue [0, 360), saturation [0, 1], brightness [0, 1], alpha [0, 1].
+    Hsb { h: f64, s: f64, b: f64, a: f64 },
+    /// Cyan, magenta, yellow, key (black), alpha — all in [0, 1].
+    Cmyk { c: f64, m: f64, y: f64, k: f64, a: f64 },
 }
 
 impl Color {
+    /// Create an RGB color (backward-compatible alias for `Color::Rgb`).
     pub const fn new(r: f64, g: f64, b: f64, a: f64) -> Self {
-        Self { r, g, b, a }
+        Self::Rgb { r, g, b, a }
     }
 
+    /// Create an opaque RGB color.
     pub const fn rgb(r: f64, g: f64, b: f64) -> Self {
-        Self { r, g, b, a: 1.0 }
+        Self::Rgb { r, g, b, a: 1.0 }
+    }
+
+    /// Create an opaque HSB color.
+    pub const fn hsb(h: f64, s: f64, b: f64) -> Self {
+        Self::Hsb { h, s, b, a: 1.0 }
+    }
+
+    /// Create an opaque CMYK color.
+    pub const fn cmyk(c: f64, m: f64, y: f64, k: f64) -> Self {
+        Self::Cmyk { c, m, y, k, a: 1.0 }
     }
 
     pub const BLACK: Self = Self::rgb(0.0, 0.0, 0.0);
     pub const WHITE: Self = Self::rgb(1.0, 1.0, 1.0);
+
+    /// Alpha component, regardless of color space.
+    pub fn alpha(&self) -> f64 {
+        match self {
+            Self::Rgb { a, .. } | Self::Hsb { a, .. } | Self::Cmyk { a, .. } => *a,
+        }
+    }
+
+    /// Convert to (r, g, b, a) with all components in [0, 1].
+    pub fn to_rgba(&self) -> (f64, f64, f64, f64) {
+        match *self {
+            Self::Rgb { r, g, b, a } => (r, g, b, a),
+            Self::Hsb { h, s, b, a } => {
+                let (r, g, bl) = hsb_to_rgb_components(h, s, b);
+                (r, g, bl, a)
+            }
+            Self::Cmyk { c, m, y, k, a } => {
+                let r = (1.0 - c) * (1.0 - k);
+                let g = (1.0 - m) * (1.0 - k);
+                let b = (1.0 - y) * (1.0 - k);
+                (r, g, b, a)
+            }
+        }
+    }
+
+    /// Convert to (h, s, b, a) with h in [0, 360), s/b in [0, 1].
+    pub fn to_hsba(&self) -> (f64, f64, f64, f64) {
+        match *self {
+            Self::Hsb { h, s, b, a } => (h, s, b, a),
+            _ => {
+                let (r, g, b, a) = self.to_rgba();
+                let (h, s, br) = rgb_to_hsb_components(r, g, b);
+                (h, s, br, a)
+            }
+        }
+    }
+
+    /// Convert to (c, m, y, k, a) with all components in [0, 1].
+    pub fn to_cmyka(&self) -> (f64, f64, f64, f64, f64) {
+        match *self {
+            Self::Cmyk { c, m, y, k, a } => (c, m, y, k, a),
+            _ => {
+                let (r, g, b, a) = self.to_rgba();
+                let max = r.max(g).max(b);
+                let k = 1.0 - max;
+                if k >= 1.0 {
+                    (0.0, 0.0, 0.0, 1.0, a)
+                } else {
+                    let c = (1.0 - r - k) / (1.0 - k);
+                    let m = (1.0 - g - k) / (1.0 - k);
+                    let y = (1.0 - b - k) / (1.0 - k);
+                    (c, m, y, k, a)
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Color-space conversion helpers
+// ---------------------------------------------------------------------------
+
+fn hsb_to_rgb_components(h: f64, s: f64, v: f64) -> (f64, f64, f64) {
+    if s == 0.0 {
+        return (v, v, v);
+    }
+    let h = ((h % 360.0) + 360.0) % 360.0; // normalize hue
+    let hi = (h / 60.0).floor() as u32 % 6;
+    let f = h / 60.0 - hi as f64;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+    match hi {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    }
+}
+
+fn rgb_to_hsb_components(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+
+    let brightness = max;
+    let saturation = if max == 0.0 { 0.0 } else { delta / max };
+
+    let hue = if delta == 0.0 {
+        0.0
+    } else if max == r {
+        60.0 * (((g - b) / delta) % 6.0)
+    } else if max == g {
+        60.0 * ((b - r) / delta + 2.0)
+    } else {
+        60.0 * ((r - g) / delta + 4.0)
+    };
+    let hue = ((hue % 360.0) + 360.0) % 360.0;
+
+    (hue, saturation, brightness)
 }
 
 impl Default for Color {
@@ -1811,5 +1930,305 @@ mod tests {
         let last = pts.last().unwrap();
         assert!((last.0 - 10.0).abs() < 0.01);
         assert!((last.1 - 10.0).abs() < 0.01);
+    }
+
+    // --- Color space conversion tests ---
+
+    const EPS: f64 = 1e-10;
+
+    fn assert_near(a: f64, b: f64, label: &str) {
+        assert!((a - b).abs() < EPS, "{label}: expected {b}, got {a}");
+    }
+
+    // -- Constructors & alpha --
+
+    #[test]
+    fn color_rgb_constructor() {
+        let c = Color::rgb(0.2, 0.4, 0.6);
+        assert!(matches!(c, Color::Rgb { .. }));
+        assert_near(c.alpha(), 1.0, "alpha");
+    }
+
+    #[test]
+    fn color_hsb_constructor() {
+        let c = Color::hsb(120.0, 0.5, 0.8);
+        assert!(matches!(c, Color::Hsb { .. }));
+        assert_near(c.alpha(), 1.0, "alpha");
+    }
+
+    #[test]
+    fn color_cmyk_constructor() {
+        let c = Color::cmyk(0.1, 0.2, 0.3, 0.4);
+        assert!(matches!(c, Color::Cmyk { .. }));
+        assert_near(c.alpha(), 1.0, "alpha");
+    }
+
+    #[test]
+    fn color_new_creates_rgb() {
+        let c = Color::new(0.1, 0.2, 0.3, 0.5);
+        assert!(matches!(c, Color::Rgb { .. }));
+        assert_near(c.alpha(), 0.5, "alpha");
+    }
+
+    // -- RGB identity --
+
+    #[test]
+    fn rgb_to_rgba_identity() {
+        let c = Color::new(0.2, 0.4, 0.6, 0.8);
+        let (r, g, b, a) = c.to_rgba();
+        assert_near(r, 0.2, "r");
+        assert_near(g, 0.4, "g");
+        assert_near(b, 0.6, "b");
+        assert_near(a, 0.8, "a");
+    }
+
+    // -- RGB → HSB --
+
+    #[test]
+    fn rgb_black_to_hsb() {
+        let (h, s, b, _) = Color::BLACK.to_hsba();
+        assert_near(h, 0.0, "h");
+        assert_near(s, 0.0, "s");
+        assert_near(b, 0.0, "b");
+    }
+
+    #[test]
+    fn rgb_white_to_hsb() {
+        let (h, s, b, _) = Color::WHITE.to_hsba();
+        assert_near(h, 0.0, "h");
+        assert_near(s, 0.0, "s");
+        assert_near(b, 1.0, "b");
+    }
+
+    #[test]
+    fn rgb_red_to_hsb() {
+        let (h, s, b, _) = Color::rgb(1.0, 0.0, 0.0).to_hsba();
+        assert_near(h, 0.0, "h");
+        assert_near(s, 1.0, "s");
+        assert_near(b, 1.0, "b");
+    }
+
+    #[test]
+    fn rgb_green_to_hsb() {
+        let (h, s, b, _) = Color::rgb(0.0, 1.0, 0.0).to_hsba();
+        assert_near(h, 120.0, "h");
+        assert_near(s, 1.0, "s");
+        assert_near(b, 1.0, "b");
+    }
+
+    #[test]
+    fn rgb_blue_to_hsb() {
+        let (h, s, b, _) = Color::rgb(0.0, 0.0, 1.0).to_hsba();
+        assert_near(h, 240.0, "h");
+        assert_near(s, 1.0, "s");
+        assert_near(b, 1.0, "b");
+    }
+
+    #[test]
+    fn rgb_yellow_to_hsb() {
+        let (h, s, b, _) = Color::rgb(1.0, 1.0, 0.0).to_hsba();
+        assert_near(h, 60.0, "h");
+        assert_near(s, 1.0, "s");
+        assert_near(b, 1.0, "b");
+    }
+
+    // -- HSB → RGB --
+
+    #[test]
+    fn hsb_red_to_rgb() {
+        let (r, g, b, _) = Color::hsb(0.0, 1.0, 1.0).to_rgba();
+        assert_near(r, 1.0, "r");
+        assert_near(g, 0.0, "g");
+        assert_near(b, 0.0, "b");
+    }
+
+    #[test]
+    fn hsb_green_to_rgb() {
+        let (r, g, b, _) = Color::hsb(120.0, 1.0, 1.0).to_rgba();
+        assert_near(r, 0.0, "r");
+        assert_near(g, 1.0, "g");
+        assert_near(b, 0.0, "b");
+    }
+
+    #[test]
+    fn hsb_blue_to_rgb() {
+        let (r, g, b, _) = Color::hsb(240.0, 1.0, 1.0).to_rgba();
+        assert_near(r, 0.0, "r");
+        assert_near(g, 0.0, "g");
+        assert_near(b, 1.0, "b");
+    }
+
+    #[test]
+    fn hsb_black_to_rgb() {
+        let (r, g, b, _) = Color::hsb(0.0, 0.0, 0.0).to_rgba();
+        assert_near(r, 0.0, "r");
+        assert_near(g, 0.0, "g");
+        assert_near(b, 0.0, "b");
+    }
+
+    #[test]
+    fn hsb_white_to_rgb() {
+        let (r, g, b, _) = Color::hsb(0.0, 0.0, 1.0).to_rgba();
+        assert_near(r, 1.0, "r");
+        assert_near(g, 1.0, "g");
+        assert_near(b, 1.0, "b");
+    }
+
+    // -- RGB → CMYK --
+
+    #[test]
+    fn rgb_black_to_cmyk() {
+        let (c, m, y, k, _) = Color::BLACK.to_cmyka();
+        assert_near(c, 0.0, "c");
+        assert_near(m, 0.0, "m");
+        assert_near(y, 0.0, "y");
+        assert_near(k, 1.0, "k");
+    }
+
+    #[test]
+    fn rgb_white_to_cmyk() {
+        let (c, m, y, k, _) = Color::WHITE.to_cmyka();
+        assert_near(c, 0.0, "c");
+        assert_near(m, 0.0, "m");
+        assert_near(y, 0.0, "y");
+        assert_near(k, 0.0, "k");
+    }
+
+    #[test]
+    fn rgb_red_to_cmyk() {
+        let (c, m, y, k, _) = Color::rgb(1.0, 0.0, 0.0).to_cmyka();
+        assert_near(c, 0.0, "c");
+        assert_near(m, 1.0, "m");
+        assert_near(y, 1.0, "y");
+        assert_near(k, 0.0, "k");
+    }
+
+    // -- CMYK → RGB --
+
+    #[test]
+    fn cmyk_black_to_rgb() {
+        let (r, g, b, _) = Color::cmyk(0.0, 0.0, 0.0, 1.0).to_rgba();
+        assert_near(r, 0.0, "r");
+        assert_near(g, 0.0, "g");
+        assert_near(b, 0.0, "b");
+    }
+
+    #[test]
+    fn cmyk_white_to_rgb() {
+        let (r, g, b, _) = Color::cmyk(0.0, 0.0, 0.0, 0.0).to_rgba();
+        assert_near(r, 1.0, "r");
+        assert_near(g, 1.0, "g");
+        assert_near(b, 1.0, "b");
+    }
+
+    #[test]
+    fn cmyk_red_to_rgb() {
+        let (r, g, b, _) = Color::cmyk(0.0, 1.0, 1.0, 0.0).to_rgba();
+        assert_near(r, 1.0, "r");
+        assert_near(g, 0.0, "g");
+        assert_near(b, 0.0, "b");
+    }
+
+    // -- Round-trip tests --
+
+    #[test]
+    fn rgb_hsb_roundtrip() {
+        let orig = Color::rgb(0.3, 0.6, 0.9);
+        let (h, s, br, a) = orig.to_hsba();
+        let back = Color::Hsb { h, s, b: br, a };
+        let (r, g, b, _) = back.to_rgba();
+        assert_near(r, 0.3, "r");
+        assert_near(g, 0.6, "g");
+        assert_near(b, 0.9, "b");
+    }
+
+    #[test]
+    fn rgb_cmyk_roundtrip() {
+        let orig = Color::rgb(0.3, 0.6, 0.9);
+        let (c, m, y, k, a) = orig.to_cmyka();
+        let back = Color::Cmyk { c, m, y, k, a };
+        let (r, g, b, _) = back.to_rgba();
+        assert_near(r, 0.3, "r");
+        assert_near(g, 0.6, "g");
+        assert_near(b, 0.9, "b");
+    }
+
+    #[test]
+    fn hsb_rgb_roundtrip() {
+        let orig = Color::hsb(210.0, 0.667, 0.9);
+        let (r, g, b, a) = orig.to_rgba();
+        let back = Color::Rgb { r, g, b, a };
+        let (h, s, br, _) = back.to_hsba();
+        assert_near(h, 210.0, "h");
+        assert!((s - 0.667).abs() < 1e-3, "s: expected ~0.667, got {s}");
+        assert_near(br, 0.9, "b");
+    }
+
+    #[test]
+    fn cmyk_rgb_roundtrip() {
+        // Round-trip is exact when min(C,M,Y) = 0.
+        let orig = Color::cmyk(0.2, 0.4, 0.0, 0.3);
+        let (r, g, b, a) = orig.to_rgba();
+        let back = Color::Rgb { r, g, b, a };
+        let (c, m, y, k, _) = back.to_cmyka();
+        assert_near(c, 0.2, "c");
+        assert_near(m, 0.4, "m");
+        assert_near(y, 0.0, "y");
+        assert_near(k, 0.3, "k");
+    }
+
+    #[test]
+    fn cmyk_rgb_visual_equivalence() {
+        // When min(C,M,Y)>0, CMYK→RGB→CMYK may shift values
+        // but the visual RGB color must be preserved.
+        let orig = Color::cmyk(0.2, 0.4, 0.1, 0.3);
+        let (r1, g1, b1, _) = orig.to_rgba();
+        let (c, m, y, k, a) = orig.to_cmyka();
+        let back = Color::Cmyk { c, m, y, k, a };
+        let (r2, g2, b2, _) = back.to_rgba();
+        assert_near(r1, r2, "r");
+        assert_near(g1, g2, "g");
+        assert_near(b1, b2, "b");
+    }
+
+    // -- Alpha preservation --
+
+    #[test]
+    fn hsb_preserves_alpha() {
+        let c = Color::Hsb { h: 180.0, s: 0.5, b: 0.8, a: 0.3 };
+        let (_, _, _, a) = c.to_rgba();
+        assert_near(a, 0.3, "alpha");
+    }
+
+    #[test]
+    fn cmyk_preserves_alpha() {
+        let c = Color::Cmyk { c: 0.1, m: 0.2, y: 0.3, k: 0.4, a: 0.7 };
+        let (_, _, _, a) = c.to_rgba();
+        assert_near(a, 0.7, "alpha");
+    }
+
+    // -- HSB identity --
+
+    #[test]
+    fn hsb_to_hsba_identity() {
+        let c = Color::Hsb { h: 123.0, s: 0.45, b: 0.67, a: 0.89 };
+        let (h, s, b, a) = c.to_hsba();
+        assert_near(h, 123.0, "h");
+        assert_near(s, 0.45, "s");
+        assert_near(b, 0.67, "b");
+        assert_near(a, 0.89, "a");
+    }
+
+    // -- CMYK identity --
+
+    #[test]
+    fn cmyk_to_cmyka_identity() {
+        let c = Color::Cmyk { c: 0.1, m: 0.2, y: 0.3, k: 0.4, a: 0.5 };
+        let (cv, m, y, k, a) = c.to_cmyka();
+        assert_near(cv, 0.1, "c");
+        assert_near(m, 0.2, "m");
+        assert_near(y, 0.3, "y");
+        assert_near(k, 0.4, "k");
+        assert_near(a, 0.5, "a");
     }
 }

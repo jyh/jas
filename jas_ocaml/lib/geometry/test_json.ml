@@ -81,10 +81,26 @@ let json_array items =
 
 let color_json (c : color) =
   let o = json_obj () in
-  json_num o "a" c.a;
-  json_num o "b" c.b;
-  json_num o "g" c.g;
-  json_num o "r" c.r;
+  (match c with
+   | Rgb { r; g; b; a } ->
+     json_num o "a" a;
+     json_num o "b" b;
+     json_num o "g" g;
+     json_num o "r" r;
+     json_str o "space" "rgb"
+   | Hsb { h; s; b; a } ->
+     json_num o "a" a;
+     json_num o "b" b;
+     json_num o "h" h;
+     json_num o "s" s;
+     json_str o "space" "hsb"
+   | Cmyk { c; m; y; k; a } ->
+     json_num o "a" a;
+     json_num o "c" c;
+     json_num o "k" k;
+     json_num o "m" m;
+     json_str o "space" "cmyk";
+     json_num o "y" y);
   json_build o
 
 let fill_json = function
@@ -376,10 +392,24 @@ let to_num j =
   try to_float j with _ -> float_of_int (to_int j)
 
 let parse_color j =
-  { r = j |> member "r" |> to_num;
-    g = j |> member "g" |> to_num;
-    b = j |> member "b" |> to_num;
-    a = j |> member "a" |> to_num }
+  let space = try j |> member "space" |> to_string with _ -> "rgb" in
+  match space with
+  | "hsb" ->
+    Hsb { h = j |> member "h" |> to_num;
+          s = j |> member "s" |> to_num;
+          b = j |> member "b" |> to_num;
+          a = j |> member "a" |> to_num }
+  | "cmyk" ->
+    Cmyk { c = j |> member "c" |> to_num;
+           m = j |> member "m" |> to_num;
+           y = j |> member "y" |> to_num;
+           k = j |> member "k" |> to_num;
+           a = j |> member "a" |> to_num }
+  | _ ->
+    Rgb { r = j |> member "r" |> to_num;
+          g = j |> member "g" |> to_num;
+          b = j |> member "b" |> to_num;
+          a = j |> member "a" |> to_num }
 
 let parse_fill j =
   if j = `Null then None

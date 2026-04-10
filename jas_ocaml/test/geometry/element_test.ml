@@ -8,9 +8,10 @@ let () =
 
   run_test "color construction" (fun () ->
     let c = make_color 1.0 0.0 0.0 in
-    assert (c.r = 1.0 && c.a = 1.0);
+    let (r, _, _, a) = color_to_rgba c in
+    assert (r = 1.0 && a = 1.0);
     let c2 = make_color ~a:0.5 0.0 1.0 0.0 in
-    assert (c2.a = 0.5));
+    assert (color_alpha c2 = 0.5));
 
   run_test "stroke defaults" (fun () ->
     let s = make_stroke (make_color 0.0 0.0 0.0) in
@@ -83,7 +84,7 @@ let () =
       [MoveTo (0.0, 0.0); LineTo (10.0, 10.0); ClosePath] in
     match styled with
     | Path { fill; stroke; _ } ->
-      (match fill with Some f -> assert (f.fill_color.r = 1.0) | None -> assert false);
+      (match fill with Some f -> let (r, _, _, _) = color_to_rgba f.fill_color in assert (r = 1.0) | None -> assert false);
       (match stroke with Some s -> assert (s.stroke_width = 2.0 && s.stroke_linecap = Round_cap) | None -> assert false)
     | _ -> assert false);
 
@@ -173,7 +174,7 @@ let () =
       50.0 50.0 25.0 in
     match cfs with
     | Circle { fill; stroke; _ } ->
-      (match fill with Some f -> assert (f.fill_color.g = 1.0) | None -> assert false);
+      (match fill with Some f -> let (_, g, _, _) = color_to_rgba f.fill_color in assert (g = 1.0) | None -> assert false);
       (match stroke with Some s -> assert (s.stroke_width = 3.0) | None -> assert false)
     | _ -> assert false);
 
@@ -184,7 +185,7 @@ let () =
       50.0 50.0 25.0 15.0 in
     match efs with
     | Ellipse { fill; stroke; _ } ->
-      (match fill with Some f -> assert (f.fill_color.b = 1.0) | None -> assert false);
+      (match fill with Some f -> let (_, _, b, _) = color_to_rgba f.fill_color in assert (b = 1.0) | None -> assert false);
       (match stroke with Some s -> assert (s.stroke_linecap = Square) | None -> assert false)
     | _ -> assert false);
 
@@ -284,5 +285,139 @@ let () =
   run_test "distance_to_point perpendicular" (fun () ->
     let d = path_distance_to_point straight 50.0 30.0 in
     assert (abs_float (d -. 30.0) < eps));
+
+  (* ---- Color conversion tests ---- *)
+
+  run_test "rgb to rgba identity" (fun () ->
+    let c = color_rgb 0.5 0.6 0.7 in
+    let (r, g, b, a) = color_to_rgba c in
+    assert (r = 0.5 && g = 0.6 && b = 0.7 && a = 1.0));
+
+  run_test "color_alpha on all variants" (fun () ->
+    assert (color_alpha (Rgb { r = 0.; g = 0.; b = 0.; a = 0.3 }) = 0.3);
+    assert (color_alpha (Hsb { h = 0.; s = 0.; b = 0.; a = 0.5 }) = 0.5);
+    assert (color_alpha (Cmyk { c = 0.; m = 0.; y = 0.; k = 0.; a = 0.7 }) = 0.7));
+
+  run_test "black and white constants" (fun () ->
+    let (r, g, b, a) = color_to_rgba black in
+    assert (r = 0. && g = 0. && b = 0. && a = 1.);
+    let (r, g, b, a) = color_to_rgba white in
+    assert (r = 1. && g = 1. && b = 1. && a = 1.));
+
+  run_test "hsb black to rgba" (fun () ->
+    let (_, _, _, a) = color_to_hsba black in
+    let (h, s, br, _) = color_to_hsba black in
+    assert (h = 0. && s = 0. && br = 0. && a = 1.));
+
+  run_test "hsb white to hsba" (fun () ->
+    let (h, s, br, a) = color_to_hsba white in
+    assert (h = 0. && s = 0. && br = 1. && a = 1.));
+
+  run_test "hsb pure red" (fun () ->
+    let (h, s, br, _) = color_to_hsba (color_rgb 1.0 0.0 0.0) in
+    assert (abs_float h < eps && abs_float (s -. 1.0) < eps && abs_float (br -. 1.0) < eps));
+
+  run_test "hsb pure green" (fun () ->
+    let (h, s, br, _) = color_to_hsba (color_rgb 0.0 1.0 0.0) in
+    assert (abs_float (h -. 120.0) < eps && abs_float (s -. 1.0) < eps && abs_float (br -. 1.0) < eps));
+
+  run_test "hsb pure blue" (fun () ->
+    let (h, s, br, _) = color_to_hsba (color_rgb 0.0 0.0 1.0) in
+    assert (abs_float (h -. 240.0) < eps && abs_float (s -. 1.0) < eps && abs_float (br -. 1.0) < eps));
+
+  run_test "hsb yellow" (fun () ->
+    let (h, s, br, _) = color_to_hsba (color_rgb 1.0 1.0 0.0) in
+    assert (abs_float (h -. 60.0) < eps && abs_float (s -. 1.0) < eps && abs_float (br -. 1.0) < eps));
+
+  run_test "hsb(0, 1, 1) -> red" (fun () ->
+    let (r, g, b, _) = color_to_rgba (color_hsb 0.0 1.0 1.0) in
+    assert (abs_float (r -. 1.0) < eps && abs_float g < eps && abs_float b < eps));
+
+  run_test "hsb(120, 1, 1) -> green" (fun () ->
+    let (r, g, b, _) = color_to_rgba (color_hsb 120.0 1.0 1.0) in
+    assert (abs_float r < eps && abs_float (g -. 1.0) < eps && abs_float b < eps));
+
+  run_test "hsb(240, 1, 1) -> blue" (fun () ->
+    let (r, g, b, _) = color_to_rgba (color_hsb 240.0 1.0 1.0) in
+    assert (abs_float r < eps && abs_float g < eps && abs_float (b -. 1.0) < eps));
+
+  run_test "hsb(0, 0, 0) -> black" (fun () ->
+    let (r, g, b, _) = color_to_rgba (color_hsb 0.0 0.0 0.0) in
+    assert (abs_float r < eps && abs_float g < eps && abs_float b < eps));
+
+  run_test "hsb(0, 0, 1) -> white" (fun () ->
+    let (r, g, b, _) = color_to_rgba (color_hsb 0.0 0.0 1.0) in
+    assert (abs_float (r -. 1.0) < eps && abs_float (g -. 1.0) < eps && abs_float (b -. 1.0) < eps));
+
+  run_test "cmyk black" (fun () ->
+    let (c, m, y, k, _) = color_to_cmyka black in
+    assert (c = 0. && m = 0. && y = 0. && abs_float (k -. 1.0) < eps));
+
+  run_test "cmyk white" (fun () ->
+    let (c, m, y, k, _) = color_to_cmyka white in
+    assert (abs_float c < eps && abs_float m < eps && abs_float y < eps && abs_float k < eps));
+
+  run_test "cmyk pure red" (fun () ->
+    let (c, m, y, k, _) = color_to_cmyka (color_rgb 1.0 0.0 0.0) in
+    assert (abs_float c < eps && abs_float (m -. 1.0) < eps && abs_float (y -. 1.0) < eps && abs_float k < eps));
+
+  run_test "cmyk(0,0,0,1) -> black" (fun () ->
+    let (r, g, b, _) = color_to_rgba (color_cmyk 0.0 0.0 0.0 1.0) in
+    assert (abs_float r < eps && abs_float g < eps && abs_float b < eps));
+
+  run_test "cmyk(0,0,0,0) -> white" (fun () ->
+    let (r, g, b, _) = color_to_rgba (color_cmyk 0.0 0.0 0.0 0.0) in
+    assert (abs_float (r -. 1.0) < eps && abs_float (g -. 1.0) < eps && abs_float (b -. 1.0) < eps));
+
+  run_test "cmyk(0,1,1,0) -> red" (fun () ->
+    let (r, g, b, _) = color_to_rgba (color_cmyk 0.0 1.0 1.0 0.0) in
+    assert (abs_float (r -. 1.0) < eps && abs_float g < eps && abs_float b < eps));
+
+  run_test "rgb -> hsb -> rgb roundtrip" (fun () ->
+    let orig = color_rgb 0.3 0.6 0.9 in
+    let (h, s, br, a) = color_to_hsba orig in
+    let back = Hsb { h; s; b = br; a } in
+    let (r, g, b, _) = color_to_rgba back in
+    let (r0, g0, b0, _) = color_to_rgba orig in
+    assert (abs_float (r -. r0) < eps && abs_float (g -. g0) < eps && abs_float (b -. b0) < eps));
+
+  run_test "rgb -> cmyk -> rgb roundtrip" (fun () ->
+    let orig = color_rgb 0.3 0.6 0.9 in
+    let (c, m, y, k, a) = color_to_cmyka orig in
+    let back = Cmyk { c; m; y; k; a } in
+    let (r, g, b, _) = color_to_rgba back in
+    let (r0, g0, b0, _) = color_to_rgba orig in
+    assert (abs_float (r -. r0) < eps && abs_float (g -. g0) < eps && abs_float (b -. b0) < eps));
+
+  run_test "hsb -> rgb -> hsb roundtrip" (fun () ->
+    let orig = color_hsb 210.0 0.67 0.9 in
+    let (r, g, b, a) = color_to_rgba orig in
+    let back = Rgb { r; g; b; a } in
+    let (h, s, br, _) = color_to_hsba back in
+    let (h0, s0, br0, _) = color_to_hsba orig in
+    assert (abs_float (h -. h0) < eps && abs_float (s -. s0) < eps && abs_float (br -. br0) < eps));
+
+  run_test "rgb -> cmyk -> rgb roundtrip (via cmyk)" (fun () ->
+    let orig = color_rgb 0.5 0.7 0.2 in
+    let (c, m, y, k, a) = color_to_cmyka orig in
+    let back = Cmyk { c; m; y; k; a } in
+    let (r1, g1, b1, _) = color_to_rgba orig in
+    let (r2, g2, b2, _) = color_to_rgba back in
+    assert (abs_float (r1 -. r2) < eps && abs_float (g1 -. g2) < eps && abs_float (b1 -. b2) < eps));
+
+  run_test "alpha preserved through rgb constructor" (fun () ->
+    let c = make_color ~a:0.42 0.1 0.2 0.3 in
+    let (_, _, _, a) = color_to_rgba c in
+    assert (abs_float (a -. 0.42) < eps));
+
+  run_test "hsb identity to hsba" (fun () ->
+    let c = Hsb { h = 123.0; s = 0.45; b = 0.67; a = 0.89 } in
+    let (h, s, br, a) = color_to_hsba c in
+    assert (h = 123.0 && s = 0.45 && br = 0.67 && a = 0.89));
+
+  run_test "cmyk identity to cmyka" (fun () ->
+    let c = Cmyk { c = 0.1; m = 0.2; y = 0.3; k = 0.4; a = 0.5 } in
+    let (cv, m, y, k, a) = color_to_cmyka c in
+    assert (cv = 0.1 && m = 0.2 && y = 0.3 && k = 0.4 && a = 0.5));
 
   Printf.printf "All element tests passed.\n"

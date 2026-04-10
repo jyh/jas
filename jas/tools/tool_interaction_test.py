@@ -10,7 +10,7 @@ from document.controller import Controller
 from document.document import Document, ElementSelection, ElementPath
 from document.model import Model
 from geometry.element import (
-    Color, CurveTo, Element, Fill, Layer, Line, LineTo, MoveTo, Path, Polygon, Rect, Stroke,
+    RgbColor, CurveTo, Element, Fill, Layer, Line, LineTo, MoveTo, Path, Polygon, Rect, Stroke,
     control_point_count,
 )
 from tools.tool import ToolContext
@@ -246,7 +246,7 @@ class TypeToolTest(absltest.TestCase):
         # Place an existing Text in the model so the tool's recursive
         # hit-test (which walks the document) finds it.
         existing = Text(x=0, y=0, content="hello",
-                        fill=Fill(Color(0, 0, 0)))
+                        fill=Fill(RgbColor(0, 0, 0)))
         layer = Layer(name="L", children=(existing,))
         model = Model(document=Document(layers=(layer,)))
         ctx, model, ctrl = _make_ctx(model)
@@ -309,7 +309,7 @@ class SelectionToolTest(absltest.TestCase):
         from tools.selection_tool import SelectionTool
         tool = SelectionTool()
         rect = Rect(x=50, y=50, width=20, height=20,
-                    fill=Fill(Color(0, 0, 0)), stroke=None)
+                    fill=Fill(RgbColor(0, 0, 0)), stroke=None)
         layer = Layer(name="L", children=(rect,))
         doc = Document(layers=(layer,), selection=frozenset())
         model = Model(document=doc)
@@ -324,7 +324,7 @@ class SelectionToolTest(absltest.TestCase):
         from tools.selection_tool import SelectionTool
         tool = SelectionTool()
         rect = Rect(x=50, y=50, width=20, height=20,
-                    fill=Fill(Color(0, 0, 0)), stroke=None)
+                    fill=Fill(RgbColor(0, 0, 0)), stroke=None)
         layer = Layer(name="L", children=(rect,))
         doc = Document(layers=(layer,), selection=frozenset())
         model = Model(document=doc)
@@ -338,7 +338,7 @@ class SelectionToolTest(absltest.TestCase):
         from tools.selection_tool import SelectionTool
         tool = SelectionTool()
         rect = Rect(x=50, y=50, width=20, height=20,
-                    fill=Fill(Color(0, 0, 0)), stroke=None)
+                    fill=Fill(RgbColor(0, 0, 0)), stroke=None)
         layer = Layer(name="L", children=(rect,))
         sel = frozenset({ElementSelection.all((0, 0))})
         doc = Document(layers=(layer,), selection=sel)
@@ -395,7 +395,7 @@ class AddAnchorPointToolTest(absltest.TestCase):
         """Create a document with a single straight-line cubic path."""
         path_elem = Path(
             d=(MoveTo(0, 0), CurveTo(33, 0, 67, 0, 100, 0)),
-            stroke=Stroke(Color(0, 0, 0), 1.0),
+            stroke=Stroke(RgbColor(0, 0, 0), 1.0),
         )
         layer = Layer(name="L", children=(path_elem,))
         doc = Document(layers=(layer,), selection=frozenset())
@@ -520,7 +520,7 @@ class AddAnchorPointToolTest(absltest.TestCase):
         tool = AddAnchorPointTool()
         path_elem = Path(
             d=(MoveTo(0, 0), CurveTo(33, 0, 67, 0, 100, 0)),
-            stroke=Stroke(Color(0, 0, 0), 1.0),
+            stroke=Stroke(RgbColor(0, 0, 0), 1.0),
         )
         from document.document import _SelectionAll
         layer = Layer(name="L", children=(path_elem,))
@@ -547,7 +547,7 @@ class AddAnchorPointToolTest(absltest.TestCase):
         tool = AddAnchorPointTool()
         path_elem = Path(
             d=(MoveTo(0, 0), LineTo(100, 0)),
-            stroke=Stroke(Color(0, 0, 0), 1.0),
+            stroke=Stroke(RgbColor(0, 0, 0), 1.0),
         )
         layer = Layer(name="L", children=(path_elem,))
         doc = Document(layers=(layer,), selection=frozenset())
@@ -569,7 +569,7 @@ class AddAnchorPointToolTest(absltest.TestCase):
         tool = AddAnchorPointTool()
         path_elem = Path(
             d=(MoveTo(0, 0), CurveTo(33, 0, 67, 0, 100, 0)),
-            stroke=Stroke(Color(0, 0, 0), 1.0),
+            stroke=Stroke(RgbColor(0, 0, 0), 1.0),
         )
         layer = Layer(name="L", children=(path_elem,))
         doc = Document(layers=(layer,), selection=frozenset())
@@ -723,13 +723,13 @@ class PathEraserToolTest(absltest.TestCase):
     def _make_line_path(self, x1, y1, x2, y2):
         return Path(
             d=(MoveTo(x1, y1), LineTo(x2, y2)),
-            stroke=Stroke(Color(0, 0, 0), 1.0),
+            stroke=Stroke(RgbColor(0, 0, 0), 1.0),
         )
 
     def _make_long_path(self):
         return Path(
             d=(MoveTo(0, 0), LineTo(50, 0), LineTo(100, 0), LineTo(150, 0)),
-            stroke=Stroke(Color(0, 0, 0), 1.0),
+            stroke=Stroke(RgbColor(0, 0, 0), 1.0),
         )
 
     def _make_closed_path(self):
@@ -737,8 +737,8 @@ class PathEraserToolTest(absltest.TestCase):
         return Path(
             d=(MoveTo(0, 0), LineTo(100, 0), LineTo(100, 100),
                LineTo(0, 100), CP()),
-            fill=Fill(Color(0, 0, 0)),
-            stroke=Stroke(Color(0, 0, 0), 1.0),
+            fill=Fill(RgbColor(0, 0, 0)),
+            stroke=Stroke(RgbColor(0, 0, 0), 1.0),
         )
 
     def test_erase_deletes_small_path(self):
@@ -841,7 +841,7 @@ class PathEraserToolTest(absltest.TestCase):
         tool = PathEraserTool()
         small = Path(
             d=(MoveTo(0, 0), LineTo(1, 1)),
-            stroke=Stroke(Color(0, 0, 0), 1.0),
+            stroke=Stroke(RgbColor(0, 0, 0), 1.0),
             locked=True,
         )
         layer = Layer(name="L", children=(small,))
@@ -861,7 +861,7 @@ class PathEraserToolTest(absltest.TestCase):
         # Erase at x=50 with ERASER_SIZE=2 => eraser rect x=[48,52].
         path = Path(
             d=(MoveTo(0, 0), LineTo(100, 0), LineTo(200, 0)),
-            stroke=Stroke(Color(0, 0, 0), 1.0),
+            stroke=Stroke(RgbColor(0, 0, 0), 1.0),
         )
         layer = Layer(name="L", children=(path,))
         doc = Document(layers=(layer,), selection=frozenset())
@@ -888,7 +888,7 @@ class PathEraserToolTest(absltest.TestCase):
         # Cubic curve from (0,0) to (200,0) arching upward.
         path = Path(
             d=(MoveTo(0, 0), CurveTo(50, -100, 150, -100, 200, 0)),
-            stroke=Stroke(Color(0, 0, 0), 1.0),
+            stroke=Stroke(RgbColor(0, 0, 0), 1.0),
         )
         layer = Layer(name="L", children=(path,))
         doc = Document(layers=(layer,), selection=frozenset())
@@ -997,7 +997,7 @@ class TypeOnPathToolTest(absltest.TestCase):
         tool = TypeOnPathTool()
         existing = Path(
             d=(MoveTo(0, 0), LineTo(100, 0)),
-            stroke=Stroke(Color(0, 0, 0), 1.0),
+            stroke=Stroke(RgbColor(0, 0, 0), 1.0),
         )
         layer = Layer(name="L", children=(existing,))
         model = Model(document=Document(layers=(layer,)))

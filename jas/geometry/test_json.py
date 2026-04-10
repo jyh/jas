@@ -16,7 +16,8 @@ from document.document import (
 from geometry.element import (
     Element, Line, Rect, Circle, Ellipse, Polyline, Polygon,
     Path, Text, TextPath, Group, Layer,
-    Color, Fill, Stroke, Transform, Visibility,
+    Color, RgbColor, HsbColor, CmykColor,
+    Fill, Stroke, Transform, Visibility,
     LineCap, LineJoin,
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
@@ -81,10 +82,25 @@ def _json_array(items: list[str]) -> str:
 
 def _color_json(c: Color) -> str:
     o = _JsonObj()
-    o.num("a", c.a)
-    o.num("b", c.b)
-    o.num("g", c.g)
-    o.num("r", c.r)
+    if isinstance(c, RgbColor):
+        o.num("a", c.a)
+        o.num("b", c.b)
+        o.num("g", c.g)
+        o.num("r", c.r)
+        o.str("space", "rgb")
+    elif isinstance(c, HsbColor):
+        o.num("a", c.a)
+        o.num("b", c.b)
+        o.num("h", c.h)
+        o.num("s", c.s)
+        o.str("space", "hsb")
+    elif isinstance(c, CmykColor):
+        o.num("a", c.a)
+        o.num("c", c.c)
+        o.num("k", c.k)
+        o.num("m", c.m)
+        o.str("space", "cmyk")
+        o.num("y", c.y)
     return o.build()
 
 
@@ -345,7 +361,14 @@ _VISIBILITY_MAP = {"invisible": Visibility.INVISIBLE,
 
 
 def _parse_color(d: dict) -> Color:
-    return Color(r=d["r"], g=d["g"], b=d["b"], a=d["a"])
+    space = d.get("space", "rgb")
+    if space == "rgb":
+        return RgbColor(r=d["r"], g=d["g"], b=d["b"], a=d["a"])
+    elif space == "hsb":
+        return HsbColor(h=d["h"], s=d["s"], b=d["b"], a=d["a"])
+    elif space == "cmyk":
+        return CmykColor(c=d["c"], m=d["m"], y=d["y"], k=d["k"], a=d["a"])
+    raise ValueError(f"Unknown color space: {space}")
 
 
 def _parse_fill(d) -> Fill | None:

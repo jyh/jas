@@ -34,19 +34,127 @@ public let approxCharWidthFactor = 0.6
 
 // MARK: - SVG presentation attributes
 
-/// RGBA color with components in [0, 1].
-public struct Color: Equatable, Hashable {
-    public let r: Double
-    public let g: Double
-    public let b: Double
-    public let a: Double
+/// Color with support for RGB, HSB, and CMYK color spaces.
+///
+/// Components are normalized to [0, 1] except HSB hue which is [0, 360).
+/// Each variant carries its own alpha in [0, 1].
+public enum Color: Equatable, Hashable {
+    /// Red, green, blue, alpha -- all in [0, 1].
+    case rgb(r: Double, g: Double, b: Double, a: Double)
+    /// Hue [0, 360), saturation [0, 1], brightness [0, 1], alpha [0, 1].
+    case hsb(h: Double, s: Double, b: Double, a: Double)
+    /// Cyan, magenta, yellow, key (black), alpha -- all in [0, 1].
+    case cmyk(c: Double, m: Double, y: Double, k: Double, a: Double)
 
+    /// Backward-compatible initializer that creates an RGB color.
     public init(r: Double, g: Double, b: Double, a: Double = 1.0) {
-        self.r = r
-        self.g = g
-        self.b = b
-        self.a = a
+        self = .rgb(r: r, g: g, b: b, a: a)
     }
+
+    public static let black = Color.rgb(r: 0, g: 0, b: 0, a: 1)
+    public static let white = Color.rgb(r: 1, g: 1, b: 1, a: 1)
+
+    /// Alpha component, regardless of color space.
+    public var alpha: Double {
+        switch self {
+        case .rgb(_, _, _, let a),
+             .hsb(_, _, _, let a),
+             .cmyk(_, _, _, _, let a):
+            return a
+        }
+    }
+
+    /// Convert to (r, g, b, a) with all components in [0, 1].
+    public func toRgba() -> (Double, Double, Double, Double) {
+        switch self {
+        case .rgb(let r, let g, let b, let a):
+            return (r, g, b, a)
+        case .hsb(let h, let s, let bri, let a):
+            let (r, g, b) = hsbToRgbComponents(h: h, s: s, v: bri)
+            return (r, g, b, a)
+        case .cmyk(let c, let m, let y, let k, let a):
+            let r = (1.0 - c) * (1.0 - k)
+            let g = (1.0 - m) * (1.0 - k)
+            let b = (1.0 - y) * (1.0 - k)
+            return (r, g, b, a)
+        }
+    }
+
+    /// Convert to (h, s, b, a) with h in [0, 360), s/b in [0, 1].
+    public func toHsba() -> (Double, Double, Double, Double) {
+        switch self {
+        case .hsb(let h, let s, let b, let a):
+            return (h, s, b, a)
+        default:
+            let (r, g, b, a) = toRgba()
+            let (h, s, br) = rgbToHsbComponents(r: r, g: g, b: b)
+            return (h, s, br, a)
+        }
+    }
+
+    /// Convert to (c, m, y, k, a) with all components in [0, 1].
+    public func toCmyka() -> (Double, Double, Double, Double, Double) {
+        switch self {
+        case .cmyk(let c, let m, let y, let k, let a):
+            return (c, m, y, k, a)
+        default:
+            let (r, g, b, a) = toRgba()
+            let maxC = max(r, max(g, b))
+            let k = 1.0 - maxC
+            if k >= 1.0 {
+                return (0.0, 0.0, 0.0, 1.0, a)
+            }
+            let c = (1.0 - r - k) / (1.0 - k)
+            let m = (1.0 - g - k) / (1.0 - k)
+            let y = (1.0 - b - k) / (1.0 - k)
+            return (c, m, y, k, a)
+        }
+    }
+}
+
+// MARK: - Color-space conversion helpers
+
+func hsbToRgbComponents(h: Double, s: Double, v: Double) -> (Double, Double, Double) {
+    if s == 0 { return (v, v, v) }
+    let h = ((h.truncatingRemainder(dividingBy: 360.0)) + 360.0)
+        .truncatingRemainder(dividingBy: 360.0)
+    let hi = Int(floor(h / 60.0)) % 6
+    let f = h / 60.0 - Double(hi)
+    let p = v * (1.0 - s)
+    let q = v * (1.0 - s * f)
+    let t = v * (1.0 - s * (1.0 - f))
+    switch hi {
+    case 0: return (v, t, p)
+    case 1: return (q, v, p)
+    case 2: return (p, v, t)
+    case 3: return (p, q, v)
+    case 4: return (t, p, v)
+    default: return (v, p, q)
+    }
+}
+
+func rgbToHsbComponents(r: Double, g: Double, b: Double) -> (Double, Double, Double) {
+    let maxC = max(r, max(g, b))
+    let minC = min(r, min(g, b))
+    let delta = maxC - minC
+
+    let brightness = maxC
+    let saturation = maxC == 0 ? 0.0 : delta / maxC
+
+    var hue: Double
+    if delta == 0 {
+        hue = 0
+    } else if maxC == r {
+        hue = 60.0 * (((g - b) / delta).truncatingRemainder(dividingBy: 6.0))
+    } else if maxC == g {
+        hue = 60.0 * ((b - r) / delta + 2.0)
+    } else {
+        hue = 60.0 * ((r - g) / delta + 4.0)
+    }
+    hue = ((hue.truncatingRemainder(dividingBy: 360.0)) + 360.0)
+        .truncatingRemainder(dividingBy: 360.0)
+
+    return (hue, saturation, brightness)
 }
 
 /// SVG stroke-linecap.

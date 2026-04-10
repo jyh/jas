@@ -9,13 +9,87 @@ let flatten_steps = 20
 (** Average character width as a fraction of font size. *)
 let approx_char_width_factor = 0.6
 
-(** RGBA color with components in [0, 1]. *)
-type color = {
-  r : float;
-  g : float;
-  b : float;
-  a : float;
-}
+(** Color with support for RGB, HSB, and CMYK color spaces. *)
+type color =
+  | Rgb of { r : float; g : float; b : float; a : float }
+  | Hsb of { h : float; s : float; b : float; a : float }
+  | Cmyk of { c : float; m : float; y : float; k : float; a : float }
+
+(** Convenience constructors for opaque colors. *)
+let color_rgb r g b = Rgb { r; g; b; a = 1.0 }
+let color_hsb h s b = Hsb { h; s; b; a = 1.0 }
+let color_cmyk c m y k = Cmyk { c; m; y; k; a = 1.0 }
+let black = Rgb { r = 0.; g = 0.; b = 0.; a = 1. }
+let white = Rgb { r = 1.; g = 1.; b = 1.; a = 1. }
+let color_alpha = function Rgb { a; _ } | Hsb { a; _ } | Cmyk { a; _ } -> a
+
+(** HSB to RGB component conversion. *)
+let hsb_to_rgb_components h s v =
+  if s = 0.0 then (v, v, v)
+  else
+    let h = Float.rem (Float.rem h 360.0 +. 360.0) 360.0 in
+    let hi = int_of_float (floor (h /. 60.0)) mod 6 in
+    let f = h /. 60.0 -. float_of_int hi in
+    let p = v *. (1.0 -. s) in
+    let q = v *. (1.0 -. s *. f) in
+    let t = v *. (1.0 -. s *. (1.0 -. f)) in
+    match hi with
+    | 0 -> (v, t, p)
+    | 1 -> (q, v, p)
+    | 2 -> (p, v, t)
+    | 3 -> (p, q, v)
+    | 4 -> (t, p, v)
+    | _ -> (v, p, q)
+
+(** RGB to HSB component conversion. *)
+let rgb_to_hsb_components r g b =
+  let mx = Float.max r (Float.max g b) in
+  let mn = Float.min r (Float.min g b) in
+  let delta = mx -. mn in
+  let brightness = mx in
+  let saturation = if mx = 0.0 then 0.0 else delta /. mx in
+  let hue =
+    if delta = 0.0 then 0.0
+    else if mx = r then 60.0 *. Float.rem ((g -. b) /. delta) 6.0
+    else if mx = g then 60.0 *. ((b -. r) /. delta +. 2.0)
+    else 60.0 *. ((r -. g) /. delta +. 4.0)
+  in
+  let hue = Float.rem (Float.rem hue 360.0 +. 360.0) 360.0 in
+  (hue, saturation, brightness)
+
+(** Convert any color to (r, g, b, a). *)
+let color_to_rgba = function
+  | Rgb { r; g; b; a } -> (r, g, b, a)
+  | Hsb { h; s; b; a } ->
+    let (r, g, bl) = hsb_to_rgb_components h s b in
+    (r, g, bl, a)
+  | Cmyk { c; m; y; k; a } ->
+    let r = (1.0 -. c) *. (1.0 -. k) in
+    let g = (1.0 -. m) *. (1.0 -. k) in
+    let b = (1.0 -. y) *. (1.0 -. k) in
+    (r, g, b, a)
+
+(** Convert any color to (h, s, b, a). *)
+let color_to_hsba = function
+  | Hsb { h; s; b; a } -> (h, s, b, a)
+  | other ->
+    let (r, g, b, a) = color_to_rgba other in
+    let (h, s, br) = rgb_to_hsb_components r g b in
+    (h, s, br, a)
+
+(** Convert any color to (c, m, y, k, a). *)
+let color_to_cmyka = function
+  | Cmyk { c; m; y; k; a } -> (c, m, y, k, a)
+  | other ->
+    let (r, g, b, a) = color_to_rgba other in
+    let mx = Float.max r (Float.max g b) in
+    let k = 1.0 -. mx in
+    if k >= 1.0 then (0.0, 0.0, 0.0, 1.0, a)
+    else
+      let c = (1.0 -. r -. k) /. (1.0 -. k) in
+      let m = (1.0 -. g -. k) /. (1.0 -. k) in
+      let y = (1.0 -. b -. k) /. (1.0 -. k) in
+      (c, m, y, k, a)
 
 (** Per-element visibility mode. Declaration order places
     [Invisible] first so that [compare] / [min] pick the more
@@ -376,7 +450,7 @@ let rec bounds = function
 
 (** Helper constructors. *)
 
-let make_color ?(a = 1.0) r g b = { r; g; b; a }
+let make_color ?(a = 1.0) r g b = Rgb { r; g; b; a }
 
 let make_fill color = { fill_color = color }
 

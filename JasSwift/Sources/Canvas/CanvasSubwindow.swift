@@ -16,11 +16,13 @@ public struct CanvasBoundingBox: Equatable {
 // MARK: - Element drawing
 
 private func nsColor(_ c: Color) -> NSColor {
-    NSColor(red: c.r, green: c.g, blue: c.b, alpha: c.a)
+    let (r, g, b, a) = c.toRgba()
+    return NSColor(red: r, green: g, blue: b, alpha: a)
 }
 
 private func cgColor(_ c: Color) -> CGColor {
-    CGColor(red: c.r, green: c.g, blue: c.b, alpha: c.a)
+    let (r, g, b, a) = c.toRgba()
+    return CGColor(red: r, green: g, blue: b, alpha: a)
 }
 
 private func applyTransform(_ ctx: CGContext, _ t: Transform?) {

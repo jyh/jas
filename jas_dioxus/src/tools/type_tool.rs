@@ -302,11 +302,12 @@ fn accent_color_css(t: &TextElem) -> String {
         .map(|f| f.color)
         .or_else(|| t.stroke.as_ref().map(|s| s.color))
         .unwrap_or(Color::BLACK);
+    let (r, g, b, _) = c.to_rgba();
     format!(
         "rgb({},{},{})",
-        (c.r * 255.0) as u8,
-        (c.g * 255.0) as u8,
-        (c.b * 255.0) as u8,
+        (r * 255.0) as u8,
+        (g * 255.0) as u8,
+        (b * 255.0) as u8,
     )
 }
 
@@ -318,7 +319,8 @@ fn selection_color_css(t: &TextElem) -> String {
     let candidates = [t.fill.as_ref().map(|f| f.color), t.stroke.as_ref().map(|s| s.color)];
     let blue_lum = relative_luminance(0.529, 0.808, 0.980); // light sky blue
     for c in candidates.into_iter().flatten() {
-        let lum = relative_luminance(c.r, c.g, c.b);
+        let (r, g, b, _) = c.to_rgba();
+        let lum = relative_luminance(r, g, b);
         if (lum - blue_lum).abs() < 0.15 {
             light_blue_ok = false;
             break;

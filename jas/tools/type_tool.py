@@ -22,7 +22,7 @@ import dataclasses
 from typing import TYPE_CHECKING
 
 from geometry.element import (
-    Color, Element, Fill, Group, Layer, Text, Stroke,
+    Color, RgbColor, Element, Fill, Group, Layer, Text, Stroke,
 )
 from algorithms.text_layout import layout as _layout, TextLayout
 from tools.text_edit import (
@@ -59,8 +59,9 @@ def _text_draw_bounds(t: Text) -> tuple[float, float, float, float]:
 def _accent_color(t: Text) -> "QColor":
     from PySide6.QtGui import QColor
     c = (t.fill.color if t.fill is not None
-         else (t.stroke.color if t.stroke is not None else Color(0, 0, 0)))
-    return QColor(int(c.r * 255), int(c.g * 255), int(c.b * 255))
+         else (t.stroke.color if t.stroke is not None else RgbColor(0, 0, 0)))
+    r, g, b, _a = c.to_rgba()
+    return QColor(int(r * 255), int(g * 255), int(b * 255))
 
 
 def _selection_color(t: Text) -> "QColor":
@@ -73,7 +74,8 @@ def _selection_color(t: Text) -> "QColor":
     if t.stroke is not None:
         candidates.append(t.stroke.color)
     for c in candidates:
-        lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+        cr, cg, cb, _ca = c.to_rgba()
+        lum = 0.2126 * cr + 0.7152 * cg + 0.0722 * cb
         if abs(lum - blue_lum) < 0.15:
             return QColor(255, 235, 80, 128)
     return QColor(135, 206, 250, 115)

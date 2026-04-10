@@ -19,13 +19,141 @@ APPROX_CHAR_WIDTH_FACTOR = 0.6  # average character width as a fraction of font 
 
 # SVG presentation attributes
 
-@dataclass(frozen=True)
 class Color:
+    """Color with support for RGB, HSB, and CMYK color spaces."""
+
+    @staticmethod
+    def rgb(r: float, g: float, b: float, a: float = 1.0) -> "Color":
+        return RgbColor(r, g, b, a)
+
+    @staticmethod
+    def hsb(h: float, s: float, b: float, a: float = 1.0) -> "Color":
+        return HsbColor(h, s, b, a)
+
+    @staticmethod
+    def cmyk(c: float, m: float, y: float, k: float, a: float = 1.0) -> "Color":
+        return CmykColor(c, m, y, k, a)
+
+    @property
+    def alpha(self) -> float:
+        return self.a
+
+    def to_rgba(self) -> tuple[float, float, float, float]:
+        raise NotImplementedError
+
+    def to_hsba(self) -> tuple[float, float, float, float]:
+        raise NotImplementedError
+
+    def to_cmyka(self) -> tuple[float, float, float, float, float]:
+        raise NotImplementedError
+
+
+@dataclass(frozen=True)
+class RgbColor(Color):
     """RGBA color with components in [0, 1]."""
     r: float
     g: float
     b: float
     a: float = 1.0
+
+    def to_rgba(self) -> tuple[float, float, float, float]:
+        return (self.r, self.g, self.b, self.a)
+
+    def to_hsba(self) -> tuple[float, float, float, float]:
+        r, g, b = self.r, self.g, self.b
+        max_c = max(r, g, b)
+        min_c = min(r, g, b)
+        delta = max_c - min_c
+        brightness = max_c
+        saturation = 0.0 if max_c == 0.0 else delta / max_c
+        if delta == 0.0:
+            hue = 0.0
+        elif max_c == r:
+            hue = 60.0 * (((g - b) / delta) % 6.0)
+        elif max_c == g:
+            hue = 60.0 * (((b - r) / delta) + 2.0)
+        else:
+            hue = 60.0 * (((r - g) / delta) + 4.0)
+        if hue < 0.0:
+            hue += 360.0
+        return (hue, saturation, brightness, self.a)
+
+    def to_cmyka(self) -> tuple[float, float, float, float, float]:
+        r, g, b = self.r, self.g, self.b
+        k = 1.0 - max(r, g, b)
+        if k >= 1.0:
+            return (0.0, 0.0, 0.0, 1.0, self.a)
+        c = (1.0 - r - k) / (1.0 - k)
+        m = (1.0 - g - k) / (1.0 - k)
+        y = (1.0 - b - k) / (1.0 - k)
+        return (c, m, y, k, self.a)
+
+
+@dataclass(frozen=True)
+class HsbColor(Color):
+    """HSB/HSV color. h in [0, 360), s and b in [0, 1]."""
+    h: float
+    s: float
+    b: float
+    a: float = 1.0
+
+    def to_rgba(self) -> tuple[float, float, float, float]:
+        h, s, v = self.h, self.s, self.b
+        if s == 0.0:
+            return (v, v, v, self.a)
+        hi = int(h / 60.0) % 6
+        f = h / 60.0 - int(h / 60.0)
+        p = v * (1.0 - s)
+        q = v * (1.0 - s * f)
+        t = v * (1.0 - s * (1.0 - f))
+        if hi == 0:
+            r, g, b = v, t, p
+        elif hi == 1:
+            r, g, b = q, v, p
+        elif hi == 2:
+            r, g, b = p, v, t
+        elif hi == 3:
+            r, g, b = p, q, v
+        elif hi == 4:
+            r, g, b = t, p, v
+        else:
+            r, g, b = v, p, q
+        return (r, g, b, self.a)
+
+    def to_hsba(self) -> tuple[float, float, float, float]:
+        return (self.h, self.s, self.b, self.a)
+
+    def to_cmyka(self) -> tuple[float, float, float, float, float]:
+        r, g, b, a = self.to_rgba()
+        return RgbColor(r, g, b, a).to_cmyka()
+
+
+@dataclass(frozen=True)
+class CmykColor(Color):
+    """CMYK color with components in [0, 1]."""
+    c: float
+    m: float
+    y: float
+    k: float
+    a: float = 1.0
+
+    def to_rgba(self) -> tuple[float, float, float, float]:
+        r = (1.0 - self.c) * (1.0 - self.k)
+        g = (1.0 - self.m) * (1.0 - self.k)
+        b = (1.0 - self.y) * (1.0 - self.k)
+        return (r, g, b, self.a)
+
+    def to_hsba(self) -> tuple[float, float, float, float]:
+        r, g, b, a = self.to_rgba()
+        return RgbColor(r, g, b, a).to_hsba()
+
+    def to_cmyka(self) -> tuple[float, float, float, float, float]:
+        return (self.c, self.m, self.y, self.k, self.a)
+
+
+# Convenience constants
+Color.BLACK = RgbColor(0.0, 0.0, 0.0)
+Color.WHITE = RgbColor(1.0, 1.0, 1.0)
 
 
 class Visibility(Enum):

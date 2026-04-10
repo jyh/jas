@@ -28,11 +28,12 @@ fn fmt(v: f64) -> String {
 }
 
 fn color_str(c: &Color) -> String {
-    let r = (c.r * 255.0).round() as u8;
-    let g = (c.g * 255.0).round() as u8;
-    let b = (c.b * 255.0).round() as u8;
-    if c.a < 1.0 {
-        format!("rgba({},{},{},{})", r, g, b, fmt(c.a))
+    let (rv, gv, bv, a) = c.to_rgba();
+    let r = (rv * 255.0).round() as u8;
+    let g = (gv * 255.0).round() as u8;
+    let b = (bv * 255.0).round() as u8;
+    if a < 1.0 {
+        format!("rgba({},{},{},{})", r, g, b, fmt(a))
     } else {
         format!("rgb({},{},{})", r, g, b)
     }
@@ -518,7 +519,7 @@ fn parse_color(s: &str) -> Option<Color> {
     }
     // Named colors
     if let Some(&(r, g, b)) = get_named_colors().get(s.to_lowercase().as_str()) {
-        return Some(Color { r: r as f64 / 255.0, g: g as f64 / 255.0, b: b as f64 / 255.0, a: 1.0 });
+        return Some(Color::Rgb { r: r as f64 / 255.0, g: g as f64 / 255.0, b: b as f64 / 255.0, a: 1.0 });
     }
     // Hex
     if let Some(h) = s.strip_prefix('#') {
@@ -526,13 +527,13 @@ fn parse_color(s: &str) -> Option<Color> {
             let r = u8::from_str_radix(&h[0..1].repeat(2), 16).ok()? as f64 / 255.0;
             let g = u8::from_str_radix(&h[1..2].repeat(2), 16).ok()? as f64 / 255.0;
             let b = u8::from_str_radix(&h[2..3].repeat(2), 16).ok()? as f64 / 255.0;
-            return Some(Color { r, g, b, a: 1.0 });
+            return Some(Color::Rgb { r, g, b, a: 1.0 });
         }
         if h.len() == 6 {
             let r = u8::from_str_radix(&h[0..2], 16).ok()? as f64 / 255.0;
             let g = u8::from_str_radix(&h[2..4], 16).ok()? as f64 / 255.0;
             let b = u8::from_str_radix(&h[4..6], 16).ok()? as f64 / 255.0;
-            return Some(Color { r, g, b, a: 1.0 });
+            return Some(Color::Rgb { r, g, b, a: 1.0 });
         }
         return None;
     }
@@ -545,7 +546,7 @@ fn parse_color(s: &str) -> Option<Color> {
             let g = parts[1].trim().parse::<f64>().ok()? / 255.0;
             let b = parts[2].trim().parse::<f64>().ok()? / 255.0;
             let a = if parts.len() > 3 { parts[3].trim().parse::<f64>().ok()? } else { 1.0 };
-            return Some(Color { r, g, b, a });
+            return Some(Color::Rgb { r, g, b, a });
         }
     }
     None
@@ -1395,7 +1396,8 @@ mod tests {
         if let Element::Rect(r) = &*children[0] {
             assert!(r.fill.is_some());
             let c = r.fill.unwrap().color;
-            assert!((c.r - 1.0).abs() < 0.01);
+            let (rv, _, _, _) = c.to_rgba();
+            assert!((rv - 1.0).abs() < 0.01);
         }
     }
 

@@ -421,7 +421,8 @@ class TypeOnPathTool: CanvasTool {
             if let f = pr.fill { color = f.color }
             else if let st = pr.stroke { color = st.color }
             else { color = Color(r: 0, g: 0, b: 0) }
-            cgCtx.setStrokeColor(CGColor(red: color.r, green: color.g, blue: color.b, alpha: 1.0))
+            let (cr, cg, cb, _) = color.toRgba()
+            cgCtx.setStrokeColor(CGColor(red: cr, green: cg, blue: cb, alpha: 1.0))
             cgCtx.setLineWidth(1.5)
             cgCtx.move(to: CGPoint(x: cx + nx * (h * 0.7), y: cy + ny * (h * 0.7)))
             cgCtx.addLine(to: CGPoint(x: cx - nx * (h * 0.2), y: cy - ny * (h * 0.2)))

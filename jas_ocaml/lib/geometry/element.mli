@@ -6,13 +6,32 @@ val flatten_steps : int
 (** Average character width as a fraction of font size. *)
 val approx_char_width_factor : float
 
-(** RGBA color with components in [0, 1]. *)
-type color = {
-  r : float;
-  g : float;
-  b : float;
-  a : float;
-}
+(** Color with support for RGB, HSB, and CMYK color spaces. *)
+type color =
+  | Rgb of { r : float; g : float; b : float; a : float }
+  | Hsb of { h : float; s : float; b : float; a : float }
+  | Cmyk of { c : float; m : float; y : float; k : float; a : float }
+
+(** Convenience constructors for opaque colors. *)
+val color_rgb : float -> float -> float -> color
+val color_hsb : float -> float -> float -> color
+val color_cmyk : float -> float -> float -> float -> color
+
+(** Common color constants. *)
+val black : color
+val white : color
+
+(** Alpha component, regardless of color space. *)
+val color_alpha : color -> float
+
+(** Convert any color to (r, g, b, a). *)
+val color_to_rgba : color -> float * float * float * float
+
+(** Convert any color to (h, s, b, a). *)
+val color_to_hsba : color -> float * float * float * float
+
+(** Convert any color to (c, m, y, k, a). *)
+val color_to_cmyka : color -> float * float * float * float * float
 
 (** Per-element visibility mode.
 

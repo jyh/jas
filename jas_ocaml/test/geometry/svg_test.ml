@@ -452,9 +452,10 @@ let () =
     let doc_hex6 = Jas.Svg.svg_to_document svg_hex6 in
     match (children_of doc_hex6.Jas.Document.layers.(0)).(0) with
     | Rect { fill = Some { fill_color; _ }; _ } ->
-      assert (abs_float (fill_color.r -. 1.0) < 0.01);
-      assert (abs_float (fill_color.g -. (128.0 /. 255.0)) < 0.01);
-      assert (abs_float (fill_color.b -. 0.0) < 0.01)
+      let (r, g, b, _) = Jas.Element.color_to_rgba fill_color in
+      assert (abs_float (r -. 1.0) < 0.01);
+      assert (abs_float (g -. (128.0 /. 255.0)) < 0.01);
+      assert (abs_float (b -. 0.0) < 0.01)
     | _ -> assert false);
 
   run_test "import #RGB shorthand hex color" (fun () ->
@@ -462,9 +463,10 @@ let () =
     let doc_hex3 = Jas.Svg.svg_to_document svg_hex3 in
     match (children_of doc_hex3.Jas.Document.layers.(0)).(0) with
     | Rect { fill = Some { fill_color; _ }; _ } ->
-      assert (abs_float (fill_color.r -. 1.0) < 0.01);
-      assert (abs_float (fill_color.g -. 0.0) < 0.01);
-      assert (abs_float (fill_color.b -. 0.0) < 0.01)
+      let (r, g, b, _) = Jas.Element.color_to_rgba fill_color in
+      assert (abs_float (r -. 1.0) < 0.01);
+      assert (abs_float (g -. 0.0) < 0.01);
+      assert (abs_float (b -. 0.0) < 0.01)
     | _ -> assert false);
 
   run_test "import hex color on stroke" (fun () ->
@@ -472,7 +474,8 @@ let () =
     let doc_hex_s = Jas.Svg.svg_to_document svg_hex_stroke in
     match (children_of doc_hex_s.Jas.Document.layers.(0)).(0) with
     | Line { stroke = Some { stroke_color; _ }; _ } ->
-      assert (abs_float (stroke_color.b -. 1.0) < 0.01)
+      let (_, _, b, _) = Jas.Element.color_to_rgba stroke_color in
+      assert (abs_float (b -. 1.0) < 0.01)
     | _ -> assert false);
 
   run_test "import named color \"red\"" (fun () ->
@@ -480,8 +483,9 @@ let () =
     let doc_red = Jas.Svg.svg_to_document svg_red in
     match (children_of doc_red.Jas.Document.layers.(0)).(0) with
     | Rect { fill = Some { fill_color; _ }; _ } ->
-      assert (abs_float (fill_color.r -. 1.0) < 0.01);
-      assert (abs_float (fill_color.g -. 0.0) < 0.01)
+      let (r, g, _, _) = Jas.Element.color_to_rgba fill_color in
+      assert (abs_float (r -. 1.0) < 0.01);
+      assert (abs_float (g -. 0.0) < 0.01)
     | _ -> assert false);
 
   run_test "import named color \"steelblue\"" (fun () ->
@@ -489,9 +493,10 @@ let () =
     let doc_sb = Jas.Svg.svg_to_document svg_sb in
     match (children_of doc_sb.Jas.Document.layers.(0)).(0) with
     | Rect { fill = Some { fill_color; _ }; _ } ->
-      assert (abs_float (fill_color.r -. 70.0 /. 255.0) < 0.01);
-      assert (abs_float (fill_color.g -. 130.0 /. 255.0) < 0.01);
-      assert (abs_float (fill_color.b -. 180.0 /. 255.0) < 0.01)
+      let (r, g, b, _) = Jas.Element.color_to_rgba fill_color in
+      assert (abs_float (r -. 70.0 /. 255.0) < 0.01);
+      assert (abs_float (g -. 130.0 /. 255.0) < 0.01);
+      assert (abs_float (b -. 180.0 /. 255.0) < 0.01)
     | _ -> assert false);
 
   Printf.printf "All SVG tests passed.\n"

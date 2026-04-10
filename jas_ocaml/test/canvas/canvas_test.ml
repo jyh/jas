@@ -83,7 +83,7 @@ let () =
     let ctrl3 = Jas.Controller.create ~model:model3 () in
     let line = Jas.Element.Line {
       x1 = 10.0; y1 = 20.0; x2 = 50.0; y2 = 60.0;
-      stroke = Some { stroke_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
+      stroke = Some { stroke_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
                       stroke_width = 1.0;
                       stroke_linecap = Butt;
                       stroke_linejoin = Miter };
@@ -113,7 +113,7 @@ let () =
       x = 10.0; y = 20.0; width = 40.0; height = 40.0;
       rx = 0.0; ry = 0.0;
       fill = None;
-      stroke = Some { stroke_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
+      stroke = Some { stroke_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
                       stroke_width = 1.0;
                       stroke_linecap = Butt;
                       stroke_linejoin = Miter };

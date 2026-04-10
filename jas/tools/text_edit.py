@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 
-from geometry.element import Color, Fill, Text, TextPath
+from geometry.element import RgbColor, Fill, Text, TextPath
 from algorithms.text_layout import ordered_range
 
 
@@ -160,9 +160,9 @@ def empty_text_elem(x: float, y: float, width: float = 0.0, height: float = 0.0)
     return Text(
         x=x, y=y, content="",
         width=width, height=height,
-        fill=Fill(color=Color(0, 0, 0)),
+        fill=Fill(color=RgbColor(0, 0, 0)),
     )
 
 
 def empty_text_path_elem(d: tuple) -> TextPath:
-    return TextPath(d=d, content="", fill=Fill(color=Color(0, 0, 0)))
+    return TextPath(d=d, content="", fill=Fill(color=RgbColor(0, 0, 0)))

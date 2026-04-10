@@ -69,10 +69,27 @@ private func jsonArray(_ items: [String]) -> String {
 
 private func colorJson(_ c: Color) -> String {
     let o = JsonObj()
-    o.num("a", c.a)
-    o.num("b", c.b)
-    o.num("g", c.g)
-    o.num("r", c.r)
+    switch c {
+    case .rgb(let r, let g, let b, let a):
+        o.num("a", a)
+        o.num("b", b)
+        o.num("g", g)
+        o.num("r", r)
+        o.str("space", "rgb")
+    case .hsb(let h, let s, let b, let a):
+        o.num("a", a)
+        o.num("b", b)
+        o.num("h", h)
+        o.num("s", s)
+        o.str("space", "hsb")
+    case .cmyk(let c, let m, let y, let k, let a):
+        o.num("a", a)
+        o.num("c", c)
+        o.num("k", k)
+        o.num("m", m)
+        o.str("space", "cmyk")
+        o.num("y", y)
+    }
     return o.build()
 }
 
@@ -347,7 +364,15 @@ private func parseF(_ v: Any?) -> Double {
 
 private func parseColor(_ v: Any?) -> Color {
     guard let d = v as? [String: Any] else { return Color(r: 0, g: 0, b: 0, a: 1) }
-    return Color(r: parseF(d["r"]), g: parseF(d["g"]), b: parseF(d["b"]), a: parseF(d["a"]))
+    let space = d["space"] as? String ?? "rgb"
+    switch space {
+    case "hsb":
+        return .hsb(h: parseF(d["h"]), s: parseF(d["s"]), b: parseF(d["b"]), a: parseF(d["a"]))
+    case "cmyk":
+        return .cmyk(c: parseF(d["c"]), m: parseF(d["m"]), y: parseF(d["y"]), k: parseF(d["k"]), a: parseF(d["a"]))
+    default:
+        return Color(r: parseF(d["r"]), g: parseF(d["g"]), b: parseF(d["b"]), a: parseF(d["a"]))
+    }
 }
 
 private func parseFill(_ v: Any?) -> Fill? {

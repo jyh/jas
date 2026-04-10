@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from geometry.element import Color, Line, Stroke
+from geometry.element import RgbColor, Line, Stroke
 from tools.drawing_tool import DrawingToolBase
 
 if TYPE_CHECKING:
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class LineTool(DrawingToolBase):
     def _create_element(self, sx, sy, ex, ey):
         return Line(x1=sx, y1=sy, x2=ex, y2=ey,
-                    stroke=Stroke(color=Color(0, 0, 0), width=1.0))
+                    stroke=Stroke(color=RgbColor(0, 0, 0), width=1.0))
 
     def _draw_preview(self, painter, sx, sy, ex, ey):
         from PySide6.QtCore import QPointF

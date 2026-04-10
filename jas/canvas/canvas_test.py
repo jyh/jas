@@ -5,7 +5,7 @@ from canvas.canvas import BoundingBox, CanvasWidget, _draw_element, _build_path
 from document.controller import Controller
 from document.document import Document
 from geometry.element import (
-    Circle, Color, CurveTo, ClosePath, Ellipse, Fill, Group, Layer, Line,
+    Circle, RgbColor, CurveTo, ClosePath, Ellipse, Fill, Group, Layer, Line,
     LineTo, MoveTo, Path, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
     SmoothQuadTo, Stroke, Text, TextPath, Transform,
 )
@@ -185,7 +185,7 @@ class CanvasWidgetTest(absltest.TestCase):
         ctrl = Controller(model=model)
         model.document = Document(
             layers=(Layer(name="L1", children=(
-                Line(x1=0, y1=0, x2=1, y2=1, stroke=Stroke(color=Color(0, 0, 0))),
+                Line(x1=0, y1=0, x2=1, y2=1, stroke=Stroke(color=RgbColor(0, 0, 0))),
             )),),
         )
         canvas = CanvasWidget(model=model, controller=ctrl)
@@ -233,44 +233,44 @@ class DrawElementTest(absltest.TestCase):
     def test_draw_line(self):
         p, _ = self._make_painter()
         _draw_element(p, Line(x1=0, y1=0, x2=50, y2=50,
-                              stroke=Stroke(color=Color(0, 0, 0))))
+                              stroke=Stroke(color=RgbColor(0, 0, 0))))
         p.end()
 
     def test_draw_rect(self):
         p, _ = self._make_painter()
         _draw_element(p, Rect(x=10, y=10, width=30, height=20,
-                              fill=Fill(color=Color(1, 0, 0))))
+                              fill=Fill(color=RgbColor(1, 0, 0))))
         p.end()
 
     def test_draw_rect_rounded(self):
         p, _ = self._make_painter()
         _draw_element(p, Rect(x=10, y=10, width=30, height=20, rx=5, ry=5,
-                              fill=Fill(color=Color(0, 1, 0))))
+                              fill=Fill(color=RgbColor(0, 1, 0))))
         p.end()
 
     def test_draw_circle(self):
         p, _ = self._make_painter()
         _draw_element(p, Circle(cx=50, cy=50, r=20,
-                                fill=Fill(color=Color(0, 0, 1)),
-                                stroke=Stroke(color=Color(0, 0, 0))))
+                                fill=Fill(color=RgbColor(0, 0, 1)),
+                                stroke=Stroke(color=RgbColor(0, 0, 0))))
         p.end()
 
     def test_draw_ellipse(self):
         p, _ = self._make_painter()
         _draw_element(p, Ellipse(cx=50, cy=50, rx=30, ry=15,
-                                 fill=Fill(color=Color(1, 1, 0))))
+                                 fill=Fill(color=RgbColor(1, 1, 0))))
         p.end()
 
     def test_draw_polyline(self):
         p, _ = self._make_painter()
         _draw_element(p, Polyline(points=((0, 0), (50, 25), (100, 0)),
-                                  stroke=Stroke(color=Color(0, 0, 0))))
+                                  stroke=Stroke(color=RgbColor(0, 0, 0))))
         p.end()
 
     def test_draw_polygon(self):
         p, _ = self._make_painter()
         _draw_element(p, Polygon(points=((10, 10), (90, 10), (50, 90)),
-                                 fill=Fill(color=Color(0, 1, 1))))
+                                 fill=Fill(color=RgbColor(0, 1, 1))))
         p.end()
 
     def test_draw_path(self):
@@ -281,7 +281,7 @@ class DrawElementTest(absltest.TestCase):
             CurveTo(60, 10, 70, 30, 50, 50),
             QuadTo(30, 70, 10, 50),
             ClosePath(),
-        ), fill=Fill(color=Color(0.5, 0.5, 0.5))))
+        ), fill=Fill(color=RgbColor(0.5, 0.5, 0.5))))
         p.end()
 
     def test_draw_path_smooth(self):
@@ -292,19 +292,19 @@ class DrawElementTest(absltest.TestCase):
             SmoothCurveTo(80, 90, 90, 50),
             QuadTo(70, 20, 50, 50),
             SmoothQuadTo(30, 50),
-        ), stroke=Stroke(color=Color(0, 0, 0))))
+        ), stroke=Stroke(color=RgbColor(0, 0, 0))))
         p.end()
 
     def test_draw_text(self):
         p, _ = self._make_painter()
         _draw_element(p, Text(x=10, y=50, content="Hello",
-                              fill=Fill(color=Color(0, 0, 0))))
+                              fill=Fill(color=RgbColor(0, 0, 0))))
         p.end()
 
     def test_draw_group(self):
         p, _ = self._make_painter()
         _draw_element(p, Group(children=(
-            Rect(x=0, y=0, width=20, height=20, fill=Fill(color=Color(1, 0, 0))),
+            Rect(x=0, y=0, width=20, height=20, fill=Fill(color=RgbColor(1, 0, 0))),
             Circle(cx=50, cy=50, r=10),
         )))
         p.end()
@@ -312,21 +312,21 @@ class DrawElementTest(absltest.TestCase):
     def test_draw_layer(self):
         p, _ = self._make_painter()
         _draw_element(p, Layer(name="L1", children=(
-            Line(x1=0, y1=0, x2=100, y2=100, stroke=Stroke(color=Color(0, 0, 0))),
+            Line(x1=0, y1=0, x2=100, y2=100, stroke=Stroke(color=RgbColor(0, 0, 0))),
         )))
         p.end()
 
     def test_draw_with_transform(self):
         p, _ = self._make_painter()
         _draw_element(p, Rect(x=0, y=0, width=20, height=20,
-                              fill=Fill(color=Color(1, 0, 0)),
+                              fill=Fill(color=RgbColor(1, 0, 0)),
                               transform=Transform.translate(10, 10)))
         p.end()
 
     def test_draw_with_opacity(self):
         p, _ = self._make_painter()
         _draw_element(p, Rect(x=0, y=0, width=20, height=20,
-                              fill=Fill(color=Color(1, 0, 0)),
+                              fill=Fill(color=RgbColor(1, 0, 0)),
                               opacity=0.5))
         p.end()
 
@@ -405,7 +405,7 @@ class VisibilityDrawTest(absltest.TestCase):
         from geometry.element import Visibility
         p, _ = self._make_painter()
         elem = Rect(x=0, y=0, width=20, height=20,
-                    fill=Fill(color=Color(1, 0, 0)),
+                    fill=Fill(color=RgbColor(1, 0, 0)),
                     visibility=Visibility.INVISIBLE)
         _draw_element(p, elem)
         p.end()
@@ -414,7 +414,7 @@ class VisibilityDrawTest(absltest.TestCase):
         from geometry.element import Visibility
         p, _ = self._make_painter()
         elem = Rect(x=0, y=0, width=20, height=20,
-                    fill=Fill(color=Color(1, 0, 0)),
+                    fill=Fill(color=RgbColor(1, 0, 0)),
                     visibility=Visibility.OUTLINE)
         _draw_element(p, elem)
         p.end()

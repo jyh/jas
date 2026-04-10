@@ -1,6 +1,6 @@
 """Tests for TextEditSession."""
 
-from geometry.element import Color, Fill, Text
+from geometry.element import RgbColor, Fill, Text
 from tools.text_edit import EditTarget, TextEditSession
 
 

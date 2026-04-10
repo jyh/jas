@@ -7,7 +7,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from geometry.element import (
-    ClosePath, Color, CurveTo, MoveTo, Path, PathCommand, Stroke,
+    ClosePath, RgbColor, CurveTo, MoveTo, Path, PathCommand, Stroke,
 )
 from tools.tool import CanvasTool, ToolContext, HIT_RADIUS, HANDLE_DRAW_SIZE
 
@@ -81,7 +81,7 @@ class PenTool(CanvasTool):
             ))
             cmds.append(ClosePath())
         elem = Path(d=tuple(cmds),
-                    stroke=Stroke(color=Color(0, 0, 0), width=1.0))
+                    stroke=Stroke(color=RgbColor(0, 0, 0), width=1.0))
         ctx.controller.add_element(elem)
         self._points.clear()
         self._state = _PenState.IDLE

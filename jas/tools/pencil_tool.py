@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from geometry.element import Color, CurveTo, MoveTo, Path, PathCommand, Stroke
+from geometry.element import RgbColor, CurveTo, MoveTo, Path, PathCommand, Stroke
 from algorithms.fit_curve import fit_curve
 from tools.tool import CanvasTool, ToolContext
 
@@ -56,7 +56,7 @@ class PencilTool(CanvasTool):
         for seg in segments:
             cmds.append(CurveTo(seg[2], seg[3], seg[4], seg[5], seg[6], seg[7]))
         elem = Path(d=tuple(cmds),
-                    stroke=Stroke(color=Color(0, 0, 0), width=1.0))
+                    stroke=Stroke(color=RgbColor(0, 0, 0), width=1.0))
         ctx.controller.add_element(elem)
         self._points.clear()
         ctx.request_update()

@@ -134,7 +134,9 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
     Cairo.Group.push cr;
     apply_transform cr transform;
     begin match fill with
-    | Some { fill_color = c } -> Cairo.set_source_rgba cr c.r c.g c.b c.a
+    | Some { fill_color = c } ->
+      let (r, g, b, a) = Element.color_to_rgba c in
+      Cairo.set_source_rgba cr r g b a
     | None -> Cairo.set_source_rgb cr 0.0 0.0 0.0
     end;
     let slant = if font_style = "italic" || font_style = "oblique" then Cairo.Italic else Cairo.Upright in
@@ -179,7 +181,9 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
     Cairo.Group.push cr;
     apply_transform cr transform;
     begin match fill with
-    | Some { fill_color = c } -> Cairo.set_source_rgba cr c.r c.g c.b c.a
+    | Some { fill_color = c } ->
+      let (r, g, b, a) = Element.color_to_rgba c in
+      Cairo.set_source_rgba cr r g b a
     | None -> Cairo.set_source_rgb cr 0.0 0.0 0.0
     end;
     let slant = if font_style = "italic" || font_style = "oblique" then Cairo.Italic else Cairo.Upright in
@@ -296,7 +300,8 @@ and apply_transform cr = function
 and apply_stroke cr = function
   | None -> ()
   | Some (s : Element.stroke) ->
-    Cairo.set_source_rgba cr s.stroke_color.r s.stroke_color.g s.stroke_color.b s.stroke_color.a;
+    let (r, g, b, a) = Element.color_to_rgba s.stroke_color in
+    Cairo.set_source_rgba cr r g b a;
     Cairo.set_line_width cr s.stroke_width;
     begin match s.stroke_linecap with
     | Butt -> Cairo.set_line_cap cr Cairo.BUTT
@@ -314,14 +319,18 @@ and fill_and_stroke cr fill stroke =
   let has_stroke = stroke <> None in
   if has_fill && has_stroke then begin
     (match fill with
-     | Some (f : Element.fill) -> Cairo.set_source_rgba cr f.fill_color.r f.fill_color.g f.fill_color.b f.fill_color.a
+     | Some (f : Element.fill) ->
+       let (r, g, b, a) = Element.color_to_rgba f.fill_color in
+       Cairo.set_source_rgba cr r g b a
      | None -> ());
     Cairo.fill_preserve cr;
     apply_stroke cr stroke;
     Cairo.stroke cr
   end else if has_fill then begin
     (match fill with
-     | Some (f : Element.fill) -> Cairo.set_source_rgba cr f.fill_color.r f.fill_color.g f.fill_color.b f.fill_color.a
+     | Some (f : Element.fill) ->
+       let (r, g, b, a) = Element.color_to_rgba f.fill_color in
+       Cairo.set_source_rgba cr r g b a
      | None -> ());
     Cairo.fill cr
   end else if has_stroke then begin
