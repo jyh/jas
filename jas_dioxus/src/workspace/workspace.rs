@@ -352,11 +352,10 @@ impl WorkspaceLayout {
 
     /// Toggle a group's collapsed state.
     pub fn toggle_group_collapsed(&mut self, addr: GroupAddr) {
-        if let Some(d) = self.dock_mut(addr.dock_id) {
-            if let Some(g) = d.groups.get_mut(addr.group_idx) {
+        if let Some(d) = self.dock_mut(addr.dock_id)
+            && let Some(g) = d.groups.get_mut(addr.group_idx) {
                 g.collapsed = !g.collapsed;
             }
-        }
         self.bump();
     }
 
@@ -366,13 +365,11 @@ impl WorkspaceLayout {
 
     /// Set the active tab within a panel group.
     pub fn set_active_panel(&mut self, addr: PanelAddr) {
-        if let Some(d) = self.dock_mut(addr.group.dock_id) {
-            if let Some(g) = d.groups.get_mut(addr.group.group_idx) {
-                if addr.panel_idx < g.panels.len() {
+        if let Some(d) = self.dock_mut(addr.group.dock_id)
+            && let Some(g) = d.groups.get_mut(addr.group.group_idx)
+                && addr.panel_idx < g.panels.len() {
                     g.active = addr.panel_idx;
                 }
-            }
-        }
         self.bump();
     }
 
@@ -454,8 +451,8 @@ impl WorkspaceLayout {
     /// Reorder a panel within its group. Removes the panel at `from` and
     /// re-inserts at `to` (clamped). Sets `active` to the new position.
     pub fn reorder_panel(&mut self, group: GroupAddr, from: usize, to: usize) {
-        if let Some(d) = self.dock_mut(group.dock_id) {
-            if let Some(g) = d.groups.get_mut(group.group_idx) {
+        if let Some(d) = self.dock_mut(group.dock_id)
+            && let Some(g) = d.groups.get_mut(group.group_idx) {
                 if from >= g.panels.len() {
                     return;
                 }
@@ -464,7 +461,6 @@ impl WorkspaceLayout {
                 g.panels.insert(to, panel);
                 g.active = to;
             }
-        }
         self.bump();
     }
 
@@ -497,22 +493,20 @@ impl WorkspaceLayout {
                 dst_group.active = dst_group.panels.len() - 1;
             } else {
                 // Target group not found — put panel back.
-                if let Some(src_dock) = self.dock_mut(from.group.dock_id) {
-                    if let Some(src_group) = src_dock.groups.get_mut(from.group.group_idx) {
+                if let Some(src_dock) = self.dock_mut(from.group.dock_id)
+                    && let Some(src_group) = src_dock.groups.get_mut(from.group.group_idx) {
                         let idx = from.panel_idx.min(src_group.panels.len());
                         src_group.panels.insert(idx, panel);
                     }
-                }
                 return;
             }
         } else {
             // Target dock not found — put panel back.
-            if let Some(src_dock) = self.dock_mut(from.group.dock_id) {
-                if let Some(src_group) = src_dock.groups.get_mut(from.group.group_idx) {
+            if let Some(src_dock) = self.dock_mut(from.group.dock_id)
+                && let Some(src_group) = src_dock.groups.get_mut(from.group.group_idx) {
                     let idx = from.panel_idx.min(src_group.panels.len());
                     src_group.panels.insert(idx, panel);
                 }
-            }
             return;
         }
         self.cleanup(from.group.dock_id);
@@ -550,12 +544,11 @@ impl WorkspaceLayout {
             dst.groups.insert(idx, new_group);
         } else {
             // Target not found — put panel back.
-            if let Some(src_dock) = self.dock_mut(from.group.dock_id) {
-                if let Some(src_group) = src_dock.groups.get_mut(from.group.group_idx) {
+            if let Some(src_dock) = self.dock_mut(from.group.dock_id)
+                && let Some(src_group) = src_dock.groups.get_mut(from.group.group_idx) {
                     let idx = from.panel_idx.min(src_group.panels.len());
                     src_group.panels.insert(idx, panel);
                 }
-            }
             return;
         }
         self.cleanup(from.group.dock_id);
@@ -607,11 +600,10 @@ impl WorkspaceLayout {
 
     /// Set a group's height. Clamped to MIN_GROUP_HEIGHT.
     pub fn resize_group(&mut self, addr: GroupAddr, height: f64) {
-        if let Some(d) = self.dock_mut(addr.dock_id) {
-            if let Some(g) = d.groups.get_mut(addr.group_idx) {
+        if let Some(d) = self.dock_mut(addr.dock_id)
+            && let Some(g) = d.groups.get_mut(addr.group_idx) {
                 g.height = Some(height.max(MIN_GROUP_HEIGHT));
             }
-        }
         self.bump();
     }
 

@@ -82,16 +82,14 @@ impl DirectSelectionTool {
                 let anchors = control_points(&Element::Path(pe.clone()));
                 for (ai, _) in anchors.iter().enumerate() {
                     let (h_in, h_out) = path_handle_positions(&pe.d, ai);
-                    if let Some((hx, hy)) = h_in {
-                        if ((x - hx).powi(2) + (y - hy).powi(2)).sqrt() < HIT_RADIUS {
+                    if let Some((hx, hy)) = h_in
+                        && ((x - hx).powi(2) + (y - hy).powi(2)).sqrt() < HIT_RADIUS {
                             return Some((es.path.clone(), ai, "in".to_string()));
                         }
-                    }
-                    if let Some((hx, hy)) = h_out {
-                        if ((x - hx).powi(2) + (y - hy).powi(2)).sqrt() < HIT_RADIUS {
+                    if let Some((hx, hy)) = h_out
+                        && ((x - hx).powi(2) + (y - hy).powi(2)).sqrt() < HIT_RADIUS {
                             return Some((es.path.clone(), ai, "out".to_string()));
                         }
-                    }
                 }
             }
         }

@@ -235,7 +235,7 @@ fn compute_max_error(
         (bez_curve.4, bez_curve.5),
         (bez_curve.6, bez_curve.7),
     ];
-    let mut split_point = (last - first + 1) / 2;
+    let mut split_point = (last - first).div_ceil(2);
     let mut max_dist = 0.0;
     for i in (first + 1)..last {
         let p = bezier_ii(3, &pts, u[i - first]);

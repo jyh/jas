@@ -172,26 +172,23 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
     let mut candidates: Vec<(f64, RecognizedShape)> = Vec::new();
 
     // Line is always a valid candidate (open or closed).
-    if let Some((a, b, res)) = fit_line(&pts) {
-        if res <= tol_abs {
+    if let Some((a, b, res)) = fit_line(&pts)
+        && res <= tol_abs {
             candidates.push((res, RecognizedShape::Line { a, b }));
         }
-    }
 
     // Scribble (open paths only). A true zigzag has many direction
     // reversals, which random noise on a straight stroke does not.
-    if !closed {
-        if let Some((segs, res)) = fit_scribble(&pts, diag) {
-            if res <= tol_abs {
+    if !closed
+        && let Some((segs, res)) = fit_scribble(&pts, diag)
+            && res <= tol_abs {
                 candidates.push((res, RecognizedShape::Scribble { points: segs }));
             }
-        }
-    }
 
     if closed {
         // Ellipse (axis-aligned, bbox-based). Snap to circle when nearly so.
-        if let Some((cx, cy, rx, ry, res)) = fit_ellipse_aa(&pts) {
-            if res <= tol_abs {
+        if let Some((cx, cy, rx, ry, res)) = fit_ellipse_aa(&pts)
+            && res <= tol_abs {
                 let ratio = rx.min(ry) / rx.max(ry);
                 let shape = if ratio >= cfg.circle_eccentricity_eps {
                     let r = (rx + ry) / 2.0;
@@ -201,12 +198,11 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
                 };
                 candidates.push((res, shape));
             }
-        }
 
         // Rectangle (axis-aligned, bbox-based). Snap to square when nearly so.
         let rect_fit = fit_rect_aa(&pts);
-        if let Some((x, y, w, h, res)) = rect_fit {
-            if res <= tol_abs {
+        if let Some((x, y, w, h, res)) = rect_fit
+            && res <= tol_abs {
                 let aspect = (w - h).abs() / w.max(h);
                 let (w, h) = if aspect <= cfg.square_aspect_eps {
                     let m = (w + h) / 2.0;
@@ -216,7 +212,6 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
                 };
                 candidates.push((res, RecognizedShape::Rectangle { x, y, w, h }));
             }
-        }
 
         // Round rectangle. Two guards prevent false positives:
         //   1. r/short ∈ (0.05, 0.45) — outside this band the plain rect or
@@ -237,17 +232,16 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
         }
 
         // Triangle.
-        if let Some((verts, res)) = fit_triangle(&pts) {
-            if res <= tol_abs {
+        if let Some((verts, res)) = fit_triangle(&pts)
+            && res <= tol_abs {
                 candidates.push((res, RecognizedShape::Triangle { pts: verts }));
             }
-        }
 
         // Lemniscate. Only attempted when the path crosses itself, which
         // is the defining topological feature of the figure-8.
-        if count_self_intersections(&pts) >= 1 {
-            if let Some((cx, cy, a, horizontal, res)) = fit_lemniscate(&pts) {
-                if res <= tol_abs {
+        if count_self_intersections(&pts) >= 1
+            && let Some((cx, cy, a, horizontal, res)) = fit_lemniscate(&pts)
+                && res <= tol_abs {
                     candidates.push((
                         res,
                         RecognizedShape::Lemniscate {
@@ -257,15 +251,12 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
                         },
                     ));
                 }
-            }
-        }
 
         // Arrow outline (closed, 7-corner silhouette of a filled arrow).
         // Run on the un-resampled input so corner positions are preserved.
         if let Some((tail, tip, head_len, head_half_width, shaft_half_width, res)) =
             fit_arrow(points, diag)
-        {
-            if res <= tol_abs {
+            && res <= tol_abs {
                 candidates.push((
                     res,
                     RecognizedShape::Arrow {
@@ -277,7 +268,6 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
                     },
                 ));
             }
-        }
     }
 
     candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -325,13 +315,13 @@ pub fn recognize_element(element: &Element, cfg: &RecognizeConfig) -> Option<(Sh
 /// Used by [`recognized_to_element`] to inherit the template's appearance.
 fn template_appearance(e: &Element) -> (Option<Fill>, Option<Stroke>, CommonProps) {
     match e {
-        Element::Line(l) => (None, l.stroke.clone(), l.common.clone()),
-        Element::Rect(r) => (r.fill.clone(), r.stroke.clone(), r.common.clone()),
-        Element::Circle(c) => (c.fill.clone(), c.stroke.clone(), c.common.clone()),
-        Element::Ellipse(e) => (e.fill.clone(), e.stroke.clone(), e.common.clone()),
-        Element::Polyline(p) => (p.fill.clone(), p.stroke.clone(), p.common.clone()),
-        Element::Polygon(p) => (p.fill.clone(), p.stroke.clone(), p.common.clone()),
-        Element::Path(p) => (p.fill.clone(), p.stroke.clone(), p.common.clone()),
+        Element::Line(l) => (None, l.stroke, l.common.clone()),
+        Element::Rect(r) => (r.fill, r.stroke, r.common.clone()),
+        Element::Circle(c) => (c.fill, c.stroke, c.common.clone()),
+        Element::Ellipse(e) => (e.fill, e.stroke, e.common.clone()),
+        Element::Polyline(p) => (p.fill, p.stroke, p.common.clone()),
+        Element::Polygon(p) => (p.fill, p.stroke, p.common.clone()),
+        Element::Path(p) => (p.fill, p.stroke, p.common.clone()),
         _ => (None, None, CommonProps::default()),
     }
 }

@@ -287,7 +287,7 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             let chars: Vec<char> = e.content.chars().collect();
             for line in &layout.lines {
                 let s: String = chars[line.start..line.end].iter().collect();
-                let s = s.trim_end_matches(|c: char| c == '\n');
+                let s = s.trim_end_matches('\n');
                 ctx.fill_text(s, e.x, e.y + line.baseline_y).ok();
             }
         }

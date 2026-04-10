@@ -26,7 +26,7 @@ pub fn make_measurer(font: &str, font_size: f64) -> Box<dyn Fn(&str) -> f64> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = font;
-        return Box::new(fallback_width(font_size));
+        Box::new(fallback_width(font_size))
     }
     #[cfg(target_arch = "wasm32")]
     {

@@ -392,15 +392,14 @@ impl CanvasTool for TypeTool {
         dragging: bool,
     ) {
         // While editing and dragging: extend selection.
-        if let Some(session) = &mut self.session {
-            if session.drag_active && dragging {
+        if let Some(session) = &mut self.session
+            && session.drag_active && dragging {
                 let cursor = self.cursor_at(model, x, y);
                 let s = self.session.as_mut().unwrap();
                 s.set_insertion(cursor, true);
                 s.blink_epoch_ms = now_ms();
                 return;
             }
-        }
 
         // While dragging on empty canvas: update preview rect.
         if let State::Dragging {
@@ -449,9 +448,8 @@ impl CanvasTool for TypeTool {
     }
 
     fn on_double_click(&mut self, _model: &mut Model, _x: f64, _y: f64) {
-        if self.session.is_some() {
+        if let Some(s) = &mut self.session {
             // Select word at cursor (simple: select the entire content).
-            let s = self.session.as_mut().unwrap();
             s.select_all();
             s.blink_epoch_ms = now_ms();
         }
@@ -626,8 +624,8 @@ impl CanvasTool for TypeTool {
 
     fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
         // Drag-create preview rectangle.
-        if self.session.is_none() {
-            if let State::Dragging {
+        if self.session.is_none()
+            && let State::Dragging {
                 start_x,
                 start_y,
                 cur_x,
@@ -647,7 +645,6 @@ impl CanvasTool for TypeTool {
                     ctx.set_line_dash(&js_sys::Array::new().into()).ok();
                 }
             }
-        }
 
         // Editing overlay: selection highlights and caret.
         let Some(session) = &self.session else { return; };

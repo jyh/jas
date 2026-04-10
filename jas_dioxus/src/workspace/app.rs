@@ -363,10 +363,7 @@ impl AppState {
 
 /// Write text to the system clipboard (fire-and-forget async).
 fn clipboard_write(text: String) {
-    if let Some(window) = web_sys::window() {
-        let clipboard = window.navigator().clipboard();
-        let promise = clipboard.write_text(&text);
-        let _ = wasm_bindgen_futures::JsFuture::from(promise);
+    if let Some(_window) = web_sys::window() {
         // Fire and forget — spawn to avoid blocking
         wasm_bindgen_futures::spawn_local(async move {
             if let Some(window) = web_sys::window() {
@@ -400,18 +397,16 @@ fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64
             .tab()
             .and_then(|tab| tab.tools.get(&active_kind).map(|t| t.is_editing()))
             .unwrap_or(false);
-        if editing {
-            if let Some(text) = clipboard_text.clone() {
+        if editing
+            && let Some(text) = clipboard_text.clone() {
                 let tab = st.tab_mut().unwrap();
-                if let Some(tool) = tab.tools.get_mut(&active_kind) {
-                    if tool.paste_text(&mut tab.model, &text) {
+                if let Some(tool) = tab.tools.get_mut(&active_kind)
+                    && tool.paste_text(&mut tab.model, &text) {
                         drop(st);
                         revision += 1;
                         return;
                     }
-                }
             }
-        }
 
         let tab = st.tab_mut().unwrap();
 
@@ -553,7 +548,7 @@ fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
     input.set_attribute("accept", ".svg,image/svg+xml").ok();
 
     let app2 = app.clone();
-    let revision2 = revision.clone();
+    let revision2 = revision;
     let input2 = input.clone();
     let onchange = Closure::wrap(Box::new(move |_evt: web_sys::Event| {
         let files = match input2.files() {
@@ -571,7 +566,7 @@ fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
         };
         let reader2 = reader.clone();
         let app3 = app2.clone();
-        let mut revision3 = revision2.clone();
+        let mut revision3 = revision2;
         let onload = Closure::wrap(Box::new(move |_evt: web_sys::Event| {
             let result = match reader2.result() {
                 Ok(r) => r,
@@ -768,11 +763,10 @@ pub fn App() -> Element {
             let alt = mods.alt();
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                if let Some(tab) = st.tab_mut() {
-                    if let Some(tool) = tab.tools.get_mut(&kind) {
+                if let Some(tab) = st.tab_mut()
+                    && let Some(tool) = tab.tools.get_mut(&kind) {
                         tool.on_press(&mut tab.model, cx, cy, shift, alt);
                     }
-                }
             }));
         }
     };
@@ -789,11 +783,10 @@ pub fn App() -> Element {
             let dragging = evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary);
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                if let Some(tab) = st.tab_mut() {
-                    if let Some(tool) = tab.tools.get_mut(&kind) {
+                if let Some(tab) = st.tab_mut()
+                    && let Some(tool) = tab.tools.get_mut(&kind) {
                         tool.on_move(&mut tab.model, cx, cy, shift, alt, dragging);
                     }
-                }
             }));
         }
     };
@@ -809,11 +802,10 @@ pub fn App() -> Element {
             let alt = mods.alt();
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                if let Some(tab) = st.tab_mut() {
-                    if let Some(tool) = tab.tools.get_mut(&kind) {
+                if let Some(tab) = st.tab_mut()
+                    && let Some(tool) = tab.tools.get_mut(&kind) {
                         tool.on_release(&mut tab.model, cx, cy, shift, alt);
                     }
-                }
             }));
         }
     };
@@ -826,11 +818,10 @@ pub fn App() -> Element {
             let cy = coords.y;
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
-                if let Some(tab) = st.tab_mut() {
-                    if let Some(tool) = tab.tools.get_mut(&kind) {
+                if let Some(tab) = st.tab_mut()
+                    && let Some(tool) = tab.tools.get_mut(&kind) {
                         tool.on_double_click(&mut tab.model, cx, cy);
                     }
-                }
             }));
         }
     };
@@ -839,7 +830,7 @@ pub fn App() -> Element {
     let on_keydown = {
         let act = act.clone();
         let app_for_keys = app.clone();
-        let revision_for_keys = revision.clone();
+        let revision_for_keys = revision;
         move |evt: Event<KeyboardData>| {
             let key = evt.data().key();
             let mods = evt.data().modifiers();
@@ -886,11 +877,10 @@ pub fn App() -> Element {
                         };
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                             let kind = st.active_tool;
-                            if let Some(tab) = st.tab_mut() {
-                                if let Some(tool) = tab.tools.get_mut(&kind) {
+                            if let Some(tab) = st.tab_mut()
+                                && let Some(tool) = tab.tools.get_mut(&kind) {
                                     tool.on_key_event(&mut tab.model, &key_str, km);
                                 }
-                            }
                         }));
                         return;
                     }
@@ -898,7 +888,7 @@ pub fn App() -> Element {
                     evt.prevent_default();
                     clipboard_read_and_paste(
                         app_for_keys.clone(),
-                        revision_for_keys.clone(),
+                        revision_for_keys,
                         0.0,
                     );
                     return;
@@ -980,7 +970,7 @@ pub fn App() -> Element {
                     // Try async clipboard read first, fall back to internal
                     clipboard_read_and_paste(
                         app_for_keys.clone(),
-                        revision_for_keys.clone(),
+                        revision_for_keys,
                         offset,
                     );
                 }
@@ -1043,7 +1033,7 @@ pub fn App() -> Element {
                 }
                 Key::Character(ref c) if (c == "o" || c == "O") && cmd => {
                     evt.prevent_default();
-                    open_file_dialog(app_for_keys.clone(), revision_for_keys.clone());
+                    open_file_dialog(app_for_keys.clone(), revision_for_keys);
                 }
                 Key::Character(ref c) if (c == "n" || c == "N") && cmd => {
                     evt.prevent_default();
@@ -1137,11 +1127,10 @@ pub fn App() -> Element {
                 Key::Escape | Key::Enter => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         let kind = st.active_tool;
-                        if let Some(tab) = st.tab_mut() {
-                            if let Some(tool) = tab.tools.get_mut(&kind) {
+                        if let Some(tab) = st.tab_mut()
+                            && let Some(tool) = tab.tools.get_mut(&kind) {
                                 tool.on_key(&mut tab.model, "Escape");
                             }
-                        }
                     }));
                 }
                 Key::Delete | Key::Backspace => {
@@ -1166,11 +1155,10 @@ pub fn App() -> Element {
                 Key::Character(ref c) if c == " " => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         let kind = st.active_tool;
-                        if let Some(tab) = st.tab_mut() {
-                            if let Some(tool) = tab.tools.get_mut(&kind) {
+                        if let Some(tab) = st.tab_mut()
+                            && let Some(tool) = tab.tools.get_mut(&kind) {
                                 tool.on_key_up(&mut tab.model, " ");
                             }
-                        }
                     }));
                 }
                 _ => {}
@@ -1194,9 +1182,9 @@ pub fn App() -> Element {
     let mut popup_slot = use_signal(|| Option::<usize>::None);
 
     // Dock drag-and-drop state.
-    let mut drag_source = use_signal(|| Option::<super::workspace::DragPayload>::None);
-    let mut drop_target_sig = use_signal(|| Option::<super::workspace::DropTarget>::None);
-    let mut was_dropped = use_signal(|| false);
+    let drag_source = use_signal(|| Option::<super::workspace::DragPayload>::None);
+    let drop_target_sig = use_signal(|| Option::<super::workspace::DropTarget>::None);
+    let was_dropped = use_signal(|| false);
     let mut last_drag_pos = use_signal(|| (0.0f64, 0.0f64));
     // Floating dock title bar drag (dock_id, offset_x, offset_y).
     let mut title_drag = use_signal(|| Option::<(super::workspace::DockId, f64, f64)>::None);
@@ -1208,7 +1196,7 @@ pub fn App() -> Element {
     // Pane edge resize: (pane_id, edge, start_mouse_x, start_mouse_y, start_pane_width, start_pane_height, start_pane_x, start_pane_y)
     let mut pane_resize = use_signal(|| Option::<(super::workspace::PaneId, super::workspace::EdgeSide, f64, f64, f64, f64, f64, f64)>::None);
     // Snap preview lines shown during drag
-    let mut snap_preview = use_signal(|| Vec::<super::workspace::SnapConstraint>::new());
+    let mut snap_preview = use_signal(Vec::<super::workspace::SnapConstraint>::new);
 
     // Read revision to trigger re-render when state changes.
     let _ = revision();
@@ -1252,14 +1240,13 @@ pub fn App() -> Element {
     // borrow conflicts in the Dioxus runtime.
     let slot_updates: Vec<(usize, usize)> = TOOLBAR_SLOTS.iter().enumerate()
         .filter_map(|(si, (_r, _c, tools))| {
-            if tools.len() > 1 {
-                if let Some(pos) = tools.iter().position(|&t| t == active_tool) {
+            if tools.len() > 1
+                && let Some(pos) = tools.iter().position(|&t| t == active_tool) {
                     let current = *slot_alternates.peek().get(&si).unwrap_or(&0);
                     if current != pos {
                         return Some((si, pos));
                     }
                 }
-            }
             None
         })
         .collect();
@@ -1306,7 +1293,7 @@ pub fn App() -> Element {
                             if has_alternates {
                                 // Start long-press timer via setTimeout
                                 let slot_idx = si;
-                                let mut popup = popup_slot.clone();
+                                let mut popup = popup_slot;
                                 let Some(window) = web_sys::window() else { return; };
                                 let cb = Closure::once(move || {
                                     popup.set(Some(slot_idx));
@@ -1334,7 +1321,7 @@ pub fn App() -> Element {
 
     // Build popup for long-press alternate selection
     let popup_node: Option<Result<VNode, RenderError>> = popup_slot().map(|si| {
-        let (_row, col, tools) = TOOLBAR_SLOTS[si];
+        let (_row, _col, tools) = TOOLBAR_SLOTS[si];
         let items: Vec<Result<VNode, RenderError>> = tools.iter().enumerate().map(|(ti, &tool_kind)| {
             let act = act.clone();
             let label = tool_kind.label();
@@ -1358,7 +1345,7 @@ pub fn App() -> Element {
         }).collect();
         // Position the popup next to the toolbar
         let top = _row as u32 * 34 + 4;
-        let left = if col == 0 { 72 } else { 72 };
+        let left = 72;
         rsx! {
             div {
                 style: "position:fixed; top:{top}px; left:{left}px; background:{THEME_BG_TAB}; border:1px solid #666; box-shadow:2px 2px 8px rgba(0,0,0,0.3); z-index:2000; padding:4px; border-radius:4px;",
@@ -1418,7 +1405,7 @@ pub fn App() -> Element {
     let dispatch = {
         let act = act.clone();
         let app_for_menu = app.clone();
-        let revision_for_menu = revision.clone();
+        let revision_for_menu = revision;
         Rc::new(move |cmd: &str| {
             match cmd {
                 "new" => {
@@ -1427,7 +1414,7 @@ pub fn App() -> Element {
                     }));
                 }
                 "open" => {
-                    open_file_dialog(app_for_menu.clone(), revision_for_menu.clone());
+                    open_file_dialog(app_for_menu.clone(), revision_for_menu);
                 }
                 "save" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
@@ -1497,12 +1484,12 @@ pub fn App() -> Element {
                 }
                 "paste" => {
                     clipboard_read_and_paste(
-                        app_for_menu.clone(), revision_for_menu.clone(), PASTE_OFFSET,
+                        app_for_menu.clone(), revision_for_menu, PASTE_OFFSET,
                     );
                 }
                 "paste_in_place" => {
                     clipboard_read_and_paste(
-                        app_for_menu.clone(), revision_for_menu.clone(), 0.0,
+                        app_for_menu.clone(), revision_for_menu, 0.0,
                     );
                 }
                 "select_all" => {
@@ -1578,7 +1565,7 @@ pub fn App() -> Element {
                 "tile_panes" => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         let dock_collapsed = st.workspace_layout.anchored_dock(super::workspace::DockEdge::Right)
-                            .map_or(false, |d| d.collapsed);
+                            .is_some_and(|d| d.collapsed);
                         if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                             pl.canvas_maximized = false;
                             let override_id = if dock_collapsed {
@@ -1685,7 +1672,7 @@ pub fn App() -> Element {
         let menu_name_str2 = menu_name_str.clone();
         let is_open = open_menu() == Some(menu_name_str.clone());
         let dispatch = dispatch.clone();
-        let mut open_menu_sig = open_menu.clone();
+        let mut open_menu_sig = open_menu;
 
         // Pre-build item nodes for this menu
         let item_nodes: Vec<Result<VNode, RenderError>> = if is_open {
@@ -1699,7 +1686,7 @@ pub fn App() -> Element {
                 } else if cmd == "workspace_submenu" {
                     // Dynamic workspace submenu
                     let act_ws = act.clone();
-                    let open_menu_ws = open_menu_sig.clone();
+                    let open_menu_ws = open_menu_sig;
                     let active_name = active_layout_name.clone();
                     let has_saved_layout = active_name != super::workspace::WORKSPACE_LAYOUT_NAME;
                     // Filter out "Workspace" from the layout list
@@ -1739,7 +1726,7 @@ pub fn App() -> Element {
                                                 let check = if is_active { "\u{2713} " } else { "    " };
                                                 let display = format!("{check}{name}");
                                                 let name_clone = name.clone();
-                                                let mut open_menu_cl = open_menu_ws.clone();
+                                                let mut open_menu_cl = open_menu_ws;
                                                 rsx! {
                                                     div {
                                                         class: "jas-menu-item",
@@ -1764,7 +1751,7 @@ pub fn App() -> Element {
 
                                         // Save As...
                                         {
-                                            let mut open_menu_cl = open_menu_ws.clone();
+                                            let mut open_menu_cl = open_menu_ws;
                                             let prefill = if has_saved_layout { active_name.clone() } else { String::new() };
                                             rsx! {
                                                 div {
@@ -1787,7 +1774,7 @@ pub fn App() -> Element {
                                         // Reset to Default
                                         {
                                             let act = act_ws.clone();
-                                            let mut open_menu_cl = open_menu_ws.clone();
+                                            let mut open_menu_cl = open_menu_ws;
                                             rsx! {
                                                 div {
                                                     class: "jas-menu-item",
@@ -1808,7 +1795,7 @@ pub fn App() -> Element {
                                         // Revert to Saved (enabled only when a named layout is selected)
                                         {
                                             let act = act_ws.clone();
-                                            let mut open_menu_cl = open_menu_ws.clone();
+                                            let mut open_menu_cl = open_menu_ws;
                                             let disabled_style = if has_saved_layout {
                                                 format!("padding:4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; white-space:nowrap; border-radius:3px; margin:0 4px;")
                                             } else {
@@ -1841,13 +1828,13 @@ pub fn App() -> Element {
                 } else {
                     let dispatch = dispatch.clone();
                     let cmd = cmd.to_string();
-                    let mut open_menu_sig2 = open_menu_sig.clone();
+                    let mut open_menu_sig2 = open_menu_sig;
                     // Add checkmark prefix for toggle items
                     let display_label = {
                         let st = app.borrow();
                         let checked = match cmd.as_str() {
-                            "toggle_pane_toolbar" => st.workspace_layout.pane_layout.as_ref().map_or(false, |pl| pl.is_pane_visible(super::workspace::PaneKind::Toolbar)),
-                            "toggle_pane_dock" => st.workspace_layout.pane_layout.as_ref().map_or(false, |pl| pl.is_pane_visible(super::workspace::PaneKind::Dock)),
+                            "toggle_pane_toolbar" => st.workspace_layout.pane_layout.as_ref().is_some_and(|pl| pl.is_pane_visible(super::workspace::PaneKind::Toolbar)),
+                            "toggle_pane_dock" => st.workspace_layout.pane_layout.as_ref().is_some_and(|pl| pl.is_pane_visible(super::workspace::PaneKind::Dock)),
                             "toggle_panel_layers" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Layers),
                             "toggle_panel_color" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Color),
                             "toggle_panel_stroke" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Stroke),
@@ -2071,7 +2058,7 @@ pub fn App() -> Element {
 
             let chevron = if group_collapsed { "\u{25BC}" } else { "\u{25B2}" };
             let body_label = group.active_panel()
-                .map(|k| WorkspaceLayout::panel_label(k))
+                .map(WorkspaceLayout::panel_label)
                 .unwrap_or("");
 
             // Drop indicator logic
@@ -2240,7 +2227,7 @@ pub fn App() -> Element {
     let layout_snapshot = app.borrow().workspace_layout.clone();
     let focused_panel = layout_snapshot.focused_panel();
     let right_dock = layout_snapshot.anchored_dock(DockEdge::Right);
-    let dock_collapsed = right_dock.map_or(true, |d| d.collapsed);
+    let dock_collapsed = right_dock.is_none_or(|d| d.collapsed);
     let dock_id = right_dock.map_or(DockId(0), |d| d.id);
 
     let dock_groups: Vec<Result<VNode, RenderError>> = match right_dock {
@@ -2326,7 +2313,7 @@ pub fn App() -> Element {
     }).collect();
 
     // Dock collapse toggle
-    let dock_toggle_label = if dock_collapsed { "\u{25C0}" } else { "\u{25B6}" };
+    let _dock_toggle_label = if dock_collapsed { "\u{25C0}" } else { "\u{25B6}" };
 
     // Snap indicator: show a highlight on the edge being targeted during drag
     let snap_edge = match drop_target_sig() {
@@ -2341,7 +2328,7 @@ pub fn App() -> Element {
     use super::workspace::{PaneKind, PaneId, EdgeSide, SnapTarget, PaneLayout};
 
     let pane_snapshot = layout_snapshot.pane_layout.clone();
-    let canvas_maximized = pane_snapshot.as_ref().map_or(false, |pl| pl.canvas_maximized);
+    let canvas_maximized = pane_snapshot.as_ref().is_some_and(|pl| pl.canvas_maximized);
 
     let (tx, ty, tw, th, toolbar_z) = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Toolbar))
@@ -2562,7 +2549,6 @@ pub fn App() -> Element {
                                 }
                             }
                         }));
-                        return;
                     }
                 }
             },
@@ -2623,7 +2609,7 @@ pub fn App() -> Element {
                 style: "flex:1; position:relative; overflow:hidden;",
 
             // ===== Toolbar pane (position:absolute) =====
-            if pane_snapshot.as_ref().map_or(false, |pl| pl.is_pane_visible(PaneKind::Toolbar)) {
+            if pane_snapshot.as_ref().is_some_and(|pl| pl.is_pane_visible(PaneKind::Toolbar)) {
             div {
                 style: "position:absolute; left:{tx}px; top:{ty}px; width:{tw}px; height:{th}px; z-index:{toolbar_z}; display:flex; flex-direction:column; overflow:hidden; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-sizing:border-box;",
                 onmousedown: {
@@ -2777,7 +2763,7 @@ pub fn App() -> Element {
             // (canvas pane is always visible, no close button)
 
             // ===== Dock pane (position:absolute) =====
-            if pane_snapshot.as_ref().map_or(false, |pl| pl.is_pane_visible(PaneKind::Dock)) {
+            if pane_snapshot.as_ref().is_some_and(|pl| pl.is_pane_visible(PaneKind::Dock)) {
             div {
                 style: "position:absolute; left:{dx}px; top:{dy}px; width:{dw}px; height:{dh}px; z-index:{dock_z}; display:flex; flex-direction:column; overflow:hidden; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-sizing:border-box;",
                 onmousedown: {

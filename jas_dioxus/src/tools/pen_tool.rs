@@ -164,8 +164,8 @@ impl CanvasTool for PenTool {
         self.mouse_x = x;
         self.mouse_y = y;
 
-        if self.state == State::Dragging {
-            if let Some(pt) = self.points.last_mut() {
+        if self.state == State::Dragging
+            && let Some(pt) = self.points.last_mut() {
                 pt.hx_out = x;
                 pt.hy_out = y;
                 // Mirror the incoming handle
@@ -173,7 +173,6 @@ impl CanvasTool for PenTool {
                 pt.hy_in = 2.0 * pt.y - y;
                 pt.smooth = true;
             }
-        }
     }
 
     fn on_release(&mut self, _model: &mut Model, _x: f64, _y: f64, _shift: bool, _alt: bool) {

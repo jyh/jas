@@ -121,6 +121,7 @@ impl SmoothTool {
     ///   3. Map those flat indices back to original command indices.
     ///   4. Re-fit the affected region with Schneider curve fitting.
     ///   5. Splice the re-fitted curves into the original command list.
+    ///
     /// If the result has fewer commands, update the document.
     fn smooth_at(&self, model: &mut Model, x: f64, y: f64) {
         let doc = model.document().clone();
@@ -212,7 +213,7 @@ impl SmoothTool {
 
             // Commands before the affected range.
             for cmd in &path_elem.d[..first_cmd] {
-                new_cmds.push(cmd.clone());
+                new_cmds.push(*cmd);
             }
 
             // Re-fitted curves.
@@ -229,7 +230,7 @@ impl SmoothTool {
 
             // Commands after the affected range.
             for cmd in &path_elem.d[last_cmd + 1..] {
-                new_cmds.push(cmd.clone());
+                new_cmds.push(*cmd);
             }
 
             // Skip if no actual change in command count or structure.
