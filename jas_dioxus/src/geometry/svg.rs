@@ -398,7 +398,7 @@ fn parse_xml_node(input: &str) -> Option<(XmlNode, &str)> {
     let mut children = Vec::new();
     let mut text = String::new();
     let mut rest = rest;
-    let _close_tag = format!("</{}", tag.split(':').last().unwrap_or(&tag));
+    let _close_tag = format!("</{}", tag.split(':').next_back().unwrap_or(&tag));
     // Also handle namespaced close tags
     loop {
         rest = rest.trim_start();
@@ -455,11 +455,11 @@ fn parse_attributes(mut input: &str) -> Option<(HashMap<String, String>, &str, b
     let mut attrs = HashMap::new();
     loop {
         input = input.trim_start();
-        if input.starts_with("/>") {
-            return Some((attrs, &input[2..], true));
+        if let Some(rest) = input.strip_prefix("/>") {
+            return Some((attrs, rest, true));
         }
-        if input.starts_with('>') {
-            return Some((attrs, &input[1..], false));
+        if let Some(rest) = input.strip_prefix('>') {
+            return Some((attrs, rest, false));
         }
         // Parse attribute name
         let eq_pos = input.find('=')?;
@@ -521,8 +521,7 @@ fn parse_color(s: &str) -> Option<Color> {
         return Some(Color { r: r as f64 / 255.0, g: g as f64 / 255.0, b: b as f64 / 255.0, a: 1.0 });
     }
     // Hex
-    if s.starts_with('#') {
-        let h = &s[1..];
+    if let Some(h) = s.strip_prefix('#') {
         if h.len() == 3 {
             let r = u8::from_str_radix(&h[0..1].repeat(2), 16).ok()? as f64 / 255.0;
             let g = u8::from_str_radix(&h[1..2].repeat(2), 16).ok()? as f64 / 255.0;
@@ -584,7 +583,7 @@ fn parse_transform(node: &XmlNode) -> Option<Transform> {
     let val = node.attrs.get("transform")?;
     if val.starts_with("matrix(") {
         let inner = val.trim_start_matches("matrix(").trim_end_matches(')');
-        let parts: Vec<f64> = inner.split(|c| c == ',' || c == ' ')
+        let parts: Vec<f64> = inner.split([',', ' '])
             .filter(|s| !s.is_empty())
             .filter_map(|s| s.parse().ok())
             .collect();
@@ -597,7 +596,7 @@ fn parse_transform(node: &XmlNode) -> Option<Transform> {
     }
     if val.starts_with("translate(") {
         let inner = val.trim_start_matches("translate(").trim_end_matches(')');
-        let parts: Vec<f64> = inner.split(|c| c == ',' || c == ' ')
+        let parts: Vec<f64> = inner.split([',', ' '])
             .filter(|s| !s.is_empty())
             .filter_map(|s| s.parse().ok())
             .collect();
@@ -613,7 +612,7 @@ fn parse_transform(node: &XmlNode) -> Option<Transform> {
     }
     if val.starts_with("scale(") {
         let inner = val.trim_start_matches("scale(").trim_end_matches(')');
-        let parts: Vec<f64> = inner.split(|c| c == ',' || c == ' ')
+        let parts: Vec<f64> = inner.split([',', ' '])
             .filter(|s| !s.is_empty())
             .filter_map(|s| s.parse().ok())
             .collect();
@@ -642,13 +641,12 @@ fn parse_common(node: &XmlNode) -> CommonProps {
 
 fn parse_points(s: &str) -> Vec<(f64, f64)> {
     let mut result = Vec::new();
-    for pair in s.trim().split_whitespace() {
+    for pair in s.split_whitespace() {
         let parts: Vec<&str> = pair.split(',').collect();
-        if parts.len() == 2 {
-            if let (Ok(x), Ok(y)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
+        if parts.len() == 2
+            && let (Ok(x), Ok(y)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
                 result.push((pt(x), pt(y)));
             }
-        }
     }
     result
 }
@@ -885,12 +883,11 @@ fn tokenize_path(d: &str) -> Vec<PathToken> {
             } else if (c == 'e' || c == 'E') && !num.is_empty() {
                 num.push(c);
                 chars.next();
-                if let Some(&c2) = chars.peek() {
-                    if c2 == '+' || c2 == '-' {
+                if let Some(&c2) = chars.peek()
+                    && (c2 == '+' || c2 == '-') {
                         num.push(c2);
                         chars.next();
                     }
-                }
             } else {
                 break;
             }
@@ -1012,8 +1009,8 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
 
             let content = node.text.clone();
             let mut tw = 0.0;
-            if let Some(style) = node.attrs.get("style") {
-                if let Some(pos) = style.find("inline-size:") {
+            if let Some(style) = node.attrs.get("style")
+                && let Some(pos) = style.find("inline-size:") {
                     let rest = &style[pos + 12..];
                     let num_str: String = rest.trim_start().chars()
                         .take_while(|c| c.is_ascii_digit() || *c == '.')
@@ -1022,7 +1019,6 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                         tw = pt(v);
                     }
                 }
-            }
             let th = if tw > 0.0 {
                 let lines = (content.len() as f64 * fs * super::element::APPROX_CHAR_WIDTH_FACTOR / tw).ceil().max(1.0);
                 lines * fs * 1.2
@@ -1087,7 +1083,7 @@ pub fn svg_to_document(svg: &str) -> Document {
             }
             _ => {
                 // Wrap standalone elements in a default layer
-                if layers.is_empty() || !layers.last().map_or(false, |l| {
+                if layers.is_empty() || !layers.last().is_some_and(|l| {
                     if let Element::Layer(le) = l { le.name.is_empty() } else { false }
                 }) {
                     layers.push(Element::Layer(LayerElem {

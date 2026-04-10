@@ -71,8 +71,8 @@ impl Controller {
                         continue;
                     }
                     if child.is_group() {
-                        if let Some(grandchildren) = child.children() {
-                            if grandchildren
+                        if let Some(grandchildren) = child.children()
+                            && grandchildren
                                 .iter()
                                 .any(|gc| element_intersects_rect(gc, x, y, width, height))
                             {
@@ -81,7 +81,6 @@ impl Controller {
                                     entries.push(ElementSelection::all(vec![li, ci, gi]));
                                 }
                             }
-                        }
                     } else if element_intersects_rect(child, x, y, width, height) {
                         entries.push(ElementSelection::all(vec![li, ci]));
                     }
@@ -122,8 +121,8 @@ impl Controller {
                         continue;
                     }
                     if child.is_group() {
-                        if let Some(grandchildren) = child.children() {
-                            if grandchildren
+                        if let Some(grandchildren) = child.children()
+                            && grandchildren
                                 .iter()
                                 .any(|gc| element_intersects_polygon(gc, polygon))
                             {
@@ -132,7 +131,6 @@ impl Controller {
                                     entries.push(ElementSelection::all(vec![li, ci, gi]));
                                 }
                             }
-                        }
                     } else if element_intersects_polygon(child, polygon) {
                         entries.push(ElementSelection::all(vec![li, ci]));
                     }
@@ -293,8 +291,8 @@ impl Controller {
         // Check if parent is a group (not layer) — select the whole group
         if path.len() >= 2 {
             let parent_path: ElementPath = path[..path.len() - 1].to_vec();
-            if let Some(parent) = doc.get_element(&parent_path) {
-                if parent.is_group() {
+            if let Some(parent) = doc.get_element(&parent_path)
+                && parent.is_group() {
                     let mut entries = vec![ElementSelection::all(parent_path.clone())];
                     if let Some(children) = parent.children() {
                         for i in 0..children.len() {
@@ -308,7 +306,6 @@ impl Controller {
                     model.set_document(new_doc);
                     return;
                 }
-            }
         }
         let mut new_doc = doc;
         new_doc.selection = vec![ElementSelection::all(path.clone())];
@@ -408,11 +405,10 @@ impl Controller {
         // Find selected groups
         let mut group_paths: Vec<ElementPath> = Vec::new();
         for es in &doc.selection {
-            if let Some(elem) = doc.get_element(&es.path) {
-                if elem.is_group() {
+            if let Some(elem) = doc.get_element(&es.path)
+                && elem.is_group() {
                     group_paths.push(es.path.clone());
                 }
-            }
         }
         if group_paths.is_empty() {
             return;
@@ -559,7 +555,7 @@ impl Controller {
     /// Unlock all locked elements.
     pub fn unlock_all(model: &mut Model) {
         let doc = model.document().clone();
-        let new_layers: Vec<Element> = doc.layers.iter().map(|l| unlock_element(l)).collect();
+        let new_layers: Vec<Element> = doc.layers.iter().map(unlock_element).collect();
         let mut new_doc = doc;
         new_doc.layers = new_layers;
         new_doc.selection.clear();
@@ -651,11 +647,10 @@ fn show_all_in(
 
 fn lock_element(elem: &Element) -> Element {
     let mut new = elem.clone();
-    if new.is_group() {
-        if let Some(children) = new.children_mut() {
+    if new.is_group()
+        && let Some(children) = new.children_mut() {
             *children = children.iter().map(|c| Rc::new(lock_element(c))).collect();
         }
-    }
     new.common_mut().locked = true;
     new
 }

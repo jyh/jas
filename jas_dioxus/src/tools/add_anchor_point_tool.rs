@@ -391,12 +391,11 @@ fn update_handles(
         *y1 = drag_y;
     }
     // Incoming handle: mirror (smooth) or leave unchanged (cusp)
-    if !cusp {
-        if let PathCommand::CurveTo { x2, y2, .. } = &mut cmds[first_cmd_idx] {
+    if !cusp
+        && let PathCommand::CurveTo { x2, y2, .. } = &mut cmds[first_cmd_idx] {
             *x2 = 2.0 * anchor_x - drag_x;
             *y2 = 2.0 * anchor_y - drag_y;
         }
-    }
 }
 
 /// Find an existing anchor point on any path near (px, py).
@@ -411,19 +410,17 @@ fn hit_test_anchor(
     for (li, layer) in doc.layers.iter().enumerate() {
         if let Some(children) = layer.children() {
             for (ci, child) in children.iter().enumerate() {
-                if let Element::Path(pe) = &**child {
-                    if let Some(idx) = find_anchor_at(pe, px, py, threshold) {
+                if let Element::Path(pe) = &**child
+                    && let Some(idx) = find_anchor_at(pe, px, py, threshold) {
                         return Some((vec![li, ci], pe.clone(), idx));
                     }
-                }
                 if let Element::Group(g) = &**child {
                     if child.common().locked { continue; }
                     for (gi, gc) in g.children.iter().enumerate() {
-                        if let Element::Path(pe) = &**gc {
-                            if let Some(idx) = find_anchor_at(pe, px, py, threshold) {
+                        if let Element::Path(pe) = &**gc
+                            && let Some(idx) = find_anchor_at(pe, px, py, threshold) {
                                 return Some((vec![li, ci, gi], pe.clone(), idx));
                             }
-                        }
                     }
                 }
             }
@@ -452,7 +449,7 @@ fn find_anchor_at(pe: &PathElem, px: f64, py: f64, threshold: f64) -> Option<usi
 /// Toggle a point between smooth and corner.
 /// A corner point has handles collapsed to the anchor position.
 /// A smooth point has handles extended (we restore them symmetrically).
-fn toggle_smooth_corner(cmds: &mut Vec<PathCommand>, anchor_idx: usize) {
+fn toggle_smooth_corner(cmds: &mut [PathCommand], anchor_idx: usize) {
     let (ax, ay) = match cmds[anchor_idx] {
         PathCommand::MoveTo { x, y } => (x, y),
         PathCommand::LineTo { x, y } => (x, y),
@@ -506,12 +503,11 @@ fn toggle_smooth_corner(cmds: &mut Vec<PathCommand>, anchor_idx: usize) {
                     *y2 = ay - uy * in_len;
                 }
                 // Set outgoing handle
-                if anchor_idx + 1 < cmds.len() {
-                    if let PathCommand::CurveTo { x1, y1, .. } = &mut cmds[anchor_idx + 1] {
+                if anchor_idx + 1 < cmds.len()
+                    && let PathCommand::CurveTo { x1, y1, .. } = &mut cmds[anchor_idx + 1] {
                         *x1 = ax + ux * out_len;
                         *y1 = ay + uy * out_len;
                     }
-                }
             }
         }
     } else {
@@ -520,12 +516,11 @@ fn toggle_smooth_corner(cmds: &mut Vec<PathCommand>, anchor_idx: usize) {
             *x2 = ax;
             *y2 = ay;
         }
-        if anchor_idx + 1 < cmds.len() {
-            if let PathCommand::CurveTo { x1, y1, .. } = &mut cmds[anchor_idx + 1] {
+        if anchor_idx + 1 < cmds.len()
+            && let PathCommand::CurveTo { x1, y1, .. } = &mut cmds[anchor_idx + 1] {
                 *x1 = ax;
                 *y1 = ay;
             }
-        }
     }
 }
 
@@ -575,12 +570,11 @@ fn reposition_anchor(
         *y2 += dy;
     }
     // Move outgoing handle by same delta
-    if first_cmd_idx + 1 < cmds.len() {
-        if let PathCommand::CurveTo { x1, y1, .. } = &mut cmds[first_cmd_idx + 1] {
+    if first_cmd_idx + 1 < cmds.len()
+        && let PathCommand::CurveTo { x1, y1, .. } = &mut cmds[first_cmd_idx + 1] {
             *x1 += dx;
             *y1 += dy;
         }
-    }
 }
 
 impl CanvasTool for AddAnchorPointTool {
@@ -588,31 +582,30 @@ impl CanvasTool for AddAnchorPointTool {
         self.drag = None;
 
         // Alt+click on existing anchor: toggle smooth/corner
-        if alt {
-            if let Some((path, pe, anchor_idx)) = hit_test_anchor(model, x, y) {
+        if alt
+            && let Some((path, pe, anchor_idx)) = hit_test_anchor(model, x, y) {
                 model.snapshot();
                 let mut new_cmds = pe.d.clone();
                 toggle_smooth_corner(&mut new_cmds, anchor_idx);
                 let new_elem = Element::Path(PathElem {
                     d: new_cmds,
-                    fill: pe.fill.clone(),
-                    stroke: pe.stroke.clone(),
+                    fill: pe.fill,
+                    stroke: pe.stroke,
                     common: pe.common.clone(),
                 });
                 let doc = model.document().replace_element(&path, new_elem);
                 model.set_document(doc);
                 return;
             }
-        }
 
-        if let Some((path, pe)) = Self::hit_test_path(model, x, y) {
-            if let Some((seg_idx, t)) = closest_segment_and_t(&pe.d, x, y) {
+        if let Some((path, pe)) = Self::hit_test_path(model, x, y)
+            && let Some((seg_idx, t)) = closest_segment_and_t(&pe.d, x, y) {
                 model.snapshot();
                 let ins = insert_point_in_path(&pe.d, seg_idx, t);
                 let new_elem = Element::Path(PathElem {
                     d: ins.commands.clone(),
-                    fill: pe.fill.clone(),
-                    stroke: pe.stroke.clone(),
+                    fill: pe.fill,
+                    stroke: pe.stroke,
                     common: pe.common.clone(),
                 });
                 let mut doc = model.document().replace_element(&path, new_elem);
@@ -658,7 +651,6 @@ impl CanvasTool for AddAnchorPointTool {
                     });
                 }
             }
-        }
     }
 
     fn on_move(&mut self, model: &mut Model, x: f64, y: f64, _shift: bool, alt: bool, dragging: bool) {
@@ -685,20 +677,19 @@ impl CanvasTool for AddAnchorPointTool {
             let new_ay = drag.anchor_y;
 
             let doc = model.document();
-            if let Some(elem) = doc.get_element(&elem_path) {
-                if let Element::Path(pe) = elem {
+            if let Some(elem) = doc.get_element(&elem_path)
+                && let Element::Path(pe) = elem {
                     let mut new_cmds = pe.d.clone();
                     reposition_anchor(&mut new_cmds, idx, new_ax, new_ay, dx, dy);
                     let new_elem = Element::Path(PathElem {
                         d: new_cmds,
-                        fill: pe.fill.clone(),
-                        stroke: pe.stroke.clone(),
+                        fill: pe.fill,
+                        stroke: pe.stroke,
                         common: pe.common.clone(),
                     });
                     let new_doc = doc.replace_element(&elem_path, new_elem);
                     model.set_document(new_doc);
                 }
-            }
         } else {
             // Normal drag: update handles
             drag.last_x = x;
@@ -710,20 +701,19 @@ impl CanvasTool for AddAnchorPointTool {
             let ay = drag.anchor_y;
 
             let doc = model.document();
-            if let Some(elem) = doc.get_element(&elem_path) {
-                if let Element::Path(pe) = elem {
+            if let Some(elem) = doc.get_element(&elem_path)
+                && let Element::Path(pe) = elem {
                     let mut new_cmds = pe.d.clone();
                     update_handles(&mut new_cmds, idx, ax, ay, x, y, alt);
                     let new_elem = Element::Path(PathElem {
                         d: new_cmds,
-                        fill: pe.fill.clone(),
-                        stroke: pe.stroke.clone(),
+                        fill: pe.fill,
+                        stroke: pe.stroke,
                         common: pe.common.clone(),
                     });
                     let new_doc = doc.replace_element(&elem_path, new_elem);
                     model.set_document(new_doc);
                 }
-            }
         }
     }
 

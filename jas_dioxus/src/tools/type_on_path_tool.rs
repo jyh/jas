@@ -226,8 +226,8 @@ impl TypeOnPathTool {
     fn find_offset_handle(model: &Model, x: f64, y: f64) -> Option<(Vec<usize>, f64)> {
         let doc = model.document();
         for es in &doc.selection {
-            if let Some(Element::TextPath(e)) = doc.get_element(&es.path) {
-                if !e.d.is_empty() {
+            if let Some(Element::TextPath(e)) = doc.get_element(&es.path)
+                && !e.d.is_empty() {
                     let (hx, hy) = path_point_at_offset(&e.d, e.start_offset);
                     if (x - hx).abs() <= OFFSET_HANDLE_RADIUS + 2.0
                         && (y - hy).abs() <= OFFSET_HANDLE_RADIUS + 2.0
@@ -235,7 +235,6 @@ impl TypeOnPathTool {
                         return Some((es.path.clone(), e.start_offset));
                     }
                 }
-            }
         }
         None
     }
@@ -364,23 +363,21 @@ impl CanvasTool for TypeOnPathTool {
         dragging: bool,
     ) {
 
-        if let Some(session) = &mut self.session {
-            if session.drag_active && dragging {
+        if let Some(session) = &mut self.session
+            && session.drag_active && dragging {
                 let cursor = self.cursor_at(model, x, y);
                 let s = self.session.as_mut().unwrap();
                 s.set_insertion(cursor, true);
                 s.blink_epoch_ms = now_ms();
                 return;
             }
-        }
 
         match &mut self.state {
             State::OffsetDrag { path, preview } => {
-                if let Some(Element::TextPath(e)) = model.document().get_element(path) {
-                    if !e.d.is_empty() {
+                if let Some(Element::TextPath(e)) = model.document().get_element(path)
+                    && !e.d.is_empty() {
                         *preview = Some(path_closest_offset(&e.d, x, y));
                     }
-                }
             }
             State::DragCreate {
                 start_x,
@@ -609,8 +606,8 @@ impl CanvasTool for TypeOnPathTool {
 
     fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
         // Drag-create preview curve.
-        if self.session.is_none() {
-            if let State::DragCreate {
+        if self.session.is_none()
+            && let State::DragCreate {
                 start_x,
                 start_y,
                 cur_x,
@@ -631,7 +628,6 @@ impl CanvasTool for TypeOnPathTool {
                 ctx.stroke();
                 ctx.set_line_dash(&js_sys::Array::new().into()).ok();
             }
-        }
 
         // Offset handles for selected TextPaths (unchanged from old behavior).
         let doc = model.document();
@@ -680,8 +676,8 @@ impl CanvasTool for TypeOnPathTool {
         }
 
         // Caret.
-        if cursor_visible(session.blink_epoch_ms) {
-            if let Some((cx, cy, angle)) = lay.cursor_pos(session.insertion) {
+        if cursor_visible(session.blink_epoch_ms)
+            && let Some((cx, cy, angle)) = lay.cursor_pos(session.insertion) {
                 ctx.save();
                 ctx.translate(cx, cy).ok();
                 ctx.rotate(angle).ok();
@@ -693,7 +689,6 @@ impl CanvasTool for TypeOnPathTool {
                 ctx.stroke();
                 ctx.restore();
             }
-        }
     }
 }
 

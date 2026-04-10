@@ -272,6 +272,7 @@ pub enum Element {
 /// an element's own visibility with the capping visibility inherited
 /// from its parent Group or Layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Default)]
 pub enum Visibility {
     /// Not rendered; cannot be selected or hit-tested.
     Invisible,
@@ -280,14 +281,10 @@ pub enum Visibility {
     /// exception: Text in outline mode still renders as Preview.
     Outline,
     /// Element is fully drawn with its fill, stroke, and effects.
+    #[default]
     Preview,
 }
 
-impl Default for Visibility {
-    fn default() -> Self {
-        Visibility::Preview
-    }
-}
 
 /// Common properties shared by all visible elements.
 #[derive(Debug, Clone, PartialEq)]
@@ -929,11 +926,10 @@ pub fn move_control_points(
     dx: f64,
     dy: f64,
 ) -> Element {
-    if let SelectionKind::Partial(s) = kind {
-        if s.is_empty() {
+    if let SelectionKind::Partial(s) = kind
+        && s.is_empty() {
             return elem.clone();
         }
-    }
     match elem {
         Element::Line(e) => {
             let mut new = e.clone();
@@ -982,12 +978,10 @@ pub fn move_control_points(
                 new.cy += dy;
                 Element::Circle(new)
             } else {
-                let mut cps = vec![
-                    (e.cx, e.cy - e.r),
+                let mut cps = [(e.cx, e.cy - e.r),
                     (e.cx + e.r, e.cy),
                     (e.cx, e.cy + e.r),
-                    (e.cx - e.r, e.cy),
-                ];
+                    (e.cx - e.r, e.cy)];
                 for i in 0..4 {
                     if kind.contains(i) {
                         cps[i].0 += dx;
@@ -1011,12 +1005,10 @@ pub fn move_control_points(
                 new.cy += dy;
                 Element::Ellipse(new)
             } else {
-                let mut cps = vec![
-                    (e.cx, e.cy - e.ry),
+                let mut cps = [(e.cx, e.cy - e.ry),
                     (e.cx + e.rx, e.cy),
                     (e.cx, e.cy + e.ry),
-                    (e.cx - e.rx, e.cy),
-                ];
+                    (e.cx - e.rx, e.cy)];
                 for i in 0..4 {
                     if kind.contains(i) {
                         cps[i].0 += dx;
@@ -1169,16 +1161,15 @@ pub fn move_path_handle(
             let new_hy = y2 + dy;
             new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: new_hx, y2: new_hy, x, y };
             // Rotate opposite (out) handle
-            if ci + 1 < d.len() {
-                if let PathCommand::CurveTo { x1: nx1, y1: ny1, x2: nx2, y2: ny2, x: nx, y: ny } = d[ci + 1] {
+            if ci + 1 < d.len()
+                && let PathCommand::CurveTo { x1: nx1, y1: ny1, x2: nx2, y2: ny2, x: nx, y: ny } = d[ci + 1] {
                     let (rx, ry) = reflect_handle_keep_distance(ax, ay, new_hx, new_hy, nx1, ny1);
                     new_cmds[ci + 1] = PathCommand::CurveTo { x1: rx, y1: ry, x2: nx2, y2: ny2, x: nx, y: ny };
                 }
-            }
         }
-    } else if handle_type == "out" {
-        if ci + 1 < d.len() {
-            if let PathCommand::CurveTo { x1: nx1, y1: ny1, x2: nx2, y2: ny2, x: nx, y: ny } = d[ci + 1] {
+    } else if handle_type == "out"
+        && ci + 1 < d.len()
+            && let PathCommand::CurveTo { x1: nx1, y1: ny1, x2: nx2, y2: ny2, x: nx, y: ny } = d[ci + 1] {
                 let new_hx = nx1 + dx;
                 let new_hy = ny1 + dy;
                 new_cmds[ci + 1] = PathCommand::CurveTo { x1: new_hx, y1: new_hy, x2: nx2, y2: ny2, x: nx, y: ny };
@@ -1188,8 +1179,6 @@ pub fn move_path_handle(
                     new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: rx, y2: ry, x, y };
                 }
             }
-        }
-    }
 
     PathElem { d: new_cmds, ..elem.clone() }
 }
@@ -1215,13 +1204,11 @@ pub fn move_path_handle_independent(
         if let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[ci] {
             new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: x2 + dx, y2: y2 + dy, x, y };
         }
-    } else if handle_type == "out" {
-        if ci + 1 < d.len() {
-            if let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[ci + 1] {
+    } else if handle_type == "out"
+        && ci + 1 < d.len()
+            && let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[ci + 1] {
                 new_cmds[ci + 1] = PathCommand::CurveTo { x1: x1 + dx, y1: y1 + dy, x2, y2, x, y };
             }
-        }
-    }
 
     PathElem { d: new_cmds, ..elem.clone() }
 }
@@ -1247,13 +1234,11 @@ pub fn set_path_handle_absolute(
         if let PathCommand::CurveTo { x1, y1, x: ex, y: ey, .. } = d[ci] {
             new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: hx, y2: hy, x: ex, y: ey };
         }
-    } else if handle_type == "out" {
-        if ci + 1 < d.len() {
-            if let PathCommand::CurveTo { x2, y2, x, y, .. } = d[ci + 1] {
+    } else if handle_type == "out"
+        && ci + 1 < d.len()
+            && let PathCommand::CurveTo { x2, y2, x, y, .. } = d[ci + 1] {
                 new_cmds[ci + 1] = PathCommand::CurveTo { x1: hx, y1: hy, x2, y2, x, y };
             }
-        }
-    }
 
     PathElem { d: new_cmds, ..elem.clone() }
 }
@@ -1319,12 +1304,7 @@ pub fn convert_corner_to_smooth(
         match new_cmds[ci + 1] {
             PathCommand::LineTo { x, y } => {
                 // Need incoming handle for the next anchor too
-                let next_ci = ci + 1;
-                let (nx2, ny2) = if next_ci + 1 < d.len() {
-                    (x, y)
-                } else {
-                    (x, y)
-                };
+                let (nx2, ny2) = (x, y);
                 new_cmds[ci + 1] = PathCommand::CurveTo { x1: hx, y1: hy, x2: nx2, y2: ny2, x, y };
             }
             PathCommand::CurveTo { x2, y2, x, y, .. } => {
@@ -1364,11 +1344,10 @@ pub fn convert_smooth_to_corner(
     }
 
     // Collapse outgoing handle (x1,y1 of next command) to anchor
-    if ci + 1 < new_cmds.len() {
-        if let PathCommand::CurveTo { x2, y2, x, y, .. } = new_cmds[ci + 1] {
+    if ci + 1 < new_cmds.len()
+        && let PathCommand::CurveTo { x2, y2, x, y, .. } = new_cmds[ci + 1] {
             new_cmds[ci + 1] = PathCommand::CurveTo { x1: ax, y1: ay, x2, y2, x, y };
         }
-    }
 
     PathElem { d: new_cmds, ..elem.clone() }
 }
@@ -1399,8 +1378,8 @@ fn move_path_command_points(
                         y: y + dy,
                     };
                     // Move outgoing handle
-                    if ci + 1 < d.len() {
-                        if let PathCommand::CurveTo {
+                    if ci + 1 < d.len()
+                        && let PathCommand::CurveTo {
                             x1, y1, x2, y2, x, y,
                         } = d[ci + 1]
                         {
@@ -1413,7 +1392,6 @@ fn move_path_command_points(
                                 y,
                             };
                         }
-                    }
                 }
                 PathCommand::CurveTo {
                     x1: _, y1: _, x2, y2, x, y,
@@ -1433,8 +1411,8 @@ fn move_path_command_points(
                         y: y + dy,
                     };
                     // Move outgoing handle
-                    if ci + 1 < d.len() {
-                        if let PathCommand::CurveTo {
+                    if ci + 1 < d.len()
+                        && let PathCommand::CurveTo {
                             x1,
                             y1,
                             x2,
@@ -1452,7 +1430,6 @@ fn move_path_command_points(
                                 y,
                             };
                         }
-                    }
                 }
                 PathCommand::LineTo { x, y } => {
                     new_cmds[ci] = PathCommand::LineTo {
@@ -1460,8 +1437,8 @@ fn move_path_command_points(
                         y: y + dy,
                     };
                     // Move outgoing handle
-                    if ci + 1 < d.len() {
-                        if let PathCommand::CurveTo {
+                    if ci + 1 < d.len()
+                        && let PathCommand::CurveTo {
                             x1, y1, x2, y2, x, y,
                         } = d[ci + 1]
                         {
@@ -1474,7 +1451,6 @@ fn move_path_command_points(
                                 y,
                             };
                         }
-                    }
                 }
                 _ => {}
             }

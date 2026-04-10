@@ -414,8 +414,8 @@ impl PaneLayout {
                         EdgeSide::Bottom => p.y = target_coord - p.height,
                     }
                 }
-            } else if let SnapTarget::Pane(target_pid, target_edge) = snap.target {
-                if target_pid == pane_id {
+            } else if let SnapTarget::Pane(target_pid, target_edge) = snap.target
+                && target_pid == pane_id {
                     let anchor_coord = match self.pane(snap.pane) {
                         Some(other) => Self::pane_edge_coord(other, snap.edge),
                         None => continue,
@@ -429,7 +429,6 @@ impl PaneLayout {
                         }
                     }
                 }
-            }
         }
     }
 
@@ -554,17 +553,15 @@ impl PaneLayout {
             let max_shrink = if a_fixed { 0.0 } else { a_w - a_min_w };
             let clamped = delta.clamp(-max_shrink, max_expand);
 
-            if !a_fixed {
-                if let Some(a) = self.pane_mut(snap.pane) {
+            if !a_fixed
+                && let Some(a) = self.pane_mut(snap.pane) {
                     a.width += clamped;
                 }
-            }
-            if !b_fixed {
-                if let Some(b) = self.pane_mut(other_id) {
+            if !b_fixed
+                && let Some(b) = self.pane_mut(other_id) {
                     b.x = b_x + clamped;
                     b.width -= clamped;
                 }
-            }
             // Propagate: shift panes snapped to B's right edge
             self.propagate_border_shift(other_id, EdgeSide::Right, true);
         } else {
@@ -576,17 +573,15 @@ impl PaneLayout {
             let max_shrink = if a_fixed { 0.0 } else { a_h - a_min_h };
             let clamped = delta.clamp(-max_shrink, max_expand);
 
-            if !a_fixed {
-                if let Some(a) = self.pane_mut(snap.pane) {
+            if !a_fixed
+                && let Some(a) = self.pane_mut(snap.pane) {
                     a.height += clamped;
                 }
-            }
-            if !b_fixed {
-                if let Some(b) = self.pane_mut(other_id) {
+            if !b_fixed
+                && let Some(b) = self.pane_mut(other_id) {
                     b.y = b_y + clamped;
                     b.height -= clamped;
                 }
-            }
             // Propagate: shift panes snapped to B's bottom edge
             self.propagate_border_shift(other_id, EdgeSide::Bottom, false);
         }
@@ -604,11 +599,10 @@ impl PaneLayout {
     ) {
         // Find snaps where source_pane's source_edge connects to another pane
         let chained: Vec<(PaneId, EdgeSide)> = self.snaps.iter().filter_map(|s| {
-            if s.pane == source_pane && s.edge == source_edge {
-                if let SnapTarget::Pane(pid, pe) = s.target {
+            if s.pane == source_pane && s.edge == source_edge
+                && let SnapTarget::Pane(pid, pe) = s.target {
                     return Some((pid, pe));
                 }
-            }
             None
         }).collect();
 
@@ -676,9 +670,8 @@ impl PaneLayout {
         let mut fixed_total = 0.0;
         let mut flex_count = 0;
         let tile_widths: Vec<TileWidth> = visible.iter().map(|&(id, _, _)| {
-            if let Some((oid, cw)) = collapsed_override {
-                if oid == id { return TileWidth::Fixed(cw); }
-            }
+            if let Some((oid, cw)) = collapsed_override
+                && oid == id { return TileWidth::Fixed(cw); }
             match self.pane(id) {
                 Some(p) if p.config.fixed_width => TileWidth::Fixed(p.width),
                 Some(p) if p.config.collapsed_width.is_some() => TileWidth::KeepCurrent(p.width),
@@ -746,13 +739,11 @@ impl PaneLayout {
 
     /// Hide a pane (close it). If the pane is maximized, unmaximize first.
     pub fn hide_pane(&mut self, kind: PaneKind) {
-        if self.canvas_maximized {
-            if let Some(p) = self.pane_by_kind(kind) {
-                if p.config.double_click_action == DoubleClickAction::Maximize {
+        if self.canvas_maximized
+            && let Some(p) = self.pane_by_kind(kind)
+                && p.config.double_click_action == DoubleClickAction::Maximize {
                     self.canvas_maximized = false;
                 }
-            }
-        }
         if !self.hidden_panes.contains(&kind) {
             self.hidden_panes.push(kind);
         }
@@ -877,8 +868,8 @@ impl PaneLayout {
                 }
 
                 // Horizontal: a.Bottom near b.Top
-                if (Self::pane_edge_coord(a, EdgeSide::Bottom) - Self::pane_edge_coord(b, EdgeSide::Top)).abs() <= tolerance {
-                    if a.x < b.x + b.width && a.x + a.width > b.x {
+                if (Self::pane_edge_coord(a, EdgeSide::Bottom) - Self::pane_edge_coord(b, EdgeSide::Top)).abs() <= tolerance
+                    && a.x < b.x + b.width && a.x + a.width > b.x {
                         let exists = self.snaps.iter().any(|s|
                             s.pane == a.id && s.edge == EdgeSide::Bottom
                             && s.target == SnapTarget::Pane(b.id, EdgeSide::Top)
@@ -891,7 +882,6 @@ impl PaneLayout {
                             });
                         }
                     }
-                }
             }
         }
     }

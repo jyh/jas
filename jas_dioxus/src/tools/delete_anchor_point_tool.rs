@@ -47,19 +47,17 @@ fn hit_test_anchor(
     for (li, layer) in doc.layers.iter().enumerate() {
         if let Some(children) = layer.children() {
             for (ci, child) in children.iter().enumerate() {
-                if let Element::Path(pe) = &**child {
-                    if let Some(idx) = find_anchor_at(pe, px, py, threshold) {
+                if let Element::Path(pe) = &**child
+                    && let Some(idx) = find_anchor_at(pe, px, py, threshold) {
                         return Some((vec![li, ci], pe.clone(), idx));
                     }
-                }
                 if let Element::Group(g) = &**child {
                     if child.common().locked { continue; }
                     for (gi, gc) in g.children.iter().enumerate() {
-                        if let Element::Path(pe) = &**gc {
-                            if let Some(idx) = find_anchor_at(pe, px, py, threshold) {
+                        if let Element::Path(pe) = &**gc
+                            && let Some(idx) = find_anchor_at(pe, px, py, threshold) {
                                 return Some((vec![li, ci, gi], pe.clone(), idx));
                             }
-                        }
                     }
                 }
             }
@@ -200,8 +198,8 @@ impl CanvasTool for DeleteAnchorPointTool {
                 Some(new_cmds) => {
                     let new_elem = Element::Path(PathElem {
                         d: new_cmds,
-                        fill: pe.fill.clone(),
-                        stroke: pe.stroke.clone(),
+                        fill: pe.fill,
+                        stroke: pe.stroke,
                         common: pe.common.clone(),
                     });
                     let mut doc = model.document().replace_element(&path, new_elem.clone());

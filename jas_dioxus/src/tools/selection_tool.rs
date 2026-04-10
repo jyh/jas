@@ -37,7 +37,7 @@ impl SelectionTool {
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
                 let cps = control_points(elem);
-                for (_, (px, py)) in cps.iter().enumerate() {
+                for (px, py) in cps.iter() {
                     let dx = x - px;
                     let dy = y - py;
                     if (dx * dx + dy * dy).sqrt() < HIT_RADIUS {

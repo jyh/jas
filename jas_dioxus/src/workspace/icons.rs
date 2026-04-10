@@ -10,14 +10,11 @@ pub fn toolbar_svg_icon(kind: ToolKind) -> String {
     let c = IC;
     match kind {
         // Black arrow with white border
-        ToolKind::Selection => format!(
-            r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="black" stroke="white" stroke-width="1"/>"#),
+        ToolKind::Selection => r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="black" stroke="white" stroke-width="1"/>"#.to_string(),
         // White arrow with black border
-        ToolKind::DirectSelection => format!(
-            r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="white" stroke="black" stroke-width="1"/>"#),
+        ToolKind::DirectSelection => r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="white" stroke="black" stroke-width="1"/>"#.to_string(),
         // White arrow with black border + plus badge
-        ToolKind::GroupSelection => format!(
-            r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="white" stroke="black" stroke-width="1"/><line x1="20" y1="20" x2="27" y2="20" stroke="black" stroke-width="1.5"/><line x1="23.5" y1="16.5" x2="23.5" y2="23.5" stroke="black" stroke-width="1.5"/>"#),
+        ToolKind::GroupSelection => r#"<path d="M5,2 L5,24 L10,18 L15,26 L18,24 L13,16 L20,16 Z" fill="white" stroke="black" stroke-width="1"/><line x1="20" y1="20" x2="27" y2="20" stroke="black" stroke-width="1.5"/><line x1="23.5" y1="16.5" x2="23.5" y2="23.5" stroke="black" stroke-width="1.5"/>"#.to_string(),
         // Pen nib (from SVG, scaled from 256x256 viewBox to 28x28)
         ToolKind::Pen => {
             let _c = c;

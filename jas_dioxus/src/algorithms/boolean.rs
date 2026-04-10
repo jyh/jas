@@ -689,7 +689,7 @@ fn find_intersection(
     // Allow a small slack at the endpoints so vertex-incident
     // intersections aren't missed by FP noise.
     const EPS: f64 = 1e-9;
-    if s < -EPS || s > 1.0 + EPS || t < -EPS || t > 1.0 + EPS {
+    if !(-EPS..=1.0 + EPS).contains(&s) || !(-EPS..=1.0 + EPS).contains(&t) {
         return Intersection::None;
     }
     let s = s.clamp(0.0, 1.0);
@@ -1029,6 +1029,7 @@ fn project_onto_segment(a: (f64, f64), b: (f64, f64), p: (f64, f64)) -> (f64, f6
 /// - the new "right of the left half" and "left of the right half"
 ///   events are pushed onto `queue` so they will be processed in
 ///   priority order.
+///
 /// Split an edge at point `p`. Returns `(l_idx, nr_idx)` where:
 ///   - `l_idx` is the new *right* event of the left half (at `p`).
 ///   - `nr_idx` is the new *left* event of the right half (at `p`).
