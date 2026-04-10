@@ -4,6 +4,7 @@ bazel*
 [xyz]
 
 # Local editor / agent scratch
+examples
 transcript/
 .claude/settings.local.json
 .claude/projects/

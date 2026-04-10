@@ -1,3 +1,7 @@
 The four projects here in jas (python), jas_ocaml (OCaml), jas_dioxus (Rust), and JasSwift (Swift), are intended to be identical. Generally, develop new features in the Rust app first, then push the feature to the other apps, in the sequence Swift, then OCaml, then python.
 
 When I say, "review the codebase", I mean the following: Review the entire codebase and evaluate it for clarity, maintainability, efficiency, complexity, safety, test coverage, pattern consistency, conformity with style conventions, functional equivalence across languages, and anything else of importance. Make suggestions for improvements, ranking them in priority from high to low, and giving each a number. Be ready for a deep dive into any of the suggestions.
+
+Write tests before writing code.
+
+Always ask before commiting.
