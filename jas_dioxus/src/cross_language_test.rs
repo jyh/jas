@@ -240,9 +240,28 @@ mod tests {
                     op["dy"].as_f64().unwrap(),
                 );
             }
+            "copy_selection" => {
+                Controller::copy_selection(
+                    model,
+                    op["dx"].as_f64().unwrap(),
+                    op["dy"].as_f64().unwrap(),
+                );
+            }
             "delete_selection" => {
                 let new_doc = model.document().delete_selection();
                 model.set_document(new_doc);
+            }
+            "lock_selection" => {
+                Controller::lock_selection(model);
+            }
+            "unlock_all" => {
+                Controller::unlock_all(model);
+            }
+            "hide_selection" => {
+                Controller::hide_selection(model);
+            }
+            "show_all" => {
+                Controller::show_all(model);
             }
             "snapshot" => {
                 model.snapshot();
@@ -290,7 +309,8 @@ mod tests {
     #[test]
     #[ignore]
     fn generate_operation_expected() {
-        for fixture in &["operations/select_and_move.json", "operations/undo_redo_laws.json"] {
+        for fixture in &["operations/select_and_move.json", "operations/undo_redo_laws.json",
+                         "operations/controller_ops.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -323,5 +343,10 @@ mod tests {
     #[test]
     fn operation_undo_redo_laws() {
         run_operation_fixture("operations/undo_redo_laws.json");
+    }
+
+    #[test]
+    fn operation_controller_ops() {
+        run_operation_fixture("operations/controller_ops.json");
     }
 }

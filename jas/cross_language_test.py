@@ -159,8 +159,8 @@ class CrossLanguageTest(absltest.TestCase):
     # Operation equivalence tests
     # ---------------------------------------------------------------
 
-    def test_operation_select_and_move(self):
-        json_str = _read_fixture("operations/select_and_move.json")
+    def _run_operation_fixture(self, fixture):
+        json_str = _read_fixture(f"operations/{fixture}")
         tests = json.loads(json_str)
 
         for tc in tests:
@@ -180,8 +180,18 @@ class CrossLanguageTest(absltest.TestCase):
                         extend=op.get("extend", False))
                 elif op_name == "move_selection":
                     ctrl.move_selection(op["dx"], op["dy"])
+                elif op_name == "copy_selection":
+                    ctrl.copy_selection(op["dx"], op["dy"])
                 elif op_name == "delete_selection":
                     model.document = model.document.delete_selection()
+                elif op_name == "lock_selection":
+                    ctrl.lock_selection()
+                elif op_name == "unlock_all":
+                    ctrl.unlock_all()
+                elif op_name == "hide_selection":
+                    ctrl.hide_selection()
+                elif op_name == "show_all":
+                    ctrl.show_all()
                 elif op_name == "snapshot":
                     model.snapshot()
                 elif op_name == "undo":
@@ -192,45 +202,17 @@ class CrossLanguageTest(absltest.TestCase):
                     self.fail(f"Unknown op: {op_name}")
 
             actual = document_to_test_json(model.document)
-            self.assertEqual(
-                actual, expected,
-                f"Operation test '{name}' failed",
-            )
-
-
-    def test_operation_undo_redo_laws(self):
-        json_str = _read_fixture("operations/undo_redo_laws.json")
-        tests = json.loads(json_str)
-
-        for tc in tests:
-            name = tc["name"]
-            svg = _read_fixture(f"svg/{tc['setup_svg']}")
-            expected = _read_fixture(f"operations/{tc['expected_json']}")
-
-            doc = svg_to_document(svg)
-            model = Model(document=doc)
-            ctrl = Controller(model=model)
-
-            for op in tc["ops"]:
-                op_name = op["op"]
-                if op_name == "select_rect":
-                    ctrl.select_rect(
-                        op["x"], op["y"], op["width"], op["height"],
-                        extend=op.get("extend", False))
-                elif op_name == "move_selection":
-                    ctrl.move_selection(op["dx"], op["dy"])
-                elif op_name == "delete_selection":
-                    model.document = model.document.delete_selection()
-                elif op_name == "snapshot":
-                    model.snapshot()
-                elif op_name == "undo":
-                    model.undo()
-                elif op_name == "redo":
-                    model.redo()
-
-            actual = document_to_test_json(model.document)
             self.assertEqual(actual, expected,
                 f"Operation test '{name}' failed")
+
+    def test_operation_select_and_move(self):
+        self._run_operation_fixture("select_and_move.json")
+
+    def test_operation_undo_redo_laws(self):
+        self._run_operation_fixture("undo_redo_laws.json")
+
+    def test_operation_controller_ops(self):
+        self._run_operation_fixture("controller_ops.json")
 
 
 if __name__ == "__main__":
