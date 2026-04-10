@@ -42,6 +42,40 @@ private func assertSvgParse(_ name: String) {
     #expect(actual == expected, "Cross-language test '\(name)' failed: canonical JSON mismatch")
 }
 
+// MARK: - SVG round-trip idempotence
+
+private func assertSvgRoundtrip(_ name: String) {
+    let svg = readFixture("svg/\(name).svg")
+    let doc1 = svgToDocument(svg)
+    let json1 = documentToTestJson(doc1)
+
+    let svg2 = documentToSvg(doc1)
+    let doc2 = svgToDocument(svg2)
+    let json2 = documentToTestJson(doc2)
+
+    if json1 != json2 {
+        print("=== FIRST PARSE (\(name)) ===")
+        print(json1)
+        print("=== AFTER ROUND-TRIP (\(name)) ===")
+        print(json2)
+    }
+    #expect(json1 == json2, "SVG round-trip '\(name)' failed")
+}
+
+@Test func svgRoundtripAllFixtures() {
+    let names = [
+        "line_basic", "rect_basic", "rect_with_stroke",
+        "circle_basic", "ellipse_basic",
+        "polyline_basic", "polygon_basic", "path_all_commands",
+        "text_basic", "text_path_basic",
+        "group_nested", "transform_translate", "transform_rotate",
+        "multi_layer", "complex_document",
+    ]
+    for name in names { assertSvgRoundtrip(name) }
+}
+
+// MARK: - SVG parse equivalence
+
 @Test func svgParseLineBasic() { assertSvgParse("line_basic") }
 @Test func svgParseRectBasic() { assertSvgParse("rect_basic") }
 @Test func svgParseRectWithStroke() { assertSvgParse("rect_with_stroke") }
@@ -172,6 +206,56 @@ private func applyOp(_ model: Model, _ controller: Controller, _ op: [String: An
             print("=== ACTUAL (\(name)) ===")
             print(actual)
         }
+        #expect(actual == expected, "Operation test '\(name)' failed")
+    }
+}
+
+@Test func operationUndoRedoLaws() throws {
+    let json = readFixture("operations/undo_redo_laws.json")
+    let data = json.data(using: .utf8)!
+    let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    for tc in tests {
+        let name = tc["name"] as! String
+        let setupSvg = tc["setup_svg"] as! String
+        let expectedFile = tc["expected_json"] as! String
+        let ops = tc["ops"] as! [[String: Any]]
+
+        let svg = readFixture("svg/\(setupSvg)")
+        let expected = readFixture("operations/\(expectedFile)").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let doc = svgToDocument(svg)
+        let model = Model(document: doc)
+        let controller = Controller(model: model)
+
+        for op in ops {
+            let opName = op["op"] as! String
+            switch opName {
+            case "select_rect":
+                controller.selectRect(
+                    x: op["x"] as! Double,
+                    y: op["y"] as! Double,
+                    width: op["width"] as! Double,
+                    height: op["height"] as! Double,
+                    extend: op["extend"] as? Bool ?? false)
+            case "move_selection":
+                controller.moveSelection(
+                    dx: op["dx"] as! Double,
+                    dy: op["dy"] as! Double)
+            case "delete_selection":
+                model.document = model.document.deleteSelection()
+            case "snapshot":
+                model.snapshot()
+            case "undo":
+                model.undo()
+            case "redo":
+                model.redo()
+            default:
+                Issue.record("Unknown op: \(opName)")
+            }
+        }
+
+        let actual = documentToTestJson(model.document)
         #expect(actual == expected, "Operation test '\(name)' failed")
     }
 }

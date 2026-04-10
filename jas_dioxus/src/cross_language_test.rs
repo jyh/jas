@@ -10,7 +10,7 @@ mod tests {
     use crate::algorithms::hit_test;
     use crate::document::controller::Controller;
     use crate::document::model::Model;
-    use crate::geometry::svg::svg_to_document;
+    use crate::geometry::svg::{document_to_svg, svg_to_document};
     use crate::geometry::test_json::document_to_test_json;
 
     /// Path to the shared test fixtures directory, relative to the Rust
@@ -47,6 +47,44 @@ mod tests {
                 "Cross-language test '{}' failed: canonical JSON mismatch",
                 name
             );
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // SVG round-trip idempotence: parse → serialize → parse
+    // should produce the same canonical JSON.
+    // ---------------------------------------------------------------
+
+    fn assert_svg_roundtrip(name: &str) {
+        let svg = read_fixture(&format!("svg/{}.svg", name));
+        let doc1 = svg_to_document(&svg);
+        let json1 = document_to_test_json(&doc1);
+
+        let svg2 = document_to_svg(&doc1);
+        let doc2 = svg_to_document(&svg2);
+        let json2 = document_to_test_json(&doc2);
+
+        if json1 != json2 {
+            eprintln!("=== FIRST PARSE ({}) ===", name);
+            eprintln!("{}", json1);
+            eprintln!("=== AFTER ROUND-TRIP ({}) ===", name);
+            eprintln!("{}", json2);
+            panic!("SVG round-trip '{}' failed: canonical JSON changed after serialize→parse", name);
+        }
+    }
+
+    #[test]
+    fn svg_roundtrip_all_fixtures() {
+        let names = [
+            "line_basic", "rect_basic", "rect_with_stroke",
+            "circle_basic", "ellipse_basic",
+            "polyline_basic", "polygon_basic", "path_all_commands",
+            "text_basic", "text_path_basic",
+            "group_nested", "transform_translate", "transform_rotate",
+            "multi_layer", "complex_document",
+        ];
+        for name in &names {
+            assert_svg_roundtrip(name);
         }
     }
 
@@ -236,28 +274,38 @@ mod tests {
     #[test]
     #[ignore]
     fn generate_operation_expected() {
-        let json_str = read_fixture("operations/select_and_move.json");
-        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        for fixture in &["operations/select_and_move.json", "operations/undo_redo_laws.json"] {
+            let json_str = read_fixture(fixture);
+            let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
+            for tc in tests.as_array().unwrap() {
+                let name = tc["name"].as_str().unwrap();
+                let expected_file = tc["expected_json"].as_str().unwrap();
+                let actual = run_operation_test(tc);
+                let path = format!("{}/operations/{}", FIXTURES, expected_file);
+                std::fs::write(&path, &actual)
+                    .unwrap_or_else(|e| panic!("Failed to write {}: {}", path, e));
+                eprintln!("Generated: {} -> {}", name, expected_file);
+            }
+        }
+    }
+
+    fn run_operation_fixture(fixture: &str) {
+        let json_str = read_fixture(fixture);
+        let tests: serde_json::Value = serde_json::from_str(&json_str)
+            .unwrap_or_else(|e| panic!("Failed to parse {}: {}", fixture, e));
         for tc in tests.as_array().unwrap() {
-            let name = tc["name"].as_str().unwrap();
-            let expected_file = tc["expected_json"].as_str().unwrap();
-            let actual = run_operation_test(tc);
-            let path = format!("{}/operations/{}", FIXTURES, expected_file);
-            std::fs::write(&path, &actual)
-                .unwrap_or_else(|e| panic!("Failed to write {}: {}", path, e));
-            eprintln!("Generated: {} -> {}", name, expected_file);
+            assert_operation_test(tc);
         }
     }
 
     #[test]
     fn operation_select_and_move() {
-        let json_str = read_fixture("operations/select_and_move.json");
-        let tests: serde_json::Value = serde_json::from_str(&json_str)
-            .expect("Failed to parse select_and_move.json");
+        run_operation_fixture("operations/select_and_move.json");
+    }
 
-        for tc in tests.as_array().unwrap() {
-            assert_operation_test(tc);
-        }
+    #[test]
+    fn operation_undo_redo_laws() {
+        run_operation_fixture("operations/undo_redo_laws.json");
     }
 }

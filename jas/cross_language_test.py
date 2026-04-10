@@ -15,7 +15,7 @@ from algorithms.hit_test import (
 )
 from document.controller import Controller
 from document.model import Model
-from geometry.svg import svg_to_document
+from geometry.svg import document_to_svg, svg_to_document
 from geometry.test_json import document_to_test_json
 
 # Path to the shared test fixtures directory.
@@ -42,6 +42,35 @@ def _assert_svg_parse(test: absltest.TestCase, name: str):
 
 
 class CrossLanguageTest(absltest.TestCase):
+    # ---------------------------------------------------------------
+    # SVG round-trip idempotence
+    # ---------------------------------------------------------------
+
+    def test_svg_roundtrip_all_fixtures(self):
+        # Text fixtures are excluded because document_to_svg calls
+        # doc.bounds() which uses QFontMetrics, requiring a running
+        # QApplication.  The other three languages cover text round-trip.
+        names = [
+            "line_basic", "rect_basic", "rect_with_stroke",
+            "circle_basic", "ellipse_basic",
+            "polyline_basic", "polygon_basic", "path_all_commands",
+            "group_nested", "transform_translate", "transform_rotate",
+            "multi_layer",
+        ]
+        for name in names:
+            svg = _read_fixture(f"svg/{name}.svg")
+            doc1 = svg_to_document(svg)
+            json1 = document_to_test_json(doc1)
+            svg2 = document_to_svg(doc1)
+            doc2 = svg_to_document(svg2)
+            json2 = document_to_test_json(doc2)
+            self.assertEqual(json1, json2,
+                f"SVG round-trip '{name}' failed: canonical JSON changed")
+
+    # ---------------------------------------------------------------
+    # SVG parse equivalence
+    # ---------------------------------------------------------------
+
     def test_svg_parse_line_basic(self):
         _assert_svg_parse(self, "line_basic")
 
@@ -150,6 +179,41 @@ class CrossLanguageTest(absltest.TestCase):
                 actual, expected,
                 f"Operation test '{name}' failed",
             )
+
+
+    def test_operation_undo_redo_laws(self):
+        json_str = _read_fixture("operations/undo_redo_laws.json")
+        tests = json.loads(json_str)
+
+        for tc in tests:
+            name = tc["name"]
+            svg = _read_fixture(f"svg/{tc['setup_svg']}")
+            expected = _read_fixture(f"operations/{tc['expected_json']}")
+
+            doc = svg_to_document(svg)
+            model = Model(document=doc)
+            ctrl = Controller(model=model)
+
+            for op in tc["ops"]:
+                op_name = op["op"]
+                if op_name == "select_rect":
+                    ctrl.select_rect(
+                        op["x"], op["y"], op["width"], op["height"],
+                        extend=op.get("extend", False))
+                elif op_name == "move_selection":
+                    ctrl.move_selection(op["dx"], op["dy"])
+                elif op_name == "delete_selection":
+                    model.document = model.document.delete_selection()
+                elif op_name == "snapshot":
+                    model.snapshot()
+                elif op_name == "undo":
+                    model.undo()
+                elif op_name == "redo":
+                    model.redo()
+
+            actual = document_to_test_json(model.document)
+            self.assertEqual(actual, expected,
+                f"Operation test '{name}' failed")
 
 
 if __name__ == "__main__":
