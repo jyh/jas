@@ -412,6 +412,7 @@ public class Controller {
 
         let newLayers: [Layer] = doc.layers.enumerated().map { (li, layer) in
             let shown = showIn(.layer(layer), [li])
+            // showIn preserves the Element variant: a .layer input always produces a .layer output.
             guard case .layer(let l) = shown else { fatalError("unreachable") }
             return l
         }
