@@ -57,7 +57,9 @@ let shared_borders (pl : Pane.pane_layout) : shared_border list =
         if is_vert || is_horiz then begin
           match Pane.find_pane pl snap.snap_pane, Pane.find_pane pl other_id with
           | Some pa, Some pb ->
-            if not pa.config.fixed_width && not pb.config.fixed_width then begin
+            if not (pa.config.fixed_width && pb.config.fixed_width)
+               && not (is_vert && abs_float (pa.x +. pa.width -. pb.x) > 1.0)
+               && not (is_horiz && abs_float (pa.y +. pa.height -. pb.y) > 1.0) then begin
               if is_vert then begin
                 let bx = pa.x +. pa.width in
                 let by = max pa.y pb.y in

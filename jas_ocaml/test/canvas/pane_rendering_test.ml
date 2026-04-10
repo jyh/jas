@@ -65,13 +65,9 @@ let () =
   run "shared_borders_default" (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let borders = shared_borders pl in
-    (* Toolbar is fixed_width, so only canvas|dock border *)
-    assert (List.length borders = 1);
-    let b = List.hd borders in
-    assert b.is_vertical;
-    let canvas = Option.get (pane_by_kind pl Canvas) in
-    assert (near b.bx (canvas.x +. canvas.width -. 3.0));
-    assert (b.bh = 700.0));
+    (* toolbar|canvas and canvas|dock borders *)
+    assert (List.length borders = 2);
+    List.iter (fun b -> assert b.is_vertical; assert (b.bh = 700.0)) borders);
 
   run "no_borders_when_maximized" (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in

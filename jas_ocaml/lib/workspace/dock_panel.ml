@@ -42,18 +42,14 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
     | Some dock when Array.length dock.groups = 0 -> ()
     | Some dock ->
       (* Set dock width and dark background *)
-      dock_box#misc#set_size_request ~width:(int_of_float dock.width) ();
+      let collapsed_w = match panes layout with
+        | Some pl -> (match Pane.pane_by_kind pl Pane.Dock with
+          | Some p -> (match p.config.collapsed_width with Some w -> int_of_float w | None -> 32)
+          | None -> 32)
+        | None -> 32 in
+      let display_width = if dock.collapsed then collapsed_w else int_of_float dock.width in
+      dock_box#misc#set_size_request ~width:display_width ();
       apply_dark_css dock_box (Printf.sprintf "* { background-color: %s; }" theme_bg);
-
-      (* Collapse/expand toggle *)
-      let toggle_btn = GButton.button ~packing:(dock_box#pack ~expand:false) () in
-      toggle_btn#set_label (if dock.collapsed then "\xE2\x97\x80" else "\xE2\x96\xB6");
-      toggle_btn#misc#set_size_request ~height:20 ();
-      apply_dark_css toggle_btn (Printf.sprintf "* { color: %s; background-color: %s; border-bottom: 1px solid %s; }" theme_text_button theme_bg theme_border);
-      toggle_btn#connect#clicked ~callback:(fun () ->
-        toggle_dock_collapsed layout dock.id;
-        rebuild ()
-      ) |> ignore;
 
       if dock.collapsed then begin
         (* Collapsed: show icon strip *)
@@ -98,7 +94,7 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
             let label = panel_label kind in
             let btn = GButton.button ~label ~packing:(tab_bar#pack ~expand:false) () in
             let tab_bg = if pi = group.active then theme_bg_tab else theme_bg_tab_inactive in
-            apply_dark_css btn (Printf.sprintf "* { color: %s; background-color: %s; font-size: 11px; padding: 3px 8px; }" theme_text tab_bg);
+            apply_dark_css btn (Printf.sprintf "button { color: %s; background: %s; font-size: 11px; padding: 3px 8px; border: none; border-radius: 0; box-shadow: none; min-height: 0; }" theme_text tab_bg);
             btn#connect#clicked ~callback:(fun () ->
               (match !drag_ref with
                | No_drag ->
@@ -115,7 +111,7 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
           (* Collapse chevron *)
           let chevron_label = if group.collapsed then "\xE2\x96\xBC" else "\xE2\x96\xB2" in
           let chevron = GButton.button ~label:chevron_label ~packing:(tab_bar#pack ~from:`END ~expand:false) () in
-          apply_dark_css chevron (Printf.sprintf "* { color: %s; font-size: 9px; }" theme_text_button);
+          apply_dark_css chevron (Printf.sprintf "button { color: %s; background: %s; font-size: 9px; border: none; border-radius: 0; box-shadow: none; min-height: 0; min-width: 0; padding: 0 4px; }" theme_text_button theme_bg_dark);
           chevron#connect#clicked ~callback:(fun () ->
             toggle_group_collapsed layout { dock_id = dock.id; group_idx = gi };
             rebuild ()

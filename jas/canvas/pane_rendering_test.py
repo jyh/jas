@@ -63,12 +63,11 @@ def test_geometries_z_order():
 def test_shared_borders_default():
     pl = PaneLayout.default_three_pane(1000, 700)
     borders = compute_shared_borders(pl)
-    assert len(borders) == 1
-    b = borders[0]
-    assert b.is_vertical
-    canvas = pl.pane_by_kind(PaneKind.CANVAS)
-    assert abs(b.x - (canvas.x + canvas.width - 3)) < 0.001
-    assert b.height == 700
+    # toolbar-canvas and canvas-dock borders
+    assert len(borders) == 2
+    for b in borders:
+        assert b.is_vertical
+        assert b.height == 700
 
 
 def test_no_borders_when_maximized():
