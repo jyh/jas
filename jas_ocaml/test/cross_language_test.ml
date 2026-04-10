@@ -102,6 +102,16 @@ let () =
       let args = tc |> member "args" |> to_list |> List.map to_float in
       let expected = tc |> member "expected" |> to_bool in
       let a = Array.of_list args in
+      let filled = try tc |> member "filled" |> to_bool with _ -> false in
+      let polygon =
+        try
+          tc |> member "polygon" |> to_list
+          |> List.map (fun p ->
+            let pts = to_list p |> List.map to_float in
+            (List.nth pts 0, List.nth pts 1))
+          |> Array.of_list
+        with _ -> [||]
+      in
       let actual = match func with
         | "point_in_rect" ->
           Jas.Hit_test.point_in_rect a.(0) a.(1) a.(2) a.(3) a.(4) a.(5)
@@ -114,6 +124,14 @@ let () =
         | "rects_intersect" ->
           Jas.Hit_test.rects_intersect a.(0) a.(1) a.(2) a.(3)
             a.(4) a.(5) a.(6) a.(7)
+        | "circle_intersects_rect" ->
+          Jas.Hit_test.circle_intersects_rect a.(0) a.(1) a.(2)
+            a.(3) a.(4) a.(5) a.(6) filled
+        | "ellipse_intersects_rect" ->
+          Jas.Hit_test.ellipse_intersects_rect a.(0) a.(1) a.(2) a.(3)
+            a.(4) a.(5) a.(6) a.(7) filled
+        | "point_in_polygon" ->
+          Jas.Hit_test.point_in_polygon a.(0) a.(1) polygon
         | _ -> failwith (Printf.sprintf "Unknown function: %s" func)
       in
       if actual <> expected then begin

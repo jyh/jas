@@ -265,22 +265,39 @@ private func applyOp(_ model: Model, _ controller: Controller, _ op: [String: An
     let data = json.data(using: .utf8)!
     let tests = try JSONDecoder().decode([HitTestCase].self, from: data)
 
-    for tc in tests {
-        let a = tc.args
+    // Use JSONSerialization for richer type handling (polygon arrays).
+    let rawData = json.data(using: .utf8)!
+    let rawTests = try JSONSerialization.jsonObject(with: rawData) as! [[String: Any]]
+
+    for tc in rawTests {
+        let name = tc["name"] as! String
+        let function = tc["function"] as! String
+        let args = tc["args"] as! [Double]
+        let expected = tc["expected"] as! Bool
+        let filled = tc["filled"] as? Bool ?? false
+
         let actual: Bool
-        switch tc.function {
+        switch function {
         case "point_in_rect":
-            actual = pointInRect(a[0], a[1], a[2], a[3], a[4], a[5])
+            actual = pointInRect(args[0], args[1], args[2], args[3], args[4], args[5])
         case "segments_intersect":
-            actual = segmentsIntersect(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
+            actual = segmentsIntersect(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7])
         case "segment_intersects_rect":
-            actual = segmentIntersectsRect(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
+            actual = segmentIntersectsRect(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7])
         case "rects_intersect":
-            actual = rectsIntersect(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
+            actual = rectsIntersect(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7])
+        case "circle_intersects_rect":
+            actual = circleIntersectsRect(args[0], args[1], args[2], args[3], args[4], args[5], args[6], filled: filled)
+        case "ellipse_intersects_rect":
+            actual = ellipseIntersectsRect(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], filled: filled)
+        case "point_in_polygon":
+            let polyRaw = tc["polygon"] as! [[Double]]
+            let poly = polyRaw.map { ($0[0], $0[1]) }
+            actual = pointInPolygon(args[0], args[1], poly)
         default:
-            Issue.record("Unknown function: \(tc.function)")
+            Issue.record("Unknown function: \(function)")
             continue
         }
-        #expect(actual == tc.expected, "Hit test '\(tc.name)' failed: expected \(tc.expected), got \(actual)")
+        #expect(actual == expected, "Hit test '\(name)' failed: expected \(expected), got \(actual)")
     }
 }
