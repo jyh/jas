@@ -202,48 +202,65 @@ public struct JasCommands: Commands {
         CommandGroup(replacing: .windowList) {
             if let ws = workspace {
                 Menu("Workspace \u{25B6}") {
-                    ForEach(ws.appConfig.savedLayouts, id: \.self) { name in
+                    let visibleLayouts = ws.appConfig.savedLayouts.filter { $0 != workspaceLayoutName }
+                    ForEach(visibleLayouts, id: \.self) { name in
                         let isActive = name == ws.appConfig.activeLayout
                         let prefix = isActive ? "\u{2713} " : "    "
                         Button(prefix + name) {
-                            ws.dockLayout.save()
-                            ws.dockLayout = DockLayout.load(name: name)
-                            ws.appConfig.activeLayout = name
-                            ws.appConfig.save()
+                            ws.switchLayout(name)
                         }
                     }
 
                     Divider()
 
-                    Button("Reset \u{201C}\(ws.appConfig.activeLayout)\u{201D}") {
-                        ws.dockLayout.resetToDefault()
-                        ws.dockLayout.saveIfNeeded()
-                    }
-
-                    Button("New Workspace\u{2026}") {
+                    Button("Save As\u{2026}") {
                         let alert = NSAlert()
-                        alert.messageText = "New Workspace"
-                        alert.informativeText = "Enter a name for the new workspace:"
+                        alert.messageText = "Save Workspace As"
+                        alert.informativeText = "Enter a name for the workspace:"
                         let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 250, height: 24))
-                        input.stringValue = ""
+                        let prefill = ws.appConfig.activeLayout != workspaceLayoutName
+                            ? ws.appConfig.activeLayout : ""
+                        input.stringValue = prefill
                         input.placeholderString = "Workspace name"
                         alert.accessoryView = input
-                        alert.addButton(withTitle: "OK")
+                        alert.addButton(withTitle: "Save")
                         alert.addButton(withTitle: "Cancel")
                         alert.window.initialFirstResponder = input
                         let response = alert.runModal()
                         if response == .alertFirstButtonReturn {
                             let name = input.stringValue.trimmingCharacters(in: .whitespaces)
-                            if !name.isEmpty {
-                                ws.dockLayout.save()
-                                ws.dockLayout.name = name
-                                ws.appConfig.registerLayout(name)
-                                ws.appConfig.activeLayout = name
-                                ws.appConfig.save()
-                                ws.dockLayout.save()
+                            guard !name.isEmpty else { return }
+                            // Reject "Workspace" name
+                            if name.caseInsensitiveCompare(workspaceLayoutName) == .orderedSame {
+                                let info = NSAlert()
+                                info.messageText = "\u{201C}Workspace\u{201D} is a system workspace that is saved automatically."
+                                info.addButton(withTitle: "OK")
+                                info.runModal()
+                                return
                             }
+                            // Confirm overwrite
+                            if ws.appConfig.savedLayouts.contains(name) {
+                                let confirm = NSAlert()
+                                confirm.messageText = "Layout \u{201C}\(name)\u{201D} already exists. Overwrite?"
+                                confirm.addButton(withTitle: "Overwrite")
+                                confirm.addButton(withTitle: "Cancel")
+                                let confirmResponse = confirm.runModal()
+                                guard confirmResponse == .alertFirstButtonReturn else { return }
+                            }
+                            ws.saveLayoutAs(name)
                         }
                     }
+
+                    Divider()
+
+                    Button("Reset to Default") {
+                        ws.resetToDefault()
+                    }
+
+                    Button("Revert to Saved") {
+                        ws.revertToSaved()
+                    }
+                    .disabled(ws.appConfig.activeLayout == workspaceLayoutName)
                 }
 
                 Divider()

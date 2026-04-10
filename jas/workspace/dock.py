@@ -27,6 +27,7 @@ DEFAULT_DOCK_WIDTH = 240.0
 DEFAULT_FLOATING_WIDTH = 220.0
 SNAP_DISTANCE = 20.0
 DEFAULT_LAYOUT_NAME = "Default"
+WORKSPACE_LAYOUT_NAME = "Workspace"
 LAYOUT_VERSION = 3
 
 # ---------------------------------------------------------------------------
@@ -142,6 +143,26 @@ class AppConfig:
     def register_layout(self, name: str) -> None:
         if name not in self.saved_layouts:
             self.saved_layouts.append(name)
+
+    def save(self) -> None:
+        import os
+        path = os.path.join(os.path.expanduser("~"), ".config", "jas")
+        os.makedirs(path, exist_ok=True)
+        try:
+            with open(os.path.join(path, "app_config.json"), "w") as f:
+                f.write(self.to_json())
+        except OSError:
+            pass
+
+    @staticmethod
+    def load() -> 'AppConfig':
+        import os
+        path = os.path.join(os.path.expanduser("~"), ".config", "jas", "app_config.json")
+        try:
+            with open(path) as f:
+                return AppConfig.from_json(f.read())
+        except (OSError, json.JSONDecodeError):
+            return AppConfig()
 
 # ---------------------------------------------------------------------------
 # DockLayout
@@ -628,8 +649,9 @@ class DockLayout:
         return d
 
     def save_to_file(self):
+        """Save the workspace layout under the 'Workspace' file."""
         import os
-        path = os.path.join(self._config_dir(), f"{self.name}.json")
+        path = os.path.join(self._config_dir(), f"{WORKSPACE_LAYOUT_NAME}.json")
         try:
             with open(path, "w") as f:
                 json.dump(self.to_dict(), f)
@@ -637,15 +659,66 @@ class DockLayout:
         except OSError:
             pass
 
+    def save_as(self, name: str):
+        """Save the current layout as a named snapshot."""
+        import os
+        saved_name = self.name
+        self.name = name
+        path = os.path.join(self._config_dir(), f"{name}.json")
+        try:
+            with open(path, "w") as f:
+                json.dump(self.to_dict(), f)
+        except OSError:
+            pass
+        self.name = saved_name
+
     @staticmethod
-    def load_from_file(name: str) -> 'DockLayout':
+    def try_load_from_file(name: str) -> 'Optional[DockLayout]':
         import os
         path = os.path.join(DockLayout._config_dir(), f"{name}.json")
         try:
             with open(path) as f:
-                return DockLayout.from_dict(json.load(f))
+                d = json.load(f)
+                if d.get("version", 0) != LAYOUT_VERSION:
+                    return None
+                layout = DockLayout.from_dict(d)
+                if layout.version != LAYOUT_VERSION:
+                    return None
+                return layout
         except (OSError, json.JSONDecodeError):
-            return DockLayout.named(name)
+            return None
+
+    @staticmethod
+    def load_from_file(name: str) -> 'DockLayout':
+        layout = DockLayout.try_load_from_file(name)
+        return layout if layout is not None else DockLayout.named(name)
+
+    @staticmethod
+    def load_or_migrate_workspace(config: 'AppConfig') -> 'DockLayout':
+        """Load the 'Workspace' working copy, migrating from active_layout if needed."""
+        layout = DockLayout.try_load_from_file(WORKSPACE_LAYOUT_NAME)
+        if layout is not None:
+            layout.name = WORKSPACE_LAYOUT_NAME
+            return layout
+        # Migration: copy active_layout into "Workspace"
+        layout = DockLayout.try_load_from_file(config.active_layout)
+        if layout is None:
+            layout = DockLayout.named(WORKSPACE_LAYOUT_NAME)
+        layout.name = WORKSPACE_LAYOUT_NAME
+        # Persist so it exists on next startup
+        import os
+        path = os.path.join(DockLayout._config_dir(), f"{WORKSPACE_LAYOUT_NAME}.json")
+        try:
+            with open(path, "w") as f:
+                json.dump(layout.to_dict(), f)
+        except OSError:
+            pass
+        return layout
+
+    def save_always(self):
+        """Always save — pane mutations may bypass _bump."""
+        self._bump()
+        self.save_to_file()
 
     def save_if_needed(self):
         if self.needs_save():

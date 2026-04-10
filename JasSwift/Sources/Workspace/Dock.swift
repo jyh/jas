@@ -20,6 +20,8 @@ public let defaultDockWidth: Double = 240.0
 public let defaultFloatingWidth: Double = 220.0
 public let snapDistance: Double = 20.0
 public let defaultLayoutName = "Default"
+/// System workspace name — the always-active working copy.
+public let workspaceLayoutName = "Workspace"
 
 /// Current layout format version. Saved layouts with a different version
 /// are rejected and replaced with the default layout.
@@ -268,7 +270,7 @@ public struct DockLayout: Codable {
 
     // MARK: - Generation
 
-    private mutating func bump() { generation += 1 }
+    public mutating func bump() { generation += 1 }
     public func needsSave() -> Bool { generation != savedGeneration }
     public mutating func markSaved() { savedGeneration = generation }
 
@@ -628,6 +630,15 @@ public struct DockLayout: Codable {
         return layout
     }
 
+    public static func tryFromJson(_ json: String) -> DockLayout? {
+        guard let data = json.data(using: .utf8),
+              let layout = try? JSONDecoder().decode(DockLayout.self, from: data),
+              layout.version == layoutVersion else {
+            return nil
+        }
+        return layout
+    }
+
     static let storagePrefix = "jas_layout:"
 
     public func storageKey() -> String {
@@ -638,10 +649,21 @@ public struct DockLayout: Codable {
         "\(storagePrefix)\(name)"
     }
 
+    /// Save the workspace layout under the "Workspace" key.
     public func save() {
         if let json = toJson() {
-            UserDefaults.standard.set(json, forKey: storageKey())
+            UserDefaults.standard.set(json, forKey: DockLayout.storageKeyFor(workspaceLayoutName))
         }
+    }
+
+    /// Save the current layout as a named snapshot.
+    public mutating func saveAs(_ name: String) {
+        let savedName = self.name
+        self.name = name
+        if let json = toJson() {
+            UserDefaults.standard.set(json, forKey: DockLayout.storageKeyFor(name))
+        }
+        self.name = savedName
     }
 
     public static func load(name: String) -> DockLayout {
@@ -649,6 +671,42 @@ public struct DockLayout: Codable {
             return named(name)
         }
         return fromJson(json)
+    }
+
+    public static func tryLoad(name: String) -> DockLayout? {
+        guard let json = UserDefaults.standard.string(forKey: storageKeyFor(name)) else {
+            return nil
+        }
+        return tryFromJson(json)
+    }
+
+    /// Load the "Workspace" working copy, migrating from activeLayout if needed.
+    public static func loadOrMigrateWorkspace(config: AppConfig) -> DockLayout {
+        // Try loading "Workspace" directly
+        if var layout = tryLoad(name: workspaceLayoutName) {
+            layout.name = workspaceLayoutName
+            return layout
+        }
+        // Migration: copy activeLayout into "Workspace"
+        var layout: DockLayout
+        if let migrated = tryLoad(name: config.activeLayout) {
+            layout = migrated
+        } else {
+            layout = named(workspaceLayoutName)
+        }
+        layout.name = workspaceLayoutName
+        // Persist so it exists on next startup
+        if let json = layout.toJson() {
+            UserDefaults.standard.set(json, forKey: storageKeyFor(workspaceLayoutName))
+        }
+        return layout
+    }
+
+    /// Always save — pane mutations bypass bump().
+    public mutating func saveAlways() {
+        bump()
+        save()
+        markSaved()
     }
 
     /// Save if generation changed, then reset saved_generation.

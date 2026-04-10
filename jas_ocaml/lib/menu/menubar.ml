@@ -376,7 +376,7 @@ let revert (get_model : unit -> Model.model) (parent : GWindow.window) () =
     | _ -> ()
   end
 
-let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open ?(dock_layout : Dock.dock_layout option) ?(refresh_dock : (unit -> unit) option) (vbox : GPack.box) =
+let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open ?(dock_layout : Dock.dock_layout option) ?(app_config : Dock.app_config option) ?(refresh_dock : (unit -> unit) option) (vbox : GPack.box) =
   let m () = get_model () in
   (* Menubar *)
   let menubar = GMenu.menu_bar ~packing:(fun w -> vbox#pack w) () in
@@ -435,13 +435,97 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   let window_factory = new GMenu.factory _window_menu in
 
   (* Workspace submenu *)
-  (match dock_layout, refresh_dock with
-   | Some layout, Some refresh ->
+  (match dock_layout, app_config, refresh_dock with
+   | Some layout, Some config, Some refresh ->
      let _ws_menu = window_factory#add_submenu "Workspace" in
      let ws_factory = new GMenu.factory _ws_menu in
-     ignore (ws_factory#add_item ("Reset \xE2\x80\x9C" ^ layout.Dock.name ^ "\xE2\x80\x9D") ~callback:(fun () ->
+     (* List saved layouts, filtering out "Workspace" *)
+     let visible = List.filter (fun n -> n <> Dock.workspace_layout_name) config.Dock.saved_layouts in
+     List.iter (fun name ->
+       let prefix = if name = config.Dock.active_layout then "\xE2\x9C\x93 " else "    " in
+       ignore (ws_factory#add_item (prefix ^ name) ~callback:(fun () ->
+         Dock.save_layout layout;
+         let loaded = Dock.load_layout name in
+         layout.Dock.version <- loaded.Dock.version;
+         layout.Dock.name <- Dock.workspace_layout_name;
+         layout.Dock.anchored <- loaded.Dock.anchored;
+         layout.Dock.floating <- loaded.Dock.floating;
+         layout.Dock.hidden_panels <- loaded.Dock.hidden_panels;
+         layout.Dock.z_order <- loaded.Dock.z_order;
+         layout.Dock.focused_panel <- loaded.Dock.focused_panel;
+         layout.Dock.pane_layout <- loaded.Dock.pane_layout;
+         layout.Dock.next_id <- loaded.Dock.next_id;
+         config.Dock.active_layout <- name;
+         Dock.save_app_config config;
+         Dock.save_layout layout;
+         refresh ()
+       ))
+     ) visible;
+     ignore (ws_factory#add_separator ());
+     (* Save As... *)
+     ignore (ws_factory#add_item "Save As\xE2\x80\xA6" ~callback:(fun () ->
+       let dialog = GWindow.dialog ~title:"Save Workspace As" ~parent ~modal:true () in
+       let vbox = dialog#vbox in
+       let prefill = if config.Dock.active_layout <> Dock.workspace_layout_name
+         then config.Dock.active_layout else "" in
+       let entry = GEdit.entry ~text:prefill ~packing:vbox#add () in
+       dialog#add_button_stock `CANCEL `CANCEL;
+       dialog#add_button_stock `SAVE `ACCEPT;
+       let response = dialog#run () in
+       let name = String.trim (entry#text) in
+       dialog#destroy ();
+       if response = `ACCEPT && name <> "" then begin
+         if String.lowercase_ascii name = String.lowercase_ascii Dock.workspace_layout_name then begin
+           let info = GWindow.message_dialog ~message:"\xE2\x80\x9CWorkspace\xE2\x80\x9D is a system workspace that is saved automatically."
+             ~message_type:`INFO ~buttons:GWindow.Buttons.ok ~parent ~modal:true () in
+           ignore (info#run ());
+           info#destroy ()
+         end else if List.mem name config.Dock.saved_layouts then begin
+           let confirm = GWindow.message_dialog
+             ~message:(Printf.sprintf "Layout \xE2\x80\x9C%s\xE2\x80\x9D already exists. Overwrite?" name)
+             ~message_type:`QUESTION ~buttons:GWindow.Buttons.ok_cancel ~parent ~modal:true () in
+           let resp = confirm#run () in
+           confirm#destroy ();
+           if resp = `OK then begin
+             Dock.save_layout_as layout name;
+             Dock.register_layout config name;
+             config.Dock.active_layout <- name;
+             Dock.save_app_config config
+           end
+         end else begin
+           Dock.save_layout_as layout name;
+           Dock.register_layout config name;
+           config.Dock.active_layout <- name;
+           Dock.save_app_config config
+         end
+       end
+     ));
+     ignore (ws_factory#add_separator ());
+     (* Reset to Default *)
+     ignore (ws_factory#add_item "Reset to Default" ~callback:(fun () ->
        Dock.reset_to_default layout;
+       layout.Dock.name <- Dock.workspace_layout_name;
+       config.Dock.active_layout <- Dock.workspace_layout_name;
+       Dock.save_app_config config;
+       Dock.save_layout layout;
        refresh ()
+     ));
+     (* Revert to Saved *)
+     ignore (ws_factory#add_item "Revert to Saved" ~callback:(fun () ->
+       if config.Dock.active_layout <> Dock.workspace_layout_name then begin
+         let loaded = Dock.load_layout config.Dock.active_layout in
+         layout.Dock.version <- loaded.Dock.version;
+         layout.Dock.name <- Dock.workspace_layout_name;
+         layout.Dock.anchored <- loaded.Dock.anchored;
+         layout.Dock.floating <- loaded.Dock.floating;
+         layout.Dock.hidden_panels <- loaded.Dock.hidden_panels;
+         layout.Dock.z_order <- loaded.Dock.z_order;
+         layout.Dock.focused_panel <- loaded.Dock.focused_panel;
+         layout.Dock.pane_layout <- loaded.Dock.pane_layout;
+         layout.Dock.next_id <- loaded.Dock.next_id;
+         Dock.save_layout layout;
+         refresh ()
+       end
      ));
      ignore (ws_factory#add_separator ())
    | _ -> ());
