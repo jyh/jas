@@ -37,6 +37,38 @@ let assert_svg_parse name =
 let () =
   Printf.printf "Cross-language tests:\n";
 
+  (* --------------------------------------------------------------- *)
+  (* SVG round-trip idempotence                                       *)
+  (* --------------------------------------------------------------- *)
+
+  Printf.printf "SVG round-trip tests:\n";
+
+  let assert_svg_roundtrip name =
+    let svg = read_fixture (Printf.sprintf "svg/%s.svg" name) in
+    let doc1 = Jas.Svg.svg_to_document svg in
+    let json1 = Jas.Test_json.document_to_test_json doc1 in
+    let svg2 = Jas.Svg.document_to_svg doc1 in
+    let doc2 = Jas.Svg.svg_to_document svg2 in
+    let json2 = Jas.Test_json.document_to_test_json doc2 in
+    if json1 <> json2 then begin
+      Printf.eprintf "=== FIRST PARSE (%s) ===\n%s\n" name json1;
+      Printf.eprintf "=== AFTER ROUND-TRIP (%s) ===\n%s\n" name json2;
+      assert false
+    end
+  in
+  let roundtrip_names = [
+    "line_basic"; "rect_basic"; "rect_with_stroke";
+    "circle_basic"; "ellipse_basic";
+    "polyline_basic"; "polygon_basic"; "path_all_commands";
+    "text_basic"; "text_path_basic";
+    "group_nested"; "transform_translate"; "transform_rotate";
+    "multi_layer"; "complex_document"
+  ] in
+  run_test "svg_roundtrip all fixtures" (fun () ->
+    List.iter assert_svg_roundtrip roundtrip_names);
+
+  Printf.printf "SVG parse tests:\n";
+
   run_test "svg_parse line_basic" (fun () -> assert_svg_parse "line_basic");
   run_test "svg_parse rect_basic" (fun () -> assert_svg_parse "rect_basic");
   run_test "svg_parse rect_with_stroke" (fun () -> assert_svg_parse "rect_with_stroke");
@@ -137,6 +169,52 @@ let () =
           model#undo
         | "redo" ->
           model#redo
+        | _ -> failwith (Printf.sprintf "Unknown op: %s" op_name)
+      ) ops;
+      let actual = Jas.Test_json.document_to_test_json model#document in
+      if actual <> expected then begin
+        Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name expected;
+        Printf.eprintf "=== ACTUAL (%s) ===\n%s\n" name actual;
+        assert false
+      end
+    ) tests);
+
+  run_test "undo_redo_laws operations" (fun () ->
+    let json_str = read_fixture "operations/undo_redo_laws.json" in
+    let json = Yojson.Safe.from_string json_str in
+    let tests = Yojson.Safe.Util.to_list json in
+    List.iter (fun tc ->
+      let open Yojson.Safe.Util in
+      let name = tc |> member "name" |> to_string in
+      let setup_svg_file = tc |> member "setup_svg" |> to_string in
+      let expected_file = tc |> member "expected_json" |> to_string in
+      let ops = tc |> member "ops" |> to_list in
+      let svg = read_fixture (Printf.sprintf "svg/%s" setup_svg_file) in
+      let expected = read_fixture (Printf.sprintf "operations/%s" expected_file) in
+      let doc = Jas.Svg.svg_to_document svg in
+      let model = Jas.Model.create ~document:doc () in
+      let ctrl = Jas.Controller.create ~model () in
+      List.iter (fun op ->
+        let to_num j = try to_float j with _ -> float_of_int (to_int j) in
+        let op_name = op |> member "op" |> to_string in
+        match op_name with
+        | "select_rect" ->
+          let x = op |> member "x" |> to_num in
+          let y = op |> member "y" |> to_num in
+          let w = op |> member "width" |> to_num in
+          let h = op |> member "height" |> to_num in
+          let extend = try op |> member "extend" |> to_bool with _ -> false in
+          ctrl#select_rect ~extend x y w h
+        | "move_selection" ->
+          let dx = op |> member "dx" |> to_num in
+          let dy = op |> member "dy" |> to_num in
+          ctrl#move_selection dx dy
+        | "delete_selection" ->
+          let new_doc = Jas.Document.delete_selection model#document in
+          model#set_document new_doc
+        | "snapshot" -> model#snapshot
+        | "undo" -> model#undo
+        | "redo" -> model#redo
         | _ -> failwith (Printf.sprintf "Unknown op: %s" op_name)
       ) ops;
       let actual = Jas.Test_json.document_to_test_json model#document in
