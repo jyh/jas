@@ -376,7 +376,7 @@ let revert (get_model : unit -> Model.model) (parent : GWindow.window) () =
     | _ -> ()
   end
 
-let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open ?(dock_layout : Dock.dock_layout option) ?(app_config : Dock.app_config option) ?(refresh_dock : (unit -> unit) option) (vbox : GPack.box) =
+let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open ?(workspace_layout : Workspace_layout.workspace_layout option) ?(app_config : Workspace_layout.app_config option) ?(refresh_dock : (unit -> unit) option) (vbox : GPack.box) =
   let m () = get_model () in
   (* Menubar *)
   let menubar = GMenu.menu_bar ~packing:(fun w -> vbox#pack w) () in
@@ -435,29 +435,29 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   let window_factory = new GMenu.factory _window_menu in
 
   (* Workspace submenu *)
-  (match dock_layout, app_config, refresh_dock with
+  (match workspace_layout, app_config, refresh_dock with
    | Some layout, Some config, Some refresh ->
      let _ws_menu = window_factory#add_submenu "Workspace" in
      let ws_factory = new GMenu.factory _ws_menu in
      (* List saved layouts, filtering out "Workspace" *)
-     let visible = List.filter (fun n -> n <> Dock.workspace_layout_name) config.Dock.saved_layouts in
+     let visible = List.filter (fun n -> n <> Workspace_layout.workspace_layout_name) config.Workspace_layout.saved_layouts in
      List.iter (fun name ->
-       let prefix = if name = config.Dock.active_layout then "\xE2\x9C\x93 " else "    " in
+       let prefix = if name = config.Workspace_layout.active_layout then "\xE2\x9C\x93 " else "    " in
        ignore (ws_factory#add_item (prefix ^ name) ~callback:(fun () ->
-         Dock.save_layout layout;
-         let loaded = Dock.load_layout name in
-         layout.Dock.version <- loaded.Dock.version;
-         layout.Dock.name <- Dock.workspace_layout_name;
-         layout.Dock.anchored <- loaded.Dock.anchored;
-         layout.Dock.floating <- loaded.Dock.floating;
-         layout.Dock.hidden_panels <- loaded.Dock.hidden_panels;
-         layout.Dock.z_order <- loaded.Dock.z_order;
-         layout.Dock.focused_panel <- loaded.Dock.focused_panel;
-         layout.Dock.pane_layout <- loaded.Dock.pane_layout;
-         layout.Dock.next_id <- loaded.Dock.next_id;
-         config.Dock.active_layout <- name;
-         Dock.save_app_config config;
-         Dock.save_layout layout;
+         Workspace_layout.save_layout layout;
+         let loaded = Workspace_layout.load_layout name in
+         layout.Workspace_layout.version <- loaded.Workspace_layout.version;
+         layout.Workspace_layout.name <- Workspace_layout.workspace_layout_name;
+         layout.Workspace_layout.anchored <- loaded.Workspace_layout.anchored;
+         layout.Workspace_layout.floating <- loaded.Workspace_layout.floating;
+         layout.Workspace_layout.hidden_panels <- loaded.Workspace_layout.hidden_panels;
+         layout.Workspace_layout.z_order <- loaded.Workspace_layout.z_order;
+         layout.Workspace_layout.focused_panel <- loaded.Workspace_layout.focused_panel;
+         layout.Workspace_layout.pane_layout <- loaded.Workspace_layout.pane_layout;
+         layout.Workspace_layout.next_id <- loaded.Workspace_layout.next_id;
+         config.Workspace_layout.active_layout <- name;
+         Workspace_layout.save_app_config config;
+         Workspace_layout.save_layout layout;
          refresh ()
        ))
      ) visible;
@@ -466,8 +466,8 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
      ignore (ws_factory#add_item "Save As\xE2\x80\xA6" ~callback:(fun () ->
        let dialog = GWindow.dialog ~title:"Save Workspace As" ~parent ~modal:true () in
        let vbox = dialog#vbox in
-       let prefill = if config.Dock.active_layout <> Dock.workspace_layout_name
-         then config.Dock.active_layout else "" in
+       let prefill = if config.Workspace_layout.active_layout <> Workspace_layout.workspace_layout_name
+         then config.Workspace_layout.active_layout else "" in
        let entry = GEdit.entry ~text:prefill ~packing:vbox#add () in
        dialog#add_button_stock `CANCEL `CANCEL;
        dialog#add_button_stock `SAVE `ACCEPT;
@@ -475,55 +475,55 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
        let name = String.trim (entry#text) in
        dialog#destroy ();
        if response = `ACCEPT && name <> "" then begin
-         if String.lowercase_ascii name = String.lowercase_ascii Dock.workspace_layout_name then begin
+         if String.lowercase_ascii name = String.lowercase_ascii Workspace_layout.workspace_layout_name then begin
            let info = GWindow.message_dialog ~message:"\xE2\x80\x9CWorkspace\xE2\x80\x9D is a system workspace that is saved automatically."
              ~message_type:`INFO ~buttons:GWindow.Buttons.ok ~parent ~modal:true () in
            ignore (info#run ());
            info#destroy ()
-         end else if List.mem name config.Dock.saved_layouts then begin
+         end else if List.mem name config.Workspace_layout.saved_layouts then begin
            let confirm = GWindow.message_dialog
              ~message:(Printf.sprintf "Layout \xE2\x80\x9C%s\xE2\x80\x9D already exists. Overwrite?" name)
              ~message_type:`QUESTION ~buttons:GWindow.Buttons.ok_cancel ~parent ~modal:true () in
            let resp = confirm#run () in
            confirm#destroy ();
            if resp = `OK then begin
-             Dock.save_layout_as layout name;
-             Dock.register_layout config name;
-             config.Dock.active_layout <- name;
-             Dock.save_app_config config
+             Workspace_layout.save_layout_as layout name;
+             Workspace_layout.register_layout config name;
+             config.Workspace_layout.active_layout <- name;
+             Workspace_layout.save_app_config config
            end
          end else begin
-           Dock.save_layout_as layout name;
-           Dock.register_layout config name;
-           config.Dock.active_layout <- name;
-           Dock.save_app_config config
+           Workspace_layout.save_layout_as layout name;
+           Workspace_layout.register_layout config name;
+           config.Workspace_layout.active_layout <- name;
+           Workspace_layout.save_app_config config
          end
        end
      ));
      ignore (ws_factory#add_separator ());
      (* Reset to Default *)
      ignore (ws_factory#add_item "Reset to Default" ~callback:(fun () ->
-       Dock.reset_to_default layout;
-       layout.Dock.name <- Dock.workspace_layout_name;
-       config.Dock.active_layout <- Dock.workspace_layout_name;
-       Dock.save_app_config config;
-       Dock.save_layout layout;
+       Workspace_layout.reset_to_default layout;
+       layout.Workspace_layout.name <- Workspace_layout.workspace_layout_name;
+       config.Workspace_layout.active_layout <- Workspace_layout.workspace_layout_name;
+       Workspace_layout.save_app_config config;
+       Workspace_layout.save_layout layout;
        refresh ()
      ));
      (* Revert to Saved *)
      ignore (ws_factory#add_item "Revert to Saved" ~callback:(fun () ->
-       if config.Dock.active_layout <> Dock.workspace_layout_name then begin
-         let loaded = Dock.load_layout config.Dock.active_layout in
-         layout.Dock.version <- loaded.Dock.version;
-         layout.Dock.name <- Dock.workspace_layout_name;
-         layout.Dock.anchored <- loaded.Dock.anchored;
-         layout.Dock.floating <- loaded.Dock.floating;
-         layout.Dock.hidden_panels <- loaded.Dock.hidden_panels;
-         layout.Dock.z_order <- loaded.Dock.z_order;
-         layout.Dock.focused_panel <- loaded.Dock.focused_panel;
-         layout.Dock.pane_layout <- loaded.Dock.pane_layout;
-         layout.Dock.next_id <- loaded.Dock.next_id;
-         Dock.save_layout layout;
+       if config.Workspace_layout.active_layout <> Workspace_layout.workspace_layout_name then begin
+         let loaded = Workspace_layout.load_layout config.Workspace_layout.active_layout in
+         layout.Workspace_layout.version <- loaded.Workspace_layout.version;
+         layout.Workspace_layout.name <- Workspace_layout.workspace_layout_name;
+         layout.Workspace_layout.anchored <- loaded.Workspace_layout.anchored;
+         layout.Workspace_layout.floating <- loaded.Workspace_layout.floating;
+         layout.Workspace_layout.hidden_panels <- loaded.Workspace_layout.hidden_panels;
+         layout.Workspace_layout.z_order <- loaded.Workspace_layout.z_order;
+         layout.Workspace_layout.focused_panel <- loaded.Workspace_layout.focused_panel;
+         layout.Workspace_layout.pane_layout <- loaded.Workspace_layout.pane_layout;
+         layout.Workspace_layout.next_id <- loaded.Workspace_layout.next_id;
+         Workspace_layout.save_layout layout;
          refresh ()
        end
      ));
@@ -531,18 +531,18 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
    | _ -> ());
 
   (* Pane toggles *)
-  (match dock_layout, refresh_dock with
+  (match workspace_layout, refresh_dock with
    | Some layout, Some refresh ->
      ignore (window_factory#add_separator ());
      ignore (window_factory#add_item "Tile" ~callback:(fun () ->
-       Dock.panes_mut layout (fun pl ->
+       Workspace_layout.panes_mut layout (fun pl ->
          Pane.tile_panes pl ~collapsed_override:None);
        refresh ()
      ));
      ignore (window_factory#add_separator ());
      let toggle_pane kind label =
        ignore (window_factory#add_item label ~callback:(fun () ->
-         Dock.panes_mut layout (fun pl ->
+         Workspace_layout.panes_mut layout (fun pl ->
            if Pane.is_pane_visible pl kind then
              Pane.hide_pane pl kind
            else
@@ -559,38 +559,38 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   (* Panel toggles *)
   let toggle_panel kind label =
     ignore (window_factory#add_item label ~callback:(fun () ->
-      match dock_layout, refresh_dock with
+      match workspace_layout, refresh_dock with
       | Some layout, Some refresh ->
-        if Dock.is_panel_visible layout kind then begin
+        if Workspace_layout.is_panel_visible layout kind then begin
           (* Find and close the panel *)
           let found = ref false in
-          List.iter (fun (_, (d : Dock.dock)) ->
-            Array.iteri (fun gi (g : Dock.panel_group) ->
+          List.iter (fun (_, (d : Workspace_layout.dock)) ->
+            Array.iteri (fun gi (g : Workspace_layout.panel_group) ->
               Array.iteri (fun pi k ->
                 if k = kind && not !found then begin
-                  Dock.close_panel layout { group = { dock_id = d.id; group_idx = gi }; panel_idx = pi };
+                  Workspace_layout.close_panel layout { group = { dock_id = d.id; group_idx = gi }; panel_idx = pi };
                   found := true
                 end
               ) g.panels
             ) d.groups
           ) layout.anchored;
-          List.iter (fun (fd : Dock.floating_dock) ->
-            Array.iteri (fun gi (g : Dock.panel_group) ->
+          List.iter (fun (fd : Workspace_layout.floating_dock) ->
+            Array.iteri (fun gi (g : Workspace_layout.panel_group) ->
               Array.iteri (fun pi k ->
                 if k = kind && not !found then begin
-                  Dock.close_panel layout { group = { dock_id = fd.dock.id; group_idx = gi }; panel_idx = pi };
+                  Workspace_layout.close_panel layout { group = { dock_id = fd.dock.id; group_idx = gi }; panel_idx = pi };
                   found := true
                 end
               ) g.panels
             ) fd.dock.groups
           ) layout.floating
         end else
-          Dock.show_panel layout kind;
+          Workspace_layout.show_panel layout kind;
         refresh ()
       | _ -> ()
     ))
   in
-  toggle_panel Dock.Layers "Layers";
-  toggle_panel Dock.Color "Color";
-  toggle_panel Dock.Stroke "Stroke";
-  toggle_panel Dock.Properties "Properties"
+  toggle_panel Workspace_layout.Layers "Layers";
+  toggle_panel Workspace_layout.Color "Color";
+  toggle_panel Workspace_layout.Stroke "Stroke";
+  toggle_panel Workspace_layout.Properties "Properties"

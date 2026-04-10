@@ -36,11 +36,11 @@ private func decodeDrag(_ s: String) -> DecodedDrag? {
 // MARK: - Dock Panel View (anchored dock)
 
 public struct DockPanelView: View {
-    @Binding var dockLayout: DockLayout
+    @Binding var workspaceLayout: WorkspaceLayout
     let dockId: DockId
     let edge: DockEdge
 
-    private var dock: Dock? { dockLayout.dock(dockId) }
+    private var dock: Dock? { workspaceLayout.dock(dockId) }
 
     public var body: some View {
         if let dock = dock {
@@ -69,15 +69,15 @@ public struct DockPanelView: View {
     }
 
     private func collapsedIcon(kind: PanelKind, gi: Int, pi: Int) -> some View {
-        let label = DockLayout.panelLabel(kind)
+        let label = WorkspaceLayout.panelLabel(kind)
         let first = String(label.prefix(1))
         return Button(first) {
-            dockLayout.toggleDockCollapsed(dockId)
-            dockLayout.setActivePanel(PanelAddr(
+            workspaceLayout.toggleDockCollapsed(dockId)
+            workspaceLayout.setActivePanel(PanelAddr(
                 group: GroupAddr(dockId: dockId, groupIdx: gi),
                 panelIdx: pi
             ))
-            dockLayout.saveIfNeeded()
+            workspaceLayout.saveIfNeeded()
         }
         .font(.system(size: 12, weight: .bold))
         .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.6, alpha: 1.0))) // #999
@@ -92,7 +92,7 @@ public struct DockPanelView: View {
         VStack(spacing: 0) {
             ForEach(Array(dock.groups.enumerated()), id: \.offset) { gi, group in
                 PanelGroupView(
-                    dockLayout: $dockLayout,
+                    workspaceLayout: $workspaceLayout,
                     dockId: dockId,
                     groupIdx: gi,
                     group: group
@@ -107,7 +107,7 @@ public struct DockPanelView: View {
 // MARK: - Panel Group View
 
 public struct PanelGroupView: View {
-    @Binding var dockLayout: DockLayout
+    @Binding var workspaceLayout: WorkspaceLayout
     let dockId: DockId
     let groupIdx: Int
     let group: PanelGroup
@@ -147,7 +147,7 @@ public struct PanelGroupView: View {
             // Panel body (placeholder)
             if !group.collapsed {
                 if let kind = group.activePanel() {
-                    SwiftUI.Text(verbatim: DockLayout.panelLabel(kind))
+                    SwiftUI.Text(verbatim: WorkspaceLayout.panelLabel(kind))
                         .font(.system(size: 12))
                         .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.67, alpha: 1.0))) // #aaa
                         .frame(maxWidth: .infinity, minHeight: 60, alignment: .topLeading)
@@ -173,19 +173,19 @@ public struct PanelGroupView: View {
                 switch decoded {
                 case .group(let from):
                     if from.dockId == dockId {
-                        dockLayout.moveGroupWithinDock(dockId, from: from.groupIdx, to: groupIdx)
+                        workspaceLayout.moveGroupWithinDock(dockId, from: from.groupIdx, to: groupIdx)
                     } else {
-                        dockLayout.moveGroupToDock(from, toDock: dockId, toIdx: groupIdx)
+                        workspaceLayout.moveGroupToDock(from, toDock: dockId, toIdx: groupIdx)
                     }
                 case .panel(let from):
                     if from.group == targetGroup {
                         // Reorder within same group — drop at end
-                        dockLayout.reorderPanel(targetGroup, from: from.panelIdx, to: group.panels.count)
+                        workspaceLayout.reorderPanel(targetGroup, from: from.panelIdx, to: group.panels.count)
                     } else {
-                        dockLayout.movePanelToGroup(from, to: targetGroup)
+                        workspaceLayout.movePanelToGroup(from, to: targetGroup)
                     }
                 }
-                dockLayout.saveIfNeeded()
+                workspaceLayout.saveIfNeeded()
             }
         }
         return true
@@ -193,14 +193,14 @@ public struct PanelGroupView: View {
 
     private func tabButton(pi: Int, kind: PanelKind) -> some View {
         let isActive = pi == group.active
-        let label = DockLayout.panelLabel(kind)
+        let label = WorkspaceLayout.panelLabel(kind)
         let bg = isActive ? NSColor(white: 0.29, alpha: 1.0) : NSColor(white: 0.21, alpha: 1.0) // #4a4a4a / #353535
         return Button(label) {
-            dockLayout.setActivePanel(PanelAddr(
+            workspaceLayout.setActivePanel(PanelAddr(
                 group: GroupAddr(dockId: dockId, groupIdx: groupIdx),
                 panelIdx: pi
             ))
-            dockLayout.saveIfNeeded()
+            workspaceLayout.saveIfNeeded()
         }
         .font(.system(size: 11, weight: isActive ? .bold : .regular))
         .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.8, alpha: 1.0))) // #ccc
@@ -213,8 +213,8 @@ public struct PanelGroupView: View {
     private func chevronButton() -> some View {
         let label = group.collapsed ? "\u{25BC}" : "\u{25B2}"
         return Button(label) {
-            dockLayout.toggleGroupCollapsed(GroupAddr(dockId: dockId, groupIdx: groupIdx))
-            dockLayout.saveIfNeeded()
+            workspaceLayout.toggleGroupCollapsed(GroupAddr(dockId: dockId, groupIdx: groupIdx))
+            workspaceLayout.saveIfNeeded()
         }
         .font(.system(size: 9))
         .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.53, alpha: 1.0))) // #888
@@ -227,7 +227,7 @@ public struct PanelGroupView: View {
 // MARK: - Floating Dock View
 
 public struct FloatingDockView: View {
-    @Binding var dockLayout: DockLayout
+    @Binding var workspaceLayout: WorkspaceLayout
     let floatingDock: FloatingDock
     @State private var dragOffset: CGSize = .zero
     @State private var isDragging = false
@@ -237,7 +237,7 @@ public struct FloatingDockView: View {
         let x = floatingDock.x + (isDragging ? Double(dragOffset.width) : 0)
         let y = floatingDock.y + (isDragging ? Double(dragOffset.height) : 0)
         let w = floatingDock.dock.width
-        let zIdx = dockLayout.zIndexFor(fid)
+        let zIdx = workspaceLayout.zIndexFor(fid)
 
         VStack(spacing: 0) {
             // Title bar
@@ -255,21 +255,21 @@ public struct FloatingDockView: View {
                     .onEnded { value in
                         isDragging = false
                         dragOffset = .zero
-                        dockLayout.setFloatingPosition(fid,
+                        workspaceLayout.setFloatingPosition(fid,
                             x: floatingDock.x + Double(value.translation.width),
                             y: floatingDock.y + Double(value.translation.height))
-                        dockLayout.saveIfNeeded()
+                        workspaceLayout.saveIfNeeded()
                     }
             )
             .onTapGesture(count: 2) {
-                dockLayout.redock(fid)
-                dockLayout.saveIfNeeded()
+                workspaceLayout.redock(fid)
+                workspaceLayout.saveIfNeeded()
             }
 
             // Panel groups
             ForEach(Array(floatingDock.dock.groups.enumerated()), id: \.offset) { gi, group in
                 PanelGroupView(
-                    dockLayout: $dockLayout,
+                    workspaceLayout: $workspaceLayout,
                     dockId: fid,
                     groupIdx: gi,
                     group: group
@@ -284,8 +284,8 @@ public struct FloatingDockView: View {
         .position(x: x + w / 2, y: y + 50)
         .zIndex(Double(900 + zIdx))
         .onTapGesture {
-            dockLayout.bringToFront(fid)
-            dockLayout.saveIfNeeded()
+            workspaceLayout.bringToFront(fid)
+            workspaceLayout.saveIfNeeded()
         }
     }
 }

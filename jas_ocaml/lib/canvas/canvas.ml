@@ -24,7 +24,7 @@ let snap_preview : Pane.snap_constraint list ref = ref []
 (* Title bar                                                          *)
 (* ------------------------------------------------------------------ *)
 
-let make_title_bar ~dock_layout ~refresh_all ~pane_id ~kind ~(config : Pane.pane_config) ~collapsed () =
+let make_title_bar ~workspace_layout ~refresh_all ~pane_id ~kind ~(config : Pane.pane_config) ~collapsed () =
   let title_bar = GBin.event_box () in
   title_bar#misc#set_size_request ~height:title_bar_height ();
   let hbox = GPack.hbox ~packing:title_bar#add () in
@@ -45,12 +45,12 @@ let make_title_bar ~dock_layout ~refresh_all ~pane_id ~kind ~(config : Pane.pane
    | Some _ ->
      let chevron = if collapsed then "\xC2\xBB" else "\xC2\xAB" in (* » or « *)
      make_clickable_label chevron ~packing:(hbox#pack ~expand:false) ~callback:(fun () ->
-       (match Dock.anchored_dock dock_layout Dock.Right with
+       (match Workspace_layout.anchored_dock workspace_layout Workspace_layout.Right with
         | Some d ->
-          Dock.toggle_dock_collapsed dock_layout d.id;
-          let collapsed = (match Dock.anchored_dock dock_layout Dock.Right with
+          Workspace_layout.toggle_dock_collapsed workspace_layout d.id;
+          let collapsed = (match Workspace_layout.anchored_dock workspace_layout Workspace_layout.Right with
             | Some d -> d.collapsed | None -> false) in
-          Dock.panes_mut dock_layout (fun pl ->
+          Workspace_layout.panes_mut workspace_layout (fun pl ->
             let dock_pane = Pane.pane_by_kind pl Pane.Dock in
             let override = match dock_pane, collapsed with
               | Some p, true ->
@@ -72,7 +72,7 @@ let make_title_bar ~dock_layout ~refresh_all ~pane_id ~kind ~(config : Pane.pane
     spacer#misc#set_size_request ~width:0 ();
     (* Close button *)
     make_clickable_label "\xC3\x97" ~packing:(hbox#pack ~expand:false) ~callback:(fun () ->
-      Dock.panes_mut dock_layout (fun pl -> Pane.hide_pane pl kind);
+      Workspace_layout.panes_mut workspace_layout (fun pl -> Pane.hide_pane pl kind);
       refresh_all ())
   end;
 
@@ -80,21 +80,21 @@ let make_title_bar ~dock_layout ~refresh_all ~pane_id ~kind ~(config : Pane.pane
   title_bar#event#add [`BUTTON_PRESS];
   ignore (title_bar#event#connect#button_press ~callback:(fun ev ->
     if GdkEvent.get_type ev = `TWO_BUTTON_PRESS && config.double_click_action = Pane.Maximize then begin
-      Dock.panes_mut dock_layout (fun pl -> Pane.toggle_canvas_maximized pl);
+      Workspace_layout.panes_mut workspace_layout (fun pl -> Pane.toggle_canvas_maximized pl);
       refresh_all ();
       true
     end else begin
       let x = GdkEvent.Button.x_root ev in
       let y = GdkEvent.Button.y_root ev in
       (* Read current pane position for offset calculation *)
-      let px, py = match Dock.panes dock_layout with
+      let px, py = match Workspace_layout.panes workspace_layout with
         | Some pl -> (match Pane.find_pane pl pane_id with
           | Some p -> (p.x, p.y)
           | None -> (0.0, 0.0))
         | None -> (0.0, 0.0)
       in
       drag := Pane_drag { pane_id; off_x = x -. px; off_y = y -. py };
-      Dock.panes_mut dock_layout (fun pl -> Pane.bring_pane_to_front pl pane_id);
+      Workspace_layout.panes_mut workspace_layout (fun pl -> Pane.bring_pane_to_front pl pane_id);
       refresh_all ();
       true
     end
@@ -108,7 +108,7 @@ let make_title_bar ~dock_layout ~refresh_all ~pane_id ~kind ~(config : Pane.pane
 
 let edge_handle_size = 6
 
-let add_edge_handles ~pane_container ~pane_id ~dock_layout ~drag ~refresh_all:(_refresh_all : unit -> unit) (_frame : GPack.box) =
+let add_edge_handles ~pane_container ~pane_id ~workspace_layout ~drag ~refresh_all:(_refresh_all : unit -> unit) (_frame : GPack.box) =
   let edges = [Edge_left; Edge_right; Edge_top; Edge_bottom] in
   let handles = List.map (fun edge ->
     let eb = GBin.event_box () in
@@ -131,7 +131,7 @@ let add_edge_handles ~pane_container ~pane_id ~dock_layout ~drag ~refresh_all:(_
     ignore (eb#event#connect#button_press ~callback:(fun ev ->
       let gx = GdkEvent.Button.x_root ev in
       let gy = GdkEvent.Button.y_root ev in
-      (match Dock.panes dock_layout with
+      (match Workspace_layout.panes workspace_layout with
        | Some pl ->
          (match Pane.find_pane pl pane_id with
           | Some p ->
@@ -185,14 +185,14 @@ let create_main_window ~get_model ~on_open () =
   let vbox = GPack.vbox ~packing:window#add () in
 
   (* Dock layout *)
-  let app_config = Dock.load_app_config () in
-  let dock_layout = Dock.load_or_migrate_workspace app_config in
-  Dock.ensure_pane_layout dock_layout ~viewport_w:1200.0 ~viewport_h:900.0;
+  let app_config = Workspace_layout.load_app_config () in
+  let workspace_layout = Workspace_layout.load_or_migrate_workspace app_config in
+  Workspace_layout.ensure_pane_layout workspace_layout ~viewport_w:1200.0 ~viewport_h:900.0;
   let dock_refresh = ref (fun () -> ()) in
 
   (* Menubar *)
   Menubar.create get_model window ~on_open
-    ~dock_layout ~app_config ~refresh_dock:(fun () -> !dock_refresh ()) vbox;
+    ~workspace_layout ~app_config ~refresh_dock:(fun () -> !dock_refresh ()) vbox;
 
   (* Pane container: GtkLayout for absolute positioning.
      Unlike GtkFixed, GtkLayout doesn't expand the window when
@@ -232,14 +232,14 @@ let create_main_window ~get_model ~on_open () =
   pane_container#put dock_frame#coerce ~x:760 ~y:0;
 
   (* Edge resize handles *)
-  let pl_ids = match Dock.panes dock_layout with Some pl -> pl | None ->
+  let pl_ids = match Workspace_layout.panes workspace_layout with Some pl -> pl | None ->
     Pane.default_three_pane ~viewport_w:1200.0 ~viewport_h:900.0 in
   let toolbar_id = (match Pane.pane_by_kind pl_ids Pane.Toolbar with Some p -> p.id | None -> 0) in
   let canvas_id = (match Pane.pane_by_kind pl_ids Pane.Canvas with Some p -> p.id | None -> 1) in
   let dock_id_pane = (match Pane.pane_by_kind pl_ids Pane.Dock with Some p -> p.id | None -> 2) in
-  let toolbar_edges = add_edge_handles ~pane_container ~pane_id:toolbar_id ~dock_layout ~drag ~refresh_all:(fun () -> !dock_refresh ()) toolbar_frame in
-  let canvas_edges = add_edge_handles ~pane_container ~pane_id:canvas_id ~dock_layout ~drag ~refresh_all:(fun () -> !dock_refresh ()) canvas_frame in
-  let dock_edges = add_edge_handles ~pane_container ~pane_id:dock_id_pane ~dock_layout ~drag ~refresh_all:(fun () -> !dock_refresh ()) dock_frame in
+  let toolbar_edges = add_edge_handles ~pane_container ~pane_id:toolbar_id ~workspace_layout ~drag ~refresh_all:(fun () -> !dock_refresh ()) toolbar_frame in
+  let canvas_edges = add_edge_handles ~pane_container ~pane_id:canvas_id ~workspace_layout ~drag ~refresh_all:(fun () -> !dock_refresh ()) canvas_frame in
+  let dock_edges = add_edge_handles ~pane_container ~pane_id:dock_id_pane ~workspace_layout ~drag ~refresh_all:(fun () -> !dock_refresh ()) dock_frame in
 
   (* Border handles and snap lines *)
   let border_handles : GBin.event_box list ref = ref [] in
@@ -248,13 +248,13 @@ let create_main_window ~get_model ~on_open () =
   let configure_guard = ref false in
   let refresh_all () =
     configure_guard := true;
-    let geos = match Dock.panes dock_layout with
+    let geos = match Workspace_layout.panes workspace_layout with
       | None -> [] | Some pl -> Pane_rendering.pane_geometries pl
     in
-    let borders = match Dock.panes dock_layout with
+    let borders = match Workspace_layout.panes workspace_layout with
       | None -> [] | Some pl -> Pane_rendering.shared_borders pl
     in
-    let maximized = match Dock.panes dock_layout with
+    let maximized = match Workspace_layout.panes workspace_layout with
       | Some pl -> pl.canvas_maximized | None -> false
     in
 
@@ -342,7 +342,7 @@ let create_main_window ~get_model ~on_open () =
     snap_widgets := [];
 
     (* Add snap preview lines *)
-    (match Dock.panes dock_layout with
+    (match Workspace_layout.panes workspace_layout with
      | Some pl ->
        let lines = Pane_rendering.snap_lines !snap_preview pl in
        List.iter (fun (l : Pane_rendering.snap_line) ->
@@ -360,7 +360,7 @@ let create_main_window ~get_model ~on_open () =
        ) lines
      | None -> ());
 
-    Dock.save_layout_if_needed dock_layout;
+    Workspace_layout.save_layout_if_needed workspace_layout;
     (* Defer resetting the configure guard so configure events triggered
        by set_size_request during this refresh are suppressed. *)
     ignore (GMain.Idle.add (fun () -> configure_guard := false; false))
@@ -373,26 +373,26 @@ let create_main_window ~get_model ~on_open () =
     canvas_frame#remove !canvas_title#coerce;
     dock_frame#remove !dock_title#coerce;
 
-    let tpl = match Dock.panes dock_layout with Some pl -> Some pl | None -> None in
+    let tpl = match Workspace_layout.panes workspace_layout with Some pl -> Some pl | None -> None in
     let toolbar_id = match tpl with Some pl -> (match Pane.pane_by_kind pl Pane.Toolbar with Some p -> p.id | None -> 0) | None -> 0 in
     let canvas_id = match tpl with Some pl -> (match Pane.pane_by_kind pl Pane.Canvas with Some p -> p.id | None -> 1) | None -> 1 in
     let dock_id = match tpl with Some pl -> (match Pane.pane_by_kind pl Pane.Dock with Some p -> p.id | None -> 2) | None -> 2 in
 
-    let tb = make_title_bar ~dock_layout ~refresh_all:(fun () -> !dock_refresh ())
+    let tb = make_title_bar ~workspace_layout ~refresh_all:(fun () -> !dock_refresh ())
       ~pane_id:toolbar_id ~kind:Pane.Toolbar ~config:(Pane.config_for_kind Pane.Toolbar) ~collapsed:false () in
     toolbar_title := tb;
     toolbar_frame#pack tb#coerce ~expand:false;
     toolbar_frame#reorder_child tb#coerce ~pos:0;
 
-    let cb = make_title_bar ~dock_layout ~refresh_all:(fun () -> !dock_refresh ())
+    let cb = make_title_bar ~workspace_layout ~refresh_all:(fun () -> !dock_refresh ())
       ~pane_id:canvas_id ~kind:Pane.Canvas ~config:(Pane.config_for_kind Pane.Canvas) ~collapsed:false () in
     canvas_title := cb;
     canvas_frame#pack cb#coerce ~expand:false;
     canvas_frame#reorder_child cb#coerce ~pos:0;
 
-    let dock_collapsed = match Dock.anchored_dock dock_layout Dock.Right with
+    let dock_collapsed = match Workspace_layout.anchored_dock workspace_layout Workspace_layout.Right with
       | Some d -> d.collapsed | None -> false in
-    let db = make_title_bar ~dock_layout ~refresh_all:(fun () -> !dock_refresh ())
+    let db = make_title_bar ~workspace_layout ~refresh_all:(fun () -> !dock_refresh ())
       ~pane_id:dock_id ~kind:Pane.Dock ~config:(Pane.config_for_kind Pane.Dock) ~collapsed:dock_collapsed () in
     dock_title := db;
     dock_frame#pack db#coerce ~expand:false;
@@ -401,7 +401,7 @@ let create_main_window ~get_model ~on_open () =
   rebuild_title_bars ();
 
   (* Initialize dock panel *)
-  let dock_refresh_panel = Dock_panel.create dock_box dock_layout in
+  let dock_refresh_panel = Dock_panel.create dock_box workspace_layout in
   dock_refresh := (fun () -> refresh_all (); dock_refresh_panel ());
 
   (* Mouse move handler *)
@@ -412,7 +412,7 @@ let create_main_window ~get_model ~on_open () =
      | Pane_drag { pane_id; off_x; off_y } ->
        let new_x = mx -. off_x in
        let new_y = my -. off_y in
-       Dock.panes_mut dock_layout (fun pl ->
+       Workspace_layout.panes_mut workspace_layout (fun pl ->
          Pane.set_pane_position pl pane_id ~x:new_x ~y:new_y;
          let preview = Pane.detect_snaps pl ~dragged:pane_id
            ~viewport_w:pl.viewport_width ~viewport_h:pl.viewport_height in
@@ -425,13 +425,13 @@ let create_main_window ~get_model ~on_open () =
        let current = if bd.is_vertical then mx else my in
        let delta = current -. bd.start_coord in
        bd.start_coord <- current;
-       Dock.panes_mut dock_layout (fun pl ->
+       Workspace_layout.panes_mut workspace_layout (fun pl ->
          Pane.drag_shared_border pl ~snap_idx:bd.snap_idx ~delta);
        refresh_all ()
      | Edge_drag ed ->
        let dx = mx -. ed.start_gx in
        let dy = my -. ed.start_gy in
-       Dock.panes_mut dock_layout (fun pl ->
+       Workspace_layout.panes_mut workspace_layout (fun pl ->
          match Pane.find_pane pl ed.pane_id with
          | None -> ()
          | Some p ->
@@ -461,7 +461,7 @@ let create_main_window ~get_model ~on_open () =
      | Pane_drag { pane_id; _ } ->
        let preview = !snap_preview in
        if preview <> [] then
-         Dock.panes_mut dock_layout (fun pl ->
+         Workspace_layout.panes_mut workspace_layout (fun pl ->
            Pane.apply_snaps pl pane_id ~new_snaps:preview
              ~viewport_w:pl.viewport_width ~viewport_h:pl.viewport_height);
        snap_preview := []
@@ -487,10 +487,10 @@ let create_main_window ~get_model ~on_open () =
       if w > 10.0 && h > 10.0 && w < 10000.0 && h < 10000.0 then begin
         pane_container#set_width (int_of_float w);
         pane_container#set_height (int_of_float h);
-        Dock.panes_mut dock_layout (fun pl ->
+        Workspace_layout.panes_mut workspace_layout (fun pl ->
           Pane.on_viewport_resize pl ~new_w:w ~new_h:h;
           (* Re-tile with collapsed override if dock is collapsed *)
-          let dock_collapsed = match Dock.anchored_dock dock_layout Dock.Right with
+          let dock_collapsed = match Workspace_layout.anchored_dock workspace_layout Workspace_layout.Right with
             | Some d -> d.collapsed | None -> false in
           if dock_collapsed then
             let override = match Pane.pane_by_kind pl Pane.Dock with
@@ -520,7 +520,7 @@ let create_main_window ~get_model ~on_open () =
     if w > 10.0 && h > 10.0 then begin
       pane_container#set_width (int_of_float w);
       pane_container#set_height (int_of_float h);
-      Dock.panes_mut dock_layout (fun pl ->
+      Workspace_layout.panes_mut workspace_layout (fun pl ->
         Pane.on_viewport_resize pl ~new_w:w ~new_h:h;
         Pane.repair_snaps pl ~viewport_w:w ~viewport_h:h)
     end;

@@ -1,6 +1,6 @@
 """Dock and panel infrastructure.
 
-A DockLayout manages multiple docks: anchored docks snapped to screen
+A WorkspaceLayout manages multiple docks: anchored docks snapped to screen
 edges and floating docks at arbitrary positions. Each Dock contains a
 vertical list of PanelGroups. Each group has tabbed PanelKind entries,
 one of which is active at a time.
@@ -165,12 +165,12 @@ class AppConfig:
             return AppConfig()
 
 # ---------------------------------------------------------------------------
-# DockLayout
+# WorkspaceLayout
 # ---------------------------------------------------------------------------
 
 STORAGE_PREFIX = "jas_layout:"
 
-class DockLayout:
+class WorkspaceLayout:
     def __init__(self, name: str, anchored: list[tuple[DockEdge, Dock]],
                  floating: list[FloatingDock], hidden_panels: list[PanelKind],
                  z_order: list[int], focused_panel: Optional[PanelAddr],
@@ -190,12 +190,12 @@ class DockLayout:
     # -- Construction --
 
     @staticmethod
-    def default_layout() -> DockLayout:
-        return DockLayout.named(DEFAULT_LAYOUT_NAME)
+    def default_layout() -> WorkspaceLayout:
+        return WorkspaceLayout.named(DEFAULT_LAYOUT_NAME)
 
     @staticmethod
-    def named(name: str) -> DockLayout:
-        return DockLayout(
+    def named(name: str) -> WorkspaceLayout:
+        return WorkspaceLayout(
             name=name,
             anchored=[(DockEdge.RIGHT, Dock(
                 id=0,
@@ -554,7 +554,7 @@ class DockLayout:
 
     def reset_to_default(self):
         name = self.name
-        fresh = DockLayout.named(name)
+        fresh = WorkspaceLayout.named(name)
         self.version = fresh.version
         self.name = fresh.name
         self.anchored = fresh.anchored
@@ -600,7 +600,7 @@ class DockLayout:
         return result
 
     @staticmethod
-    def from_dict(d: dict) -> 'DockLayout':
+    def from_dict(d: dict) -> 'WorkspaceLayout':
         try:
             _pk = lambda s: PanelKind[s]
             _edge = lambda s: DockEdge[s]
@@ -625,8 +625,8 @@ class DockLayout:
                     pl = None
             ver = d.get("version", 0)
             if ver != LAYOUT_VERSION:
-                return DockLayout.default_layout()
-            return DockLayout(
+                return WorkspaceLayout.default_layout()
+            return WorkspaceLayout(
                 name=d["name"],
                 anchored=[(_edge(a["edge"]), _dock(a["dock"])) for a in d["anchored"]],
                 floating=[FloatingDock(dock=_dock(f["dock"]), x=f["x"], y=f["y"]) for f in d["floating"]],
@@ -638,7 +638,7 @@ class DockLayout:
                 version=ver,
             )
         except (KeyError, TypeError, ValueError):
-            return DockLayout.default_layout()
+            return WorkspaceLayout.default_layout()
 
     @staticmethod
     def _config_dir() -> str:
@@ -673,15 +673,15 @@ class DockLayout:
         self.name = saved_name
 
     @staticmethod
-    def try_load_from_file(name: str) -> 'Optional[DockLayout]':
+    def try_load_from_file(name: str) -> 'Optional[WorkspaceLayout]':
         import os
-        path = os.path.join(DockLayout._config_dir(), f"{name}.json")
+        path = os.path.join(WorkspaceLayout._config_dir(), f"{name}.json")
         try:
             with open(path) as f:
                 d = json.load(f)
                 if d.get("version", 0) != LAYOUT_VERSION:
                     return None
-                layout = DockLayout.from_dict(d)
+                layout = WorkspaceLayout.from_dict(d)
                 if layout.version != LAYOUT_VERSION:
                     return None
                 return layout
@@ -689,25 +689,25 @@ class DockLayout:
             return None
 
     @staticmethod
-    def load_from_file(name: str) -> 'DockLayout':
-        layout = DockLayout.try_load_from_file(name)
-        return layout if layout is not None else DockLayout.named(name)
+    def load_from_file(name: str) -> 'WorkspaceLayout':
+        layout = WorkspaceLayout.try_load_from_file(name)
+        return layout if layout is not None else WorkspaceLayout.named(name)
 
     @staticmethod
-    def load_or_migrate_workspace(config: 'AppConfig') -> 'DockLayout':
+    def load_or_migrate_workspace(config: 'AppConfig') -> 'WorkspaceLayout':
         """Load the 'Workspace' working copy, migrating from active_layout if needed."""
-        layout = DockLayout.try_load_from_file(WORKSPACE_LAYOUT_NAME)
+        layout = WorkspaceLayout.try_load_from_file(WORKSPACE_LAYOUT_NAME)
         if layout is not None:
             layout.name = WORKSPACE_LAYOUT_NAME
             return layout
         # Migration: copy active_layout into "Workspace"
-        layout = DockLayout.try_load_from_file(config.active_layout)
+        layout = WorkspaceLayout.try_load_from_file(config.active_layout)
         if layout is None:
-            layout = DockLayout.named(WORKSPACE_LAYOUT_NAME)
+            layout = WorkspaceLayout.named(WORKSPACE_LAYOUT_NAME)
         layout.name = WORKSPACE_LAYOUT_NAME
         # Persist so it exists on next startup
         import os
-        path = os.path.join(DockLayout._config_dir(), f"{WORKSPACE_LAYOUT_NAME}.json")
+        path = os.path.join(WorkspaceLayout._config_dir(), f"{WORKSPACE_LAYOUT_NAME}.json")
         try:
             with open(path, "w") as f:
                 json.dump(layout.to_dict(), f)
