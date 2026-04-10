@@ -17,7 +17,7 @@ from algorithms.hit_test import (
 from document.controller import Controller
 from document.model import Model
 from geometry.svg import document_to_svg, svg_to_document
-from geometry.test_json import document_to_test_json
+from geometry.test_json import document_to_test_json, test_json_to_document
 
 # Path to the shared test fixtures directory.
 _FIXTURES = os.path.join(os.path.dirname(__file__), "..", "test_fixtures")
@@ -67,6 +67,26 @@ class CrossLanguageTest(absltest.TestCase):
             json2 = document_to_test_json(doc2)
             self.assertEqual(json1, json2,
                 f"SVG round-trip '{name}' failed: canonical JSON changed")
+
+    # ---------------------------------------------------------------
+    # JSON round-trip idempotence
+    # ---------------------------------------------------------------
+
+    def test_json_roundtrip_all_expected(self):
+        names = [
+            "line_basic", "rect_basic", "rect_with_stroke",
+            "circle_basic", "ellipse_basic",
+            "polyline_basic", "polygon_basic", "path_all_commands",
+            "text_basic", "text_path_basic",
+            "group_nested", "transform_translate", "transform_rotate",
+            "multi_layer", "complex_document",
+        ]
+        for name in names:
+            expected = _read_fixture(f"expected/{name}.json")
+            doc = test_json_to_document(expected)
+            actual = document_to_test_json(doc)
+            self.assertEqual(actual, expected,
+                f"JSON round-trip '{name}' failed: canonical JSON changed")
 
     # ---------------------------------------------------------------
     # SVG parse equivalence

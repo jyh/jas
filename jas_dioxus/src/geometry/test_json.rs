@@ -5,7 +5,7 @@
 //! string representation, so byte-for-byte comparison of the output is a
 //! valid equivalence check.
 
-use crate::document::document::{Document, ElementSelection, SelectionKind};
+use crate::document::document::{Document, ElementPath, ElementSelection, Selection, SelectionKind, SortedCps};
 use crate::geometry::element::*;
 
 // ---------------------------------------------------------------------------
@@ -395,6 +395,214 @@ pub fn document_to_test_json(doc: &Document) -> String {
     o.int("selected_layer", doc.selected_layer);
     o.raw("selection", selection_json(&doc.selection));
     o.build()
+}
+
+// ---------------------------------------------------------------------------
+// JSON → Document parser (inverse of document_to_test_json)
+// ---------------------------------------------------------------------------
+
+fn parse_f(v: &serde_json::Value) -> f64 {
+    v.as_f64().unwrap_or(0.0)
+}
+
+fn parse_color(v: &serde_json::Value) -> Color {
+    Color::new(parse_f(&v["r"]), parse_f(&v["g"]), parse_f(&v["b"]), parse_f(&v["a"]))
+}
+
+fn parse_fill(v: &serde_json::Value) -> Option<Fill> {
+    if v.is_null() { return None; }
+    Some(Fill::new(parse_color(&v["color"])))
+}
+
+fn parse_stroke(v: &serde_json::Value) -> Option<Stroke> {
+    if v.is_null() { return None; }
+    let lc = match v["linecap"].as_str().unwrap_or("butt") {
+        "round" => LineCap::Round,
+        "square" => LineCap::Square,
+        _ => LineCap::Butt,
+    };
+    let lj = match v["linejoin"].as_str().unwrap_or("miter") {
+        "round" => LineJoin::Round,
+        "bevel" => LineJoin::Bevel,
+        _ => LineJoin::Miter,
+    };
+    Some(Stroke { color: parse_color(&v["color"]), width: parse_f(&v["width"]), linecap: lc, linejoin: lj })
+}
+
+fn parse_transform(v: &serde_json::Value) -> Option<Transform> {
+    if v.is_null() { return None; }
+    Some(Transform {
+        a: parse_f(&v["a"]), b: parse_f(&v["b"]), c: parse_f(&v["c"]),
+        d: parse_f(&v["d"]), e: parse_f(&v["e"]), f: parse_f(&v["f"]),
+    })
+}
+
+fn parse_visibility(v: &serde_json::Value) -> Visibility {
+    match v.as_str().unwrap_or("preview") {
+        "invisible" => Visibility::Invisible,
+        "outline" => Visibility::Outline,
+        _ => Visibility::Preview,
+    }
+}
+
+fn parse_common(v: &serde_json::Value) -> CommonProps {
+    CommonProps {
+        opacity: parse_f(&v["opacity"]),
+        transform: parse_transform(&v["transform"]),
+        locked: v["locked"].as_bool().unwrap_or(false),
+        visibility: parse_visibility(&v["visibility"]),
+    }
+}
+
+fn parse_path_commands(v: &serde_json::Value) -> Vec<PathCommand> {
+    v.as_array().unwrap_or(&vec![]).iter().map(|c| {
+        match c["cmd"].as_str().unwrap_or("") {
+            "M" => PathCommand::MoveTo { x: parse_f(&c["x"]), y: parse_f(&c["y"]) },
+            "L" => PathCommand::LineTo { x: parse_f(&c["x"]), y: parse_f(&c["y"]) },
+            "C" => PathCommand::CurveTo {
+                x1: parse_f(&c["x1"]), y1: parse_f(&c["y1"]),
+                x2: parse_f(&c["x2"]), y2: parse_f(&c["y2"]),
+                x: parse_f(&c["x"]), y: parse_f(&c["y"]),
+            },
+            "S" => PathCommand::SmoothCurveTo {
+                x2: parse_f(&c["x2"]), y2: parse_f(&c["y2"]),
+                x: parse_f(&c["x"]), y: parse_f(&c["y"]),
+            },
+            "Q" => PathCommand::QuadTo {
+                x1: parse_f(&c["x1"]), y1: parse_f(&c["y1"]),
+                x: parse_f(&c["x"]), y: parse_f(&c["y"]),
+            },
+            "T" => PathCommand::SmoothQuadTo { x: parse_f(&c["x"]), y: parse_f(&c["y"]) },
+            "A" => PathCommand::ArcTo {
+                rx: parse_f(&c["rx"]), ry: parse_f(&c["ry"]),
+                x_rotation: parse_f(&c["x_rotation"]),
+                large_arc: c["large_arc"].as_bool().unwrap_or(false),
+                sweep: c["sweep"].as_bool().unwrap_or(false),
+                x: parse_f(&c["x"]), y: parse_f(&c["y"]),
+            },
+            _ => PathCommand::ClosePath,
+        }
+    }).collect()
+}
+
+fn parse_points(v: &serde_json::Value) -> Vec<(f64, f64)> {
+    v.as_array().unwrap_or(&vec![]).iter().map(|p| {
+        let a = p.as_array().unwrap();
+        (a[0].as_f64().unwrap(), a[1].as_f64().unwrap())
+    }).collect()
+}
+
+fn parse_element(v: &serde_json::Value) -> Element {
+    let typ = v["type"].as_str().unwrap_or("");
+    let common = parse_common(v);
+    match typ {
+        "line" => Element::Line(LineElem {
+            x1: parse_f(&v["x1"]), y1: parse_f(&v["y1"]),
+            x2: parse_f(&v["x2"]), y2: parse_f(&v["y2"]),
+            stroke: parse_stroke(&v["stroke"]),
+            common,
+        }),
+        "rect" => Element::Rect(RectElem {
+            x: parse_f(&v["x"]), y: parse_f(&v["y"]),
+            width: parse_f(&v["width"]), height: parse_f(&v["height"]),
+            rx: parse_f(&v["rx"]), ry: parse_f(&v["ry"]),
+            fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
+            common,
+        }),
+        "circle" => Element::Circle(CircleElem {
+            cx: parse_f(&v["cx"]), cy: parse_f(&v["cy"]), r: parse_f(&v["r"]),
+            fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
+            common,
+        }),
+        "ellipse" => Element::Ellipse(EllipseElem {
+            cx: parse_f(&v["cx"]), cy: parse_f(&v["cy"]),
+            rx: parse_f(&v["rx"]), ry: parse_f(&v["ry"]),
+            fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
+            common,
+        }),
+        "polyline" => Element::Polyline(PolylineElem {
+            points: parse_points(&v["points"]),
+            fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
+            common,
+        }),
+        "polygon" => Element::Polygon(PolygonElem {
+            points: parse_points(&v["points"]),
+            fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
+            common,
+        }),
+        "path" => Element::Path(PathElem {
+            d: parse_path_commands(&v["d"]),
+            fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
+            common,
+        }),
+        "text" => Element::Text(TextElem {
+            x: parse_f(&v["x"]), y: parse_f(&v["y"]),
+            content: v["content"].as_str().unwrap_or("").to_string(),
+            font_family: v["font_family"].as_str().unwrap_or("sans-serif").to_string(),
+            font_size: parse_f(&v["font_size"]),
+            font_weight: v["font_weight"].as_str().unwrap_or("normal").to_string(),
+            font_style: v["font_style"].as_str().unwrap_or("normal").to_string(),
+            text_decoration: v["text_decoration"].as_str().unwrap_or("none").to_string(),
+            width: parse_f(&v["width"]), height: parse_f(&v["height"]),
+            fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
+            common,
+        }),
+        "text_path" => Element::TextPath(TextPathElem {
+            d: parse_path_commands(&v["d"]),
+            content: v["content"].as_str().unwrap_or("").to_string(),
+            start_offset: parse_f(&v["start_offset"]),
+            font_family: v["font_family"].as_str().unwrap_or("sans-serif").to_string(),
+            font_size: parse_f(&v["font_size"]),
+            font_weight: v["font_weight"].as_str().unwrap_or("normal").to_string(),
+            font_style: v["font_style"].as_str().unwrap_or("normal").to_string(),
+            text_decoration: v["text_decoration"].as_str().unwrap_or("none").to_string(),
+            fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
+            common,
+        }),
+        "group" => {
+            let children = v["children"].as_array().unwrap_or(&vec![])
+                .iter().map(|c| std::rc::Rc::new(parse_element(c))).collect();
+            Element::Group(GroupElem { children, common })
+        },
+        "layer" => {
+            let children = v["children"].as_array().unwrap_or(&vec![])
+                .iter().map(|c| std::rc::Rc::new(parse_element(c))).collect();
+            let name = v["name"].as_str().unwrap_or("Layer").to_string();
+            Element::Layer(LayerElem { name, children, common })
+        },
+        _ => panic!("Unknown element type: {}", typ),
+    }
+}
+
+fn parse_selection(v: &serde_json::Value) -> Selection {
+    v.as_array().unwrap_or(&vec![]).iter().map(|es| {
+        let path: ElementPath = es["path"].as_array().unwrap()
+            .iter().map(|i| i.as_u64().unwrap() as usize).collect();
+        let kind = if let Some(s) = es["kind"].as_str() {
+            if s == "all" { SelectionKind::All }
+            else { SelectionKind::All }
+        } else if let Some(obj) = es["kind"].as_object() {
+            if let Some(partial) = obj.get("partial") {
+                let cps: Vec<usize> = partial.as_array().unwrap()
+                    .iter().map(|i| i.as_u64().unwrap() as usize).collect();
+                SelectionKind::Partial(SortedCps::from_iter(cps))
+            } else { SelectionKind::All }
+        } else { SelectionKind::All };
+        ElementSelection { path, kind }
+    }).collect()
+}
+
+/// Parse canonical test JSON into a Document.
+///
+/// This is the inverse of [`document_to_test_json`].
+pub fn test_json_to_document(json: &str) -> Document {
+    let v: serde_json::Value = serde_json::from_str(json)
+        .expect("Failed to parse test JSON");
+    let layers: Vec<Element> = v["layers"].as_array().unwrap()
+        .iter().map(|l| parse_element(l)).collect();
+    let selected_layer = v["selected_layer"].as_u64().unwrap_or(0) as usize;
+    let selection = parse_selection(&v["selection"]);
+    Document { layers, selected_layer, selection }
 }
 
 // ---------------------------------------------------------------------------

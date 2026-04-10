@@ -6,6 +6,7 @@ string representation, so byte-for-byte comparison of the output is a
 valid equivalence check.
 """
 
+import json
 import math
 
 from document.document import (
@@ -330,3 +331,188 @@ def document_to_test_json(doc: Document) -> str:
     o.int_("selected_layer", doc.selected_layer)
     o.raw("selection", _selection_json(doc.selection))
     return o.build()
+
+
+# ------------------------------------------------------------------ #
+# JSON parser helpers                                                 #
+# ------------------------------------------------------------------ #
+
+_LINECAP_MAP = {v.value: v for v in LineCap}
+_LINEJOIN_MAP = {v.value: v for v in LineJoin}
+_VISIBILITY_MAP = {"invisible": Visibility.INVISIBLE,
+                   "outline": Visibility.OUTLINE,
+                   "preview": Visibility.PREVIEW}
+
+
+def _parse_color(d: dict) -> Color:
+    return Color(r=d["r"], g=d["g"], b=d["b"], a=d["a"])
+
+
+def _parse_fill(d) -> Fill | None:
+    if d is None:
+        return None
+    return Fill(color=_parse_color(d["color"]))
+
+
+def _parse_stroke(d) -> Stroke | None:
+    if d is None:
+        return None
+    return Stroke(
+        color=_parse_color(d["color"]),
+        width=d["width"],
+        linecap=_LINECAP_MAP[d["linecap"]],
+        linejoin=_LINEJOIN_MAP[d["linejoin"]],
+    )
+
+
+def _parse_transform(d) -> Transform | None:
+    if d is None:
+        return None
+    return Transform(a=d["a"], b=d["b"], c=d["c"],
+                     d=d["d"], e=d["e"], f=d["f"])
+
+
+def _parse_common(d: dict) -> dict:
+    """Extract the common Element fields shared by all element types."""
+    return dict(
+        locked=d["locked"],
+        opacity=d["opacity"],
+        transform=_parse_transform(d["transform"]),
+        visibility=_VISIBILITY_MAP[d["visibility"]],
+    )
+
+
+def _parse_path_command(d: dict):
+    """Parse a single path command dict into its PathCommand dataclass."""
+    cmd = d["cmd"]
+    if cmd == "M":
+        return MoveTo(x=d["x"], y=d["y"])
+    elif cmd == "L":
+        return LineToCmd(x=d["x"], y=d["y"])
+    elif cmd == "C":
+        return CurveTo(x1=d["x1"], y1=d["y1"], x2=d["x2"], y2=d["y2"],
+                        x=d["x"], y=d["y"])
+    elif cmd == "S":
+        return SmoothCurveTo(x2=d["x2"], y2=d["y2"], x=d["x"], y=d["y"])
+    elif cmd == "Q":
+        return QuadTo(x1=d["x1"], y1=d["y1"], x=d["x"], y=d["y"])
+    elif cmd == "T":
+        return SmoothQuadTo(x=d["x"], y=d["y"])
+    elif cmd == "A":
+        return ArcTo(rx=d["rx"], ry=d["ry"], x_rotation=d["x_rotation"],
+                     large_arc=d["large_arc"], sweep=d["sweep"],
+                     x=d["x"], y=d["y"])
+    elif cmd == "Z":
+        return ClosePath()
+    raise ValueError(f"Unknown path command: {cmd}")
+
+
+def _parse_points(lst: list) -> tuple[tuple[float, float], ...]:
+    return tuple((p[0], p[1]) for p in lst)
+
+
+# ------------------------------------------------------------------ #
+# Element parser                                                      #
+# ------------------------------------------------------------------ #
+
+def _parse_element(d: dict) -> Element:
+    """Parse a JSON dict into an Element."""
+    typ = d["type"]
+    common = _parse_common(d)
+
+    if typ == "layer":
+        children = tuple(_parse_element(c) for c in d["children"])
+        return Layer(name=d["name"], children=children, **common)
+    elif typ == "group":
+        children = tuple(_parse_element(c) for c in d["children"])
+        return Group(children=children, **common)
+    elif typ == "line":
+        return Line(x1=d["x1"], y1=d["y1"], x2=d["x2"], y2=d["y2"],
+                    stroke=_parse_stroke(d["stroke"]), **common)
+    elif typ == "rect":
+        return Rect(x=d["x"], y=d["y"], width=d["width"], height=d["height"],
+                    rx=d["rx"], ry=d["ry"],
+                    fill=_parse_fill(d["fill"]),
+                    stroke=_parse_stroke(d["stroke"]), **common)
+    elif typ == "circle":
+        return Circle(cx=d["cx"], cy=d["cy"], r=d["r"],
+                      fill=_parse_fill(d["fill"]),
+                      stroke=_parse_stroke(d["stroke"]), **common)
+    elif typ == "ellipse":
+        return Ellipse(cx=d["cx"], cy=d["cy"], rx=d["rx"], ry=d["ry"],
+                       fill=_parse_fill(d["fill"]),
+                       stroke=_parse_stroke(d["stroke"]), **common)
+    elif typ == "polyline":
+        return Polyline(points=_parse_points(d["points"]),
+                        fill=_parse_fill(d["fill"]),
+                        stroke=_parse_stroke(d["stroke"]), **common)
+    elif typ == "polygon":
+        return Polygon(points=_parse_points(d["points"]),
+                       fill=_parse_fill(d["fill"]),
+                       stroke=_parse_stroke(d["stroke"]), **common)
+    elif typ == "path":
+        cmds = tuple(_parse_path_command(c) for c in d["d"])
+        return Path(d=cmds,
+                    fill=_parse_fill(d["fill"]),
+                    stroke=_parse_stroke(d["stroke"]), **common)
+    elif typ == "text":
+        return Text(x=d["x"], y=d["y"], content=d["content"],
+                    font_family=d["font_family"], font_size=d["font_size"],
+                    font_weight=d["font_weight"], font_style=d["font_style"],
+                    text_decoration=d["text_decoration"],
+                    width=d["width"], height=d["height"],
+                    fill=_parse_fill(d["fill"]),
+                    stroke=_parse_stroke(d["stroke"]), **common)
+    elif typ == "text_path":
+        cmds = tuple(_parse_path_command(c) for c in d["d"])
+        return TextPath(d=cmds, content=d["content"],
+                        start_offset=d["start_offset"],
+                        font_family=d["font_family"],
+                        font_size=d["font_size"],
+                        font_weight=d["font_weight"],
+                        font_style=d["font_style"],
+                        text_decoration=d["text_decoration"],
+                        fill=_parse_fill(d["fill"]),
+                        stroke=_parse_stroke(d["stroke"]), **common)
+    raise ValueError(f"Unknown element type: {typ}")
+
+
+# ------------------------------------------------------------------ #
+# Selection parser                                                    #
+# ------------------------------------------------------------------ #
+
+def _parse_selection(lst: list) -> frozenset[ElementSelection]:
+    entries: list[ElementSelection] = []
+    for item in lst:
+        path = tuple(item["path"])
+        kind_val = item["kind"]
+        if kind_val == "all":
+            kind = _SelectionAll()
+        else:
+            # kind_val is {"partial": [indices...]}
+            kind = _SelectionPartial(SortedCps.from_iter(kind_val["partial"]))
+        entries.append(ElementSelection(path=path, kind=kind))
+    return frozenset(entries)
+
+
+# ------------------------------------------------------------------ #
+# Document parser (public API)                                        #
+# ------------------------------------------------------------------ #
+
+def test_json_to_document(json_str: str) -> Document:
+    """Parse canonical test JSON into a Document.
+
+    This is the inverse of document_to_test_json: given a JSON string
+    produced by the serializer (from any language), reconstruct the
+    equivalent Document value.
+    """
+    d = json.loads(json_str)
+    layers = tuple(_parse_element(l) for l in d["layers"])
+    selected_layer = d["selected_layer"]
+    selection = _parse_selection(d["selection"])
+    return Document(layers=layers, selected_layer=selected_layer,
+                    selection=selection)
+
+# Prevent pytest from collecting this function as a test (the file name
+# test_json.py matches pytest's test_*.py pattern).
+test_json_to_document.__test__ = False  # type: ignore[attr-defined]

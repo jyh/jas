@@ -67,6 +67,25 @@ let () =
   run_test "svg_roundtrip all fixtures" (fun () ->
     List.iter assert_svg_roundtrip roundtrip_names);
 
+  (* --------------------------------------------------------------- *)
+  (* JSON round-trip idempotence                                       *)
+  (* --------------------------------------------------------------- *)
+
+  Printf.printf "JSON round-trip tests:\n";
+
+  let assert_json_roundtrip name =
+    let expected = read_fixture (Printf.sprintf "expected/%s.json" name) in
+    let doc = Jas.Test_json.test_json_to_document expected in
+    let actual = Jas.Test_json.document_to_test_json doc in
+    if actual <> expected then begin
+      Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name expected;
+      Printf.eprintf "=== ACTUAL (%s) ===\n%s\n" name actual;
+      assert false
+    end
+  in
+  run_test "json_roundtrip all expected" (fun () ->
+    List.iter assert_json_roundtrip roundtrip_names);
+
   Printf.printf "SVG parse tests:\n";
 
   run_test "svg_parse line_basic" (fun () -> assert_svg_parse "line_basic");

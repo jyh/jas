@@ -92,6 +92,34 @@ private func assertSvgRoundtrip(_ name: String) {
 @Test func svgParseMultiLayer() { assertSvgParse("multi_layer") }
 @Test func svgParseComplexDocument() { assertSvgParse("complex_document") }
 
+// MARK: - JSON round-trip (parse → serialize)
+
+private func assertJsonRoundtrip(_ name: String) {
+    let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
+    let doc = testJsonToDocument(expected)
+    let actual = documentToTestJson(doc)
+
+    if actual != expected {
+        print("=== EXPECTED (\(name)) ===")
+        print(expected)
+        print("=== ACTUAL (\(name)) ===")
+        print(actual)
+    }
+    #expect(actual == expected, "JSON round-trip '\(name)' failed: canonical JSON mismatch")
+}
+
+@Test func jsonRoundtripAllExpected() {
+    let names = [
+        "line_basic", "rect_basic", "rect_with_stroke",
+        "circle_basic", "ellipse_basic",
+        "polyline_basic", "polygon_basic", "path_all_commands",
+        "text_basic", "text_path_basic",
+        "group_nested", "transform_translate", "transform_rotate",
+        "multi_layer", "complex_document",
+    ]
+    for name in names { assertJsonRoundtrip(name) }
+}
+
 // MARK: - Algorithm test vectors
 
 private struct HitTestCase: Decodable {
