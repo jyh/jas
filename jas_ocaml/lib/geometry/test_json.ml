@@ -364,3 +364,210 @@ let document_to_test_json doc =
   json_int o "selected_layer" doc.selected_layer;
   json_raw o "selection" (selection_json doc.selection);
   json_build o
+
+(* ------------------------------------------------------------------ *)
+(* JSON -> Document parser (inverse of document_to_test_json)         *)
+(* ------------------------------------------------------------------ *)
+
+open Yojson.Safe.Util
+
+(** Parse a numeric JSON value, handling both floats and ints. *)
+let to_num j =
+  try to_float j with _ -> float_of_int (to_int j)
+
+let parse_color j =
+  { r = j |> member "r" |> to_num;
+    g = j |> member "g" |> to_num;
+    b = j |> member "b" |> to_num;
+    a = j |> member "a" |> to_num }
+
+let parse_fill j =
+  if j = `Null then None
+  else Some { fill_color = parse_color (j |> member "color") }
+
+let parse_stroke j =
+  if j = `Null then None
+  else
+    let lc = match j |> member "linecap" |> to_string with
+      | "round" -> Round_cap
+      | "square" -> Square
+      | _ -> Butt
+    in
+    let lj = match j |> member "linejoin" |> to_string with
+      | "round" -> Round_join
+      | "bevel" -> Bevel
+      | _ -> Miter
+    in
+    Some { stroke_color = parse_color (j |> member "color");
+           stroke_width = j |> member "width" |> to_num;
+           stroke_linecap = lc;
+           stroke_linejoin = lj }
+
+let parse_transform j =
+  if j = `Null then None
+  else Some { a = j |> member "a" |> to_num;
+              b = j |> member "b" |> to_num;
+              c = j |> member "c" |> to_num;
+              d = j |> member "d" |> to_num;
+              e = j |> member "e" |> to_num;
+              f = j |> member "f" |> to_num }
+
+let parse_visibility j =
+  match to_string j with
+  | "invisible" -> Invisible
+  | "outline" -> Outline
+  | _ -> Preview
+
+let parse_path_command j =
+  match j |> member "cmd" |> to_string with
+  | "M" -> MoveTo (j |> member "x" |> to_num,
+                    j |> member "y" |> to_num)
+  | "L" -> LineTo (j |> member "x" |> to_num,
+                    j |> member "y" |> to_num)
+  | "C" -> CurveTo (j |> member "x1" |> to_num,
+                     j |> member "y1" |> to_num,
+                     j |> member "x2" |> to_num,
+                     j |> member "y2" |> to_num,
+                     j |> member "x" |> to_num,
+                     j |> member "y" |> to_num)
+  | "S" -> SmoothCurveTo (j |> member "x2" |> to_num,
+                           j |> member "y2" |> to_num,
+                           j |> member "x" |> to_num,
+                           j |> member "y" |> to_num)
+  | "Q" -> QuadTo (j |> member "x1" |> to_num,
+                    j |> member "y1" |> to_num,
+                    j |> member "x" |> to_num,
+                    j |> member "y" |> to_num)
+  | "T" -> SmoothQuadTo (j |> member "x" |> to_num,
+                          j |> member "y" |> to_num)
+  | "A" -> ArcTo (j |> member "rx" |> to_num,
+                   j |> member "ry" |> to_num,
+                   j |> member "x_rotation" |> to_num,
+                   j |> member "large_arc" |> to_bool,
+                   j |> member "sweep" |> to_bool,
+                   j |> member "x" |> to_num,
+                   j |> member "y" |> to_num)
+  | _ -> ClosePath
+
+let parse_points j =
+  j |> to_list |> List.map (fun p ->
+    let a = to_list p in
+    (List.nth a 0 |> to_num, List.nth a 1 |> to_num))
+
+let rec parse_element j =
+  let typ = j |> member "type" |> to_string in
+  let opacity = j |> member "opacity" |> to_num in
+  let transform = parse_transform (j |> member "transform") in
+  let locked = j |> member "locked" |> to_bool in
+  let visibility = parse_visibility (j |> member "visibility") in
+  match typ with
+  | "line" ->
+    Line { x1 = j |> member "x1" |> to_num;
+           y1 = j |> member "y1" |> to_num;
+           x2 = j |> member "x2" |> to_num;
+           y2 = j |> member "y2" |> to_num;
+           stroke = parse_stroke (j |> member "stroke");
+           opacity; transform; locked; visibility }
+  | "rect" ->
+    Rect { x = j |> member "x" |> to_num;
+           y = j |> member "y" |> to_num;
+           width = j |> member "width" |> to_num;
+           height = j |> member "height" |> to_num;
+           rx = j |> member "rx" |> to_num;
+           ry = j |> member "ry" |> to_num;
+           fill = parse_fill (j |> member "fill");
+           stroke = parse_stroke (j |> member "stroke");
+           opacity; transform; locked; visibility }
+  | "circle" ->
+    Circle { cx = j |> member "cx" |> to_num;
+             cy = j |> member "cy" |> to_num;
+             r = j |> member "r" |> to_num;
+             fill = parse_fill (j |> member "fill");
+             stroke = parse_stroke (j |> member "stroke");
+             opacity; transform; locked; visibility }
+  | "ellipse" ->
+    Ellipse { cx = j |> member "cx" |> to_num;
+              cy = j |> member "cy" |> to_num;
+              rx = j |> member "rx" |> to_num;
+              ry = j |> member "ry" |> to_num;
+              fill = parse_fill (j |> member "fill");
+              stroke = parse_stroke (j |> member "stroke");
+              opacity; transform; locked; visibility }
+  | "polyline" ->
+    Polyline { points = parse_points (j |> member "points");
+               fill = parse_fill (j |> member "fill");
+               stroke = parse_stroke (j |> member "stroke");
+               opacity; transform; locked; visibility }
+  | "polygon" ->
+    Polygon { points = parse_points (j |> member "points");
+              fill = parse_fill (j |> member "fill");
+              stroke = parse_stroke (j |> member "stroke");
+              opacity; transform; locked; visibility }
+  | "path" ->
+    Path { d = j |> member "d" |> to_list |> List.map parse_path_command;
+           fill = parse_fill (j |> member "fill");
+           stroke = parse_stroke (j |> member "stroke");
+           opacity; transform; locked; visibility }
+  | "text" ->
+    Text { x = j |> member "x" |> to_num;
+           y = j |> member "y" |> to_num;
+           content = j |> member "content" |> to_string;
+           font_family = j |> member "font_family" |> to_string;
+           font_size = j |> member "font_size" |> to_num;
+           font_weight = j |> member "font_weight" |> to_string;
+           font_style = j |> member "font_style" |> to_string;
+           text_decoration = j |> member "text_decoration" |> to_string;
+           text_width = j |> member "width" |> to_num;
+           text_height = j |> member "height" |> to_num;
+           fill = parse_fill (j |> member "fill");
+           stroke = parse_stroke (j |> member "stroke");
+           opacity; transform; locked; visibility }
+  | "text_path" ->
+    Text_path { d = j |> member "d" |> to_list |> List.map parse_path_command;
+                content = j |> member "content" |> to_string;
+                start_offset = j |> member "start_offset" |> to_num;
+                font_family = j |> member "font_family" |> to_string;
+                font_size = j |> member "font_size" |> to_num;
+                font_weight = j |> member "font_weight" |> to_string;
+                font_style = j |> member "font_style" |> to_string;
+                text_decoration = j |> member "text_decoration" |> to_string;
+                fill = parse_fill (j |> member "fill");
+                stroke = parse_stroke (j |> member "stroke");
+                opacity; transform; locked; visibility }
+  | "group" ->
+    let children = j |> member "children" |> to_list
+      |> List.map parse_element |> Array.of_list in
+    Group { children; opacity; transform; locked; visibility }
+  | "layer" ->
+    let children = j |> member "children" |> to_list
+      |> List.map parse_element |> Array.of_list in
+    let name = j |> member "name" |> to_string in
+    Layer { name; children; opacity; transform; locked; visibility }
+  | _ -> failwith (Printf.sprintf "Unknown element type: %s" typ)
+
+let parse_selection j =
+  let entries = j |> to_list |> List.map (fun es ->
+    let path = es |> member "path" |> to_list |> List.map to_int in
+    let kind_j = es |> member "kind" in
+    let kind = match kind_j with
+      | `String "all" -> SelKindAll
+      | `Assoc _ ->
+        let partial = kind_j |> member "partial" |> to_list |> List.map to_int in
+        SelKindPartial (SortedCps.from_list partial)
+      | _ -> SelKindAll
+    in
+    { es_path = path; es_kind = kind }
+  ) in
+  List.fold_left (fun m es ->
+    PathMap.add es.es_path es m
+  ) PathMap.empty entries
+
+(** Parse canonical test JSON into a Document.
+    This is the inverse of [document_to_test_json]. *)
+let test_json_to_document json_str =
+  let j = Yojson.Safe.from_string json_str in
+  let layers = j |> member "layers" |> to_list
+    |> List.map parse_element |> Array.of_list in
+  let selected_layer = j |> member "selected_layer" |> to_int in
+  let selection = parse_selection (j |> member "selection") in
+  make_document ~selected_layer ~selection layers

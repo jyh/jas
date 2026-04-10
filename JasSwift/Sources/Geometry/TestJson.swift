@@ -337,3 +337,209 @@ public func documentToTestJson(_ doc: Document) -> String {
     o.raw("selection", selectionJson(Array(doc.selection)))
     return o.build()
 }
+
+// MARK: - JSON → Document parser (inverse of documentToTestJson)
+
+private func parseF(_ v: Any?) -> Double {
+    if let n = v as? NSNumber { return n.doubleValue }
+    return 0.0
+}
+
+private func parseColor(_ v: Any?) -> Color {
+    guard let d = v as? [String: Any] else { return Color(r: 0, g: 0, b: 0, a: 1) }
+    return Color(r: parseF(d["r"]), g: parseF(d["g"]), b: parseF(d["b"]), a: parseF(d["a"]))
+}
+
+private func parseFill(_ v: Any?) -> Fill? {
+    guard let d = v as? [String: Any] else { return nil }
+    return Fill(color: parseColor(d["color"]))
+}
+
+private func parseStroke(_ v: Any?) -> Stroke? {
+    guard let d = v as? [String: Any] else { return nil }
+    let lc: LineCap
+    switch d["linecap"] as? String ?? "butt" {
+    case "round": lc = .round
+    case "square": lc = .square
+    default: lc = .butt
+    }
+    let lj: LineJoin
+    switch d["linejoin"] as? String ?? "miter" {
+    case "round": lj = .round
+    case "bevel": lj = .bevel
+    default: lj = .miter
+    }
+    return Stroke(color: parseColor(d["color"]), width: parseF(d["width"]), linecap: lc, linejoin: lj)
+}
+
+private func parseTransform(_ v: Any?) -> Transform? {
+    guard let d = v as? [String: Any] else { return nil }
+    return Transform(a: parseF(d["a"]), b: parseF(d["b"]), c: parseF(d["c"]),
+                     d: parseF(d["d"]), e: parseF(d["e"]), f: parseF(d["f"]))
+}
+
+private func parseVisibility(_ v: Any?) -> Visibility {
+    switch v as? String ?? "preview" {
+    case "invisible": return .invisible
+    case "outline": return .outline
+    default: return .preview
+    }
+}
+
+private func parseCommon(_ d: [String: Any]) -> (Double, Transform?, Bool, Visibility) {
+    (parseF(d["opacity"]),
+     parseTransform(d["transform"]),
+     d["locked"] as? Bool ?? false,
+     parseVisibility(d["visibility"]))
+}
+
+private func parsePathCommands(_ v: Any?) -> [PathCommand] {
+    guard let arr = v as? [[String: Any]] else { return [] }
+    return arr.map { c in
+        switch c["cmd"] as? String ?? "" {
+        case "M": return .moveTo(parseF(c["x"]), parseF(c["y"]))
+        case "L": return .lineTo(parseF(c["x"]), parseF(c["y"]))
+        case "C": return .curveTo(x1: parseF(c["x1"]), y1: parseF(c["y1"]),
+                                  x2: parseF(c["x2"]), y2: parseF(c["y2"]),
+                                  x: parseF(c["x"]), y: parseF(c["y"]))
+        case "S": return .smoothCurveTo(x2: parseF(c["x2"]), y2: parseF(c["y2"]),
+                                        x: parseF(c["x"]), y: parseF(c["y"]))
+        case "Q": return .quadTo(x1: parseF(c["x1"]), y1: parseF(c["y1"]),
+                                 x: parseF(c["x"]), y: parseF(c["y"]))
+        case "T": return .smoothQuadTo(parseF(c["x"]), parseF(c["y"]))
+        case "A": return .arcTo(rx: parseF(c["rx"]), ry: parseF(c["ry"]),
+                                rotation: parseF(c["x_rotation"]),
+                                largeArc: c["large_arc"] as? Bool ?? false,
+                                sweep: c["sweep"] as? Bool ?? false,
+                                x: parseF(c["x"]), y: parseF(c["y"]))
+        default: return .closePath
+        }
+    }
+}
+
+private func parsePoints(_ v: Any?) -> [(Double, Double)] {
+    guard let arr = v as? [[Any]] else { return [] }
+    return arr.map { p in
+        (parseF(p[0]), parseF(p[1]))
+    }
+}
+
+private func parseElement(_ v: Any?) -> Element {
+    guard let d = v as? [String: Any] else { fatalError("Expected JSON object for element") }
+    let typ = d["type"] as? String ?? ""
+    let (opacity, transform, locked, visibility) = parseCommon(d)
+
+    switch typ {
+    case "line":
+        return .line(Line(x1: parseF(d["x1"]), y1: parseF(d["y1"]),
+                          x2: parseF(d["x2"]), y2: parseF(d["y2"]),
+                          stroke: parseStroke(d["stroke"]),
+                          opacity: opacity, transform: transform, locked: locked,
+                          visibility: visibility))
+    case "rect":
+        return .rect(Rect(x: parseF(d["x"]), y: parseF(d["y"]),
+                          width: parseF(d["width"]), height: parseF(d["height"]),
+                          rx: parseF(d["rx"]), ry: parseF(d["ry"]),
+                          fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
+                          opacity: opacity, transform: transform, locked: locked,
+                          visibility: visibility))
+    case "circle":
+        return .circle(Circle(cx: parseF(d["cx"]), cy: parseF(d["cy"]), r: parseF(d["r"]),
+                              fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
+                              opacity: opacity, transform: transform, locked: locked,
+                              visibility: visibility))
+    case "ellipse":
+        return .ellipse(Ellipse(cx: parseF(d["cx"]), cy: parseF(d["cy"]),
+                                rx: parseF(d["rx"]), ry: parseF(d["ry"]),
+                                fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
+                                opacity: opacity, transform: transform, locked: locked,
+                                visibility: visibility))
+    case "polyline":
+        return .polyline(Polyline(points: parsePoints(d["points"]),
+                                  fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
+                                  opacity: opacity, transform: transform, locked: locked,
+                                  visibility: visibility))
+    case "polygon":
+        return .polygon(Polygon(points: parsePoints(d["points"]),
+                                fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
+                                opacity: opacity, transform: transform, locked: locked,
+                                visibility: visibility))
+    case "path":
+        return .path(Path(d: parsePathCommands(d["d"]),
+                          fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
+                          opacity: opacity, transform: transform, locked: locked,
+                          visibility: visibility))
+    case "text":
+        return .text(Text(x: parseF(d["x"]), y: parseF(d["y"]),
+                          content: d["content"] as? String ?? "",
+                          fontFamily: d["font_family"] as? String ?? "sans-serif",
+                          fontSize: parseF(d["font_size"]),
+                          fontWeight: d["font_weight"] as? String ?? "normal",
+                          fontStyle: d["font_style"] as? String ?? "normal",
+                          textDecoration: d["text_decoration"] as? String ?? "none",
+                          width: parseF(d["width"]), height: parseF(d["height"]),
+                          fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
+                          opacity: opacity, transform: transform, locked: locked,
+                          visibility: visibility))
+    case "text_path":
+        return .textPath(TextPath(d: parsePathCommands(d["d"]),
+                                  content: d["content"] as? String ?? "",
+                                  startOffset: parseF(d["start_offset"]),
+                                  fontFamily: d["font_family"] as? String ?? "sans-serif",
+                                  fontSize: parseF(d["font_size"]),
+                                  fontWeight: d["font_weight"] as? String ?? "normal",
+                                  fontStyle: d["font_style"] as? String ?? "normal",
+                                  textDecoration: d["text_decoration"] as? String ?? "none",
+                                  fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
+                                  opacity: opacity, transform: transform, locked: locked,
+                                  visibility: visibility))
+    case "group":
+        let children = (d["children"] as? [Any] ?? []).map { parseElement($0) }
+        return .group(Group(children: children, opacity: opacity, transform: transform,
+                            locked: locked, visibility: visibility))
+    case "layer":
+        let children = (d["children"] as? [Any] ?? []).map { parseElement($0) }
+        let name = d["name"] as? String ?? "Layer"
+        return .layer(Layer(name: name, children: children, opacity: opacity, transform: transform,
+                            locked: locked, visibility: visibility))
+    default:
+        fatalError("Unknown element type: \(typ)")
+    }
+}
+
+private func parseSelection(_ v: Any?) -> Selection {
+    guard let arr = v as? [[String: Any]] else { return [] }
+    var sel: Selection = []
+    for es in arr {
+        let path = (es["path"] as? [Any] ?? []).map { ($0 as! NSNumber).intValue }
+        let kind: SelectionKind
+        if let s = es["kind"] as? String {
+            kind = s == "all" ? .all : .all
+        } else if let obj = es["kind"] as? [String: Any],
+                  let partial = obj["partial"] as? [Any] {
+            let cps = partial.map { ($0 as! NSNumber).intValue }
+            kind = .partial(SortedCps(cps))
+        } else {
+            kind = .all
+        }
+        sel.insert(ElementSelection(path: path, kind: kind))
+    }
+    return sel
+}
+
+/// Parse canonical test JSON into a Document.
+///
+/// This is the inverse of ``documentToTestJson(_:)``.
+public func testJsonToDocument(_ json: String) -> Document {
+    let data = json.data(using: .utf8)!
+    let v = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+    let layerValues = v["layers"] as? [Any] ?? []
+    let layers: [Layer] = layerValues.map { lv in
+        let elem = parseElement(lv)
+        guard case .layer(let l) = elem else { fatalError("Expected layer element") }
+        return l
+    }
+    let selectedLayer = (v["selected_layer"] as? NSNumber)?.intValue ?? 0
+    let selection = parseSelection(v["selection"])
+    return Document(layers: layers, selectedLayer: selectedLayer, selection: selection)
+}

@@ -11,7 +11,7 @@ mod tests {
     use crate::document::controller::Controller;
     use crate::document::model::Model;
     use crate::geometry::svg::{document_to_svg, svg_to_document};
-    use crate::geometry::test_json::document_to_test_json;
+    use crate::geometry::test_json::{document_to_test_json, test_json_to_document};
 
     /// Path to the shared test fixtures directory, relative to the Rust
     /// crate root (`jas_dioxus/`).
@@ -70,6 +70,30 @@ mod tests {
             eprintln!("=== AFTER ROUND-TRIP ({}) ===", name);
             eprintln!("{}", json2);
             panic!("SVG round-trip '{}' failed: canonical JSON changed after serialize→parse", name);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Canonical JSON round-trip: parse JSON → Document → JSON
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn json_roundtrip_all_expected() {
+        let names = [
+            "line_basic", "rect_basic", "rect_with_stroke",
+            "circle_basic", "ellipse_basic",
+            "polyline_basic", "polygon_basic", "path_all_commands",
+            "text_basic", "text_path_basic",
+            "group_nested", "transform_translate", "transform_rotate",
+            "multi_layer", "complex_document",
+        ];
+        for name in &names {
+            let json1 = read_fixture(&format!("expected/{}.json", name));
+            let json1 = json1.trim();
+            let doc = test_json_to_document(json1);
+            let json2 = document_to_test_json(&doc);
+            assert_eq!(json1, json2,
+                "JSON round-trip '{}' failed: parse→serialize changed the canonical JSON", name);
         }
     }
 
