@@ -140,11 +140,13 @@ let bounds doc =
 (** Return the children of an element, if it is a group or layer. *)
 let children_of = function
   | Group { children; _ } | Layer { children; _ } -> children
+  (* Precondition: elem must be Group or Layer. Caller must type-check. *)
   | _ -> failwith "element has no children"
 
 (** Return the element at the given path in the document. *)
 let get_element doc path =
   match path with
+  (* Precondition: path must be non-empty. Controller validates at entry. *)
   | [] -> failwith "path must be non-empty"
   | [i] -> doc.layers.(i)
   | i :: rest ->
@@ -189,6 +191,7 @@ let with_children node new_children =
     Group { children = new_children; opacity; transform; locked; visibility }
   | Layer { name; opacity; transform; locked; visibility; _ } ->
     Layer { name; children = new_children; opacity; transform; locked; visibility }
+  (* Precondition: elem must be Group or Layer. Called only after children_of. *)
   | _ -> failwith "element has no children"
 
 (** Recursively replace the element at [rest] inside a group/layer node. *)
@@ -213,6 +216,7 @@ let array_insert_after arr n x =
 (** Recursively insert new_elem after the position indicated by rest. *)
 let rec insert_after_in_group node rest new_elem =
   match rest with
+  (* Precondition: rest must be non-empty. Guaranteed by insert_element_after recursion. *)
   | [] -> failwith "rest must be non-empty"
   | [i] ->
     with_children node (array_insert_after (children_of node) i new_elem)
@@ -224,6 +228,7 @@ let rec insert_after_in_group node rest new_elem =
 (** Return a new document with new_elem inserted immediately after path. *)
 let insert_element_after doc path new_elem =
   match path with
+  (* Precondition: path must be non-empty. Controller validates at entry. *)
   | [] -> failwith "path must be non-empty"
   | [i] ->
     { doc with layers = array_insert_after doc.layers i new_elem }
@@ -235,6 +240,7 @@ let insert_element_after doc path new_elem =
 (** Return a new document with the element at [path] replaced by [new_elem]. *)
 let replace_element doc path new_elem =
   match path with
+  (* Precondition: path must be non-empty. Controller validates at entry. *)
   | [] -> failwith "path must be non-empty"
   | [i] ->
     { doc with layers = array_replace_nth doc.layers i new_elem }
@@ -251,6 +257,7 @@ let array_remove_nth arr n =
 (** Recursively remove the element at [rest] inside a group/layer node. *)
 let rec remove_from_group node rest =
   match rest with
+  (* Precondition: rest must be non-empty. Guaranteed by delete_element recursion. *)
   | [] -> failwith "rest must be non-empty"
   | [i] -> with_children node (array_remove_nth (children_of node) i)
   | i :: rest ->
@@ -261,6 +268,7 @@ let rec remove_from_group node rest =
 (** Return a new document with the element at [path] removed. *)
 let delete_element doc path =
   match path with
+  (* Precondition: path must be non-empty. Controller validates at entry. *)
   | [] -> failwith "path must be non-empty"
   | [i] -> { doc with layers = array_remove_nth doc.layers i }
   | i :: rest ->
