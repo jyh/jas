@@ -1,8 +1,8 @@
 """Tests for pane layout infrastructure."""
 
 from workspace.pane import (
-    PaneLayout, PaneKind, PaneConfig, EdgeSide, SnapConstraint,
-    WindowTarget, PaneTarget,
+    PaneLayout, PaneKind, PaneConfig, DoubleClickAction, EdgeSide,
+    SnapConstraint, WindowTarget, PaneTarget,
     MIN_TOOLBAR_WIDTH, MIN_TOOLBAR_HEIGHT, MIN_CANVAS_WIDTH, MIN_CANVAS_HEIGHT,
     MIN_PANE_DOCK_WIDTH, MIN_PANE_DOCK_HEIGHT, DEFAULT_TOOLBAR_WIDTH,
     BORDER_HIT_TOLERANCE, MIN_PANE_VISIBLE,
@@ -50,23 +50,16 @@ def test_pane_config_defaults():
     tc = PaneConfig.for_kind(PaneKind.TOOLBAR)
     assert tc.min_width == MIN_TOOLBAR_WIDTH
     assert tc.fixed_width
-    assert tc.closable
-    assert not tc.maximizable
+    assert tc.double_click_action == DoubleClickAction.NONE
     cc = PaneConfig.for_kind(PaneKind.CANVAS)
     assert cc.min_width == MIN_CANVAS_WIDTH
     assert not cc.fixed_width
-    assert not cc.closable
-    assert cc.maximizable
+    assert cc.double_click_action == DoubleClickAction.MAXIMIZE
     dc = PaneConfig.for_kind(PaneKind.DOCK)
     assert dc.min_width == MIN_PANE_DOCK_WIDTH
     assert not dc.fixed_width
-    assert dc.closable
-    assert dc.collapsible
-    # always_visible
-    assert not tc.always_visible
-    assert cc.always_visible
-    assert not dc.always_visible
-    # collapsed_width
+    assert dc.double_click_action == DoubleClickAction.REDOCK
+    # collapsed_width drives collapsibility
     assert tc.collapsed_width is None
     assert cc.collapsed_width is None
     assert dc.collapsed_width == 36.0
@@ -398,3 +391,44 @@ def test_tile_panes_rebuilds_snaps():
     tid = pl.pane_by_kind(PaneKind.TOOLBAR).id
     cid = pl.pane_by_kind(PaneKind.CANVAS).id
     assert any(s.pane == tid and s.edge == EdgeSide.RIGHT and s.target == PaneTarget(cid, EdgeSide.LEFT) for s in pl.snaps)
+
+
+# -- show_pane brings to front --
+
+def test_show_pane_brings_to_front():
+    pl = PaneLayout.default_three_pane(1000, 700)
+    toolbar_id = pl.pane_by_kind(PaneKind.TOOLBAR).id
+    pl.hide_pane(PaneKind.TOOLBAR)
+    pl.show_pane(PaneKind.TOOLBAR)
+    assert pl.z_order[-1] == toolbar_id
+
+
+# -- hide_pane unmaximizes --
+
+def test_hide_maximized_pane_unmaximizes():
+    pl = PaneLayout.default_three_pane(1000, 700)
+    pl.toggle_canvas_maximized()
+    assert pl.canvas_maximized
+    pl.hide_pane(PaneKind.CANVAS)
+    assert not pl.canvas_maximized
+
+def test_hide_non_maximizable_pane_preserves_maximized():
+    pl = PaneLayout.default_three_pane(1000, 700)
+    pl.toggle_canvas_maximized()
+    assert pl.canvas_maximized
+    pl.hide_pane(PaneKind.TOOLBAR)
+    assert pl.canvas_maximized
+
+
+# -- fixed-width border drag unsnaps --
+
+def test_drag_shared_border_fixed_width_unsnaps():
+    pl = PaneLayout.default_three_pane(1000, 700)
+    toolbar_id = pl.pane_by_kind(PaneKind.TOOLBAR).id
+    canvas_id = pl.pane_by_kind(PaneKind.CANVAS).id
+    snap_idx = next(i for i, s in enumerate(pl.snaps)
+                    if s.pane == toolbar_id and s.edge == EdgeSide.RIGHT
+                    and s.target == PaneTarget(canvas_id, EdgeSide.LEFT))
+    pl.drag_shared_border(snap_idx, 30.0)
+    assert not any(s.pane == toolbar_id and s.edge == EdgeSide.RIGHT
+                   and s.target == PaneTarget(canvas_id, EdgeSide.LEFT) for s in pl.snaps)

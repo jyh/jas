@@ -153,7 +153,7 @@ pub enum DropTarget {
 
 /// Current layout format version. Saved layouts with a different version
 /// are rejected and replaced with the default layout.
-pub const LAYOUT_VERSION: u32 = 1;
+pub const LAYOUT_VERSION: u32 = 2;
 
 /// Top-level layout: anchored docks on screen edges + floating docks.
 #[derive(Debug, Clone, Serialize, Deserialize)]

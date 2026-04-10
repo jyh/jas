@@ -4,8 +4,8 @@ from PaneLayout state. No Qt code."""
 from __future__ import annotations
 from dataclasses import dataclass
 from workspace.pane import (
-    PaneLayout, PaneKind, PaneConfig, EdgeSide, SnapConstraint,
-    PaneTarget,
+    PaneLayout, PaneKind, PaneConfig, DoubleClickAction, EdgeSide,
+    SnapConstraint, PaneTarget,
 )
 
 
@@ -46,8 +46,8 @@ def compute_pane_geometries(pl: PaneLayout | None) -> list[PaneGeometry]:
     maximized = pl.canvas_maximized
     result = []
     for p in pl.panes:
-        visible = p.config.always_visible or pl.is_pane_visible(p.kind)
-        if p.config.maximizable and maximized:
+        visible = pl.is_pane_visible(p.kind)
+        if p.config.double_click_action == DoubleClickAction.MAXIMIZE and maximized:
             x, y, w, h, z = 0, 0, pl.viewport_width, pl.viewport_height, 0
         elif maximized:
             x, y, w, h, z = p.x, p.y, p.width, p.height, pl.pane_z_index(p.id) + 50

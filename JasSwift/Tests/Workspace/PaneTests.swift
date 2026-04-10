@@ -48,27 +48,19 @@ import Testing
     let tc = PaneConfig.forKind(.toolbar)
     #expect(tc.minWidth == minToolbarWidth)
     #expect(tc.fixedWidth)
-    #expect(tc.closable)
-    #expect(!tc.maximizable)
+    #expect(tc.doubleClickAction == .none)
 
     let cc = PaneConfig.forKind(.canvas)
     #expect(cc.minWidth == minCanvasWidth)
     #expect(!cc.fixedWidth)
-    #expect(!cc.closable)
-    #expect(cc.maximizable)
+    #expect(cc.doubleClickAction == .maximize)
 
     let dc = PaneConfig.forKind(.dock)
     #expect(dc.minWidth == minPaneDockWidth)
     #expect(!dc.fixedWidth)
-    #expect(dc.closable)
-    #expect(dc.collapsible)
+    #expect(dc.doubleClickAction == .redock)
 
-    // alwaysVisible
-    #expect(!tc.alwaysVisible)
-    #expect(cc.alwaysVisible)
-    #expect(!dc.alwaysVisible)
-
-    // collapsedWidth
+    // collapsedWidth drives collapsibility
     #expect(tc.collapsedWidth == nil)
     #expect(cc.collapsedWidth == nil)
     #expect(dc.collapsedWidth == 36.0)
@@ -489,6 +481,49 @@ import Testing
     let toolbarId = pl.paneByKind(.toolbar)!.id
     let canvasId = pl.paneByKind(.canvas)!.id
     #expect(pl.snaps.contains { s in
+        s.pane == toolbarId && s.edge == .right && s.target == .pane(canvasId, .left)
+    })
+}
+
+// MARK: - show_pane brings to front
+
+@Test func showPaneBringsToFront() {
+    var pl = PaneLayout.defaultThreePane(viewportW: 1000, viewportH: 700)
+    let toolbarId = pl.paneByKind(.toolbar)!.id
+    pl.hidePane(.toolbar)
+    pl.showPane(.toolbar)
+    #expect(pl.zOrder.last == toolbarId)
+}
+
+// MARK: - hide_pane unmaximizes
+
+@Test func hideMaximizedPaneUnmaximizes() {
+    var pl = PaneLayout.defaultThreePane(viewportW: 1000, viewportH: 700)
+    pl.toggleCanvasMaximized()
+    #expect(pl.canvasMaximized)
+    pl.hidePane(.canvas)
+    #expect(!pl.canvasMaximized)
+}
+
+@Test func hideNonMaximizablePanePreservesMaximized() {
+    var pl = PaneLayout.defaultThreePane(viewportW: 1000, viewportH: 700)
+    pl.toggleCanvasMaximized()
+    #expect(pl.canvasMaximized)
+    pl.hidePane(.toolbar)
+    #expect(pl.canvasMaximized)
+}
+
+// MARK: - fixed-width border drag unsnaps
+
+@Test func dragSharedBorderFixedWidthUnsnaps() {
+    var pl = PaneLayout.defaultThreePane(viewportW: 1000, viewportH: 700)
+    let toolbarId = pl.paneByKind(.toolbar)!.id
+    let canvasId = pl.paneByKind(.canvas)!.id
+    let snapIdx = pl.snaps.firstIndex { s in
+        s.pane == toolbarId && s.edge == .right && s.target == .pane(canvasId, .left)
+    }!
+    pl.dragSharedBorder(snapIdx: snapIdx, delta: 30.0)
+    #expect(!pl.snaps.contains { s in
         s.pane == toolbarId && s.edge == .right && s.target == .pane(canvasId, .left)
     })
 }

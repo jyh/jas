@@ -126,7 +126,7 @@ let make_dock id groups width = {
 (* DockLayout                                                         *)
 (* ------------------------------------------------------------------ *)
 
-let layout_version = 1
+let layout_version = 2
 
 type dock_layout = {
   mutable version : int;
@@ -672,13 +672,22 @@ let tile_width_of_json (j : Yojson.Safe.t) : Pane.tile_width =
   | `Assoc [("Fixed", `Float w)] -> Fixed w
   | _ -> Flex
 
+let double_click_action_to_json = function
+  | Pane.Maximize -> `String "Maximize"
+  | Pane.Redock -> `String "Redock"
+  | Pane.No_action -> `String "None"
+
+let double_click_action_of_json = function
+  | `String "Maximize" -> Pane.Maximize
+  | `String "Redock" -> Pane.Redock
+  | _ -> Pane.No_action
+
 let pane_config_to_json (c : Pane.pane_config) : Yojson.Safe.t =
   let base = [
     "label", `String c.label;
     "min_width", `Float c.min_width; "min_height", `Float c.min_height;
-    "fixed_width", `Bool c.fixed_width; "closable", `Bool c.closable;
-    "collapsible", `Bool c.collapsible; "maximizable", `Bool c.maximizable;
-    "always_visible", `Bool c.always_visible;
+    "fixed_width", `Bool c.fixed_width;
+    "double_click_action", double_click_action_to_json c.double_click_action;
     "tile_order", `Int c.tile_order; "tile_width", tile_width_to_json c.tile_width;
   ] in
   let with_cw = match c.collapsed_width with
@@ -693,11 +702,8 @@ let pane_config_of_json (j : Yojson.Safe.t) : Pane.pane_config =
     min_width = j |> member "min_width" |> to_float;
     min_height = j |> member "min_height" |> to_float;
     fixed_width = j |> member "fixed_width" |> to_bool;
-    closable = j |> member "closable" |> to_bool;
-    collapsible = j |> member "collapsible" |> to_bool;
-    maximizable = j |> member "maximizable" |> to_bool;
-    always_visible = (try j |> member "always_visible" |> to_bool with _ -> false);
     collapsed_width = (try Some (j |> member "collapsed_width" |> to_float) with _ -> None);
+    double_click_action = (try double_click_action_of_json (j |> member "double_click_action") with _ -> Pane.No_action);
     tile_order = j |> member "tile_order" |> to_int;
     tile_width = tile_width_of_json (j |> member "tile_width"); }
 

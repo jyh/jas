@@ -939,7 +939,7 @@ private func rightDockId(_ l: DockLayout) -> DockId {
     l.ensurePaneLayout(viewportW: 1000, viewportH: 700)
     let json = l.toJson()!
     // Tamper with version to simulate future format
-    let tampered = json.replacingOccurrences(of: "\"version\":1", with: "\"version\":999")
+    let tampered = json.replacingOccurrences(of: "\"version\":\(layoutVersion)", with: "\"version\":999")
     let l2 = DockLayout.fromJson(tampered)
     // Should fall back to default (version mismatch)
     #expect(l2.version == layoutVersion)

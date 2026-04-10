@@ -48,17 +48,20 @@ class TileWidth(Enum):
 class TileFixed:
     width: float
 
+class DoubleClickAction(Enum):
+    """Action triggered by double-clicking a pane's title bar."""
+    MAXIMIZE = auto()
+    REDOCK = auto()
+    NONE = auto()
+
 @dataclass
 class PaneConfig:
     label: str
     min_width: float
     min_height: float
     fixed_width: bool
-    closable: bool
-    collapsible: bool
-    maximizable: bool
-    always_visible: bool
     collapsed_width: float | None
+    double_click_action: DoubleClickAction
     tile_order: int
     tile_width: object  # TileFixed | TileWidth.KEEP_CURRENT | TileWidth.FLEX
 
@@ -66,15 +69,15 @@ class PaneConfig:
     def for_kind(kind: PaneKind) -> PaneConfig:
         if kind == PaneKind.TOOLBAR:
             return PaneConfig("Tools", MIN_TOOLBAR_WIDTH, MIN_TOOLBAR_HEIGHT,
-                              True, True, False, False, False, None,
+                              True, None, DoubleClickAction.NONE,
                               0, TileFixed(DEFAULT_TOOLBAR_WIDTH))
         elif kind == PaneKind.CANVAS:
             return PaneConfig("Canvas", MIN_CANVAS_WIDTH, MIN_CANVAS_HEIGHT,
-                              False, False, False, True, True, None,
+                              False, None, DoubleClickAction.MAXIMIZE,
                               1, TileWidth.FLEX)
         else:
             return PaneConfig("Panels", MIN_PANE_DOCK_WIDTH, MIN_PANE_DOCK_HEIGHT,
-                              False, True, True, False, False, 36.0,
+                              False, 36.0, DoubleClickAction.REDOCK,
                               2, TileWidth.KEEP_CURRENT)
 
 @dataclass
@@ -366,6 +369,13 @@ class PaneLayout:
                 pb.y += clamped
                 pb.height -= clamped
             self._propagate_border_shift(other_id, EdgeSide.BOTTOM, False)
+        # When one pane is fixed-width, unsnap the border.
+        a_fixed = pa.config.fixed_width
+        b_fixed = pb.config.fixed_width
+        if (a_fixed or b_fixed) and not (a_fixed and b_fixed):
+            self.snaps = [s for s in self.snaps
+                          if not (s.pane == snap.pane and s.edge == snap.edge
+                                  and s.target == snap.target)]
 
     # -- Canvas maximization --
 
@@ -434,11 +444,20 @@ class PaneLayout:
     # -- Pane visibility --
 
     def hide_pane(self, kind: PaneKind):
+        """Hide a pane (close it). If the pane is maximized, unmaximize first."""
+        if self.canvas_maximized:
+            p = self.pane_by_kind(kind)
+            if p is not None and p.config.double_click_action == DoubleClickAction.MAXIMIZE:
+                self.canvas_maximized = False
         if kind not in self.hidden_panes:
             self.hidden_panes.append(kind)
 
     def show_pane(self, kind: PaneKind):
+        """Show a hidden pane and bring it to the front."""
         self.hidden_panes = [k for k in self.hidden_panes if k != kind]
+        p = self.pane_by_kind(kind)
+        if p is not None:
+            self.bring_pane_to_front(p.id)
 
     def is_pane_visible(self, kind: PaneKind) -> bool:
         return kind not in self.hidden_panes
@@ -522,9 +541,8 @@ def pane_layout_to_dict(pl: PaneLayout) -> dict:
         else:
             tw_d = "Flex"
         result = {"label": c.label, "min_width": c.min_width, "min_height": c.min_height,
-                "fixed_width": c.fixed_width, "closable": c.closable,
-                "collapsible": c.collapsible, "maximizable": c.maximizable,
-                "always_visible": c.always_visible,
+                "fixed_width": c.fixed_width,
+                "double_click_action": c.double_click_action.name,
                 "tile_order": c.tile_order, "tile_width": tw_d}
         if c.collapsed_width is not None:
             result["collapsed_width"] = c.collapsed_width
@@ -558,11 +576,12 @@ def pane_layout_from_dict(d: dict) -> PaneLayout:
         return TileWidth.FLEX
     def _config(cd, kind):
         try:
+            dca_name = cd.get("double_click_action", "NONE")
+            dca = DoubleClickAction[dca_name] if dca_name in DoubleClickAction.__members__ else DoubleClickAction.NONE
             return PaneConfig(cd["label"], cd["min_width"], cd["min_height"],
-                              cd["fixed_width"], cd["closable"], cd["collapsible"],
-                              cd["maximizable"],
-                              cd.get("always_visible", False),
+                              cd["fixed_width"],
                               cd.get("collapsed_width"),
+                              dca,
                               cd["tile_order"], _tw(cd["tile_width"]))
         except (KeyError, TypeError):
             return PaneConfig.for_kind(kind)

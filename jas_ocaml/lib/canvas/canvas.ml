@@ -26,19 +26,17 @@ let make_title_bar ~dock_layout ~refresh_all ~pane_id ~kind ~(config : Pane.pane
   let _lbl = GMisc.label ~text:config.label
     ~packing:(hbox#pack ~expand:true ~fill:true) () in
 
-  if config.closable then begin
-    let close_btn = GButton.button ~label:"\xC3\x97" ~packing:(hbox#pack ~expand:false) () in
-    close_btn#misc#set_size_request ~width:20 ~height:title_bar_height ();
-    ignore (close_btn#connect#clicked ~callback:(fun () ->
-      Dock.panes_mut dock_layout (fun pl -> Pane.hide_pane pl kind);
-      refresh_all ()
-    ))
-  end;
+  let close_btn = GButton.button ~label:"\xC3\x97" ~packing:(hbox#pack ~expand:false) () in
+  close_btn#misc#set_size_request ~width:20 ~height:title_bar_height ();
+  ignore (close_btn#connect#clicked ~callback:(fun () ->
+    Dock.panes_mut dock_layout (fun pl -> Pane.hide_pane pl kind);
+    refresh_all ()
+  ));
 
   (* Title bar drag — mousedown starts pane drag *)
   title_bar#event#add [`BUTTON_PRESS];
   ignore (title_bar#event#connect#button_press ~callback:(fun ev ->
-    if GdkEvent.get_type ev = `TWO_BUTTON_PRESS && config.maximizable then begin
+    if GdkEvent.get_type ev = `TWO_BUTTON_PRESS && config.double_click_action = Pane.Maximize then begin
       Dock.panes_mut dock_layout (fun pl -> Pane.toggle_canvas_maximized pl);
       refresh_all ();
       true

@@ -48,6 +48,18 @@ pub enum TileWidth {
     Flex,
 }
 
+/// Action triggered by double-clicking a pane's title bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum DoubleClickAction {
+    /// Toggle maximize (canvas).
+    Maximize,
+    /// Merge floating dock back into nearest anchored dock.
+    Redock,
+    /// No action.
+    #[default]
+    None,
+}
+
 /// Configuration that drives generic pane management behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaneConfig {
@@ -55,15 +67,12 @@ pub struct PaneConfig {
     pub min_width: f64,
     pub min_height: f64,
     pub fixed_width: bool,
-    pub closable: bool,
-    pub collapsible: bool,
-    pub maximizable: bool,
-    /// Pane cannot be hidden via hide_pane.
-    #[serde(default)]
-    pub always_visible: bool,
-    /// Width when in collapsed state; None means not collapsible to fixed width.
+    /// Width when in collapsed state; None means not collapsible.
     #[serde(default)]
     pub collapsed_width: Option<f64>,
+    /// Action triggered by double-clicking the title bar.
+    #[serde(default)]
+    pub double_click_action: DoubleClickAction,
     pub tile_order: usize,
     pub tile_width: TileWidth,
 }
@@ -77,11 +86,8 @@ impl PaneConfig {
                 min_width: MIN_TOOLBAR_WIDTH,
                 min_height: MIN_TOOLBAR_HEIGHT,
                 fixed_width: true,
-                closable: true,
-                collapsible: false,
-                maximizable: false,
-                always_visible: false,
                 collapsed_width: None,
+                double_click_action: DoubleClickAction::None,
                 tile_order: 0,
                 tile_width: TileWidth::Fixed(DEFAULT_TOOLBAR_WIDTH),
             },
@@ -90,11 +96,8 @@ impl PaneConfig {
                 min_width: MIN_CANVAS_WIDTH,
                 min_height: MIN_CANVAS_HEIGHT,
                 fixed_width: false,
-                closable: false,
-                collapsible: false,
-                maximizable: true,
-                always_visible: true,
                 collapsed_width: None,
+                double_click_action: DoubleClickAction::Maximize,
                 tile_order: 1,
                 tile_width: TileWidth::Flex,
             },
@@ -103,11 +106,8 @@ impl PaneConfig {
                 min_width: MIN_PANE_DOCK_WIDTH,
                 min_height: MIN_PANE_DOCK_HEIGHT,
                 fixed_width: false,
-                closable: true,
-                collapsible: true,
-                maximizable: false,
-                always_visible: false,
                 collapsed_width: Some(36.0),
+                double_click_action: DoubleClickAction::Redock,
                 tile_order: 2,
                 tile_width: TileWidth::KeepCurrent,
             },
@@ -597,6 +597,14 @@ impl PaneLayout {
             // Propagate: shift panes snapped to B's bottom edge
             self.propagate_border_shift(other_id, EdgeSide::Bottom, false);
         }
+
+        // When one pane is fixed-width, the non-fixed pane should be
+        // unsnapped from the border after actual movement occurs.
+        if (a_fixed || b_fixed) && !(a_fixed && b_fixed) {
+            self.snaps.retain(|s| {
+                !(s.pane == snap.pane && s.edge == snap.edge && s.target == snap.target)
+            });
+        }
     }
 
     /// After a border drag changes pane B's position, find any panes
@@ -748,16 +756,27 @@ impl PaneLayout {
     // Pane visibility
     // -----------------------------------------------------------------------
 
-    /// Hide a pane (close it).
+    /// Hide a pane (close it). If the pane is maximized, unmaximize first.
     pub fn hide_pane(&mut self, kind: PaneKind) {
+        if self.canvas_maximized {
+            if let Some(p) = self.pane_by_kind(kind) {
+                if p.config.double_click_action == DoubleClickAction::Maximize {
+                    self.canvas_maximized = false;
+                }
+            }
+        }
         if !self.hidden_panes.contains(&kind) {
             self.hidden_panes.push(kind);
         }
     }
 
-    /// Show a hidden pane.
+    /// Show a hidden pane and bring it to the front.
     pub fn show_pane(&mut self, kind: PaneKind) {
         self.hidden_panes.retain(|&k| k != kind);
+        if let Some(p) = self.pane_by_kind(kind) {
+            let id = p.id;
+            self.bring_pane_to_front(id);
+        }
     }
 
     /// Whether a pane kind is currently visible.
@@ -1308,27 +1327,19 @@ mod tests {
         let tc = PaneConfig::for_kind(PaneKind::Toolbar);
         assert_eq!(tc.min_width, MIN_TOOLBAR_WIDTH);
         assert!(tc.fixed_width);
-        assert!(tc.closable);
-        assert!(!tc.maximizable);
+        assert_eq!(tc.double_click_action, DoubleClickAction::None);
 
         let cc = PaneConfig::for_kind(PaneKind::Canvas);
         assert_eq!(cc.min_width, MIN_CANVAS_WIDTH);
         assert!(!cc.fixed_width);
-        assert!(!cc.closable);
-        assert!(cc.maximizable);
+        assert_eq!(cc.double_click_action, DoubleClickAction::Maximize);
 
         let dc = PaneConfig::for_kind(PaneKind::Dock);
         assert_eq!(dc.min_width, MIN_PANE_DOCK_WIDTH);
         assert!(!dc.fixed_width);
-        assert!(dc.closable);
-        assert!(dc.collapsible);
+        assert_eq!(dc.double_click_action, DoubleClickAction::Redock);
 
-        // always_visible
-        assert!(!tc.always_visible);
-        assert!(cc.always_visible);
-        assert!(!dc.always_visible);
-
-        // collapsed_width
+        // collapsed_width drives collapsibility
         assert!(tc.collapsed_width.is_none());
         assert!(cc.collapsed_width.is_none());
         assert_eq!(dc.collapsed_width, Some(36.0));
@@ -1493,5 +1504,63 @@ mod tests {
         pl.repair_snaps(1000.0, 700.0);
         // Should not add duplicates
         assert_eq!(pl.snaps.len(), count_before);
+    }
+
+    // -----------------------------------------------------------------------
+    // show_pane brings to front
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn show_pane_brings_to_front() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let toolbar_id = pl.pane_by_kind(PaneKind::Toolbar).unwrap().id;
+        pl.hide_pane(PaneKind::Toolbar);
+        pl.show_pane(PaneKind::Toolbar);
+        assert_eq!(*pl.z_order.last().unwrap(), toolbar_id);
+    }
+
+    // -----------------------------------------------------------------------
+    // hide_pane unmaximizes
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn hide_maximized_pane_unmaximizes() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        pl.toggle_canvas_maximized();
+        assert!(pl.canvas_maximized);
+        pl.hide_pane(PaneKind::Canvas);
+        assert!(!pl.canvas_maximized);
+    }
+
+    #[test]
+    fn hide_non_maximizable_pane_preserves_maximized() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        pl.toggle_canvas_maximized();
+        assert!(pl.canvas_maximized);
+        pl.hide_pane(PaneKind::Toolbar);
+        assert!(pl.canvas_maximized);
+    }
+
+    // -----------------------------------------------------------------------
+    // fixed-width border drag unsnaps
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn drag_shared_border_fixed_width_unsnaps() {
+        let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
+        let toolbar_id = pl.pane_by_kind(PaneKind::Toolbar).unwrap().id;
+        let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
+        // Find the toolbar-right / canvas-left snap
+        let snap_idx = pl.snaps.iter().position(|s|
+            s.pane == toolbar_id && s.edge == EdgeSide::Right
+            && s.target == SnapTarget::Pane(canvas_id, EdgeSide::Left)
+        ).expect("toolbar-canvas snap should exist");
+        // Drag the border (toolbar is fixed-width, canvas is not)
+        pl.drag_shared_border(snap_idx, 30.0);
+        // The snap between toolbar and canvas should be removed
+        assert!(!pl.snaps.iter().any(|s|
+            s.pane == toolbar_id && s.edge == EdgeSide::Right
+            && s.target == SnapTarget::Pane(canvas_id, EdgeSide::Left)
+        ));
     }
 }
