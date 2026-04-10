@@ -64,8 +64,20 @@ def run_python(mode: str, svg_path: str) -> str:
     return result.stdout
 
 
+def run_swift(mode: str, svg_path: str) -> str:
+    result = subprocess.run(
+        ["swift", "run", "SvgRoundtrip", mode, svg_path],
+        cwd=os.path.join(REPO_ROOT, "JasSwift"),
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Swift {mode} failed: {result.stderr}")
+    return result.stdout
+
+
 LANGUAGES = {
     "ocaml": run_ocaml,
+    "swift": run_swift,
     "python": run_python,
 }
 
