@@ -219,6 +219,9 @@ impl AppConfig {
 /// Default layout name.
 pub const DEFAULT_LAYOUT_NAME: &str = "Default";
 
+/// System workspace name — the always-active working copy.
+pub const WORKSPACE_LAYOUT_NAME: &str = "Workspace";
+
 impl WorkspaceLayout {
     // -----------------------------------------------------------------------
     // Construction
@@ -261,7 +264,7 @@ impl WorkspaceLayout {
     }
 
     /// Bump the generation counter. Call after every layout mutation.
-    fn bump(&mut self) {
+    pub fn bump(&mut self) {
         self.generation += 1;
     }
 
@@ -815,6 +818,15 @@ impl WorkspaceLayout {
         match serde_json::from_str::<Self>(json) {
             Ok(layout) if layout.version == LAYOUT_VERSION => layout,
             _ => Self::default_layout(),
+        }
+    }
+
+    /// Try to deserialize a layout from a JSON string. Returns None
+    /// if the JSON is invalid or the version doesn't match.
+    pub fn try_from_json(json: &str) -> Option<Self> {
+        match serde_json::from_str::<Self>(json) {
+            Ok(layout) if layout.version == LAYOUT_VERSION => Some(layout),
+            _ => None,
         }
     }
 

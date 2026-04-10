@@ -127,9 +127,10 @@ class MainWindow(QMainWindow):
         self._snap_preview = []
 
         # Dock layout
-        from workspace.dock import DockLayout
+        from workspace.dock import DockLayout, AppConfig
         from workspace.dock_panel import DockPanelWidget
-        self.dock_layout = DockLayout.default_layout()
+        self.app_config = AppConfig.load()
+        self.dock_layout = DockLayout.load_or_migrate_workspace(self.app_config)
         self.dock_layout.ensure_pane_layout(1200, 900)
 
         # Menubar

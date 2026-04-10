@@ -38,6 +38,20 @@ use crate::tools::type_on_path_tool::TypeOnPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind, PASTE_OFFSET};
 
 // ---------------------------------------------------------------------------
+// Save As dialog state
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+enum SaveAsDialog {
+    /// User is typing a name.
+    Editing(String),
+    /// Confirm overwrite of an existing layout.
+    ConfirmOverwrite(String),
+    /// Reject the reserved "Workspace" name.
+    RejectWorkspace,
+}
+
+// ---------------------------------------------------------------------------
 // Theme colors
 // ---------------------------------------------------------------------------
 
@@ -103,7 +117,7 @@ struct AppState {
 impl AppState {
     fn new() -> Self {
         let app_config = Self::load_app_config();
-        let workspace_layout = Self::load_workspace_layout(&app_config.active_layout);
+        let workspace_layout = Self::load_or_migrate_workspace(&app_config);
         Self {
             tabs: vec![],
             active_tab: 0,
@@ -141,26 +155,69 @@ impl AppState {
         }
     }
 
-    /// Load a named dock layout from localStorage, or return default.
-    fn load_workspace_layout(name: &str) -> super::workspace::WorkspaceLayout {
+    /// Try to load a named layout from localStorage. Returns None if not found.
+    fn try_load_workspace_layout(_name: &str) -> Option<super::workspace::WorkspaceLayout> {
         #[cfg(target_arch = "wasm32")]
         {
-            let key = super::workspace::WorkspaceLayout::storage_key_for(name);
+            let key = super::workspace::WorkspaceLayout::storage_key_for(_name);
             if let Some(json) = web_sys::window()
                 .and_then(|w| w.local_storage().ok()?)
                 .and_then(|s| s.get_item(&key).ok()?)
             {
-                return super::workspace::WorkspaceLayout::from_json(&json);
+                return super::workspace::WorkspaceLayout::try_from_json(&json);
             }
         }
-        super::workspace::WorkspaceLayout::named(name)
+        None
     }
 
-    /// Save dock layout to localStorage under its name.
+    /// Load a named dock layout from localStorage, or return default.
+    fn load_workspace_layout(name: &str) -> super::workspace::WorkspaceLayout {
+        Self::try_load_workspace_layout(name)
+            .unwrap_or_else(|| super::workspace::WorkspaceLayout::named(name))
+    }
+
+    /// Load the "Workspace" working copy. If it doesn't exist, migrate
+    /// from the current active_layout, or fall back to factory defaults.
+    /// Always ensures the result is persisted under the "Workspace" key.
+    fn load_or_migrate_workspace(
+        config: &super::workspace::AppConfig,
+    ) -> super::workspace::WorkspaceLayout {
+        use super::workspace::WORKSPACE_LAYOUT_NAME;
+        // Try loading "Workspace" directly
+        if let Some(mut layout) = Self::try_load_workspace_layout(WORKSPACE_LAYOUT_NAME) {
+            layout.name = WORKSPACE_LAYOUT_NAME.to_string();
+            return layout;
+        }
+        // Migration: copy active_layout into "Workspace" and persist it
+        let mut layout =
+            if let Some(layout) = Self::try_load_workspace_layout(&config.active_layout) {
+                layout
+            } else {
+                super::workspace::WorkspaceLayout::named(WORKSPACE_LAYOUT_NAME)
+            };
+        layout.name = WORKSPACE_LAYOUT_NAME.to_string();
+        // Persist the migrated/default layout so it exists on next startup
+        #[cfg(target_arch = "wasm32")]
+        {
+            let key = super::workspace::WorkspaceLayout::storage_key_for(WORKSPACE_LAYOUT_NAME);
+            if let Ok(json) = layout.to_json() {
+                if let Some(storage) = web_sys::window()
+                    .and_then(|w| w.local_storage().ok()?)
+                {
+                    let _ = storage.set_item(&key, &json);
+                }
+            }
+        }
+        layout
+    }
+
+    /// Save the workspace layout to localStorage under the "Workspace" key.
     fn save_workspace_layout(&self) {
         #[cfg(target_arch = "wasm32")]
         {
-            let key = self.workspace_layout.storage_key();
+            let key = super::workspace::WorkspaceLayout::storage_key_for(
+                super::workspace::WORKSPACE_LAYOUT_NAME,
+            );
             if let Ok(json) = self.workspace_layout.to_json() {
                 if let Some(storage) = web_sys::window()
                     .and_then(|w| w.local_storage().ok()?)
@@ -171,12 +228,14 @@ impl AppState {
         }
     }
 
-    /// Switch to a different named layout.
-    fn switch_layout(&mut self, name: &str) {
-        // Save current layout first
+    /// Save the current workspace state as a named layout snapshot.
+    fn save_layout_as(&mut self, name: &str) {
         #[cfg(target_arch = "wasm32")]
         {
-            let key = self.workspace_layout.storage_key();
+            let key = super::workspace::WorkspaceLayout::storage_key_for(name);
+            // Temporarily set name for serialization
+            let saved_name = self.workspace_layout.name.clone();
+            self.workspace_layout.name = name.to_string();
             if let Ok(json) = self.workspace_layout.to_json() {
                 if let Some(storage) = web_sys::window()
                     .and_then(|w| w.local_storage().ok()?)
@@ -184,11 +243,45 @@ impl AppState {
                     let _ = storage.set_item(&key, &json);
                 }
             }
+            self.workspace_layout.name = saved_name;
         }
-        // Load the new layout
-        self.workspace_layout = Self::load_workspace_layout(name);
+        self.app_config.register_layout(name);
         self.app_config.active_layout = name.to_string();
         self.save_app_config();
+    }
+
+    /// Switch to a different named layout (load it as the working copy).
+    fn switch_layout(&mut self, name: &str) {
+        // Save current working copy
+        self.save_workspace_layout();
+        // Load the named layout as the new working copy
+        self.workspace_layout = Self::load_workspace_layout(name);
+        self.workspace_layout.name = super::workspace::WORKSPACE_LAYOUT_NAME.to_string();
+        self.app_config.active_layout = name.to_string();
+        self.save_app_config();
+        // Persist as "Workspace"
+        self.save_workspace_layout();
+    }
+
+    /// Revert to the currently selected saved layout.
+    fn revert_to_saved(&mut self) {
+        let name = self.app_config.active_layout.clone();
+        if name != super::workspace::WORKSPACE_LAYOUT_NAME {
+            self.workspace_layout = Self::load_workspace_layout(&name);
+            self.workspace_layout.name = super::workspace::WORKSPACE_LAYOUT_NAME.to_string();
+            self.save_workspace_layout();
+        }
+    }
+
+    /// Reset to factory defaults.
+    fn reset_to_default(&mut self) {
+        self.workspace_layout = super::workspace::WorkspaceLayout::named(
+            super::workspace::WORKSPACE_LAYOUT_NAME,
+        );
+        self.app_config.active_layout =
+            super::workspace::WORKSPACE_LAYOUT_NAME.to_string();
+        self.save_app_config();
+        self.save_workspace_layout();
     }
 
     fn tab(&self) -> Option<&TabState> {
@@ -624,10 +717,9 @@ pub fn App() -> Element {
                                 pl.on_viewport_resize(vw, vh);
                             }
                             st.workspace_layout.clamp_floating_docks(vw, vh);
-                            if st.workspace_layout.needs_save() {
-                                st.save_workspace_layout();
-                                st.workspace_layout.mark_saved();
-                            }
+                            st.workspace_layout.bump();
+                            st.save_workspace_layout();
+                            st.workspace_layout.mark_saved();
                         }
                         rev_r += 1;
                     }
@@ -652,10 +744,11 @@ pub fn App() -> Element {
             {
                 let mut st = app.borrow_mut();
                 f(&mut st);
-                if st.workspace_layout.needs_save() {
-                    st.save_workspace_layout();
-                    st.workspace_layout.mark_saved();
-                }
+                // Always bump after any mutation — pane_layout mutations
+                // bypass bump(), so we ensure saves happen.
+                st.workspace_layout.bump();
+                st.save_workspace_layout();
+                st.workspace_layout.mark_saved();
             }
             revision += 1;
         }
@@ -1577,7 +1670,7 @@ pub fn App() -> Element {
     // --- Menu bar data ---
     let mut open_menu = use_signal(|| Option::<String>::None);
     let mut workspace_submenu_open = use_signal(|| false);
-    let mut new_workspace_dialog = use_signal(|| Option::<String>::None); // Some(initial_name) when open
+    let mut save_as_dialog = use_signal(|| Option::<SaveAsDialog>::None);
 
     let menus = super::menu::MENU_BAR;
 
@@ -1606,9 +1699,15 @@ pub fn App() -> Element {
                 } else if cmd == "workspace_submenu" {
                     // Dynamic workspace submenu
                     let act_ws = act.clone();
-                    let mut open_menu_ws = open_menu_sig.clone();
+                    let open_menu_ws = open_menu_sig.clone();
                     let active_name = active_layout_name.clone();
-                    let reset_label = format!("Reset \u{201C}{}\u{201D}", active_name);
+                    let has_saved_layout = active_name != super::workspace::WORKSPACE_LAYOUT_NAME;
+                    // Filter out "Workspace" from the layout list
+                    let visible_layouts: Vec<String> = saved_layout_names
+                        .iter()
+                        .filter(|n| n.as_str() != super::workspace::WORKSPACE_LAYOUT_NAME)
+                        .cloned()
+                        .collect();
 
                     let mut items: Vec<Result<VNode, RenderError>> = Vec::new();
 
@@ -1633,7 +1732,7 @@ pub fn App() -> Element {
                                         onmouseenter: move |_| { workspace_submenu_open.set(true); },
 
                                         // List saved layouts with check mark
-                                        for name in saved_layout_names.clone() {
+                                        for name in visible_layouts.clone() {
                                             {
                                                 let act = act_ws.clone();
                                                 let is_active = name == active_name;
@@ -1661,9 +1760,31 @@ pub fn App() -> Element {
                                         }
 
                                         // Separator
-                                        div { style: "height:1px; background:#ddd; margin:4px 8px;" }
+                                        div { style: "height:1px; background:{THEME_BORDER}; margin:4px 8px;" }
 
-                                        // Reset current layout
+                                        // Save As...
+                                        {
+                                            let mut open_menu_cl = open_menu_ws.clone();
+                                            let prefill = if has_saved_layout { active_name.clone() } else { String::new() };
+                                            rsx! {
+                                                div {
+                                                    class: "jas-menu-item",
+                                                    style: "padding:4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                                                    onmousedown: move |evt: Event<MouseData>| {
+                                                        evt.stop_propagation();
+                                                        save_as_dialog.set(Some(SaveAsDialog::Editing(prefill.clone())));
+                                                        open_menu_cl.set(None);
+                                                        workspace_submenu_open.set(false);
+                                                    },
+                                                    "Save As\u{2026}"
+                                                }
+                                            }
+                                        }
+
+                                        // Separator
+                                        div { style: "height:1px; background:{THEME_BORDER}; margin:4px 8px;" }
+
+                                        // Reset to Default
                                         {
                                             let act = act_ws.clone();
                                             let mut open_menu_cl = open_menu_ws.clone();
@@ -1674,30 +1795,40 @@ pub fn App() -> Element {
                                                     onmousedown: move |evt: Event<MouseData>| {
                                                         evt.stop_propagation();
                                                         (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                                                            st.workspace_layout.reset_to_default();
+                                                            st.reset_to_default();
                                                         }));
                                                         open_menu_cl.set(None);
                                                         workspace_submenu_open.set(false);
                                                     },
-                                                    "{reset_label}"
+                                                    "Reset to Default"
                                                 }
                                             }
                                         }
 
-                                        // New Workspace...
+                                        // Revert to Saved (enabled only when a named layout is selected)
                                         {
+                                            let act = act_ws.clone();
                                             let mut open_menu_cl = open_menu_ws.clone();
+                                            let disabled_style = if has_saved_layout {
+                                                format!("padding:4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; white-space:nowrap; border-radius:3px; margin:0 4px;")
+                                            } else {
+                                                format!("padding:4px 16px; cursor:default; font-size:13px; color:{THEME_TEXT_DIM}; white-space:nowrap; border-radius:3px; margin:0 4px;")
+                                            };
                                             rsx! {
                                                 div {
-                                                    class: "jas-menu-item",
-                                                    style: "padding:4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                                                    class: if has_saved_layout { "jas-menu-item" } else { "" },
+                                                    style: "{disabled_style}",
                                                     onmousedown: move |evt: Event<MouseData>| {
                                                         evt.stop_propagation();
-                                                        new_workspace_dialog.set(Some(String::new()));
-                                                        open_menu_cl.set(None);
-                                                        workspace_submenu_open.set(false);
+                                                        if has_saved_layout {
+                                                            (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                                                                st.revert_to_saved();
+                                                            }));
+                                                            open_menu_cl.set(None);
+                                                            workspace_submenu_open.set(false);
+                                                        }
                                                     },
-                                                    "New Workspace\u{2026}"
+                                                    "Revert to Saved"
                                                 }
                                             }
                                         }
@@ -2767,94 +2898,189 @@ pub fn App() -> Element {
 
             } // close pane container div
 
-            // New Workspace dialog
-            if let Some(initial_name) = new_workspace_dialog() {
+            // Save As dialog
+            if let Some(dialog_state) = save_as_dialog() {
                 {
                     let act = act.clone();
-                    rsx! {
-                        div {
-                            style: "position:fixed; inset:0; background:rgba(0,0,0,0.3); z-index:2000; display:flex; align-items:center; justify-content:center;",
-                            onmousedown: move |evt: Event<MouseData>| {
-                                evt.stop_propagation();
-                                new_workspace_dialog.set(None);
-                            },
-
-                            div {
-                                style: "background:#fff; border-radius:8px; padding:20px; box-shadow:0 8px 32px rgba(0,0,0,0.25); min-width:300px;",
-                                onmousedown: move |evt: Event<MouseData>| {
-                                    evt.stop_propagation(); // don't close when clicking inside
-                                },
-
-                                div {
-                                    style: "font-size:14px; font-weight:bold; margin-bottom:12px;",
-                                    "New Workspace"
+                    let saved_layouts = app.borrow().app_config.saved_layouts.clone();
+                    match dialog_state {
+                        SaveAsDialog::Editing(ref current_name) => {
+                            let current_name = current_name.clone();
+                            let submit_name = {
+                                let act = act.clone();
+                                let saved_layouts = saved_layouts.clone();
+                                move |name: String| {
+                                    let trimmed = name.trim().to_string();
+                                    if trimmed.is_empty() {
+                                        return;
+                                    }
+                                    if trimmed.eq_ignore_ascii_case(super::workspace::WORKSPACE_LAYOUT_NAME) {
+                                        save_as_dialog.set(Some(SaveAsDialog::RejectWorkspace));
+                                    } else if saved_layouts.iter().any(|n| n == &trimmed) {
+                                        save_as_dialog.set(Some(SaveAsDialog::ConfirmOverwrite(trimmed)));
+                                    } else {
+                                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                            st.save_layout_as(&trimmed);
+                                        }));
+                                        save_as_dialog.set(None);
+                                    }
                                 }
-
-                                input {
-                                    r#type: "text",
-                                    placeholder: "Workspace name",
-                                    value: "{initial_name}",
-                                    autofocus: true,
-                                    style: "width:100%; padding:6px 8px; font-size:13px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;",
-                                    oninput: move |evt: Event<FormData>| {
-                                        new_workspace_dialog.set(Some(evt.value().to_string()));
-                                    },
-                                    onkeydown: move |evt: Event<KeyboardData>| {
-                                        if evt.data().key() == Key::Enter {
-                                            let name = new_workspace_dialog().unwrap_or_default();
-                                            if !name.trim().is_empty() {
-                                                let name = name.trim().to_string();
-                                                (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                                    // Save current layout, create new one as a copy
-                                                    st.save_workspace_layout();
-                                                    st.workspace_layout.name = name.clone();
-                                                    st.app_config.register_layout(&name);
-                                                    st.app_config.active_layout = name;
-                                                    st.save_app_config();
-                                                    st.save_workspace_layout();
-                                                }));
-                                            }
-                                            new_workspace_dialog.set(None);
-                                        } else if evt.data().key() == Key::Escape {
-                                            new_workspace_dialog.set(None);
-                                        }
-                                    },
-                                }
-
+                            };
+                            let mut submit_enter = submit_name.clone();
+                            let mut submit_ok = submit_name.clone();
+                            rsx! {
                                 div {
-                                    style: "display:flex; justify-content:flex-end; gap:8px; margin-top:12px;",
+                                    style: "position:fixed; inset:0; background:rgba(0,0,0,0.3); z-index:2000; display:flex; align-items:center; justify-content:center;",
+                                    onmousedown: move |evt: Event<MouseData>| {
+                                        evt.stop_propagation();
+                                        save_as_dialog.set(None);
+                                    },
 
-                                    // Cancel button
                                     div {
-                                        style: "padding:6px 16px; cursor:pointer; font-size:13px; border:1px solid #ccc; border-radius:4px; user-select:none;",
+                                        style: "background:{THEME_BG}; border:1px solid {THEME_BORDER}; border-radius:8px; padding:20px; box-shadow:0 8px 32px rgba(0,0,0,0.25); min-width:300px;",
                                         onmousedown: move |evt: Event<MouseData>| {
                                             evt.stop_propagation();
-                                            new_workspace_dialog.set(None);
                                         },
-                                        "Cancel"
-                                    }
 
-                                    // OK button
-                                    {
-                                        let act = act.clone();
-                                        rsx! {
+                                        div {
+                                            style: "font-size:14px; font-weight:bold; margin-bottom:12px; color:{THEME_TEXT};",
+                                            "Save Workspace As"
+                                        }
+
+                                        input {
+                                            r#type: "text",
+                                            placeholder: "Workspace name",
+                                            value: "{current_name}",
+                                            autofocus: true,
+                                            style: "width:100%; padding:6px 8px; font-size:13px; border:1px solid {THEME_BORDER}; border-radius:4px; box-sizing:border-box; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT};",
+                                            oninput: move |evt: Event<FormData>| {
+                                                save_as_dialog.set(Some(SaveAsDialog::Editing(evt.value().to_string())));
+                                            },
+                                            onkeydown: move |evt: Event<KeyboardData>| {
+                                                if evt.data().key() == Key::Enter {
+                                                    if let Some(SaveAsDialog::Editing(ref name)) = save_as_dialog() {
+                                                        submit_enter(name.clone());
+                                                    }
+                                                } else if evt.data().key() == Key::Escape {
+                                                    save_as_dialog.set(None);
+                                                }
+                                            },
+                                        }
+
+                                        div {
+                                            style: "display:flex; justify-content:flex-end; gap:8px; margin-top:12px;",
+
+                                            div {
+                                                style: "padding:6px 16px; cursor:pointer; font-size:13px; border:1px solid {THEME_BORDER}; border-radius:4px; user-select:none; color:{THEME_TEXT};",
+                                                onmousedown: move |evt: Event<MouseData>| {
+                                                    evt.stop_propagation();
+                                                    save_as_dialog.set(None);
+                                                },
+                                                "Cancel"
+                                            }
+
+                                            {
+                                                rsx! {
+                                                    div {
+                                                        style: "padding:6px 16px; cursor:pointer; font-size:13px; background:{THEME_ACCENT}; color:#fff; border-radius:4px; user-select:none;",
+                                                        onmousedown: move |evt: Event<MouseData>| {
+                                                            evt.stop_propagation();
+                                                            if let Some(SaveAsDialog::Editing(ref name)) = save_as_dialog() {
+                                                                submit_ok(name.clone());
+                                                            }
+                                                        },
+                                                        "Save"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        SaveAsDialog::ConfirmOverwrite(ref name) => {
+                            let name = name.clone();
+                            let confirm_name = name.clone();
+                            let message = format!("Layout \u{201C}{name}\u{201D} already exists. Overwrite?");
+                            rsx! {
+                                div {
+                                    style: "position:fixed; inset:0; background:rgba(0,0,0,0.3); z-index:2000; display:flex; align-items:center; justify-content:center;",
+                                    onmousedown: move |evt: Event<MouseData>| {
+                                        evt.stop_propagation();
+                                    },
+
+                                    div {
+                                        style: "background:{THEME_BG}; border:1px solid {THEME_BORDER}; border-radius:8px; padding:20px; box-shadow:0 8px 32px rgba(0,0,0,0.25); min-width:300px;",
+                                        onmousedown: move |evt: Event<MouseData>| {
+                                            evt.stop_propagation();
+                                        },
+
+                                        div {
+                                            style: "font-size:13px; margin-bottom:16px; color:{THEME_TEXT};",
+                                            "{message}"
+                                        }
+
+                                        div {
+                                            style: "display:flex; justify-content:flex-end; gap:8px;",
+
+                                            div {
+                                                style: "padding:6px 16px; cursor:pointer; font-size:13px; border:1px solid {THEME_BORDER}; border-radius:4px; user-select:none; color:{THEME_TEXT};",
+                                                onmousedown: move |evt: Event<MouseData>| {
+                                                    evt.stop_propagation();
+                                                    save_as_dialog.set(Some(SaveAsDialog::Editing(name.clone())));
+                                                },
+                                                "Cancel"
+                                            }
+
+                                            {
+                                                let act = act.clone();
+                                                rsx! {
+                                                    div {
+                                                        style: "padding:6px 16px; cursor:pointer; font-size:13px; background:{THEME_ACCENT}; color:#fff; border-radius:4px; user-select:none;",
+                                                        onmousedown: move |evt: Event<MouseData>| {
+                                                            evt.stop_propagation();
+                                                            let n = confirm_name.clone();
+                                                            (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                                                st.save_layout_as(&n);
+                                                            }));
+                                                            save_as_dialog.set(None);
+                                                        },
+                                                        "Overwrite"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        SaveAsDialog::RejectWorkspace => {
+                            rsx! {
+                                div {
+                                    style: "position:fixed; inset:0; background:rgba(0,0,0,0.3); z-index:2000; display:flex; align-items:center; justify-content:center;",
+                                    onmousedown: move |evt: Event<MouseData>| {
+                                        evt.stop_propagation();
+                                    },
+
+                                    div {
+                                        style: "background:{THEME_BG}; border:1px solid {THEME_BORDER}; border-radius:8px; padding:20px; box-shadow:0 8px 32px rgba(0,0,0,0.25); min-width:300px;",
+                                        onmousedown: move |evt: Event<MouseData>| {
+                                            evt.stop_propagation();
+                                        },
+
+                                        div {
+                                            style: "font-size:13px; margin-bottom:16px; color:{THEME_TEXT};",
+                                            "\u{201C}Workspace\u{201D} is a system workspace that is saved automatically."
+                                        }
+
+                                        div {
+                                            style: "display:flex; justify-content:flex-end;",
+
                                             div {
                                                 style: "padding:6px 16px; cursor:pointer; font-size:13px; background:{THEME_ACCENT}; color:#fff; border-radius:4px; user-select:none;",
                                                 onmousedown: move |evt: Event<MouseData>| {
                                                     evt.stop_propagation();
-                                                    let name = new_workspace_dialog().unwrap_or_default();
-                                                    if !name.trim().is_empty() {
-                                                        let name = name.trim().to_string();
-                                                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                                            st.save_workspace_layout();
-                                                            st.workspace_layout.name = name.clone();
-                                                            st.app_config.register_layout(&name);
-                                                            st.app_config.active_layout = name;
-                                                            st.save_app_config();
-                                                            st.save_workspace_layout();
-                                                        }));
-                                                    }
-                                                    new_workspace_dialog.set(None);
+                                                    save_as_dialog.set(Some(SaveAsDialog::Editing(String::new())));
                                                 },
                                                 "OK"
                                             }

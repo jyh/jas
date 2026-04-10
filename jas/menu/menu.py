@@ -150,19 +150,28 @@ def create_menus(window: QMainWindow) -> None:
     ws_menu = window_menu.addMenu("Workspace")
 
     def _rebuild_workspace_menu():
+        from workspace.dock import WORKSPACE_LAYOUT_NAME
         ws_menu.clear()
-        if not hasattr(window, 'dock_layout'):
+        if not hasattr(window, 'dock_layout') or not hasattr(window, 'app_config'):
             return
-        layout = window.dock_layout
-        # Saved layout entries (just current for now)
-        active_name = layout.name
-        check = "\u2713 "
-        ws_menu.addAction(check + active_name)
+        config = window.app_config
+        active_name = config.active_layout
+        has_saved = active_name != WORKSPACE_LAYOUT_NAME
+        # Saved layout entries (filter out "Workspace")
+        visible = [n for n in config.saved_layouts if n != WORKSPACE_LAYOUT_NAME]
+        for name in visible:
+            prefix = "\u2713 " if name == active_name else "    "
+            action = ws_menu.addAction(prefix + name)
+            action.triggered.connect(lambda checked=False, n=name: _switch_layout(window, n))
         ws_menu.addSeparator()
-        reset_action = ws_menu.addAction(f"Reset \u201C{active_name}\u201D")
-        reset_action.triggered.connect(lambda: _reset_layout(window))
-        new_action = ws_menu.addAction("New Workspace\u2026")
-        new_action.triggered.connect(lambda: _new_workspace(window))
+        save_as_action = ws_menu.addAction("Save As\u2026")
+        save_as_action.triggered.connect(lambda: _save_as(window))
+        ws_menu.addSeparator()
+        reset_action = ws_menu.addAction("Reset to Default")
+        reset_action.triggered.connect(lambda: _reset_to_default(window))
+        revert_action = ws_menu.addAction("Revert to Saved")
+        revert_action.triggered.connect(lambda: _revert_to_saved(window))
+        revert_action.setEnabled(has_saved)
 
     ws_menu.aboutToShow.connect(_rebuild_workspace_menu)
 
@@ -227,23 +236,78 @@ def create_menus(window: QMainWindow) -> None:
         action.triggered.connect(lambda checked=False, k=kind: _toggle_panel(k))
 
 
-def _reset_layout(window):
-    if hasattr(window, 'dock_layout'):
-        window.dock_layout.reset_to_default()
-        if hasattr(window, 'refresh_panes'):
-            window.refresh_panes()
-        elif hasattr(window, 'dock_panel'):
-            window.dock_panel.rebuild()
+def _refresh(window):
+    if hasattr(window, 'refresh_panes'):
+        window.refresh_panes()
+    elif hasattr(window, 'dock_panel'):
+        window.dock_panel.rebuild()
 
 
-def _new_workspace(window):
-    from PySide6.QtWidgets import QInputDialog
-    name, ok = QInputDialog.getText(window, "New Workspace", "Workspace name:")
-    if ok and name.strip():
-        if hasattr(window, 'dock_layout'):
-            window.dock_layout.name = name.strip()
-            if hasattr(window, 'dock_panel'):
-                window.dock_panel.rebuild()
+def _switch_layout(window, name: str):
+    from workspace.dock import WORKSPACE_LAYOUT_NAME, DockLayout
+    if not hasattr(window, 'dock_layout') or not hasattr(window, 'app_config'):
+        return
+    window.dock_layout.save_to_file()
+    loaded = DockLayout.load_from_file(name)
+    loaded.name = WORKSPACE_LAYOUT_NAME
+    window.dock_layout = loaded
+    window.app_config.active_layout = name
+    window.app_config.save()
+    window.dock_layout.save_to_file()
+    _refresh(window)
+
+
+def _save_as(window):
+    from PySide6.QtWidgets import QInputDialog, QMessageBox
+    from workspace.dock import WORKSPACE_LAYOUT_NAME
+    if not hasattr(window, 'dock_layout') or not hasattr(window, 'app_config'):
+        return
+    config = window.app_config
+    prefill = config.active_layout if config.active_layout != WORKSPACE_LAYOUT_NAME else ""
+    name, ok = QInputDialog.getText(window, "Save Workspace As", "Workspace name:", text=prefill)
+    if not ok or not name.strip():
+        return
+    name = name.strip()
+    if name.lower() == WORKSPACE_LAYOUT_NAME.lower():
+        QMessageBox.information(window, "Save Workspace",
+            "\u201CWorkspace\u201D is a system workspace that is saved automatically.")
+        return
+    if name in config.saved_layouts:
+        reply = QMessageBox.question(window, "Save Workspace",
+            f"Layout \u201C{name}\u201D already exists. Overwrite?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+    window.dock_layout.save_as(name)
+    config.register_layout(name)
+    config.active_layout = name
+    config.save()
+
+
+def _reset_to_default(window):
+    from workspace.dock import WORKSPACE_LAYOUT_NAME
+    if not hasattr(window, 'dock_layout') or not hasattr(window, 'app_config'):
+        return
+    window.dock_layout.reset_to_default()
+    window.dock_layout.name = WORKSPACE_LAYOUT_NAME
+    window.app_config.active_layout = WORKSPACE_LAYOUT_NAME
+    window.app_config.save()
+    window.dock_layout.save_to_file()
+    _refresh(window)
+
+
+def _revert_to_saved(window):
+    from workspace.dock import WORKSPACE_LAYOUT_NAME, DockLayout
+    if not hasattr(window, 'dock_layout') or not hasattr(window, 'app_config'):
+        return
+    config = window.app_config
+    if config.active_layout == WORKSPACE_LAYOUT_NAME:
+        return
+    loaded = DockLayout.load_from_file(config.active_layout)
+    loaded.name = WORKSPACE_LAYOUT_NAME
+    window.dock_layout = loaded
+    window.dock_layout.save_to_file()
+    _refresh(window)
 
 
 def _open_file(window: QMainWindow) -> None:

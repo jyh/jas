@@ -20,6 +20,7 @@ let default_dock_width = 240.0
 let default_floating_width = 220.0
 let snap_distance = 20.0
 let default_layout_name = "Default"
+let workspace_layout_name = "Workspace"
 
 (* ------------------------------------------------------------------ *)
 (* Core types                                                         *)
@@ -797,22 +798,63 @@ let layout_of_json (j : Yojson.Safe.t) =
 
 (* -- File I/O -- *)
 
-let save_layout l =
-  try
-    let json = layout_to_json l in
-    let file = layout_file_for l.name in
-    Yojson.Safe.to_file file json;
-    l.saved_generation <- l.generation
-  with _ -> ()
-
-let load_layout name =
+let try_load_layout name =
   try
     let file = layout_file_for name in
     let json = Yojson.Safe.from_file file in
     let l = layout_of_json json in
-    if l.version <> layout_version then named name
-    else l
-  with _ -> named name
+    if l.version <> layout_version then None
+    else Some l
+  with _ -> None
+
+let load_layout name =
+  match try_load_layout name with
+  | Some l -> l
+  | None -> named name
+
+(** Save the workspace layout under the "Workspace" file. *)
+let save_layout l =
+  try
+    let json = layout_to_json l in
+    let file = layout_file_for workspace_layout_name in
+    Yojson.Safe.to_file file json;
+    l.saved_generation <- l.generation
+  with _ -> ()
+
+(** Save the current layout as a named snapshot. *)
+let save_layout_as l name =
+  try
+    let saved_name = l.name in
+    l.name <- name;
+    let json = layout_to_json l in
+    let file = layout_file_for name in
+    Yojson.Safe.to_file file json;
+    l.name <- saved_name
+  with _ -> ()
+
+(** Load the "Workspace" working copy, migrating from active_layout if needed. *)
+let load_or_migrate_workspace config =
+  match try_load_layout workspace_layout_name with
+  | Some l ->
+    l.name <- workspace_layout_name;
+    l
+  | None ->
+    let l = match try_load_layout config.active_layout with
+      | Some l -> l
+      | None -> named workspace_layout_name
+    in
+    l.name <- workspace_layout_name;
+    (* Persist so it exists on next startup *)
+    (try
+       let json = layout_to_json l in
+       Yojson.Safe.to_file (layout_file_for workspace_layout_name) json
+     with _ -> ());
+    l
+
+(** Always save — pane mutations may bypass bump. *)
+let save_layout_always l =
+  bump l;
+  save_layout l
 
 let save_layout_if_needed l =
   if needs_save l then save_layout l

@@ -186,13 +186,13 @@ let create_main_window ~get_model ~on_open () =
 
   (* Dock layout *)
   let app_config = Dock.load_app_config () in
-  let dock_layout = Dock.load_layout app_config.active_layout in
+  let dock_layout = Dock.load_or_migrate_workspace app_config in
   Dock.ensure_pane_layout dock_layout ~viewport_w:1200.0 ~viewport_h:900.0;
   let dock_refresh = ref (fun () -> ()) in
 
   (* Menubar *)
   Menubar.create get_model window ~on_open
-    ~dock_layout ~refresh_dock:(fun () -> !dock_refresh ()) vbox;
+    ~dock_layout ~app_config ~refresh_dock:(fun () -> !dock_refresh ()) vbox;
 
   (* Pane container: GtkLayout for absolute positioning.
      Unlike GtkFixed, GtkLayout doesn't expand the window when

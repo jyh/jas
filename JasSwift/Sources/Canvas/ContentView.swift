@@ -43,7 +43,37 @@ public class WorkspaceState: ObservableObject {
     public init() {
         let config = AppConfig.load()
         self.appConfig = config
-        self.dockLayout = DockLayout.load(name: config.activeLayout)
+        self.dockLayout = DockLayout.loadOrMigrateWorkspace(config: config)
+    }
+
+    public func switchLayout(_ name: String) {
+        dockLayout.save()
+        dockLayout = DockLayout.load(name: name)
+        dockLayout.name = workspaceLayoutName
+        appConfig.activeLayout = name
+        appConfig.save()
+        dockLayout.save()
+    }
+
+    public func revertToSaved() {
+        guard appConfig.activeLayout != workspaceLayoutName else { return }
+        dockLayout = DockLayout.load(name: appConfig.activeLayout)
+        dockLayout.name = workspaceLayoutName
+        dockLayout.save()
+    }
+
+    public func resetToDefault() {
+        dockLayout = DockLayout.named(workspaceLayoutName)
+        appConfig.activeLayout = workspaceLayoutName
+        appConfig.save()
+        dockLayout.save()
+    }
+
+    public func saveLayoutAs(_ name: String) {
+        dockLayout.saveAs(name)
+        appConfig.registerLayout(name)
+        appConfig.activeLayout = name
+        appConfig.save()
     }
 
     public var activeModel: Model? {
