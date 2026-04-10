@@ -1,0 +1,47 @@
+[
+  {
+    "name": "select_all_rects",
+    "setup_svg": "two_rects.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 200, "height": 200, "extend": false}
+    ],
+    "expected_json": "select_all_rects.json"
+  },
+  {
+    "name": "select_first_rect",
+    "setup_svg": "two_rects.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false}
+    ],
+    "expected_json": "select_first_rect.json"
+  },
+  {
+    "name": "move_selection",
+    "setup_svg": "two_rects.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false},
+      {"op": "move_selection", "dx": 10, "dy": 20}
+    ],
+    "expected_json": "move_first_rect.json"
+  },
+  {
+    "name": "delete_selection",
+    "setup_svg": "two_rects.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false},
+      {"op": "delete_selection"}
+    ],
+    "expected_json": "delete_first_rect.json"
+  },
+  {
+    "name": "undo_move",
+    "setup_svg": "two_rects.svg",
+    "ops": [
+      {"op": "snapshot"},
+      {"op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false},
+      {"op": "move_selection", "dx": 10, "dy": 20},
+      {"op": "undo"}
+    ],
+    "expected_json": "undo_move.json"
+  }
+]

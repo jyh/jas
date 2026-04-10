@@ -13,6 +13,8 @@ from algorithms.hit_test import (
     point_in_rect, segments_intersect, segment_intersects_rect,
     rects_intersect,
 )
+from document.controller import Controller
+from document.model import Model
 from geometry.svg import svg_to_document
 from geometry.test_json import document_to_test_json
 
@@ -104,6 +106,49 @@ class CrossLanguageTest(absltest.TestCase):
             self.assertEqual(
                 actual, tc["expected"],
                 f"Hit test '{tc['name']}' failed: expected {tc['expected']}, got {actual}",
+            )
+
+
+    # ---------------------------------------------------------------
+    # Operation equivalence tests
+    # ---------------------------------------------------------------
+
+    def test_operation_select_and_move(self):
+        json_str = _read_fixture("operations/select_and_move.json")
+        tests = json.loads(json_str)
+
+        for tc in tests:
+            name = tc["name"]
+            svg = _read_fixture(f"svg/{tc['setup_svg']}")
+            expected = _read_fixture(f"operations/{tc['expected_json']}")
+
+            doc = svg_to_document(svg)
+            model = Model(document=doc)
+            ctrl = Controller(model=model)
+
+            for op in tc["ops"]:
+                op_name = op["op"]
+                if op_name == "select_rect":
+                    ctrl.select_rect(
+                        op["x"], op["y"], op["width"], op["height"],
+                        extend=op.get("extend", False))
+                elif op_name == "move_selection":
+                    ctrl.move_selection(op["dx"], op["dy"])
+                elif op_name == "delete_selection":
+                    model.document = model.document.delete_selection()
+                elif op_name == "snapshot":
+                    model.snapshot()
+                elif op_name == "undo":
+                    model.undo()
+                elif op_name == "redo":
+                    model.redo()
+                else:
+                    self.fail(f"Unknown op: {op_name}")
+
+            actual = document_to_test_json(model.document)
+            self.assertEqual(
+                actual, expected,
+                f"Operation test '{name}' failed",
             )
 
 
