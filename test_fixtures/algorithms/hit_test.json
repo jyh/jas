@@ -1,0 +1,25 @@
+[
+  {"name": "point_in_rect_interior", "function": "point_in_rect", "args": [5.0, 5.0, 0.0, 0.0, 10.0, 10.0], "expected": true},
+  {"name": "point_in_rect_outside", "function": "point_in_rect", "args": [15.0, 5.0, 0.0, 0.0, 10.0, 10.0], "expected": false},
+  {"name": "point_in_rect_edge", "function": "point_in_rect", "args": [0.0, 5.0, 0.0, 0.0, 10.0, 10.0], "expected": true},
+  {"name": "point_in_rect_corner", "function": "point_in_rect", "args": [0.0, 0.0, 0.0, 0.0, 10.0, 10.0], "expected": true},
+
+  {"name": "segments_intersect_crossing", "function": "segments_intersect", "args": [0.0, 0.0, 10.0, 10.0, 0.0, 10.0, 10.0, 0.0], "expected": true},
+  {"name": "segments_intersect_parallel", "function": "segments_intersect", "args": [0.0, 0.0, 10.0, 0.0, 0.0, 1.0, 10.0, 1.0], "expected": false},
+  {"name": "segments_intersect_separate", "function": "segments_intersect", "args": [0.0, 0.0, 1.0, 0.0, 5.0, 0.0, 10.0, 0.0], "expected": false},
+  {"name": "segments_intersect_touching", "function": "segments_intersect", "args": [0.0, 0.0, 5.0, 5.0, 5.0, 5.0, 10.0, 0.0], "expected": true},
+  {"name": "segments_intersect_t_intersection", "function": "segments_intersect", "args": [0.0, 5.0, 10.0, 5.0, 5.0, 0.0, 5.0, 5.0], "expected": true},
+
+  {"name": "segment_intersects_rect_inside", "function": "segment_intersects_rect", "args": [2.0, 2.0, 8.0, 8.0, 0.0, 0.0, 10.0, 10.0], "expected": true},
+  {"name": "segment_intersects_rect_outside", "function": "segment_intersects_rect", "args": [15.0, 15.0, 20.0, 20.0, 0.0, 0.0, 10.0, 10.0], "expected": false},
+  {"name": "segment_intersects_rect_crosses", "function": "segment_intersects_rect", "args": [-5.0, 5.0, 15.0, 5.0, 0.0, 0.0, 10.0, 10.0], "expected": true},
+  {"name": "segment_intersects_rect_endpoint_inside", "function": "segment_intersects_rect", "args": [5.0, 5.0, 15.0, 15.0, 0.0, 0.0, 10.0, 10.0], "expected": true},
+  {"name": "segment_intersects_rect_endpoint_on_edge", "function": "segment_intersects_rect", "args": [0.0, 5.0, 15.0, 15.0, 0.0, 0.0, 10.0, 10.0], "expected": true},
+
+  {"name": "rects_intersect_overlapping", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 5.0, 5.0, 10.0, 10.0], "expected": true},
+  {"name": "rects_intersect_separate", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 20.0, 20.0, 10.0, 10.0], "expected": false},
+  {"name": "rects_intersect_contained", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 2.0, 2.0, 3.0, 3.0], "expected": true},
+  {"name": "rects_intersect_edge_touching", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 10.0, 0.0, 10.0, 10.0], "expected": true},
+  {"name": "rects_intersect_corner_touching", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0], "expected": true},
+  {"name": "rects_intersect_identical", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 0.0, 0.0, 10.0, 10.0], "expected": true}
+]

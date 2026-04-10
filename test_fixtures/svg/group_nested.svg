@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 96 96" width="96" height="96">
+  <g inkscape:label="Layer 1">
+    <g>
+      <rect x="0" y="0" width="48" height="48" fill="rgb(255,0,0)" stroke="none"/>
+      <rect x="48" y="48" width="48" height="48" fill="rgb(0,0,255)" stroke="none"/>
+    </g>
+  </g>
+</svg>

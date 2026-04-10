@@ -1,5 +1,7 @@
 mod algorithms;
 mod canvas;
+#[cfg(test)]
+mod cross_language_test;
 mod document;
 mod geometry;
 mod tools;
