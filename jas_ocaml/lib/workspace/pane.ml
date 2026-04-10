@@ -405,11 +405,6 @@ let drag_shared_border pl ~snap_idx ~delta =
               b.height <- b.height -. clamped);
           propagate_border_shift pl other_id Bottom false
         end;
-        (* When one pane is fixed-width, unsnap the border. *)
-        if (a_fixed || b_fixed) && not (a_fixed && b_fixed) then
-          pl.snaps <- List.filter (fun s ->
-            not (s.snap_pane = snap.snap_pane && s.edge = snap.edge && s.target = snap.target)
-          ) pl.snaps
       | _ -> ()
 
 (* ------------------------------------------------------------------ *)

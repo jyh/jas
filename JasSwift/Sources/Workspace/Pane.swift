@@ -471,12 +471,6 @@ public struct PaneLayout: Codable {
             propagateBorderShift(sourcePaneId: otherId, sourceEdge: .bottom, isVertical: false)
         }
 
-        // When one pane is fixed-width, unsnap the border.
-        if (aFixed || bFixed) && !(aFixed && bFixed) {
-            snaps.removeAll { s in
-                s.pane == snap.pane && s.edge == snap.edge && s.target == snap.target
-            }
-        }
     }
 
     /// After a border drag, shift panes snapped to the source pane's far edge.

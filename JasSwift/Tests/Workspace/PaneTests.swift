@@ -513,17 +513,18 @@ import Testing
     #expect(pl.canvasMaximized)
 }
 
-// MARK: - fixed-width border drag unsnaps
+// MARK: - fixed-width border drag resizes non-fixed pane
 
-@Test func dragSharedBorderFixedWidthUnsnaps() {
+@Test func dragSharedBorderFixedWidthResizesCanvas() {
     var pl = PaneLayout.defaultThreePane(viewportW: 1000, viewportH: 700)
     let toolbarId = pl.paneByKind(.toolbar)!.id
     let canvasId = pl.paneByKind(.canvas)!.id
+    let canvasWBefore = pl.pane(canvasId)!.width
+    let toolbarWBefore = pl.pane(toolbarId)!.width
     let snapIdx = pl.snaps.firstIndex { s in
         s.pane == toolbarId && s.edge == .right && s.target == .pane(canvasId, .left)
     }!
     pl.dragSharedBorder(snapIdx: snapIdx, delta: 30.0)
-    #expect(!pl.snaps.contains { s in
-        s.pane == toolbarId && s.edge == .right && s.target == .pane(canvasId, .left)
-    })
+    #expect(pl.pane(toolbarId)!.width == toolbarWBefore)
+    #expect(abs(pl.pane(canvasId)!.width - (canvasWBefore - 30.0)) < 0.001)
 }

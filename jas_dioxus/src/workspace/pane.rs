@@ -598,13 +598,6 @@ impl PaneLayout {
             self.propagate_border_shift(other_id, EdgeSide::Bottom, false);
         }
 
-        // When one pane is fixed-width, the non-fixed pane should be
-        // unsnapped from the border after actual movement occurs.
-        if (a_fixed || b_fixed) && !(a_fixed && b_fixed) {
-            self.snaps.retain(|s| {
-                !(s.pane == snap.pane && s.edge == snap.edge && s.target == snap.target)
-            });
-        }
     }
 
     /// After a border drag changes pane B's position, find any panes
@@ -1542,25 +1535,24 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // fixed-width border drag unsnaps
+    // fixed-width border drag resizes non-fixed pane
     // -----------------------------------------------------------------------
 
     #[test]
-    fn drag_shared_border_fixed_width_unsnaps() {
+    fn drag_shared_border_fixed_width_resizes_canvas() {
         let mut pl = PaneLayout::default_three_pane(1000.0, 700.0);
         let toolbar_id = pl.pane_by_kind(PaneKind::Toolbar).unwrap().id;
         let canvas_id = pl.pane_by_kind(PaneKind::Canvas).unwrap().id;
-        // Find the toolbar-right / canvas-left snap
+        let canvas_w_before = pl.pane(canvas_id).unwrap().width;
+        let toolbar_w_before = pl.pane(toolbar_id).unwrap().width;
         let snap_idx = pl.snaps.iter().position(|s|
             s.pane == toolbar_id && s.edge == EdgeSide::Right
             && s.target == SnapTarget::Pane(canvas_id, EdgeSide::Left)
         ).expect("toolbar-canvas snap should exist");
-        // Drag the border (toolbar is fixed-width, canvas is not)
+        // Drag the border right (toolbar is fixed-width, canvas is not)
         pl.drag_shared_border(snap_idx, 30.0);
-        // The snap between toolbar and canvas should be removed
-        assert!(!pl.snaps.iter().any(|s|
-            s.pane == toolbar_id && s.edge == EdgeSide::Right
-            && s.target == SnapTarget::Pane(canvas_id, EdgeSide::Left)
-        ));
+        // Toolbar width unchanged (fixed), canvas narrowed
+        assert_eq!(pl.pane(toolbar_id).unwrap().width, toolbar_w_before);
+        assert!((pl.pane(canvas_id).unwrap().width - (canvas_w_before - 30.0)).abs() < 0.001);
     }
 }

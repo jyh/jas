@@ -496,19 +496,20 @@ let () =
 (* ================================================================== *)
 
 let () =
-  run "drag_shared_border_fixed_width_unsnaps" (fun () ->
+  run "drag_shared_border_fixed_width_resizes_canvas" (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let toolbar_id = (Option.get (pane_by_kind pl Toolbar)).id in
     let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
+    let canvas_w_before = (Option.get (find_pane pl canvas_id)).width in
+    let toolbar_w_before = (Option.get (find_pane pl toolbar_id)).width in
     let snap_idx = ref 0 in
     List.iteri (fun i s ->
       if s.snap_pane = toolbar_id && s.edge = Right && s.target = Pane_target (canvas_id, Left) then
         snap_idx := i
     ) pl.snaps;
     drag_shared_border pl ~snap_idx:!snap_idx ~delta:30.0;
-    assert (not (List.exists (fun s ->
-      s.snap_pane = toolbar_id && s.edge = Right && s.target = Pane_target (canvas_id, Left)
-    ) pl.snaps)))
+    assert ((Option.get (find_pane pl toolbar_id)).width = toolbar_w_before);
+    assert (abs_float ((Option.get (find_pane pl canvas_id)).width -. (canvas_w_before -. 30.0)) < 0.001))
 
 (* ================================================================== *)
 
