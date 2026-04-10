@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from geometry.element import Color, Rect, Stroke
+from geometry.element import RgbColor, Rect, Stroke
 from tools.drawing_tool import DrawingToolBase
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ class RoundedRectTool(DrawingToolBase):
             return None
         return Rect(x=x, y=y, width=w, height=h,
                     rx=ROUNDED_RECT_RADIUS, ry=ROUNDED_RECT_RADIUS,
-                    stroke=Stroke(color=Color(0, 0, 0), width=1.0))
+                    stroke=Stroke(color=RgbColor(0, 0, 0), width=1.0))
 
     def _draw_preview(self, painter, sx, sy, ex, ey):
         from PySide6.QtCore import QPointF, QRectF

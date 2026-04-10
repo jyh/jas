@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication
 from document.document import Document, ElementSelection
 from document.model import Model
 from geometry.element import (
-    Color, Fill, Group, Layer, Rect, Stroke, Visibility,
+    RgbColor, Fill, Group, Layer, Rect, Stroke, Visibility,
 )
 from menu.menu import (
     _group_selection, _ungroup_selection, _ungroup_all,
@@ -21,7 +21,7 @@ from menu.menu import (
 def _make_rect(x=0, y=0, w=10, h=10):
     """Create a simple Rect with a fill."""
     return Rect(x=x, y=y, width=w, height=h,
-                fill=Fill(color=Color(1, 0, 0)))
+                fill=Fill(color=RgbColor(1, 0, 0)))
 
 
 def _make_model_with_rects(n=2):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-from geometry.element import Color, Polygon, Stroke
+from geometry.element import RgbColor, Polygon, Stroke
 from tools.drawing_tool import DrawingToolBase
 
 if TYPE_CHECKING:
@@ -48,7 +48,7 @@ class StarTool(DrawingToolBase):
             return None
         pts = _star_points(sx, sy, ex, ey, STAR_POINTS)
         return Polygon(points=tuple(pts),
-                       stroke=Stroke(color=Color(0, 0, 0), width=1.0))
+                       stroke=Stroke(color=RgbColor(0, 0, 0), width=1.0))
 
     def _draw_preview(self, painter, sx, sy, ex, ey):
         from PySide6.QtCore import QPointF

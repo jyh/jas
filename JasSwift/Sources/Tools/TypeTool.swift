@@ -383,7 +383,8 @@ class TypeTool: CanvasTool {
             if let f = tr.fill { color = f.color }
             else if let st = tr.stroke { color = st.color }
             else { color = Color(r: 0, g: 0, b: 0) }
-            cgCtx.setStrokeColor(CGColor(red: color.r, green: color.g, blue: color.b, alpha: 1.0))
+            let (cr, cg, cb, _) = color.toRgba()
+            cgCtx.setStrokeColor(CGColor(red: cr, green: cg, blue: cb, alpha: 1.0))
             cgCtx.setLineWidth(1.5)
             cgCtx.move(to: CGPoint(x: originX + cx, y: originY + cy - ch * 0.8))
             cgCtx.addLine(to: CGPoint(x: originX + cx, y: originY + cy + ch * 0.2))

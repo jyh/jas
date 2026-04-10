@@ -179,7 +179,7 @@ class type_on_path_tool = object (_self)
              let start_off = Element.path_closest_offset d x y in
              let tp = Element.make_text_path
                ~start_offset:start_off
-               ~fill:(Some Element.{ fill_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 } })
+               ~fill:(Some Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 } })
                d "" in
              let new_doc = Document.replace_element ctx.model#document path tp in
              ctx.controller#set_document new_doc;
@@ -280,7 +280,7 @@ class type_on_path_tool = object (_self)
                  [Element.MoveTo (sx, sy); Element.LineTo (x, y)]
              in
              let elem = Element.make_text_path
-               ~fill:(Some Element.{ fill_color = { r = 0.0; g = 0.0; b = 0.0; a = 1.0 } })
+               ~fill:(Some Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 } })
                d "" in
              ctx.controller#add_element elem;
              let doc = ctx.model#document in
@@ -465,9 +465,10 @@ class type_on_path_tool = object (_self)
              | Some f -> f.fill_color
              | None -> match pr.pr_stroke with
                | Some st -> st.stroke_color
-               | None -> { Element.r = 0.0; g = 0.0; b = 0.0; a = 1.0 }
+               | None -> Element.black
            in
-           Cairo.set_source_rgba cr color.r color.g color.b 1.0;
+           let (r, g, b, _) = Element.color_to_rgba color in
+           Cairo.set_source_rgba cr r g b 1.0;
            Cairo.set_line_width cr 1.5;
            Cairo.move_to cr (cx +. nx *. (h *. 0.7)) (cy +. ny *. (h *. 0.7));
            Cairo.line_to cr (cx -. nx *. (h *. 0.2)) (cy -. ny *. (h *. 0.2));

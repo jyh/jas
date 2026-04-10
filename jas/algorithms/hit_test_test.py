@@ -10,7 +10,7 @@ from algorithms.hit_test import (
     element_intersects_rect,
     element_intersects_polygon,
 )
-from geometry.element import Color, Fill, Line, Rect, Stroke, Transform
+from geometry.element import RgbColor, Fill, Line, Rect, Stroke, Transform
 
 
 # ---- point_in_rect ----
@@ -116,7 +116,7 @@ def test_rects_intersect_identical():
 
 
 def _stroke():
-    return Stroke(color=Color(0, 0, 0), width=1.0)
+    return Stroke(color=RgbColor(0, 0, 0), width=1.0)
 
 
 def test_line_element_overlapping_rect():
@@ -151,7 +151,7 @@ def test_translated_line_intersects_rect():
 
 def test_rotated_rect_intersects_rect():
     rect = Rect(x=0, y=0, width=10, height=10,
-                fill=Fill(color=Color(r=0, g=0, b=0)),
+                fill=Fill(color=RgbColor(r=0, g=0, b=0)),
                 transform=Transform.rotate(45))
     assert element_intersects_rect(rect, 6, 6, 2, 2)
     assert not element_intersects_rect(rect, 12, 0, 2, 2)

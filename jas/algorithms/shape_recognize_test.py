@@ -22,7 +22,7 @@ from algorithms.shape_recognize import (
 from geometry.element import (
     Circle,
     ClosePath,
-    Color,
+    RgbColor,
     Ellipse,
     Line,
     LineTo,
@@ -369,7 +369,7 @@ def test_lemniscate_off_center_crossing_returns_none():
 # ---------------------------------------------------------------------------
 
 def test_recognized_to_element_preserves_stroke_and_common():
-    template = Path(d=(), stroke=Stroke(color=Color(0, 0, 0), width=2.5), opacity=0.7)
+    template = Path(d=(), stroke=Stroke(color=RgbColor(0, 0, 0), width=2.5), opacity=0.7)
     shape = RecognizedRectangle(x=10, y=20, w=30, h=40)
     result = recognized_to_element(shape, template)
     assert isinstance(result, Rect)

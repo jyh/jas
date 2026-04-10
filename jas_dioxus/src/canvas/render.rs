@@ -15,20 +15,21 @@ use crate::tools::tool::HANDLE_DRAW_SIZE;
 // ---------------------------------------------------------------------------
 
 fn css_color(c: &Color) -> String {
-    if c.a >= 1.0 {
+    let (r, g, b, a) = c.to_rgba();
+    if a >= 1.0 {
         format!(
             "rgb({},{},{})",
-            (c.r * 255.0) as u8,
-            (c.g * 255.0) as u8,
-            (c.b * 255.0) as u8,
+            (r * 255.0) as u8,
+            (g * 255.0) as u8,
+            (b * 255.0) as u8,
         )
     } else {
         format!(
             "rgba({},{},{},{})",
-            (c.r * 255.0) as u8,
-            (c.g * 255.0) as u8,
-            (c.b * 255.0) as u8,
-            c.a,
+            (r * 255.0) as u8,
+            (g * 255.0) as u8,
+            (b * 255.0) as u8,
+            a,
         )
     }
 }
@@ -518,43 +519,43 @@ mod tests {
 
     #[test]
     fn css_color_opaque_black() {
-        let c = Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
+        let c = Color::Rgb { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
         assert_eq!(css_color(&c), "rgb(0,0,0)");
     }
 
     #[test]
     fn css_color_opaque_white() {
-        let c = Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
+        let c = Color::Rgb { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
         assert_eq!(css_color(&c), "rgb(255,255,255)");
     }
 
     #[test]
     fn css_color_opaque_red() {
-        let c = Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 };
+        let c = Color::Rgb { r: 1.0, g: 0.0, b: 0.0, a: 1.0 };
         assert_eq!(css_color(&c), "rgb(255,0,0)");
     }
 
     #[test]
     fn css_color_transparent() {
-        let c = Color { r: 1.0, g: 0.0, b: 0.0, a: 0.5 };
+        let c = Color::Rgb { r: 1.0, g: 0.0, b: 0.0, a: 0.5 };
         assert_eq!(css_color(&c), "rgba(255,0,0,0.5)");
     }
 
     #[test]
     fn css_color_fully_transparent() {
-        let c = Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
+        let c = Color::Rgb { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
         assert_eq!(css_color(&c), "rgba(0,0,0,0)");
     }
 
     #[test]
     fn css_color_mid_gray() {
-        let c = Color { r: 0.5, g: 0.5, b: 0.5, a: 1.0 };
+        let c = Color::Rgb { r: 0.5, g: 0.5, b: 0.5, a: 1.0 };
         assert_eq!(css_color(&c), "rgb(127,127,127)");
     }
 
     #[test]
     fn css_color_alpha_just_below_one() {
-        let c = Color { r: 0.0, g: 1.0, b: 0.0, a: 0.99 };
+        let c = Color::Rgb { r: 0.0, g: 1.0, b: 0.0, a: 0.99 };
         assert_eq!(css_color(&c), "rgba(0,255,0,0.99)");
     }
 }

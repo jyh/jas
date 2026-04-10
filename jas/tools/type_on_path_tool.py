@@ -18,7 +18,7 @@ import math
 from typing import TYPE_CHECKING
 
 from geometry.element import (
-    Color, CurveTo, Element, Fill, Group, Layer, LineTo, MoveTo,
+    Color, RgbColor, CurveTo, Element, Fill, Group, Layer, LineTo, MoveTo,
     Path, TextPath,
     path_closest_offset, path_distance_to_point, path_point_at_offset,
 )
@@ -37,8 +37,9 @@ _OFFSET_HANDLE_RADIUS = 5.0
 def _accent_color(tp: TextPath) -> "QColor":
     from PySide6.QtGui import QColor
     c = (tp.fill.color if tp.fill is not None
-         else (tp.stroke.color if tp.stroke is not None else Color(0, 0, 0)))
-    return QColor(int(c.r * 255), int(c.g * 255), int(c.b * 255))
+         else (tp.stroke.color if tp.stroke is not None else RgbColor(0, 0, 0)))
+    r, g, b, _a = c.to_rgba()
+    return QColor(int(r * 255), int(g * 255), int(b * 255))
 
 
 def _selection_color(tp: TextPath) -> "QColor":
@@ -50,7 +51,8 @@ def _selection_color(tp: TextPath) -> "QColor":
     if tp.stroke is not None:
         candidates.append(tp.stroke.color)
     for c in candidates:
-        lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+        cr, cg, cb, _ca = c.to_rgba()
+        lum = 0.2126 * cr + 0.7152 * cg + 0.0722 * cb
         if abs(lum - blue_lum) < 0.15:
             return QColor(255, 235, 80, 128)
     return QColor(135, 206, 250, 115)

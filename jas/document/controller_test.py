@@ -215,9 +215,9 @@ class SelectionControllerTest(absltest.TestCase):
 
     def test_select_rect_filled_rect_interior_hits(self):
         """Marquee inside a filled rect should select it."""
-        from geometry.element import Fill, Color
+        from geometry.element import Fill, RgbColor
         rect = Rect(x=0, y=0, width=100, height=100,
-                    fill=Fill(color=Color(1, 0, 0)))
+                    fill=Fill(color=RgbColor(1, 0, 0)))
         layer = Layer(children=(rect,), name="L0")
         doc = Document(layers=(layer,))
         ctrl = Controller(model=Model(document=doc))

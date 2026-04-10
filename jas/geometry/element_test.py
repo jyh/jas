@@ -1,7 +1,8 @@
 from absl.testing import absltest
 
 from geometry.element import (
-    Color, Fill, Stroke, LineCap, LineJoin, Transform,
+    Color, RgbColor, HsbColor, CmykColor,
+    Fill, Stroke, LineCap, LineJoin, Transform,
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, TextPath, Group, Layer,
     path_point_at_offset, path_closest_offset, path_distance_to_point,
@@ -12,16 +13,16 @@ class ElementTest(absltest.TestCase):
     """Test SVG-conforming immutable document elements."""
 
     def test_color_defaults(self):
-        c = Color(1.0, 0.0, 0.0)
+        c = RgbColor(1.0, 0.0, 0.0)
         self.assertEqual(c.a, 1.0)
 
     def test_color_immutable(self):
-        c = Color(1.0, 0.0, 0.0)
+        c = RgbColor(1.0, 0.0, 0.0)
         with self.assertRaises(AttributeError):
             c.r = 0.5
 
     def test_stroke_defaults(self):
-        s = Stroke(Color(0, 0, 0))
+        s = Stroke(RgbColor(0, 0, 0))
         self.assertEqual(s.width, 1.0)
         self.assertEqual(s.linecap, LineCap.BUTT)
         self.assertEqual(s.linejoin, LineJoin.MITER)
@@ -83,8 +84,8 @@ class ElementTest(absltest.TestCase):
 
     def test_circle_with_fill_and_stroke(self):
         c = Circle(cx=50, cy=50, r=25,
-                   fill=Fill(Color(0, 1, 0)),
-                   stroke=Stroke(Color(0, 0, 0), width=3.0))
+                   fill=Fill(RgbColor(0, 1, 0)),
+                   stroke=Stroke(RgbColor(0, 0, 0), width=3.0))
         self.assertEqual(c.fill.color.g, 1.0)
         self.assertEqual(c.stroke.width, 3.0)
 
@@ -94,8 +95,8 @@ class ElementTest(absltest.TestCase):
 
     def test_ellipse_with_fill_and_stroke(self):
         e = Ellipse(cx=50, cy=50, rx=25, ry=15,
-                    fill=Fill(Color(0, 0, 1)),
-                    stroke=Stroke(Color(1, 1, 1), linecap=LineCap.SQUARE))
+                    fill=Fill(RgbColor(0, 0, 1)),
+                    stroke=Stroke(RgbColor(1, 1, 1), linecap=LineCap.SQUARE))
         self.assertEqual(e.fill.color.b, 1.0)
         self.assertEqual(e.stroke.linecap, LineCap.SQUARE)
 
@@ -156,8 +157,8 @@ class ElementTest(absltest.TestCase):
         self.assertEqual(p.bounds(), (0, 0, 0, 0))
 
     def test_path_with_fill_and_stroke(self):
-        fill = Fill(Color(1, 0, 0))
-        stroke = Stroke(Color(0, 0, 0), width=2.0, linecap=LineCap.ROUND)
+        fill = Fill(RgbColor(1, 0, 0))
+        stroke = Stroke(RgbColor(0, 0, 0), width=2.0, linecap=LineCap.ROUND)
         p = Path(d=(MoveTo(0, 0), LineTo(10, 10), ClosePath()), fill=fill, stroke=stroke)
         self.assertEqual(p.fill.color.r, 1.0)
         self.assertEqual(p.stroke.width, 2.0)
@@ -256,6 +257,250 @@ class ElementTest(absltest.TestCase):
     def test_layer_is_group(self):
         layer = Layer(children=(), name="Test")
         self.assertIsInstance(layer, Group)
+
+
+class ColorConversionTest(absltest.TestCase):
+    """Tests for color space conversions."""
+
+    # -- Factory methods --
+
+    def test_color_rgb_factory(self):
+        c = Color.rgb(1.0, 0.0, 0.0)
+        self.assertIsInstance(c, RgbColor)
+        self.assertEqual(c.r, 1.0)
+
+    def test_color_hsb_factory(self):
+        c = Color.hsb(120.0, 1.0, 1.0)
+        self.assertIsInstance(c, HsbColor)
+        self.assertEqual(c.h, 120.0)
+
+    def test_color_cmyk_factory(self):
+        c = Color.cmyk(1.0, 0.0, 0.0, 0.0)
+        self.assertIsInstance(c, CmykColor)
+        self.assertEqual(c.c, 1.0)
+
+    # -- Constants --
+
+    def test_color_black(self):
+        self.assertEqual(Color.BLACK, RgbColor(0.0, 0.0, 0.0))
+
+    def test_color_white(self):
+        self.assertEqual(Color.WHITE, RgbColor(1.0, 1.0, 1.0))
+
+    # -- Alpha property --
+
+    def test_alpha_rgb(self):
+        c = RgbColor(1.0, 0.0, 0.0, 0.5)
+        self.assertEqual(c.alpha, 0.5)
+
+    def test_alpha_hsb(self):
+        c = HsbColor(0.0, 0.0, 0.0, 0.3)
+        self.assertEqual(c.alpha, 0.3)
+
+    def test_alpha_cmyk(self):
+        c = CmykColor(0.0, 0.0, 0.0, 0.0, 0.7)
+        self.assertEqual(c.alpha, 0.7)
+
+    # -- RGB identity --
+
+    def test_rgb_to_rgba(self):
+        c = RgbColor(0.2, 0.4, 0.6, 0.8)
+        self.assertEqual(c.to_rgba(), (0.2, 0.4, 0.6, 0.8))
+
+    # -- RGB -> HSB -> RGB round-trip --
+
+    def test_rgb_red_to_hsba(self):
+        h, s, b, a = RgbColor(1.0, 0.0, 0.0).to_hsba()
+        self.assertAlmostEqual(h, 0.0)
+        self.assertAlmostEqual(s, 1.0)
+        self.assertAlmostEqual(b, 1.0)
+        self.assertAlmostEqual(a, 1.0)
+
+    def test_rgb_green_to_hsba(self):
+        h, s, b, a = RgbColor(0.0, 1.0, 0.0).to_hsba()
+        self.assertAlmostEqual(h, 120.0)
+        self.assertAlmostEqual(s, 1.0)
+        self.assertAlmostEqual(b, 1.0)
+
+    def test_rgb_blue_to_hsba(self):
+        h, s, b, a = RgbColor(0.0, 0.0, 1.0).to_hsba()
+        self.assertAlmostEqual(h, 240.0)
+        self.assertAlmostEqual(s, 1.0)
+        self.assertAlmostEqual(b, 1.0)
+
+    def test_rgb_white_to_hsba(self):
+        h, s, b, a = RgbColor(1.0, 1.0, 1.0).to_hsba()
+        self.assertAlmostEqual(s, 0.0)
+        self.assertAlmostEqual(b, 1.0)
+
+    def test_rgb_black_to_hsba(self):
+        h, s, b, a = RgbColor(0.0, 0.0, 0.0).to_hsba()
+        self.assertAlmostEqual(s, 0.0)
+        self.assertAlmostEqual(b, 0.0)
+
+    # -- HSB -> RGB --
+
+    def test_hsb_red_to_rgba(self):
+        r, g, b, a = HsbColor(0.0, 1.0, 1.0).to_rgba()
+        self.assertAlmostEqual(r, 1.0)
+        self.assertAlmostEqual(g, 0.0)
+        self.assertAlmostEqual(b, 0.0)
+
+    def test_hsb_green_to_rgba(self):
+        r, g, b, a = HsbColor(120.0, 1.0, 1.0).to_rgba()
+        self.assertAlmostEqual(r, 0.0)
+        self.assertAlmostEqual(g, 1.0)
+        self.assertAlmostEqual(b, 0.0)
+
+    def test_hsb_blue_to_rgba(self):
+        r, g, b, a = HsbColor(240.0, 1.0, 1.0).to_rgba()
+        self.assertAlmostEqual(r, 0.0)
+        self.assertAlmostEqual(g, 0.0)
+        self.assertAlmostEqual(b, 1.0)
+
+    def test_hsb_gray_to_rgba(self):
+        """Saturation 0 should produce gray."""
+        r, g, b, a = HsbColor(0.0, 0.0, 0.5).to_rgba()
+        self.assertAlmostEqual(r, 0.5)
+        self.assertAlmostEqual(g, 0.5)
+        self.assertAlmostEqual(b, 0.5)
+
+    def test_hsb_yellow_to_rgba(self):
+        r, g, b, a = HsbColor(60.0, 1.0, 1.0).to_rgba()
+        self.assertAlmostEqual(r, 1.0)
+        self.assertAlmostEqual(g, 1.0)
+        self.assertAlmostEqual(b, 0.0)
+
+    def test_hsb_cyan_to_rgba(self):
+        r, g, b, a = HsbColor(180.0, 1.0, 1.0).to_rgba()
+        self.assertAlmostEqual(r, 0.0)
+        self.assertAlmostEqual(g, 1.0)
+        self.assertAlmostEqual(b, 1.0)
+
+    def test_hsb_magenta_to_rgba(self):
+        r, g, b, a = HsbColor(300.0, 1.0, 1.0).to_rgba()
+        self.assertAlmostEqual(r, 1.0)
+        self.assertAlmostEqual(g, 0.0)
+        self.assertAlmostEqual(b, 1.0)
+
+    # -- HSB round-trip through RGB --
+
+    def test_hsb_roundtrip(self):
+        original = HsbColor(210.0, 0.7, 0.8, 0.9)
+        r, g, b, a = original.to_rgba()
+        h2, s2, b2, a2 = RgbColor(r, g, b, a).to_hsba()
+        self.assertAlmostEqual(h2, 210.0, places=5)
+        self.assertAlmostEqual(s2, 0.7, places=5)
+        self.assertAlmostEqual(b2, 0.8, places=5)
+        self.assertAlmostEqual(a2, 0.9, places=5)
+
+    # -- RGB -> CMYK --
+
+    def test_rgb_to_cmyka_red(self):
+        c, m, y, k, a = RgbColor(1.0, 0.0, 0.0).to_cmyka()
+        self.assertAlmostEqual(c, 0.0)
+        self.assertAlmostEqual(m, 1.0)
+        self.assertAlmostEqual(y, 1.0)
+        self.assertAlmostEqual(k, 0.0)
+
+    def test_rgb_to_cmyka_black(self):
+        c, m, y, k, a = RgbColor(0.0, 0.0, 0.0).to_cmyka()
+        self.assertAlmostEqual(k, 1.0)
+        self.assertAlmostEqual(c, 0.0)
+        self.assertAlmostEqual(m, 0.0)
+        self.assertAlmostEqual(y, 0.0)
+
+    def test_rgb_to_cmyka_white(self):
+        c, m, y, k, a = RgbColor(1.0, 1.0, 1.0).to_cmyka()
+        self.assertAlmostEqual(c, 0.0)
+        self.assertAlmostEqual(m, 0.0)
+        self.assertAlmostEqual(y, 0.0)
+        self.assertAlmostEqual(k, 0.0)
+
+    # -- CMYK -> RGB --
+
+    def test_cmyk_to_rgba_cyan(self):
+        r, g, b, a = CmykColor(1.0, 0.0, 0.0, 0.0).to_rgba()
+        self.assertAlmostEqual(r, 0.0)
+        self.assertAlmostEqual(g, 1.0)
+        self.assertAlmostEqual(b, 1.0)
+
+    def test_cmyk_to_rgba_black(self):
+        r, g, b, a = CmykColor(0.0, 0.0, 0.0, 1.0).to_rgba()
+        self.assertAlmostEqual(r, 0.0)
+        self.assertAlmostEqual(g, 0.0)
+        self.assertAlmostEqual(b, 0.0)
+
+    def test_cmyk_to_rgba_white(self):
+        r, g, b, a = CmykColor(0.0, 0.0, 0.0, 0.0).to_rgba()
+        self.assertAlmostEqual(r, 1.0)
+        self.assertAlmostEqual(g, 1.0)
+        self.assertAlmostEqual(b, 1.0)
+
+    # -- CMYK round-trip through RGB --
+
+    def test_cmyk_roundtrip_via_rgb(self):
+        """CMYK -> RGB -> CMYK -> RGB should produce the same RGB values."""
+        original = CmykColor(0.3, 0.5, 0.7, 0.1, 0.8)
+        r1, g1, b1, a1 = original.to_rgba()
+        c2, m2, y2, k2, a2 = RgbColor(r1, g1, b1, a1).to_cmyka()
+        r2, g2, b2, a3 = CmykColor(c2, m2, y2, k2, a2).to_rgba()
+        self.assertAlmostEqual(r1, r2, places=10)
+        self.assertAlmostEqual(g1, g2, places=10)
+        self.assertAlmostEqual(b1, b2, places=10)
+        self.assertAlmostEqual(a1, a3, places=10)
+
+    # -- HSB identity --
+
+    def test_hsb_to_hsba(self):
+        c = HsbColor(90.0, 0.5, 0.8, 0.3)
+        self.assertEqual(c.to_hsba(), (90.0, 0.5, 0.8, 0.3))
+
+    # -- CMYK identity --
+
+    def test_cmyk_to_cmyka(self):
+        c = CmykColor(0.1, 0.2, 0.3, 0.4, 0.5)
+        self.assertEqual(c.to_cmyka(), (0.1, 0.2, 0.3, 0.4, 0.5))
+
+    # -- Cross-space conversions (HSB <-> CMYK via RGB) --
+
+    def test_hsb_to_cmyka(self):
+        c = HsbColor(0.0, 1.0, 1.0)  # red
+        cm, m, y, k, a = c.to_cmyka()
+        self.assertAlmostEqual(cm, 0.0)
+        self.assertAlmostEqual(m, 1.0)
+        self.assertAlmostEqual(y, 1.0)
+        self.assertAlmostEqual(k, 0.0)
+
+    def test_cmyk_to_hsba(self):
+        c = CmykColor(1.0, 0.0, 0.0, 0.0)  # cyan
+        h, s, b, a = c.to_hsba()
+        self.assertAlmostEqual(h, 180.0)
+        self.assertAlmostEqual(s, 1.0)
+        self.assertAlmostEqual(b, 1.0)
+
+    # -- Color is base class --
+
+    def test_rgb_is_color(self):
+        self.assertIsInstance(RgbColor(0, 0, 0), Color)
+
+    def test_hsb_is_color(self):
+        self.assertIsInstance(HsbColor(0, 0, 0), Color)
+
+    def test_cmyk_is_color(self):
+        self.assertIsInstance(CmykColor(0, 0, 0, 0), Color)
+
+    # -- Immutability --
+
+    def test_hsb_immutable(self):
+        c = HsbColor(0.0, 0.0, 0.0)
+        with self.assertRaises(AttributeError):
+            c.h = 1.0
+
+    def test_cmyk_immutable(self):
+        c = CmykColor(0.0, 0.0, 0.0, 0.0)
+        with self.assertRaises(AttributeError):
+            c.c = 1.0
 
 
 class PathOffsetTest(absltest.TestCase):

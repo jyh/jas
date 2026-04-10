@@ -11,7 +11,7 @@ from xml.sax.saxutils import escape
 from document.document import Document
 from geometry.element import (
     APPROX_CHAR_WIDTH_FACTOR,
-    ArcTo, Circle, ClosePath, Color, CurveTo, Element, Ellipse, Fill,
+    ArcTo, Circle, ClosePath, Color, RgbColor, CurveTo, Element, Ellipse, Fill,
     Group, Layer, Line, LineCap, LineJoin, LineTo, MoveTo, Path,
     PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
     SmoothQuadTo, Stroke, Text, TextPath, Transform,
@@ -33,11 +33,12 @@ def _fmt(v: float) -> str:
 
 
 def _color_str(c: Color) -> str:
-    r = int(round(c.r * 255))
-    g = int(round(c.g * 255))
-    b = int(round(c.b * 255))
-    if c.a < 1.0:
-        return f"rgba({r},{g},{b},{_fmt(c.a)})"
+    r_val, g_val, b_val, a_val = c.to_rgba()
+    r = int(round(r_val * 255))
+    g = int(round(g_val * 255))
+    b = int(round(b_val * 255))
+    if a_val < 1.0:
+        return f"rgba({r},{g},{b},{_fmt(a_val)})"
     return f"rgb({r},{g},{b})"
 
 
@@ -288,7 +289,7 @@ def _parse_color(s: str) -> Color | None:
     # Named SVG colors
     named = _NAMED_COLORS.get(s.lower())
     if named is not None:
-        return Color(named[0] / 255.0, named[1] / 255.0, named[2] / 255.0)
+        return RgbColor(named[0] / 255.0, named[1] / 255.0, named[2] / 255.0)
     # Hex colors: #RRGGBB or #RGB
     if s.startswith("#"):
         h = s[1:]
@@ -296,12 +297,12 @@ def _parse_color(s: str) -> Color | None:
             r = int(h[0] + h[0], 16) / 255.0
             g = int(h[1] + h[1], 16) / 255.0
             b = int(h[2] + h[2], 16) / 255.0
-            return Color(r, g, b)
+            return RgbColor(r, g, b)
         if len(h) == 6:
             r = int(h[0:2], 16) / 255.0
             g = int(h[2:4], 16) / 255.0
             b = int(h[4:6], 16) / 255.0
-            return Color(r, g, b)
+            return RgbColor(r, g, b)
         return None
     # rgb()/rgba() functional notation
     m = re.match(r"rgba?\(([^)]+)\)", s)
@@ -311,7 +312,7 @@ def _parse_color(s: str) -> Color | None:
         g = int(parts[1].strip()) / 255.0
         b = int(parts[2].strip()) / 255.0
         a = float(parts[3].strip()) if len(parts) > 3 else 1.0
-        return Color(r, g, b, a)
+        return RgbColor(r, g, b, a)
     import logging
     logging.warning("Unrecognized SVG color value: %s", s)
     return None

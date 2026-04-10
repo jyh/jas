@@ -171,7 +171,8 @@ class BoundingBox:
 
 
 def _qcolor(c: Color) -> QColor:
-    return QColor.fromRgbF(c.r, c.g, c.b, c.a)
+    r, g, b, a = c.to_rgba()
+    return QColor.fromRgbF(r, g, b, a)
 
 
 def _apply_fill(painter: QPainter, fill: Fill | None) -> None:

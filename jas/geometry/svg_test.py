@@ -2,7 +2,7 @@ from absl.testing import absltest
 
 from document.document import Document
 from geometry.element import (
-    ArcTo, Circle, ClosePath, Color, CurveTo, Ellipse, Fill, Group, Layer,
+    ArcTo, Circle, ClosePath, RgbColor, CurveTo, Ellipse, Fill, Group, Layer,
     Line, LineCap, LineJoin, LineTo, MoveTo, Path, Polygon, Polyline,
     QuadTo, Rect, SmoothCurveTo, SmoothQuadTo, Stroke, Text, Transform,
 )
@@ -29,7 +29,7 @@ class SvgTest(absltest.TestCase):
     def test_line_coordinates_converted(self):
         layer = Layer(children=(
             Line(x1=0, y1=0, x2=72, y2=36,
-                 stroke=Stroke(color=Color(0, 0, 0))),
+                 stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         svg = document_to_svg(Document(layers=(layer,)))
         # 72pt -> 96px, 36pt -> 48px
@@ -39,8 +39,8 @@ class SvgTest(absltest.TestCase):
     def test_rect_with_fill_and_stroke(self):
         layer = Layer(children=(
             Rect(x=0, y=0, width=72, height=72,
-                 fill=Fill(color=Color(1, 0, 0)),
-                 stroke=Stroke(color=Color(0, 0, 0))),
+                 fill=Fill(color=RgbColor(1, 0, 0)),
+                 stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         svg = document_to_svg(Document(layers=(layer,)))
         self.assertIn('<rect', svg)
@@ -58,7 +58,7 @@ class SvgTest(absltest.TestCase):
 
     def test_circle(self):
         layer = Layer(children=(
-            Circle(cx=36, cy=36, r=18, fill=Fill(color=Color(0, 0, 1))),
+            Circle(cx=36, cy=36, r=18, fill=Fill(color=RgbColor(0, 0, 1))),
         ))
         svg = document_to_svg(Document(layers=(layer,)))
         self.assertIn('cx="48"', svg)
@@ -77,7 +77,7 @@ class SvgTest(absltest.TestCase):
     def test_polygon(self):
         layer = Layer(children=(
             Polygon(points=((0, 0), (72, 0), (36, 72)),
-                    stroke=Stroke(color=Color(0, 0, 0))),
+                    stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         svg = document_to_svg(Document(layers=(layer,)))
         self.assertIn('<polygon', svg)
@@ -86,7 +86,7 @@ class SvgTest(absltest.TestCase):
     def test_polyline(self):
         layer = Layer(children=(
             Polyline(points=((0, 0), (36, 72)),
-                     stroke=Stroke(color=Color(0, 0, 0))),
+                     stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         svg = document_to_svg(Document(layers=(layer,)))
         self.assertIn('<polyline', svg)
@@ -95,7 +95,7 @@ class SvgTest(absltest.TestCase):
     def test_path(self):
         layer = Layer(children=(
             Path(d=(MoveTo(0, 0), LineTo(72, 72), ClosePath()),
-                 stroke=Stroke(color=Color(0, 0, 0))),
+                 stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         svg = document_to_svg(Document(layers=(layer,)))
         self.assertIn('<path', svg)
@@ -112,7 +112,7 @@ class SvgTest(absltest.TestCase):
                 QuadTo(36, 36, 72, 0),
                 SmoothQuadTo(144, 0),
                 ArcTo(36, 36, 0, True, False, 72, 72),
-            ), stroke=Stroke(color=Color(0, 0, 0))),
+            ), stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         svg = document_to_svg(Document(layers=(layer,)))
         self.assertIn('C0,48 48,96 96,96', svg)
@@ -124,7 +124,7 @@ class SvgTest(absltest.TestCase):
     def test_text(self):
         layer = Layer(children=(
             Text(x=10, y=20, content="Hello", font_family="Arial",
-                 font_size=12, fill=Fill(color=Color(0, 0, 0))),
+                 font_size=12, fill=Fill(color=RgbColor(0, 0, 0))),
         ))
         svg = document_to_svg(Document(layers=(layer,)))
         self.assertIn('<text', svg)
@@ -137,7 +137,7 @@ class SvgTest(absltest.TestCase):
         # same top-of-box position.
         layer = Layer(children=(
             Text(x=10, y=20, content="Hi", font_family="Arial",
-                 font_size=16, fill=Fill(color=Color(0, 0, 0))),
+                 font_size=16, fill=Fill(color=RgbColor(0, 0, 0))),
         ))
         svg = document_to_svg(Document(layers=(layer,)))
         from geometry.svg import svg_to_document
@@ -156,7 +156,7 @@ class SvgTest(absltest.TestCase):
     def test_no_fill(self):
         layer = Layer(children=(
             Rect(x=0, y=0, width=72, height=72,
-                 stroke=Stroke(color=Color(0, 0, 0))),
+                 stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         svg = document_to_svg(Document(layers=(layer,)))
         self.assertIn('fill="none"', svg)
@@ -164,7 +164,7 @@ class SvgTest(absltest.TestCase):
     def test_no_stroke(self):
         layer = Layer(children=(
             Rect(x=0, y=0, width=72, height=72,
-                 fill=Fill(color=Color(1, 1, 1))),
+                 fill=Fill(color=RgbColor(1, 1, 1))),
         ))
         svg = document_to_svg(Document(layers=(layer,)))
         self.assertIn('stroke="none"', svg)
@@ -195,7 +195,7 @@ class SvgTest(absltest.TestCase):
     def test_stroke_linecap_linejoin(self):
         layer = Layer(children=(
             Line(x1=0, y1=0, x2=72, y2=72,
-                 stroke=Stroke(color=Color(0, 0, 0),
+                 stroke=Stroke(color=RgbColor(0, 0, 0),
                                linecap=LineCap.ROUND,
                                linejoin=LineJoin.BEVEL)),
         ))
@@ -206,7 +206,7 @@ class SvgTest(absltest.TestCase):
     def test_color_alpha(self):
         layer = Layer(children=(
             Rect(x=0, y=0, width=72, height=72,
-                 fill=Fill(color=Color(1, 0, 0, 0.5))),
+                 fill=Fill(color=RgbColor(1, 0, 0, 0.5))),
         ))
         svg = document_to_svg(Document(layers=(layer,)))
         self.assertIn('rgba(255,0,0,0.5)', svg)
@@ -240,7 +240,7 @@ class SvgTest(absltest.TestCase):
     def test_multiple_layers(self):
         layer1 = Layer(name="L1", children=(
             Line(x1=0, y1=0, x2=72, y2=72,
-                 stroke=Stroke(color=Color(0, 0, 0))),
+                 stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         layer2 = Layer(name="L2", children=(
             Circle(cx=36, cy=36, r=18),
@@ -265,7 +265,7 @@ class SvgImportTest(absltest.TestCase):
     def test_roundtrip_line(self):
         layer = Layer(children=(
             Line(x1=0, y1=0, x2=72, y2=36,
-                 stroke=Stroke(color=Color(0, 0, 0))),
+                 stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         doc2 = self._roundtrip(Document(layers=(layer,)))
         elem = doc2.layers[0].children[0]
@@ -276,8 +276,8 @@ class SvgImportTest(absltest.TestCase):
     def test_roundtrip_rect(self):
         layer = Layer(children=(
             Rect(x=10, y=20, width=72, height=36,
-                 fill=Fill(color=Color(1, 0, 0)),
-                 stroke=Stroke(color=Color(0, 0, 0))),
+                 fill=Fill(color=RgbColor(1, 0, 0)),
+                 stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         doc2 = self._roundtrip(Document(layers=(layer,)))
         elem = doc2.layers[0].children[0]
@@ -290,7 +290,7 @@ class SvgImportTest(absltest.TestCase):
     def test_roundtrip_circle(self):
         layer = Layer(children=(
             Circle(cx=36, cy=36, r=18,
-                   fill=Fill(color=Color(0, 0, 1))),
+                   fill=Fill(color=RgbColor(0, 0, 1))),
         ))
         doc2 = self._roundtrip(Document(layers=(layer,)))
         elem = doc2.layers[0].children[0]
@@ -310,7 +310,7 @@ class SvgImportTest(absltest.TestCase):
     def test_roundtrip_polygon(self):
         layer = Layer(children=(
             Polygon(points=((0, 0), (72, 0), (36, 72)),
-                    stroke=Stroke(color=Color(0, 0, 0))),
+                    stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         doc2 = self._roundtrip(Document(layers=(layer,)))
         elem = doc2.layers[0].children[0]
@@ -321,7 +321,7 @@ class SvgImportTest(absltest.TestCase):
     def test_roundtrip_path(self):
         layer = Layer(children=(
             Path(d=(MoveTo(0, 0), LineTo(72, 72), ClosePath()),
-                 stroke=Stroke(color=Color(0, 0, 0))),
+                 stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         doc2 = self._roundtrip(Document(layers=(layer,)))
         elem = doc2.layers[0].children[0]
@@ -340,7 +340,7 @@ class SvgImportTest(absltest.TestCase):
                 QuadTo(36, 36, 72, 0),
                 SmoothQuadTo(144, 0),
                 ArcTo(36, 36, 0, True, False, 72, 72),
-            ), stroke=Stroke(color=Color(0, 0, 0))),
+            ), stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         doc2 = self._roundtrip(Document(layers=(layer,)))
         elem = doc2.layers[0].children[0]
@@ -355,7 +355,7 @@ class SvgImportTest(absltest.TestCase):
     def test_roundtrip_text(self):
         layer = Layer(children=(
             Text(x=10, y=20, content="Hello", font_family="Arial",
-                 font_size=12, fill=Fill(color=Color(0, 0, 0))),
+                 font_size=12, fill=Fill(color=RgbColor(0, 0, 0))),
         ))
         doc2 = self._roundtrip(Document(layers=(layer,)))
         elem = doc2.layers[0].children[0]
@@ -395,7 +395,7 @@ class SvgImportTest(absltest.TestCase):
         doc = Document(layers=(
             Layer(name="L1", children=(
                 Line(x1=0, y1=0, x2=72, y2=72,
-                     stroke=Stroke(color=Color(0, 0, 0))),
+                     stroke=Stroke(color=RgbColor(0, 0, 0))),
             )),
             Layer(name="L2", children=(
                 Circle(cx=36, cy=36, r=18),
@@ -409,7 +409,7 @@ class SvgImportTest(absltest.TestCase):
     def test_roundtrip_color_alpha(self):
         layer = Layer(children=(
             Rect(x=0, y=0, width=72, height=72,
-                 fill=Fill(color=Color(1, 0, 0, 0.5))),
+                 fill=Fill(color=RgbColor(1, 0, 0, 0.5))),
         ))
         doc2 = self._roundtrip(Document(layers=(layer,)))
         elem = doc2.layers[0].children[0]
@@ -517,7 +517,7 @@ class SvgImportTest(absltest.TestCase):
     def test_roundtrip_stroke_linecap_linejoin(self):
         layer = Layer(children=(
             Line(x1=0, y1=0, x2=72, y2=72,
-                 stroke=Stroke(color=Color(0, 0, 0),
+                 stroke=Stroke(color=RgbColor(0, 0, 0),
                                linecap=LineCap.ROUND,
                                linejoin=LineJoin.BEVEL)),
         ))
@@ -533,7 +533,7 @@ class SvgImportTest(absltest.TestCase):
             Path(d=(
                 MoveTo(0, 0),
                 ArcTo(rx=36, ry=36, x_rotation=0, large_arc=True, sweep=True, x=72, y=0),
-            ), stroke=Stroke(color=Color(0, 0, 0))),
+            ), stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         doc2 = self._roundtrip(Document(layers=(layer,)))
         elem = doc2.layers[0].children[0]
@@ -549,7 +549,7 @@ class SvgImportTest(absltest.TestCase):
             Path(d=(
                 MoveTo(0, 0),
                 ArcTo(rx=36, ry=18, x_rotation=30, large_arc=False, sweep=False, x=72, y=36),
-            ), stroke=Stroke(color=Color(0, 0, 0))),
+            ), stroke=Stroke(color=RgbColor(0, 0, 0))),
         ))
         doc2 = self._roundtrip(Document(layers=(layer,)))
         elem = doc2.layers[0].children[0]

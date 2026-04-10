@@ -268,7 +268,7 @@ private func roundtrip(_ doc: Document) -> Document {
     if case .rect(let v) = doc2.layers[0].children[0] {
         #expect(abs(v.width - 72) < 0.1)
         #expect(v.fill != nil)
-        #expect(abs(v.fill!.color.r - 1.0) < 0.1)
+        #expect(abs(v.fill!.color.toRgba().0 - 1.0) < 0.1)
     } else {
         Issue.record("Expected rect")
     }
@@ -412,7 +412,7 @@ private func roundtrip(_ doc: Document) -> Document {
     let doc2 = roundtrip(doc)
     if case .rect(let v) = doc2.layers[0].children[0] {
         #expect(v.fill != nil)
-        #expect(abs(v.fill!.color.a - 0.5) < 0.1)
+        #expect(abs(v.fill!.color.alpha - 0.5) < 0.1)
     } else {
         Issue.record("Expected rect")
     }
@@ -426,9 +426,9 @@ private func roundtrip(_ doc: Document) -> Document {
     let doc = svgToDocument(svg)
     if case .rect(let v) = doc.layers[0].children[0] {
         #expect(v.fill != nil)
-        #expect(abs(v.fill!.color.r - 1.0) < 0.01)
-        #expect(abs(v.fill!.color.g - 128.0 / 255.0) < 0.01)
-        #expect(abs(v.fill!.color.b - 0.0) < 0.01)
+        #expect(abs(v.fill!.color.toRgba().0 - 1.0) < 0.01)
+        #expect(abs(v.fill!.color.toRgba().1 - 128.0 / 255.0) < 0.01)
+        #expect(abs(v.fill!.color.toRgba().2 - 0.0) < 0.01)
     } else {
         Issue.record("Expected rect")
     }
@@ -442,8 +442,8 @@ private func roundtrip(_ doc: Document) -> Document {
     let doc = svgToDocument(svg)
     if case .rect(let v) = doc.layers[0].children[0] {
         #expect(v.fill != nil)
-        #expect(abs(v.fill!.color.r - 1.0) < 0.01)
-        #expect(abs(v.fill!.color.g - 0.0) < 0.01)
+        #expect(abs(v.fill!.color.toRgba().0 - 1.0) < 0.01)
+        #expect(abs(v.fill!.color.toRgba().1 - 0.0) < 0.01)
     } else {
         Issue.record("Expected rect")
     }
@@ -457,7 +457,7 @@ private func roundtrip(_ doc: Document) -> Document {
     let doc = svgToDocument(svg)
     if case .line(let v) = doc.layers[0].children[0] {
         #expect(v.stroke != nil)
-        #expect(abs(v.stroke!.color.b - 1.0) < 0.01)
+        #expect(abs(v.stroke!.color.toRgba().2 - 1.0) < 0.01)
     } else {
         Issue.record("Expected line")
     }
@@ -589,8 +589,8 @@ private func pt(_ px: Double) -> Double { px * 72.0 / 96.0 }
     """
     let doc = svgToDocument(svg)
     if case .rect(let v) = doc.layers[0].children[0] {
-        #expect(abs(v.fill!.color.r - 1.0) < 0.01)
-        #expect(abs(v.fill!.color.g - 0.0) < 0.01)
+        #expect(abs(v.fill!.color.toRgba().0 - 1.0) < 0.01)
+        #expect(abs(v.fill!.color.toRgba().1 - 0.0) < 0.01)
     } else { Issue.record("Expected rect") }
 }
 
@@ -600,8 +600,8 @@ private func pt(_ px: Double) -> Double { px * 72.0 / 96.0 }
     """
     let doc = svgToDocument(svg)
     if case .rect(let v) = doc.layers[0].children[0] {
-        #expect(abs(v.fill!.color.r - 70.0/255.0) < 0.01)
-        #expect(abs(v.fill!.color.g - 130.0/255.0) < 0.01)
-        #expect(abs(v.fill!.color.b - 180.0/255.0) < 0.01)
+        #expect(abs(v.fill!.color.toRgba().0 - 70.0/255.0) < 0.01)
+        #expect(abs(v.fill!.color.toRgba().1 - 130.0/255.0) < 0.01)
+        #expect(abs(v.fill!.color.toRgba().2 - 180.0/255.0) < 0.01)
     } else { Issue.record("Expected rect") }
 }

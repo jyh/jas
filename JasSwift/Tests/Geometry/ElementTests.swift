@@ -3,7 +3,7 @@ import Testing
 
 @Test func colorDefaults() {
     let c = Color(r: 1.0, g: 0.0, b: 0.0)
-    #expect(c.a == 1.0)
+    #expect(c.alpha == 1.0)
 }
 
 @Test func strokeDefaults() {
@@ -69,7 +69,7 @@ import Testing
     let c = Circle(cx: 50, cy: 50, r: 25,
                       fill: Fill(color: Color(r: 0, g: 1, b: 0)),
                       stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 3.0))
-    #expect(c.fill?.color.g == 1.0)
+    #expect(c.fill?.color.toRgba().1 == 1.0)
     #expect(c.stroke?.width == 3.0)
 }
 
@@ -83,7 +83,7 @@ import Testing
     let e = Ellipse(cx: 50, cy: 50, rx: 25, ry: 15,
                        fill: Fill(color: Color(r: 0, g: 0, b: 1)),
                        stroke: Stroke(color: Color(r: 1, g: 1, b: 1), linecap: .square))
-    #expect(e.fill?.color.b == 1.0)
+    #expect(e.fill?.color.toRgba().2 == 1.0)
     #expect(e.stroke?.linecap == .square)
 }
 
@@ -157,7 +157,7 @@ import Testing
     let fill = Fill(color: Color(r: 1, g: 0, b: 0))
     let stroke = Stroke(color: Color(r: 0, g: 0, b: 0), width: 2.0, linecap: .round)
     let p = Path(d: [.moveTo(0, 0), .lineTo(10, 10), .closePath], fill: fill, stroke: stroke)
-    #expect(p.fill?.color.r == 1.0)
+    #expect(p.fill?.color.toRgba().0 == 1.0)
     #expect(p.stroke?.width == 2.0)
     #expect(p.stroke?.linecap == .round)
 }
@@ -340,4 +340,142 @@ private let straightPath: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
 @Test func distanceToPointPerpendicular() {
     let d = pathDistanceToPoint(straightPath, px: 50, py: 30)
     #expect(abs(d - 30) < 1e-6)
+}
+
+// MARK: - Color conversion tests
+
+@Test func colorRgbIdentity() {
+    let c = Color(r: 0.5, g: 0.3, b: 0.7, a: 0.8)
+    let (r, g, b, a) = c.toRgba()
+    #expect(abs(r - 0.5) < 1e-10)
+    #expect(abs(g - 0.3) < 1e-10)
+    #expect(abs(b - 0.7) < 1e-10)
+    #expect(abs(a - 0.8) < 1e-10)
+}
+
+@Test func colorAlphaProperty() {
+    #expect(Color(r: 1, g: 0, b: 0, a: 0.5).alpha == 0.5)
+    #expect(Color.hsb(h: 120, s: 1, b: 1, a: 0.3).alpha == 0.3)
+    #expect(Color.cmyk(c: 0, m: 1, y: 1, k: 0, a: 0.7).alpha == 0.7)
+}
+
+@Test func colorBlackWhiteConstants() {
+    let (br, bg, bb, ba) = Color.black.toRgba()
+    #expect(br == 0 && bg == 0 && bb == 0 && ba == 1)
+    let (wr, wg, wb, wa) = Color.white.toRgba()
+    #expect(wr == 1 && wg == 1 && wb == 1 && wa == 1)
+}
+
+@Test func colorHsbToRgbRed() {
+    let c = Color.hsb(h: 0, s: 1, b: 1, a: 1)
+    let (r, g, b, _) = c.toRgba()
+    #expect(abs(r - 1.0) < 1e-10)
+    #expect(abs(g) < 1e-10)
+    #expect(abs(b) < 1e-10)
+}
+
+@Test func colorHsbToRgbGreen() {
+    let c = Color.hsb(h: 120, s: 1, b: 1, a: 1)
+    let (r, g, b, _) = c.toRgba()
+    #expect(abs(r) < 1e-10)
+    #expect(abs(g - 1.0) < 1e-10)
+    #expect(abs(b) < 1e-10)
+}
+
+@Test func colorHsbToRgbBlue() {
+    let c = Color.hsb(h: 240, s: 1, b: 1, a: 1)
+    let (r, g, b, _) = c.toRgba()
+    #expect(abs(r) < 1e-10)
+    #expect(abs(g) < 1e-10)
+    #expect(abs(b - 1.0) < 1e-10)
+}
+
+@Test func colorHsbGrayscale() {
+    let c = Color.hsb(h: 0, s: 0, b: 0.5, a: 1)
+    let (r, g, b, _) = c.toRgba()
+    #expect(abs(r - 0.5) < 1e-10)
+    #expect(abs(g - 0.5) < 1e-10)
+    #expect(abs(b - 0.5) < 1e-10)
+}
+
+@Test func colorRgbToHsbRoundtrip() {
+    let orig = Color(r: 0.8, g: 0.3, b: 0.6, a: 0.9)
+    let (h, s, bri, a) = orig.toHsba()
+    let back = Color.hsb(h: h, s: s, b: bri, a: a)
+    let (r2, g2, b2, a2) = back.toRgba()
+    let (r1, g1, b1, a1) = orig.toRgba()
+    #expect(abs(r1 - r2) < 1e-10)
+    #expect(abs(g1 - g2) < 1e-10)
+    #expect(abs(b1 - b2) < 1e-10)
+    #expect(abs(a1 - a2) < 1e-10)
+}
+
+@Test func colorCmykToRgb() {
+    // Pure cyan: c=1,m=0,y=0,k=0 => r=0,g=1,b=1
+    let c = Color.cmyk(c: 1, m: 0, y: 0, k: 0, a: 1)
+    let (r, g, b, _) = c.toRgba()
+    #expect(abs(r) < 1e-10)
+    #expect(abs(g - 1.0) < 1e-10)
+    #expect(abs(b - 1.0) < 1e-10)
+}
+
+@Test func colorCmykBlack() {
+    // k=1 => all black
+    let c = Color.cmyk(c: 0, m: 0, y: 0, k: 1, a: 1)
+    let (r, g, b, _) = c.toRgba()
+    #expect(abs(r) < 1e-10)
+    #expect(abs(g) < 1e-10)
+    #expect(abs(b) < 1e-10)
+}
+
+@Test func colorRgbToCmykRoundtrip() {
+    let orig = Color(r: 0.8, g: 0.3, b: 0.6, a: 0.9)
+    let (c, m, y, k, a) = orig.toCmyka()
+    let back = Color.cmyk(c: c, m: m, y: y, k: k, a: a)
+    let (r2, g2, b2, a2) = back.toRgba()
+    let (r1, g1, b1, a1) = orig.toRgba()
+    #expect(abs(r1 - r2) < 1e-10)
+    #expect(abs(g1 - g2) < 1e-10)
+    #expect(abs(b1 - b2) < 1e-10)
+    #expect(abs(a1 - a2) < 1e-10)
+}
+
+@Test func colorRgbBlackToCmyk() {
+    let (c, m, y, k, _) = Color.black.toCmyka()
+    #expect(c == 0 && m == 0 && y == 0 && k == 1)
+}
+
+@Test func colorAlphaPreservedHsbRoundtrip() {
+    let orig = Color(r: 1, g: 0, b: 0, a: 0.42)
+    let (h, s, bri, a) = orig.toHsba()
+    #expect(abs(a - 0.42) < 1e-10)
+    let back = Color.hsb(h: h, s: s, b: bri, a: a)
+    #expect(abs(back.alpha - 0.42) < 1e-10)
+}
+
+@Test func colorAlphaPreservedCmykRoundtrip() {
+    let orig = Color(r: 0, g: 1, b: 0, a: 0.37)
+    let (c, m, y, k, a) = orig.toCmyka()
+    #expect(abs(a - 0.37) < 1e-10)
+    let back = Color.cmyk(c: c, m: m, y: y, k: k, a: a)
+    #expect(abs(back.alpha - 0.37) < 1e-10)
+}
+
+@Test func colorHsbIdentity() {
+    let c = Color.hsb(h: 200, s: 0.8, b: 0.6, a: 0.5)
+    let (h, s, bri, a) = c.toHsba()
+    #expect(abs(h - 200) < 1e-10)
+    #expect(abs(s - 0.8) < 1e-10)
+    #expect(abs(bri - 0.6) < 1e-10)
+    #expect(abs(a - 0.5) < 1e-10)
+}
+
+@Test func colorCmykIdentity() {
+    let c = Color.cmyk(c: 0.1, m: 0.2, y: 0.3, k: 0.4, a: 0.5)
+    let (cc, m, y, k, a) = c.toCmyka()
+    #expect(abs(cc - 0.1) < 1e-10)
+    #expect(abs(m - 0.2) < 1e-10)
+    #expect(abs(y - 0.3) < 1e-10)
+    #expect(abs(k - 0.4) < 1e-10)
+    #expect(abs(a - 0.5) < 1e-10)
 }
