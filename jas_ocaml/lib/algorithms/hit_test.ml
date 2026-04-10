@@ -107,11 +107,58 @@ let segments_of_element (elem : Element.element) =
 
 let all_cps elem = List.init (Element.control_point_count elem) Fun.id
 
-(* TODO: This ignores the element's transform. If an element has a non-identity
-   transform, its visual position differs from its raw coordinates. To fix,
-   inverse-transform the selection rect into the element's local coordinate
-   space before testing (inheriting transforms from parent groups). *)
-let element_intersects_rect (elem : Element.element) rx ry rw rh =
+(* ------------------------------------------------------------------ *)
+(* Polygon geometry                                                    *)
+(* ------------------------------------------------------------------ *)
+
+let point_in_polygon px py poly =
+  let n = Array.length poly in
+  if n < 3 then false
+  else
+    let inside = ref false in
+    let j = ref (n - 1) in
+    for i = 0 to n - 1 do
+      let (xi, yi) = poly.(i) in
+      let (xj, yj) = poly.(!j) in
+      if ((yi > py) <> (yj > py)) && (px < (xj -. xi) *. (py -. yi) /. (yj -. yi) +. xi) then
+        inside := not !inside;
+      j := i
+    done;
+    !inside
+
+let segment_intersects_polygon x1 y1 x2 y2 poly =
+  if point_in_polygon x1 y1 poly || point_in_polygon x2 y2 poly then true
+  else
+    let n = Array.length poly in
+    let found = ref false in
+    for i = 0 to n - 1 do
+      let j = (i + 1) mod n in
+      if segments_intersect x1 y1 x2 y2
+           (fst poly.(i)) (snd poly.(i)) (fst poly.(j)) (snd poly.(j)) then
+        found := true
+    done;
+    !found
+
+(* ------------------------------------------------------------------ *)
+(* Transform-aware element hit-testing                                 *)
+(* ------------------------------------------------------------------ *)
+
+let rec element_intersects_rect (elem : Element.element) rx ry rw rh =
+  match Element.transform_of elem with
+  | Some t ->
+    (match Element.inverse t with
+     | None -> false
+     | Some inv ->
+       let corners = [|
+         Element.apply_point inv rx ry;
+         Element.apply_point inv (rx +. rw) ry;
+         Element.apply_point inv (rx +. rw) (ry +. rh);
+         Element.apply_point inv rx (ry +. rh);
+       |] in
+       element_intersects_polygon_local elem corners)
+  | None -> element_intersects_rect_local elem rx ry rw rh
+
+and element_intersects_rect_local (elem : Element.element) rx ry rw rh =
   let open Element in
   match elem with
   | Line { x1; y1; x2; y2; _ } ->
@@ -166,39 +213,17 @@ let element_intersects_rect (elem : Element.element) rx ry rw rh =
     let (bx, by, bw, bh) = Element.bounds elem in
     rects_intersect bx by bw bh rx ry rw rh
 
-(* ------------------------------------------------------------------ *)
-(* Polygon geometry                                                    *)
-(* ------------------------------------------------------------------ *)
+and element_intersects_polygon (elem : Element.element) poly =
+  match Element.transform_of elem with
+  | Some t ->
+    (match Element.inverse t with
+     | None -> false
+     | Some inv ->
+       let local_poly = Array.map (fun (x, y) -> Element.apply_point inv x y) poly in
+       element_intersects_polygon_local elem local_poly)
+  | None -> element_intersects_polygon_local elem poly
 
-let point_in_polygon px py poly =
-  let n = Array.length poly in
-  if n < 3 then false
-  else
-    let inside = ref false in
-    let j = ref (n - 1) in
-    for i = 0 to n - 1 do
-      let (xi, yi) = poly.(i) in
-      let (xj, yj) = poly.(!j) in
-      if ((yi > py) <> (yj > py)) && (px < (xj -. xi) *. (py -. yi) /. (yj -. yi) +. xi) then
-        inside := not !inside;
-      j := i
-    done;
-    !inside
-
-let segment_intersects_polygon x1 y1 x2 y2 poly =
-  if point_in_polygon x1 y1 poly || point_in_polygon x2 y2 poly then true
-  else
-    let n = Array.length poly in
-    let found = ref false in
-    for i = 0 to n - 1 do
-      let j = (i + 1) mod n in
-      if segments_intersect x1 y1 x2 y2
-           (fst poly.(i)) (snd poly.(i)) (fst poly.(j)) (snd poly.(j)) then
-        found := true
-    done;
-    !found
-
-let element_intersects_polygon (elem : Element.element) poly =
+and element_intersects_polygon_local (elem : Element.element) poly =
   let open Element in
   match elem with
   | Line { x1; y1; x2; y2; _ } ->

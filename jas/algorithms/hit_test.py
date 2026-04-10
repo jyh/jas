@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from geometry.element import (
     Circle, Element, Ellipse, Group, Layer, Line, Path, Polygon, Polyline,
-    Rect, Text,
+    Rect, Text, Transform,
     control_point_count,
     flatten_path_commands,
 )
@@ -129,13 +129,24 @@ def segments_of_element(elem: Element) -> list[tuple[float, float, float, float]
 
 def element_intersects_rect(elem: Element,
                             rx: float, ry: float, rw: float, rh: float) -> bool:
-    """Test whether the visible drawn portion of elem intersects the selection rect.
+    """Test whether the visible drawn portion of elem intersects the selection rect."""
+    if elem.transform is not None:
+        inv = elem.transform.inverse()
+        if inv is None:
+            return False
+        corners = [
+            inv.apply_point(rx, ry),
+            inv.apply_point(rx + rw, ry),
+            inv.apply_point(rx + rw, ry + rh),
+            inv.apply_point(rx, ry + rh),
+        ]
+        return _element_intersects_polygon_local(elem, corners)
+    return _element_intersects_rect_local(elem, rx, ry, rw, rh)
 
-    TODO: This ignores the element's transform. If an element has a non-identity
-    transform, its visual position differs from its raw coordinates. To fix,
-    inverse-transform the selection rect into the element's local coordinate
-    space before testing (inheriting transforms from parent groups).
-    """
+
+def _element_intersects_rect_local(elem: Element,
+                                   rx: float, ry: float, rw: float, rh: float) -> bool:
+    """Rect hit-test against raw (untransformed) coordinates."""
     match elem:
         case Line():
             return segment_intersects_rect(elem.x1, elem.y1, elem.x2, elem.y2,
@@ -223,6 +234,18 @@ def segment_intersects_polygon(x1: float, y1: float, x2: float, y2: float,
 def element_intersects_polygon(elem: Element,
                                poly: list[tuple[float, float]]) -> bool:
     """Test whether the visible drawn portion of elem intersects the polygon."""
+    if elem.transform is not None:
+        inv = elem.transform.inverse()
+        if inv is None:
+            return False
+        local_poly = [inv.apply_point(x, y) for x, y in poly]
+        return _element_intersects_polygon_local(elem, local_poly)
+    return _element_intersects_polygon_local(elem, poly)
+
+
+def _element_intersects_polygon_local(elem: Element,
+                                      poly: list[tuple[float, float]]) -> bool:
+    """Polygon hit-test against raw (untransformed) coordinates."""
     match elem:
         case Line():
             return segment_intersects_polygon(elem.x1, elem.y1, elem.x2, elem.y2, poly)

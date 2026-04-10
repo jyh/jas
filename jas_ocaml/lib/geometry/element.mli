@@ -186,6 +186,9 @@ val identity_transform : transform
 val make_translate : float -> float -> transform
 val make_scale : float -> float -> transform
 val make_rotate : float -> transform
+val apply_point : transform -> float -> float -> float * float
+val inverse : transform -> transform option
+val transform_of : element -> transform option
 val make_line : ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
 val make_rect : ?rx:float -> ?ry:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
 val make_circle : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> element

@@ -8,8 +8,9 @@ from algorithms.hit_test import (
     segment_intersects_rect,
     rects_intersect,
     element_intersects_rect,
+    element_intersects_polygon,
 )
-from geometry.element import Color, Line, Rect, Stroke
+from geometry.element import Color, Fill, Line, Rect, Stroke, Transform
 
 
 # ---- point_in_rect ----
@@ -136,3 +137,49 @@ def test_rect_element_overlapping_rect():
 def test_rect_element_outside_rect():
     rect = Rect(x=20, y=20, width=5, height=5, stroke=_stroke())
     assert not element_intersects_rect(rect, 0, 0, 10, 10)
+
+
+# ---- transform-aware hit-testing ----
+
+
+def test_translated_line_intersects_rect():
+    line = Line(x1=0, y1=5, x2=10, y2=5,
+                transform=Transform.translate(100, 0))
+    assert element_intersects_rect(line, 95, 0, 20, 10)
+    assert not element_intersects_rect(line, 0, 0, 10, 10)
+
+
+def test_rotated_rect_intersects_rect():
+    rect = Rect(x=0, y=0, width=10, height=10,
+                fill=Fill(color=Color(r=0, g=0, b=0)),
+                transform=Transform.rotate(45))
+    assert element_intersects_rect(rect, 6, 6, 2, 2)
+    assert not element_intersects_rect(rect, 12, 0, 2, 2)
+
+
+def test_scaled_line_intersects_rect():
+    line = Line(x1=0, y1=0, x2=5, y2=0,
+                transform=Transform.scale(2, 2))
+    assert element_intersects_rect(line, 8, -1, 4, 2)
+    assert element_intersects_rect(line, 6, -1, 2, 2)
+
+
+def test_singular_transform_returns_false():
+    line = Line(x1=0, y1=0, x2=10, y2=0,
+                transform=Transform.scale(0, 0))
+    assert not element_intersects_rect(line, 0, 0, 10, 10)
+
+
+def test_no_transform_still_works():
+    line = Line(x1=0, y1=5, x2=10, y2=5)
+    assert element_intersects_rect(line, 0, 0, 10, 10)
+    assert not element_intersects_rect(line, 20, 0, 10, 10)
+
+
+def test_translated_line_intersects_polygon():
+    line = Line(x1=0, y1=5, x2=10, y2=5,
+                transform=Transform.translate(100, 0))
+    sq = [(95, 0), (115, 0), (115, 10), (95, 10)]
+    assert element_intersects_polygon(line, sq)
+    sq2 = [(0, 0), (10, 0), (10, 10), (0, 10)]
+    assert not element_intersects_polygon(line, sq2)

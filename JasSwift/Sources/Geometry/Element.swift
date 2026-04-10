@@ -129,6 +129,24 @@ public struct Transform: Equatable, Hashable {
         let rad = angleDeg * .pi / 180
         return Transform(a: cos(rad), b: sin(rad), c: -sin(rad), d: cos(rad))
     }
+
+    /// Apply this transform to a point.
+    public func applyPoint(_ x: Double, _ y: Double) -> (Double, Double) {
+        (a * x + c * y + e, b * x + d * y + f)
+    }
+
+    /// Return the inverse transform, or nil if the matrix is singular.
+    public func inverse() -> Transform? {
+        let det = a * d - b * c
+        if abs(det) < 1e-12 { return nil }
+        let invDet = 1.0 / det
+        return Transform(
+            a: d * invDet, b: -b * invDet,
+            c: -c * invDet, d: a * invDet,
+            e: (c * f - d * e) * invDet,
+            f: (b * e - a * f) * invDet
+        )
+    }
 }
 
 // MARK: - SVG path commands
@@ -530,6 +548,23 @@ public enum Element: Equatable {
         case .textPath(let v): return v.visibility
         case .group(let v): return v.visibility
         case .layer(let v): return v.visibility
+        }
+    }
+
+    /// The element's transform, if any.
+    public var transform: Transform? {
+        switch self {
+        case .line(let v): return v.transform
+        case .rect(let v): return v.transform
+        case .circle(let v): return v.transform
+        case .ellipse(let v): return v.transform
+        case .polyline(let v): return v.transform
+        case .polygon(let v): return v.transform
+        case .path(let v): return v.transform
+        case .text(let v): return v.transform
+        case .textPath(let v): return v.transform
+        case .group(let v): return v.transform
+        case .layer(let v): return v.transform
         }
     }
 

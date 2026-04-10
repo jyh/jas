@@ -121,6 +121,26 @@ class Transform:
         sin_a = math.sin(rad)
         return Transform(a=cos_a, b=sin_a, c=-sin_a, d=cos_a)
 
+    def apply_point(self, x: float, y: float) -> tuple[float, float]:
+        """Apply this transform to a point."""
+        return (self.a * x + self.c * y + self.e,
+                self.b * x + self.d * y + self.f)
+
+    def inverse(self) -> Transform | None:
+        """Return the inverse transform, or None if the matrix is singular."""
+        det = self.a * self.d - self.b * self.c
+        if abs(det) < 1e-12:
+            return None
+        inv_det = 1.0 / det
+        return Transform(
+            a=self.d * inv_det,
+            b=-self.b * inv_det,
+            c=-self.c * inv_det,
+            d=self.a * inv_det,
+            e=(self.c * self.f - self.d * self.e) * inv_det,
+            f=(self.b * self.e - self.a * self.f) * inv_det,
+        )
+
 
 # SVG path commands (the 'd' attribute)
 

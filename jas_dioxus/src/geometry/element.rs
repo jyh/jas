@@ -158,6 +158,29 @@ impl Transform {
             ..Self::IDENTITY
         }
     }
+
+    /// Apply this transform to a point, returning the transformed point.
+    pub fn apply_point(&self, x: f64, y: f64) -> (f64, f64) {
+        (self.a * x + self.c * y + self.e,
+         self.b * x + self.d * y + self.f)
+    }
+
+    /// Return the inverse transform, or `None` if the matrix is singular.
+    pub fn inverse(&self) -> Option<Self> {
+        let det = self.a * self.d - self.b * self.c;
+        if det.abs() < 1e-12 {
+            return None;
+        }
+        let inv_det = 1.0 / det;
+        Some(Self {
+            a: self.d * inv_det,
+            b: -self.b * inv_det,
+            c: -self.c * inv_det,
+            d: self.a * inv_det,
+            e: (self.c * self.f - self.d * self.e) * inv_det,
+            f: (self.b * self.e - self.a * self.f) * inv_det,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
