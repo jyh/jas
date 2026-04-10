@@ -20,10 +20,10 @@ TITLE_BAR_HEIGHT = 20
 
 
 class PaneTitleBar(QWidget):
-    """Title bar for a pane: label + optional close button."""
+    """Title bar for a pane: label + close button."""
 
-    def __init__(self, label: str, closable: bool, maximizable: bool,
-                 pane_id: int = 0, on_close=None, on_maximize_toggle=None,
+    def __init__(self, label: str, pane_id: int = 0,
+                 on_close=None, on_maximize_toggle=None,
                  on_drag_start=None, parent=None):
         super().__init__(parent)
         self.setFixedHeight(TITLE_BAR_HEIGHT)
@@ -36,7 +36,7 @@ class PaneTitleBar(QWidget):
         lbl = QLabel(label)
         lbl.setStyleSheet("color: #d9d9d9; font-size: 11px;")
         layout.addWidget(lbl, stretch=1)
-        if closable and on_close:
+        if on_close:
             btn = QPushButton("\u00D7")
             btn.setFixedSize(16, 16)
             btn.setStyleSheet("color: #a5a5a5; border: none; font-size: 12px;")
@@ -54,10 +54,35 @@ class PaneTitleBar(QWidget):
             self._on_maximize_toggle()
 
 
+EDGE_HANDLE_SIZE = 6
+
+
+class EdgeHandle(QWidget):
+    """Invisible edge handle for resizing a pane."""
+
+    def __init__(self, edge: str, pane_id: int, on_edge_drag_start=None, parent=None):
+        super().__init__(parent)
+        self._edge = edge
+        self._pane_id = pane_id
+        self._on_edge_drag_start = on_edge_drag_start
+        if edge in ("left", "right"):
+            self.setCursor(QCursor(Qt.SplitHCursor))
+        else:
+            self.setCursor(QCursor(Qt.SplitVCursor))
+        self.setStyleSheet("background: transparent;")
+
+    def mousePressEvent(self, event):
+        if self._on_edge_drag_start:
+            self._on_edge_drag_start(
+                self._pane_id, self._edge,
+                event.globalPosition().x(), event.globalPosition().y())
+
+
 class PaneFrame(QWidget):
     """A pane frame with title bar wrapping content."""
 
-    def __init__(self, title_bar: PaneTitleBar, content: QWidget, parent=None):
+    def __init__(self, title_bar: PaneTitleBar, content: QWidget,
+                 pane_id: int = 0, on_edge_drag_start=None, parent=None):
         super().__init__(parent)
         self.title_bar = title_bar
         self.content = content
@@ -67,6 +92,26 @@ class PaneFrame(QWidget):
         layout.addWidget(title_bar)
         layout.addWidget(content, stretch=1)
         self.setStyleSheet("border: 1px solid #555;")
+        # Edge resize handles (children, positioned absolutely)
+        self._edge_handles = []
+        for edge in ("left", "right", "top", "bottom"):
+            h = EdgeHandle(edge, pane_id, on_edge_drag_start, self)
+            self._edge_handles.append((edge, h))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        w, h = self.width(), self.height()
+        es = EDGE_HANDLE_SIZE
+        for edge, handle in self._edge_handles:
+            if edge == "left":
+                handle.setGeometry(0, 0, es, h)
+            elif edge == "right":
+                handle.setGeometry(w - es, 0, es, h)
+            elif edge == "top":
+                handle.setGeometry(es, 0, w - 2 * es, es)
+            elif edge == "bottom":
+                handle.setGeometry(es, h - es, w - 2 * es, es)
+            handle.raise_()
 
 
 class MainWindow(QMainWindow):
@@ -77,6 +122,8 @@ class MainWindow(QMainWindow):
         # Drag state
         self._pane_drag = None      # (pane_id, off_x, off_y)
         self._border_drag = None    # (snap_idx, start_coord, is_vertical)
+        self._edge_drag = None      # (pane_id, edge, start_x, start_y, start_pw, start_ph, start_px, start_py)
+        self._edge_snapped_coord = None  # snapped coordinate during edge drag
         self._snap_preview = []
 
         # Dock layout
@@ -103,29 +150,36 @@ class MainWindow(QMainWindow):
         # Toolbar pane
         self.toolbar = Toolbar()
         self._toolbar_title = PaneTitleBar(
-            "Tools", closable=True, maximizable=False, pane_id=tid,
+            "Tools", pane_id=tid,
             on_close=lambda: self._hide_pane(PaneKind.TOOLBAR),
             on_drag_start=self._start_pane_drag)
-        self._toolbar_frame = PaneFrame(self._toolbar_title, self.toolbar, self._pane_container)
+        self._toolbar_frame = PaneFrame(self._toolbar_title, self.toolbar,
+                                        pane_id=tid, on_edge_drag_start=self._start_edge_drag,
+                                        parent=self._pane_container)
 
         # Canvas pane
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabsClosable(True)
         self.tab_widget.tabCloseRequested.connect(self._close_tab)
         self._canvas_title = PaneTitleBar(
-            "Canvas", closable=False, maximizable=True, pane_id=cid,
+            "Canvas", pane_id=cid,
+            on_close=lambda: self._hide_pane(PaneKind.CANVAS),
             on_maximize_toggle=self._toggle_canvas_maximized,
             on_drag_start=self._start_pane_drag)
-        self._canvas_frame = PaneFrame(self._canvas_title, self.tab_widget, self._pane_container)
+        self._canvas_frame = PaneFrame(self._canvas_title, self.tab_widget,
+                                        pane_id=cid, on_edge_drag_start=self._start_edge_drag,
+                                        parent=self._pane_container)
 
         # Dock pane
         self.dock_panel = DockPanelWidget(self.dock_layout)
         self.dock_panel.setStyleSheet("background: #3c3c3c;")
         self._dock_title = PaneTitleBar(
-            "Panels", closable=True, maximizable=False, pane_id=did,
+            "Panels", pane_id=did,
             on_close=lambda: self._hide_pane(PaneKind.DOCK),
             on_drag_start=self._start_pane_drag)
-        self._dock_frame = PaneFrame(self._dock_title, self.dock_panel, self._pane_container)
+        self._dock_frame = PaneFrame(self._dock_title, self.dock_panel,
+                                      pane_id=did, on_edge_drag_start=self._start_edge_drag,
+                                      parent=self._pane_container)
 
         # Border handle widgets
         self._border_widgets: list[QWidget] = []
@@ -196,6 +250,10 @@ class MainWindow(QMainWindow):
             cursor = Qt.SplitHCursor if b.is_vertical else Qt.SplitVCursor
             handle.setCursor(QCursor(cursor))
             handle.setMouseTracking(True)
+            handle.setAttribute(Qt.WA_Hover, True)
+            handle.setStyleSheet(
+                "QWidget { background: transparent; }"
+                "QWidget:hover { background: rgba(74, 144, 217, 0.5); }")
             handle._snap_idx = b.snap_idx
             handle._is_vertical = b.is_vertical
             handle.mousePressEvent = lambda ev, si=b.snap_idx, iv=b.is_vertical: self._start_border_drag(ev, si, iv)
@@ -219,6 +277,23 @@ class MainWindow(QMainWindow):
                 w.show()
                 w.raise_()
                 self._snap_widgets.append(w)
+
+        # Edge snap highlight
+        if self._edge_snapped_coord is not None and self._edge_drag:
+            _, edge, *_ = self._edge_drag
+            coord = int(self._edge_snapped_coord)
+            vh = int(pl.viewport_height) if pl else self._pane_container.height()
+            vw = int(pl.viewport_width) if pl else self._pane_container.width()
+            w = QWidget(self._pane_container)
+            if edge in ("left", "right"):
+                w.setGeometry(coord - 2, 0, 4, vh)
+            else:
+                w.setGeometry(0, coord - 2, vw, 4)
+            w.setStyleSheet("background: rgba(50, 120, 220, 200);")
+            w.setAttribute(Qt.WA_TransparentForMouseEvents)
+            w.show()
+            w.raise_()
+            self._snap_widgets.append(w)
 
     def _frame_for_kind(self, kind):
         if kind == PaneKind.TOOLBAR: return self._toolbar_frame
@@ -249,6 +324,17 @@ class MainWindow(QMainWindow):
     def _start_border_drag(self, event, snap_idx, is_vertical):
         coord = event.globalPosition().x() if is_vertical else event.globalPosition().y()
         self._border_drag = (snap_idx, coord, is_vertical)
+        self.grabMouse()
+
+    def _start_edge_drag(self, pane_id, edge, gx, gy):
+        pl = self.dock_layout.panes()
+        if not pl:
+            return
+        p = pl.find_pane(pane_id)
+        if not p:
+            return
+        self._edge_drag = (pane_id, edge, gx, gy, p.width, p.height, p.x, p.y)
+        self.grabMouse()
 
     def refresh_panes(self):
         """Refresh pane layout and dock panel after a pane mutation."""
@@ -282,6 +368,13 @@ class MainWindow(QMainWindow):
             self.dock_layout.panes_mut(
                 lambda pl: pl.drag_shared_border(snap_idx, delta))
             self._refresh_pane_positions()
+        elif self._edge_drag:
+            pid, edge, sx, sy, sw, sh, spx, spy = self._edge_drag
+            dx = mx - sx
+            dy = my - sy
+            self.dock_layout.panes_mut(
+                lambda pl: self._do_edge_drag(pl, pid, edge, dx, dy, sw, sh, spx, spy))
+            self._refresh_pane_positions()
 
     def _do_pane_drag(self, pl, pid, new_x, new_y):
         from workspace.pane import PaneLayout
@@ -290,6 +383,66 @@ class MainWindow(QMainWindow):
         if preview:
             pl.align_to_snaps(pid, preview, pl.viewport_width, pl.viewport_height)
         self._snap_preview = preview
+
+    def _do_edge_drag(self, pl, pid, edge, dx, dy, start_w, start_h, start_x, start_y):
+        from workspace.pane import SNAP_DISTANCE, EdgeSide, WindowTarget, PaneTarget
+        p = pl.find_pane(pid)
+        if not p:
+            return
+        min_w = p.config.min_width
+        min_h = p.config.min_height
+        if edge == "right":
+            raw_coord = start_x + max(start_w + dx, min_w)
+            snapped = self._find_edge_snap(pl, pid, EdgeSide.RIGHT, raw_coord)
+            final = snapped if snapped is not None else raw_coord
+            p.width = max(final - p.x, min_w)
+        elif edge == "left":
+            raw_coord = start_x + dx
+            snapped = self._find_edge_snap(pl, pid, EdgeSide.LEFT, raw_coord)
+            final = snapped if snapped is not None else raw_coord
+            new_w = max(start_x + start_w - final, min_w)
+            p.x = start_x + start_w - new_w
+            p.width = new_w
+        elif edge == "bottom":
+            raw_coord = start_y + max(start_h + dy, min_h)
+            snapped = self._find_edge_snap(pl, pid, EdgeSide.BOTTOM, raw_coord)
+            final = snapped if snapped is not None else raw_coord
+            p.height = max(final - p.y, min_h)
+        elif edge == "top":
+            raw_coord = start_y + dy
+            snapped = self._find_edge_snap(pl, pid, EdgeSide.TOP, raw_coord)
+            final = snapped if snapped is not None else raw_coord
+            new_h = max(start_y + start_h - final, min_h)
+            p.y = start_y + start_h - new_h
+            p.height = new_h
+        self._edge_snapped_coord = snapped if snapped is not None else None
+
+    @staticmethod
+    def _find_edge_snap(pl, pane_id, edge, coord):
+        from workspace.pane import SNAP_DISTANCE, EdgeSide
+        dist = SNAP_DISTANCE
+        vw, vh = pl.viewport_width, pl.viewport_height
+        # Window edges
+        window_coord = {
+            EdgeSide.LEFT: 0, EdgeSide.RIGHT: vw,
+            EdgeSide.TOP: 0, EdgeSide.BOTTOM: vh,
+        }[edge]
+        if abs(coord - window_coord) <= dist:
+            return window_coord
+        # Other pane edges
+        best = None
+        best_d = dist + 1
+        for other in pl.panes:
+            if other.id == pane_id:
+                continue
+            # Check matching edges
+            for oe in [EdgeSide.LEFT, EdgeSide.RIGHT, EdgeSide.TOP, EdgeSide.BOTTOM]:
+                oc = pl.pane_edge_coord(other, oe)
+                d = abs(coord - oc)
+                if d <= dist and d < best_d:
+                    best = oc
+                    best_d = d
+        return best
 
     def mouseReleaseEvent(self, event):
         if self._pane_drag:
@@ -303,7 +456,13 @@ class MainWindow(QMainWindow):
             self._pane_drag = None
             self._refresh_pane_positions()
         elif self._border_drag:
+            self.releaseMouse()
             self._border_drag = None
+            self._refresh_pane_positions()
+        elif self._edge_drag:
+            self.releaseMouse()
+            self._edge_drag = None
+            self._edge_snapped_coord = None
             self._refresh_pane_positions()
 
     def add_canvas(self, model: Model) -> None:
