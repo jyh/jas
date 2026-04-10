@@ -757,7 +757,7 @@ class CanvasWidget(QWidget):
             self._blink_timer.setInterval(265)
             self._blink_timer.timeout.connect(self._on_blink_tick)
             self._blink_timer.start()
-        except Exception:
+        except (ImportError, RuntimeError):
             self._blink_timer = None
 
     def _on_blink_tick(self) -> None:
