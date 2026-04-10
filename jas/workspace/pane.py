@@ -39,15 +39,6 @@ class PaneKind(Enum):
     CANVAS = auto()
     DOCK = auto()
 
-class TileWidth(Enum):
-    FIXED = auto()
-    KEEP_CURRENT = auto()
-    FLEX = auto()
-
-@dataclass
-class TileFixed:
-    width: float
-
 class DoubleClickAction(Enum):
     """Action triggered by double-clicking a pane's title bar."""
     MAXIMIZE = auto()
@@ -62,23 +53,18 @@ class PaneConfig:
     fixed_width: bool
     collapsed_width: float | None
     double_click_action: DoubleClickAction
-    tile_order: int
-    tile_width: object  # TileFixed | TileWidth.KEEP_CURRENT | TileWidth.FLEX
 
     @staticmethod
     def for_kind(kind: PaneKind) -> PaneConfig:
         if kind == PaneKind.TOOLBAR:
             return PaneConfig("Tools", MIN_TOOLBAR_WIDTH, MIN_TOOLBAR_HEIGHT,
-                              True, None, DoubleClickAction.NONE,
-                              0, TileFixed(DEFAULT_TOOLBAR_WIDTH))
+                              True, None, DoubleClickAction.NONE)
         elif kind == PaneKind.CANVAS:
             return PaneConfig("Canvas", MIN_CANVAS_WIDTH, MIN_CANVAS_HEIGHT,
-                              False, None, DoubleClickAction.MAXIMIZE,
-                              1, TileWidth.FLEX)
+                              False, None, DoubleClickAction.MAXIMIZE)
         else:
             return PaneConfig("Panels", MIN_PANE_DOCK_WIDTH, MIN_PANE_DOCK_HEIGHT,
-                              False, 36.0, DoubleClickAction.REDOCK,
-                              2, TileWidth.KEEP_CURRENT)
+                              False, 36.0, DoubleClickAction.REDOCK)
 
 @dataclass
 class Pane:
@@ -381,49 +367,47 @@ class PaneLayout:
         vw, vh = self.viewport_width, self.viewport_height
         self.canvas_maximized = False
         self.hidden_panes = []
-        visible = [(p.id, p.config.tile_width, p.width, p.config.tile_order) for p in self.panes]
-        visible.sort(key=lambda t: t[3])
+        # Sort by position: ascending x, tiebreak by descending y
+        visible = [(p.id, p.x, p.y) for p in self.panes]
+        visible.sort(key=lambda t: (t[1], -t[2]))
         if not visible:
             return
-        fixed_total = 0.0
-        flex_count = 0
-        widths = []
-        for pid, tw, cw, _ in visible:
-            if isinstance(tw, TileFixed):
-                fixed_total += tw.width
-                widths.append(tw.width)
-            elif tw == TileWidth.KEEP_CURRENT:
-                w = cw
-                if collapsed_override and collapsed_override[0] == pid:
-                    w = collapsed_override[1]
-                fixed_total += w
-                widths.append(w)
+        # Derive tile widths from config
+        FIXED, KEEP, FLEX = 'fixed', 'keep', 'flex'
+        tile_widths = []
+        for pid, _, _ in visible:
+            if collapsed_override and collapsed_override[0] == pid:
+                tile_widths.append((FIXED, collapsed_override[1]))
+                continue
+            p = self.find_pane(pid)
+            if p and p.config.fixed_width:
+                tile_widths.append((FIXED, p.width))
+            elif p and p.config.collapsed_width is not None:
+                tile_widths.append((KEEP, p.width))
             else:
-                flex_count += 1
-                widths.append(0.0)
+                tile_widths.append((FLEX, 0.0))
+        # Compute widths
+        fixed_total = sum(w for kind, w in tile_widths if kind != FLEX)
+        flex_count = sum(1 for kind, _ in tile_widths if kind == FLEX)
         if flex_count > 0:
-            min_flex = max((p.config.min_width for p in self.panes if p.config.tile_width == TileWidth.FLEX), default=0)
+            min_flex = max((self.find_pane(pid).config.min_width
+                           for (pid, _, _), (kind, _) in zip(visible, tile_widths)
+                           if kind == FLEX and self.find_pane(pid)), default=0)
             flex_each = max((vw - fixed_total) / flex_count, min_flex)
         else:
             flex_each = 0.0
-        widths = [flex_each if (isinstance(tw, type) and False) or tw == TileWidth.FLEX else w
-                  for (_, tw, _, _), w in zip(visible, widths)]
-        # Correct flex assignment
-        final_widths = []
-        for (_, tw, _, _), w in zip(visible, widths):
-            if tw == TileWidth.FLEX:
-                final_widths.append(flex_each)
-            else:
-                final_widths.append(w)
+        widths = [flex_each if kind == FLEX else w for kind, w in tile_widths]
+        # Assign positions
         x = 0.0
-        for (pid, _, _, _), w in zip(visible, final_widths):
+        for (pid, _, _), w in zip(visible, widths):
             p = self.find_pane(pid)
             if p:
                 p.x, p.y, p.width, p.height = x, 0, w, vh
             x += w
+        # Rebuild snaps
         self.snaps = []
         n = len(visible)
-        for i, (pid, _, _, _) in enumerate(visible):
+        for i, (pid, _, _) in enumerate(visible):
             if i == 0:
                 self.snaps.append(SnapConstraint(pid, EdgeSide.LEFT, WindowTarget(EdgeSide.LEFT)))
             if i == n - 1:
@@ -526,17 +510,9 @@ class PaneLayout:
 
 def pane_layout_to_dict(pl: PaneLayout) -> dict:
     def _config(c):
-        tw = c.tile_width
-        if isinstance(tw, TileFixed):
-            tw_d = {"Fixed": tw.width}
-        elif tw == TileWidth.KEEP_CURRENT:
-            tw_d = "KeepCurrent"
-        else:
-            tw_d = "Flex"
         result = {"label": c.label, "min_width": c.min_width, "min_height": c.min_height,
                 "fixed_width": c.fixed_width,
-                "double_click_action": c.double_click_action.name,
-                "tile_order": c.tile_order, "tile_width": tw_d}
+                "double_click_action": c.double_click_action.name}
         if c.collapsed_width is not None:
             result["collapsed_width"] = c.collapsed_width
         return result
@@ -561,12 +537,6 @@ def pane_layout_to_dict(pl: PaneLayout) -> dict:
     }
 
 def pane_layout_from_dict(d: dict) -> PaneLayout:
-    def _tw(v):
-        if isinstance(v, dict) and "Fixed" in v:
-            return TileFixed(v["Fixed"])
-        if v == "KeepCurrent":
-            return TileWidth.KEEP_CURRENT
-        return TileWidth.FLEX
     def _config(cd, kind):
         try:
             dca_name = cd.get("double_click_action", "NONE")
@@ -574,8 +544,7 @@ def pane_layout_from_dict(d: dict) -> PaneLayout:
             return PaneConfig(cd["label"], cd["min_width"], cd["min_height"],
                               cd["fixed_width"],
                               cd.get("collapsed_width"),
-                              dca,
-                              cd["tile_order"], _tw(cd["tile_width"]))
+                              dca)
         except (KeyError, TypeError):
             return PaneConfig.for_kind(kind)
     def _pane(pd):

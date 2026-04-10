@@ -23,7 +23,7 @@ public let defaultLayoutName = "Default"
 
 /// Current layout format version. Saved layouts with a different version
 /// are rejected and replaced with the default layout.
-public let layoutVersion: Int = 2
+public let layoutVersion: Int = 3
 
 // MARK: - Core Types
 

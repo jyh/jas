@@ -32,7 +32,9 @@ type pane_id = int
 
 type pane_kind = Toolbar | Canvas | Dock
 
-type tile_width = Fixed of float | Keep_current | Flex
+(** How a pane's width is allocated during the Tile operation.
+    Derived at tile time from pane_config fields, not stored. *)
+type tile_width = Fixed of float | Keep_current of float | Flex
 
 (** Action triggered by double-clicking a pane's title bar. *)
 type double_click_action = Maximize | Redock | No_action
@@ -46,8 +48,6 @@ type pane_config = {
   collapsed_width : float option;
   (** Action triggered by double-clicking the title bar. *)
   double_click_action : double_click_action;
-  tile_order : int;
-  tile_width : tile_width;
 }
 
 type pane = {
@@ -92,19 +92,16 @@ let config_for_kind = function
       label = "Tools"; min_width = min_toolbar_width; min_height = min_toolbar_height;
       fixed_width = true; collapsed_width = None;
       double_click_action = No_action;
-      tile_order = 0; tile_width = Fixed default_toolbar_width;
     }
   | Canvas -> {
       label = "Canvas"; min_width = min_canvas_width; min_height = min_canvas_height;
       fixed_width = false; collapsed_width = None;
       double_click_action = Maximize;
-      tile_order = 1; tile_width = Flex;
     }
   | Dock -> {
       label = "Panels"; min_width = min_pane_dock_width; min_height = min_pane_dock_height;
       fixed_width = false; collapsed_width = Some 32.0;
       double_click_action = Redock;
-      tile_order = 2; tile_width = Keep_current;
     }
 
 (* ------------------------------------------------------------------ *)
@@ -423,40 +420,50 @@ let tile_panes pl ~collapsed_override =
   let vh = pl.viewport_height in
   pl.canvas_maximized <- false;
   pl.hidden_panes <- [];
+  (* Sort by position: ascending x, tiebreak by descending y *)
   let visible = Array.to_list pl.panes
-    |> List.map (fun p -> (p.id, p.config.tile_width, p.width, p.config.tile_order))
-    |> List.sort (fun (_, _, _, o1) (_, _, _, o2) -> compare o1 o2)
+    |> List.map (fun p -> (p.id, p.x, p.y))
+    |> List.sort (fun (_, x1, y1) (_, x2, y2) ->
+         let c = compare x1 x2 in
+         if c <> 0 then c else compare y2 y1)
   in
   if visible = [] then ()
   else begin
+    (* Derive tile widths from config *)
+    let tile_widths = List.map (fun (id, _, _) ->
+      match collapsed_override with
+      | Some (oid, cw) when oid = id -> Fixed cw
+      | _ ->
+        match find_pane pl id with
+        | Some p when p.config.fixed_width -> Fixed p.width
+        | Some p when p.config.collapsed_width <> None -> Keep_current p.width
+        | _ -> Flex
+    ) visible in
     (* Compute widths *)
     let fixed_total = ref 0.0 in
     let flex_count = ref 0 in
-    let widths = List.map (fun (id, tw, current_w, _) ->
+    let widths = List.map (fun tw ->
       match tw with
       | Fixed w -> fixed_total := !fixed_total +. w; w
-      | Keep_current ->
-        let w = match collapsed_override with
-          | Some (oid, cw) when oid = id -> cw
-          | _ -> current_w
-        in
-        fixed_total := !fixed_total +. w; w
+      | Keep_current w -> fixed_total := !fixed_total +. w; w
       | Flex -> incr flex_count; 0.0
-    ) visible in
+    ) tile_widths in
     let flex_each =
       if !flex_count > 0 then
-        let min_flex = Array.fold_left (fun acc p ->
-          if p.config.tile_width = Flex then max acc p.config.min_width else acc
-        ) 0.0 pl.panes in
+        let min_flex = List.fold_left2 (fun acc (id, _, _) tw ->
+          match tw with
+          | Flex -> (match find_pane pl id with Some p -> max acc p.config.min_width | None -> acc)
+          | _ -> acc
+        ) 0.0 visible tile_widths in
         max ((vw -. !fixed_total) /. float_of_int !flex_count) min_flex
       else 0.0
     in
-    let widths = List.map2 (fun (_, tw, _, _) w ->
+    let widths = List.map2 (fun tw w ->
       match tw with Flex -> flex_each | _ -> w
-    ) visible widths in
+    ) tile_widths widths in
     (* Assign positions *)
     let x = ref 0.0 in
-    List.iter2 (fun (id, _, _, _) w ->
+    List.iter2 (fun (id, _, _) w ->
       pane_mut pl id (fun p ->
         p.x <- !x;
         p.y <- 0.0;
@@ -467,7 +474,7 @@ let tile_panes pl ~collapsed_override =
     (* Rebuild snaps *)
     pl.snaps <- [];
     let len = List.length visible in
-    List.iteri (fun i (id, _, _, _) ->
+    List.iteri (fun i (id, _, _) ->
       if i = 0 then
         pl.snaps <- pl.snaps @ [{ snap_pane = id; edge = Left; target = Window_target Left }];
       if i = len - 1 then
@@ -477,7 +484,7 @@ let tile_panes pl ~collapsed_override =
         { snap_pane = id; edge = Bottom; target = Window_target Bottom };
       ];
       if i + 1 < len then begin
-        let next_id = let (nid, _, _, _) = List.nth visible (i + 1) in nid in
+        let next_id = let (nid, _, _) = List.nth visible (i + 1) in nid in
         pl.snaps <- pl.snaps @ [{ snap_pane = id; edge = Right; target = Pane_target (next_id, Left) }]
       end
     ) visible

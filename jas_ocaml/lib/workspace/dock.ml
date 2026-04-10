@@ -126,7 +126,7 @@ let make_dock id groups width = {
 (* DockLayout                                                         *)
 (* ------------------------------------------------------------------ *)
 
-let layout_version = 2
+let layout_version = 3
 
 type dock_layout = {
   mutable version : int;
@@ -660,18 +660,6 @@ let edge_side_of_json = function
   | "Left" -> Pane.Left | "Right" -> Pane.Right | "Top" -> Pane.Top | "Bottom" -> Pane.Bottom
   | _ -> Pane.Left
 
-let tile_width_to_json : Pane.tile_width -> Yojson.Safe.t = function
-  | Fixed w -> `Assoc ["Fixed", `Float w]
-  | Keep_current -> `String "KeepCurrent"
-  | Flex -> `String "Flex"
-
-let tile_width_of_json (j : Yojson.Safe.t) : Pane.tile_width =
-  match j with
-  | `String "KeepCurrent" -> Keep_current
-  | `String "Flex" -> Flex
-  | `Assoc [("Fixed", `Float w)] -> Fixed w
-  | _ -> Flex
-
 let double_click_action_to_json = function
   | Pane.Maximize -> `String "Maximize"
   | Pane.Redock -> `String "Redock"
@@ -688,7 +676,6 @@ let pane_config_to_json (c : Pane.pane_config) : Yojson.Safe.t =
     "min_width", `Float c.min_width; "min_height", `Float c.min_height;
     "fixed_width", `Bool c.fixed_width;
     "double_click_action", double_click_action_to_json c.double_click_action;
-    "tile_order", `Int c.tile_order; "tile_width", tile_width_to_json c.tile_width;
   ] in
   let with_cw = match c.collapsed_width with
     | Some w -> base @ ["collapsed_width", `Float w]
@@ -703,9 +690,7 @@ let pane_config_of_json (j : Yojson.Safe.t) : Pane.pane_config =
     min_height = j |> member "min_height" |> to_float;
     fixed_width = j |> member "fixed_width" |> to_bool;
     collapsed_width = (try Some (j |> member "collapsed_width" |> to_float) with _ -> None);
-    double_click_action = (try double_click_action_of_json (j |> member "double_click_action") with _ -> Pane.No_action);
-    tile_order = j |> member "tile_order" |> to_int;
-    tile_width = tile_width_of_json (j |> member "tile_width"); }
+    double_click_action = (try double_click_action_of_json (j |> member "double_click_action") with _ -> Pane.No_action); }
 
 let pane_to_json (p : Pane.pane) : Yojson.Safe.t =
   `Assoc [

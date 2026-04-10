@@ -37,9 +37,10 @@ public enum PaneKind: Hashable, Codable {
 }
 
 /// How a pane's width is allocated during the Tile operation.
-public enum TileWidth: Codable, Equatable {
+/// Derived at tile time from PaneConfig fields, not stored.
+enum TileWidth {
     case fixed(Double)
-    case keepCurrent
+    case keepCurrent(Double)
     case flex
 }
 
@@ -63,8 +64,6 @@ public struct PaneConfig: Codable {
     public var collapsedWidth: Double?
     /// Action triggered by double-clicking the title bar.
     public var doubleClickAction: DoubleClickAction
-    public var tileOrder: Int
-    public var tileWidth: TileWidth
 
     public static func forKind(_ kind: PaneKind) -> PaneConfig {
         switch kind {
@@ -72,20 +71,17 @@ public struct PaneConfig: Codable {
             return PaneConfig(
                 label: "Tools", minWidth: minToolbarWidth, minHeight: minToolbarHeight,
                 fixedWidth: true, collapsedWidth: nil,
-                doubleClickAction: .none,
-                tileOrder: 0, tileWidth: .fixed(defaultToolbarWidth))
+                doubleClickAction: .none)
         case .canvas:
             return PaneConfig(
                 label: "Canvas", minWidth: minCanvasWidth, minHeight: minCanvasHeight,
                 fixedWidth: false, collapsedWidth: nil,
-                doubleClickAction: .maximize,
-                tileOrder: 1, tileWidth: .flex)
+                doubleClickAction: .maximize)
         case .dock:
             return PaneConfig(
                 label: "Panels", minWidth: minPaneDockWidth, minHeight: minPaneDockHeight,
                 fixedWidth: false, collapsedWidth: 36.0,
-                doubleClickAction: .redock,
-                tileOrder: 2, tileWidth: .keepCurrent)
+                doubleClickAction: .redock)
         }
     }
 }
@@ -518,42 +514,46 @@ public struct PaneLayout: Codable {
 
         canvasMaximized = false
         hiddenPanes.removeAll()
-        var visible: [(PaneId, TileWidth, Double)] = panes.map { ($0.id, $0.config.tileWidth, $0.width) }
+
+        // Sort by position: ascending x, tiebreak by descending y.
+        var visible: [(PaneId, Double, Double)] = panes.map { ($0.id, $0.x, $0.y) }
         visible.sort { a, b in
-            let orderA = pane(a.0)?.config.tileOrder ?? 0
-            let orderB = pane(b.0)?.config.tileOrder ?? 0
-            return orderA < orderB
+            if a.1 != b.1 { return a.1 < b.1 }
+            return a.2 > b.2
         }
         if visible.isEmpty { return }
+
+        // Derive tile widths from config
+        let tileWidths: [TileWidth] = visible.map { (id, _, _) in
+            if let co = collapsedOverride, co.0 == id { return .fixed(co.1) }
+            guard let p = pane(id) else { return .flex }
+            if p.config.fixedWidth { return .fixed(p.width) }
+            if p.config.collapsedWidth != nil { return .keepCurrent(p.width) }
+            return .flex
+        }
 
         // Compute widths
         var fixedTotal: Double = 0
         var flexCount = 0
-        var widths: [Double] = visible.map { (id, tileW, currentW) in
-            switch tileW {
-            case .fixed(let w):
-                fixedTotal += w; return w
-            case .keepCurrent:
-                let w: Double
-                if let co = collapsedOverride, co.0 == id {
-                    w = co.1
-                } else {
-                    w = currentW
-                }
-                fixedTotal += w; return w
-            case .flex:
-                flexCount += 1; return 0
+        var widths: [Double] = tileWidths.map { tw in
+            switch tw {
+            case .fixed(let w): fixedTotal += w; return w
+            case .keepCurrent(let w): fixedTotal += w; return w
+            case .flex: flexCount += 1; return 0
             }
         }
         let flexEach: Double
         if flexCount > 0 {
-            let minFlex = panes.filter { $0.config.tileWidth == .flex }.map(\.config.minWidth).max() ?? 0
+            let minFlex = zip(visible, tileWidths)
+                .filter { if case .flex = $0.1 { return true }; return false }
+                .compactMap { pane($0.0.0)?.config.minWidth }
+                .max() ?? 0
             flexEach = max((vw - fixedTotal) / Double(flexCount), minFlex)
         } else {
             flexEach = 0
         }
-        widths = zip(visible, widths).map { (entry, w) in
-            if case .flex = entry.1 { return flexEach }
+        widths = zip(tileWidths, widths).map { (tw, w) in
+            if case .flex = tw { return flexEach }
             return w
         }
 
