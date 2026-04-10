@@ -87,7 +87,12 @@ public class Controller {
         return result
     }
 
-    public func selectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
+    // MARK: - Selection helpers
+
+    /// Flat 2-level selection with group expansion. Used by `selectRect`
+    /// and `selectPolygon` — the only difference between them is the
+    /// hit-test predicate.
+    private func selectFlat(_ model: Model, predicate: (Element) -> Bool, extend: Bool) {
         let doc = model.document
         var selection: Selection = []
         for (li, layer) in doc.layers.enumerated() {
@@ -98,7 +103,7 @@ public class Controller {
                 let childVis = min(layerVis, child.visibility)
                 if childVis == .invisible { continue }
                 if case .group(let g) = child {
-                    let anyHit = g.children.contains { elementIntersectsRect($0, x, y, width, height) }
+                    let anyHit = g.children.contains { predicate($0) }
                     if anyHit {
                         selection.insert(ElementSelection.all([li, ci]))
                         for gi in 0..<g.children.count {
@@ -106,7 +111,7 @@ public class Controller {
                         }
                     }
                 } else {
-                    if elementIntersectsRect(child, x, y, width, height) {
+                    if predicate(child) {
                         selection.insert(ElementSelection.all([li, ci]))
                     }
                 }
@@ -115,103 +120,76 @@ public class Controller {
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
         model.document = Document(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: finalSel)
+    }
+
+    /// Recursive selection with customizable leaf handling. Used by
+    /// `groupSelectRect` and `directSelectRect` — they differ only in
+    /// what happens when a leaf element is reached.
+    private func selectRecursive(_ model: Model,
+                                 leafHandler: ([Int], Element) -> ElementSelection?,
+                                 extend: Bool) {
+        let doc = model.document
+        var selection: Selection = []
+
+        func check(_ path: [Int], _ elem: Element, _ ancestorVis: Visibility) {
+            if elem.isLocked { return }
+            let effective = min(ancestorVis, elem.visibility)
+            if effective == .invisible { return }
+            switch elem {
+            case .layer(let v):
+                for (i, child) in v.children.enumerated() { check(path + [i], child, effective) }
+            case .group(let v):
+                for (i, child) in v.children.enumerated() { check(path + [i], child, effective) }
+            default:
+                if let es = leafHandler(path, elem) {
+                    selection.insert(es)
+                }
+            }
+        }
+
+        for (li, layer) in doc.layers.enumerated() {
+            check([li], .layer(layer), .preview)
+        }
+        let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
+        model.document = Document(layers: doc.layers,
+                                     selectedLayer: doc.selectedLayer, selection: finalSel)
+    }
+
+    // MARK: - Public selection methods
+
+    public func selectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
+        selectFlat(model, predicate: { elementIntersectsRect($0, x, y, width, height) }, extend: extend)
     }
 
     public func selectPolygon(polygon: [(Double, Double)], extend: Bool = false) {
-        let doc = model.document
-        var selection: Selection = []
-        for (li, layer) in doc.layers.enumerated() {
-            let layerVis = layer.visibility
-            if layerVis == .invisible { continue }
-            for (ci, child) in layer.children.enumerated() {
-                if child.isLocked { continue }
-                let childVis = min(layerVis, child.visibility)
-                if childVis == .invisible { continue }
-                if case .group(let g) = child {
-                    let anyHit = g.children.contains { elementIntersectsPolygon($0, polygon) }
-                    if anyHit {
-                        selection.insert(ElementSelection.all([li, ci]))
-                        for gi in 0..<g.children.count {
-                            selection.insert(ElementSelection.all([li, ci, gi]))
-                        }
-                    }
-                } else {
-                    if elementIntersectsPolygon(child, polygon) {
-                        selection.insert(ElementSelection.all([li, ci]))
-                    }
-                }
-            }
-        }
-        let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
-        model.document = Document(layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer, selection: finalSel)
+        selectFlat(model, predicate: { elementIntersectsPolygon($0, polygon) }, extend: extend)
     }
 
     public func groupSelectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
-        let doc = model.document
-        var selection: Selection = []
-
-        func check(_ path: [Int], _ elem: Element, _ ancestorVis: Visibility) {
-            if elem.isLocked { return }
-            let effective = min(ancestorVis, elem.visibility)
-            if effective == .invisible { return }
-            switch elem {
-            case .layer(let v):
-                for (i, child) in v.children.enumerated() { check(path + [i], child, effective) }
-            case .group(let v):
-                for (i, child) in v.children.enumerated() { check(path + [i], child, effective) }
-            default:
-                if elementIntersectsRect(elem, x, y, width, height) {
-                    selection.insert(ElementSelection.all(path))
-                }
-            }
-        }
-
-        for (li, layer) in doc.layers.enumerated() {
-            check([li], .layer(layer), .preview)
-        }
-        let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
-        model.document = Document(layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer, selection: finalSel)
+        selectRecursive(model, leafHandler: { path, elem in
+            elementIntersectsRect(elem, x, y, width, height)
+                ? ElementSelection.all(path) : nil
+        }, extend: extend)
     }
 
     public func directSelectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
-        let doc = model.document
-        var selection: Selection = []
-
-        func check(_ path: [Int], _ elem: Element, _ ancestorVis: Visibility) {
-            if elem.isLocked { return }
-            let effective = min(ancestorVis, elem.visibility)
-            if effective == .invisible { return }
-            switch elem {
-            case .layer(let v):
-                for (i, child) in v.children.enumerated() { check(path + [i], child, effective) }
-            case .group(let v):
-                for (i, child) in v.children.enumerated() { check(path + [i], child, effective) }
-            default:
-                let cps = elem.controlPointPositions
-                let hitCPs: [Int] = cps.enumerated().compactMap { (i, pt) in
-                    pointInRect(pt.0, pt.1, x, y, width, height) ? i : nil
-                }
-                if !hitCPs.isEmpty {
-                    selection.insert(ElementSelection.partial(path, hitCPs))
-                } else if elementIntersectsRect(elem, x, y, width, height) {
-                    // Marquee covers the body but no CPs. Select the
-                    // element with an empty CP set — the Direct
-                    // Selection tool must not promote "body
-                    // intersects" to "every CP selected" (which is
-                    // what `.all` would mean).
-                    selection.insert(ElementSelection.partial(path, []))
-                }
+        selectRecursive(model, leafHandler: { path, elem in
+            let cps = elem.controlPointPositions
+            let hitCPs: [Int] = cps.enumerated().compactMap { (i, pt) in
+                pointInRect(pt.0, pt.1, x, y, width, height) ? i : nil
             }
-        }
-
-        for (li, layer) in doc.layers.enumerated() {
-            check([li], .layer(layer), .preview)
-        }
-        let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
-        model.document = Document(layers: doc.layers,
-                                     selectedLayer: doc.selectedLayer, selection: finalSel)
+            if !hitCPs.isEmpty {
+                return ElementSelection.partial(path, hitCPs)
+            } else if elementIntersectsRect(elem, x, y, width, height) {
+                // Marquee covers the body but no CPs. Select the
+                // element with an empty CP set — the Direct
+                // Selection tool must not promote "body
+                // intersects" to "every CP selected" (which is
+                // what `.all` would mean).
+                return ElementSelection.partial(path, [])
+            }
+            return nil
+        }, extend: extend)
     }
 
     public func setSelection(_ selection: Selection) {
@@ -422,6 +400,97 @@ public class Controller {
         }
         model.document = Document(layers: newLayers,
                                   selectedLayer: doc.selectedLayer, selection: newSelection)
+    }
+
+    /// Group the currently selected sibling elements into a new Group.
+    /// Requires at least 2 selected elements that share the same parent.
+    /// After grouping, the selection contains only the new group.
+    public func groupSelection() {
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        let paths = doc.selection.map(\.path).sorted { $0.lexicographicallyPrecedes($1) }
+        guard paths.count >= 2 else { return }
+        // All selected elements must be siblings (same parent prefix)
+        let parent = Array(paths[0].dropLast())
+        guard paths.allSatisfy({ Array($0.dropLast()) == parent }) else { return }
+        // Gather elements in order
+        let elements = paths.map { doc.getElement($0) }
+        // Delete in reverse order
+        var newDoc = doc
+        for path in paths.reversed() {
+            newDoc = newDoc.deleteElement(path)
+        }
+        // Create group and insert at position of first element
+        let group = Element.group(Group(children: elements))
+        let insertPath = paths[0]
+        let layerIdx = insertPath[0]
+        let childIdx = insertPath.count > 1 ? insertPath[1] : 0
+        let layer = newDoc.layers[layerIdx]
+        var newChildren = layer.children
+        newChildren.insert(group, at: childIdx)
+        let newLayer = Layer(name: layer.name, children: newChildren,
+                            opacity: layer.opacity, transform: layer.transform)
+        var newLayers = newDoc.layers
+        newLayers[layerIdx] = newLayer
+        let newSelection: Selection = [ElementSelection.all(insertPath)]
+        model.document = Document(layers: newLayers,
+                                  selectedLayer: newDoc.selectedLayer,
+                                  selection: newSelection)
+    }
+
+    /// Ungroup all selected Group elements, replacing each with its children.
+    /// After ungrouping, the selection contains the formerly-grouped children.
+    public func ungroupSelection() {
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        // Collect selected paths that are Groups
+        var groupPaths: [ElementPath] = []
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            if case .group = elem {
+                groupPaths.append(es.path)
+            }
+        }
+        guard !groupPaths.isEmpty else { return }
+        groupPaths.sort { $0.lexicographicallyPrecedes($1) }
+        // Process in reverse order to preserve indices
+        var newDoc = doc
+        for gpath in groupPaths.reversed() {
+            let groupElem = newDoc.getElement(gpath)
+            guard case .group(let g) = groupElem else { continue }
+            let children = g.children
+            // Delete the group
+            newDoc = newDoc.deleteElement(gpath)
+            let layerIdx = gpath[0]
+            let childIdx = gpath.count > 1 ? gpath[1] : 0
+            let layer = newDoc.layers[layerIdx]
+            var newChildren = layer.children
+            newChildren.insert(contentsOf: children, at: childIdx)
+            let newLayer = Layer(name: layer.name, children: newChildren,
+                                opacity: layer.opacity, transform: layer.transform)
+            var newLayers = newDoc.layers
+            newLayers[layerIdx] = newLayer
+            newDoc = Document(layers: newLayers, selectedLayer: newDoc.selectedLayer,
+                              selection: [])
+        }
+        // Build selection for all unpacked children
+        var newSelection: Selection = []
+        var offset = 0
+        for gpath in groupPaths {
+            let groupElem = doc.getElement(gpath)
+            guard case .group(let g) = groupElem else { continue }
+            let nChildren = g.children.count
+            let layerIdx = gpath[0]
+            let childIdx = (gpath.count > 1 ? gpath[1] : 0) + offset
+            for j in 0..<nChildren {
+                let path: ElementPath = [layerIdx, childIdx + j]
+                newSelection.insert(ElementSelection.all(path))
+            }
+            offset += nChildren - 1
+        }
+        model.document = Document(layers: newDoc.layers,
+                                  selectedLayer: newDoc.selectedLayer,
+                                  selection: newSelection)
     }
 
     public func copySelection(dx: Double, dy: Double) {

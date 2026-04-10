@@ -155,16 +155,18 @@ class type_tool = object (_self)
     ctx.controller#add_element elem;
     let doc = ctx.model#document in
     let li = doc.Document.selected_layer in
-    let layer = doc.Document.layers.(li) in
-    let ci = (match layer with
-      | Element.Layer { children; _ } -> Array.length children - 1
-      | _ -> 0) in
-    let path = [li; ci] in
-    ctx.controller#select_element path;
-    let s = Text_edit.create
-      ~path ~target:Text_edit.Edit_text ~content:"" ~insertion:0 in
-    Text_edit.set_blink_epoch_ms s (now_ms ());
-    session <- Some s
+    if li >= 0 && li < Array.length doc.Document.layers then begin
+      let layer = doc.Document.layers.(li) in
+      let ci = (match layer with
+        | Element.Layer { children; _ } -> Array.length children - 1
+        | _ -> 0) in
+      let path = [li; ci] in
+      ctx.controller#select_element path;
+      let s = Text_edit.create
+        ~path ~target:Text_edit.Edit_text ~content:"" ~insertion:0 in
+      Text_edit.set_blink_epoch_ms s (now_ms ());
+      session <- Some s
+    end
 
   method private end_session () =
     session <- None;
@@ -353,18 +355,22 @@ class type_tool = object (_self)
         (match _self#build_layout ctx with
          | Some (_, lay) ->
            let line_no = Text_layout.line_for_cursor lay (Text_edit.insertion s) in
-           let line = lay.lines.(line_no) in
-           Text_edit.set_insertion s line.start ~extend:mods.shift;
-           bump (); ctx.request_update ()
+           if line_no >= 0 && line_no < Array.length lay.lines then begin
+             let line = lay.lines.(line_no) in
+             Text_edit.set_insertion s line.start ~extend:mods.shift;
+             bump (); ctx.request_update ()
+           end
          | None -> ());
         true
       end else if key = "End" then begin
         (match _self#build_layout ctx with
          | Some (_, lay) ->
            let line_no = Text_layout.line_for_cursor lay (Text_edit.insertion s) in
-           let line = lay.lines.(line_no) in
-           Text_edit.set_insertion s line.end_ ~extend:mods.shift;
-           bump (); ctx.request_update ()
+           if line_no >= 0 && line_no < Array.length lay.lines then begin
+             let line = lay.lines.(line_no) in
+             Text_edit.set_insertion s line.end_ ~extend:mods.shift;
+             bump (); ctx.request_update ()
+           end
          | None -> ());
         true
       end else if String.length key = 1 && not cmd then begin

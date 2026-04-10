@@ -5,6 +5,7 @@ Since the Document is immutable, mutations produce a new Document
 that replaces the old one in the Model.
 """
 
+from collections.abc import Callable
 from dataclasses import replace
 
 from document.document import (
@@ -13,7 +14,7 @@ from document.document import (
     selection_all, selection_partial,
 )
 from geometry.element import (
-    Element, Group, Layer, Path,
+    Element, Group, Layer, Path, Visibility,
     control_point_count, control_points, move_control_points,
     move_path_handle as _move_path_handle,
 )
@@ -115,14 +116,19 @@ class Controller:
                 result.add(ElementSelection.all(path))
         return frozenset(result)
 
-    def select_rect(self, x: float, y: float, width: float, height: float,
-                    *, extend: bool = False) -> None:
-        """Select all elements whose bounds intersect the given rectangle.
+    # ------------------------------------------------------------------
+    # Private helpers for selection
+    # ------------------------------------------------------------------
 
-        Group expansion: if any child of a Group intersects, all children
-        of that Group are selected.
+    def _select_flat(self, predicate: Callable[[Element], bool],
+                     *, extend: bool = False) -> None:
+        """Flat 2-level selection with group expansion.
+
+        Iterates layers and their direct children.  Groups that contain
+        at least one hit are expanded (the group itself *and* every child
+        are selected).  Parameterized by *predicate* which receives an
+        element and returns whether it is hit.
         """
-        from geometry.element import Visibility
         doc = self._model.document
         entries: list[ElementSelection] = []
         for li, layer in enumerate(doc.layers):
@@ -136,48 +142,82 @@ class Controller:
                 if child_vis == Visibility.INVISIBLE:
                     continue
                 if isinstance(child, Group) and not isinstance(child, Layer):
-                    if any(element_intersects_rect(gc, x, y, width, height)
-                           for gc in child.children):
-                        entries.append(ElementSelection.all((li, ci)))
-                        for gi, gc in enumerate(child.children):
-                            entries.append(ElementSelection.all((li, ci, gi)))
-                else:
-                    if element_intersects_rect(child, x, y, width, height):
-                        entries.append(ElementSelection.all((li, ci)))
-        new_sel = frozenset(entries)
-        if extend:
-            new_sel = self._toggle_selection(doc.selection, new_sel)
-        self._model.document = replace(doc, selection=new_sel)
-
-    def select_polygon(self, polygon: list[tuple[float, float]], *,
-                       extend: bool = False) -> None:
-        """Select all elements intersecting the given polygon."""
-        from geometry.element import Visibility
-        from algorithms.hit_test import element_intersects_polygon
-        doc = self._model.document
-        entries: list[ElementSelection] = []
-        for li, layer in enumerate(doc.layers):
-            layer_vis = layer.visibility
-            if layer_vis == Visibility.INVISIBLE:
-                continue
-            for ci, child in enumerate(layer.children):
-                if child.locked:
-                    continue
-                child_vis = min(layer_vis, child.visibility)
-                if child_vis == Visibility.INVISIBLE:
-                    continue
-                if isinstance(child, Group) and not isinstance(child, Layer):
-                    if any(element_intersects_polygon(gc, polygon)
-                           for gc in child.children):
+                    if any(predicate(gc) for gc in child.children):
                         entries.append(ElementSelection.all((li, ci)))
                         for gi in range(len(child.children)):
-                            entries.append(ElementSelection.all((li, ci, gi)))
-                elif element_intersects_polygon(child, polygon):
+                            entries.append(
+                                ElementSelection.all((li, ci, gi)))
+                elif predicate(child):
                     entries.append(ElementSelection.all((li, ci)))
         new_sel = frozenset(entries)
         if extend:
             new_sel = self._toggle_selection(doc.selection, new_sel)
         self._model.document = replace(doc, selection=new_sel)
+
+    def _select_recursive(
+        self,
+        leaf_handler: Callable[
+            [ElementPath, Element], ElementSelection | None],
+        *, extend: bool = False,
+    ) -> None:
+        """Recursive selection traversal.
+
+        Walks every layer/group tree.  When a leaf element (non-group,
+        non-layer) is reached, *leaf_handler* is called with ``(path,
+        element)`` and may return an :class:`ElementSelection` or
+        ``None``.
+        """
+        doc = self._model.document
+        entries: list[ElementSelection] = []
+
+        def _walk(path: ElementPath, elem: Element,
+                  ancestor_vis: Visibility) -> None:
+            if elem.locked:
+                return
+            effective = min(ancestor_vis, elem.visibility,
+                            key=lambda v: v.value)
+            if effective == Visibility.INVISIBLE:
+                return
+            if isinstance(elem, (Group, Layer)):
+                for i, child in enumerate(elem.children):
+                    _walk(path + (i,), child, effective)
+                return
+            result = leaf_handler(path, elem)
+            if result is not None:
+                entries.append(result)
+
+        for li, layer in enumerate(doc.layers):
+            _walk((li,), layer, Visibility.PREVIEW)
+
+        new_sel = frozenset(entries)
+        if extend:
+            new_sel = self._toggle_selection(doc.selection, new_sel)
+        self._model.document = replace(doc, selection=new_sel)
+
+    # ------------------------------------------------------------------
+    # Public selection methods (thin wrappers)
+    # ------------------------------------------------------------------
+
+    def select_rect(self, x: float, y: float, width: float, height: float,
+                    *, extend: bool = False) -> None:
+        """Select all elements whose bounds intersect the given rectangle.
+
+        Group expansion: if any child of a Group intersects, all children
+        of that Group are selected.
+        """
+        self._select_flat(
+            lambda elem: element_intersects_rect(elem, x, y, width, height),
+            extend=extend,
+        )
+
+    def select_polygon(self, polygon: list[tuple[float, float]], *,
+                       extend: bool = False) -> None:
+        """Select all elements intersecting the given polygon."""
+        from algorithms.hit_test import element_intersects_polygon
+        self._select_flat(
+            lambda elem: element_intersects_polygon(elem, polygon),
+            extend=extend,
+        )
 
     def group_select_rect(self, x: float, y: float, width: float, height: float,
                           *, extend: bool = False) -> None:
@@ -185,32 +225,11 @@ class Controller:
         control points.  Groups are traversed (not expanded) so elements
         inside groups can be individually selected.
         """
-        from geometry.element import Visibility
-        doc = self._model.document
-        entries: list[ElementSelection] = []
-
-        def _check(path: ElementPath, elem: Element,
-                   ancestor_vis: Visibility) -> None:
-            if elem.locked:
-                return
-            effective = min(ancestor_vis, elem.visibility,
-                            key=lambda v: v.value)
-            if effective == Visibility.INVISIBLE:
-                return
-            if isinstance(elem, (Group, Layer)):
-                for i, child in enumerate(elem.children):
-                    _check(path + (i,), child, effective)
-                return
+        def _leaf(path: ElementPath, elem: Element) -> ElementSelection | None:
             if element_intersects_rect(elem, x, y, width, height):
-                entries.append(ElementSelection.all(path))
-
-        for li, layer in enumerate(doc.layers):
-            _check((li,), layer, Visibility.PREVIEW)
-
-        new_sel = frozenset(entries)
-        if extend:
-            new_sel = self._toggle_selection(doc.selection, new_sel)
-        self._model.document = replace(doc, selection=new_sel)
+                return ElementSelection.all(path)
+            return None
+        self._select_recursive(_leaf, extend=extend)
 
     def direct_select_rect(self, x: float, y: float, width: float, height: float,
                            *, extend: bool = False) -> None:
@@ -218,44 +237,22 @@ class Controller:
         control points that fall within the rectangle.  Groups are not
         expanded — elements inside groups can be individually selected.
         """
-        from geometry.element import Visibility
-        doc = self._model.document
-        entries: list[ElementSelection] = []
-
-        def _check(path: ElementPath, elem: Element,
-                   ancestor_vis: Visibility) -> None:
-            if elem.locked:
-                return
-            effective = min(ancestor_vis, elem.visibility,
-                            key=lambda v: v.value)
-            if effective == Visibility.INVISIBLE:
-                return
-            if isinstance(elem, (Group, Layer)):
-                for i, child in enumerate(elem.children):
-                    _check(path + (i,), child, effective)
-                return
-            # Find which control points are inside the rect
+        def _leaf(path: ElementPath, elem: Element) -> ElementSelection | None:
             cps = control_points(elem)
             hit_cps = [
                 i for i, (px, py) in enumerate(cps)
                 if point_in_rect(px, py, x, y, width, height)
             ]
             if hit_cps:
-                entries.append(ElementSelection.partial(path, hit_cps))
-            elif element_intersects_rect(elem, x, y, width, height):
+                return ElementSelection.partial(path, hit_cps)
+            if element_intersects_rect(elem, x, y, width, height):
                 # Marquee crosses the body but no CPs. Select the
-                # element with an empty CP set — the Direct Selection
+                # element with an empty CP set -- the Direct Selection
                 # tool must not promote "body intersects" to "every CP
                 # selected" (which is what `.all` would mean).
-                entries.append(ElementSelection.partial(path, ()))
-
-        for li, layer in enumerate(doc.layers):
-            _check((li,), layer, Visibility.PREVIEW)
-
-        new_sel = frozenset(entries)
-        if extend:
-            new_sel = self._toggle_selection(doc.selection, new_sel)
-        self._model.document = replace(doc, selection=new_sel)
+                return ElementSelection.partial(path, ())
+            return None
+        self._select_recursive(_leaf, extend=extend)
 
     def set_selection(self, selection: Selection) -> None:
         """Set the document selection directly."""
@@ -268,7 +265,7 @@ class Controller:
         children of that Group are selected.  Otherwise just the single
         element is selected.  Locked elements cannot be selected.
         """
-        from geometry.element import Visibility
+
         if not path:
             raise ValueError("Path must be non-empty")
         doc = self._model.document
@@ -407,7 +404,7 @@ class Controller:
         so the effect reaches the whole subtree without rewriting
         every node.
         """
-        from geometry.element import Visibility
+
         doc = self._model.document
         if not doc.selection:
             return
@@ -428,7 +425,7 @@ class Controller:
         ancestor is invisible are *not* individually modified — it
         is the ancestor whose own flag is unset, and that cascades.
         """
-        from geometry.element import Visibility
+
         doc = self._model.document
         shown_paths: list[ElementPath] = []
 

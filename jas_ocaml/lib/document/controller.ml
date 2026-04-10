@@ -90,7 +90,7 @@ class controller ?(model = Model.create ()) () =
         | None, None -> None
       ) current new_sel
 
-    method select_rect ?(extend=false) x y w h =
+    method private select_flat predicate extend =
       let doc = model#document in
       let selection = ref Document.PathMap.empty in
       Array.iteri (fun li layer ->
@@ -109,9 +109,7 @@ class controller ?(model = Model.create ()) () =
             else
             match child with
             | Element.Group { children = gc; _ } ->
-              let any_hit = Array.exists (fun c ->
-                element_intersects_rect c x y w h
-              ) gc in
+              let any_hit = Array.exists (fun c -> predicate c) gc in
               if any_hit then begin
                 let grp_path = [li; ci] in
                 selection := Document.PathMap.add grp_path
@@ -123,7 +121,7 @@ class controller ?(model = Model.create ()) () =
                 ) gc
               end
             | _ ->
-              if element_intersects_rect child x y w h then
+              if predicate child then
                 let path = [li; ci] in
                 selection := Document.PathMap.add path
                   (Document.element_selection_all path) !selection
@@ -132,117 +130,71 @@ class controller ?(model = Model.create ()) () =
       ) doc.Document.layers;
       let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
       model#set_document { doc with Document.selection = new_sel }
+
+    method private select_recursive leaf_handler extend =
+      let doc = model#document in
+      let selection = ref Document.PathMap.empty in
+      let rec check path (elem : Element.element) ancestor_vis =
+        if Element.is_locked elem then ()
+        else
+        let effective =
+          let v = Element.get_visibility elem in
+          if compare v ancestor_vis < 0 then v else ancestor_vis
+        in
+        if effective = Element.Invisible then ()
+        else
+        match elem with
+        | Element.Layer { children; _ } | Element.Group { children; _ } ->
+          Array.iteri (fun i child -> check (path @ [i]) child effective) children
+        | _ ->
+          (match leaf_handler path elem with
+           | Some es -> selection := Document.PathMap.add path es !selection
+           | None -> ())
+      in
+      Array.iteri (fun li layer -> check [li] layer Element.Preview) doc.Document.layers;
+      let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
+      model#set_document { doc with Document.selection = new_sel }
+
+    method select_rect ?(extend=false) x y w h =
+      self#select_flat (fun elem -> element_intersects_rect elem x y w h) extend
 
     method select_polygon ?(extend=false) (polygon : (float * float) array) =
-      let doc = model#document in
-      let selection = ref Document.PathMap.empty in
-      Array.iteri (fun li layer ->
-        match layer with
-        | Element.Layer { children; visibility = layer_vis; _ } ->
-          if layer_vis = Element.Invisible then ()
-          else
-          Array.iteri (fun ci child ->
-            if Element.is_locked child then ()
-            else
-            let child_vis =
-              let cv = Element.get_visibility child in
-              if compare cv layer_vis < 0 then cv else layer_vis
-            in
-            if child_vis = Element.Invisible then ()
-            else
-            match child with
-            | Element.Group { children = gc; _ } ->
-              let any_hit = Array.exists (fun c ->
-                element_intersects_polygon c polygon
-              ) gc in
-              if any_hit then begin
-                let grp_path = [li; ci] in
-                selection := Document.PathMap.add grp_path
-                  (Document.element_selection_all grp_path) !selection;
-                Array.iteri (fun gi _gc_elem ->
-                  let path = [li; ci; gi] in
-                  selection := Document.PathMap.add path
-                    (Document.element_selection_all path) !selection
-                ) gc
-              end
-            | _ ->
-              if element_intersects_polygon child polygon then
-                let path = [li; ci] in
-                selection := Document.PathMap.add path
-                  (Document.element_selection_all path) !selection
-          ) children
-        | _ -> ()
-      ) doc.Document.layers;
-      let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
-      model#set_document { doc with Document.selection = new_sel }
+      self#select_flat (fun elem -> element_intersects_polygon elem polygon) extend
 
     method group_select_rect ?(extend=false) x y w h =
-      let doc = model#document in
-      let selection = ref Document.PathMap.empty in
-      let rec check path (elem : Element.element) ancestor_vis =
-        if Element.is_locked elem then ()
+      self#select_recursive (fun path elem ->
+        if element_intersects_rect elem x y w h then
+          Some (Document.element_selection_all path)
         else
-        let effective =
-          let v = Element.get_visibility elem in
-          if compare v ancestor_vis < 0 then v else ancestor_vis
-        in
-        if effective = Element.Invisible then ()
-        else
-        match elem with
-        | Element.Layer { children; _ } | Element.Group { children; _ } ->
-          Array.iteri (fun i child -> check (path @ [i]) child effective) children
-        | _ ->
-          if element_intersects_rect elem x y w h then
-            selection := Document.PathMap.add path
-              (Document.element_selection_all path) !selection
-      in
-      Array.iteri (fun li layer -> check [li] layer Element.Preview) doc.Document.layers;
-      let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
-      model#set_document { doc with Document.selection = new_sel }
+          None
+      ) extend
 
     method direct_select_rect ?(extend=false) x y w h =
-      let doc = model#document in
-      let selection = ref Document.PathMap.empty in
-      let rec check path (elem : Element.element) ancestor_vis =
-        if Element.is_locked elem then ()
+      self#select_recursive (fun path elem ->
+        let cps = Element.control_points elem in
+        let hit_cps =
+          List.mapi (fun i (px, py) -> (i, px, py)) cps
+          |> List.filter (fun (_i, px, py) -> point_in_rect px py x y w h)
+          |> List.map (fun (i, _, _) -> i) in
+        if hit_cps <> [] then
+          Some (Document.element_selection_partial path hit_cps)
+        else if element_intersects_rect elem x y w h then
+          (* Marquee crosses the body but no CPs. Select the
+             element with an empty CP set — the Direct Selection
+             tool must not promote "body intersects" to "every CP
+             selected" (which is what `element_selection_all` would
+             mean). *)
+          Some (Document.element_selection_partial path [])
         else
-        let effective =
-          let v = Element.get_visibility elem in
-          if compare v ancestor_vis < 0 then v else ancestor_vis
-        in
-        if effective = Element.Invisible then ()
-        else
-        match elem with
-        | Element.Layer { children; _ } | Element.Group { children; _ } ->
-          Array.iteri (fun i child -> check (path @ [i]) child effective) children
-        | _ ->
-          let cps = Element.control_points elem in
-          let hit_cps =
-            List.mapi (fun i (px, py) -> (i, px, py)) cps
-            |> List.filter (fun (_i, px, py) -> point_in_rect px py x y w h)
-            |> List.map (fun (i, _, _) -> i) in
-          if hit_cps <> [] then
-            selection := Document.PathMap.add path
-              (Document.element_selection_partial path hit_cps) !selection
-          else if element_intersects_rect elem x y w h then
-            (* Marquee crosses the body but no CPs. Select the
-               element with an empty CP set — the Direct Selection
-               tool must not promote "body intersects" to "every CP
-               selected" (which is what `element_selection_all` would
-               mean). *)
-            selection := Document.PathMap.add path
-              (Document.element_selection_partial path []) !selection
-      in
-      Array.iteri (fun li layer -> check [li] layer Element.Preview) doc.Document.layers;
-      let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
-      model#set_document { doc with Document.selection = new_sel }
+          None
+      ) extend
 
     method set_selection (selection : Document.selection) =
       model#set_document { model#document with Document.selection }
 
     method select_element (path : Document.element_path) =
       match path with
-      | [] -> failwith "path must be non-empty"
+      | [] -> ()
       | _ ->
         let doc = model#document in
         let elem = Document.get_element doc path in
@@ -273,7 +225,7 @@ class controller ?(model = Model.create ()) () =
 
     method select_control_point (path : Document.element_path) (index : int) =
       match path with
-      | [] -> failwith "path must be non-empty"
+      | [] -> ()
       | _ ->
         let es = Document.element_selection_partial path [index] in
         model#set_document { model#document with Document.selection =

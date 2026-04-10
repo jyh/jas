@@ -75,18 +75,21 @@ class DroppablePanelGroup(QWidget):
         data = bytes(event.mimeData().data(DOCK_DRAG_MIME)).decode()
         parts = data.split(":")
         target = GroupAddr(dock_id=self._dock_id, group_idx=self._gi)
-        if parts[0] == "group" and len(parts) == 3:
-            from_addr = GroupAddr(dock_id=int(parts[1]), group_idx=int(parts[2]))
-            if from_addr.dock_id == self._dock_id:
-                self._layout_data.move_group_within_dock(self._dock_id, from_addr.group_idx, self._gi)
-            else:
-                self._layout_data.move_group_to_dock(from_addr, self._dock_id, self._gi)
-        elif parts[0] == "panel" and len(parts) == 4:
-            from_addr = PanelAddr(group=GroupAddr(dock_id=int(parts[1]), group_idx=int(parts[2])), panel_idx=int(parts[3]))
-            if from_addr.group == target:
-                self._layout_data.reorder_panel(target, from_addr.panel_idx, len(self._group.panels))
-            else:
-                self._layout_data.move_panel_to_group(from_addr, target)
+        try:
+            if parts[0] == "group" and len(parts) == 3:
+                from_addr = GroupAddr(dock_id=int(parts[1]), group_idx=int(parts[2]))
+                if from_addr.dock_id == self._dock_id:
+                    self._layout_data.move_group_within_dock(self._dock_id, from_addr.group_idx, self._gi)
+                else:
+                    self._layout_data.move_group_to_dock(from_addr, self._dock_id, self._gi)
+            elif parts[0] == "panel" and len(parts) == 4:
+                from_addr = PanelAddr(group=GroupAddr(dock_id=int(parts[1]), group_idx=int(parts[2])), panel_idx=int(parts[3]))
+                if from_addr.group == target:
+                    self._layout_data.reorder_panel(target, from_addr.panel_idx, len(self._group.panels))
+                else:
+                    self._layout_data.move_panel_to_group(from_addr, target)
+        except (IndexError, ValueError):
+            return
         event.acceptProposedAction()
         self._rebuild()
 
@@ -135,7 +138,7 @@ class DockPanelWidget(QWidget):
         for gi, group in enumerate(dock.groups):
             for pi, kind in enumerate(group.panels):
                 label = WorkspaceLayout.panel_label(kind)
-                btn = QPushButton(label[0])
+                btn = QPushButton(label[0] if label else "?")
                 btn.setFixedSize(28, 28)
                 btn.setToolTip(label)
                 btn.clicked.connect(lambda _, d=dock.id, g=gi, p=pi: self._expand_to(d, g, p))

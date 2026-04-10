@@ -403,16 +403,16 @@ def _save_as(window: QMainWindow, model: Model) -> None:
 
 def _lock_selection(model: Model) -> None:
     """Lock all selected elements and clear the selection."""
-    from document.controller import DocumentController
-    controller = DocumentController(model)
+    from document.controller import Controller
+    controller = Controller(model=model)
     model.snapshot()
     controller.lock_selection()
 
 
 def _unlock_all(model: Model) -> None:
     """Unlock all locked elements in the document."""
-    from document.controller import DocumentController
-    controller = DocumentController(model)
+    from document.controller import Controller
+    controller = Controller(model=model)
     model.snapshot()
     controller.unlock_all()
 
@@ -437,7 +437,7 @@ def _group_selection(model: Model) -> None:
     """Group the selected elements into a single Group element."""
     from dataclasses import replace as dreplace
     from document.document import ElementSelection
-    from geometry.element import Group, control_point_count
+    from geometry.element import Group
 
     doc = model.document
     if not doc.selection:
@@ -475,9 +475,7 @@ def _group_selection(model: Model) -> None:
     new_layers = new_doc.layers[:layer_idx] + (new_layer,) + new_doc.layers[layer_idx + 1:]
     # Select the new group
     group_path = insert_path
-    n = control_point_count(group)
-    new_selection = frozenset([ElementSelection(
-        path=group_path, control_points=frozenset(range(n)))])
+    new_selection = frozenset([ElementSelection.all(group_path)])
     model.document = dreplace(new_doc, layers=tuple(new_layers), selection=new_selection)
 
 
@@ -485,7 +483,7 @@ def _ungroup_selection(model: Model) -> None:
     """Ungroup all selected Group elements, replacing each with its children."""
     from dataclasses import replace as dreplace
     from document.document import ElementSelection
-    from geometry.element import Group, control_point_count
+    from geometry.element import Group
 
     doc = model.document
     if not doc.selection:
@@ -534,9 +532,7 @@ def _ungroup_selection(model: Model) -> None:
         for j in range(n_children):
             path = (layer_idx, child_idx + j)
             elem = new_doc.get_element(path)
-            n = control_point_count(elem)
-            new_selection.add(ElementSelection(
-                path=path, control_points=frozenset(range(n))))
+            new_selection.add(ElementSelection.all(path))
         # Each ungroup replaces 1 element with n_children, shifting by n_children - 1
         offset += n_children - 1
     model.document = dreplace(new_doc, selection=frozenset(new_selection))
@@ -640,7 +636,7 @@ def _paste_clipboard(model: Model, offset: float) -> None:
     from dataclasses import replace as dreplace
 
     from document.document import Document, ElementSelection
-    from geometry.element import Group, Layer, Text, control_point_count
+    from geometry.element import Group, Layer, Text
     from geometry.svg import svg_to_document
 
     clipboard = QApplication.clipboard()
@@ -675,9 +671,7 @@ def _paste_clipboard(model: Model, offset: float) -> None:
             base = len(new_layers[target_idx].children)
             for j, child in enumerate(children):
                 path = (target_idx, base + j)
-                n = control_point_count(child)
-                new_selection.add(ElementSelection(
-                    path=path, control_points=frozenset(range(n))))
+                new_selection.add(ElementSelection.all(path))
             new_layers[target_idx] = dreplace(
                 new_layers[target_idx],
                 children=new_layers[target_idx].children + children)
@@ -689,9 +683,7 @@ def _paste_clipboard(model: Model, offset: float) -> None:
         idx = doc.selected_layer
         layer = doc.layers[idx]
         path = (idx, len(layer.children))
-        n = control_point_count(elem)
-        new_selection.add(ElementSelection(
-            path=path, control_points=frozenset(range(n))))
+        new_selection.add(ElementSelection.all(path))
         new_layer = dreplace(layer, children=layer.children + (elem,))
         new_layers = doc.layers[:idx] + (new_layer,) + doc.layers[idx + 1:]
         model.document = dreplace(doc, layers=tuple(new_layers),

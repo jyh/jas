@@ -47,7 +47,7 @@ class PenTool: CanvasTool {
             return
         }
         let p0 = points[0]
-        let pn = points.last!
+        guard let pn = points.last else { return }
         let dist = hypot(pn.x - p0.x, pn.y - p0.y)
         let shouldClose = close || (points.count >= 3 && dist <= penCloseRadius)
         let skipLast = shouldClose && points.count >= 3 && dist <= penCloseRadius
@@ -150,8 +150,7 @@ class PenTool: CanvasTool {
         }
 
         // Draw preview curve from last point to mouse
-        if penState != .dragging {
-            let last = points.last!
+        if penState != .dragging, let last = points.last {
             let p0 = points[0]
             let nearStart = points.count >= 2 && hypot(mouseX - p0.x, mouseY - p0.y) <= penCloseRadius
             cgCtx.setStrokeColor(CGColor(gray: 0.4, alpha: 1))
