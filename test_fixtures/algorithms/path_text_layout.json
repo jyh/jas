@@ -1,0 +1,87 @@
+{
+  "algorithm": "path_text_layout",
+  "comparison": "tolerance",
+  "tolerance": 0.0001,
+  "vectors": [
+    {
+      "name": "empty_content",
+      "path": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 100.0, "y": 0.0}],
+      "content": "",
+      "start_offset": 0.0,
+      "font_size": 16.0,
+      "char_width": 10.0,
+      "expected": {
+        "total_length": 100.0,
+        "char_count": 0,
+        "glyphs": []
+      }
+    },
+    {
+      "name": "straight_horizontal_path",
+      "path": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 100.0, "y": 0.0}],
+      "content": "abc",
+      "start_offset": 0.0,
+      "font_size": 16.0,
+      "char_width": 10.0,
+      "expected": {
+        "total_length": 100.0,
+        "char_count": 3,
+        "glyphs": [
+          {"idx": 0, "cx": 5.0, "cy": 0.0, "angle": 0.0, "overflow": false},
+          {"idx": 1, "cx": 15.0, "cy": 0.0, "angle": 0.0, "overflow": false},
+          {"idx": 2, "cx": 25.0, "cy": 0.0, "angle": 0.0, "overflow": false}
+        ]
+      }
+    },
+    {
+      "name": "with_start_offset",
+      "path": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 100.0, "y": 0.0}],
+      "content": "ab",
+      "start_offset": 0.5,
+      "font_size": 16.0,
+      "char_width": 10.0,
+      "expected": {
+        "total_length": 100.0,
+        "char_count": 2,
+        "glyphs": [
+          {"idx": 0, "cx": 55.0, "cy": 0.0, "angle": 0.0, "overflow": false},
+          {"idx": 1, "cx": 65.0, "cy": 0.0, "angle": 0.0, "overflow": false}
+        ]
+      }
+    },
+    {
+      "name": "overflow_past_path_end",
+      "path": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}],
+      "content": "abcd",
+      "start_offset": 0.0,
+      "font_size": 16.0,
+      "char_width": 10.0,
+      "expected": {
+        "total_length": 20.0,
+        "char_count": 4,
+        "glyphs": [
+          {"idx": 0, "cx": 5.0, "cy": 0.0, "angle": 0.0, "overflow": false},
+          {"idx": 1, "cx": 15.0, "cy": 0.0, "angle": 0.0, "overflow": false},
+          {"idx": 2, "cx": 20.0, "cy": 0.0, "angle": 0.0, "overflow": true},
+          {"idx": 3, "cx": 20.0, "cy": 0.0, "angle": 0.0, "overflow": true}
+        ]
+      }
+    },
+    {
+      "name": "vertical_path",
+      "path": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 0.0, "y": 100.0}],
+      "content": "ab",
+      "start_offset": 0.0,
+      "font_size": 16.0,
+      "char_width": 10.0,
+      "expected": {
+        "total_length": 100.0,
+        "char_count": 2,
+        "glyphs": [
+          {"idx": 0, "cx": 0.0, "cy": 5.0, "angle": 1.5707963267948966, "overflow": false},
+          {"idx": 1, "cx": 0.0, "cy": 15.0, "angle": 1.5707963267948966, "overflow": false}
+        ]
+      }
+    }
+  ]
+}

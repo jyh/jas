@@ -1,16 +1,16 @@
 import Foundation
 
 /// A fitted cubic Bezier segment with endpoints and control points.
-struct FitSegment {
-    let p1x: Double, p1y: Double
-    let c1x: Double, c1y: Double
-    let c2x: Double, c2y: Double
-    let p2x: Double, p2y: Double
+public struct FitSegment {
+    public let p1x: Double, p1y: Double
+    public let c1x: Double, c1y: Double
+    public let c2x: Double, c2y: Double
+    public let p2x: Double, p2y: Double
 }
 
 /// Fit a cubic Bezier spline to a sequence of 2D points using the
 /// Schneider algorithm (Graphics Gems I, 1990).
-func fitCurve(points: [(Double, Double)], error: Double) -> [FitSegment] {
+public func fitCurve(points: [(Double, Double)], error: Double) -> [FitSegment] {
     guard points.count >= 2 else { return [] }
     let d = points
     let tHat1 = leftTangent(d, 0)

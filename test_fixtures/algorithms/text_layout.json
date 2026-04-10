@@ -1,0 +1,97 @@
+{
+  "algorithm": "text_layout",
+  "comparison": "tolerance",
+  "tolerance": 0.0001,
+  "vectors": [
+    {
+      "name": "empty_string",
+      "content": "",
+      "max_width": 100.0,
+      "font_size": 16.0,
+      "char_width": 10.0,
+      "expected": {
+        "line_count": 1,
+        "char_count": 0,
+        "glyphs": []
+      }
+    },
+    {
+      "name": "single_word_point_text",
+      "content": "hello",
+      "max_width": 0.0,
+      "font_size": 16.0,
+      "char_width": 10.0,
+      "expected": {
+        "line_count": 1,
+        "char_count": 5,
+        "glyphs": [
+          {"idx": 0, "line": 0, "x": 0.0, "right": 10.0},
+          {"idx": 1, "line": 0, "x": 10.0, "right": 20.0},
+          {"idx": 2, "line": 0, "x": 20.0, "right": 30.0},
+          {"idx": 3, "line": 0, "x": 30.0, "right": 40.0},
+          {"idx": 4, "line": 0, "x": 40.0, "right": 50.0}
+        ]
+      }
+    },
+    {
+      "name": "hard_newline",
+      "content": "ab\ncd",
+      "max_width": 0.0,
+      "font_size": 16.0,
+      "char_width": 10.0,
+      "expected": {
+        "line_count": 2,
+        "char_count": 5,
+        "glyphs": [
+          {"idx": 0, "line": 0, "x": 0.0, "right": 10.0},
+          {"idx": 1, "line": 0, "x": 10.0, "right": 20.0},
+          {"idx": 3, "line": 1, "x": 0.0, "right": 10.0},
+          {"idx": 4, "line": 1, "x": 10.0, "right": 20.0}
+        ]
+      }
+    },
+    {
+      "name": "word_wrap",
+      "content": "hello world",
+      "max_width": 60.0,
+      "font_size": 16.0,
+      "char_width": 10.0,
+      "expected": {
+        "line_count": 2,
+        "char_count": 11,
+        "glyphs": [
+          {"idx": 0, "line": 0, "x": 0.0, "right": 10.0},
+          {"idx": 1, "line": 0, "x": 10.0, "right": 20.0},
+          {"idx": 2, "line": 0, "x": 20.0, "right": 30.0},
+          {"idx": 3, "line": 0, "x": 30.0, "right": 40.0},
+          {"idx": 4, "line": 0, "x": 40.0, "right": 50.0},
+          {"idx": 5, "line": 0, "x": 50.0, "right": 60.0},
+          {"idx": 6, "line": 1, "x": 0.0, "right": 10.0},
+          {"idx": 7, "line": 1, "x": 10.0, "right": 20.0},
+          {"idx": 8, "line": 1, "x": 20.0, "right": 30.0},
+          {"idx": 9, "line": 1, "x": 30.0, "right": 40.0},
+          {"idx": 10, "line": 1, "x": 40.0, "right": 50.0}
+        ]
+      }
+    },
+    {
+      "name": "long_word_char_break",
+      "content": "abcdef",
+      "max_width": 30.0,
+      "font_size": 16.0,
+      "char_width": 10.0,
+      "expected": {
+        "line_count": 2,
+        "char_count": 6,
+        "glyphs": [
+          {"idx": 0, "line": 0, "x": 0.0, "right": 10.0},
+          {"idx": 1, "line": 0, "x": 10.0, "right": 20.0},
+          {"idx": 2, "line": 0, "x": 20.0, "right": 30.0},
+          {"idx": 3, "line": 1, "x": 0.0, "right": 10.0},
+          {"idx": 4, "line": 1, "x": 10.0, "right": 20.0},
+          {"idx": 5, "line": 1, "x": 20.0, "right": 30.0}
+        ]
+      }
+    }
+  ]
+}

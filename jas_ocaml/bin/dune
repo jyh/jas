@@ -9,3 +9,7 @@
 (executable
  (name workspace_roundtrip)
  (libraries jas yojson))
+
+(executable
+ (name algorithm_roundtrip)
+ (libraries jas yojson))

@@ -20,6 +20,10 @@ path = "src/bin/svg_roundtrip.rs"
 name = "workspace_roundtrip"
 path = "src/bin/workspace_roundtrip.rs"
 
+[[bin]]
+name = "algorithm_roundtrip"
+path = "src/bin/algorithm_roundtrip.rs"
+
 [features]
 default = ["web"]
 web = ["dep:dioxus", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:dioxus-logger"]
