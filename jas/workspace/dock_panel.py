@@ -6,8 +6,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QMimeData
 from PySide6.QtGui import QDrag
 
-from workspace.dock import (
-    DockLayout, DockEdge, PanelKind, GroupAddr, PanelAddr,
+from workspace.workspace_layout import (
+    WorkspaceLayout, DockEdge, PanelKind, GroupAddr, PanelAddr,
 )
 
 DOCK_DRAG_MIME = "application/x-jas-dock-drag"
@@ -58,9 +58,9 @@ class DraggableTabButton(QPushButton):
 
 class DroppablePanelGroup(QWidget):
     """Panel group widget that accepts dock DnD drops."""
-    def __init__(self, dock_layout, dock_id, gi, group, rebuild_fn, parent=None):
+    def __init__(self, workspace_layout, dock_id, gi, group, rebuild_fn, parent=None):
         super().__init__(parent)
-        self._layout_data = dock_layout
+        self._layout_data = workspace_layout
         self._dock_id = dock_id
         self._gi = gi
         self._group = group
@@ -94,9 +94,9 @@ class DroppablePanelGroup(QWidget):
 class DockPanelWidget(QWidget):
     """Renders an anchored dock with panel groups, tab bars, and placeholders."""
 
-    def __init__(self, dock_layout: DockLayout, edge: DockEdge = DockEdge.RIGHT):
+    def __init__(self, workspace_layout: WorkspaceLayout, edge: DockEdge = DockEdge.RIGHT):
         super().__init__()
-        self._layout_data = dock_layout
+        self._layout_data = workspace_layout
         self._edge = edge
         self._vbox = QVBoxLayout(self)
         self._vbox.setContentsMargins(0, 0, 0, 0)
@@ -134,7 +134,7 @@ class DockPanelWidget(QWidget):
         # Icon buttons
         for gi, group in enumerate(dock.groups):
             for pi, kind in enumerate(group.panels):
-                label = DockLayout.panel_label(kind)
+                label = WorkspaceLayout.panel_label(kind)
                 btn = QPushButton(label[0])
                 btn.setFixedSize(28, 28)
                 btn.setToolTip(label)
@@ -177,7 +177,7 @@ class DockPanelWidget(QWidget):
 
         # Tab buttons (draggable — drags individual panel)
         for pi, kind in enumerate(group.panels):
-            label = DockLayout.panel_label(kind)
+            label = WorkspaceLayout.panel_label(kind)
             btn = DraggableTabButton(label, f"panel:{dock_id}:{gi}:{pi}")
             is_active = pi == group.active
             weight = "bold" if is_active else "normal"
@@ -201,7 +201,7 @@ class DockPanelWidget(QWidget):
         if not group.collapsed:
             active = group.active_panel()
             if active is not None:
-                body = QLabel(DockLayout.panel_label(active))
+                body = QLabel(WorkspaceLayout.panel_label(active))
                 body.setStyleSheet(f"color: {THEME_TEXT_BODY}; font-size: 12px; padding: 12px;")
                 body.setMinimumHeight(60)
                 body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
@@ -260,9 +260,9 @@ class DockPanelWidget(QWidget):
 class FloatingDockWindow(QWidget):
     """A floating dock rendered as a tool window."""
 
-    def __init__(self, dock_layout: DockLayout, fd, parent_panel):
+    def __init__(self, workspace_layout: WorkspaceLayout, fd, parent_panel):
         super().__init__(None, Qt.Tool | Qt.FramelessWindowHint)
-        self._layout_data = dock_layout
+        self._layout_data = workspace_layout
         self._fd = fd
         self._parent_panel = parent_panel
         self._drag_start = None
@@ -306,7 +306,7 @@ class FloatingDockWindow(QWidget):
         hbox.addWidget(grip)
 
         for pi, kind in enumerate(group.panels):
-            label = DockLayout.panel_label(kind)
+            label = WorkspaceLayout.panel_label(kind)
             btn = QPushButton(label)
             btn.setFlat(True)
             is_active = pi == group.active
@@ -322,7 +322,7 @@ class FloatingDockWindow(QWidget):
         if not group.collapsed:
             active = group.active_panel()
             if active is not None:
-                body = QLabel(DockLayout.panel_label(active))
+                body = QLabel(WorkspaceLayout.panel_label(active))
                 body.setStyleSheet(f"color: {THEME_TEXT_BODY}; font-size: 12px; padding: 12px;")
                 body.setMinimumHeight(60)
                 body.setAlignment(Qt.AlignTop | Qt.AlignLeft)

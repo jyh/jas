@@ -235,7 +235,7 @@ struct PaneFrameView<Content: View>: View {
         .overlay { edgeHandles }
         .simultaneousGesture(
             TapGesture().onEnded {
-                workspace.dockLayout.panesMut { pl in
+                workspace.workspaceLayout.panesMut { pl in
                     pl.bringPaneToFront(geo.id)
                 }
             }
@@ -253,12 +253,12 @@ struct PaneFrameView<Content: View>: View {
 
             if geo.config.collapsedWidth != nil {
                 Button(action: {
-                    if let rightDock = workspace.dockLayout.anchoredDock(.right) {
-                        workspace.dockLayout.toggleDockCollapsed(rightDock.id)
-                        let collapsed = workspace.dockLayout.anchoredDock(.right)?.collapsed ?? false
+                    if let rightDock = workspace.workspaceLayout.anchoredDock(.right) {
+                        workspace.workspaceLayout.toggleDockCollapsed(rightDock.id)
+                        let collapsed = workspace.workspaceLayout.anchoredDock(.right)?.collapsed ?? false
                         let dockPaneId = geo.id
                         let cw = geo.config.collapsedWidth ?? 36
-                        workspace.dockLayout.panesMut { pl in
+                        workspace.workspaceLayout.panesMut { pl in
                             pl.tilePanes(collapsedOverride: collapsed ? (dockPaneId, cw) : nil)
                         }
                     }
@@ -272,7 +272,7 @@ struct PaneFrameView<Content: View>: View {
             }
 
             Button(action: {
-                workspace.dockLayout.panesMut { pl in
+                workspace.workspaceLayout.panesMut { pl in
                     pl.hidePane(geo.kind)
                 }
             }) {
@@ -289,7 +289,7 @@ struct PaneFrameView<Content: View>: View {
         .gesture(paneDragGesture)
         .if(geo.config.doubleClickAction == .maximize) { view in
             view.onTapGesture(count: 2) {
-                workspace.dockLayout.panesMut { pl in
+                workspace.workspaceLayout.panesMut { pl in
                     pl.toggleCanvasMaximized()
                 }
             }
@@ -308,7 +308,7 @@ struct PaneFrameView<Content: View>: View {
                 if let drag = paneDrag {
                     let newX = value.location.x - drag.offX
                     let newY = value.location.y - drag.offY
-                    workspace.dockLayout.panesMut { pl in
+                    workspace.workspaceLayout.panesMut { pl in
                         pl.setPanePosition(geo.id, x: newX, y: newY)
                         let preview = pl.detectSnaps(dragged: geo.id,
                                                       viewportW: pl.viewportWidth,
@@ -326,7 +326,7 @@ struct PaneFrameView<Content: View>: View {
                 if paneDrag != nil {
                     let preview = snapPreview
                     if !preview.isEmpty {
-                        workspace.dockLayout.panesMut { pl in
+                        workspace.workspaceLayout.panesMut { pl in
                             pl.applySnaps(geo.id, newSnaps: preview,
                                          viewportW: pl.viewportWidth,
                                          viewportH: pl.viewportHeight)
@@ -334,7 +334,7 @@ struct PaneFrameView<Content: View>: View {
                     }
                     snapPreview = []
                     paneDrag = nil
-                    workspace.dockLayout.saveIfNeeded()
+                    workspace.workspaceLayout.saveIfNeeded()
                 }
             }
     }
@@ -373,7 +373,7 @@ struct PaneFrameView<Content: View>: View {
                     .onChanged { value in
                         // Capture initial geometry on first call
                         if edgeResize == nil {
-                            workspace.dockLayout.panesMut { pl in
+                            workspace.workspaceLayout.panesMut { pl in
                                 guard let p = pl.pane(geo.id) else { return }
                                 edgeResize = (geo.id, edge, p.x, p.y, p.width, p.height)
                             }
@@ -382,7 +382,7 @@ struct PaneFrameView<Content: View>: View {
                         let dx = Double(value.translation.width)
                         let dy = Double(value.translation.height)
                         var snappedAt: Double? = nil
-                        workspace.dockLayout.panesMut { pl in
+                        workspace.workspaceLayout.panesMut { pl in
                             let minW = pl.pane(geo.id)?.config.minWidth ?? 200
                             let minH = pl.pane(geo.id)?.config.minHeight ?? 200
                             // Compute raw (unsnapped) edge position
@@ -424,7 +424,7 @@ struct PaneFrameView<Content: View>: View {
                     .onEnded { _ in
                         edgeResize = nil
                         edgeSnappedCoord = nil
-                        workspace.dockLayout.saveIfNeeded()
+                        workspace.workspaceLayout.saveIfNeeded()
                     }
             )
     }

@@ -150,9 +150,9 @@ def create_menus(window: QMainWindow) -> None:
     ws_menu = window_menu.addMenu("Workspace")
 
     def _rebuild_workspace_menu():
-        from workspace.dock import WORKSPACE_LAYOUT_NAME
+        from workspace.workspace_layout import WORKSPACE_LAYOUT_NAME
         ws_menu.clear()
-        if not hasattr(window, 'dock_layout') or not hasattr(window, 'app_config'):
+        if not hasattr(window, 'workspace_layout') or not hasattr(window, 'app_config'):
             return
         config = window.app_config
         active_name = config.active_layout
@@ -179,9 +179,9 @@ def create_menus(window: QMainWindow) -> None:
 
     # Tile
     def _tile_panes():
-        if not hasattr(window, 'dock_layout'):
+        if not hasattr(window, 'workspace_layout'):
             return
-        window.dock_layout.panes_mut(lambda pl: pl.tile_panes())
+        window.workspace_layout.panes_mut(lambda pl: pl.tile_panes())
         if hasattr(window, 'refresh_panes'):
             window.refresh_panes()
 
@@ -192,9 +192,9 @@ def create_menus(window: QMainWindow) -> None:
 
     # Pane toggles
     def _toggle_pane(kind):
-        if not hasattr(window, 'dock_layout'):
+        if not hasattr(window, 'workspace_layout'):
             return
-        layout = window.dock_layout
+        layout = window.workspace_layout
         layout.panes_mut(lambda pl: (
             pl.hide_pane(kind) if pl.is_pane_visible(kind) else pl.show_pane(kind)))
         if hasattr(window, 'refresh_panes'):
@@ -210,10 +210,10 @@ def create_menus(window: QMainWindow) -> None:
 
     # Panel toggles
     def _toggle_panel(kind):
-        if not hasattr(window, 'dock_layout'):
+        if not hasattr(window, 'workspace_layout'):
             return
-        from workspace.dock import DockLayout, GroupAddr, PanelAddr
-        layout = window.dock_layout
+        from workspace.workspace_layout import WorkspaceLayout, GroupAddr, PanelAddr
+        layout = window.workspace_layout
         if layout.is_panel_visible(kind):
             # Find and close
             for _, dock in layout.anchored:
@@ -229,7 +229,7 @@ def create_menus(window: QMainWindow) -> None:
             if hasattr(window, 'dock_panel'):
                 window.dock_panel.rebuild()
 
-    from workspace.dock import PanelKind
+    from workspace.workspace_layout import PanelKind
     for kind, label in [(PanelKind.LAYERS, "&Layers"), (PanelKind.COLOR, "&Color"),
                         (PanelKind.STROKE, "&Stroke"), (PanelKind.PROPERTIES, "&Properties")]:
         action = window_menu.addAction(label)
@@ -244,23 +244,23 @@ def _refresh(window):
 
 
 def _switch_layout(window, name: str):
-    from workspace.dock import WORKSPACE_LAYOUT_NAME, DockLayout
-    if not hasattr(window, 'dock_layout') or not hasattr(window, 'app_config'):
+    from workspace.workspace_layout import WORKSPACE_LAYOUT_NAME, WorkspaceLayout
+    if not hasattr(window, 'workspace_layout') or not hasattr(window, 'app_config'):
         return
-    window.dock_layout.save_to_file()
-    loaded = DockLayout.load_from_file(name)
+    window.workspace_layout.save_to_file()
+    loaded = WorkspaceLayout.load_from_file(name)
     loaded.name = WORKSPACE_LAYOUT_NAME
-    window.dock_layout = loaded
+    window.workspace_layout = loaded
     window.app_config.active_layout = name
     window.app_config.save()
-    window.dock_layout.save_to_file()
+    window.workspace_layout.save_to_file()
     _refresh(window)
 
 
 def _save_as(window):
     from PySide6.QtWidgets import QInputDialog, QMessageBox
-    from workspace.dock import WORKSPACE_LAYOUT_NAME
-    if not hasattr(window, 'dock_layout') or not hasattr(window, 'app_config'):
+    from workspace.workspace_layout import WORKSPACE_LAYOUT_NAME
+    if not hasattr(window, 'workspace_layout') or not hasattr(window, 'app_config'):
         return
     config = window.app_config
     prefill = config.active_layout if config.active_layout != WORKSPACE_LAYOUT_NAME else ""
@@ -278,35 +278,35 @@ def _save_as(window):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply != QMessageBox.Yes:
             return
-    window.dock_layout.save_as(name)
+    window.workspace_layout.save_as(name)
     config.register_layout(name)
     config.active_layout = name
     config.save()
 
 
 def _reset_to_default(window):
-    from workspace.dock import WORKSPACE_LAYOUT_NAME
-    if not hasattr(window, 'dock_layout') or not hasattr(window, 'app_config'):
+    from workspace.workspace_layout import WORKSPACE_LAYOUT_NAME
+    if not hasattr(window, 'workspace_layout') or not hasattr(window, 'app_config'):
         return
-    window.dock_layout.reset_to_default()
-    window.dock_layout.name = WORKSPACE_LAYOUT_NAME
+    window.workspace_layout.reset_to_default()
+    window.workspace_layout.name = WORKSPACE_LAYOUT_NAME
     window.app_config.active_layout = WORKSPACE_LAYOUT_NAME
     window.app_config.save()
-    window.dock_layout.save_to_file()
+    window.workspace_layout.save_to_file()
     _refresh(window)
 
 
 def _revert_to_saved(window):
-    from workspace.dock import WORKSPACE_LAYOUT_NAME, DockLayout
-    if not hasattr(window, 'dock_layout') or not hasattr(window, 'app_config'):
+    from workspace.workspace_layout import WORKSPACE_LAYOUT_NAME, WorkspaceLayout
+    if not hasattr(window, 'workspace_layout') or not hasattr(window, 'app_config'):
         return
     config = window.app_config
     if config.active_layout == WORKSPACE_LAYOUT_NAME:
         return
-    loaded = DockLayout.load_from_file(config.active_layout)
+    loaded = WorkspaceLayout.load_from_file(config.active_layout)
     loaded.name = WORKSPACE_LAYOUT_NAME
-    window.dock_layout = loaded
-    window.dock_layout.save_to_file()
+    window.workspace_layout = loaded
+    window.workspace_layout.save_to_file()
     _refresh(window)
 
 

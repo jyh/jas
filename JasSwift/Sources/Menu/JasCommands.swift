@@ -268,10 +268,10 @@ public struct JasCommands: Commands {
 
             if let ws = workspace {
                 Button("Tile") {
-                    ws.dockLayout.panesMut { pl in
+                    ws.workspaceLayout.panesMut { pl in
                         pl.tilePanes(collapsedOverride: nil)
                     }
-                    ws.dockLayout.saveIfNeeded()
+                    ws.workspaceLayout.saveIfNeeded()
                 }
 
                 Divider()
@@ -291,38 +291,38 @@ public struct JasCommands: Commands {
 
     @ViewBuilder
     private func paneToggle(_ ws: WorkspaceState, _ kind: PaneKind, _ label: String) -> some View {
-        let visible = ws.dockLayout.panes()?.isPaneVisible(kind) ?? true
+        let visible = ws.workspaceLayout.panes()?.isPaneVisible(kind) ?? true
         let prefix = visible ? "\u{2713} " : "    "
         Button(prefix + label) {
-            ws.dockLayout.panesMut { pl in
+            ws.workspaceLayout.panesMut { pl in
                 if pl.isPaneVisible(kind) {
                     pl.hidePane(kind)
                 } else {
                     pl.showPane(kind)
                 }
             }
-            ws.dockLayout.saveIfNeeded()
+            ws.workspaceLayout.saveIfNeeded()
         }
     }
 
     @ViewBuilder
     private func panelToggle(_ kind: PanelKind, _ label: String) -> some View {
-        let visible = workspace?.dockLayout.isPanelVisible(kind) ?? true
+        let visible = workspace?.workspaceLayout.isPanelVisible(kind) ?? true
         let prefix = visible ? "\u{2713} " : "    "
         Button(prefix + label) {
             guard let ws = workspace else { return }
-            if ws.dockLayout.isPanelVisible(kind) {
-                if let addr = findPanel(ws.dockLayout, kind) {
-                    ws.dockLayout.closePanel(addr)
+            if ws.workspaceLayout.isPanelVisible(kind) {
+                if let addr = findPanel(ws.workspaceLayout, kind) {
+                    ws.workspaceLayout.closePanel(addr)
                 }
             } else {
-                ws.dockLayout.showPanel(kind)
+                ws.workspaceLayout.showPanel(kind)
             }
-            ws.dockLayout.saveIfNeeded()
+            ws.workspaceLayout.saveIfNeeded()
         }
     }
 
-    private func findPanel(_ layout: DockLayout, _ kind: PanelKind) -> PanelAddr? {
+    private func findPanel(_ layout: WorkspaceLayout, _ kind: PanelKind) -> PanelAddr? {
         for (_, dock) in layout.anchored {
             for (gi, group) in dock.groups.enumerated() {
                 if let pi = group.panels.firstIndex(of: kind) {

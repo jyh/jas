@@ -1,4 +1,4 @@
-open Jas.Dock
+open Jas.Workspace_layout
 
 let pass = ref 0
 let fail = ref 0
@@ -825,7 +825,7 @@ let () =
 (* ================================================================== *)
 
 let () =
-  run "dock_layout_default_has_no_pane_layout" (fun () ->
+  run "workspace_layout_default_has_no_pane_layout" (fun () ->
     let l = default_layout () in
     assert (panes l = None));
 

@@ -127,11 +127,11 @@ class MainWindow(QMainWindow):
         self._snap_preview = []
 
         # Dock layout
-        from workspace.dock import DockLayout, AppConfig
+        from workspace.workspace_layout import WorkspaceLayout, AppConfig
         from workspace.dock_panel import DockPanelWidget
         self.app_config = AppConfig.load()
-        self.dock_layout = DockLayout.load_or_migrate_workspace(self.app_config)
-        self.dock_layout.ensure_pane_layout(1200, 900)
+        self.workspace_layout = WorkspaceLayout.load_or_migrate_workspace(self.app_config)
+        self.workspace_layout.ensure_pane_layout(1200, 900)
 
         # Menubar
         create_menus(self)
@@ -143,7 +143,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self._pane_container)
 
         # Get pane IDs
-        pl = self.dock_layout.panes()
+        pl = self.workspace_layout.panes()
         tid = pl.pane_by_kind(PaneKind.TOOLBAR).id if pl else 0
         cid = pl.pane_by_kind(PaneKind.CANVAS).id if pl else 1
         did = pl.pane_by_kind(PaneKind.DOCK).id if pl else 2
@@ -172,7 +172,7 @@ class MainWindow(QMainWindow):
                                         parent=self._pane_container)
 
         # Dock pane
-        self.dock_panel = DockPanelWidget(self.dock_layout)
+        self.dock_panel = DockPanelWidget(self.workspace_layout)
         self.dock_panel.setStyleSheet("background: #3c3c3c;")
         self._dock_title = PaneTitleBar(
             "Panels", pane_id=did,
@@ -219,7 +219,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_pane_positions(self):
         """Position all pane frames from PaneLayout coordinates."""
-        pl = self.dock_layout.panes()
+        pl = self.workspace_layout.panes()
         geos = compute_pane_geometries(pl)
         borders = compute_shared_borders(pl)
         maximized = pl.canvas_maximized if pl else False
@@ -302,23 +302,23 @@ class MainWindow(QMainWindow):
         return self._dock_frame
 
     def _hide_pane(self, kind):
-        self.dock_layout.panes_mut(lambda pl: pl.hide_pane(kind))
+        self.workspace_layout.panes_mut(lambda pl: pl.hide_pane(kind))
         self._refresh_pane_positions()
 
     def _toggle_canvas_maximized(self):
-        self.dock_layout.panes_mut(lambda pl: pl.toggle_canvas_maximized())
+        self.workspace_layout.panes_mut(lambda pl: pl.toggle_canvas_maximized())
         self._refresh_pane_positions()
 
     def _start_pane_drag(self, pane_id, global_x, global_y):
         """Start dragging a pane from its title bar."""
-        pl = self.dock_layout.panes()
+        pl = self.workspace_layout.panes()
         if not pl:
             return
         p = pl.find_pane(pane_id)
         if not p:
             return
         self._pane_drag = (pane_id, global_x - p.x, global_y - p.y)
-        self.dock_layout.panes_mut(lambda pl: pl.bring_pane_to_front(pane_id))
+        self.workspace_layout.panes_mut(lambda pl: pl.bring_pane_to_front(pane_id))
         self._refresh_pane_positions()
         self.grabMouse()
 
@@ -328,7 +328,7 @@ class MainWindow(QMainWindow):
         self.grabMouse()
 
     def _start_edge_drag(self, pane_id, edge, gx, gy):
-        pl = self.dock_layout.panes()
+        pl = self.workspace_layout.panes()
         if not pl:
             return
         p = pl.find_pane(pane_id)
@@ -348,7 +348,7 @@ class MainWindow(QMainWindow):
         w = self._pane_container.width()
         h = self._pane_container.height()
         if w > 0 and h > 0:
-            self.dock_layout.panes_mut(
+            self.workspace_layout.panes_mut(
                 lambda pl: pl.on_viewport_resize(w, h))
             self._refresh_pane_positions()
 
@@ -359,21 +359,21 @@ class MainWindow(QMainWindow):
             pid, off_x, off_y = self._pane_drag
             new_x = mx - off_x
             new_y = my - off_y
-            self.dock_layout.panes_mut(lambda pl: self._do_pane_drag(pl, pid, new_x, new_y))
+            self.workspace_layout.panes_mut(lambda pl: self._do_pane_drag(pl, pid, new_x, new_y))
             self._refresh_pane_positions()
         elif self._border_drag:
             snap_idx, start_coord, is_vert = self._border_drag
             current = mx if is_vert else my
             delta = current - start_coord
             self._border_drag = (snap_idx, current, is_vert)
-            self.dock_layout.panes_mut(
+            self.workspace_layout.panes_mut(
                 lambda pl: pl.drag_shared_border(snap_idx, delta))
             self._refresh_pane_positions()
         elif self._edge_drag:
             pid, edge, sx, sy, sw, sh, spx, spy = self._edge_drag
             dx = mx - sx
             dy = my - sy
-            self.dock_layout.panes_mut(
+            self.workspace_layout.panes_mut(
                 lambda pl: self._do_edge_drag(pl, pid, edge, dx, dy, sw, sh, spx, spy))
             self._refresh_pane_positions()
 
@@ -451,7 +451,7 @@ class MainWindow(QMainWindow):
             pid = self._pane_drag[0]
             preview = self._snap_preview
             if preview:
-                self.dock_layout.panes_mut(
+                self.workspace_layout.panes_mut(
                     lambda pl: pl.apply_snaps(pid, preview, pl.viewport_width, pl.viewport_height))
             self._snap_preview = []
             self._pane_drag = None

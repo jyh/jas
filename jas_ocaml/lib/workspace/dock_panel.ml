@@ -3,7 +3,7 @@
     Creates GTK widgets for the anchored right dock with panel groups,
     tab bars, collapse/expand, and panel body placeholders. *)
 
-open Dock
+open Workspace_layout
 
 (** Build the dock panel widget inside the given container.
     Returns a refresh function that rebuilds the dock UI when the layout changes. *)
@@ -30,7 +30,7 @@ let apply_dark_css w css_str =
   css#load_from_data css_str;
   w#misc#style_context#add_provider css 600
 
-let create (dock_box : GPack.box) (layout : dock_layout) =
+let create (dock_box : GPack.box) (layout : workspace_layout) =
   let drag_ref = ref No_drag in
 
   let rec rebuild () =
@@ -164,7 +164,7 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
   let rec rebuild_floating () =
     List.iter (fun w -> w#destroy ()) !floating_windows;
     floating_windows := [];
-    List.iter (fun (fd : Dock.floating_dock) ->
+    List.iter (fun (fd : Workspace_layout.floating_dock) ->
       let fid = fd.dock.id in
       let win = GWindow.window
         ~type_hint:`UTILITY
@@ -188,7 +188,7 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
         let mx = GdkEvent.Button.x_root ev in
         let my = GdkEvent.Button.y_root ev in
         drag_start := Some (mx -. fd.x, my -. fd.y);
-        Dock.bring_to_front layout fid;
+        Workspace_layout.bring_to_front layout fid;
         true
       ) |> ignore;
       title_bar#event#connect#motion_notify ~callback:(fun ev ->
@@ -198,7 +198,7 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
            let my = GdkEvent.Motion.y_root ev in
            let nx = mx -. off_x in
            let ny = my -. off_y in
-           Dock.set_floating_position layout fid ~x:nx ~y:ny;
+           Workspace_layout.set_floating_position layout fid ~x:nx ~y:ny;
            win#move ~x:(int_of_float nx) ~y:(int_of_float ny)
          | None -> ());
         true
@@ -212,7 +212,7 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
       title_bar#event#connect#button_press ~callback:(fun ev ->
         if GdkEvent.Button.button ev = 1 &&
            GdkEvent.get_type (ev :> GdkEvent.any) = `TWO_BUTTON_PRESS then begin
-          Dock.redock layout fid;
+          Workspace_layout.redock layout fid;
           rebuild ();
           rebuild_floating ();
           true
@@ -220,7 +220,7 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
       ) |> ignore;
 
       (* Panel groups *)
-      Array.iteri (fun gi (group : Dock.panel_group) ->
+      Array.iteri (fun gi (group : Workspace_layout.panel_group) ->
         let group_box = GPack.vbox ~packing:(vbox#pack ~expand:false) () in
         let tab_bar = GPack.hbox ~packing:(group_box#pack ~expand:false) () in
         apply_dark_css tab_bar (Printf.sprintf "* { background-color: %s; }" theme_bg_dark);
@@ -228,19 +228,19 @@ let create (dock_box : GPack.box) (layout : dock_layout) =
         grip#misc#set_size_request ~width:20 ();
         apply_dark_css grip (Printf.sprintf "* { color: %s; }" theme_text_hint);
         Array.iteri (fun pi kind ->
-          let label = Dock.panel_label kind in
+          let label = Workspace_layout.panel_label kind in
           let btn = GButton.button ~label ~packing:(tab_bar#pack ~expand:false) () in
           let tab_bg = if pi = group.active then theme_bg_tab else theme_bg_tab_inactive in
           apply_dark_css btn (Printf.sprintf "* { color: %s; background-color: %s; }" theme_text tab_bg);
           btn#connect#clicked ~callback:(fun () ->
-            Dock.set_active_panel layout { group = { dock_id = fid; group_idx = gi }; panel_idx = pi };
+            Workspace_layout.set_active_panel layout { group = { dock_id = fid; group_idx = gi }; panel_idx = pi };
             rebuild_floating ()
           ) |> ignore
         ) group.panels;
         if not group.collapsed then begin
-          match Dock.active_panel group with
+          match Workspace_layout.active_panel group with
           | Some kind ->
-            let body = GMisc.label ~text:(Dock.panel_label kind) ~packing:(group_box#pack ~expand:false) () in
+            let body = GMisc.label ~text:(Workspace_layout.panel_label kind) ~packing:(group_box#pack ~expand:false) () in
             body#misc#set_size_request ~height:60 ();
             body#set_xalign 0.0;
             apply_dark_css body (Printf.sprintf "* { color: %s; font-size: 12px; }" theme_text_body)

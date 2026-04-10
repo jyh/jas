@@ -1,6 +1,6 @@
 /// Dock and panel infrastructure.
 ///
-/// A `DockLayout` manages multiple docks: anchored docks snapped to screen
+/// A `WorkspaceLayout` manages multiple docks: anchored docks snapped to screen
 /// edges and floating docks at arbitrary positions. Each `Dock` contains a
 /// vertical list of `PanelGroup`s. Each group has tabbed `PanelKind`
 /// entries, one of which is active at a time.
@@ -171,9 +171,9 @@ public struct AppConfig: Codable {
     }
 }
 
-// MARK: - DockLayout
+// MARK: - WorkspaceLayout
 
-public struct DockLayout: Codable {
+public struct WorkspaceLayout: Codable {
     public var version: Int
     public var name: String
     public var anchored: [(DockEdge, Dock)]
@@ -229,12 +229,12 @@ public struct DockLayout: Codable {
 
     // MARK: - Construction
 
-    public static func defaultLayout() -> DockLayout {
+    public static func defaultLayout() -> WorkspaceLayout {
         named(defaultLayoutName)
     }
 
-    public static func named(_ name: String) -> DockLayout {
-        DockLayout(
+    public static func named(_ name: String) -> WorkspaceLayout {
+        WorkspaceLayout(
             version: layoutVersion,
             name: name,
             anchored: [(.right, Dock(id: DockId(0), groups: [
@@ -612,7 +612,7 @@ public struct DockLayout: Codable {
 
     public mutating func resetToDefault() {
         let n = name
-        self = DockLayout.named(n)
+        self = WorkspaceLayout.named(n)
         bump()
     }
 
@@ -621,18 +621,18 @@ public struct DockLayout: Codable {
         return String(data: data, encoding: .utf8)
     }
 
-    public static func fromJson(_ json: String) -> DockLayout {
+    public static func fromJson(_ json: String) -> WorkspaceLayout {
         guard let data = json.data(using: .utf8),
-              let layout = try? JSONDecoder().decode(DockLayout.self, from: data),
+              let layout = try? JSONDecoder().decode(WorkspaceLayout.self, from: data),
               layout.version == layoutVersion else {
             return defaultLayout()
         }
         return layout
     }
 
-    public static func tryFromJson(_ json: String) -> DockLayout? {
+    public static func tryFromJson(_ json: String) -> WorkspaceLayout? {
         guard let data = json.data(using: .utf8),
-              let layout = try? JSONDecoder().decode(DockLayout.self, from: data),
+              let layout = try? JSONDecoder().decode(WorkspaceLayout.self, from: data),
               layout.version == layoutVersion else {
             return nil
         }
@@ -642,7 +642,7 @@ public struct DockLayout: Codable {
     static let storagePrefix = "jas_layout:"
 
     public func storageKey() -> String {
-        "\(DockLayout.storagePrefix)\(name)"
+        "\(WorkspaceLayout.storagePrefix)\(name)"
     }
 
     public static func storageKeyFor(_ name: String) -> String {
@@ -652,7 +652,7 @@ public struct DockLayout: Codable {
     /// Save the workspace layout under the "Workspace" key.
     public func save() {
         if let json = toJson() {
-            UserDefaults.standard.set(json, forKey: DockLayout.storageKeyFor(workspaceLayoutName))
+            UserDefaults.standard.set(json, forKey: WorkspaceLayout.storageKeyFor(workspaceLayoutName))
         }
     }
 
@@ -661,19 +661,19 @@ public struct DockLayout: Codable {
         let savedName = self.name
         self.name = name
         if let json = toJson() {
-            UserDefaults.standard.set(json, forKey: DockLayout.storageKeyFor(name))
+            UserDefaults.standard.set(json, forKey: WorkspaceLayout.storageKeyFor(name))
         }
         self.name = savedName
     }
 
-    public static func load(name: String) -> DockLayout {
+    public static func load(name: String) -> WorkspaceLayout {
         guard let json = UserDefaults.standard.string(forKey: storageKeyFor(name)) else {
             return named(name)
         }
         return fromJson(json)
     }
 
-    public static func tryLoad(name: String) -> DockLayout? {
+    public static func tryLoad(name: String) -> WorkspaceLayout? {
         guard let json = UserDefaults.standard.string(forKey: storageKeyFor(name)) else {
             return nil
         }
@@ -681,14 +681,14 @@ public struct DockLayout: Codable {
     }
 
     /// Load the "Workspace" working copy, migrating from activeLayout if needed.
-    public static func loadOrMigrateWorkspace(config: AppConfig) -> DockLayout {
+    public static func loadOrMigrateWorkspace(config: AppConfig) -> WorkspaceLayout {
         // Try loading "Workspace" directly
         if var layout = tryLoad(name: workspaceLayoutName) {
             layout.name = workspaceLayoutName
             return layout
         }
         // Migration: copy activeLayout into "Workspace"
-        var layout: DockLayout
+        var layout: WorkspaceLayout
         if let migrated = tryLoad(name: config.activeLayout) {
             layout = migrated
         } else {

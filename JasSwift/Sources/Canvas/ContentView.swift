@@ -37,40 +37,40 @@ public struct CanvasEntry: Identifiable {
 public class WorkspaceState: ObservableObject {
     @Published public var canvases: [CanvasEntry] = []
     @Published public var selectedTab: UUID?
-    @Published public var dockLayout: DockLayout
+    @Published public var workspaceLayout: WorkspaceLayout
     @Published public var appConfig: AppConfig
 
     public init() {
         let config = AppConfig.load()
         self.appConfig = config
-        self.dockLayout = DockLayout.loadOrMigrateWorkspace(config: config)
+        self.workspaceLayout = WorkspaceLayout.loadOrMigrateWorkspace(config: config)
     }
 
     public func switchLayout(_ name: String) {
-        dockLayout.save()
-        dockLayout = DockLayout.load(name: name)
-        dockLayout.name = workspaceLayoutName
+        workspaceLayout.save()
+        workspaceLayout = WorkspaceLayout.load(name: name)
+        workspaceLayout.name = workspaceLayoutName
         appConfig.activeLayout = name
         appConfig.save()
-        dockLayout.save()
+        workspaceLayout.save()
     }
 
     public func revertToSaved() {
         guard appConfig.activeLayout != workspaceLayoutName else { return }
-        dockLayout = DockLayout.load(name: appConfig.activeLayout)
-        dockLayout.name = workspaceLayoutName
-        dockLayout.save()
+        workspaceLayout = WorkspaceLayout.load(name: appConfig.activeLayout)
+        workspaceLayout.name = workspaceLayoutName
+        workspaceLayout.save()
     }
 
     public func resetToDefault() {
-        dockLayout = DockLayout.named(workspaceLayoutName)
+        workspaceLayout = WorkspaceLayout.named(workspaceLayoutName)
         appConfig.activeLayout = workspaceLayoutName
         appConfig.save()
-        dockLayout.save()
+        workspaceLayout.save()
     }
 
     public func saveLayoutAs(_ name: String) {
-        dockLayout.saveAs(name)
+        workspaceLayout.saveAs(name)
         appConfig.registerLayout(name)
         appConfig.activeLayout = name
         appConfig.save()
@@ -106,10 +106,10 @@ public struct ContentView: View {
 
     public var body: some View {
         GeometryReader { geometry in
-            let dockCollapsed = workspace.dockLayout.anchoredDock(.right)?.collapsed ?? false
-            let rs = RenderingState.from(workspace.dockLayout.panes(), dockCollapsed: dockCollapsed, activeBorderSnap: borderDrag?.snapIdx)
+            let dockCollapsed = workspace.workspaceLayout.anchoredDock(.right)?.collapsed ?? false
+            let rs = RenderingState.from(workspace.workspaceLayout.panes(), dockCollapsed: dockCollapsed, activeBorderSnap: borderDrag?.snapIdx)
             let snapLines = RenderingState.snapLines(from: snapPreview,
-                                                      paneLayout: workspace.dockLayout.panes())
+                                                      paneLayout: workspace.workspaceLayout.panes())
 
             ZStack {
                 // Background
@@ -150,9 +150,9 @@ public struct ContentView: View {
                 }
 
                 // Floating docks
-                ForEach(Array(workspace.dockLayout.floating.enumerated()), id: \.offset) { _, fd in
+                ForEach(Array(workspace.workspaceLayout.floating.enumerated()), id: \.offset) { _, fd in
                     FloatingDockView(
-                        dockLayout: $workspace.dockLayout,
+                        workspaceLayout: $workspace.workspaceLayout,
                         floatingDock: fd
                     )
                 }
@@ -171,7 +171,7 @@ public struct ContentView: View {
                 }
             }
             .onAppear {
-                workspace.dockLayout.ensurePaneLayout(
+                workspace.workspaceLayout.ensurePaneLayout(
                     viewportW: geometry.size.width,
                     viewportH: geometry.size.height)
                 if workspace.selectedTab == nil {
@@ -179,7 +179,7 @@ public struct ContentView: View {
                 }
             }
             .onChange(of: geometry.size) { newSize in
-                workspace.dockLayout.panesMut { pl in
+                workspace.workspaceLayout.panesMut { pl in
                     pl.onViewportResize(newW: newSize.width, newH: newSize.height)
                 }
             }
@@ -241,10 +241,10 @@ public struct ContentView: View {
 
     @ViewBuilder
     private var dockContent: some View {
-        if let rightDock = workspace.dockLayout.anchoredDock(.right),
+        if let rightDock = workspace.workspaceLayout.anchoredDock(.right),
            !rightDock.groups.isEmpty {
             DockPanelView(
-                dockLayout: $workspace.dockLayout,
+                workspaceLayout: $workspace.workspaceLayout,
                 dockId: rightDock.id,
                 edge: .right
             )
@@ -262,14 +262,14 @@ public struct ContentView: View {
                 let delta = newAccum - prevAccum
                 borderDrag = (border.snapIdx, newAccum)
                 if abs(delta) > 0.001 {
-                    workspace.dockLayout.panesMut { pl in
+                    workspace.workspaceLayout.panesMut { pl in
                         pl.dragSharedBorder(snapIdx: border.snapIdx, delta: delta)
                     }
                 }
             }
             .onEnded { _ in
                 borderDrag = nil
-                workspace.dockLayout.saveIfNeeded()
+                workspace.workspaceLayout.saveIfNeeded()
             }
     }
 

@@ -1,6 +1,6 @@
 (** Dock and panel infrastructure.
 
-    A {!dock_layout} manages multiple docks: anchored docks snapped to screen
+    A {!workspace_layout} manages multiple docks: anchored docks snapped to screen
     edges and floating docks at arbitrary positions. Each {!dock} contains a
     vertical list of {!panel_group}s. Each group has tabbed {!panel_kind}
     entries, one of which is active at a time.
@@ -129,7 +129,7 @@ let make_dock id groups width = {
 
 let layout_version = 3
 
-type dock_layout = {
+type workspace_layout = {
   mutable version : int;
   mutable name : string;
   mutable anchored : (dock_edge * dock) list;

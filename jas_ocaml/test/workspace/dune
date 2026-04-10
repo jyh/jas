@@ -1,6 +1,6 @@
 (test
- (name dock_test)
- (modules dock_test)
+ (name workspace_layout_test)
+ (modules workspace_layout_test)
  (libraries jas))
 
 (test
