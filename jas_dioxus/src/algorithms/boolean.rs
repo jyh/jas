@@ -1,22 +1,11 @@
 //! Boolean operations on planar polygons (union, intersection,
 //! difference, exclusive-or).
 //!
-//! # Status
-//!
 // The public API is feature-complete and tested but not yet wired into
 // the document model — the editor calls into this module via a future
 // element-level adapter. Until that lands, every item here looks "dead"
 // to cargo's reachability analysis.
 #![allow(dead_code)]
-//!
-//! **Spec only.** This module currently exposes the public API as
-//! `unimplemented!()` stubs and a comprehensive test suite. The
-//! intent is to nail down the contract — including all the
-//! degenerate cases that quietly break naïve implementations —
-//! *before* writing any algorithm code. Pick an algorithm
-//! (Greiner-Hormann, Martinez-Rueda-Feito, or Weiler-Atherton),
-//! implement it, and the tests below should pass without being
-//! rewritten.
 //!
 //! # Data model
 //!
@@ -102,19 +91,12 @@ pub fn boolean_exclude(a: &PolygonSet, b: &PolygonSet) -> PolygonSet {
 //   - Reference C++ implementation accompanying the paper.
 //   - Open-source Rust ports (geo-booleanop, polygon-clipping/JS).
 //
-// Phasing:
-//   - Phase 1 (this commit): skeleton — data structures, event queue
-//     ordering, sweep loop with in_out / other_in_out / in_result
-//     computation, connection step. *No proper-intersection
-//     detection*: edges that cross in the interior are not yet
-//     subdivided. As a result, only inputs whose edges have no
-//     interior crossings (disjoint, empty operands) produce correct
-//     results in this phase.
-//   - Phase 2 (next commit): add intersection detection / edge
-//     subdivision so the overlapping cases pass.
-//   - Phase 3 (final commit): degeneracy fixes (collinear edges,
-//     vertex coincidences, vertical edges, robustness tweaks) so
-//     the touching cases pass.
+// All three phases are implemented:
+//   - Phase 1: data structures, event queue ordering, sweep loop with
+//     in_out / other_in_out / in_result computation, connection step.
+//   - Phase 2: intersection detection / edge subdivision.
+//   - Phase 3: degeneracy fixes (collinear edges, vertex coincidences,
+//     vertical edges, robustness tweaks).
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
