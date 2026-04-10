@@ -217,6 +217,9 @@ let create_main_window ~get_model ~on_open () =
        ) lines
      | None -> ());
 
+    (* Force redraw of the pane container to clear smeared artifacts *)
+    pane_container#misc#queue_draw ();
+
     Dock.save_layout_if_needed dock_layout
   in
 

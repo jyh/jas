@@ -73,7 +73,7 @@ The GUI must be highly customizable, allowing users to reconfigure it for specif
 #### **3\. Appearance and Styling**
 
 * **Fill:** The color, gradient, or pattern inside a closed path.  
-* **Stroke:** The outline or border. Attributes include weight (thickness), alignment (Center, Inside, Outside), and variable width profiles.  
+* **Stroke:** The outline or border. Attributes include weight (thickness), alignment (Center, Inside, Outside), and variable width profiles.  1  
 * **Blending Modes and Opacity:** Control how an object’s color interacts with objects underneath (e.g., Multiply, Screen) and its level of transparency.
 
 ---
@@ -754,3 +754,77 @@ Name the saved dock layouts. Save a separate app config that includes the name o
 Create a Workspace submenu in the Window menu, place it at the top of the Window menu. The Workspace menu should contain the names of the saved dock layouts, with a check mark next to the dock layout that is currently in use. After the last dock layout, add a separator, and two menu items:
 - "Reset {name of the current dock layout}" (restores the current dock layout to what it was when the app started)
 - "New Workspace..." (brings up a dialogue box to prompt for the workspace name and initializes it with a copy of the current workspace)
+
+# Window layout
+
+The toolbar, canvas container, and dock should all float in the outermost window. Initially, the layout is left-to-right. They can each be be moved and resized. They should snap to each other and the window in the normal way. If two of the windows are snapped together, the border between them can be moved and keep the windows snapped. The positions and sizes of these windows should be saved in the layout config. Make suggestions.
+
+# Review
+
+Review the workspace code for clarity, maintainability, efficiency, complexity, safety, test coverage, pattern consistency, conformity with style conventions, and anything else of importance. Make suggestions for improvements, ranking them in priority from high to low, and giving each a number. Be ready for a deep dive into any of the suggestions.
+
+# Refactor
+
+How generic is the workspace code? Is it possible for each pane to have a configuration, so that the dock code is generic? Give me your suggestions.
+
+[...]
+
+Ok that's good. Make a plan.
+
+[...]
+
+The app.rs and workspace.rs files are getting big. How can we split them into smaller files? Give me your suggestions.
+
+[...]
+
+# Propagate
+
+/effort max
+Make a plan to propagate to other apps.
+
+# Restart
+
+Here is a description of the workspace.
+
+- The window contains a set of Pane elements. In some cases there mey be a menubar at the top of the window.
+- A Pane has a PaneConfig that describes its behavior, including whether it is fixed-width, maximized, etc.
+- Panes float within the open area of the window. If there is a menu bar, this is the area below the menu, otherwise it is the entire window.
+- Panes can be moved and resized (fixed-width panes cannot be resized horizontally).
+- Panes snap to each other, and to the open area of the window.
+- When the borders of two panes are snapped together, the border can be moved to resize both adjacent windows. If one of the windows is fixed-width, the other can still be resized, unsnappingg it from the border.
+- A Pane that is not snapped can also be resized.
+- When two fixed-width Panes are adjacent, their border cannot be moved, even if they are snapped together.
+- When a Pane is being resized and the border approaches a snap, it will snap into place, unless the mouse pulls it away.
+- When a Pane is being moved and it approaches a snap, the window will snap into place, unless the mouse pulls it away.
+- Snap borders are highlighted on mouseover, or when and edge or window snaps into position.
+- Every Pane has a title bar.
+- There are three main kinds of Pane elements: a Pane for the Toolbar, a Pane for the Canvas container, and a Pane that contains a Dock.
+- the Toolbar pane is fixed-width.
+- the Canvas pane is resizable.
+- a Dock pane contains a list of Panel Group element. It can be collapsed using a small chevron on the titlebar. When a Dock pane is collapsed, it becomes fixed-width, hugging its contents.
+- The Workspace logic described here is generic, it should not depend on the Pane kind. Each Pane has a PaneConfig that describes the specific properties of that Pane.
+- The Pane sizes and positions are saved to a Workspace Layout, which is saved to a file and reloaded in JSON format. 
+
+Please read and understand these requirements. Analyze them for inconsistencies and completeness. Make suggestions for improvements, ranking them in priority from high to low. Be ready for a deep dive on an
+
+
+# Colors
+
+Colors should support RGB, HSB, and CMYK.
+
+# Fill and Stroke tool
+
+An image of the toolbar is in examples/toolbar.png. Near the bottom of the tool is the Fill and Stroke Tool, which covers 2x2 cells in the toolbar. It contains two overlapping squares that represent the current color attributes of a selected object. The Fill (Solid Square) represents the color, gradient, or pattern that fills the inside of a path. The (Hollow Square) represents the color or gradient applied to the border or outline of a path. 
+
+Swap Arrow (Top-Right): A small, curved double-headed arrow. Clicking this (or Shift + X) flips the colors between the Fill and the Stroke.
+Default Colors (Bottom-Left): A tiny black-and-white version of the Fill/Stroke icons. Clicking this (or pressing D) instantly resets the selection to a White Fill and Black Stroke.
+
+Double-Click to Edit: Double-clicking either the Fill or Stroke icon opens the Color Picker dialog, allowing to select a precise hue or enter Hex/RGB/CMYK values.
+The "Stacking" Logic: Whichever icon is "on top" is the one currently being edited. If you try to change a color and it’s affecting the outline instead of the center, hit X to bring the Fill to the front.
+
+An image of the Color Picker dialogue box is shown in "example/color picker.png".
+
+If either square contains a question marfk, it means that the selection contains multiple objects that differ in fill/stroke.
+If either square contains a white box with a red diagonal line, it means "None." This is different from the color white; it means the object is completely see-through in that area.
+
+Setting the color in the fill square sets the fill color of all elements in the selection. Setting the color in the stroke square sets the stroke color of all paths in the selection.
