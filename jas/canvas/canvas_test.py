@@ -351,5 +351,74 @@ class DrawElementTest(absltest.TestCase):
         p.end()
 
 
+class ArcToBeziersTest(absltest.TestCase):
+    """Tests for _arc_to_beziers arc-to-cubic conversion."""
+
+    def test_90_degree_arc_produces_segments(self):
+        from canvas.canvas import _arc_to_beziers
+        # Quarter circle: start at (10,0), end at (0,10), radius 10
+        result = _arc_to_beziers(10, 0, 10, 10, 0, False, True, 0, 10)
+        self.assertGreaterEqual(len(result), 1)
+
+    def test_zero_radius_returns_empty(self):
+        from canvas.canvas import _arc_to_beziers
+        result = _arc_to_beziers(0, 0, 0, 0, 0, False, False, 10, 10)
+        self.assertEqual(result, [])
+
+    def test_segment_tuple_structure(self):
+        from canvas.canvas import _arc_to_beziers
+        result = _arc_to_beziers(10, 0, 10, 10, 0, False, True, 0, 10)
+        for seg in result:
+            self.assertIsInstance(seg, tuple)
+            self.assertEqual(len(seg), 6)
+            for coord in seg:
+                self.assertIsInstance(coord, float)
+
+
+class BuildPathTest(absltest.TestCase):
+    """Tests for _build_path QPainterPath construction."""
+
+    def test_moveto_lineto(self):
+        path = _build_path((MoveTo(0, 0), LineTo(50, 50)))
+        self.assertFalse(path.isEmpty())
+
+    def test_curveto(self):
+        path = _build_path((MoveTo(0, 0), CurveTo(10, 0, 20, 10, 30, 30)))
+        self.assertFalse(path.isEmpty())
+
+    def test_closepath(self):
+        path = _build_path((
+            MoveTo(0, 0), LineTo(50, 0), LineTo(50, 50), ClosePath(),
+        ))
+        self.assertFalse(path.isEmpty())
+
+
+class VisibilityDrawTest(absltest.TestCase):
+    """Smoke tests for visibility modes in _draw_element."""
+
+    def _make_painter(self):
+        img = QImage(100, 100, QImage.Format_ARGB32)
+        painter = QPainter(img)
+        return painter, img
+
+    def test_draw_invisible_element(self):
+        from geometry.element import Visibility
+        p, _ = self._make_painter()
+        elem = Rect(x=0, y=0, width=20, height=20,
+                    fill=Fill(color=Color(1, 0, 0)),
+                    visibility=Visibility.INVISIBLE)
+        _draw_element(p, elem)
+        p.end()
+
+    def test_draw_outline_element(self):
+        from geometry.element import Visibility
+        p, _ = self._make_painter()
+        elem = Rect(x=0, y=0, width=20, height=20,
+                    fill=Fill(color=Color(1, 0, 0)),
+                    visibility=Visibility.OUTLINE)
+        _draw_element(p, elem)
+        p.end()
+
+
 if __name__ == "__main__":
     absltest.main()

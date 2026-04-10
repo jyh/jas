@@ -285,16 +285,18 @@ class type_on_path_tool = object (_self)
              ctx.controller#add_element elem;
              let doc = ctx.model#document in
              let li = doc.Document.selected_layer in
-             let layer = doc.Document.layers.(li) in
-             let ci = (match layer with
-               | Element.Layer { children; _ } -> Array.length children - 1
-               | _ -> 0) in
-             let path = [li; ci] in
-             ctx.controller#select_element path;
-             let s = Text_edit.create
-               ~path ~target:Text_edit.Edit_text_path ~content:"" ~insertion:0 in
-             Text_edit.set_blink_epoch_ms s (now_ms ());
-             session <- Some s;
+             if li >= 0 && li < Array.length doc.Document.layers then begin
+               let layer = doc.Document.layers.(li) in
+               let ci = (match layer with
+                 | Element.Layer { children; _ } -> Array.length children - 1
+                 | _ -> 0) in
+               let path = [li; ci] in
+               ctx.controller#select_element path;
+               let s = Text_edit.create
+                 ~path ~target:Text_edit.Edit_text_path ~content:"" ~insertion:0 in
+               Text_edit.set_blink_epoch_ms s (now_ms ());
+               session <- Some s
+             end;
              control_pt <- None;
              ctx.request_update ()
            end

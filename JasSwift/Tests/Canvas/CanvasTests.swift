@@ -144,3 +144,90 @@ import AppKit
     // No elements should have been created
     #expect(model.document.layers[0].children.isEmpty)
 }
+
+// MARK: - arcToBeziers tests
+
+@Test func arcToBeziers90Degree() {
+    // A 90-degree arc from (100, 0) to (0, 100) on a unit circle of radius 100
+    // centered at the origin. Should produce exactly 1 Bezier segment.
+    let result = arcToBeziers(
+        cx0: 100, cy0: 0,
+        rx: 100, ry: 100, xRotation: 0,
+        largeArc: false, sweep: true,
+        x: 0, y: 100
+    )
+    #expect(result.count == 1)
+    // The endpoint of the single segment should be near (0, 100)
+    let (_, _, _, _, epx, epy) = result[0]
+    #expect(abs(epx - 0) < 1e-9)
+    #expect(abs(epy - 100) < 1e-9)
+}
+
+@Test func arcToBeziersZeroRadius() {
+    // Zero-radius arc should return empty result
+    let result = arcToBeziers(
+        cx0: 10, cy0: 20,
+        rx: 0, ry: 0, xRotation: 0,
+        largeArc: false, sweep: false,
+        x: 30, y: 40
+    )
+    #expect(result.isEmpty)
+}
+
+@Test func arcToBeziersSamePoint() {
+    // Start and end at the same point should return empty result
+    let result = arcToBeziers(
+        cx0: 50, cy0: 50,
+        rx: 100, ry: 100, xRotation: 0,
+        largeArc: false, sweep: true,
+        x: 50, y: 50
+    )
+    #expect(result.isEmpty)
+}
+
+@Test func arcToBeziers360Degree() {
+    // A full-circle arc (large arc flag set, sweep set).
+    // From (100, 0) sweeping 360 degrees back to near (100, 0).
+    // We use a point very close but not identical to avoid the same-point check.
+    let result = arcToBeziers(
+        cx0: 100, cy0: 0,
+        rx: 100, ry: 100, xRotation: 0,
+        largeArc: true, sweep: true,
+        x: 100, y: 0.001
+    )
+    // A near-full circle should produce 4 segments (ceil(2*pi / (pi/2)) = 4)
+    #expect(result.count == 4)
+    // The endpoint of the last segment should be near (100, 0.001)
+    let (_, _, _, _, epx, epy) = result[result.count - 1]
+    #expect(abs(epx - 100) < 0.1)
+    #expect(abs(epy - 0.001) < 0.1)
+}
+
+@Test func arcToBeziers180Degree() {
+    // A half-circle arc should produce exactly 2 segments (ceil(pi / (pi/2)) = 2)
+    let result = arcToBeziers(
+        cx0: 100, cy0: 0,
+        rx: 100, ry: 100, xRotation: 0,
+        largeArc: false, sweep: true,
+        x: -100, y: 0
+    )
+    #expect(result.count == 2)
+    // The endpoint of the last segment should be near (-100, 0)
+    let (_, _, _, _, epx, epy) = result[result.count - 1]
+    #expect(abs(epx - (-100)) < 1e-9)
+    #expect(abs(epy - 0) < 1e-9)
+}
+
+// MARK: - Visibility ordering tests
+
+@Test func visibilityInvisibleLessThanOutline() {
+    #expect(Visibility.invisible < Visibility.outline)
+}
+
+@Test func visibilityOutlineLessThanPreview() {
+    #expect(Visibility.outline < Visibility.preview)
+}
+
+@Test func visibilityInvisibleLessThanPreview() {
+    #expect(Visibility.invisible < Visibility.preview)
+}

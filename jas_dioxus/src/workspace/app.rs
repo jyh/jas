@@ -399,7 +399,7 @@ fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64
             .unwrap_or(false);
         if editing
             && let Some(text) = clipboard_text.clone() {
-                let tab = st.tab_mut().unwrap();
+                let Some(tab) = st.tab_mut() else { return; };
                 if let Some(tool) = tab.tools.get_mut(&active_kind)
                     && tool.paste_text(&mut tab.model, &text) {
                         drop(st);
@@ -408,7 +408,7 @@ fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64
                     }
             }
 
-        let tab = st.tab_mut().unwrap();
+        let Some(tab) = st.tab_mut() else { return; };
 
         // Check if clipboard contains SVG
         if let Some(text) = &clipboard_text {
@@ -932,13 +932,14 @@ pub fn App() -> Element {
                         }
                         // Also update internal clipboard
                         let elements = {
-                            let tab = st.tab().unwrap();
+                            let Some(tab) = st.tab() else { return; };
                             let doc = tab.model.document();
                             doc.selection.iter()
                                 .filter_map(|es| doc.get_element(&es.path).cloned())
                                 .collect::<Vec<_>>()
                         };
-                        st.tab_mut().unwrap().clipboard = elements;
+                        let Some(tab) = st.tab_mut() else { return; };
+                        tab.clipboard = elements;
                     }));
                 }
                 Key::Character(ref c) if (c == "x" || c == "X") && cmd => {
@@ -951,13 +952,13 @@ pub fn App() -> Element {
                         }
                         // Update internal clipboard and delete
                         let elements = {
-                            let tab = st.tab().unwrap();
+                            let Some(tab) = st.tab() else { return; };
                             let doc = tab.model.document();
                             doc.selection.iter()
                                 .filter_map(|es| doc.get_element(&es.path).cloned())
                                 .collect::<Vec<_>>()
                         };
-                        let tab = st.tab_mut().unwrap();
+                        let Some(tab) = st.tab_mut() else { return; };
                         tab.clipboard = elements;
                         tab.model.snapshot();
                         let new_doc = tab.model.document().delete_selection();
@@ -1453,13 +1454,13 @@ pub fn App() -> Element {
                             clipboard_write(svg);
                         }
                         let elements: Vec<GeoElement> = {
-                            let tab = st.tab().unwrap();
+                            let Some(tab) = st.tab() else { return; };
                             let doc = tab.model.document();
                             doc.selection.iter()
                                 .filter_map(|es| doc.get_element(&es.path).cloned())
                                 .collect()
                         };
-                        let tab = st.tab_mut().unwrap();
+                        let Some(tab) = st.tab_mut() else { return; };
                         tab.clipboard = elements;
                         tab.model.snapshot();
                         let new_doc = tab.model.document().delete_selection();
@@ -1473,13 +1474,14 @@ pub fn App() -> Element {
                             clipboard_write(svg);
                         }
                         let elements: Vec<GeoElement> = {
-                            let tab = st.tab().unwrap();
+                            let Some(tab) = st.tab() else { return; };
                             let doc = tab.model.document();
                             doc.selection.iter()
                                 .filter_map(|es| doc.get_element(&es.path).cloned())
                                 .collect()
                         };
-                        st.tab_mut().unwrap().clipboard = elements;
+                        let Some(tab) = st.tab_mut() else { return; };
+                        tab.clipboard = elements;
                     }));
                 }
                 "paste" => {

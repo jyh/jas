@@ -101,7 +101,7 @@ impl CanvasTool for SelectionTool {
             if shift {
                 // Toggle in selection
                 let doc = model.document();
-                let _elem = doc.get_element(&path).unwrap();
+                let Some(_elem) = doc.get_element(&path) else { return; };
                 let mut sel = doc.selection.clone();
                 if let Some(pos) = sel.iter().position(|es| es.path == path) {
                     sel.remove(pos);

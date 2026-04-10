@@ -51,50 +51,7 @@ impl Controller {
         height: f64,
         extend: bool,
     ) {
-        use crate::geometry::element::Visibility;
-        let doc = model.document().clone();
-        let mut entries: Selection = Vec::new();
-        for (li, layer) in doc.layers.iter().enumerate() {
-            let layer_vis = layer.visibility();
-            if layer_vis == Visibility::Invisible {
-                // Entire layer is hidden — nothing beneath it is
-                // selectable, regardless of individual visibilities.
-                continue;
-            }
-            if let Some(children) = layer.children() {
-                for (ci, child) in children.iter().enumerate() {
-                    if child.locked() {
-                        continue;
-                    }
-                    let child_vis = std::cmp::min(layer_vis, child.visibility());
-                    if child_vis == Visibility::Invisible {
-                        continue;
-                    }
-                    if child.is_group() {
-                        if let Some(grandchildren) = child.children()
-                            && grandchildren
-                                .iter()
-                                .any(|gc| element_intersects_rect(gc, x, y, width, height))
-                            {
-                                entries.push(ElementSelection::all(vec![li, ci]));
-                                for (gi, _gc) in grandchildren.iter().enumerate() {
-                                    entries.push(ElementSelection::all(vec![li, ci, gi]));
-                                }
-                            }
-                    } else if element_intersects_rect(child, x, y, width, height) {
-                        entries.push(ElementSelection::all(vec![li, ci]));
-                    }
-                }
-            }
-        }
-        let new_sel = if extend {
-            toggle_selection(&doc.selection, &entries)
-        } else {
-            entries
-        };
-        let mut new_doc = doc;
-        new_doc.selection = new_sel;
-        model.set_document(new_doc);
+        select_flat(model, |elem| element_intersects_rect(elem, x, y, width, height), extend);
     }
 
     /// Select all elements whose bounds intersect the given polygon.
@@ -103,48 +60,7 @@ impl Controller {
         polygon: &[(f64, f64)],
         extend: bool,
     ) {
-        use crate::geometry::element::Visibility;
-        let doc = model.document().clone();
-        let mut entries: Selection = Vec::new();
-        for (li, layer) in doc.layers.iter().enumerate() {
-            let layer_vis = layer.visibility();
-            if layer_vis == Visibility::Invisible {
-                continue;
-            }
-            if let Some(children) = layer.children() {
-                for (ci, child) in children.iter().enumerate() {
-                    if child.locked() {
-                        continue;
-                    }
-                    let child_vis = std::cmp::min(layer_vis, child.visibility());
-                    if child_vis == Visibility::Invisible {
-                        continue;
-                    }
-                    if child.is_group() {
-                        if let Some(grandchildren) = child.children()
-                            && grandchildren
-                                .iter()
-                                .any(|gc| element_intersects_polygon(gc, polygon))
-                            {
-                                entries.push(ElementSelection::all(vec![li, ci]));
-                                for (gi, _gc) in grandchildren.iter().enumerate() {
-                                    entries.push(ElementSelection::all(vec![li, ci, gi]));
-                                }
-                            }
-                    } else if element_intersects_polygon(child, polygon) {
-                        entries.push(ElementSelection::all(vec![li, ci]));
-                    }
-                }
-            }
-        }
-        let new_sel = if extend {
-            toggle_selection(&doc.selection, &entries)
-        } else {
-            entries
-        };
-        let mut new_doc = doc;
-        new_doc.selection = new_sel;
-        model.set_document(new_doc);
+        select_flat(model, |elem| element_intersects_polygon(elem, polygon), extend);
     }
 
     /// Direct selection marquee: select individual control points within the rect.
@@ -156,37 +72,7 @@ impl Controller {
         height: f64,
         extend: bool,
     ) {
-        let doc = model.document().clone();
-        let mut entries: Selection = Vec::new();
-
-        fn check(
-            entries: &mut Selection,
-            path: &ElementPath,
-            elem: &Element,
-            ancestor_vis: crate::geometry::element::Visibility,
-            x: f64,
-            y: f64,
-            width: f64,
-            height: f64,
-        ) {
-            use crate::geometry::element::Visibility;
-            if elem.locked() {
-                return;
-            }
-            let effective = std::cmp::min(ancestor_vis, elem.visibility());
-            if effective == Visibility::Invisible {
-                return;
-            }
-            if elem.is_group_or_layer() {
-                if let Some(children) = elem.children() {
-                    for (i, child) in children.iter().enumerate() {
-                        let mut child_path = path.clone();
-                        child_path.push(i);
-                        check(entries, &child_path, child, effective, x, y, width, height);
-                    }
-                }
-                return;
-            }
+        select_recursive(model, |path, elem| {
             let cps = control_points(elem);
             let hit_cps: Vec<usize> = cps
                 .iter()
@@ -195,46 +81,19 @@ impl Controller {
                 .map(|(i, _)| i)
                 .collect();
             if !hit_cps.is_empty() {
-                entries.push(ElementSelection {
+                Some(ElementSelection {
                     path: path.clone(),
                     kind: SelectionKind::Partial(SortedCps::from_iter(hit_cps)),
-                });
+                })
             } else if element_intersects_rect(elem, x, y, width, height) {
-                // The marquee covers the element's body but none of
-                // its control points. Select the element with an
-                // empty CP set — the Direct Selection tool must not
-                // promote "body intersects" to "every CP selected",
-                // which would be the effect of `All`. The user sees
-                // the element's handles in the unselected style and
-                // can still drag the whole element by its body.
-                entries.push(ElementSelection::partial(
+                Some(ElementSelection::partial(
                     path.clone(),
                     std::iter::empty::<usize>(),
-                ));
+                ))
+            } else {
+                None
             }
-        }
-
-        for (li, layer) in doc.layers.iter().enumerate() {
-            check(
-                &mut entries,
-                &vec![li],
-                layer,
-                crate::geometry::element::Visibility::Preview,
-                x,
-                y,
-                width,
-                height,
-            );
-        }
-
-        let new_sel = if extend {
-            toggle_selection(&doc.selection, &entries)
-        } else {
-            entries
-        };
-        let mut new_doc = doc;
-        new_doc.selection = new_sel;
-        model.set_document(new_doc);
+        }, extend);
     }
 
     /// Select all unlocked, visible elements in the document.
@@ -662,6 +521,112 @@ fn unlock_element(elem: &Element) -> Element {
     }
     new.common_mut().locked = false;
     new
+}
+
+/// Flat 2-level selection: iterate layers → children, expanding groups.
+///
+/// The `predicate` tests whether a leaf element should be selected.
+/// Groups are expanded: if any grandchild matches, the group and all
+/// its children are selected.
+fn select_flat(
+    model: &mut Model,
+    predicate: impl Fn(&Element) -> bool,
+    extend: bool,
+) {
+    use crate::geometry::element::Visibility;
+    let doc = model.document().clone();
+    let mut entries: Selection = Vec::new();
+    for (li, layer) in doc.layers.iter().enumerate() {
+        let layer_vis = layer.visibility();
+        if layer_vis == Visibility::Invisible {
+            continue;
+        }
+        if let Some(children) = layer.children() {
+            for (ci, child) in children.iter().enumerate() {
+                if child.locked() {
+                    continue;
+                }
+                let child_vis = std::cmp::min(layer_vis, child.visibility());
+                if child_vis == Visibility::Invisible {
+                    continue;
+                }
+                if child.is_group() {
+                    if let Some(grandchildren) = child.children()
+                        && grandchildren.iter().any(|gc| predicate(gc))
+                    {
+                        entries.push(ElementSelection::all(vec![li, ci]));
+                        for (gi, _gc) in grandchildren.iter().enumerate() {
+                            entries.push(ElementSelection::all(vec![li, ci, gi]));
+                        }
+                    }
+                } else if predicate(child) {
+                    entries.push(ElementSelection::all(vec![li, ci]));
+                }
+            }
+        }
+    }
+    let new_sel = if extend {
+        toggle_selection(&doc.selection, &entries)
+    } else {
+        entries
+    };
+    let mut new_doc = doc;
+    new_doc.selection = new_sel;
+    model.set_document(new_doc);
+}
+
+/// Recursive selection: traverse the full element tree, calling
+/// `leaf_handler` on each non-container element. Groups and layers
+/// are traversed (not expanded).
+fn select_recursive(
+    model: &mut Model,
+    leaf_handler: impl Fn(&ElementPath, &Element) -> Option<ElementSelection>,
+    extend: bool,
+) {
+    use crate::geometry::element::Visibility;
+
+    fn check(
+        entries: &mut Selection,
+        path: &ElementPath,
+        elem: &Element,
+        ancestor_vis: Visibility,
+        leaf_handler: &dyn Fn(&ElementPath, &Element) -> Option<ElementSelection>,
+    ) {
+        if elem.locked() {
+            return;
+        }
+        let effective = std::cmp::min(ancestor_vis, elem.visibility());
+        if effective == Visibility::Invisible {
+            return;
+        }
+        if elem.is_group_or_layer() {
+            if let Some(children) = elem.children() {
+                for (i, child) in children.iter().enumerate() {
+                    let mut child_path = path.clone();
+                    child_path.push(i);
+                    check(entries, &child_path, child, effective, leaf_handler);
+                }
+            }
+            return;
+        }
+        if let Some(es) = leaf_handler(path, elem) {
+            entries.push(es);
+        }
+    }
+
+    let doc = model.document().clone();
+    let mut entries: Selection = Vec::new();
+    for (li, layer) in doc.layers.iter().enumerate() {
+        check(&mut entries, &vec![li], layer, Visibility::Preview, &leaf_handler);
+    }
+    let new_sel = if extend {
+        toggle_selection(&doc.selection, &entries)
+    } else {
+        entries
+    };
+    let mut new_doc = doc;
+    new_doc.selection = new_sel;
+    model.set_document(new_doc);
 }
 
 /// Combine two selections by XOR-ing per-element CP membership.

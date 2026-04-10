@@ -51,7 +51,7 @@ private func setStroke(_ ctx: CGContext, _ stroke: Stroke?) {
 }
 
 /// Convert an SVG arc to cubic Bezier curves (W3C SVG F.6).
-private func arcToBeziers(
+func arcToBeziers(
     cx0: Double, cy0: Double,
     rx rxIn: Double, ry ryIn: Double, xRotation: Double,
     largeArc: Bool, sweep: Bool,
@@ -470,8 +470,7 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
             let dy = points[i].1 - points[i-1].1
             dists.append(dists[i-1] + hypot(dx, dy))
         }
-        let totalLen = dists.last!
-        guard totalLen > 0 else { break }
+        guard let totalLen = dists.last, totalLen > 0 else { break }
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
         var offset = v.startOffset * totalLen
         ctx.saveGState()
@@ -696,7 +695,10 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document) {
                 default: break
                 }
             }
-            node = elemChildren(node)[path.last!]
+            guard let lastIdx = path.last else { ctx.restoreGState(); continue }
+            let children = elemChildren(node)
+            guard lastIdx < children.count else { ctx.restoreGState(); continue }
+            node = children[lastIdx]
         }
         // Apply the selected element's own transform
         switch node {
