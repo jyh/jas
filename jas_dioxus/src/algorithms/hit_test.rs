@@ -194,6 +194,38 @@ fn element_intersects_polygon_local(elem: &Element, poly: &[(f64, f64)]) -> bool
 }
 
 // ---------------------------------------------------------------------------
+// Circle / ellipse geometry
+// ---------------------------------------------------------------------------
+
+pub fn circle_intersects_rect(
+    cx: f64, cy: f64, r: f64, rx: f64, ry: f64, rw: f64, rh: f64, filled: bool,
+) -> bool {
+    let closest_x = rx.max(cx.min(rx + rw));
+    let closest_y = ry.max(cy.min(ry + rh));
+    let dist_sq = (cx - closest_x).powi(2) + (cy - closest_y).powi(2);
+    if !filled {
+        let corners = [(rx, ry), (rx + rw, ry), (rx + rw, ry + rh), (rx, ry + rh)];
+        let max_dist_sq = corners
+            .iter()
+            .map(|&(px, py)| (cx - px).powi(2) + (cy - py).powi(2))
+            .fold(f64::NEG_INFINITY, f64::max);
+        return dist_sq <= r * r && r * r <= max_dist_sq;
+    }
+    dist_sq <= r * r
+}
+
+pub fn ellipse_intersects_rect(
+    cx: f64, cy: f64, erx: f64, ery: f64, rx: f64, ry: f64, rw: f64, rh: f64, filled: bool,
+) -> bool {
+    if erx == 0.0 || ery == 0.0 {
+        return false;
+    }
+    circle_intersects_rect(
+        cx / erx, cy / ery, 1.0, rx / erx, ry / ery, rw / erx, rh / ery, filled,
+    )
+}
+
+// ---------------------------------------------------------------------------
 // Element-level queries
 // ---------------------------------------------------------------------------
 
@@ -266,6 +298,12 @@ fn element_intersects_rect_local(elem: &Element, rx: f64, ry: f64, rw: f64, rh: 
                     .iter()
                     .any(|&(x1, y1, x2, y2)| segment_intersects_rect(x1, y1, x2, y2, rx, ry, rw, rh))
             }
+        }
+        Element::Circle(e) => {
+            circle_intersects_rect(e.cx, e.cy, e.r, rx, ry, rw, rh, e.fill.is_some())
+        }
+        Element::Ellipse(e) => {
+            ellipse_intersects_rect(e.cx, e.cy, e.rx, e.ry, rx, ry, rw, rh, e.fill.is_some())
         }
         Element::Text(_) | Element::TextPath(_) => {
             let b = elem.bounds();
@@ -680,5 +718,106 @@ mod tests {
         assert!(element_intersects_polygon(&line, &sq));
         let sq2 = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         assert!(!element_intersects_polygon(&line, &sq2));
+    }
+
+    // ---- circle_intersects_rect ----
+
+    #[test]
+    fn filled_circle_overlaps_rect() {
+        assert!(circle_intersects_rect(5.0, 5.0, 3.0, 0.0, 0.0, 10.0, 10.0, true));
+    }
+
+    #[test]
+    fn filled_circle_outside_rect() {
+        assert!(!circle_intersects_rect(20.0, 20.0, 3.0, 0.0, 0.0, 10.0, 10.0, true));
+    }
+
+    #[test]
+    fn unfilled_circle_ring_intersects_rect() {
+        // Rect is inside the circle but doesn't touch the ring
+        assert!(!circle_intersects_rect(5.0, 5.0, 100.0, 4.0, 4.0, 2.0, 2.0, false));
+    }
+
+    #[test]
+    fn unfilled_circle_ring_hit_by_rect() {
+        // Rect straddles the circle boundary
+        assert!(circle_intersects_rect(5.0, 5.0, 5.0, 9.0, 4.0, 3.0, 2.0, false));
+    }
+
+    // ---- ellipse_intersects_rect ----
+
+    #[test]
+    fn ellipse_intersects_rect_basic() {
+        assert!(ellipse_intersects_rect(5.0, 5.0, 10.0, 3.0, 0.0, 0.0, 10.0, 10.0, true));
+    }
+
+    #[test]
+    fn ellipse_outside_rect() {
+        assert!(!ellipse_intersects_rect(5.0, 5.0, 2.0, 2.0, 20.0, 20.0, 5.0, 5.0, true));
+    }
+
+    #[test]
+    fn ellipse_zero_radius_returns_false() {
+        assert!(!ellipse_intersects_rect(5.0, 5.0, 0.0, 5.0, 0.0, 0.0, 10.0, 10.0, true));
+    }
+
+    // ---- element-level circle/ellipse hit-testing ----
+
+    use crate::geometry::element::{CircleElem, EllipseElem, Color, Fill};
+
+    #[test]
+    fn circle_element_intersects_rect_filled() {
+        let circle = Element::Circle(CircleElem {
+            common: CommonProps::default(),
+            cx: 5.0, cy: 5.0, r: 3.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+        });
+        assert!(element_intersects_rect(&circle, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn circle_element_outside_rect() {
+        let circle = Element::Circle(CircleElem {
+            common: CommonProps::default(),
+            cx: 20.0, cy: 20.0, r: 3.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+        });
+        assert!(!element_intersects_rect(&circle, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn unfilled_circle_element_ring_miss() {
+        let circle = Element::Circle(CircleElem {
+            common: CommonProps::default(),
+            cx: 5.0, cy: 5.0, r: 100.0,
+            fill: None,
+            stroke: None,
+        });
+        // Rect fully inside the circle -- stroke-only ring not hit
+        assert!(!element_intersects_rect(&circle, 4.0, 4.0, 2.0, 2.0));
+    }
+
+    #[test]
+    fn ellipse_element_intersects_rect_filled() {
+        let ellipse = Element::Ellipse(EllipseElem {
+            common: CommonProps::default(),
+            cx: 5.0, cy: 5.0, rx: 10.0, ry: 3.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+        });
+        assert!(element_intersects_rect(&ellipse, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn ellipse_element_outside_rect() {
+        let ellipse = Element::Ellipse(EllipseElem {
+            common: CommonProps::default(),
+            cx: 5.0, cy: 5.0, rx: 2.0, ry: 2.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+        });
+        assert!(!element_intersects_rect(&ellipse, 20.0, 20.0, 5.0, 5.0));
     }
 }
