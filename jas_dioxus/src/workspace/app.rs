@@ -2515,22 +2515,20 @@ pub fn App() -> Element {
                     { let lbl = toolbar_config.label.clone(); rsx! {
                         div { style: "flex:1; font-size:10px; color:{THEME_TEXT_DIM}; overflow:hidden; white-space:nowrap;", "{lbl}" }
                     }}
-                    if toolbar_config.closable {
-                        {
-                            let act = act.clone();
-                            rsx! {
-                                div {
-                                    style: "cursor:pointer; font-size:12px; color:{THEME_TEXT_BUTTON}; padding:0 2px;",
-                                    onmousedown: move |evt: Event<MouseData>| {
-                                        evt.stop_propagation();
-                                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                                                pl.hide_pane(PaneKind::Toolbar);
-                                            }
-                                        }));
-                                    },
-                                    "\u{00D7}" // ×
-                                }
+                    {
+                        let act = act.clone();
+                        rsx! {
+                            div {
+                                style: "cursor:pointer; font-size:12px; color:{THEME_TEXT_BUTTON}; padding:0 2px;",
+                                onmousedown: move |evt: Event<MouseData>| {
+                                    evt.stop_propagation();
+                                    (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                        if let Some(ref mut pl) = st.workspace_layout.pane_layout {
+                                            pl.hide_pane(PaneKind::Toolbar);
+                                        }
+                                    }));
+                                },
+                                "\u{00D7}" // ×
                             }
                         }
                     }
@@ -2561,11 +2559,13 @@ pub fn App() -> Element {
                     move |_: Event<MouseData>| {
                         open_menu.set(None);
                         popup_slot.set(None);
-                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                                pl.bring_pane_to_front(canvas_pane_id);
-                            }
-                        }));
+                        if !canvas_maximized {
+                            (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                if let Some(ref mut pl) = st.workspace_layout.pane_layout {
+                                    pl.bring_pane_to_front(canvas_pane_id);
+                                }
+                            }));
+                        }
                     }
                 },
 
@@ -2580,9 +2580,9 @@ pub fn App() -> Element {
                         },
                         ondoubleclick: {
                             let act = act.clone();
-                            let maximizable = canvas_config.maximizable;
+                            let can_maximize = canvas_config.double_click_action == super::workspace::DoubleClickAction::Maximize;
                             move |evt: Event<MouseData>| {
-                                if !maximizable { return; }
+                                if !can_maximize { return; }
                                 evt.stop_propagation();
                                 pane_drag.set(None);
                                 (act.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -2669,8 +2669,8 @@ pub fn App() -> Element {
                     { let lbl = dock_config.label.clone(); rsx! {
                         div { style: "flex:1; font-size:10px; color:{THEME_TEXT_DIM}; overflow:hidden; white-space:nowrap;", "{lbl}" }
                     }}
-                    // Collapse chevron (if config.collapsible)
-                    if dock_config.collapsible {
+                    // Collapse chevron (if collapsed_width is set)
+                    if dock_config.collapsed_width.is_some() {
                         {
                             let act = act.clone();
                             let chevron = if dock_collapsed { "\u{00BB}" } else { "\u{00AB}" }; // >> or <<
@@ -2689,23 +2689,21 @@ pub fn App() -> Element {
                             }
                         }
                     }
-                    // Close button (if config.closable)
-                    if dock_config.closable {
-                        {
-                            let act = act.clone();
-                            rsx! {
-                                div {
-                                    style: "cursor:pointer; font-size:12px; color:{THEME_TEXT_BUTTON}; padding:0 2px;",
-                                    onmousedown: move |evt: Event<MouseData>| {
-                                        evt.stop_propagation();
-                                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                                                pl.hide_pane(PaneKind::Dock);
-                                            }
-                                        }));
-                                    },
-                                    "\u{00D7}" // x
-                                }
+                    // Close button
+                    {
+                        let act = act.clone();
+                        rsx! {
+                            div {
+                                style: "cursor:pointer; font-size:12px; color:{THEME_TEXT_BUTTON}; padding:0 2px;",
+                                onmousedown: move |evt: Event<MouseData>| {
+                                    evt.stop_propagation();
+                                    (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                        if let Some(ref mut pl) = st.workspace_layout.pane_layout {
+                                            pl.hide_pane(PaneKind::Dock);
+                                        }
+                                    }));
+                                },
+                                "\u{00D7}" // x
                             }
                         }
                     }

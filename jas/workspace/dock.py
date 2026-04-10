@@ -27,7 +27,7 @@ DEFAULT_DOCK_WIDTH = 240.0
 DEFAULT_FLOATING_WIDTH = 220.0
 SNAP_DISTANCE = 20.0
 DEFAULT_LAYOUT_NAME = "Default"
-LAYOUT_VERSION = 1
+LAYOUT_VERSION = 2
 
 # ---------------------------------------------------------------------------
 # Core types

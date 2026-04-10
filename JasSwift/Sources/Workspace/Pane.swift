@@ -43,17 +43,26 @@ public enum TileWidth: Codable, Equatable {
     case flex
 }
 
+/// Action triggered by double-clicking a pane's title bar.
+public enum DoubleClickAction: Codable, Equatable {
+    /// Toggle maximize (canvas).
+    case maximize
+    /// Merge floating dock back into nearest anchored dock.
+    case redock
+    /// No action.
+    case none
+}
+
 /// Configuration that drives generic pane management behavior.
 public struct PaneConfig: Codable {
     public var label: String
     public var minWidth: Double
     public var minHeight: Double
     public var fixedWidth: Bool
-    public var closable: Bool
-    public var collapsible: Bool
-    public var maximizable: Bool
-    public var alwaysVisible: Bool
+    /// Width when in collapsed state; nil means not collapsible.
     public var collapsedWidth: Double?
+    /// Action triggered by double-clicking the title bar.
+    public var doubleClickAction: DoubleClickAction
     public var tileOrder: Int
     public var tileWidth: TileWidth
 
@@ -62,20 +71,20 @@ public struct PaneConfig: Codable {
         case .toolbar:
             return PaneConfig(
                 label: "Tools", minWidth: minToolbarWidth, minHeight: minToolbarHeight,
-                fixedWidth: true, closable: true, collapsible: false, maximizable: false,
-                alwaysVisible: false, collapsedWidth: nil,
+                fixedWidth: true, collapsedWidth: nil,
+                doubleClickAction: .none,
                 tileOrder: 0, tileWidth: .fixed(defaultToolbarWidth))
         case .canvas:
             return PaneConfig(
                 label: "Canvas", minWidth: minCanvasWidth, minHeight: minCanvasHeight,
-                fixedWidth: false, closable: false, collapsible: false, maximizable: true,
-                alwaysVisible: true, collapsedWidth: nil,
+                fixedWidth: false, collapsedWidth: nil,
+                doubleClickAction: .maximize,
                 tileOrder: 1, tileWidth: .flex)
         case .dock:
             return PaneConfig(
                 label: "Panels", minWidth: minPaneDockWidth, minHeight: minPaneDockHeight,
-                fixedWidth: false, closable: true, collapsible: true, maximizable: false,
-                alwaysVisible: false, collapsedWidth: 36.0,
+                fixedWidth: false, collapsedWidth: 36.0,
+                doubleClickAction: .redock,
                 tileOrder: 2, tileWidth: .keepCurrent)
         }
     }
@@ -461,6 +470,13 @@ public struct PaneLayout: Codable {
             }
             propagateBorderShift(sourcePaneId: otherId, sourceEdge: .bottom, isVertical: false)
         }
+
+        // When one pane is fixed-width, unsnap the border.
+        if (aFixed || bFixed) && !(aFixed && bFixed) {
+            snaps.removeAll { s in
+                s.pane == snap.pane && s.edge == snap.edge && s.target == snap.target
+            }
+        }
     }
 
     /// After a border drag, shift panes snapped to the source pane's far edge.
@@ -580,14 +596,23 @@ public struct PaneLayout: Codable {
 
     // MARK: - Pane Visibility
 
+    /// Hide a pane (close it). If the pane is maximized, unmaximize first.
     public mutating func hidePane(_ kind: PaneKind) {
+        if canvasMaximized, let p = paneByKind(kind),
+           p.config.doubleClickAction == .maximize {
+            canvasMaximized = false
+        }
         if !hiddenPanes.contains(kind) {
             hiddenPanes.append(kind)
         }
     }
 
+    /// Show a hidden pane and bring it to the front.
     public mutating func showPane(_ kind: PaneKind) {
         hiddenPanes.removeAll { $0 == kind }
+        if let p = paneByKind(kind) {
+            bringPaneToFront(p.id)
+        }
     }
 
     public func isPaneVisible(_ kind: PaneKind) -> Bool {

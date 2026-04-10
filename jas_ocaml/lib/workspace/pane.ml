@@ -34,16 +34,18 @@ type pane_kind = Toolbar | Canvas | Dock
 
 type tile_width = Fixed of float | Keep_current | Flex
 
+(** Action triggered by double-clicking a pane's title bar. *)
+type double_click_action = Maximize | Redock | No_action
+
 type pane_config = {
   label : string;
   min_width : float;
   min_height : float;
   fixed_width : bool;
-  closable : bool;
-  collapsible : bool;
-  maximizable : bool;
-  always_visible : bool;
+  (** Width when in collapsed state; None means not collapsible. *)
   collapsed_width : float option;
+  (** Action triggered by double-clicking the title bar. *)
+  double_click_action : double_click_action;
   tile_order : int;
   tile_width : tile_width;
 }
@@ -88,20 +90,20 @@ type pane_layout = {
 let config_for_kind = function
   | Toolbar -> {
       label = "Tools"; min_width = min_toolbar_width; min_height = min_toolbar_height;
-      fixed_width = true; closable = true; collapsible = false; maximizable = false;
-      always_visible = false; collapsed_width = None;
+      fixed_width = true; collapsed_width = None;
+      double_click_action = No_action;
       tile_order = 0; tile_width = Fixed default_toolbar_width;
     }
   | Canvas -> {
       label = "Canvas"; min_width = min_canvas_width; min_height = min_canvas_height;
-      fixed_width = false; closable = false; collapsible = false; maximizable = true;
-      always_visible = true; collapsed_width = None;
+      fixed_width = false; collapsed_width = None;
+      double_click_action = Maximize;
       tile_order = 1; tile_width = Flex;
     }
   | Dock -> {
       label = "Panels"; min_width = min_pane_dock_width; min_height = min_pane_dock_height;
-      fixed_width = false; closable = true; collapsible = true; maximizable = false;
-      always_visible = false; collapsed_width = Some 36.0;
+      fixed_width = false; collapsed_width = Some 36.0;
+      double_click_action = Redock;
       tile_order = 2; tile_width = Keep_current;
     }
 
@@ -402,7 +404,12 @@ let drag_shared_border pl ~snap_idx ~delta =
               b.y <- b_y +. clamped;
               b.height <- b.height -. clamped);
           propagate_border_shift pl other_id Bottom false
-        end
+        end;
+        (* When one pane is fixed-width, unsnap the border. *)
+        if (a_fixed || b_fixed) && not (a_fixed && b_fixed) then
+          pl.snaps <- List.filter (fun s ->
+            not (s.snap_pane = snap.snap_pane && s.edge = snap.edge && s.target = snap.target)
+          ) pl.snaps
       | _ -> ()
 
 (* ------------------------------------------------------------------ *)
@@ -482,20 +489,6 @@ let tile_panes pl ~collapsed_override =
   end
 
 (* ------------------------------------------------------------------ *)
-(* Pane visibility                                                    *)
-(* ------------------------------------------------------------------ *)
-
-let hide_pane pl kind =
-  if not (List.mem kind pl.hidden_panes) then
-    pl.hidden_panes <- pl.hidden_panes @ [kind]
-
-let show_pane pl kind =
-  pl.hidden_panes <- List.filter (fun k -> k <> kind) pl.hidden_panes
-
-let is_pane_visible pl kind =
-  not (List.mem kind pl.hidden_panes)
-
-(* ------------------------------------------------------------------ *)
 (* Z-order                                                            *)
 (* ------------------------------------------------------------------ *)
 
@@ -504,6 +497,30 @@ let bring_pane_to_front pl id =
     pl.z_order <- List.filter (fun zid -> zid <> id) pl.z_order;
     pl.z_order <- pl.z_order @ [id]
   end
+
+(* ------------------------------------------------------------------ *)
+(* Pane visibility                                                    *)
+(* ------------------------------------------------------------------ *)
+
+(** Hide a pane (close it). If the pane is maximized, unmaximize first. *)
+let hide_pane pl kind =
+  if pl.canvas_maximized then
+    (match pane_by_kind pl kind with
+     | Some p when p.config.double_click_action = Maximize ->
+       pl.canvas_maximized <- false
+     | _ -> ());
+  if not (List.mem kind pl.hidden_panes) then
+    pl.hidden_panes <- pl.hidden_panes @ [kind]
+
+(** Show a hidden pane and bring it to the front. *)
+let show_pane pl kind =
+  pl.hidden_panes <- List.filter (fun k -> k <> kind) pl.hidden_panes;
+  match pane_by_kind pl kind with
+  | Some p -> bring_pane_to_front pl p.id
+  | None -> ()
+
+let is_pane_visible pl kind =
+  not (List.mem kind pl.hidden_panes)
 
 let pane_z_index pl id =
   let rec go i = function

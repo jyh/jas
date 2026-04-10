@@ -174,7 +174,8 @@ class MainWindow(QMainWindow):
             if geo.visible:
                 frame.setGeometry(int(geo.x), int(geo.y), int(geo.width), int(geo.height))
                 frame.show()
-                frame.title_bar.setVisible(not (geo.config.maximizable and maximized))
+                from workspace.pane import DoubleClickAction
+                frame.title_bar.setVisible(not (geo.config.double_click_action == DoubleClickAction.MAXIMIZE and maximized))
             else:
                 frame.hide()
 

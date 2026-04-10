@@ -57,10 +57,10 @@ public struct RenderingState {
         // Build pane geometries
         var paneGeos: [PaneGeometry] = []
         for p in pl.panes {
-            let visible = p.config.alwaysVisible || pl.isPaneVisible(p.kind)
+            let visible = pl.isPaneVisible(p.kind)
 
             let (px, py, pw, ph, pz): (Double, Double, Double, Double, Int)
-            if p.config.maximizable && maximized {
+            if p.config.doubleClickAction == .maximize && maximized {
                 (px, py, pw, ph, pz) = (0, 0, pl.viewportWidth, pl.viewportHeight, 0)
             } else if maximized {
                 (px, py, pw, ph, pz) = (p.x, p.y, p.width, p.height, pl.paneZIndex(p.id) + 50)
@@ -215,7 +215,7 @@ struct PaneFrameView<Content: View>: View {
 
             Spacer()
 
-            if geo.config.collapsible {
+            if geo.config.collapsedWidth != nil {
                 Button(action: {
                     if let rightDock = workspace.dockLayout.anchoredDock(.right) {
                         workspace.dockLayout.toggleDockCollapsed(rightDock.id)
@@ -235,25 +235,23 @@ struct PaneFrameView<Content: View>: View {
                 .padding(.trailing, 4)
             }
 
-            if geo.config.closable {
-                Button(action: {
-                    workspace.dockLayout.panesMut { pl in
-                        pl.hidePane(geo.kind)
-                    }
-                }) {
-                    SwiftUI.Text("\u{00D7}")
-                        .font(.system(size: 12))
-                        .foregroundColor(SwiftUI.Color(nsColor: paneButtonColor))
+            Button(action: {
+                workspace.dockLayout.panesMut { pl in
+                    pl.hidePane(geo.kind)
                 }
-                .buttonStyle(.plain)
-                .padding(.trailing, 4)
+            }) {
+                SwiftUI.Text("\u{00D7}")
+                    .font(.system(size: 12))
+                    .foregroundColor(SwiftUI.Color(nsColor: paneButtonColor))
             }
+            .buttonStyle(.plain)
+            .padding(.trailing, 4)
         }
         .frame(height: paneTitleBarHeight)
         .frame(maxWidth: .infinity)
         .background(SwiftUI.Color(nsColor: paneTitleBgColor))
         .gesture(paneDragGesture)
-        .if(geo.config.maximizable) { view in
+        .if(geo.config.doubleClickAction == .maximize) { view in
             view.onTapGesture(count: 2) {
                 workspace.dockLayout.panesMut { pl in
                     pl.toggleCanvasMaximized()

@@ -56,23 +56,16 @@ let () =
     let tc = config_for_kind Toolbar in
     assert (tc.min_width = min_toolbar_width);
     assert tc.fixed_width;
-    assert tc.closable;
-    assert (not tc.maximizable);
+    assert (tc.double_click_action = No_action);
     let cc = config_for_kind Canvas in
     assert (cc.min_width = min_canvas_width);
     assert (not cc.fixed_width);
-    assert (not cc.closable);
-    assert cc.maximizable;
+    assert (cc.double_click_action = Maximize);
     let dc = config_for_kind Dock in
     assert (dc.min_width = min_pane_dock_width);
     assert (not dc.fixed_width);
-    assert dc.closable;
-    assert dc.collapsible;
-    (* always_visible *)
-    assert (not tc.always_visible);
-    assert cc.always_visible;
-    assert (not dc.always_visible);
-    (* collapsed_width *)
+    assert (dc.double_click_action = Redock);
+    (* collapsed_width drives collapsibility *)
     assert (tc.collapsed_width = None);
     assert (cc.collapsed_width = None);
     assert (dc.collapsed_width = Some 36.0))
@@ -466,6 +459,56 @@ let () =
     assert (List.exists (fun s ->
       s.snap_pane = toolbar_id && s.edge = Right && s.target = Pane_target (canvas_id, Left)
     ) pl.snaps))
+
+(* ================================================================== *)
+(* show_pane brings to front                                         *)
+(* ================================================================== *)
+
+let () =
+  run "show_pane_brings_to_front" (fun () ->
+    let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
+    let toolbar_id = (Option.get (pane_by_kind pl Toolbar)).id in
+    hide_pane pl Toolbar;
+    show_pane pl Toolbar;
+    assert (List.nth pl.z_order (List.length pl.z_order - 1) = toolbar_id))
+
+(* ================================================================== *)
+(* hide_pane unmaximizes                                              *)
+(* ================================================================== *)
+
+let () =
+  run "hide_maximized_pane_unmaximizes" (fun () ->
+    let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
+    toggle_canvas_maximized pl;
+    assert pl.canvas_maximized;
+    hide_pane pl Canvas;
+    assert (not pl.canvas_maximized));
+
+  run "hide_non_maximizable_pane_preserves_maximized" (fun () ->
+    let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
+    toggle_canvas_maximized pl;
+    assert pl.canvas_maximized;
+    hide_pane pl Toolbar;
+    assert pl.canvas_maximized)
+
+(* ================================================================== *)
+(* fixed-width border drag unsnaps                                    *)
+(* ================================================================== *)
+
+let () =
+  run "drag_shared_border_fixed_width_unsnaps" (fun () ->
+    let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
+    let toolbar_id = (Option.get (pane_by_kind pl Toolbar)).id in
+    let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
+    let snap_idx = ref 0 in
+    List.iteri (fun i s ->
+      if s.snap_pane = toolbar_id && s.edge = Right && s.target = Pane_target (canvas_id, Left) then
+        snap_idx := i
+    ) pl.snaps;
+    drag_shared_border pl ~snap_idx:!snap_idx ~delta:30.0;
+    assert (not (List.exists (fun s ->
+      s.snap_pane = toolbar_id && s.edge = Right && s.target = Pane_target (canvas_id, Left)
+    ) pl.snaps)))
 
 (* ================================================================== *)
 
