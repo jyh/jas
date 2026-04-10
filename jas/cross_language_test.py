@@ -11,7 +11,8 @@ from absl.testing import absltest
 
 from algorithms.hit_test import (
     point_in_rect, segments_intersect, segment_intersects_rect,
-    rects_intersect,
+    rects_intersect, circle_intersects_rect, ellipse_intersects_rect,
+    point_in_polygon,
 )
 from document.controller import Controller
 from document.model import Model
@@ -123,18 +124,34 @@ class CrossLanguageTest(absltest.TestCase):
     def test_algorithm_hit_test_vectors(self):
         json_str = _read_fixture("algorithms/hit_test.json")
         tests = json.loads(json_str)
-        dispatch = {
-            "point_in_rect": point_in_rect,
-            "segments_intersect": segments_intersect,
-            "segment_intersects_rect": segment_intersects_rect,
-            "rects_intersect": rects_intersect,
-        }
         for tc in tests:
-            func = dispatch[tc["function"]]
-            actual = func(*tc["args"])
+            func_name = tc["function"]
+            args = tc["args"]
+            expected = tc["expected"]
+            filled = tc.get("filled", False)
+            name = tc["name"]
+
+            if func_name == "point_in_rect":
+                actual = point_in_rect(*args)
+            elif func_name == "segments_intersect":
+                actual = segments_intersect(*args)
+            elif func_name == "segment_intersects_rect":
+                actual = segment_intersects_rect(*args)
+            elif func_name == "rects_intersect":
+                actual = rects_intersect(*args)
+            elif func_name == "circle_intersects_rect":
+                actual = circle_intersects_rect(*args, filled=filled)
+            elif func_name == "ellipse_intersects_rect":
+                actual = ellipse_intersects_rect(*args, filled=filled)
+            elif func_name == "point_in_polygon":
+                poly = [tuple(p) for p in tc["polygon"]]
+                actual = point_in_polygon(*args, poly=poly)
+            else:
+                self.fail(f"Unknown function: {func_name}")
+
             self.assertEqual(
-                actual, tc["expected"],
-                f"Hit test '{tc['name']}' failed: expected {tc['expected']}, got {actual}",
+                actual, expected,
+                f"Hit test '{name}' failed: expected {expected}, got {actual}",
             )
 
 

@@ -180,6 +180,14 @@ mod tests {
                 .iter().map(|v| v.as_f64().unwrap()).collect();
             let expected = tc["expected"].as_bool().unwrap();
 
+            let filled = tc["filled"].as_bool().unwrap_or(false);
+            let polygon: Vec<(f64, f64)> = tc["polygon"].as_array()
+                .map(|pts| pts.iter().map(|p| {
+                    let a = p.as_array().unwrap();
+                    (a[0].as_f64().unwrap(), a[1].as_f64().unwrap())
+                }).collect())
+                .unwrap_or_default();
+
             let actual = match func {
                 "point_in_rect" =>
                     hit_test::point_in_rect(args[0], args[1], args[2], args[3], args[4], args[5]),
@@ -192,6 +200,14 @@ mod tests {
                 "rects_intersect" =>
                     hit_test::rects_intersect(args[0], args[1], args[2], args[3],
                                               args[4], args[5], args[6], args[7]),
+                "circle_intersects_rect" =>
+                    hit_test::circle_intersects_rect(args[0], args[1], args[2],
+                                                     args[3], args[4], args[5], args[6], filled),
+                "ellipse_intersects_rect" =>
+                    hit_test::ellipse_intersects_rect(args[0], args[1], args[2], args[3],
+                                                      args[4], args[5], args[6], args[7], filled),
+                "point_in_polygon" =>
+                    hit_test::point_in_polygon(args[0], args[1], &polygon),
                 _ => panic!("Unknown function: {}", func),
             };
 

@@ -21,5 +21,22 @@
   {"name": "rects_intersect_contained", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 2.0, 2.0, 3.0, 3.0], "expected": true},
   {"name": "rects_intersect_edge_touching", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 10.0, 0.0, 10.0, 10.0], "expected": false},
   {"name": "rects_intersect_corner_touching", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0], "expected": false},
-  {"name": "rects_intersect_identical", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 0.0, 0.0, 10.0, 10.0], "expected": true}
+  {"name": "rects_intersect_identical", "function": "rects_intersect", "args": [0.0, 0.0, 10.0, 10.0, 0.0, 0.0, 10.0, 10.0], "expected": true},
+
+  {"name": "circle_intersects_rect_filled_overlap", "function": "circle_intersects_rect", "args": [5.0, 5.0, 3.0, 0.0, 0.0, 10.0, 10.0], "filled": true, "expected": true},
+  {"name": "circle_intersects_rect_filled_inside", "function": "circle_intersects_rect", "args": [5.0, 5.0, 2.0, 0.0, 0.0, 10.0, 10.0], "filled": true, "expected": true},
+  {"name": "circle_intersects_rect_filled_outside", "function": "circle_intersects_rect", "args": [20.0, 20.0, 3.0, 0.0, 0.0, 10.0, 10.0], "filled": false, "expected": false},
+  {"name": "circle_intersects_rect_stroked_edge", "function": "circle_intersects_rect", "args": [5.0, 5.0, 3.0, 0.0, 0.0, 10.0, 10.0], "filled": false, "expected": true},
+  {"name": "circle_intersects_rect_stroked_inside", "function": "circle_intersects_rect", "args": [5.0, 5.0, 2.0, 0.0, 0.0, 10.0, 10.0], "filled": false, "expected": true},
+  {"name": "circle_intersects_rect_tangent", "function": "circle_intersects_rect", "args": [15.0, 5.0, 5.0, 0.0, 0.0, 10.0, 10.0], "filled": true, "expected": true},
+
+  {"name": "ellipse_intersects_rect_filled_overlap", "function": "ellipse_intersects_rect", "args": [5.0, 5.0, 4.0, 3.0, 0.0, 0.0, 10.0, 10.0], "filled": true, "expected": true},
+  {"name": "ellipse_intersects_rect_filled_outside", "function": "ellipse_intersects_rect", "args": [20.0, 20.0, 4.0, 3.0, 0.0, 0.0, 10.0, 10.0], "filled": false, "expected": false},
+  {"name": "ellipse_intersects_rect_stroked_edge", "function": "ellipse_intersects_rect", "args": [5.0, 5.0, 4.0, 3.0, 0.0, 0.0, 10.0, 10.0], "filled": false, "expected": true},
+  {"name": "ellipse_intersects_rect_stroked_inside", "function": "ellipse_intersects_rect", "args": [5.0, 5.0, 2.0, 1.5, 0.0, 0.0, 10.0, 10.0], "filled": false, "expected": true},
+
+  {"name": "point_in_polygon_inside_triangle", "function": "point_in_polygon", "args": [5.0, 2.0], "polygon": [[0.0, 0.0], [10.0, 0.0], [5.0, 10.0]], "expected": true},
+  {"name": "point_in_polygon_outside_triangle", "function": "point_in_polygon", "args": [0.0, 10.0], "polygon": [[0.0, 0.0], [10.0, 0.0], [5.0, 10.0]], "expected": false},
+  {"name": "point_in_polygon_inside_square", "function": "point_in_polygon", "args": [5.0, 5.0], "polygon": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]], "expected": true},
+  {"name": "point_in_polygon_outside_square", "function": "point_in_polygon", "args": [15.0, 5.0], "polygon": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]], "expected": false}
 ]
