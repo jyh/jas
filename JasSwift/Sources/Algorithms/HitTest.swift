@@ -117,12 +117,23 @@ public func segmentsOfElement(_ elem: Element) -> [(Double, Double, Double, Doub
     }
 }
 
-// TODO: This ignores the element's transform. If an element has a non-identity
-// transform, its visual position differs from its raw coordinates. To fix,
-// inverse-transform the selection rect into the element's local coordinate
-// space before testing (inheriting transforms from parent groups).
 public func elementIntersectsRect(_ elem: Element,
                                   _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double) -> Bool {
+    if let t = elem.transform {
+        guard let inv = t.inverse() else { return false }
+        let corners = [
+            inv.applyPoint(rx, ry),
+            inv.applyPoint(rx + rw, ry),
+            inv.applyPoint(rx + rw, ry + rh),
+            inv.applyPoint(rx, ry + rh),
+        ]
+        return elementIntersectsPolygonLocal(elem, corners)
+    }
+    return elementIntersectsRectLocal(elem, rx, ry, rw, rh)
+}
+
+private func elementIntersectsRectLocal(_ elem: Element,
+                                        _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double) -> Bool {
     switch elem {
     case .line(let v):
         return segmentIntersectsRect(v.x1, v.y1, v.x2, v.y2, rx, ry, rw, rh)
@@ -212,6 +223,15 @@ public func segmentIntersectsPolygon(_ x1: Double, _ y1: Double, _ x2: Double, _
 }
 
 public func elementIntersectsPolygon(_ elem: Element, _ poly: [(Double, Double)]) -> Bool {
+    if let t = elem.transform {
+        guard let inv = t.inverse() else { return false }
+        let localPoly = poly.map { inv.applyPoint($0.0, $0.1) }
+        return elementIntersectsPolygonLocal(elem, localPoly)
+    }
+    return elementIntersectsPolygonLocal(elem, poly)
+}
+
+private func elementIntersectsPolygonLocal(_ elem: Element, _ poly: [(Double, Double)]) -> Bool {
     switch elem {
     case .line(let v):
         return segmentIntersectsPolygon(v.x1, v.y1, v.x2, v.y2, poly)

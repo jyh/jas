@@ -118,5 +118,39 @@ let () =
     let rect = make_rect ~x:20.0 ~y:20.0 ~width:5.0 ~height:5.0 () in
     assert (not (element_intersects_rect rect 0.0 0.0 10.0 10.0)));
 
+  (* transform-aware hit-testing *)
+
+  run "translated_line_intersects_rect" (fun () ->
+    let line = Jas.Element.make_line ~transform:(Some (Jas.Element.make_translate 100.0 0.0)) 0.0 5.0 10.0 5.0 in
+    assert (element_intersects_rect line 95.0 0.0 20.0 10.0);
+    assert (not (element_intersects_rect line 0.0 0.0 10.0 10.0)));
+
+  run "rotated_rect_intersects_rect" (fun () ->
+    let fill = Some (Jas.Element.make_fill (Jas.Element.make_color 0.0 0.0 0.0)) in
+    let rect = Jas.Element.make_rect ~fill ~transform:(Some (Jas.Element.make_rotate 45.0)) 0.0 0.0 10.0 10.0 in
+    assert (element_intersects_rect rect 6.0 6.0 2.0 2.0);
+    assert (not (element_intersects_rect rect 12.0 0.0 2.0 2.0)));
+
+  run "scaled_line_intersects_rect" (fun () ->
+    let line = Jas.Element.make_line ~transform:(Some (Jas.Element.make_scale 2.0 2.0)) 0.0 0.0 5.0 0.0 in
+    assert (element_intersects_rect line 8.0 (-1.0) 4.0 2.0);
+    assert (element_intersects_rect line 6.0 (-1.0) 2.0 2.0));
+
+  run "singular_transform_returns_false" (fun () ->
+    let line = Jas.Element.make_line ~transform:(Some (Jas.Element.make_scale 0.0 0.0)) 0.0 0.0 10.0 0.0 in
+    assert (not (element_intersects_rect line 0.0 0.0 10.0 10.0)));
+
+  run "no_transform_still_works" (fun () ->
+    let line = Jas.Element.make_line 0.0 5.0 10.0 5.0 in
+    assert (element_intersects_rect line 0.0 0.0 10.0 10.0);
+    assert (not (element_intersects_rect line 20.0 0.0 10.0 10.0)));
+
+  run "translated_line_intersects_polygon" (fun () ->
+    let line = Jas.Element.make_line ~transform:(Some (Jas.Element.make_translate 100.0 0.0)) 0.0 5.0 10.0 5.0 in
+    let sq = [| (95.0, 0.0); (115.0, 0.0); (115.0, 10.0); (95.0, 10.0) |] in
+    assert (element_intersects_polygon line sq);
+    let sq2 = [| (0.0, 0.0); (10.0, 0.0); (10.0, 10.0); (0.0, 10.0) |] in
+    assert (not (element_intersects_polygon line sq2)));
+
   Printf.printf "\n%d passed, %d failed\n" !pass !fail;
   if !fail > 0 then exit 1

@@ -393,6 +393,31 @@ let make_rotate angle_deg =
   let rad = angle_deg *. Float.pi /. 180.0 in
   { identity_transform with a = cos rad; b = sin rad; c = -. sin rad; d = cos rad }
 
+let apply_point t x y =
+  (t.a *. x +. t.c *. y +. t.e,
+   t.b *. x +. t.d *. y +. t.f)
+
+let inverse t =
+  let det = t.a *. t.d -. t.b *. t.c in
+  if abs_float det < 1e-12 then None
+  else
+    let inv_det = 1.0 /. det in
+    Some {
+      a = t.d *. inv_det;
+      b = -. t.b *. inv_det;
+      c = -. t.c *. inv_det;
+      d = t.a *. inv_det;
+      e = (t.c *. t.f -. t.d *. t.e) *. inv_det;
+      f = (t.b *. t.e -. t.a *. t.f) *. inv_det;
+    }
+
+let transform_of elem =
+  match elem with
+  | Line r -> r.transform | Rect r -> r.transform | Circle r -> r.transform
+  | Ellipse r -> r.transform | Polyline r -> r.transform | Polygon r -> r.transform
+  | Path r -> r.transform | Text r -> r.transform | Text_path r -> r.transform
+  | Group r -> r.transform | Layer r -> r.transform
+
 let make_line ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
   Line { x1; y1; x2; y2; stroke; opacity; transform; locked; visibility = Preview }
 

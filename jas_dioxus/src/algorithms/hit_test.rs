@@ -105,6 +105,20 @@ pub fn segment_intersects_polygon(
 }
 
 pub fn element_intersects_polygon(elem: &Element, poly: &[(f64, f64)]) -> bool {
+    if let Some(t) = elem.transform() {
+        if let Some(inv) = t.inverse() {
+            let local_poly: Vec<(f64, f64)> = poly.iter()
+                .map(|&(x, y)| inv.apply_point(x, y))
+                .collect();
+            return element_intersects_polygon_local(elem, &local_poly);
+        }
+        return false;
+    }
+    element_intersects_polygon_local(elem, poly)
+}
+
+/// Polygon hit-test against an element's raw (untransformed) coordinates.
+fn element_intersects_polygon_local(elem: &Element, poly: &[(f64, f64)]) -> bool {
     match elem {
         Element::Line(e) => {
             segment_intersects_polygon(e.x1, e.y1, e.x2, e.y2, poly)
@@ -223,6 +237,23 @@ pub fn segments_of_element(elem: &Element) -> Vec<(f64, f64, f64, f64)> {
 }
 
 pub fn element_intersects_rect(elem: &Element, rx: f64, ry: f64, rw: f64, rh: f64) -> bool {
+    if let Some(t) = elem.transform() {
+        if let Some(inv) = t.inverse() {
+            let corners = [
+                inv.apply_point(rx, ry),
+                inv.apply_point(rx + rw, ry),
+                inv.apply_point(rx + rw, ry + rh),
+                inv.apply_point(rx, ry + rh),
+            ];
+            return element_intersects_polygon_local(elem, &corners);
+        }
+        return false; // singular transform — element is invisible
+    }
+    element_intersects_rect_local(elem, rx, ry, rw, rh)
+}
+
+/// Rect hit-test against an element's raw (untransformed) coordinates.
+fn element_intersects_rect_local(elem: &Element, rx: f64, ry: f64, rw: f64, rh: f64) -> bool {
     match elem {
         Element::Line(e) => {
             segment_intersects_rect(e.x1, e.y1, e.x2, e.y2, rx, ry, rw, rh)
@@ -405,7 +436,7 @@ mod tests {
     // element constructors so the tests focus on the hit-test logic
     // rather than the element model.
 
-    use crate::geometry::element::{LineElem, RectElem, CommonProps};
+    use crate::geometry::element::{LineElem, RectElem, CommonProps, Transform};
 
     #[test]
     fn line_element_intersects_rect_overlapping() {
@@ -549,5 +580,105 @@ mod tests {
         });
         let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         assert!(!element_intersects_polygon(&rect, &sq));
+    }
+
+    // ---- transform-aware hit-testing ----
+
+    #[test]
+    fn translated_line_intersects_rect() {
+        // Line at (0,5)→(10,5) translated by (100, 0) → visual (100,5)→(110,5)
+        let line = Element::Line(LineElem {
+            common: CommonProps {
+                transform: Some(Transform::translate(100.0, 0.0)),
+                ..CommonProps::default()
+            },
+            x1: 0.0, y1: 5.0, x2: 10.0, y2: 5.0,
+            stroke: None,
+        });
+        // Selection rect around the visual position should hit
+        assert!(element_intersects_rect(&line, 95.0, 0.0, 20.0, 10.0));
+        // Selection rect around the raw position should miss
+        assert!(!element_intersects_rect(&line, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn rotated_rect_intersects_rect() {
+        // A 10x10 rect at origin, rotated 45°. Its visual bounding box extends
+        // beyond the raw rect.
+        let rect = Element::Rect(RectElem {
+            common: CommonProps {
+                transform: Some(Transform::rotate(45.0)),
+                ..CommonProps::default()
+            },
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0,
+            fill: Some(crate::geometry::element::Fill::new(crate::geometry::element::Color::BLACK)),
+            stroke: None,
+        });
+        // After 45° rotation, point (10,0) maps to about (7.07, 7.07).
+        // A selection rect near (7, 7) should intersect the rotated rect.
+        assert!(element_intersects_rect(&rect, 6.0, 6.0, 2.0, 2.0));
+        // A rect at (12, 0) should miss — outside the rotated shape.
+        assert!(!element_intersects_rect(&rect, 12.0, 0.0, 2.0, 2.0));
+    }
+
+    #[test]
+    fn scaled_line_intersects_rect() {
+        // Line at (0,0)→(5,0) scaled 2x → visual (0,0)→(10,0)
+        let line = Element::Line(LineElem {
+            common: CommonProps {
+                transform: Some(Transform::scale(2.0, 2.0)),
+                ..CommonProps::default()
+            },
+            x1: 0.0, y1: 0.0, x2: 5.0, y2: 0.0,
+            stroke: None,
+        });
+        // A rect at x=8..12 should hit the scaled line (which reaches x=10)
+        assert!(element_intersects_rect(&line, 8.0, -1.0, 4.0, 2.0));
+        // A rect at x=6..8 in raw coords (line only goes to x=5) should also hit
+        // because after scaling the line reaches x=10
+        assert!(element_intersects_rect(&line, 6.0, -1.0, 2.0, 2.0));
+    }
+
+    #[test]
+    fn singular_transform_returns_false() {
+        // Scale(0,0) is singular — element is invisible
+        let line = Element::Line(LineElem {
+            common: CommonProps {
+                transform: Some(Transform::scale(0.0, 0.0)),
+                ..CommonProps::default()
+            },
+            x1: 0.0, y1: 0.0, x2: 10.0, y2: 0.0,
+            stroke: None,
+        });
+        assert!(!element_intersects_rect(&line, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn no_transform_still_works() {
+        // Regression: elements without a transform should still work
+        let line = Element::Line(LineElem {
+            common: CommonProps::default(),
+            x1: 0.0, y1: 5.0, x2: 10.0, y2: 5.0,
+            stroke: None,
+        });
+        assert!(element_intersects_rect(&line, 0.0, 0.0, 10.0, 10.0));
+        assert!(!element_intersects_rect(&line, 20.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn translated_line_intersects_polygon() {
+        let line = Element::Line(LineElem {
+            common: CommonProps {
+                transform: Some(Transform::translate(100.0, 0.0)),
+                ..CommonProps::default()
+            },
+            x1: 0.0, y1: 5.0, x2: 10.0, y2: 5.0,
+            stroke: None,
+        });
+        let sq = [(95.0, 0.0), (115.0, 0.0), (115.0, 10.0), (95.0, 10.0)];
+        assert!(element_intersects_polygon(&line, &sq));
+        let sq2 = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        assert!(!element_intersects_polygon(&line, &sq2));
     }
 }
