@@ -15,6 +15,11 @@ let package = Package(
             dependencies: ["JasLib"],
             path: "App"
         ),
+        .executableTarget(
+            name: "SvgRoundtrip",
+            dependencies: ["JasLib"],
+            path: "Tools"
+        ),
         .testTarget(
             name: "JasTests",
             dependencies: ["JasLib"],
