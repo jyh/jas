@@ -8,6 +8,8 @@
 #[cfg(test)]
 mod tests {
     use crate::algorithms::hit_test;
+    use crate::document::controller::Controller;
+    use crate::document::model::Model;
     use crate::geometry::svg::svg_to_document;
     use crate::geometry::test_json::document_to_test_json;
 
@@ -157,6 +159,105 @@ mod tests {
 
             assert_eq!(actual, expected,
                 "Hit test '{}' failed: expected {}, got {}", name, expected, actual);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Operation equivalence tests
+    // ---------------------------------------------------------------
+
+    fn apply_op(model: &mut Model, op: &serde_json::Value) {
+        let name = op["op"].as_str().unwrap();
+        match name {
+            "select_rect" => {
+                Controller::select_rect(
+                    model,
+                    op["x"].as_f64().unwrap(),
+                    op["y"].as_f64().unwrap(),
+                    op["width"].as_f64().unwrap(),
+                    op["height"].as_f64().unwrap(),
+                    op["extend"].as_bool().unwrap_or(false),
+                );
+            }
+            "move_selection" => {
+                Controller::move_selection(
+                    model,
+                    op["dx"].as_f64().unwrap(),
+                    op["dy"].as_f64().unwrap(),
+                );
+            }
+            "delete_selection" => {
+                let new_doc = model.document().delete_selection();
+                model.set_document(new_doc);
+            }
+            "snapshot" => {
+                model.snapshot();
+            }
+            "undo" => {
+                model.undo();
+            }
+            "redo" => {
+                model.redo();
+            }
+            _ => panic!("Unknown op: {}", name),
+        }
+    }
+
+    fn run_operation_test(tc: &serde_json::Value) -> String {
+        let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
+        let doc = svg_to_document(&setup_svg);
+        let mut model = Model::new(doc, None);
+
+        for op in tc["ops"].as_array().unwrap() {
+            apply_op(&mut model, op);
+        }
+
+        document_to_test_json(model.document())
+    }
+
+    fn assert_operation_test(tc: &serde_json::Value) {
+        let name = tc["name"].as_str().unwrap();
+        let expected_file = tc["expected_json"].as_str().unwrap();
+        let expected = read_fixture(&format!("operations/{}", expected_file));
+        let expected = expected.trim();
+        let actual = run_operation_test(tc);
+
+        if actual != expected {
+            eprintln!("=== EXPECTED ({}) ===", name);
+            eprintln!("{}", expected);
+            eprintln!("=== ACTUAL ({}) ===", name);
+            eprintln!("{}", actual);
+            panic!("Operation test '{}' failed: canonical JSON mismatch", name);
+        }
+    }
+
+    /// Bootstrap helper: generate expected JSON for operation tests.
+    /// Run with: cargo test generate_operation_expected -- --nocapture --ignored
+    #[test]
+    #[ignore]
+    fn generate_operation_expected() {
+        let json_str = read_fixture("operations/select_and_move.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        for tc in tests.as_array().unwrap() {
+            let name = tc["name"].as_str().unwrap();
+            let expected_file = tc["expected_json"].as_str().unwrap();
+            let actual = run_operation_test(tc);
+            let path = format!("{}/operations/{}", FIXTURES, expected_file);
+            std::fs::write(&path, &actual)
+                .unwrap_or_else(|e| panic!("Failed to write {}: {}", path, e));
+            eprintln!("Generated: {} -> {}", name, expected_file);
+        }
+    }
+
+    #[test]
+    fn operation_select_and_move() {
+        let json_str = read_fixture("operations/select_and_move.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str)
+            .expect("Failed to parse select_and_move.json");
+
+        for tc in tests.as_array().unwrap() {
+            assert_operation_test(tc);
         }
     }
 }

@@ -91,4 +91,60 @@ let () =
       end
     ) tests);
 
+  (* --------------------------------------------------------------- *)
+  (* Operation equivalence tests                                      *)
+  (* --------------------------------------------------------------- *)
+
+  Printf.printf "Operation tests:\n";
+
+  run_test "select_and_move operations" (fun () ->
+    let json_str = read_fixture "operations/select_and_move.json" in
+    let json = Yojson.Safe.from_string json_str in
+    let tests = Yojson.Safe.Util.to_list json in
+    List.iter (fun tc ->
+      let open Yojson.Safe.Util in
+      let name = tc |> member "name" |> to_string in
+      let setup_svg_file = tc |> member "setup_svg" |> to_string in
+      let expected_file = tc |> member "expected_json" |> to_string in
+      let ops = tc |> member "ops" |> to_list in
+      let svg = read_fixture (Printf.sprintf "svg/%s" setup_svg_file) in
+      let expected = read_fixture (Printf.sprintf "operations/%s" expected_file) in
+      let doc = Jas.Svg.svg_to_document svg in
+      let model = Jas.Model.create ~document:doc () in
+      let ctrl = Jas.Controller.create ~model () in
+      List.iter (fun op ->
+        let op_name = op |> member "op" |> to_string in
+        match op_name with
+        | "select_rect" ->
+          let to_num j = try to_float j with _ -> float_of_int (to_int j) in
+          let x = op |> member "x" |> to_num in
+          let y = op |> member "y" |> to_num in
+          let w = op |> member "width" |> to_num in
+          let h = op |> member "height" |> to_num in
+          let extend = try op |> member "extend" |> to_bool with _ -> false in
+          ctrl#select_rect ~extend x y w h
+        | "move_selection" ->
+          let to_num j = try to_float j with _ -> float_of_int (to_int j) in
+          let dx = op |> member "dx" |> to_num in
+          let dy = op |> member "dy" |> to_num in
+          ctrl#move_selection dx dy
+        | "delete_selection" ->
+          let new_doc = Jas.Document.delete_selection model#document in
+          model#set_document new_doc
+        | "snapshot" ->
+          model#snapshot
+        | "undo" ->
+          model#undo
+        | "redo" ->
+          model#redo
+        | _ -> failwith (Printf.sprintf "Unknown op: %s" op_name)
+      ) ops;
+      let actual = Jas.Test_json.document_to_test_json model#document in
+      if actual <> expected then begin
+        Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name expected;
+        Printf.eprintf "=== ACTUAL (%s) ===\n%s\n" name actual;
+        assert false
+      end
+    ) tests);
+
   Printf.printf "All cross-language tests passed.\n"
