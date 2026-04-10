@@ -1,0 +1,11 @@
+[
+  {"name": "px_identity", "function": "to_px", "unit": "px", "value": 100.0, "expected": 100.0},
+  {"name": "pt_to_px", "function": "to_px", "unit": "pt", "value": 72.0, "expected": 96.0},
+  {"name": "pc_to_px", "function": "to_px", "unit": "pc", "value": 1.0, "expected": 16.0},
+  {"name": "in_to_px", "function": "to_px", "unit": "in", "value": 1.0, "expected": 96.0},
+  {"name": "cm_to_px", "function": "to_px", "unit": "cm", "value": 2.54, "expected": 96.0},
+  {"name": "mm_to_px", "function": "to_px", "unit": "mm", "value": 25.4, "expected": 96.0},
+  {"name": "em_to_px_default", "function": "to_px", "unit": "em", "value": 2.0, "font_size": 16.0, "expected": 32.0},
+  {"name": "em_to_px_custom", "function": "to_px", "unit": "em", "value": 2.0, "font_size": 24.0, "expected": 48.0},
+  {"name": "rem_to_px", "function": "to_px", "unit": "rem", "value": 1.5, "expected": 24.0}
+]
