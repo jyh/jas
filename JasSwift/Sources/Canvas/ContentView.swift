@@ -77,7 +77,7 @@ public struct ContentView: View {
     public var body: some View {
         GeometryReader { geometry in
             let dockCollapsed = workspace.dockLayout.anchoredDock(.right)?.collapsed ?? false
-            let rs = RenderingState.from(workspace.dockLayout.panes(), dockCollapsed: dockCollapsed)
+            let rs = RenderingState.from(workspace.dockLayout.panes(), dockCollapsed: dockCollapsed, activeBorderSnap: borderDrag?.snapIdx)
             let snapLines = RenderingState.snapLines(from: snapPreview,
                                                       paneLayout: workspace.dockLayout.panes())
 
@@ -367,15 +367,6 @@ struct ToolbarPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Title
-            ZStack {
-                SwiftUI.Color(nsColor: NSColor(white: 0.6, alpha: 1.0))
-                SwiftUI.Text("Tools")
-                    .font(.system(size: 11))
-                    .foregroundColor(.black)
-            }
-            .frame(width: toolbarWidth, height: 24)
-
             // Tool buttons
             VStack(spacing: 2) {
                 HStack(spacing: 2) {

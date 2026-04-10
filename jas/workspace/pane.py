@@ -369,13 +369,6 @@ class PaneLayout:
                 pb.y += clamped
                 pb.height -= clamped
             self._propagate_border_shift(other_id, EdgeSide.BOTTOM, False)
-        # When one pane is fixed-width, unsnap the border.
-        a_fixed = pa.config.fixed_width
-        b_fixed = pb.config.fixed_width
-        if (a_fixed or b_fixed) and not (a_fixed and b_fixed):
-            self.snaps = [s for s in self.snaps
-                          if not (s.pane == snap.pane and s.edge == snap.edge
-                                  and s.target == snap.target)]
 
     # -- Canvas maximization --
 

@@ -5,6 +5,37 @@
 import SwiftUI
 
 // ---------------------------------------------------------------------------
+// CursorArea — NSView-based cursor region (reliable unlike SwiftUI onHover)
+// ---------------------------------------------------------------------------
+
+/// An NSViewRepresentable that sets the cursor via an NSTrackingArea.
+struct CursorArea: NSViewRepresentable {
+    let cursor: NSCursor
+
+    func makeNSView(context: Context) -> NSView {
+        let view = CursorNSView(cursor: cursor)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private class CursorNSView: NSView {
+        let cursor: NSCursor
+
+        init(cursor: NSCursor) {
+            self.cursor = cursor
+            super.init(frame: .zero)
+        }
+
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: cursor)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Rendering state (pure data, testable without UI)
 // ---------------------------------------------------------------------------
 
@@ -47,7 +78,7 @@ public struct RenderingState {
     public let borders: [SharedBorder]
     public let canvasMaximized: Bool
 
-    public static func from(_ pl: PaneLayout?, dockCollapsed: Bool = false) -> RenderingState {
+    public static func from(_ pl: PaneLayout?, dockCollapsed: Bool = false, activeBorderSnap: Int? = nil) -> RenderingState {
         guard let pl = pl else {
             return RenderingState(panes: [], borders: [], canvasMaximized: false)
         }
@@ -89,6 +120,11 @@ public struct RenderingState {
                 guard let paneA = pl.pane(snap.pane), let paneB = pl.pane(otherId) else { continue }
                 // Skip borders involving collapsed panes
                 if dockCollapsed && (paneA.config.collapsedWidth != nil || paneB.config.collapsedWidth != nil) { continue }
+                // Skip stale snaps where edges have separated (but keep active drag border)
+                if activeBorderSnap != i {
+                    if isVert && abs(paneA.x + paneA.width - paneB.x) > 1.0 { continue }
+                    if isHoriz && abs(paneA.y + paneA.height - paneB.y) > 1.0 { continue }
+                }
 
                 if isVert {
                     let bx = paneA.x + paneA.width
@@ -134,7 +170,7 @@ public struct RenderingState {
 // ---------------------------------------------------------------------------
 
 let paneTitleBarHeight: Double = 20
-let paneEdgeHandleSize: Double = 4
+let paneEdgeHandleSize: Double = 6
 let paneBorderHandleSize: Double = 6
 
 let paneTitleBgColor = NSColor(white: 0.22, alpha: 1.0)
@@ -304,29 +340,31 @@ struct PaneFrameView<Content: View>: View {
     }
 
     private var edgeHandles: some View {
-        ZStack {
-            // Right edge
-            edgeHandle(edge: .right,
-                       x: geo.width - paneEdgeHandleSize, y: 0,
-                       w: paneEdgeHandleSize, h: geo.height)
-            // Left edge
+        let es = paneEdgeHandleSize
+        return ZStack {
+            // Left edge (full height)
             edgeHandle(edge: .left,
                        x: 0, y: 0,
-                       w: paneEdgeHandleSize, h: geo.height)
-            // Bottom edge
-            edgeHandle(edge: .bottom,
-                       x: 0, y: geo.height - paneEdgeHandleSize,
-                       w: geo.width, h: paneEdgeHandleSize)
-            // Top edge
+                       w: es, h: geo.height)
+            // Right edge (full height)
+            edgeHandle(edge: .right,
+                       x: geo.width - es, y: 0,
+                       w: es, h: geo.height)
+            // Top edge (inset to avoid overlapping left/right)
             edgeHandle(edge: .top,
-                       x: 0, y: 0,
-                       w: geo.width, h: paneEdgeHandleSize)
+                       x: es, y: 0,
+                       w: geo.width - 2 * es, h: es)
+            // Bottom edge (inset to avoid overlapping left/right)
+            edgeHandle(edge: .bottom,
+                       x: es, y: geo.height - es,
+                       w: geo.width - 2 * es, h: es)
         }
     }
 
     private func edgeHandle(edge: EdgeSide, x: Double, y: Double,
                             w: Double, h: Double) -> some View {
-        return SwiftUI.Color.clear
+        let isVerticalEdge = (edge == .top || edge == .bottom)
+        return CursorArea(cursor: isVerticalEdge ? .resizeUpDown : .resizeLeftRight)
             .frame(width: w, height: h)
             .contentShape(Rectangle())
             .position(x: x + w / 2, y: y + h / 2)

@@ -2289,8 +2289,11 @@ pub fn App() -> Element {
             if !is_vertical && !is_horizontal { continue; }
             let pane_a = match pl.pane(snap.pane) { Some(p) => p, None => continue };
             let pane_b = match pl.pane(other_id) { Some(p) => p, None => continue };
-            // Skip borders involving fixed-width panes (not draggable)
-            if pane_a.config.fixed_width || pane_b.config.fixed_width { continue; }
+            // Skip borders where both panes are fixed-width (not draggable)
+            if pane_a.config.fixed_width && pane_b.config.fixed_width { continue; }
+            // Skip stale snaps where edges have separated
+            if is_vertical && (pane_a.x + pane_a.width - pane_b.x).abs() > 1.0 { continue; }
+            if is_horizontal && (pane_a.y + pane_a.height - pane_b.y).abs() > 1.0 { continue; }
             if is_vertical {
                 let bx = pane_a.x + pane_a.width;
                 let by = pane_a.y.max(pane_b.y);
@@ -2471,7 +2474,7 @@ pub fn App() -> Element {
                     }
                 }
             },
-            style: "position:relative; width:100%; height:100%; overflow:hidden; outline:none; font-family:sans-serif; border-left:{snap_left}; border-right:{snap_right}; border-bottom:{snap_bottom}; box-sizing:border-box; display:flex; flex-direction:column;",
+            style: "position:relative; width:100%; height:100%; overflow:hidden; outline:none; font-family:sans-serif; background:{THEME_BG_DARK}; border-left:{snap_left}; border-right:{snap_right}; border-bottom:{snap_bottom}; box-sizing:border-box; display:flex; flex-direction:column;",
 
             // ===== Menu bar (full width, top of window) =====
             div {

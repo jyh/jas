@@ -422,13 +422,15 @@ def test_hide_non_maximizable_pane_preserves_maximized():
 
 # -- fixed-width border drag unsnaps --
 
-def test_drag_shared_border_fixed_width_unsnaps():
+def test_drag_shared_border_fixed_width_resizes_canvas():
     pl = PaneLayout.default_three_pane(1000, 700)
     toolbar_id = pl.pane_by_kind(PaneKind.TOOLBAR).id
     canvas_id = pl.pane_by_kind(PaneKind.CANVAS).id
+    canvas_w_before = pl.find_pane(canvas_id).width
+    toolbar_w_before = pl.find_pane(toolbar_id).width
     snap_idx = next(i for i, s in enumerate(pl.snaps)
                     if s.pane == toolbar_id and s.edge == EdgeSide.RIGHT
                     and s.target == PaneTarget(canvas_id, EdgeSide.LEFT))
     pl.drag_shared_border(snap_idx, 30.0)
-    assert not any(s.pane == toolbar_id and s.edge == EdgeSide.RIGHT
-                   and s.target == PaneTarget(canvas_id, EdgeSide.LEFT) for s in pl.snaps)
+    assert pl.find_pane(toolbar_id).width == toolbar_w_before
+    assert abs(pl.find_pane(canvas_id).width - (canvas_w_before - 30.0)) < 0.001
