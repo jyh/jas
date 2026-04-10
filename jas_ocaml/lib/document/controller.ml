@@ -408,6 +408,7 @@ class controller ?(model = Model.create ()) () =
         let doc' = Document.insert_element_after acc_doc es.Document.es_path copied in
         let copy_path = match List.rev es.Document.es_path with
           | last :: rest -> List.rev ((last + 1) :: rest)
+          (* Precondition: selection paths are always non-empty (set by select_element/select_control_point). *)
           | [] -> failwith "empty path"
         in
         (* Copying always selects the new element as a whole. *)
