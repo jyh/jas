@@ -19,7 +19,7 @@ See `jas_dioxus/src/tools/text_edit.rs` for the full design notes.
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from geometry.element import (
     Color, Element, Fill, Group, Layer, Text, Stroke,
@@ -90,15 +90,15 @@ class _Dragging:
 class TypeTool(CanvasTool):
     def __init__(self):
         # Drag-to-create state machine. None == idle.
-        self._drag: Optional[_Dragging] = None
+        self._drag: _Dragging | None = None
         # active edit session, if any
-        self.session: Optional[TextEditSession] = None
+        self.session: TextEditSession | None = None
         self._did_snapshot = False
         self._hover_text = False
 
     # ---- helpers ----
 
-    def _build_layout(self, ctx: ToolContext) -> Optional[tuple[Text, TextLayout]]:
+    def _build_layout(self, ctx: ToolContext) -> tuple[Text, TextLayout] | None:
         if self.session is None or self.session.target != EditTarget.TEXT:
             return None
         try:
@@ -114,10 +114,10 @@ class TypeTool(CanvasTool):
         return (t, lay)
 
     def _hit_test_text(self, ctx: ToolContext, x: float, y: float
-                       ) -> Optional[tuple[tuple[int, ...], Text]]:
+                       ) -> tuple[tuple[int, ...], Text] | None:
         """Recursive hit-test that respects locked groups/elements."""
         doc = ctx.document
-        result: list[Optional[tuple[tuple[int, ...], Text]]] = [None]
+        result: list[tuple[tuple[int, ...], Text] | None] = [None]
 
         def rec(elem, path):
             if isinstance(elem, Layer):
@@ -380,7 +380,7 @@ class TypeTool(CanvasTool):
     def captures_keyboard(self) -> bool:
         return self.session is not None
 
-    def cursor_css_override(self) -> Optional[str]:
+    def cursor_css_override(self) -> str | None:
         # While editing, always use the system I-beam.
         if self.session is not None:
             return "ibeam"
@@ -472,5 +472,5 @@ def _clipboard_write(text: str) -> None:
         app = QApplication.instance()
         if app is not None:
             app.clipboard().setText(text)
-    except Exception:
+    except (ImportError, AttributeError):
         pass

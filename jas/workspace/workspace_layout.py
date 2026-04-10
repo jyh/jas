@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Optional
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -50,9 +50,9 @@ class PanelGroup:
     panels: list[PanelKind]
     active: int = 0
     collapsed: bool = False
-    height: Optional[float] = None
+    height: float | None = None
 
-    def active_panel(self) -> Optional[PanelKind]:
+    def active_panel(self) -> PanelKind | None:
         if self.active < len(self.panels):
             return self.panels[self.active]
         return None
@@ -173,7 +173,7 @@ STORAGE_PREFIX = "jas_layout:"
 class WorkspaceLayout:
     def __init__(self, name: str, anchored: list[tuple[DockEdge, Dock]],
                  floating: list[FloatingDock], hidden_panels: list[PanelKind],
-                 z_order: list[int], focused_panel: Optional[PanelAddr],
+                 z_order: list[int], focused_panel: PanelAddr | None,
                  next_id: int, pane_layout=None, version: int = LAYOUT_VERSION):
         self.version = version
         self.name = name
@@ -229,7 +229,7 @@ class WorkspaceLayout:
         self._next_id += 1
         return did
 
-    def dock(self, id: int) -> Optional[Dock]:
+    def dock(self, id: int) -> Dock | None:
         for _, d in self.anchored:
             if d.id == id:
                 return d
@@ -238,13 +238,13 @@ class WorkspaceLayout:
                 return fd.dock
         return None
 
-    def anchored_dock(self, edge: DockEdge) -> Optional[Dock]:
+    def anchored_dock(self, edge: DockEdge) -> Dock | None:
         for e, d in self.anchored:
             if e == edge:
                 return d
         return None
 
-    def floating_dock(self, id: int) -> Optional[FloatingDock]:
+    def floating_dock(self, id: int) -> FloatingDock | None:
         for fd in self.floating:
             if fd.dock.id == id:
                 return fd
@@ -315,7 +315,7 @@ class WorkspaceLayout:
 
     # -- Detach group --
 
-    def detach_group(self, from_addr: GroupAddr, x: float, y: float) -> Optional[int]:
+    def detach_group(self, from_addr: GroupAddr, x: float, y: float) -> int | None:
         src = self.dock(from_addr.dock_id)
         if src is None or from_addr.group_idx >= len(src.groups):
             return None
@@ -386,7 +386,7 @@ class WorkspaceLayout:
 
     # -- Detach panel --
 
-    def detach_panel(self, from_addr: PanelAddr, x: float, y: float) -> Optional[int]:
+    def detach_panel(self, from_addr: PanelAddr, x: float, y: float) -> int | None:
         src_d = self.dock(from_addr.group.dock_id)
         if src_d is None or from_addr.group.group_idx >= len(src_d.groups):
             return None
@@ -505,7 +505,7 @@ class WorkspaceLayout:
         self.snap_to_edge(id, DockEdge.RIGHT)
 
     @staticmethod
-    def is_near_edge(x: float, y: float, viewport_w: float, viewport_h: float) -> Optional[DockEdge]:
+    def is_near_edge(x: float, y: float, viewport_w: float, viewport_h: float) -> DockEdge | None:
         if x <= SNAP_DISTANCE:
             return DockEdge.LEFT
         if x >= viewport_w - SNAP_DISTANCE:
@@ -525,7 +525,7 @@ class WorkspaceLayout:
         self._bump()
         return did
 
-    def remove_anchored_dock(self, edge: DockEdge) -> Optional[int]:
+    def remove_anchored_dock(self, edge: DockEdge) -> int | None:
         idx = next((i for i, (e, _) in enumerate(self.anchored) if e == edge), None)
         if idx is None:
             return None
@@ -621,7 +621,7 @@ class WorkspaceLayout:
                 try:
                     from workspace.pane import pane_layout_from_dict
                     pl = pane_layout_from_dict(d["pane_layout"])
-                except Exception:
+                except (ImportError, KeyError, ValueError, TypeError):
                     pl = None
             ver = d.get("version", 0)
             if ver != LAYOUT_VERSION:
@@ -673,7 +673,7 @@ class WorkspaceLayout:
         self.name = saved_name
 
     @staticmethod
-    def try_load_from_file(name: str) -> 'Optional[WorkspaceLayout]':
+    def try_load_from_file(name: str) -> 'WorkspaceLayout | None':
         import os
         path = os.path.join(WorkspaceLayout._config_dir(), f"{name}.json")
         try:
@@ -726,7 +726,7 @@ class WorkspaceLayout:
 
     # -- Focus --
 
-    def set_focused_panel(self, addr: Optional[PanelAddr]):
+    def set_focused_panel(self, addr: PanelAddr | None):
         self.focused_panel = addr
 
     def _all_panel_addrs(self) -> list[PanelAddr]:

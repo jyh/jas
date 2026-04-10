@@ -5,11 +5,12 @@ one with the desired changes. Element types and attributes follow the SVG 1.1
 specification.
 """
 
+from __future__ import annotations
+
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Tuple
 
 
 # Geometry constants
@@ -216,8 +217,8 @@ class ClosePath:
 PathCommand = MoveTo | LineTo | CurveTo | SmoothCurveTo | QuadTo | SmoothQuadTo | ArcTo | ClosePath
 
 
-def _inflate_bounds(bbox: Tuple[float, float, float, float],
-                    stroke: "Stroke | None") -> Tuple[float, float, float, float]:
+def _inflate_bounds(bbox: tuple[float, float, float, float],
+                    stroke: "Stroke | None") -> tuple[float, float, float, float]:
     """Expand bounding box (x, y, w, h) by half-stroke-width on each side."""
     if stroke is None:
         return bbox
@@ -235,7 +236,7 @@ class Element(ABC):
     locked: bool
 
     @abstractmethod
-    def bounds(self) -> Tuple[float, float, float, float]:
+    def bounds(self) -> tuple[float, float, float, float]:
         """Return the bounding box as (x, y, width, height)."""
         ...
 
@@ -253,7 +254,7 @@ class Line(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
 
-    def bounds(self) -> Tuple[float, float, float, float]:
+    def bounds(self) -> tuple[float, float, float, float]:
         min_x = min(self.x1, self.x2)
         min_y = min(self.y1, self.y2)
         return _inflate_bounds(
@@ -277,7 +278,7 @@ class Rect(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
 
-    def bounds(self) -> Tuple[float, float, float, float]:
+    def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds((self.x, self.y, self.width, self.height), self.stroke)
 
 
@@ -294,7 +295,7 @@ class Circle(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
 
-    def bounds(self) -> Tuple[float, float, float, float]:
+    def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(
             (self.cx - self.r, self.cy - self.r, self.r * 2, self.r * 2),
             self.stroke)
@@ -314,7 +315,7 @@ class Ellipse(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
 
-    def bounds(self) -> Tuple[float, float, float, float]:
+    def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(
             (self.cx - self.rx, self.cy - self.ry, self.rx * 2, self.ry * 2),
             self.stroke)
@@ -331,7 +332,7 @@ class Polyline(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
 
-    def bounds(self) -> Tuple[float, float, float, float]:
+    def bounds(self) -> tuple[float, float, float, float]:
         if not self.points:
             return (0, 0, 0, 0)
         xs = [p[0] for p in self.points]
@@ -352,7 +353,7 @@ class Polygon(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
 
-    def bounds(self) -> Tuple[float, float, float, float]:
+    def bounds(self) -> tuple[float, float, float, float]:
         if not self.points:
             return (0, 0, 0, 0)
         xs = [p[0] for p in self.points]
@@ -373,7 +374,7 @@ class Path(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
 
-    def bounds(self) -> Tuple[float, float, float, float]:
+    def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
 
 
@@ -426,7 +427,7 @@ def _quadratic_eval(p0: float, p1: float, p2: float, t: float) -> float:
     return u*u*p0 + 2*u*t*p1 + t*t*p2
 
 
-def _path_bounds(d) -> Tuple[float, float, float, float]:
+def _path_bounds(d) -> tuple[float, float, float, float]:
     """Compute tight bounds by finding Bezier extrema."""
     xs: list[float] = []
     ys: list[float] = []
@@ -517,7 +518,7 @@ class Text(Element):
     def is_area_text(self) -> bool:
         return self.width > 0 and self.height > 0
 
-    def bounds(self) -> Tuple[float, float, float, float]:
+    def bounds(self) -> tuple[float, float, float, float]:
         if self.is_area_text:
             return (self.x, self.y, self.width, self.height)
         # Treat self.y as the top of the run (matching the in-place
@@ -536,7 +537,7 @@ class Text(Element):
                 font.setItalic(True)
             fm = QFontMetricsF(font)
             max_width = max((fm.horizontalAdvance(l) for l in lines), default=0.0)
-        except Exception:
+        except (ImportError, RuntimeError):
             max_chars = max((len(l) for l in lines), default=0)
             max_width = max_chars * self.font_size * APPROX_CHAR_WIDTH_FACTOR
         height = len(lines) * self.font_size
@@ -562,7 +563,7 @@ class TextPath(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
 
-    def bounds(self) -> Tuple[float, float, float, float]:
+    def bounds(self) -> tuple[float, float, float, float]:
         # Approximate from path bounds
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
 
@@ -576,7 +577,7 @@ class Group(Element):
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
 
-    def bounds(self) -> Tuple[float, float, float, float]:
+    def bounds(self) -> tuple[float, float, float, float]:
         if not self.children:
             return (0, 0, 0, 0)
         all_bounds = [c.bounds() for c in self.children]

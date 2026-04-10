@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from geometry.element import (
     Color, CurveTo, Element, Fill, Group, Layer, LineTo, MoveTo,
@@ -59,22 +59,22 @@ def _selection_color(tp: TextPath) -> "QColor":
 class TypeOnPathTool(CanvasTool):
     def __init__(self):
         # Drag-create state
-        self._drag_start: Optional[tuple[float, float]] = None
-        self._drag_end: Optional[tuple[float, float]] = None
-        self._control: Optional[tuple[float, float]] = None
+        self._drag_start: tuple[float, float] | None = None
+        self._drag_end: tuple[float, float] | None = None
+        self._control: tuple[float, float] | None = None
         # Offset handle drag
         self._offset_dragging = False
-        self._offset_drag_path: Optional[tuple] = None
-        self._offset_preview: Optional[float] = None
+        self._offset_drag_path: tuple | None = None
+        self._offset_preview: float | None = None
         # Edit session
-        self.session: Optional[TextEditSession] = None
+        self.session: TextEditSession | None = None
         self._did_snapshot = False
         self._hover_textpath = False
         self._hover_path = False
 
     # ---- helpers ----
 
-    def _build_layout(self, ctx: ToolContext) -> Optional[tuple[TextPath, PathTextLayout]]:
+    def _build_layout(self, ctx: ToolContext) -> tuple[TextPath, PathTextLayout] | None:
         if self.session is None or self.session.target != EditTarget.TEXT_PATH:
             return None
         try:
@@ -89,7 +89,7 @@ class TypeOnPathTool(CanvasTool):
         return (tp, lay)
 
     def _hit_test_path_curve(self, ctx: ToolContext, x: float, y: float
-                              ) -> Optional[tuple[tuple, Element]]:
+                              ) -> tuple[tuple, Element] | None:
         doc = ctx.document
         threshold = HIT_RADIUS + 2
         for li, layer in enumerate(doc.layers):
@@ -171,7 +171,7 @@ class TypeOnPathTool(CanvasTool):
         self._control = None
 
     def _find_offset_handle(self, ctx: ToolContext, x: float, y: float
-                             ) -> Optional[tuple[tuple, float]]:
+                             ) -> tuple[tuple, float] | None:
         doc = ctx.document
         for es in doc.selection:
             elem = doc.get_element(es.path)
@@ -403,7 +403,7 @@ class TypeOnPathTool(CanvasTool):
     def captures_keyboard(self) -> bool:
         return self.session is not None
 
-    def cursor_css_override(self) -> Optional[str]:
+    def cursor_css_override(self) -> str | None:
         # While editing, always use the system I-beam.
         if self.session is not None:
             return "ibeam"
@@ -511,5 +511,5 @@ def _clipboard_write(text: str) -> None:
         app = QApplication.instance()
         if app is not None:
             app.clipboard().setText(text)
-    except Exception:
+    except (ImportError, AttributeError):
         pass

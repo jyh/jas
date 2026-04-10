@@ -7,7 +7,7 @@ matches what the canvas painter actually draws. For headless tests
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 
 def make_measurer(family: str, weight: str, style: str, size: float) -> Callable[[str], float]:
@@ -28,7 +28,7 @@ def make_measurer(family: str, weight: str, style: str, size: float) -> Callable
             return float(fm.horizontalAdvance(s))
 
         return measure
-    except Exception:
+    except (ImportError, RuntimeError):
         return _stub_measurer(size)
 
 
