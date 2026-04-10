@@ -42,6 +42,18 @@ FIXTURE_NAMES = [
 ]
 
 
+def run_rust(mode: str, svg_path: str) -> str:
+    result = subprocess.run(
+        ["cargo", "run", "--bin", "svg_roundtrip", "--no-default-features",
+         "-q", "--", mode, svg_path],
+        cwd=os.path.join(REPO_ROOT, "jas_dioxus"),
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Rust {mode} failed: {result.stderr}")
+    return result.stdout
+
+
 def run_ocaml(mode: str, svg_path: str) -> str:
     result = subprocess.run(
         ["dune", "exec", "bin/svg_roundtrip.exe", "--", mode, svg_path],
@@ -76,6 +88,7 @@ def run_swift(mode: str, svg_path: str) -> str:
 
 
 LANGUAGES = {
+    "rust": run_rust,
     "ocaml": run_ocaml,
     "swift": run_swift,
     "python": run_python,

@@ -3,9 +3,26 @@ name = "jas_dioxus"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "jas_dioxus"
+path = "src/lib.rs"
+
+[[bin]]
+name = "jas_dioxus"
+path = "src/main.rs"
+required-features = ["web"]
+
+[[bin]]
+name = "svg_roundtrip"
+path = "src/bin/svg_roundtrip.rs"
+
+[features]
+default = ["web"]
+web = ["dep:dioxus", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:dioxus-logger"]
+
 [dependencies]
-dioxus = { version = "0.6", features = ["web"] }
-web-sys = { version = "0.3", features = [
+dioxus = { version = "0.6", features = ["web"], optional = true }
+web-sys = { version = "0.3", optional = true, features = [
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
     "MouseEvent",
@@ -31,11 +48,11 @@ web-sys = { version = "0.3", features = [
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3"
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
 log = "0.4"
-dioxus-logger = "0.6"
+dioxus-logger = { version = "0.6", optional = true }
 
 [dev-dependencies]
 dioxus-sdk = "0.6"

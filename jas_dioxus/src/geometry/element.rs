@@ -577,12 +577,17 @@ impl Element {
                     } else {
                         e.content.split('\n').collect()
                     };
-                    let font = crate::tools::text_measure::font_string(
-                        &e.font_style, &e.font_weight, e.font_size, &e.font_family);
-                    let measure = crate::tools::text_measure::make_measurer(&font, e.font_size);
+                    #[cfg(feature = "web")]
+                    let max_width = {
+                        let font = crate::tools::text_measure::font_string(
+                            &e.font_style, &e.font_weight, e.font_size, &e.font_family);
+                        let measure = crate::tools::text_measure::make_measurer(&font, e.font_size);
+                        lines.iter().map(|l| measure(l)).fold(0.0_f64, f64::max)
+                    };
+                    #[cfg(not(feature = "web"))]
                     let max_width = lines
                         .iter()
-                        .map(|l| measure(l))
+                        .map(|l| l.len() as f64 * e.font_size * APPROX_CHAR_WIDTH_FACTOR)
                         .fold(0.0_f64, f64::max);
                     let height = lines.len() as f64 * e.font_size;
                     (e.x, e.y, max_width, height)
