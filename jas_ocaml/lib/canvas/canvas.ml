@@ -121,7 +121,10 @@ let create_main_window ~get_model ~on_open () =
   let border_handles : GBin.event_box list ref = ref [] in
   let snap_widgets : GMisc.drawing_area list ref = ref [] in
 
+  let refreshing = ref false in
   let refresh_all () =
+    if !refreshing then () else begin
+    refreshing := true;
     let geos = match Dock.panes dock_layout with
       | None -> [] | Some pl -> Pane_rendering.pane_geometries pl
     in
@@ -132,7 +135,14 @@ let create_main_window ~get_model ~on_open () =
       | Some pl -> pl.canvas_maximized | None -> false
     in
 
-    (* Update pane positions and sizes *)
+    (* Update pane positions and sizes.
+       Only call set_size_request when the size actually changed,
+       to avoid triggering GTK re-layout feedback loops. *)
+    let set_size_if_changed (widget : #GObj.widget) ~width ~height =
+      let alloc = widget#misc#allocation in
+      if alloc.Gtk.width <> width || alloc.Gtk.height <> height then
+        widget#misc#set_size_request ~width ~height ()
+    in
     List.iter (fun (geo : Pane_rendering.pane_geometry) ->
       let x = int_of_float geo.x in
       let y = int_of_float geo.y in
@@ -143,13 +153,13 @@ let create_main_window ~get_model ~on_open () =
         if geo.visible then begin
           toolbar_frame#misc#show ();
           pane_container#move toolbar_frame#coerce ~x ~y;
-          toolbar_frame#misc#set_size_request ~width:w ~height:h ()
+          set_size_if_changed toolbar_frame ~width:w ~height:h
         end else
           toolbar_frame#misc#hide ()
       | Pane.Canvas ->
         canvas_frame#misc#show ();
         pane_container#move canvas_frame#coerce ~x ~y;
-        canvas_frame#misc#set_size_request ~width:w ~height:h ();
+        set_size_if_changed canvas_frame ~width:w ~height:h;
         (* Hide/show title bar for maximized *)
         if maximized then !canvas_title#misc#hide ()
         else !canvas_title#misc#show ()
@@ -157,7 +167,7 @@ let create_main_window ~get_model ~on_open () =
         if geo.visible then begin
           dock_frame#misc#show ();
           pane_container#move dock_frame#coerce ~x ~y;
-          dock_frame#misc#set_size_request ~width:w ~height:h ()
+          set_size_if_changed dock_frame ~width:w ~height:h
         end else
           dock_frame#misc#hide ()
     ) geos;
@@ -217,10 +227,11 @@ let create_main_window ~get_model ~on_open () =
        ) lines
      | None -> ());
 
-    (* Force redraw of the pane container to clear smeared artifacts *)
-    pane_container#misc#queue_draw ();
-
-    Dock.save_layout_if_needed dock_layout
+    Dock.save_layout_if_needed dock_layout;
+    (* Defer resetting the flag so that any configure events triggered
+       by set_size_request during this refresh are suppressed. *)
+    ignore (GMain.Idle.add (fun () -> refreshing := false; false))
+    end
   in
 
   (* Build title bars (must happen after refresh_all is defined) *)
@@ -307,13 +318,18 @@ let create_main_window ~get_model ~on_open () =
     true
   ));
 
-  (* Viewport resize handler *)
-  ignore (window#event#connect#configure ~callback:(fun ev ->
-    let w = float_of_int (GdkEvent.Configure.width ev) in
-    let h = float_of_int (GdkEvent.Configure.height ev) in
-    Dock.panes_mut dock_layout (fun pl ->
-      Pane.on_viewport_resize pl ~new_w:w ~new_h:h);
-    refresh_all ();
+  (* Viewport resize handler — use pane_container allocation (configure
+     event reports bogus heights on macOS/GTK3). Re-entrancy is guarded
+     by refresh_all's own flag. *)
+  ignore (window#event#connect#configure ~callback:(fun _ev ->
+    let alloc = pane_container#misc#allocation in
+    let w = float_of_int alloc.Gtk.width in
+    let h = float_of_int alloc.Gtk.height in
+    if w > 10.0 && h > 10.0 && w < 10000.0 && h < 10000.0 then begin
+      Dock.panes_mut dock_layout (fun pl ->
+        Pane.on_viewport_resize pl ~new_w:w ~new_h:h);
+      refresh_all ()
+    end;
     false
   ));
 
@@ -321,7 +337,17 @@ let create_main_window ~get_model ~on_open () =
   css#load_from_data "notebook, notebook header, notebook stack { background-color: #a0a0a0; }";
   notebook#misc#style_context#add_provider css 600;
 
-  (* Initial layout *)
-  refresh_all ();
+  (* Initial layout — deferred until the window is mapped and has a
+     valid size. We connect to the "map" signal which fires once after
+     window#show, then resize panes to fit the actual container. *)
+  ignore (window#misc#connect#map ~callback:(fun () ->
+    let alloc = pane_container#misc#allocation in
+    let w = float_of_int alloc.Gtk.width in
+    let h = float_of_int alloc.Gtk.height in
+    if w > 10.0 && h > 10.0 then
+      Dock.panes_mut dock_layout (fun pl ->
+        Pane.on_viewport_resize pl ~new_w:w ~new_h:h);
+    refresh_all ()
+  ));
 
   (window, toolbar_fixed, notebook, dock_box)
