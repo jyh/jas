@@ -55,6 +55,13 @@ public struct PanelGroup: Codable {
         self.height = nil
     }
 
+    public init(panels: [PanelKind], active: Int, collapsed: Bool, height: Double?) {
+        self.panels = panels
+        self.active = active
+        self.collapsed = collapsed
+        self.height = height
+    }
+
     public func activePanel() -> PanelKind? {
         guard active < panels.count else { return nil }
         return panels[active]
@@ -76,6 +83,18 @@ public struct Dock: Codable {
         self.autoHide = false
         self.width = width
         self.minWidth = minDockWidth
+    }
+
+    /// Reconstruct a Dock from all fields (for test JSON deserialization).
+    public static func fromParts(
+        id: DockId, groups: [PanelGroup], collapsed: Bool,
+        autoHide: Bool, width: Double, minWidth: Double
+    ) -> Dock {
+        var d = Dock(id: id, groups: groups, width: width)
+        d.collapsed = collapsed
+        d.autoHide = autoHide
+        d.minWidth = minWidth
+        return d
     }
 }
 
@@ -266,6 +285,36 @@ public struct WorkspaceLayout: Codable {
         self.nextId = nextId
         self.generation = generation
         self.savedGeneration = savedGeneration
+    }
+
+    /// Return the next dock id counter (for test JSON serialization).
+    public func getNextId() -> Int { nextId }
+
+    /// Reconstruct a WorkspaceLayout from all fields (for test JSON deserialization).
+    public static func fromParts(
+        version: Int,
+        name: String,
+        anchored: [(DockEdge, Dock)],
+        floating: [FloatingDock],
+        hiddenPanels: [PanelKind],
+        zOrder: [DockId],
+        focusedPanel: PanelAddr?,
+        paneLayout: PaneLayout?,
+        nextId: Int
+    ) -> WorkspaceLayout {
+        WorkspaceLayout(
+            version: version,
+            name: name,
+            anchored: anchored,
+            floating: floating,
+            hiddenPanels: hiddenPanels,
+            zOrder: zOrder,
+            focusedPanel: focusedPanel,
+            paneLayout: paneLayout,
+            nextId: nextId,
+            generation: 0,
+            savedGeneration: 0
+        )
     }
 
     // MARK: - Generation

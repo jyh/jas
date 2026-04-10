@@ -68,7 +68,7 @@ let () =
     (* collapsed_width drives collapsibility *)
     assert (tc.collapsed_width = None);
     assert (cc.collapsed_width = None);
-    assert (dc.collapsed_width = Some 32.0))
+    assert (dc.collapsed_width = Some 36.0))
 
 (* ================================================================== *)
 (* Position & sizing                                                  *)

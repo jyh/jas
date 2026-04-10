@@ -222,6 +222,25 @@ impl PaneLayout {
         }
     }
 
+    /// Return the next pane id counter (for test JSON serialization).
+    pub fn next_pane_id(&self) -> usize {
+        self.next_pane_id
+    }
+
+    /// Reconstruct a PaneLayout from all fields (for test JSON deserialization).
+    pub fn from_parts(
+        panes: Vec<Pane>,
+        snaps: Vec<SnapConstraint>,
+        z_order: Vec<PaneId>,
+        hidden_panes: Vec<PaneKind>,
+        canvas_maximized: bool,
+        viewport_width: f64,
+        viewport_height: f64,
+        next_pane_id: usize,
+    ) -> Self {
+        Self { panes, snaps, z_order, hidden_panes, canvas_maximized, viewport_width, viewport_height, next_pane_id }
+    }
+
     // -----------------------------------------------------------------------
     // Lookup
     // -----------------------------------------------------------------------

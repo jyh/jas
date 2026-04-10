@@ -97,6 +97,14 @@ impl Dock {
             min_width: MIN_DOCK_WIDTH,
         }
     }
+
+    /// Reconstruct a Dock from all fields (for test JSON deserialization).
+    pub fn from_parts(
+        id: DockId, groups: Vec<PanelGroup>, collapsed: bool,
+        auto_hide: bool, width: f64, min_width: f64,
+    ) -> Self {
+        Self { id, groups, collapsed, auto_hide, width, min_width }
+    }
 }
 
 /// A floating dock: a [`Dock`] plus screen position.
@@ -260,6 +268,30 @@ impl WorkspaceLayout {
             next_id: 1,
             generation: 0,
             saved_generation: 0,
+        }
+    }
+
+    /// Return the next dock id counter (for test JSON serialization).
+    pub fn next_id(&self) -> usize {
+        self.next_id
+    }
+
+    /// Reconstruct a WorkspaceLayout from all fields (for test JSON deserialization).
+    pub fn from_parts(
+        version: u32,
+        name: String,
+        anchored: Vec<(DockEdge, Dock)>,
+        floating: Vec<FloatingDock>,
+        hidden_panels: Vec<PanelKind>,
+        z_order: Vec<DockId>,
+        focused_panel: Option<PanelAddr>,
+        pane_layout: Option<PaneLayout>,
+        next_id: usize,
+    ) -> Self {
+        Self {
+            version, name, anchored, floating, hidden_panels, z_order,
+            focused_panel, pane_layout, next_id,
+            generation: 0, saved_generation: 0,
         }
     }
 

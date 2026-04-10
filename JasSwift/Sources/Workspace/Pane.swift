@@ -180,6 +180,32 @@ public struct PaneLayout: Codable {
         )
     }
 
+    /// Return the next pane id counter (for test JSON serialization).
+    public func getNextPaneId() -> Int { nextPaneId }
+
+    /// Reconstruct a PaneLayout from all fields (for test JSON deserialization).
+    public static func fromParts(
+        panes: [Pane],
+        snaps: [SnapConstraint],
+        zOrder: [PaneId],
+        hiddenPanes: [PaneKind],
+        canvasMaximized: Bool,
+        viewportWidth: Double,
+        viewportHeight: Double,
+        nextPaneId: Int
+    ) -> PaneLayout {
+        PaneLayout(
+            panes: panes,
+            snaps: snaps,
+            zOrder: zOrder,
+            hiddenPanes: hiddenPanes,
+            canvasMaximized: canvasMaximized,
+            viewportWidth: viewportWidth,
+            viewportHeight: viewportHeight,
+            nextPaneId: nextPaneId
+        )
+    }
+
     // MARK: - Lookup
 
     public func pane(_ id: PaneId) -> Pane? {

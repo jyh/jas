@@ -12,13 +12,13 @@
 (* Constants                                                          *)
 (* ------------------------------------------------------------------ *)
 
-let min_toolbar_width = 66.0
+let min_toolbar_width = 72.0
 let min_toolbar_height = 200.0
 let min_canvas_width = 200.0
 let min_canvas_height = 200.0
 let min_pane_dock_width = 150.0
 let min_pane_dock_height = 100.0
-let default_toolbar_width = 66.0
+let default_toolbar_width = 72.0
 let default_pane_dock_width = 240.0
 let snap_distance = 20.0
 let border_hit_tolerance = 6.0
@@ -100,7 +100,7 @@ let config_for_kind = function
     }
   | Dock -> {
       label = "Panels"; min_width = min_pane_dock_width; min_height = min_pane_dock_height;
-      fixed_width = false; collapsed_width = Some 32.0;
+      fixed_width = false; collapsed_width = Some 36.0;
       double_click_action = Redock;
     }
 

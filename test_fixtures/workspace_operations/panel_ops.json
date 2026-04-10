@@ -1,0 +1,68 @@
+[
+  {
+    "name": "toggle_group_collapsed",
+    "setup": "workspace_default.json",
+    "ops": [
+      {"op": "toggle_group_collapsed", "dock_id": 0, "group_idx": 0}
+    ],
+    "expected_json": "panel_toggle_collapsed.json"
+  },
+  {
+    "name": "set_active_panel",
+    "setup": "workspace_default.json",
+    "ops": [
+      {"op": "set_active_panel", "dock_id": 0, "group_idx": 1, "panel_idx": 2}
+    ],
+    "expected_json": "panel_set_active.json"
+  },
+  {
+    "name": "close_panel",
+    "setup": "workspace_default.json",
+    "ops": [
+      {"op": "close_panel", "dock_id": 0, "group_idx": 0, "panel_idx": 0}
+    ],
+    "expected_json": "panel_close_layers.json"
+  },
+  {
+    "name": "close_and_show_panel",
+    "setup": "workspace_default.json",
+    "ops": [
+      {"op": "close_panel", "dock_id": 0, "group_idx": 0, "panel_idx": 0},
+      {"op": "show_panel", "kind": "layers"}
+    ],
+    "expected_json": "panel_close_and_show.json"
+  },
+  {
+    "name": "reorder_panel",
+    "setup": "workspace_default.json",
+    "ops": [
+      {"op": "reorder_panel", "dock_id": 0, "group_idx": 1, "from": 0, "to": 2}
+    ],
+    "expected_json": "panel_reorder.json"
+  },
+  {
+    "name": "move_panel_to_group",
+    "setup": "workspace_default.json",
+    "ops": [
+      {"op": "move_panel_to_group", "from_dock_id": 0, "from_group_idx": 1, "from_panel_idx": 0, "to_dock_id": 0, "to_group_idx": 0}
+    ],
+    "expected_json": "panel_move_to_group.json"
+  },
+  {
+    "name": "detach_group",
+    "setup": "workspace_default.json",
+    "ops": [
+      {"op": "detach_group", "dock_id": 0, "group_idx": 0, "x": 100.0, "y": 200.0}
+    ],
+    "expected_json": "panel_detach_group.json"
+  },
+  {
+    "name": "detach_and_redock",
+    "setup": "workspace_default.json",
+    "ops": [
+      {"op": "detach_group", "dock_id": 0, "group_idx": 0, "x": 100.0, "y": 200.0},
+      {"op": "redock", "dock_id": 1}
+    ],
+    "expected_json": "panel_detach_and_redock.json"
+  }
+]
