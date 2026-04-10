@@ -151,11 +151,9 @@ private func applyOp(_ model: Model, _ controller: Controller, _ op: [String: An
     }
 }
 
-@Test func operationSelectAndMove() throws {
-    let json = readFixture("operations/select_and_move.json")
+private func runOperationFixture(_ fixture: String) throws {
+    let json = readFixture("operations/\(fixture)")
     let data = json.data(using: .utf8)!
-
-    // Parse manually since the ops are heterogeneous.
     let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
 
     for tc in tests {
@@ -185,65 +183,20 @@ private func applyOp(_ model: Model, _ controller: Controller, _ op: [String: An
                 controller.moveSelection(
                     dx: op["dx"] as! Double,
                     dy: op["dy"] as! Double)
-            case "delete_selection":
-                let newDoc = model.document.deleteSelection()
-                model.document = newDoc
-            case "snapshot":
-                model.snapshot()
-            case "undo":
-                model.undo()
-            case "redo":
-                model.redo()
-            default:
-                Issue.record("Unknown op: \(opName)")
-            }
-        }
-
-        let actual = documentToTestJson(model.document)
-        if actual != expected {
-            print("=== EXPECTED (\(name)) ===")
-            print(expected)
-            print("=== ACTUAL (\(name)) ===")
-            print(actual)
-        }
-        #expect(actual == expected, "Operation test '\(name)' failed")
-    }
-}
-
-@Test func operationUndoRedoLaws() throws {
-    let json = readFixture("operations/undo_redo_laws.json")
-    let data = json.data(using: .utf8)!
-    let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
-
-    for tc in tests {
-        let name = tc["name"] as! String
-        let setupSvg = tc["setup_svg"] as! String
-        let expectedFile = tc["expected_json"] as! String
-        let ops = tc["ops"] as! [[String: Any]]
-
-        let svg = readFixture("svg/\(setupSvg)")
-        let expected = readFixture("operations/\(expectedFile)").trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let doc = svgToDocument(svg)
-        let model = Model(document: doc)
-        let controller = Controller(model: model)
-
-        for op in ops {
-            let opName = op["op"] as! String
-            switch opName {
-            case "select_rect":
-                controller.selectRect(
-                    x: op["x"] as! Double,
-                    y: op["y"] as! Double,
-                    width: op["width"] as! Double,
-                    height: op["height"] as! Double,
-                    extend: op["extend"] as? Bool ?? false)
-            case "move_selection":
-                controller.moveSelection(
+            case "copy_selection":
+                controller.copySelection(
                     dx: op["dx"] as! Double,
                     dy: op["dy"] as! Double)
             case "delete_selection":
                 model.document = model.document.deleteSelection()
+            case "lock_selection":
+                controller.lockSelection()
+            case "unlock_all":
+                controller.unlockAll()
+            case "hide_selection":
+                controller.hideSelection()
+            case "show_all":
+                controller.showAll()
             case "snapshot":
                 model.snapshot()
             case "undo":
@@ -258,6 +211,18 @@ private func applyOp(_ model: Model, _ controller: Controller, _ op: [String: An
         let actual = documentToTestJson(model.document)
         #expect(actual == expected, "Operation test '\(name)' failed")
     }
+}
+
+@Test func operationSelectAndMove() throws {
+    try runOperationFixture("select_and_move.json")
+}
+
+@Test func operationUndoRedoLaws() throws {
+    try runOperationFixture("undo_redo_laws.json")
+}
+
+@Test func operationControllerOps() throws {
+    try runOperationFixture("controller_ops.json")
 }
 
 @Test func algorithmHitTestVectors() throws {

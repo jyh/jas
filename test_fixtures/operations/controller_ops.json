@@ -1,0 +1,51 @@
+[
+  {
+    "name": "copy_selection",
+    "setup_svg": "two_rects.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false},
+      {"op": "copy_selection", "dx": 20, "dy": 20}
+    ],
+    "expected_json": "copy_selection.json"
+  },
+  {
+    "name": "extend_select_with_shift",
+    "setup_svg": "two_rects.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false},
+      {"op": "select_rect", "x": 80, "y": 0, "width": 50, "height": 50, "extend": true}
+    ],
+    "expected_json": "extend_select.json"
+  },
+  {
+    "name": "lock_prevents_select",
+    "setup_svg": "two_rects.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false},
+      {"op": "lock_selection"},
+      {"op": "select_rect", "x": 0, "y": 0, "width": 200, "height": 200, "extend": false}
+    ],
+    "expected_json": "lock_prevents_select.json"
+  },
+  {
+    "name": "unlock_restores_select",
+    "setup_svg": "two_rects.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false},
+      {"op": "lock_selection"},
+      {"op": "unlock_all"},
+      {"op": "select_rect", "x": 0, "y": 0, "width": 200, "height": 200, "extend": false}
+    ],
+    "expected_json": "unlock_restores_select.json"
+  },
+  {
+    "name": "hide_and_show_cycle",
+    "setup_svg": "two_rects.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false},
+      {"op": "hide_selection"},
+      {"op": "show_all"}
+    ],
+    "expected_json": "hide_show_cycle.json"
+  }
+]
