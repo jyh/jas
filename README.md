@@ -85,6 +85,9 @@ short:
   testing, marquee intersection, and selection operations.
 - [TOOLS.md](TOOLS.md) — the toolbar, shared constants, and each of
   the tools (state machines, overlays, keyboard handling).
+- [WORKSPACE.md](WORKSPACE.md) — the workspace layout system: pane
+  positioning, dock panels, snap constraints, the working-copy save
+  pattern, and persistence across all four implementations.
 - [MENU.md](MENU.md) — the menu bar structure, commands, and the
   keyboard shortcuts they expose.
 - [KEYBOARD_SHORTCUTS.md](KEYBOARD_SHORTCUTS.md) — the target
@@ -104,6 +107,7 @@ slightly per language but the split is identical:
 | `geometry/`       | Element types, `PathCommand`, bounds, control-point positions, SVG import/export, unit conversion, text layout (word-wrap, UTF-8, glyph index), path-text layout (arc-length glyph placement), curve fitting |
 | `document/`       | Immutable `Document`, observable `Model` with undo/redo, `Controller` with all mutation operations |
 | `tools/`          | `CanvasTool` interface, `ToolContext` facade, shared constants, toolbar, and every tool implementation (selection tools, drawing tools, Pen, Pencil, Path Eraser, Smooth, Anchor Point editors, Type, Type on a Path, plus the shared `text_edit` session and `text_measure` helper) |
+| `workspace/`      | Workspace layout: pane positions and snap constraints, dock/panel management, persistence, and the working-copy save pattern |
 | `canvas/`         | Rendering via the platform 2D API, hit-testing, cursor management, and event dispatch to the active tool |
 | `menu/`           | The application menu bar and its command table                                              |
 | `assets/icons/`   | Shared PNG/SVG cursors and toolbar icons used by all four apps                               |
