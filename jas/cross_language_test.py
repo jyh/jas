@@ -5,9 +5,14 @@ repository root, parse them, serialize to canonical test JSON, and
 compare against the expected JSON files.
 """
 
+import json
 import os
 from absl.testing import absltest
 
+from algorithms.hit_test import (
+    point_in_rect, segments_intersect, segment_intersects_rect,
+    rects_intersect,
+)
 from geometry.svg import svg_to_document
 from geometry.test_json import document_to_test_json
 
@@ -79,6 +84,27 @@ class CrossLanguageTest(absltest.TestCase):
 
     def test_svg_parse_complex_document(self):
         _assert_svg_parse(self, "complex_document")
+
+    # ---------------------------------------------------------------
+    # Algorithm test vectors
+    # ---------------------------------------------------------------
+
+    def test_algorithm_hit_test_vectors(self):
+        json_str = _read_fixture("algorithms/hit_test.json")
+        tests = json.loads(json_str)
+        dispatch = {
+            "point_in_rect": point_in_rect,
+            "segments_intersect": segments_intersect,
+            "segment_intersects_rect": segment_intersects_rect,
+            "rects_intersect": rects_intersect,
+        }
+        for tc in tests:
+            func = dispatch[tc["function"]]
+            actual = func(*tc["args"])
+            self.assertEqual(
+                actual, tc["expected"],
+                f"Hit test '{tc['name']}' failed: expected {tc['expected']}, got {actual}",
+            )
 
 
 if __name__ == "__main__":

@@ -53,4 +53,42 @@ let () =
   run_test "svg_parse multi_layer" (fun () -> assert_svg_parse "multi_layer");
   run_test "svg_parse complex_document" (fun () -> assert_svg_parse "complex_document");
 
+  (* --------------------------------------------------------------- *)
+  (* Algorithm test vectors                                           *)
+  (* --------------------------------------------------------------- *)
+
+  Printf.printf "Algorithm tests:\n";
+
+  run_test "hit_test vectors" (fun () ->
+    let json_str = read_fixture "algorithms/hit_test.json" in
+    let json = Yojson.Safe.from_string json_str in
+    let tests = Yojson.Safe.Util.to_list json in
+    List.iter (fun tc ->
+      let open Yojson.Safe.Util in
+      let name = tc |> member "name" |> to_string in
+      let func = tc |> member "function" |> to_string in
+      let args = tc |> member "args" |> to_list |> List.map to_float in
+      let expected = tc |> member "expected" |> to_bool in
+      let a = Array.of_list args in
+      let actual = match func with
+        | "point_in_rect" ->
+          Jas.Hit_test.point_in_rect a.(0) a.(1) a.(2) a.(3) a.(4) a.(5)
+        | "segments_intersect" ->
+          Jas.Hit_test.segments_intersect a.(0) a.(1) a.(2) a.(3)
+            a.(4) a.(5) a.(6) a.(7)
+        | "segment_intersects_rect" ->
+          Jas.Hit_test.segment_intersects_rect a.(0) a.(1) a.(2) a.(3)
+            a.(4) a.(5) a.(6) a.(7)
+        | "rects_intersect" ->
+          Jas.Hit_test.rects_intersect a.(0) a.(1) a.(2) a.(3)
+            a.(4) a.(5) a.(6) a.(7)
+        | _ -> failwith (Printf.sprintf "Unknown function: %s" func)
+      in
+      if actual <> expected then begin
+        Printf.eprintf "Hit test '%s' failed: expected %b, got %b\n"
+          name expected actual;
+        assert false
+      end
+    ) tests);
+
   Printf.printf "All cross-language tests passed.\n"

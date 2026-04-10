@@ -1,13 +1,13 @@
 //! Cross-language equivalence tests.
 //!
-//! These tests read shared SVG fixtures from `test_fixtures/` at the
-//! repository root, parse them, serialize to canonical test JSON, and
-//! compare against the expected JSON files.  All four language
-//! implementations run the same fixtures, so passing here means the Rust
-//! implementation agrees with the canonical expected values.
+//! These tests read shared fixtures from `test_fixtures/` at the
+//! repository root.  All four language implementations run the same
+//! fixtures, so passing here means the Rust implementation agrees with
+//! the canonical expected values.
 
 #[cfg(test)]
 mod tests {
+    use crate::algorithms::hit_test;
     use crate::geometry::svg::svg_to_document;
     use crate::geometry::test_json::document_to_test_json;
 
@@ -121,5 +121,42 @@ mod tests {
     #[test]
     fn svg_parse_complex_document() {
         assert_svg_parse("complex_document");
+    }
+
+    // ---------------------------------------------------------------
+    // Algorithm test vectors
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn algorithm_hit_test_vectors() {
+        let json_str = read_fixture("algorithms/hit_test.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str)
+            .expect("Failed to parse hit_test.json");
+
+        for tc in tests.as_array().unwrap() {
+            let name = tc["name"].as_str().unwrap();
+            let func = tc["function"].as_str().unwrap();
+            let args: Vec<f64> = tc["args"].as_array().unwrap()
+                .iter().map(|v| v.as_f64().unwrap()).collect();
+            let expected = tc["expected"].as_bool().unwrap();
+
+            let actual = match func {
+                "point_in_rect" =>
+                    hit_test::point_in_rect(args[0], args[1], args[2], args[3], args[4], args[5]),
+                "segments_intersect" =>
+                    hit_test::segments_intersect(args[0], args[1], args[2], args[3],
+                                                 args[4], args[5], args[6], args[7]),
+                "segment_intersects_rect" =>
+                    hit_test::segment_intersects_rect(args[0], args[1], args[2], args[3],
+                                                      args[4], args[5], args[6], args[7]),
+                "rects_intersect" =>
+                    hit_test::rects_intersect(args[0], args[1], args[2], args[3],
+                                              args[4], args[5], args[6], args[7]),
+                _ => panic!("Unknown function: {}", func),
+            };
+
+            assert_eq!(actual, expected,
+                "Hit test '{}' failed: expected {}, got {}", name, expected, actual);
+        }
     }
 }
