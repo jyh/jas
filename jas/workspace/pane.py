@@ -12,7 +12,7 @@ rendering code.
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Optional
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -150,13 +150,13 @@ class PaneLayout:
 
     # -- Lookup --
 
-    def find_pane(self, id: int) -> Optional[Pane]:
+    def find_pane(self, id: int) -> Pane | None:
         for p in self.panes:
             if p.id == id:
                 return p
         return None
 
-    def pane_by_kind(self, kind: PaneKind) -> Optional[Pane]:
+    def pane_by_kind(self, kind: PaneKind) -> Pane | None:
         for p in self.panes:
             if p.kind == kind:
                 return p
@@ -278,7 +278,7 @@ class PaneLayout:
 
     # -- Shared border --
 
-    def shared_border_at(self, x: float, y: float, tolerance: float) -> Optional[tuple[int, EdgeSide]]:
+    def shared_border_at(self, x: float, y: float, tolerance: float) -> tuple[int, EdgeSide | None]:
         for i, snap in enumerate(self.snaps):
             if not isinstance(snap.target, PaneTarget):
                 continue
@@ -363,7 +363,7 @@ class PaneLayout:
 
     # -- Tiling --
 
-    def tile_panes(self, collapsed_override: Optional[tuple[int, float]] = None):
+    def tile_panes(self, collapsed_override: tuple[int, float | None] = None):
         vw, vh = self.viewport_width, self.viewport_height
         self.canvas_maximized = False
         self.hidden_panes = []

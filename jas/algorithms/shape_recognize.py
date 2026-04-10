@@ -7,7 +7,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 from geometry.element import (
     Circle as CircleElem,
@@ -254,7 +253,7 @@ def _point_to_line_dist(p: Pt, a: Pt, b: Pt) -> float:
 # Fits
 # ---------------------------------------------------------------------------
 
-def _fit_line(pts: list[Pt]) -> Optional[tuple[Pt, Pt, float]]:
+def _fit_line(pts: list[Pt]) -> tuple[Pt, Pt, float | None]:
     n = len(pts)
     if n < 2:
         return None
@@ -295,7 +294,7 @@ def _fit_line(pts: list[Pt]) -> Optional[tuple[Pt, Pt, float]]:
     return a, b, rms
 
 
-def _fit_ellipse_aa(pts: list[Pt]) -> Optional[tuple[float, float, float, float, float]]:
+def _fit_ellipse_aa(pts: list[Pt]) -> tuple[float, float, float, float, float | None]:
     xmin, ymin, xmax, ymax = _bbox_of(pts)
     rx, ry = (xmax - xmin) / 2.0, (ymax - ymin) / 2.0
     if rx <= 1e-9 or ry <= 1e-9:
@@ -313,7 +312,7 @@ def _fit_ellipse_aa(pts: list[Pt]) -> Optional[tuple[float, float, float, float,
     return cx, cy, rx, ry, math.sqrt(sq_sum / len(pts))
 
 
-def _fit_rect_aa(pts: list[Pt]) -> Optional[tuple[float, float, float, float, float]]:
+def _fit_rect_aa(pts: list[Pt]) -> tuple[float, float, float, float, float | None]:
     xmin, ymin, xmax, ymax = _bbox_of(pts)
     w, h = xmax - xmin, ymax - ymin
     if w <= 1e-9 or h <= 1e-9:
@@ -348,7 +347,7 @@ def _round_rect_rms(pts: list[Pt], x: float, y: float, w: float, h: float, r: fl
     return math.sqrt(sq_sum / len(pts))
 
 
-def _fit_round_rect(pts: list[Pt]) -> Optional[tuple[float, float, float, float, float, float]]:
+def _fit_round_rect(pts: list[Pt]) -> tuple[float, float, float, float, float, float | None]:
     xmin, ymin, xmax, ymax = _bbox_of(pts)
     w, h = xmax - xmin, ymax - ymin
     if w <= 1e-9 or h <= 1e-9:
@@ -401,7 +400,7 @@ def _rdp(pts: list[Pt], epsilon: float) -> list[Pt]:
     return [pts[i] for i in range(len(pts)) if keep[i]]
 
 
-def _fit_scribble(pts: list[Pt], diag: float) -> Optional[tuple[list[Pt], float]]:
+def _fit_scribble(pts: list[Pt], diag: float) -> tuple[list[Pt | None, float]]:
     if len(pts) < 6:
         return None
     if _arc_length(pts) < 1.5 * diag:
@@ -436,7 +435,7 @@ def _fit_scribble(pts: list[Pt], diag: float) -> Optional[tuple[list[Pt], float]
     return simplified, math.sqrt(sq_sum / len(pts))
 
 
-def _fit_triangle(pts: list[Pt]) -> Optional[tuple[tuple[Pt, Pt, Pt], float]]:
+def _fit_triangle(pts: list[Pt]) -> tuple[tuple[Pt, Pt, Pt | None, float]]:
     n = len(pts)
     if n < 3:
         return None
@@ -490,7 +489,7 @@ def _count_self_intersections(pts: list[Pt]) -> int:
     return count
 
 
-def _fit_lemniscate(pts: list[Pt]) -> Optional[tuple[float, float, float, bool, float]]:
+def _fit_lemniscate(pts: list[Pt]) -> tuple[float, float, float, bool, float | None]:
     xmin, ymin, xmax, ymax = _bbox_of(pts)
     w, h = xmax - xmin, ymax - ymin
     if w <= 1e-9 or h <= 1e-9:
@@ -520,7 +519,7 @@ def _fit_lemniscate(pts: list[Pt]) -> Optional[tuple[float, float, float, bool, 
     return cx, cy, a, horizontal, math.sqrt(sq_sum / len(pts))
 
 
-def _fit_arrow(pts: list[Pt], diag: float) -> Optional[tuple[Pt, Pt, float, float, float, float]]:
+def _fit_arrow(pts: list[Pt], diag: float) -> tuple[Pt, Pt, float, float, float, float | None]:
     if len(pts) < 7:
         return None
     corners: list[Pt] = []
@@ -588,7 +587,7 @@ def _fit_arrow(pts: list[Pt], diag: float) -> Optional[tuple[Pt, Pt, float, floa
 # Public API
 # ---------------------------------------------------------------------------
 
-def recognize(points: list[Pt], cfg: RecognizeConfig) -> Optional[RecognizedShape]:
+def recognize(points: list[Pt], cfg: RecognizeConfig) -> RecognizedShape | None:
     if len(points) < 3:
         return None
     pts = _resample(points, cfg.resample_n)
@@ -677,17 +676,17 @@ def recognize(points: list[Pt], cfg: RecognizeConfig) -> Optional[RecognizedShap
     return candidates[0][1]
 
 
-def recognize_path(d: tuple, cfg: RecognizeConfig) -> Optional[RecognizedShape]:
+def recognize_path(d: tuple, cfg: RecognizeConfig) -> RecognizedShape | None:
     pts = flatten_path_commands(d)
     return recognize(pts, cfg)
 
 
 @dataclass(frozen=True)
 class _Appearance:
-    fill: Optional[Fill]
-    stroke: Optional[Stroke]
+    fill: Fill | None
+    stroke: Stroke | None
     opacity: float
-    transform: Optional[Transform]
+    transform: Transform | None
     locked: bool
     visibility: Visibility
 
@@ -776,7 +775,7 @@ def recognized_to_element(shape: RecognizedShape, template: Element) -> Element:
         raise ValueError(f"Unknown shape: {shape}")
 
 
-def recognize_element(element: Element, cfg: RecognizeConfig) -> Optional[tuple[ShapeKind, Element]]:
+def recognize_element(element: Element, cfg: RecognizeConfig) -> tuple[ShapeKind, Element | None]:
     if isinstance(element, PathElem):
         pts = flatten_path_commands(element.d)
     elif isinstance(element, PolylineElem):

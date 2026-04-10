@@ -4,7 +4,7 @@ Views register callbacks via on_document_changed to be notified
 whenever the document is replaced.
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 from document.document import Document
 

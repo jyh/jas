@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Callable, List
+from collections.abc import Callable
 
 from geometry.element import flatten_path_commands, _arc_lengths
 
@@ -22,7 +22,7 @@ class PathGlyph:
 
 @dataclass
 class PathTextLayout:
-    glyphs: List[PathGlyph] = field(default_factory=list)
+    glyphs: list[PathGlyph] = field(default_factory=list)
     total_length: float = 0.0
     font_size: float = 0.0
     char_count: int = 0
@@ -72,7 +72,7 @@ def layout_path_text(d: tuple, content: str, start_offset: float,
     pts = flatten_path_commands(d)
     lengths = _arc_lengths(pts) if pts else [0.0]
     total = lengths[-1] if lengths else 0.0
-    glyphs: List[PathGlyph] = []
+    glyphs: list[PathGlyph] = []
     n = len(content)
     if total <= 0.0 or not pts:
         return PathTextLayout(glyphs=glyphs, total_length=total,
