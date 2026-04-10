@@ -6,10 +6,16 @@
 let title_bar_height = 20
 
 (* Drag state *)
+type edge = Edge_left | Edge_right | Edge_top | Edge_bottom
+
 type drag_state =
   | No_drag
   | Pane_drag of { pane_id : int; off_x : float; off_y : float }
   | Border_drag of { snap_idx : int; mutable start_coord : float; is_vertical : bool }
+  | Edge_drag of { pane_id : int; edge : edge;
+                   start_gx : float; start_gy : float;
+                   start_x : float; start_y : float;
+                   start_w : float; start_h : float }
 
 let drag = ref No_drag
 let snap_preview : Pane.snap_constraint list ref = ref []
@@ -18,20 +24,57 @@ let snap_preview : Pane.snap_constraint list ref = ref []
 (* Title bar                                                          *)
 (* ------------------------------------------------------------------ *)
 
-let make_title_bar ~dock_layout ~refresh_all ~pane_id ~kind ~(config : Pane.pane_config) () =
+let make_title_bar ~dock_layout ~refresh_all ~pane_id ~kind ~(config : Pane.pane_config) ~collapsed () =
   let title_bar = GBin.event_box () in
   title_bar#misc#set_size_request ~height:title_bar_height ();
   let hbox = GPack.hbox ~packing:title_bar#add () in
 
-  let _lbl = GMisc.label ~text:config.label
-    ~packing:(hbox#pack ~expand:true ~fill:true) () in
+  (* Helper: clickable label (no GtkButton minimum size issues) *)
+  let make_clickable_label text ~callback ~packing =
+    let eb = GBin.event_box ~packing () in
+    let lbl = GMisc.label ~text ~packing:eb#add () in
+    let lbl_css = new GObj.css_provider (GtkData.CssProvider.create ()) in
+    lbl_css#load_from_data "* { color: #a5a5a5; font-size: 11px; padding: 0 2px; background: transparent; }";
+    lbl#misc#style_context#add_provider lbl_css 600;
+    eb#event#add [`BUTTON_PRESS];
+    ignore (eb#event#connect#button_press ~callback:(fun _ -> callback (); true))
+  in
 
-  let close_btn = GButton.button ~label:"\xC3\x97" ~packing:(hbox#pack ~expand:false) () in
-  close_btn#misc#set_size_request ~width:20 ~height:title_bar_height ();
-  ignore (close_btn#connect#clicked ~callback:(fun () ->
-    Dock.panes_mut dock_layout (fun pl -> Pane.hide_pane pl kind);
-    refresh_all ()
-  ));
+  (* Collapse chevron (only if pane has collapsed_width) *)
+  (match config.collapsed_width with
+   | Some _ ->
+     let chevron = if collapsed then "\xC2\xBB" else "\xC2\xAB" in (* » or « *)
+     make_clickable_label chevron ~packing:(hbox#pack ~expand:false) ~callback:(fun () ->
+       (match Dock.anchored_dock dock_layout Dock.Right with
+        | Some d ->
+          Dock.toggle_dock_collapsed dock_layout d.id;
+          let collapsed = (match Dock.anchored_dock dock_layout Dock.Right with
+            | Some d -> d.collapsed | None -> false) in
+          Dock.panes_mut dock_layout (fun pl ->
+            let dock_pane = Pane.pane_by_kind pl Pane.Dock in
+            let override = match dock_pane, collapsed with
+              | Some p, true ->
+                p.config <- { p.config with fixed_width = true };
+                let cw = match p.config.collapsed_width with Some w -> w | None -> 32.0 in
+                Some (p.id, cw)
+              | Some p, false ->
+                p.config <- { p.config with fixed_width = false };
+                None
+              | _ -> None in
+            Pane.tile_panes pl ~collapsed_override:override)
+        | None -> ());
+       refresh_all ())
+   | None -> ());
+
+  if not collapsed then begin
+    (* Spacer pushes close button to the right *)
+    let spacer = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:true ~fill:true) () in
+    spacer#misc#set_size_request ~width:0 ();
+    (* Close button *)
+    make_clickable_label "\xC3\x97" ~packing:(hbox#pack ~expand:false) ~callback:(fun () ->
+      Dock.panes_mut dock_layout (fun pl -> Pane.hide_pane pl kind);
+      refresh_all ())
+  end;
 
   (* Title bar drag — mousedown starts pane drag *)
   title_bar#event#add [`BUTTON_PRESS];
@@ -58,10 +101,75 @@ let make_title_bar ~dock_layout ~refresh_all ~pane_id ~kind ~(config : Pane.pane
   ));
 
   let css = new GObj.css_provider (GtkData.CssProvider.create ()) in
-  css#load_from_data "* { background-color: #383838; color: #d9d9d9; font-size: 11px; padding: 0 4px; }";
+  css#load_from_data "box, * { background-color: #383838; color: #d9d9d9; font-size: 11px; margin: 0; }";
   title_bar#misc#style_context#add_provider css 600;
 
   title_bar
+
+let edge_handle_size = 6
+
+let add_edge_handles ~pane_container ~pane_id ~dock_layout ~drag ~refresh_all:(_refresh_all : unit -> unit) (_frame : GPack.box) =
+  let edges = [Edge_left; Edge_right; Edge_top; Edge_bottom] in
+  let handles = List.map (fun edge ->
+    let eb = GBin.event_box () in
+    eb#misc#set_size_request ~width:edge_handle_size ~height:edge_handle_size ();
+    let cursor_type = match edge with
+      | Edge_left | Edge_right -> `SB_H_DOUBLE_ARROW
+      | Edge_top | Edge_bottom -> `SB_V_DOUBLE_ARROW
+    in
+    eb#event#add [`BUTTON_PRESS; `POINTER_MOTION; `BUTTON_RELEASE; `ENTER_NOTIFY; `LEAVE_NOTIFY];
+    ignore (eb#event#connect#enter_notify ~callback:(fun _ ->
+      let win = eb#misc#window in
+      if Gobject.get_oid win <> 0 then
+        Gdk.Window.set_cursor win (Gdk.Cursor.create cursor_type);
+      false));
+    ignore (eb#event#connect#leave_notify ~callback:(fun _ ->
+      let win = eb#misc#window in
+      if Gobject.get_oid win <> 0 then
+        Gdk.Window.set_cursor win (Gdk.Cursor.create `LEFT_PTR);
+      false));
+    ignore (eb#event#connect#button_press ~callback:(fun ev ->
+      let gx = GdkEvent.Button.x_root ev in
+      let gy = GdkEvent.Button.y_root ev in
+      (match Dock.panes dock_layout with
+       | Some pl ->
+         (match Pane.find_pane pl pane_id with
+          | Some p ->
+            drag := Edge_drag { pane_id; edge;
+                                start_gx = gx; start_gy = gy;
+                                start_x = p.x; start_y = p.y;
+                                start_w = p.width; start_h = p.height };
+            GMain.Grab.add pane_container#coerce
+          | None -> ())
+       | None -> ());
+      true));
+    pane_container#put eb#coerce ~x:0 ~y:0;
+    (edge, eb)
+  ) edges in
+  handles
+
+let position_edge_handles handles ~x ~y ~w ~h =
+  let es = edge_handle_size in
+  List.iter (fun (edge, (eb : GBin.event_box)) ->
+    let ex, ey, ew, eh = match edge with
+      | Edge_left -> (x, y, es, h)
+      | Edge_right -> (x + w - es, y, es, h)
+      | Edge_top -> (x + es, y, w - 2 * es, es)
+      | Edge_bottom -> (x + es, y + h - es, w - 2 * es, es)
+    in
+    let parent = eb#misc#parent in
+    (match parent with
+     | Some p ->
+       (try
+         let layout = new GPack.layout (Gobject.try_cast p#as_widget "GtkLayout") in
+         layout#move eb#coerce ~x:ex ~y:ey
+       with _ ->
+         let fixed = new GPack.fixed (Gobject.try_cast p#as_widget "GtkFixed") in
+         fixed#move eb#coerce ~x:ex ~y:ey)
+     | None -> ());
+    eb#misc#set_size_request ~width:(max 1 ew) ~height:(max 1 eh) ();
+    eb#misc#show ()
+  ) handles
 
 (* ------------------------------------------------------------------ *)
 (* Main window                                                        *)
@@ -86,13 +194,17 @@ let create_main_window ~get_model ~on_open () =
   Menubar.create get_model window ~on_open
     ~dock_layout ~refresh_dock:(fun () -> !dock_refresh ()) vbox;
 
-  (* Pane container: GtkFixed for absolute positioning *)
-  let pane_container = GPack.fixed ~packing:(vbox#pack ~expand:true ~fill:true) () in
+  (* Pane container: GtkLayout for absolute positioning.
+     Unlike GtkFixed, GtkLayout doesn't expand the window when
+     children extend beyond its allocation. *)
+  let pane_container = GPack.layout ~packing:(vbox#pack ~expand:true ~fill:true) () in
   pane_container#event#add [`POINTER_MOTION; `BUTTON_RELEASE];
 
-  (* Create persistent pane frame widgets *)
   (* Toolbar pane *)
   let toolbar_frame = GPack.vbox () in
+  let tb_border_css = new GObj.css_provider (GtkData.CssProvider.create ()) in
+  tb_border_css#load_from_data "box { background-color: #3c3c3c; }";
+  toolbar_frame#misc#style_context#add_provider tb_border_css 600;
   let toolbar_title = ref (GBin.event_box ()) in
   let toolbar_fixed = GPack.fixed () in
   toolbar_frame#pack !toolbar_title#coerce ~expand:false;
@@ -112,19 +224,30 @@ let create_main_window ~get_model ~on_open () =
   dock_frame#pack !dock_title#coerce ~expand:false;
   dock_frame#pack dock_box#coerce ~expand:true ~fill:true;
 
-  (* Add frames to container (initially) *)
-  pane_container#put toolbar_frame#coerce ~x:0 ~y:0;
+  (* Add frames to container — canvas first (back), then toolbar and dock (front).
+     In GtkLayout, last-added draws on top, so this ensures toolbar and dock
+     float above the canvas when it is maximized. *)
   pane_container#put canvas_frame#coerce ~x:72 ~y:0;
+  pane_container#put toolbar_frame#coerce ~x:0 ~y:0;
   pane_container#put dock_frame#coerce ~x:760 ~y:0;
+
+  (* Edge resize handles *)
+  let pl_ids = match Dock.panes dock_layout with Some pl -> pl | None ->
+    Pane.default_three_pane ~viewport_w:1200.0 ~viewport_h:900.0 in
+  let toolbar_id = (match Pane.pane_by_kind pl_ids Pane.Toolbar with Some p -> p.id | None -> 0) in
+  let canvas_id = (match Pane.pane_by_kind pl_ids Pane.Canvas with Some p -> p.id | None -> 1) in
+  let dock_id_pane = (match Pane.pane_by_kind pl_ids Pane.Dock with Some p -> p.id | None -> 2) in
+  let toolbar_edges = add_edge_handles ~pane_container ~pane_id:toolbar_id ~dock_layout ~drag ~refresh_all:(fun () -> !dock_refresh ()) toolbar_frame in
+  let canvas_edges = add_edge_handles ~pane_container ~pane_id:canvas_id ~dock_layout ~drag ~refresh_all:(fun () -> !dock_refresh ()) canvas_frame in
+  let dock_edges = add_edge_handles ~pane_container ~pane_id:dock_id_pane ~dock_layout ~drag ~refresh_all:(fun () -> !dock_refresh ()) dock_frame in
 
   (* Border handles and snap lines *)
   let border_handles : GBin.event_box list ref = ref [] in
   let snap_widgets : GMisc.drawing_area list ref = ref [] in
 
-  let refreshing = ref false in
+  let configure_guard = ref false in
   let refresh_all () =
-    if !refreshing then () else begin
-    refreshing := true;
+    configure_guard := true;
     let geos = match Dock.panes dock_layout with
       | None -> [] | Some pl -> Pane_rendering.pane_geometries pl
     in
@@ -135,9 +258,6 @@ let create_main_window ~get_model ~on_open () =
       | Some pl -> pl.canvas_maximized | None -> false
     in
 
-    (* Update pane positions and sizes.
-       Only call set_size_request when the size actually changed,
-       to avoid triggering GTK re-layout feedback loops. *)
     let set_size_if_changed (widget : #GObj.widget) ~width ~height =
       let alloc = widget#misc#allocation in
       if alloc.Gtk.width <> width || alloc.Gtk.height <> height then
@@ -146,20 +266,22 @@ let create_main_window ~get_model ~on_open () =
     List.iter (fun (geo : Pane_rendering.pane_geometry) ->
       let x = int_of_float geo.x in
       let y = int_of_float geo.y in
-      let w = int_of_float geo.width in
-      let h = int_of_float geo.height in
+      let w = max 1 (int_of_float geo.width) in
+      let h = max 1 (int_of_float geo.height) in
       match geo.kind with
       | Pane.Toolbar ->
         if geo.visible then begin
-          toolbar_frame#misc#show ();
+          toolbar_frame#misc#show_all ();
           pane_container#move toolbar_frame#coerce ~x ~y;
-          set_size_if_changed toolbar_frame ~width:w ~height:h
+          set_size_if_changed toolbar_frame ~width:w ~height:h;
+          position_edge_handles toolbar_edges ~x ~y ~w ~h
         end else
           toolbar_frame#misc#hide ()
       | Pane.Canvas ->
         canvas_frame#misc#show ();
         pane_container#move canvas_frame#coerce ~x ~y;
         set_size_if_changed canvas_frame ~width:w ~height:h;
+        position_edge_handles canvas_edges ~x ~y ~w ~h;
         (* Hide/show title bar for maximized *)
         if maximized then !canvas_title#misc#hide ()
         else !canvas_title#misc#show ()
@@ -167,12 +289,12 @@ let create_main_window ~get_model ~on_open () =
         if geo.visible then begin
           dock_frame#misc#show ();
           pane_container#move dock_frame#coerce ~x ~y;
-          set_size_if_changed dock_frame ~width:w ~height:h
+          set_size_if_changed dock_frame ~width:w ~height:h;
+          position_edge_handles dock_edges ~x ~y ~w ~h;
         end else
           dock_frame#misc#hide ()
     ) geos;
 
-    ignore geos; (* z-order handled by GtkFixed widget order *)
 
     (* Remove old border handles *)
     List.iter (fun w -> pane_container#remove w#coerce) !border_handles;
@@ -183,20 +305,31 @@ let create_main_window ~get_model ~on_open () =
       let handle = GBin.event_box () in
       handle#misc#set_size_request ~width:(int_of_float b.bw) ~height:(int_of_float b.bh) ();
       handle#event#add [`BUTTON_PRESS; `ENTER_NOTIFY; `LEAVE_NOTIFY];
+      let highlight_css = new GObj.css_provider (GtkData.CssProvider.create ()) in
+      highlight_css#load_from_data "* { background-color: rgba(74, 144, 217, 0.5); }";
+      let clear_css = new GObj.css_provider (GtkData.CssProvider.create ()) in
+      clear_css#load_from_data "* { background-color: transparent; }";
+      handle#misc#style_context#add_provider clear_css 600;
       let cursor_type = if b.is_vertical then `SB_H_DOUBLE_ARROW else `SB_V_DOUBLE_ARROW in
       ignore (handle#event#connect#enter_notify ~callback:(fun _ ->
         let win = handle#misc#window in
         if Gobject.get_oid win <> 0 then
           Gdk.Window.set_cursor win (Gdk.Cursor.create cursor_type);
+        handle#misc#style_context#remove_provider clear_css;
+        handle#misc#style_context#add_provider highlight_css 600;
         false));
       ignore (handle#event#connect#leave_notify ~callback:(fun _ ->
         let win = handle#misc#window in
         if Gobject.get_oid win <> 0 then
           Gdk.Window.set_cursor win (Gdk.Cursor.create `LEFT_PTR);
+        handle#misc#style_context#remove_provider highlight_css;
+        handle#misc#style_context#add_provider clear_css 600;
         false));
       ignore (handle#event#connect#button_press ~callback:(fun ev ->
         let coord = if b.is_vertical then GdkEvent.Button.x_root ev else GdkEvent.Button.y_root ev in
         drag := Border_drag { snap_idx = b.snap_idx; start_coord = coord; is_vertical = b.is_vertical };
+        (* Grab so all motion/release events go to pane_container *)
+        GMain.Grab.add pane_container#coerce;
         true
       ));
       pane_container#put handle#coerce ~x:(int_of_float b.bx) ~y:(int_of_float b.by);
@@ -228,21 +361,17 @@ let create_main_window ~get_model ~on_open () =
      | None -> ());
 
     Dock.save_layout_if_needed dock_layout;
-    (* Defer resetting the flag so that any configure events triggered
+    (* Defer resetting the configure guard so configure events triggered
        by set_size_request during this refresh are suppressed. *)
-    ignore (GMain.Idle.add (fun () -> refreshing := false; false))
-    end
+    ignore (GMain.Idle.add (fun () -> configure_guard := false; false))
   in
 
   (* Build title bars (must happen after refresh_all is defined) *)
   let rebuild_title_bars () =
-    (* Remove old title bars *)
-    let children = toolbar_frame#children in
-    if List.length children > 0 then toolbar_frame#remove (List.hd children);
-    let children = canvas_frame#children in
-    if List.length children > 0 then canvas_frame#remove (List.hd children);
-    let children = dock_frame#children in
-    if List.length children > 0 then dock_frame#remove (List.hd children);
+    (* Remove old title bars by widget reference *)
+    toolbar_frame#remove !toolbar_title#coerce;
+    canvas_frame#remove !canvas_title#coerce;
+    dock_frame#remove !dock_title#coerce;
 
     let tpl = match Dock.panes dock_layout with Some pl -> Some pl | None -> None in
     let toolbar_id = match tpl with Some pl -> (match Pane.pane_by_kind pl Pane.Toolbar with Some p -> p.id | None -> 0) | None -> 0 in
@@ -250,19 +379,21 @@ let create_main_window ~get_model ~on_open () =
     let dock_id = match tpl with Some pl -> (match Pane.pane_by_kind pl Pane.Dock with Some p -> p.id | None -> 2) | None -> 2 in
 
     let tb = make_title_bar ~dock_layout ~refresh_all:(fun () -> !dock_refresh ())
-      ~pane_id:toolbar_id ~kind:Pane.Toolbar ~config:(Pane.config_for_kind Pane.Toolbar) () in
+      ~pane_id:toolbar_id ~kind:Pane.Toolbar ~config:(Pane.config_for_kind Pane.Toolbar) ~collapsed:false () in
     toolbar_title := tb;
     toolbar_frame#pack tb#coerce ~expand:false;
     toolbar_frame#reorder_child tb#coerce ~pos:0;
 
     let cb = make_title_bar ~dock_layout ~refresh_all:(fun () -> !dock_refresh ())
-      ~pane_id:canvas_id ~kind:Pane.Canvas ~config:(Pane.config_for_kind Pane.Canvas) () in
+      ~pane_id:canvas_id ~kind:Pane.Canvas ~config:(Pane.config_for_kind Pane.Canvas) ~collapsed:false () in
     canvas_title := cb;
     canvas_frame#pack cb#coerce ~expand:false;
     canvas_frame#reorder_child cb#coerce ~pos:0;
 
+    let dock_collapsed = match Dock.anchored_dock dock_layout Dock.Right with
+      | Some d -> d.collapsed | None -> false in
     let db = make_title_bar ~dock_layout ~refresh_all:(fun () -> !dock_refresh ())
-      ~pane_id:dock_id ~kind:Pane.Dock ~config:(Pane.config_for_kind Pane.Dock) () in
+      ~pane_id:dock_id ~kind:Pane.Dock ~config:(Pane.config_for_kind Pane.Dock) ~collapsed:dock_collapsed () in
     dock_title := db;
     dock_frame#pack db#coerce ~expand:false;
     dock_frame#reorder_child db#coerce ~pos:0
@@ -297,6 +428,29 @@ let create_main_window ~get_model ~on_open () =
        Dock.panes_mut dock_layout (fun pl ->
          Pane.drag_shared_border pl ~snap_idx:bd.snap_idx ~delta);
        refresh_all ()
+     | Edge_drag ed ->
+       let dx = mx -. ed.start_gx in
+       let dy = my -. ed.start_gy in
+       Dock.panes_mut dock_layout (fun pl ->
+         match Pane.find_pane pl ed.pane_id with
+         | None -> ()
+         | Some p ->
+           let min_w = p.config.min_width in
+           let min_h = p.config.min_height in
+           (match ed.edge with
+            | Edge_right ->
+              p.width <- max (ed.start_w +. dx) min_w
+            | Edge_left ->
+              let new_w = max (ed.start_w -. dx) min_w in
+              p.x <- ed.start_x +. ed.start_w -. new_w;
+              p.width <- new_w
+            | Edge_bottom ->
+              p.height <- max (ed.start_h +. dy) min_h
+            | Edge_top ->
+              let new_h = max (ed.start_h -. dy) min_h in
+              p.y <- ed.start_y +. ed.start_h -. new_h;
+              p.height <- new_h));
+       refresh_all ()
      | No_drag -> ());
     true
   ));
@@ -311,7 +465,10 @@ let create_main_window ~get_model ~on_open () =
            Pane.apply_snaps pl pane_id ~new_snaps:preview
              ~viewport_w:pl.viewport_width ~viewport_h:pl.viewport_height);
        snap_preview := []
-     | Border_drag _ -> ()
+     | Border_drag _ ->
+       GMain.Grab.remove pane_container#coerce
+     | Edge_drag _ ->
+       GMain.Grab.remove pane_container#coerce
      | No_drag -> ());
     drag := No_drag;
     refresh_all ();
@@ -322,13 +479,29 @@ let create_main_window ~get_model ~on_open () =
      event reports bogus heights on macOS/GTK3). Re-entrancy is guarded
      by refresh_all's own flag. *)
   ignore (window#event#connect#configure ~callback:(fun _ev ->
-    let alloc = pane_container#misc#allocation in
-    let w = float_of_int alloc.Gtk.width in
-    let h = float_of_int alloc.Gtk.height in
-    if w > 10.0 && h > 10.0 && w < 10000.0 && h < 10000.0 then begin
-      Dock.panes_mut dock_layout (fun pl ->
-        Pane.on_viewport_resize pl ~new_w:w ~new_h:h);
-      refresh_all ()
+    if not !configure_guard then begin
+      configure_guard := true;
+      let alloc = pane_container#misc#allocation in
+      let w = float_of_int alloc.Gtk.width in
+      let h = float_of_int alloc.Gtk.height in
+      if w > 10.0 && h > 10.0 && w < 10000.0 && h < 10000.0 then begin
+        pane_container#set_width (int_of_float w);
+        pane_container#set_height (int_of_float h);
+        Dock.panes_mut dock_layout (fun pl ->
+          Pane.on_viewport_resize pl ~new_w:w ~new_h:h;
+          (* Re-tile with collapsed override if dock is collapsed *)
+          let dock_collapsed = match Dock.anchored_dock dock_layout Dock.Right with
+            | Some d -> d.collapsed | None -> false in
+          if dock_collapsed then
+            let override = match Pane.pane_by_kind pl Pane.Dock with
+              | Some p ->
+                let cw = match p.config.collapsed_width with Some w -> w | None -> 32.0 in
+                Some (p.id, cw)
+              | None -> None in
+            Pane.tile_panes pl ~collapsed_override:override);
+        refresh_all ()
+      end;
+      ignore (GMain.Idle.add (fun () -> configure_guard := false; false))
     end;
     false
   ));
@@ -338,15 +511,19 @@ let create_main_window ~get_model ~on_open () =
   notebook#misc#style_context#add_provider css 600;
 
   (* Initial layout — deferred until the window is mapped and has a
-     valid size. We connect to the "map" signal which fires once after
-     window#show, then resize panes to fit the actual container. *)
+     valid size. Tile panes to fit the actual container and establish
+     proper snap constraints. *)
   ignore (window#misc#connect#map ~callback:(fun () ->
     let alloc = pane_container#misc#allocation in
     let w = float_of_int alloc.Gtk.width in
     let h = float_of_int alloc.Gtk.height in
-    if w > 10.0 && h > 10.0 then
+    if w > 10.0 && h > 10.0 then begin
+      pane_container#set_width (int_of_float w);
+      pane_container#set_height (int_of_float h);
       Dock.panes_mut dock_layout (fun pl ->
-        Pane.on_viewport_resize pl ~new_w:w ~new_h:h);
+        Pane.on_viewport_resize pl ~new_w:w ~new_h:h;
+        Pane.repair_snaps pl ~viewport_w:w ~viewport_h:h)
+    end;
     refresh_all ()
   ));
 

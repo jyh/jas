@@ -3,17 +3,12 @@
 type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star | Lasso
 
 let tool_button_size = 32
-let title_bar_height = 24
+let _title_bar_height = 24
 let long_press_ms = Canvas_tool.long_press_ms
 
-class toolbar ~title ~x ~y (fixed : GPack.fixed) =
-  let frame = GBin.frame ~shadow_type:`ETCHED_IN () in
+class toolbar ~title:(_title : string) ~x ~y (fixed : GPack.fixed) =
+  let frame = GBin.frame ~shadow_type:`NONE () in
   let vbox = GPack.vbox ~packing:frame#add () in
-
-  (* Title bar *)
-  let title_bar = GMisc.drawing_area
-    ~packing:(vbox#pack ~expand:false) () in
-  let () = title_bar#misc#set_size_request ~height:title_bar_height () in
 
   (* Toolbar grid *)
   let grid = GPack.table ~rows:4 ~columns:2
@@ -96,26 +91,7 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
 
     initializer
       fixed#put frame#coerce ~x:pos_x ~y:pos_y;
-      frame#misc#set_size_request ~width:80 ~height:(title_bar_height + tool_button_size * 4 + 24) ();
-
-      (* Draw title bar *)
-      title_bar#misc#connect#draw ~callback:(fun cr ->
-        let alloc = title_bar#misc#allocation in
-        let w = float_of_int alloc.Gtk.width in
-        let h = float_of_int alloc.Gtk.height in
-        Cairo.set_source_rgb cr 0.6 0.6 0.6;
-        Cairo.rectangle cr 0.0 0.0 ~w ~h;
-        Cairo.fill cr;
-        Cairo.set_source_rgb cr 0.0 0.0 0.0;
-        Cairo.select_font_face cr "Sans";
-        Cairo.set_font_size cr 11.0;
-        let extents = Cairo.text_extents cr title in
-        let tx = (w -. extents.Cairo.width) /. 2.0 in
-        let ty = (h +. extents.Cairo.height) /. 2.0 in
-        Cairo.move_to cr tx ty;
-        Cairo.show_text cr title;
-        true
-      ) |> ignore;
+      frame#misc#set_size_request ~height:(tool_button_size * 4 + 24) ();
 
       (* Draw tool buttons *)
       let arrow_path cr ~alloc =
@@ -1136,34 +1112,6 @@ class toolbar ~title ~x ~y (fixed : GPack.fixed) =
         end else false
       ) |> ignore;
 
-      (* Title bar drag *)
-      title_bar#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION];
-      title_bar#event#connect#button_press ~callback:(fun ev ->
-        if GdkEvent.Button.button ev = 1 then begin
-          dragging <- true;
-          drag_offset_x <- GdkEvent.Button.x ev;
-          drag_offset_y <- GdkEvent.Button.y ev;
-          true
-        end else false
-      ) |> ignore;
-      title_bar#event#connect#button_release ~callback:(fun ev ->
-        if GdkEvent.Button.button ev = 1 then begin
-          dragging <- false;
-          true
-        end else false
-      ) |> ignore;
-      title_bar#event#connect#motion_notify ~callback:(fun ev ->
-        if dragging then begin
-          let mx = GdkEvent.Motion.x ev in
-          let my = GdkEvent.Motion.y ev in
-          let dx = int_of_float (mx -. drag_offset_x) in
-          let dy = int_of_float (my -. drag_offset_y) in
-          pos_x <- pos_x + dx;
-          pos_y <- pos_y + dy;
-          fixed#move frame#coerce ~x:pos_x ~y:pos_y;
-          true
-        end else false
-      ) |> ignore
 
     method private show_pen_slot_menu =
       let menu = GMenu.menu () in

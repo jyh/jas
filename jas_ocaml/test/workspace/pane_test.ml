@@ -68,7 +68,7 @@ let () =
     (* collapsed_width drives collapsibility *)
     assert (tc.collapsed_width = None);
     assert (cc.collapsed_width = None);
-    assert (dc.collapsed_width = Some 36.0))
+    assert (dc.collapsed_width = Some 32.0))
 
 (* ================================================================== *)
 (* Position & sizing                                                  *)
@@ -190,7 +190,7 @@ let () =
     ] in
     apply_snaps pl canvas_id ~new_snaps ~viewport_w:1000.0 ~viewport_h:700.0;
     let p = Option.get (find_pane pl canvas_id) in
-    assert (near p.x 72.0));
+    assert (near p.x default_toolbar_width));
 
   run "drag_canvas_snap_to_toolbar_full_workflow" (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
@@ -214,9 +214,9 @@ let () =
     apply_snaps pl canvas_id ~new_snaps:snaps ~viewport_w:1000.0 ~viewport_h:700.0;
     (* 5. Canvas aligned *)
     let canvas = Option.get (find_pane pl canvas_id) in
-    assert (near canvas.x 72.0);
+    assert (near canvas.x default_toolbar_width);
     (* 6. Shared border findable *)
-    let border = shared_border_at pl ~x:72.0 ~y:350.0 ~tolerance:border_hit_tolerance in
+    let border = shared_border_at pl ~x:default_toolbar_width ~y:350.0 ~tolerance:border_hit_tolerance in
     assert (border <> None));
 
   run "apply_snaps_replaces_old" (fun () ->
@@ -243,7 +243,7 @@ let () =
     align_to_snaps pl canvas_id ~snaps:new_snaps ~viewport_w:1000.0 ~viewport_h:700.0;
     assert (List.length pl.snaps = snaps_before);
     let p = Option.get (find_pane pl canvas_id) in
-    assert (near p.x 72.0);
+    assert (near p.x default_toolbar_width);
     assert (p.y = 0.0))
 
 (* ================================================================== *)
