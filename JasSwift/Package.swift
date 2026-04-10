@@ -25,6 +25,11 @@ let package = Package(
             dependencies: ["JasLib"],
             path: "ToolsWorkspace"
         ),
+        .executableTarget(
+            name: "AlgorithmRoundtrip",
+            dependencies: ["JasLib"],
+            path: "ToolsAlgorithm"
+        ),
         .testTarget(
             name: "JasTests",
             dependencies: ["JasLib"],

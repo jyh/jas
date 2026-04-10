@@ -1,0 +1,119 @@
+{
+  "algorithm": "planar",
+  "comparison": "property",
+  "tolerance": 0.01,
+  "vectors": [
+    {
+      "name": "empty_input",
+      "polylines": [],
+      "expected": {
+        "face_count": 0,
+        "face_areas_sorted": [],
+        "sample_points": []
+      }
+    },
+    {
+      "name": "closed_square_one_face",
+      "polylines": [[[0,0],[10,0],[10,10],[0,10],[0,0]]],
+      "expected": {
+        "face_count": 1,
+        "face_areas_sorted": [100.0],
+        "sample_points": [
+          {"point": [5.0, 5.0], "inside_any_face": true},
+          {"point": [15.0, 5.0], "inside_any_face": false}
+        ]
+      }
+    },
+    {
+      "name": "square_with_diagonal_two_triangles",
+      "polylines": [
+        [[0,0],[10,0],[10,10],[0,10],[0,0]],
+        [[0,0],[10,10]]
+      ],
+      "expected": {
+        "face_count": 2,
+        "face_areas_sorted": [50.0, 50.0],
+        "sample_points": [
+          {"point": [2.0, 5.0], "inside_any_face": true},
+          {"point": [8.0, 5.0], "inside_any_face": true}
+        ]
+      }
+    },
+    {
+      "name": "square_with_both_diagonals_four_triangles",
+      "polylines": [
+        [[0,0],[10,0],[10,10],[0,10],[0,0]],
+        [[0,0],[10,10]],
+        [[10,0],[0,10]]
+      ],
+      "expected": {
+        "face_count": 4,
+        "face_areas_sorted": [25.0, 25.0, 25.0, 25.0],
+        "sample_points": [
+          {"point": [5.0, 2.0], "inside_any_face": true},
+          {"point": [8.0, 5.0], "inside_any_face": true},
+          {"point": [5.0, 8.0], "inside_any_face": true},
+          {"point": [2.0, 5.0], "inside_any_face": true}
+        ]
+      }
+    },
+    {
+      "name": "two_disjoint_squares",
+      "polylines": [
+        [[0,0],[10,0],[10,10],[0,10],[0,0]],
+        [[20,0],[30,0],[30,10],[20,10],[20,0]]
+      ],
+      "expected": {
+        "face_count": 2,
+        "face_areas_sorted": [100.0, 100.0],
+        "sample_points": [
+          {"point": [5.0, 5.0], "inside_any_face": true},
+          {"point": [25.0, 5.0], "inside_any_face": true},
+          {"point": [15.0, 5.0], "inside_any_face": false}
+        ]
+      }
+    },
+    {
+      "name": "two_crossing_segments_no_faces",
+      "polylines": [
+        [[-1,0],[1,0]],
+        [[0,-1],[0,1]]
+      ],
+      "expected": {
+        "face_count": 0,
+        "face_areas_sorted": [],
+        "sample_points": []
+      }
+    },
+    {
+      "name": "square_with_external_tail",
+      "polylines": [
+        [[0,0],[10,0],[10,10],[0,10],[0,0]],
+        [[10,10],[15,15]]
+      ],
+      "expected": {
+        "face_count": 1,
+        "face_areas_sorted": [100.0],
+        "sample_points": [
+          {"point": [5.0, 5.0], "inside_any_face": true}
+        ]
+      }
+    },
+    {
+      "name": "nested_squares_two_faces",
+      "polylines": [
+        [[0,0],[20,0],[20,20],[0,20],[0,0]],
+        [[5,5],[15,5],[15,15],[5,15],[5,5]]
+      ],
+      "expected": {
+        "face_count": 2,
+        "face_areas_sorted": [100.0, 300.0],
+        "sample_points": [
+          {"point": [10.0, 10.0], "inside_any_face": true},
+          {"point": [2.0, 2.0], "inside_any_face": true},
+          {"point": [25.0, 25.0], "inside_any_face": false}
+        ]
+      }
+    }
+  ]
+}

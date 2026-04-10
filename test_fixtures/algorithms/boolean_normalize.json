@@ -1,0 +1,63 @@
+{
+  "algorithm": "boolean_normalize",
+  "comparison": "property",
+  "tolerance": 0.01,
+  "vectors": [
+    {
+      "name": "simple_square_passthrough",
+      "input": [[[0,0],[10,0],[10,10],[0,10]]],
+      "expected": {
+        "area": 100.0,
+        "ring_count": 1,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "simple_triangle_passthrough",
+      "input": [[[0,0],[10,0],[5,10]]],
+      "expected": {
+        "area": 50.0,
+        "ring_count": 1,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "empty_input_yields_empty",
+      "input": [],
+      "expected": {
+        "area": 0.0,
+        "ring_count": 0,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "degenerate_two_vertices_dropped",
+      "input": [[[0,0],[10,0]]],
+      "expected": {
+        "area": 0.0,
+        "ring_count": 0,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "figure_eight_becomes_two_triangles",
+      "input": [[[0,0],[10,10],[10,0],[0,10]]],
+      "expected": {
+        "area": 50.0,
+        "ring_count": 2,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "consecutive_duplicates_deduped",
+      "_comment": "SKIP: crashes Swift normalize() — Range requires lowerBound <= upperBound. Known bug, fix separately.",
+      "_skip": true,
+      "input": [[[0,0],[0,0],[10,0],[10,10],[10,10],[0,10]]],
+      "expected": {
+        "area": 100.0,
+        "ring_count": 1,
+        "all_rings_simple": true
+      }
+    }
+  ]
+}

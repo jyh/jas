@@ -1,0 +1,162 @@
+{
+  "algorithm": "boolean",
+  "comparison": "property",
+  "tolerance": 0.01,
+  "vectors": [
+    {
+      "name": "union_disjoint_squares",
+      "function": "union",
+      "a": [[[0,0],[10,0],[10,10],[0,10]]],
+      "b": [[[15,0],[25,0],[25,10],[15,10]]],
+      "expected": {
+        "area": 200.0,
+        "ring_count": 2,
+        "sample_points": [
+          {"point": [5.0, 5.0], "inside": true},
+          {"point": [20.0, 5.0], "inside": true},
+          {"point": [12.0, 5.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "intersect_disjoint_squares_empty",
+      "function": "intersect",
+      "a": [[[0,0],[10,0],[10,10],[0,10]]],
+      "b": [[[15,0],[25,0],[25,10],[15,10]]],
+      "expected": {
+        "area": 0.0,
+        "ring_count": 0,
+        "sample_points": []
+      }
+    },
+    {
+      "name": "union_overlapping_squares",
+      "function": "union",
+      "a": [[[0,0],[10,0],[10,10],[0,10]]],
+      "b": [[[5,5],[15,5],[15,15],[5,15]]],
+      "expected": {
+        "area": 175.0,
+        "ring_count": 1,
+        "sample_points": [
+          {"point": [2.0, 2.0], "inside": true},
+          {"point": [12.0, 12.0], "inside": true},
+          {"point": [7.0, 7.0], "inside": true},
+          {"point": [12.0, 2.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "intersect_overlapping_squares",
+      "function": "intersect",
+      "a": [[[0,0],[10,0],[10,10],[0,10]]],
+      "b": [[[5,5],[15,5],[15,15],[5,15]]],
+      "expected": {
+        "area": 25.0,
+        "ring_count": 1,
+        "sample_points": [
+          {"point": [7.0, 7.0], "inside": true},
+          {"point": [2.0, 2.0], "inside": false},
+          {"point": [12.0, 12.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "subtract_overlapping_squares",
+      "function": "subtract",
+      "a": [[[0,0],[10,0],[10,10],[0,10]]],
+      "b": [[[5,5],[15,5],[15,15],[5,15]]],
+      "expected": {
+        "area": 75.0,
+        "ring_count": 1,
+        "sample_points": [
+          {"point": [2.0, 2.0], "inside": true},
+          {"point": [7.0, 7.0], "inside": false},
+          {"point": [12.0, 12.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "exclude_overlapping_squares",
+      "function": "exclude",
+      "a": [[[0,0],[10,0],[10,10],[0,10]]],
+      "b": [[[5,5],[15,5],[15,15],[5,15]]],
+      "expected": {
+        "area": 150.0,
+        "ring_count": 2,
+        "sample_points": [
+          {"point": [2.0, 2.0], "inside": true},
+          {"point": [12.0, 12.0], "inside": true},
+          {"point": [7.0, 7.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "union_identical_squares",
+      "function": "union",
+      "a": [[[0,0],[10,0],[10,10],[0,10]]],
+      "b": [[[0,0],[10,0],[10,10],[0,10]]],
+      "expected": {
+        "area": 100.0,
+        "ring_count": 1,
+        "sample_points": [
+          {"point": [5.0, 5.0], "inside": true},
+          {"point": [15.0, 5.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "subtract_identical_squares_empty",
+      "function": "subtract",
+      "a": [[[0,0],[10,0],[10,10],[0,10]]],
+      "b": [[[0,0],[10,0],[10,10],[0,10]]],
+      "expected": {
+        "area": 0.0,
+        "ring_count": 0,
+        "sample_points": []
+      }
+    },
+    {
+      "name": "subtract_inner_creates_hole",
+      "function": "subtract",
+      "a": [[[0,0],[10,0],[10,10],[0,10]]],
+      "b": [[[3,3],[7,3],[7,7],[3,7]]],
+      "expected": {
+        "area": 84.0,
+        "ring_count": 2,
+        "sample_points": [
+          {"point": [1.0, 1.0], "inside": true},
+          {"point": [5.0, 5.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "union_edge_touching_squares",
+      "function": "union",
+      "a": [[[0,0],[10,0],[10,10],[0,10]]],
+      "b": [[[10,0],[20,0],[20,10],[10,10]]],
+      "expected": {
+        "area": 200.0,
+        "ring_count": 1,
+        "sample_points": [
+          {"point": [5.0, 5.0], "inside": true},
+          {"point": [15.0, 5.0], "inside": true},
+          {"point": [25.0, 5.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "intersect_inner_is_inner",
+      "function": "intersect",
+      "a": [[[0,0],[10,0],[10,10],[0,10]]],
+      "b": [[[3,3],[7,3],[7,7],[3,7]]],
+      "expected": {
+        "area": 16.0,
+        "ring_count": 1,
+        "sample_points": [
+          {"point": [5.0, 5.0], "inside": true},
+          {"point": [1.0, 1.0], "inside": false}
+        ]
+      }
+    }
+  ]
+}

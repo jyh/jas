@@ -1,0 +1,82 @@
+{
+  "algorithm": "fit_curve",
+  "comparison": "tolerance",
+  "tolerance": 0.5,
+  "vectors": [
+    {
+      "name": "empty_returns_empty",
+      "points": [],
+      "error": 1.0,
+      "expected": {
+        "segment_count": 0,
+        "segments": []
+      }
+    },
+    {
+      "name": "single_point_returns_empty",
+      "points": [[0.0, 0.0]],
+      "error": 1.0,
+      "expected": {
+        "segment_count": 0,
+        "segments": []
+      }
+    },
+    {
+      "name": "two_points_one_segment",
+      "points": [[0.0, 0.0], [30.0, 0.0]],
+      "error": 1.0,
+      "expected": {
+        "segment_count": 1,
+        "segments": [
+          [0.0, 0.0, 10.0, 0.0, 20.0, 0.0, 30.0, 0.0]
+        ]
+      }
+    },
+    {
+      "name": "collinear_points_one_segment",
+      "points": [[0.0, 0.0], [10.0, 0.0], [20.0, 0.0], [30.0, 0.0]],
+      "error": 1.0,
+      "expected": {
+        "segment_count": 1,
+        "segments": [
+          [0.0, 0.0, 10.0, 0.0, 20.0, 0.0, 30.0, 0.0]
+        ]
+      }
+    },
+    {
+      "name": "horizontal_line",
+      "points": [[0.0, 5.0], [1.0, 5.0], [2.0, 5.0], [3.0, 5.0], [4.0, 5.0],
+                  [5.0, 5.0], [6.0, 5.0], [7.0, 5.0], [8.0, 5.0], [9.0, 5.0]],
+      "error": 1.0,
+      "expected": {
+        "segment_count": 1,
+        "segments": [
+          [0.0, 5.0, 3.0, 5.0, 6.0, 5.0, 9.0, 5.0]
+        ]
+      }
+    },
+    {
+      "name": "vertical_line",
+      "points": [[3.0, 0.0], [3.0, 1.0], [3.0, 2.0], [3.0, 3.0], [3.0, 4.0],
+                  [3.0, 5.0], [3.0, 6.0], [3.0, 7.0], [3.0, 8.0], [3.0, 9.0]],
+      "error": 1.0,
+      "expected": {
+        "segment_count": 1,
+        "segments": [
+          [3.0, 0.0, 3.0, 3.0, 3.0, 6.0, 3.0, 9.0]
+        ]
+      }
+    },
+    {
+      "name": "two_coincident_points",
+      "points": [[5.0, 5.0], [5.0, 5.0]],
+      "error": 1.0,
+      "expected": {
+        "segment_count": 1,
+        "segments": [
+          [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
+        ]
+      }
+    }
+  ]
+}
