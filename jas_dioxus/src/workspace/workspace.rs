@@ -2254,4 +2254,92 @@ mod tests {
         assert!(p.x <= 1000.0 - MIN_PANE_VISIBLE);
         assert!(p.y <= 700.0 - MIN_PANE_VISIBLE);
     }
+
+    // -----------------------------------------------------------------------
+    // Workspace working-copy pattern
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn workspace_layout_name_constant() {
+        assert_eq!(WORKSPACE_LAYOUT_NAME, "Workspace");
+    }
+
+    #[test]
+    fn named_creates_layout_with_given_name() {
+        let l = WorkspaceLayout::named("MyLayout");
+        assert_eq!(l.name, "MyLayout");
+        assert_eq!(l.version, LAYOUT_VERSION);
+        assert_eq!(l.anchored.len(), 1);
+    }
+
+    #[test]
+    fn generation_tracking() {
+        let mut l = WorkspaceLayout::default_layout();
+        assert!(!l.needs_save());
+        l.bump();
+        assert!(l.needs_save());
+        l.mark_saved();
+        assert!(!l.needs_save());
+    }
+
+    #[test]
+    fn reset_to_default_preserves_name() {
+        let mut l = WorkspaceLayout::named(WORKSPACE_LAYOUT_NAME);
+        // Mutate it
+        l.hidden_panels.push(PanelKind::Layers);
+        l.bump();
+        assert!(!l.hidden_panels.is_empty());
+        l.reset_to_default();
+        assert!(l.hidden_panels.is_empty());
+        assert_eq!(l.name, WORKSPACE_LAYOUT_NAME);
+        assert!(l.needs_save());
+    }
+
+    #[test]
+    fn json_round_trip_preserves_layout() {
+        let l = WorkspaceLayout::named("Test");
+        let json = l.to_json().unwrap();
+        let loaded = WorkspaceLayout::from_json(&json);
+        assert_eq!(loaded.name, "Test");
+        assert_eq!(loaded.version, LAYOUT_VERSION);
+        assert_eq!(loaded.anchored.len(), l.anchored.len());
+    }
+
+    #[test]
+    fn try_from_json_returns_none_for_bad_version() {
+        let json = r#"{"version":0,"name":"Old","anchored":[],"floating":[],"hidden_panels":[],"z_order":[],"focused_panel":null,"next_id":1}"#;
+        assert!(WorkspaceLayout::try_from_json(json).is_none());
+    }
+
+    #[test]
+    fn try_from_json_returns_none_for_invalid_json() {
+        assert!(WorkspaceLayout::try_from_json("not json").is_none());
+    }
+
+    #[test]
+    fn try_from_json_returns_some_for_valid() {
+        let l = WorkspaceLayout::named("Valid");
+        let json = l.to_json().unwrap();
+        let result = WorkspaceLayout::try_from_json(&json);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name, "Valid");
+    }
+
+    #[test]
+    fn storage_key_uses_prefix_and_name() {
+        let l = WorkspaceLayout::named("Foo");
+        assert_eq!(l.storage_key(), "jas_layout:Foo");
+        assert_eq!(WorkspaceLayout::storage_key_for("Bar"), "jas_layout:Bar");
+    }
+
+    #[test]
+    fn app_config_register_layout_idempotent() {
+        let mut c = AppConfig::default();
+        c.register_layout("Custom");
+        assert_eq!(c.saved_layouts.len(), 2);
+        assert!(c.saved_layouts.contains(&"Custom".to_string()));
+        // Registering again is a no-op
+        c.register_layout("Custom");
+        assert_eq!(c.saved_layouts.len(), 2);
+    }
 }

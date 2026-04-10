@@ -968,3 +968,79 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     #expect(canvas.x <= 1000 - minPaneVisible)
     #expect(canvas.y <= 700 - minPaneVisible)
 }
+
+// MARK: - Workspace working-copy pattern
+
+@Test func workspaceLayoutNameConstant() {
+    #expect(workspaceLayoutName == "Workspace")
+}
+
+@Test func namedCreatesLayoutWithGivenName() {
+    let l = WorkspaceLayout.named("MyLayout")
+    #expect(l.name == "MyLayout")
+    #expect(l.version == layoutVersion)
+    #expect(l.anchored.count == 1)
+}
+
+@Test func generationTracking() {
+    var l = WorkspaceLayout.defaultLayout()
+    #expect(!l.needsSave())
+    l.bump()
+    #expect(l.needsSave())
+    l.markSaved()
+    #expect(!l.needsSave())
+}
+
+@Test func resetToDefaultPreservesName() {
+    var l = WorkspaceLayout.named(workspaceLayoutName)
+    l.hiddenPanels.append(.layers)
+    l.bump()
+    #expect(!l.hiddenPanels.isEmpty)
+    l.resetToDefault()
+    #expect(l.hiddenPanels.isEmpty)
+    #expect(l.name == workspaceLayoutName)
+    #expect(l.needsSave())
+}
+
+@Test func jsonRoundTripPreservesLayout() {
+    let l = WorkspaceLayout.named("Test")
+    let json = l.toJson()!
+    let loaded = WorkspaceLayout.fromJson(json)
+    #expect(loaded.name == "Test")
+    #expect(loaded.version == layoutVersion)
+    #expect(loaded.anchored.count == l.anchored.count)
+}
+
+@Test func tryFromJsonReturnsNilForBadVersion() {
+    let json = """
+    {"version":0,"name":"Old","anchored":[],"floating":[],"hiddenPanels":[],"zOrder":[],"focusedPanel":null,"nextId":1}
+    """
+    #expect(WorkspaceLayout.tryFromJson(json) == nil)
+}
+
+@Test func tryFromJsonReturnsNilForInvalidJson() {
+    #expect(WorkspaceLayout.tryFromJson("not json") == nil)
+}
+
+@Test func tryFromJsonReturnsSomeForValid() {
+    let l = WorkspaceLayout.named("Valid")
+    let json = l.toJson()!
+    let result = WorkspaceLayout.tryFromJson(json)
+    #expect(result != nil)
+    #expect(result!.name == "Valid")
+}
+
+@Test func storageKeyUsesPrefixAndName() {
+    let l = WorkspaceLayout.named("Foo")
+    #expect(l.storageKey() == "jas_layout:Foo")
+    #expect(WorkspaceLayout.storageKeyFor("Bar") == "jas_layout:Bar")
+}
+
+@Test func appConfigRegisterLayoutIdempotent() {
+    var c = AppConfig()
+    c.registerLayout("Custom")
+    #expect(c.savedLayouts.count == 2)
+    #expect(c.savedLayouts.contains("Custom"))
+    c.registerLayout("Custom")
+    #expect(c.savedLayouts.count == 2)
+}
