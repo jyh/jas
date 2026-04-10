@@ -886,6 +886,66 @@ let () =
     assert (canvas.y <= 700.0 -. Jas.Pane.min_pane_visible))
 
 (* ================================================================== *)
+(* Workspace working-copy pattern                                     *)
+(* ================================================================== *)
+
+let () =
+  Printf.printf "\nWorkspace pattern tests:\n";
+
+  run "workspace_layout_name_constant" (fun () ->
+    assert (workspace_layout_name = "Workspace"));
+
+  run "named_creates_layout_with_given_name" (fun () ->
+    let l = named "MyLayout" in
+    assert (l.name = "MyLayout");
+    assert (l.version = layout_version);
+    assert (List.length l.anchored = 1));
+
+  run "generation_tracking" (fun () ->
+    let l = default_layout () in
+    assert (not (needs_save l));
+    bump l;
+    assert (needs_save l);
+    mark_saved l;
+    assert (not (needs_save l)));
+
+  run "reset_to_default_preserves_name" (fun () ->
+    let l = named workspace_layout_name in
+    l.hidden_panels <- [Layers];
+    bump l;
+    assert (l.hidden_panels <> []);
+    reset_to_default l;
+    assert (l.hidden_panels = []);
+    assert (l.name = workspace_layout_name);
+    assert (needs_save l));
+
+  run "json_round_trip_preserves_layout" (fun () ->
+    let l = named "Test" in
+    let json = layout_to_json l in
+    let loaded = layout_of_json json in
+    assert (loaded.name = "Test");
+    assert (loaded.version = layout_version);
+    assert (List.length loaded.anchored = List.length l.anchored));
+
+  run "storage_key_uses_prefix_and_name" (fun () ->
+    let l = named "Foo" in
+    assert (storage_key l = "jas_layout:Foo");
+    assert (storage_key_for "Bar" = "jas_layout:Bar"));
+
+  run "app_config_default" (fun () ->
+    let c = default_app_config () in
+    assert (c.active_layout = default_layout_name);
+    assert (c.saved_layouts = [default_layout_name]));
+
+  run "app_config_register_layout" (fun () ->
+    let c = default_app_config () in
+    register_layout c "Custom";
+    assert (List.length c.saved_layouts = 2);
+    assert (List.mem "Custom" c.saved_layouts);
+    register_layout c "Custom";
+    assert (List.length c.saved_layouts = 2))
+
+(* ================================================================== *)
 
 let () =
   Printf.printf "\n%d passed, %d failed\n" !pass !fail;

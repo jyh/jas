@@ -3,7 +3,7 @@
 from workspace.workspace_layout import (
     WorkspaceLayout, DockEdge, PanelKind, PanelGroup, GroupAddr, PanelAddr,
     AppConfig, MIN_DOCK_WIDTH, MAX_DOCK_WIDTH, MIN_GROUP_HEIGHT,
-    DEFAULT_DOCK_WIDTH, DEFAULT_LAYOUT_NAME,
+    DEFAULT_DOCK_WIDTH, DEFAULT_LAYOUT_NAME, LAYOUT_VERSION,
 )
 
 
@@ -803,3 +803,86 @@ def test_clamp_floating_docks_also_clamps_panes():
     canvas = l.panes().pane_by_kind(PK.CANVAS)
     assert canvas.x <= 1000 - MIN_PANE_VISIBLE
     assert canvas.y <= 700 - MIN_PANE_VISIBLE
+
+
+# -- Workspace working-copy pattern --
+
+def test_workspace_layout_name_constant():
+    from workspace.workspace_layout import WORKSPACE_LAYOUT_NAME
+    assert WORKSPACE_LAYOUT_NAME == "Workspace"
+
+
+def test_named_creates_layout_with_given_name():
+    l = WorkspaceLayout.named("MyLayout")
+    assert l.name == "MyLayout"
+    assert l.version == LAYOUT_VERSION
+    assert len(l.anchored) == 1
+
+
+def test_generation_tracking():
+    l = WorkspaceLayout.default_layout()
+    assert not l.needs_save()
+    l._bump()
+    assert l.needs_save()
+    l.mark_saved()
+    assert not l.needs_save()
+
+
+def test_reset_to_default_preserves_name():
+    from workspace.workspace_layout import WORKSPACE_LAYOUT_NAME
+    l = WorkspaceLayout.named(WORKSPACE_LAYOUT_NAME)
+    l.hidden_panels.append(PanelKind.LAYERS)
+    l._bump()
+    assert len(l.hidden_panels) > 0
+    l.reset_to_default()
+    assert l.hidden_panels == []
+    assert l.name == WORKSPACE_LAYOUT_NAME
+    assert l.needs_save()
+
+
+def test_json_round_trip_preserves_layout():
+    l = WorkspaceLayout.named("Test")
+    d = l.to_dict()
+    loaded = WorkspaceLayout.from_dict(d)
+    assert loaded.name == "Test"
+    assert loaded.version == LAYOUT_VERSION
+    assert len(loaded.anchored) == len(l.anchored)
+
+
+def test_from_dict_rejects_bad_version():
+    d = {"version": 0, "name": "Old", "anchored": [], "floating": [],
+         "hidden_panels": [], "z_order": [], "next_id": 1}
+    loaded = WorkspaceLayout.from_dict(d)
+    # Bad version falls back to default
+    assert loaded.name == DEFAULT_LAYOUT_NAME
+
+
+def test_storage_key_uses_prefix_and_name():
+    l = WorkspaceLayout.named("Foo")
+    assert l.storage_key() == "jas_layout:Foo"
+    assert WorkspaceLayout.storage_key_for("Bar") == "jas_layout:Bar"
+
+
+def test_app_config_default():
+    c = AppConfig()
+    assert c.active_layout == DEFAULT_LAYOUT_NAME
+    assert c.saved_layouts == [DEFAULT_LAYOUT_NAME]
+
+
+def test_app_config_register_layout():
+    c = AppConfig()
+    c.register_layout("Custom")
+    assert len(c.saved_layouts) == 2
+    assert "Custom" in c.saved_layouts
+    c.register_layout("Custom")
+    assert len(c.saved_layouts) == 2
+
+
+def test_app_config_json_round_trip():
+    c = AppConfig()
+    c.active_layout = "MyLayout"
+    c.register_layout("MyLayout")
+    json_str = c.to_json()
+    loaded = AppConfig.from_json(json_str)
+    assert loaded.active_layout == "MyLayout"
+    assert len(loaded.saved_layouts) == 2
