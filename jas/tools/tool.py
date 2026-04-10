@@ -9,7 +9,8 @@ controller, and canvas services without coupling tools to the widget.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter

@@ -14,7 +14,7 @@ indices are *Python str indices* (which are also code-point indices).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, List
+from collections.abc import Callable
 
 
 @dataclass
@@ -47,8 +47,8 @@ class LineInfo:
 
 @dataclass
 class TextLayout:
-    glyphs: List[Glyph] = field(default_factory=list)
-    lines: List[LineInfo] = field(default_factory=list)
+    glyphs: list[Glyph] = field(default_factory=list)
+    lines: list[LineInfo] = field(default_factory=list)
     font_size: float = 0.0
     char_count: int = 0
 
@@ -138,8 +138,8 @@ def layout(content: str, max_width: float, font_size: float,
            measure: Callable[[str], float]) -> TextLayout:
     line_height = font_size
     ascent = font_size * 0.8
-    glyphs: List[Glyph] = []
-    lines: List[LineInfo] = []
+    glyphs: list[Glyph] = []
+    lines: list[LineInfo] = []
     chars = list(content)
     n = len(chars)
     idx = 0

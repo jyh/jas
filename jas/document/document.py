@@ -8,9 +8,12 @@ For example, path (0, 2) means layer 0, child 2.  Path (1,) means layer 1
 itself.  This allows selections and updates without requiring element identity.
 """
 
+from __future__ import annotations
+
 import dataclasses
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable, Tuple, TypeVar, Union
+from typing import TypeVar
 
 from geometry.element import Element, Group, Layer
 
@@ -81,7 +84,7 @@ class _SelectionPartial:
 # Sum type: either `.all` or `.partial(SortedCps)`. We use a tagged
 # dataclass pair instead of a true Enum so SortedCps payloads are easy
 # to construct and pattern-match with `isinstance` checks.
-SelectionKind = Union[_SelectionAll, _SelectionPartial]
+SelectionKind = _SelectionAll | _SelectionPartial
 
 
 def selection_all() -> SelectionKind:
@@ -169,7 +172,7 @@ class Document:
         """Return the set of all element paths in the selection."""
         return frozenset(es.path for es in self.selection)
 
-    def bounds(self) -> Tuple[float, float, float, float]:
+    def bounds(self) -> tuple[float, float, float, float]:
         """Return the bounding box of all layers combined."""
         if not self.layers:
             return (0, 0, 0, 0)

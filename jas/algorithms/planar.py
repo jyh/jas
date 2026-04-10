@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +64,7 @@ class HalfEdge:
 class Face:
     boundary: HalfEdgeId
     holes: list[HalfEdgeId] = field(default_factory=list)
-    parent: Optional[FaceId] = None
+    parent: FaceId | None = None
     depth: int = 0
 
 
@@ -92,11 +91,11 @@ class PlanarGraph:
         )
         return outer - holes_sum
 
-    def hit_test(self, point: Point) -> Optional[FaceId]:
+    def hit_test(self, point: Point) -> FaceId | None:
         """Deepest face containing the point. A click in a hole
         returns the hole face, not its parent. Naive O(F) for now.
         """
-        best: Optional[FaceId] = None
+        best: FaceId | None = None
         best_depth = 0
         for fi, face in enumerate(self.faces):
             poly = self._cycle_polygon(face.boundary)
@@ -282,7 +281,7 @@ def build(polylines: list[Polyline]) -> PlanarGraph:
     for params in seg_params:
         params.sort(key=lambda pv: pv[0])
         chain: list[int] = []
-        prev: Optional[int] = None
+        prev: int | None = None
         for _, v in params:
             if v != prev:
                 chain.append(v)
@@ -397,12 +396,12 @@ def build(polylines: list[Polyline]) -> PlanarGraph:
     n_faces = len(pos_cycles)
 
     # ----- 11. Parent of each face -----
-    parents: list[Optional[int]] = [None] * n_faces
+    parents: list[int | None] = [None] * n_faces
     for fi in range(n_faces):
         cyc_f = pos_cycles[fi]
         area_f = areas[cyc_f]
         sample = _sample_inside(cycle_polys[cyc_f])
-        best: Optional[int] = None
+        best: int | None = None
         best_area = math.inf
         for gi in range(n_faces):
             if gi == fi:

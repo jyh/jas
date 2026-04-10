@@ -13,7 +13,6 @@ import dataclasses
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional
 
 from geometry.element import Color, Fill, Text, TextPath
 from algorithms.text_layout import ordered_range
@@ -55,8 +54,8 @@ class TextEditSession:
     anchor: int = 0
     drag_active: bool = False
     blink_epoch_ms: float = 0.0
-    _undo: List[_Snapshot] = field(default_factory=list)
-    _redo: List[_Snapshot] = field(default_factory=list)
+    _undo: list[_Snapshot] = field(default_factory=list)
+    _redo: list[_Snapshot] = field(default_factory=list)
 
     def __post_init__(self):
         n = len(self.content)
@@ -140,7 +139,7 @@ class TextEditSession:
         self.anchor = 0
         self.insertion = len(self.content)
 
-    def copy_selection(self) -> Optional[str]:
+    def copy_selection(self) -> str | None:
         if not self.has_selection():
             return None
         lo, hi = self.selection_range()
