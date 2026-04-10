@@ -249,6 +249,7 @@ public struct Document: Equatable {
             newLayers[path[0]] = l
         } else {
             let layerElem = replaceInGroup(.layer(layers[path[0]]), Array(path.dropFirst()), newElem)
+            // replaceInGroup always returns a Group or Layer, so this branch is unreachable.
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
@@ -265,6 +266,7 @@ public struct Document: Equatable {
             newLayers.insert(l, at: path[0] + 1)
         } else {
             let layerElem = insertAfterInGroup(.layer(layers[path[0]]), Array(path.dropFirst()), newElem)
+            // insertAfterInGroup always returns a Group or Layer, so this branch is unreachable.
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
@@ -279,6 +281,7 @@ public struct Document: Equatable {
             newLayers.remove(at: path[0])
         } else {
             let layerElem = removeFromGroup(.layer(layers[path[0]]), Array(path.dropFirst()))
+            // removeFromGroup always returns a Group or Layer, so this branch is unreachable.
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
