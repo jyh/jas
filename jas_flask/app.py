@@ -18,26 +18,54 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
     """
     app = Flask(__name__)
 
-    if workspace is None:
-        if workspace_path is None:
-            workspace_path = os.environ.get(
-                "WORKSPACE_YAML",
-                os.path.join(os.path.dirname(__file__), "..", "WORKSPACE.yaml"),
-            )
-        workspace = load_workspace(workspace_path)
+    # When a static workspace dict is provided (e.g. testing), use it directly
+    # with no file-watching.  Otherwise, reload from disk when the file changes.
+    _static_ws = workspace
 
-    ws = workspace
-    set_icons(ws.get("icons", {}))
+    if _static_ws is None and workspace_path is None:
+        workspace_path = os.environ.get(
+            "WORKSPACE_YAML",
+            os.path.join(os.path.dirname(__file__), "..", "WORKSPACE.yaml"),
+        )
 
-    def _state_defaults() -> dict:
+    _cached_ws: dict | None = None
+    _cached_mtime: float = 0.0
+
+    def _get_ws() -> dict:
+        """Return the workspace dict, reloading from disk if the file changed."""
+        nonlocal _cached_ws, _cached_mtime
+
+        if _static_ws is not None:
+            return _static_ws
+
+        try:
+            mtime = os.path.getmtime(workspace_path)
+        except OSError:
+            if _cached_ws is not None:
+                return _cached_ws
+            raise
+
+        if _cached_ws is None or mtime != _cached_mtime:
+            _cached_ws = load_workspace(workspace_path)
+            _cached_mtime = mtime
+            set_icons(_cached_ws.get("icons", {}))
+
+        return _cached_ws
+
+    # Ensure icons are set on first load
+    ws_init = _get_ws()
+    set_icons(ws_init.get("icons", {}))
+
+    def _state_defaults(ws: dict) -> dict:
         """Extract default values from state definitions."""
         return {name: defn.get("default") for name, defn in ws.get("state", {}).items()}
 
     @app.route("/")
     def index():
+        ws = _get_ws()
         mode = request.args.get("mode", "normal")
         theme = ws.get("theme", {})
-        state = _state_defaults()
+        state = _state_defaults(ws)
 
         # Render menubar (swap mode toggle link based on current mode)
         menubar_html = render_menubar(ws.get("menubar", []), ws.get("actions", {}), theme)
@@ -56,7 +84,7 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
 
         # Normal mode
         dialogs_html = render_dialogs(ws.get("dialogs", {}), theme, state)
-        state_json = json.dumps(_state_defaults())
+        state_json = json.dumps(_state_defaults(ws))
         actions_json = json.dumps(ws.get("actions", {}))
         shortcuts_json = json.dumps(ws.get("shortcuts", []))
 
@@ -68,6 +96,7 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
     @app.route("/api/spec/<element_id>")
     def element_spec(element_id):
         """Return the full YAML spec for an element as JSON."""
+        ws = _get_ws()
         layout = ws.get("layout", {})
         elem = find_element_by_id(layout, element_id)
         if elem is None:
