@@ -45,6 +45,8 @@ class PanelKind(Enum):
     STROKE = auto()
     PROPERTIES = auto()
 
+ALL_PANEL_KINDS = [PanelKind.LAYERS, PanelKind.COLOR, PanelKind.STROKE, PanelKind.PROPERTIES]
+
 @dataclass
 class PanelGroup:
     panels: list[PanelKind]
@@ -468,8 +470,7 @@ class WorkspaceLayout:
         return kind not in self.hidden_panels
 
     def panel_menu_items(self) -> list[tuple[PanelKind, bool]]:
-        all_kinds = [PanelKind.LAYERS, PanelKind.COLOR, PanelKind.STROKE, PanelKind.PROPERTIES]
-        return [(k, self.is_panel_visible(k)) for k in all_kinds]
+        return [(k, self.is_panel_visible(k)) for k in ALL_PANEL_KINDS]
 
     # -- Z-index --
 
