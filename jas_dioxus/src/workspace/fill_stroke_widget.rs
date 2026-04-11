@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 
-use super::app::{Act, AppHandle, AppState};
+use super::app_state::{Act, AppHandle, AppState};
 use super::theme::*;
 use crate::document::controller::{FillSummary, StrokeSummary};
 use crate::geometry::element::{Color, Fill, Stroke};

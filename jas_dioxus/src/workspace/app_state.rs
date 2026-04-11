@@ -1,0 +1,403 @@
+//! Application state types extracted from `app.rs`.
+//!
+//! Contains `TabState`, `AppState`, and the `Act` / `AppHandle` type aliases.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
+use wasm_bindgen::JsCast;
+
+use crate::canvas::render;
+use crate::document::controller::Controller;
+use crate::document::model::Model;
+use crate::geometry::element::{Color, Fill, Stroke, Element as GeoElement};
+use crate::tools::direct_selection_tool::DirectSelectionTool;
+use crate::tools::group_selection_tool::GroupSelectionTool;
+use crate::tools::line_tool::LineTool;
+use crate::tools::pen_tool::PenTool;
+use crate::tools::add_anchor_point_tool::AddAnchorPointTool;
+use crate::tools::delete_anchor_point_tool::DeleteAnchorPointTool;
+use crate::tools::anchor_point_tool::AnchorPointTool;
+use crate::tools::pencil_tool::PencilTool;
+use crate::tools::path_eraser_tool::PathEraserTool;
+use crate::tools::smooth_tool::SmoothTool;
+use crate::tools::polygon_tool::PolygonTool;
+use crate::tools::star_tool::StarTool;
+use crate::tools::rect_tool::RectTool;
+use crate::tools::rounded_rect_tool::RoundedRectTool;
+use crate::tools::lasso_tool::LassoTool;
+use crate::tools::selection_tool::SelectionTool;
+use crate::tools::type_tool::TypeTool;
+use crate::tools::type_on_path_tool::TypeOnPathTool;
+use crate::tools::tool::{CanvasTool, ToolKind};
+
+/// Shared application state handle, available via `use_context::<AppHandle>()`.
+pub(crate) type AppHandle = Rc<RefCell<AppState>>;
+
+/// Universal state mutation handle, available via `use_context::<Act>()`.
+/// Call `(act.0.borrow_mut())(Box::new(|st| { ... }))` to mutate AppState.
+#[derive(Clone)]
+pub(crate) struct Act(pub Rc<RefCell<dyn FnMut(Box<dyn FnOnce(&mut AppState)>)>>);
+
+// ---------------------------------------------------------------------------
+
+/// Per-tab state: each tab has its own document, tools, and clipboard.
+pub(crate) struct TabState {
+    pub(crate) model: Model,
+    pub(crate) tools: HashMap<ToolKind, Box<dyn CanvasTool>>,
+    pub(crate) clipboard: Vec<GeoElement>,
+}
+
+impl TabState {
+    pub(crate) fn new() -> Self {
+        Self::with_model(Model::default())
+    }
+
+    pub(crate) fn with_model(model: Model) -> Self {
+        let mut tools: HashMap<ToolKind, Box<dyn CanvasTool>> = HashMap::new();
+        tools.insert(ToolKind::Selection, Box::new(SelectionTool::new()));
+        tools.insert(ToolKind::DirectSelection, Box::new(DirectSelectionTool::new()));
+        tools.insert(ToolKind::GroupSelection, Box::new(GroupSelectionTool::new()));
+        tools.insert(ToolKind::Pen, Box::new(PenTool::new()));
+        tools.insert(ToolKind::AddAnchorPoint, Box::new(AddAnchorPointTool::new()));
+        tools.insert(ToolKind::DeleteAnchorPoint, Box::new(DeleteAnchorPointTool::new()));
+        tools.insert(ToolKind::AnchorPoint, Box::new(AnchorPointTool::new()));
+        tools.insert(ToolKind::Pencil, Box::new(PencilTool::new()));
+        tools.insert(ToolKind::PathEraser, Box::new(PathEraserTool::new()));
+        tools.insert(ToolKind::Smooth, Box::new(SmoothTool::new()));
+        tools.insert(ToolKind::Type, Box::new(TypeTool::new()));
+        tools.insert(ToolKind::TypeOnPath, Box::new(TypeOnPathTool::new()));
+        tools.insert(ToolKind::Rect, Box::new(RectTool::new()));
+        tools.insert(ToolKind::RoundedRect, Box::new(RoundedRectTool::new()));
+        tools.insert(ToolKind::Polygon, Box::new(PolygonTool::new()));
+        tools.insert(ToolKind::Star, Box::new(StarTool::new()));
+        tools.insert(ToolKind::Line, Box::new(LineTool::new()));
+        tools.insert(ToolKind::Lasso, Box::new(LassoTool::new()));
+        Self { model, tools, clipboard: Vec::new() }
+    }
+}
+
+/// Shared application state.
+pub(crate) struct AppState {
+    pub(crate) tabs: Vec<TabState>,
+    pub(crate) active_tab: usize,
+    pub(crate) active_tool: ToolKind,
+    pub(crate) app_config: super::workspace::AppConfig,
+    pub(crate) workspace_layout: super::workspace::WorkspaceLayout,
+    /// Which fill/stroke square is on top (active). true = fill, false = stroke.
+    pub(crate) fill_on_top: bool,
+}
+
+impl AppState {
+    pub(crate) fn new() -> Self {
+        let app_config = Self::load_app_config();
+        let workspace_layout = Self::load_or_migrate_workspace(&app_config);
+        Self {
+            tabs: vec![],
+            active_tab: 0,
+            active_tool: ToolKind::Selection,
+            app_config,
+            workspace_layout,
+            fill_on_top: true,
+        }
+    }
+
+    /// Load app config from localStorage, or return default.
+    fn load_app_config() -> super::workspace::AppConfig {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(json) = web_sys::window()
+                .and_then(|w| w.local_storage().ok()?)
+                .and_then(|s| s.get_item(super::workspace::AppConfig::STORAGE_KEY).ok()?)
+            {
+                return super::workspace::AppConfig::from_json(&json);
+            }
+        }
+        super::workspace::AppConfig::default()
+    }
+
+    /// Save app config to localStorage.
+    pub(crate) fn save_app_config(&self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Ok(json) = self.app_config.to_json() {
+                if let Some(storage) = web_sys::window()
+                    .and_then(|w| w.local_storage().ok()?)
+                {
+                    let _ = storage.set_item(super::workspace::AppConfig::STORAGE_KEY, &json);
+                }
+            }
+        }
+    }
+
+    /// Try to load a named layout from localStorage. Returns None if not found.
+    fn try_load_workspace_layout(_name: &str) -> Option<super::workspace::WorkspaceLayout> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let key = super::workspace::WorkspaceLayout::storage_key_for(_name);
+            if let Some(json) = web_sys::window()
+                .and_then(|w| w.local_storage().ok()?)
+                .and_then(|s| s.get_item(&key).ok()?)
+            {
+                return super::workspace::WorkspaceLayout::try_from_json(&json);
+            }
+        }
+        None
+    }
+
+    /// Load a named dock layout from localStorage, or return default.
+    fn load_workspace_layout(name: &str) -> super::workspace::WorkspaceLayout {
+        Self::try_load_workspace_layout(name)
+            .unwrap_or_else(|| super::workspace::WorkspaceLayout::named(name))
+    }
+
+    /// Load the "Workspace" working copy. If it doesn't exist, migrate
+    /// from the current active_layout, or fall back to factory defaults.
+    /// Always ensures the result is persisted under the "Workspace" key.
+    fn load_or_migrate_workspace(
+        config: &super::workspace::AppConfig,
+    ) -> super::workspace::WorkspaceLayout {
+        use super::workspace::WORKSPACE_LAYOUT_NAME;
+        // Try loading "Workspace" directly
+        if let Some(mut layout) = Self::try_load_workspace_layout(WORKSPACE_LAYOUT_NAME) {
+            layout.name = WORKSPACE_LAYOUT_NAME.to_string();
+            return layout;
+        }
+        // Migration: copy active_layout into "Workspace" and persist it
+        let mut layout =
+            if let Some(layout) = Self::try_load_workspace_layout(&config.active_layout) {
+                layout
+            } else {
+                super::workspace::WorkspaceLayout::named(WORKSPACE_LAYOUT_NAME)
+            };
+        layout.name = WORKSPACE_LAYOUT_NAME.to_string();
+        // Persist the migrated/default layout so it exists on next startup
+        #[cfg(target_arch = "wasm32")]
+        {
+            let key = super::workspace::WorkspaceLayout::storage_key_for(WORKSPACE_LAYOUT_NAME);
+            if let Ok(json) = layout.to_json() {
+                if let Some(storage) = web_sys::window()
+                    .and_then(|w| w.local_storage().ok()?)
+                {
+                    let _ = storage.set_item(&key, &json);
+                }
+            }
+        }
+        layout
+    }
+
+    /// Save the workspace layout to localStorage under the "Workspace" key.
+    pub(crate) fn save_workspace_layout(&self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let key = super::workspace::WorkspaceLayout::storage_key_for(
+                super::workspace::WORKSPACE_LAYOUT_NAME,
+            );
+            if let Ok(json) = self.workspace_layout.to_json() {
+                if let Some(storage) = web_sys::window()
+                    .and_then(|w| w.local_storage().ok()?)
+                {
+                    let _ = storage.set_item(&key, &json);
+                }
+            }
+        }
+    }
+
+    /// Save the current workspace state as a named layout snapshot.
+    pub(crate) fn save_layout_as(&mut self, name: &str) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let key = super::workspace::WorkspaceLayout::storage_key_for(name);
+            // Temporarily set name for serialization
+            let saved_name = self.workspace_layout.name.clone();
+            self.workspace_layout.name = name.to_string();
+            if let Ok(json) = self.workspace_layout.to_json() {
+                if let Some(storage) = web_sys::window()
+                    .and_then(|w| w.local_storage().ok()?)
+                {
+                    let _ = storage.set_item(&key, &json);
+                }
+            }
+            self.workspace_layout.name = saved_name;
+        }
+        self.app_config.register_layout(name);
+        self.app_config.active_layout = name.to_string();
+        self.save_app_config();
+    }
+
+    /// Switch to a different named layout (load it as the working copy).
+    pub(crate) fn switch_layout(&mut self, name: &str) {
+        // Save current working copy
+        self.save_workspace_layout();
+        // Load the named layout as the new working copy
+        self.workspace_layout = Self::load_workspace_layout(name);
+        self.workspace_layout.name = super::workspace::WORKSPACE_LAYOUT_NAME.to_string();
+        self.app_config.active_layout = name.to_string();
+        self.save_app_config();
+        // Persist as "Workspace"
+        self.save_workspace_layout();
+    }
+
+    /// Revert to the currently selected saved layout.
+    pub(crate) fn revert_to_saved(&mut self) {
+        let name = self.app_config.active_layout.clone();
+        if name != super::workspace::WORKSPACE_LAYOUT_NAME {
+            self.workspace_layout = Self::load_workspace_layout(&name);
+            self.workspace_layout.name = super::workspace::WORKSPACE_LAYOUT_NAME.to_string();
+            self.save_workspace_layout();
+        }
+    }
+
+    /// Reset to factory defaults.
+    pub(crate) fn reset_to_default(&mut self) {
+        self.workspace_layout = super::workspace::WorkspaceLayout::named(
+            super::workspace::WORKSPACE_LAYOUT_NAME,
+        );
+        self.app_config.active_layout =
+            super::workspace::WORKSPACE_LAYOUT_NAME.to_string();
+        self.save_app_config();
+        self.save_workspace_layout();
+    }
+
+    pub(crate) fn tab(&self) -> Option<&TabState> {
+        self.tabs.get(self.active_tab)
+    }
+
+    pub(crate) fn tab_mut(&mut self) -> Option<&mut TabState> {
+        self.tabs.get_mut(self.active_tab)
+    }
+
+    pub(crate) fn add_tab(&mut self, tab: TabState) {
+        self.tabs.push(tab);
+        self.active_tab = self.tabs.len() - 1;
+    }
+
+    pub(crate) fn close_tab(&mut self, index: usize) {
+        if index >= self.tabs.len() {
+            return;
+        }
+        self.tabs.remove(index);
+        if self.tabs.is_empty() {
+            self.active_tab = 0;
+        } else if self.active_tab >= self.tabs.len() {
+            self.active_tab = self.tabs.len() - 1;
+        } else if self.active_tab > index {
+            self.active_tab -= 1;
+        }
+    }
+
+    pub(crate) fn set_tool(&mut self, kind: ToolKind) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            let active = self.active_tool;
+            if let Some(tool) = tab.tools.get_mut(&active) {
+                tool.deactivate(&mut tab.model);
+            }
+        }
+        self.active_tool = kind;
+    }
+
+    /// Toggle which fill/stroke square is on top.
+    pub(crate) fn toggle_fill_on_top(&mut self) {
+        self.fill_on_top = !self.fill_on_top;
+    }
+
+    /// Swap default fill and stroke colors (including None).
+    pub(crate) fn swap_fill_stroke(&mut self) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            let old_fill_color = tab.model.default_fill.map(|f| f.color);
+            let old_stroke_color = tab.model.default_stroke.map(|s| s.color);
+            // Swap: fill gets old stroke color, stroke gets old fill color
+            tab.model.default_fill = old_stroke_color.map(Fill::new);
+            tab.model.default_stroke = match old_fill_color {
+                Some(c) => {
+                    let mut s = tab.model.default_stroke.unwrap_or(Stroke::new(c, 1.0));
+                    s.color = c;
+                    Some(s)
+                }
+                None => None,
+            };
+            // Apply to selection
+            let new_fill = tab.model.default_fill;
+            let new_stroke = tab.model.default_stroke;
+            if !tab.model.document().selection.is_empty() {
+                tab.model.snapshot();
+                Controller::set_selection_fill(&mut tab.model, new_fill);
+                Controller::set_selection_stroke(&mut tab.model, new_stroke);
+            }
+        }
+    }
+
+    /// Reset defaults to No Fill + Black Stroke.
+    pub(crate) fn reset_fill_stroke_defaults(&mut self) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            tab.model.default_fill = None;
+            tab.model.default_stroke = Some(Stroke::new(Color::BLACK, 1.0));
+            // Apply to selection
+            if !tab.model.document().selection.is_empty() {
+                tab.model.snapshot();
+                Controller::set_selection_fill(&mut tab.model, None);
+                Controller::set_selection_stroke(&mut tab.model, Some(Stroke::new(Color::BLACK, 1.0)));
+            }
+        }
+    }
+
+    /// Set the active attribute (fill or stroke, per fill_on_top) to None.
+    pub(crate) fn set_active_to_none(&mut self) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            if self.fill_on_top {
+                tab.model.default_fill = None;
+                if !tab.model.document().selection.is_empty() {
+                    tab.model.snapshot();
+                    Controller::set_selection_fill(&mut tab.model, None);
+                }
+            } else {
+                tab.model.default_stroke = None;
+                if !tab.model.document().selection.is_empty() {
+                    tab.model.snapshot();
+                    Controller::set_selection_stroke(&mut tab.model, None);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn repaint(&self) {
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => return,
+        };
+        let document = match window.document() {
+            Some(d) => d,
+            None => return,
+        };
+        let canvas_el = match document.get_element_by_id("jas-canvas") {
+            Some(el) => el,
+            None => return,
+        };
+        let canvas: HtmlCanvasElement = canvas_el.unchecked_into();
+        // Sync canvas internal resolution to its CSS layout size
+        let cw = canvas.client_width() as u32;
+        let ch = canvas.client_height() as u32;
+        if cw > 0 && ch > 0 && (canvas.width() != cw || canvas.height() != ch) {
+            canvas.set_width(cw);
+            canvas.set_height(ch);
+        }
+        let ctx: CanvasRenderingContext2d = match canvas.get_context("2d") {
+            Ok(Some(ctx)) => ctx.unchecked_into(),
+            _ => return,
+        };
+        let w = canvas.width() as f64;
+        let h = canvas.height() as f64;
+        let tab = match self.tab() {
+            Some(t) => t,
+            None => return,
+        };
+        render::render(&ctx, w, h, tab.model.document());
+
+        // Draw tool overlay
+        if let Some(tool) = tab.tools.get(&self.active_tool) {
+            tool.draw_overlay(&tab.model, &ctx);
+        }
+    }
+}

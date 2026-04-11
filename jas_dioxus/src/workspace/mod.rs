@@ -1,10 +1,13 @@
 #[allow(dead_code)]
 pub mod app;
+pub(crate) mod app_state;
+pub(crate) mod clipboard;
 pub mod color_picker;
 pub mod color_picker_dialog;
 pub(crate) mod dock_panel;
 pub mod fill_stroke_widget;
 pub mod icons;
+pub(crate) mod keyboard;
 pub mod menu;
 pub mod menu_bar;
 #[allow(dead_code)]

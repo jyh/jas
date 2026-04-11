@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-use super::app::{Act, AppState};
+use super::app_state::{Act, AppState};
 use super::theme::*;
 use crate::document::controller::Controller;
 use crate::geometry::element::{Fill, Stroke};

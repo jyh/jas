@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
-use super::app::{
-    Act, AppHandle, AppState, TabState,
+use super::app_state::{Act, AppHandle, AppState, TabState};
+use super::clipboard::{
     clipboard_read_and_paste, clipboard_write, download_file, find_panel,
     open_file_dialog, selection_to_svg,
 };
