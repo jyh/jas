@@ -237,6 +237,110 @@
       return;
     }
 
+    // tile: { container }
+    // Horizontal single-row tile matching the Rust algorithm:
+    //   1. Unhide all panes, unmaximize canvas
+    //   2. Sort panes left-to-right by current x, then descending y
+    //   3. Classify widths: fixed_width → Fixed, collapsed_width → KeepCurrent, else → Flex
+    //   4. Flex panes split remaining space equally (respecting min_width)
+    //   5. Position left-to-right, full viewport height
+    if (effect.tile) {
+      var configs = typeof JAS_PANE_CONFIGS !== "undefined" ? JAS_PANE_CONFIGS : {};
+      var container = document.getElementById(resolve(effect.tile.container, ctx));
+      if (!container) return;
+
+      // Phase 1: unhide all panes, unmaximize
+      setState("canvas_maximized", false);
+      var paneEls = Array.from(container.querySelectorAll(".jas-pane"));
+      paneEls.forEach(function (p) { p.style.display = ""; });
+      for (var vid in configs) {
+        if (vid.endsWith("_pane")) {
+          var visKey = vid.replace("_pane", "") + "_visible";
+          if (state.hasOwnProperty(visKey)) setState(visKey, true);
+        }
+      }
+
+      // Phase 2: sort by x ascending, then y descending
+      paneEls.sort(function (a, b) {
+        var ax = a.offsetLeft, bx = b.offsetLeft;
+        if (ax !== bx) return ax - bx;
+        return b.offsetTop - a.offsetTop;
+      });
+
+      if (paneEls.length === 0) return;
+
+      var vw = container.clientWidth || window.innerWidth;
+      var vh = container.clientHeight || (window.innerHeight - 28); // subtract menubar
+
+      // Phase 3: classify widths
+      var widthTypes = paneEls.map(function (p) {
+        var cfg = configs[p.id] || {};
+        if (cfg.fixed_width) return { type: "fixed", value: p.offsetWidth };
+        if (cfg.collapsed_width != null) return { type: "keep", value: p.offsetWidth };
+        return { type: "flex", min: cfg.min_width || 50 };
+      });
+
+      // Phase 4: compute flex sizes
+      var fixedTotal = 0;
+      var flexCount = 0;
+      var maxFlexMin = 0;
+      widthTypes.forEach(function (wt) {
+        if (wt.type === "fixed" || wt.type === "keep") {
+          fixedTotal += wt.value;
+        } else {
+          flexCount++;
+          if (wt.min > maxFlexMin) maxFlexMin = wt.min;
+        }
+      });
+
+      var flexEach = 0;
+      if (flexCount > 0) {
+        flexEach = Math.max((vw - fixedTotal) / flexCount, maxFlexMin);
+      }
+
+      var finalWidths = widthTypes.map(function (wt) {
+        if (wt.type === "flex") return flexEach;
+        return wt.value;
+      });
+
+      // Phase 5: position left-to-right, full height
+      var x = 0;
+      for (var ti = 0; ti < paneEls.length; ti++) {
+        paneEls[ti].style.left = x + "px";
+        paneEls[ti].style.top = "0px";
+        paneEls[ti].style.width = finalWidths[ti] + "px";
+        paneEls[ti].style.height = vh + "px";
+        x += finalWidths[ti];
+      }
+      return;
+    }
+
+    // reset_layout: { container }
+    if (effect.reset_layout) {
+      var configs = typeof JAS_PANE_CONFIGS !== "undefined" ? JAS_PANE_CONFIGS : {};
+      for (var paneId in configs) {
+        if (configs.hasOwnProperty(paneId)) {
+          var pos = configs[paneId].default_position;
+          if (!pos) continue;
+          var paneEl = document.getElementById(paneId);
+          if (paneEl) {
+            paneEl.style.left = pos.x + "px";
+            paneEl.style.top = pos.y + "px";
+            paneEl.style.width = pos.width + "px";
+            paneEl.style.height = pos.height + "px";
+            paneEl.style.display = "";
+          }
+        }
+      }
+      // Reset visibility state
+      setState("toolbar_visible", true);
+      setState("canvas_visible", true);
+      setState("dock_visible", true);
+      setState("dock_collapsed", false);
+      setState("canvas_maximized", false);
+      return;
+    }
+
     // open_dialog: { id, params }
     if (effect.open_dialog) {
       var dlgSpec = effect.open_dialog;

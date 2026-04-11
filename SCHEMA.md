@@ -291,6 +291,20 @@ is a single-key map where the key is the operation type.
 - scroll_to: <element_id>
 ```
 
+### Layout Operations
+
+```yaml
+# Tile panes in a horizontal row filling the viewport.
+# Panes with fixed_width keep their width. Panes with collapsed_width
+# keep their current width. Flex panes split the remaining space equally
+# (respecting min_width). All panes are full viewport height. Hidden
+# panes are made visible. Panes are sorted left-to-right by current x.
+- tile: { container: <element_id> }
+
+# Reset all pane positions/sizes to their default_position values
+- reset_layout: { container: <element_id> }
+```
+
 ### Dialog Control
 
 ```yaml
