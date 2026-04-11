@@ -130,6 +130,8 @@ def _style_str(el: dict, theme: dict, state: dict, extra: str = "") -> str:
             parts.append(f"align-items:{_align(val)}")
         elif key == "justify":
             parts.append(f"justify-content:{_justify(val)}")
+        elif key == "aspect_ratio":
+            parts.append(f"aspect-ratio:{val}")
     return f' style="{";".join(parts)}"' if parts else ""
 
 
@@ -402,6 +404,29 @@ def _render_toggle(el, theme, state):
     )
 
 
+def _render_radio_group(el, theme, state):
+    """Render a group of radio buttons or a single radio in a named group."""
+    options = el.get("options", [])
+    group_name = escape(el.get("bind", el.get("group", el.get("id", "radio"))))
+    html = ""
+    for opt in options:
+        if isinstance(opt, dict):
+            opt_id = escape(opt.get("id", ""))
+            opt_label = escape(opt.get("label", ""))
+        else:
+            opt_id = escape(str(opt))
+            opt_label = escape(str(opt))
+        checked = ""
+        input_id = f"{el.get('id', 'rg')}_{opt_id}"
+        html += (
+            f'<div class="form-check form-check-inline" style="min-height:auto;padding-left:20px;margin:0">'
+            f'<input class="form-check-input" type="radio" name="{group_name}"'
+            f' id="{input_id}" value="{opt_id}"{checked}>'
+            f'<label class="form-check-label" for="{input_id}">{opt_label}</label></div>'
+        )
+    return Markup(f'<span{_id_attr(el)}>{html}</span>')
+
+
 def _render_text(el, theme, state):
     content = el.get("content", "")
     if isinstance(content, str) and "{{" in content:
@@ -483,10 +508,10 @@ def _render_canvas(el, theme, state):
 def _render_placeholder(el, theme, state):
     summary = escape(el.get("summary", "Placeholder"))
     desc = escape(el.get("description", ""))
+    base = "border:1px dashed #666;padding:12px;color:#888;text-align:center;font-size:11px;min-height:40px"
     return Markup(
         f'<div{_id_attr(el)} class="jas-placeholder"'
-        f' style="border:1px dashed #666;padding:12px;color:#888;text-align:center;'
-        f'font-size:11px;min-height:40px"'
+        f'{_style_str(el, theme, state, base)}'
         f' title="{desc}"{_data_attrs(el)}>{summary}</div>'
     )
 
@@ -644,6 +669,7 @@ _RENDERERS = {
     "icon_button": _render_icon_button,
     "dropdown": _render_dropdown,
     "toggle": _render_toggle,
+    "radio_group": _render_radio_group,
     "text": _render_text,
     "text_input": _render_text_input,
     "number_input": _render_number_input,
