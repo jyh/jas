@@ -103,12 +103,14 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
         actions_json = json.dumps(ws.get("actions", {}))
         shortcuts_json = json.dumps(ws.get("shortcuts", []))
         positions_json = json.dumps(_pane_configs(ws))
+        icons_json = json.dumps(ws.get("icons", {}))
 
         return render_template("normal.html", ws=ws, menubar_html=menubar_html,
                                layout_html=layout_html, dialogs_html=dialogs_html,
                                state_json=state_json, actions_json=actions_json,
                                shortcuts_json=shortcuts_json,
-                               positions_json=positions_json)
+                               positions_json=positions_json,
+                               icons_json=icons_json)
 
     @app.route("/api/spec/<element_id>")
     def element_spec(element_id):
