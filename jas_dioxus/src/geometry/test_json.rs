@@ -537,7 +537,7 @@ fn parse_points(v: &serde_json::Value) -> Vec<(f64, f64)> {
     }).collect()
 }
 
-fn parse_element(v: &serde_json::Value) -> Element {
+pub fn parse_element(v: &serde_json::Value) -> Element {
     let typ = v["type"].as_str().unwrap_or("");
     let common = parse_common(v);
     match typ {

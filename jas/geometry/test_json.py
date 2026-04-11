@@ -525,6 +525,11 @@ def _parse_selection(lst: list) -> frozenset[ElementSelection]:
 # Document parser (public API)                                        #
 # ------------------------------------------------------------------ #
 
+def parse_element_json(d: dict) -> Element:
+    """Parse a canonical test JSON element dict into an Element."""
+    return _parse_element(d)
+
+
 def test_json_to_document(json_str: str) -> Document:
     """Parse canonical test JSON into a Document.
 

@@ -32,6 +32,8 @@ from algorithms.planar import build as planar_build
 from algorithms.text_layout import layout as text_layout
 from algorithms.path_text_layout import layout_path_text
 from geometry.element import MoveTo, LineTo, CurveTo, QuadTo, ClosePath
+from geometry.measure import Measure, Unit
+from geometry.test_json import parse_element_json
 
 
 def main():
@@ -54,6 +56,8 @@ def main():
     vectors = [v for v in vectors if not v.get("_skip", False)]
 
     runners = {
+        "measure": run_measure,
+        "element_bounds": run_element_bounds,
         "hit_test": run_hit_test,
         "boolean": run_boolean,
         "boolean_normalize": run_boolean_normalize,
@@ -70,6 +74,38 @@ def main():
 
     results = runners[algo](vectors)
     print(json.dumps(results, sort_keys=True), end="")
+
+
+# ---------------------------------------------------------------
+# Measure (unit conversion)
+# ---------------------------------------------------------------
+
+_UNIT_MAP = {
+    "px": Unit.PX, "pt": Unit.PT, "pc": Unit.PC, "in": Unit.IN,
+    "cm": Unit.CM, "mm": Unit.MM, "em": Unit.EM, "rem": Unit.REM,
+}
+
+def run_measure(vectors):
+    results = []
+    for tc in vectors:
+        unit = _UNIT_MAP[tc["unit"]]
+        m = Measure(tc["value"], unit)
+        font_size = tc.get("font_size", 16.0)
+        results.append({"name": tc["name"], "result": m.to_px(font_size)})
+    return results
+
+
+# ---------------------------------------------------------------
+# Element bounds
+# ---------------------------------------------------------------
+
+def run_element_bounds(vectors):
+    results = []
+    for tc in vectors:
+        elem = parse_element_json(tc["element"])
+        x, y, w, h = elem.bounds()
+        results.append({"name": tc["name"], "result": [x, y, w, h]})
+    return results
 
 
 # ---------------------------------------------------------------

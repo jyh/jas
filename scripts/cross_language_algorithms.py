@@ -24,6 +24,8 @@ FIXTURES_DIR = os.path.join(REPO_ROOT, "test_fixtures", "algorithms")
 
 # Algorithm → (comparison strategy, tolerance)
 ALGORITHMS = {
+    "measure":           ("tolerance", 1e-4),
+    "element_bounds":    ("tolerance", 1e-4),
     "hit_test":          ("exact", None),
     "boolean":           ("property_boolean", 0.01),
     "boolean_normalize": ("property_normalize", 0.01),

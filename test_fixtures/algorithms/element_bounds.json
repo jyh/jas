@@ -1,0 +1,54 @@
+[
+  {"name": "line_bounds", "function": "bounds",
+   "element": {"type": "line", "x1": 0.0, "y1": 0.0, "x2": 10.0, "y2": 20.0, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [0.0, 0.0, 10.0, 20.0]},
+
+  {"name": "line_reversed", "function": "bounds",
+   "element": {"type": "line", "x1": 10.0, "y1": 20.0, "x2": 0.0, "y2": 0.0, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [0.0, 0.0, 10.0, 20.0]},
+
+  {"name": "line_with_stroke", "function": "bounds",
+   "element": {"type": "line", "x1": 0.0, "y1": 0.0, "x2": 10.0, "y2": 20.0,
+    "stroke": {"color": {"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 2.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0},
+    "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [-1.0, -1.0, 12.0, 22.0]},
+
+  {"name": "rect_bounds", "function": "bounds",
+   "element": {"type": "rect", "x": 5.0, "y": 10.0, "width": 100.0, "height": 50.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [5.0, 10.0, 100.0, 50.0]},
+
+  {"name": "circle_bounds", "function": "bounds",
+   "element": {"type": "circle", "cx": 50.0, "cy": 50.0, "r": 25.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [25.0, 25.0, 50.0, 50.0]},
+
+  {"name": "ellipse_bounds", "function": "bounds",
+   "element": {"type": "ellipse", "cx": 50.0, "cy": 50.0, "rx": 30.0, "ry": 20.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [20.0, 30.0, 60.0, 40.0]},
+
+  {"name": "polygon_bounds", "function": "bounds",
+   "element": {"type": "polygon", "points": [[0.0, 0.0], [10.0, 0.0], [5.0, 10.0]], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [0.0, 0.0, 10.0, 10.0]},
+
+  {"name": "polyline_bounds", "function": "bounds",
+   "element": {"type": "polyline", "points": [[0.0, 0.0], [10.0, 5.0], [20.0, 0.0]], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [0.0, 0.0, 20.0, 5.0]},
+
+  {"name": "path_line_bounds", "function": "bounds",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 10.0, "y": 20.0}], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [0.0, 0.0, 10.0, 20.0]},
+
+  {"name": "path_cubic_tight_bounds", "function": "bounds",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "C", "x1": 5.0, "y1": 10.0, "x2": 15.0, "y2": 10.0, "x": 20.0, "y": 0.0}], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [0.0, 0.0, 20.0, 7.5]},
+
+  {"name": "empty_path_bounds", "function": "bounds",
+   "element": {"type": "path", "d": [], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [0.0, 0.0, 0.0, 0.0]},
+
+  {"name": "group_bounds", "function": "bounds",
+   "element": {"type": "group", "children": [
+     {"type": "rect", "x": 5.0, "y": 10.0, "width": 100.0, "height": 50.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+     {"type": "ellipse", "cx": 50.0, "cy": 50.0, "rx": 25.0, "ry": 15.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}
+   ], "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [5.0, 10.0, 100.0, 55.0]}
+]

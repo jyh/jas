@@ -453,7 +453,7 @@ private func parsePoints(_ v: Any?) -> [(Double, Double)] {
     }
 }
 
-private func parseElement(_ v: Any?) -> Element {
+public func parseElement(_ v: Any?) -> Element {
     guard let d = v as? [String: Any] else { fatalError("Expected JSON object for element") }
     let typ = d["type"] as? String ?? ""
     let (opacity, transform, locked, visibility) = parseCommon(d)
