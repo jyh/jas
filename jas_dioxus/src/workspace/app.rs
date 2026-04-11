@@ -26,6 +26,8 @@ use super::menu_bar::MenuBarView;
 use super::save_dialog::{SaveAsDialog, SaveAsDialogView};
 use super::dock_panel::{DragState, DockGroupsView, FloatingDocksView};
 use super::toolbar_grid::{ToolbarGrid, TOOLBAR_SLOTS};
+use crate::panels::panel_menu_state::{PanelMenuState, MenuBarState};
+use crate::panels::panel_menu_view::PanelMenuOverlay;
 
 #[component]
 pub fn App() -> Element {
@@ -369,6 +371,11 @@ pub fn App() -> Element {
     let save_as_dialog = use_signal(|| Option::<SaveAsDialog>::None);
     let color_picker_state = use_signal(|| Option::<super::color_picker::ColorPickerState>::None);
 
+    // --- Panel menu context ---
+    let mut panel_menu_sig = use_signal(|| None);
+    use_context_provider(|| PanelMenuState { open: panel_menu_sig });
+    use_context_provider(|| MenuBarState { open_menu });
+
     // --- Build dock nodes ---
     use super::workspace::{DockEdge, DockId, DropTarget};
     #[cfg(target_arch = "wasm32")]
@@ -658,7 +665,6 @@ pub fn App() -> Element {
 
             // ===== Menu bar (full width, top of window) =====
             MenuBarView {
-                open_menu,
                 workspace_submenu_open,
                 save_as_dialog,
             }
@@ -675,6 +681,7 @@ pub fn App() -> Element {
                     let act = act.clone();
                     move |_| {
                         open_menu.set(None);
+                        panel_menu_sig.set(None);
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                             if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                 pl.bring_pane_to_front(toolbar_pane_id);
@@ -741,6 +748,7 @@ pub fn App() -> Element {
                     let act = act.clone();
                     move |_: Event<MouseData>| {
                         open_menu.set(None);
+                        panel_menu_sig.set(None);
                         popup_slot.set(None);
                         if !canvas_maximized {
                             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -859,7 +867,7 @@ pub fn App() -> Element {
                             let chevron = if dock_collapsed { "\u{00BB}" } else { "\u{00AB}" }; // >> or <<
                             rsx! {
                                 div {
-                                    style: "cursor:pointer; font-size:12px; color:{THEME_TEXT_BUTTON}; padding:0 4px;",
+                                    style: "cursor:pointer; font-size:18px; color:{THEME_TEXT_BUTTON}; padding:0 4px; line-height:1;",
                                     title: "Collapse",
                                     onmousedown: move |evt: Event<MouseData>| {
                                         evt.stop_propagation();
@@ -942,6 +950,9 @@ pub fn App() -> Element {
             FloatingDocksView {}
 
             } // close pane container div
+
+            // Panel menu overlay (z-index 1100-1101, above floating docks)
+            PanelMenuOverlay {}
 
             // Save As dialog
             SaveAsDialogView { save_as_dialog }

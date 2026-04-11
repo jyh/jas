@@ -14,17 +14,20 @@ use super::theme::*;
 use crate::document::controller::Controller;
 use crate::geometry::element::Element as GeoElement;
 use crate::geometry::svg::document_to_svg;
+use crate::panels::panel_menu_state::{MenuBarState, PanelMenuState};
 use crate::tools::tool::PASTE_OFFSET;
 
 #[component]
 pub(crate) fn MenuBarView(
-    open_menu: Signal<Option<String>>,
     workspace_submenu_open: Signal<bool>,
     save_as_dialog: Signal<Option<SaveAsDialog>>,
 ) -> Element {
     let act = use_context::<Act>();
     let app = use_context::<AppHandle>();
     let revision = use_context::<Signal<u64>>();
+    let mbs = use_context::<MenuBarState>();
+    let mut panel_menu = use_context::<PanelMenuState>();
+    let open_menu = mbs.open_menu;
 
     // --- Menu dispatch ---
     let dispatch = {
@@ -499,6 +502,7 @@ pub(crate) fn MenuBarView(
                     style: "padding:3px 8px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; user-select:none; border-radius:3px; background:{bg};",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
+                        panel_menu.open.set(None);
                         let name = menu_name_str2.clone();
                         if open_menu() == Some(name.clone()) {
                             open_menu_sig.set(None);

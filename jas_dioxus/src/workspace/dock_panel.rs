@@ -11,8 +11,9 @@ use dioxus::prelude::*;
 use super::app_state::{Act, AppState};
 use super::theme::*;
 use super::workspace::{
-    DockEdge, DockId, DragPayload, DropTarget, GroupAddr, PanelAddr, PanelGroup, WorkspaceLayout,
+    DockEdge, DockId, DragPayload, DropTarget, GroupAddr, PanelAddr, PanelGroup,
 };
+use crate::panels::panel_menu_state::{PanelMenuOpen, PanelMenuState, MenuBarState};
 
 // ---------------------------------------------------------------------------
 // DragState — shared drag signals, provided via context
@@ -43,6 +44,8 @@ pub(crate) fn build_dock_groups(
     mut was_dropped: Signal<bool>,
     mut last_drag_pos: Signal<(f64, f64)>,
     focused: Option<PanelAddr>,
+    mut panel_menu_open: Signal<Option<PanelMenuOpen>>,
+    mut menu_bar_open: Signal<Option<String>>,
 ) -> Vec<Result<VNode, RenderError>> {
     let did = dock_id;
     let group_count = groups.len();
@@ -71,7 +74,7 @@ pub(crate) fn build_dock_groups(
         let tab_nodes: Vec<Result<VNode, RenderError>> = group.panels.iter().enumerate().flat_map(|(pi, &kind)| {
             let act_dragend = act_tabs.clone();
             let act_click = act_tabs.clone();
-            let label = WorkspaceLayout::panel_label(kind);
+            let label = crate::panels::panel_label(kind);
             let is_active = pi == group.active;
             let bg = if is_active { THEME_BG_TAB } else { THEME_BG_TAB_INACTIVE };
             let border_bottom = if is_active { "2px solid #4a4a4a" } else { "2px solid #555" };
@@ -184,10 +187,12 @@ pub(crate) fn build_dock_groups(
             nodes
         }).collect();
 
-        let chevron = if group_collapsed { "\u{25BC}" } else { "\u{25B2}" };
+        let chevron = if group_collapsed { "\u{00BB}" } else { "\u{00AB}" };
         let body_label = group.active_panel()
-            .map(WorkspaceLayout::panel_label)
+            .map(crate::panels::panel_label)
             .unwrap_or("");
+        // Pre-compute active panel info for hamburger menu button
+        let active_panel_info = group.active_panel().map(|kind| (kind, group.active));
 
         // Drop indicator logic
         let show_drop_before = cur_drag.is_some()
@@ -322,7 +327,7 @@ pub(crate) fn build_dock_groups(
                     }
 
                     div {
-                        style: "margin-left:auto; padding:3px 6px; cursor:pointer; font-size:9px; color:{THEME_TEXT_BUTTON}; user-select:none;",
+                        style: "margin-left:auto; padding:3px 6px; cursor:pointer; font-size:18px; color:{THEME_TEXT_BUTTON}; user-select:none; line-height:1;",
                         onclick: {
                             let act = act_chevron.clone();
                             move |_| {
@@ -335,6 +340,34 @@ pub(crate) fn build_dock_groups(
                             }
                         },
                         "{chevron}"
+                    }
+
+                    // Hamburger menu button — hidden when collapsed
+                    if !group_collapsed && active_panel_info.is_some() {
+                        {
+                            let (active_kind, active_idx) = active_panel_info.unwrap();
+                            rsx! {
+                                div {
+                                    style: "padding:3px 6px; cursor:pointer; font-size:18px; color:{THEME_TEXT_BUTTON}; user-select:none; line-height:1;",
+                                    onmousedown: move |evt: Event<MouseData>| {
+                                        evt.stop_propagation();
+                                        let coords = evt.data().page_coordinates();
+                                        let addr = PanelAddr {
+                                            group: GroupAddr { dock_id: did, group_idx: gi },
+                                            panel_idx: active_idx,
+                                        };
+                                        panel_menu_open.set(Some(PanelMenuOpen {
+                                            kind: active_kind,
+                                            addr,
+                                            x: coords.x,
+                                            y: coords.y,
+                                        }));
+                                        menu_bar_open.set(None);
+                                    },
+                                    "\u{2261}" // ≡
+                                }
+                            }
+                        }
                     }
                 } } } // close tab bar div, rsx!, let
 
@@ -364,6 +397,11 @@ pub(crate) fn DockGroupsView() -> Element {
     let act = use_context::<Act>();
     let app = use_context::<Rc<RefCell<AppState>>>();
     let ds = use_context::<DragState>();
+    let pms = use_context::<PanelMenuState>();
+    let mbs = use_context::<MenuBarState>();
+    // Subscribe to revision so we re-render when state changes.
+    let revision = use_context::<Signal<u64>>();
+    let _ = revision();
 
     let st = app.borrow();
     let layout = &st.workspace_layout;
@@ -379,7 +417,7 @@ pub(crate) fn DockGroupsView() -> Element {
                 let act_inner = act_dock.clone();
                 group.panels.iter().enumerate().map(move |(pi, &kind)| {
                     let act = act_inner.clone();
-                    let label = WorkspaceLayout::panel_label(kind);
+                    let label = crate::panels::panel_label(kind);
                     let first_char: String = label.chars().take(1).collect();
                     rsx! {
                         div {
@@ -411,6 +449,8 @@ pub(crate) fn DockGroupsView() -> Element {
                 ds.was_dropped,
                 ds.last_drag_pos,
                 focused_panel,
+                pms.open,
+                mbs.open_menu,
             )
         }
     };
@@ -435,6 +475,11 @@ pub(crate) fn FloatingDocksView() -> Element {
     let act = use_context::<Act>();
     let app = use_context::<Rc<RefCell<AppState>>>();
     let ds = use_context::<DragState>();
+    let pms = use_context::<PanelMenuState>();
+    let mbs = use_context::<MenuBarState>();
+    // Subscribe to revision so we re-render when state changes.
+    let revision = use_context::<Signal<u64>>();
+    let _ = revision();
     let mut title_drag = ds.title_drag;
 
     let st = app.borrow();
@@ -457,6 +502,8 @@ pub(crate) fn FloatingDocksView() -> Element {
             ds.was_dropped,
             ds.last_drag_pos,
             focused_panel,
+            pms.open,
+            mbs.open_menu,
         );
         let z = 900 + layout.z_order.iter().position(|&id| id == fid).unwrap_or(0);
 
