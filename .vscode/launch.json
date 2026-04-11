@@ -39,6 +39,66 @@
             "target": "Jas",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release Jas (JasSwift)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:jas}/JasSwift",
+            "name": "Debug WorkspaceRoundtrip (JasSwift)",
+            "target": "WorkspaceRoundtrip",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug WorkspaceRoundtrip (JasSwift)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:jas}/JasSwift",
+            "name": "Release WorkspaceRoundtrip (JasSwift)",
+            "target": "WorkspaceRoundtrip",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release WorkspaceRoundtrip (JasSwift)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:jas}/JasSwift",
+            "name": "Debug SvgRoundtrip (JasSwift)",
+            "target": "SvgRoundtrip",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug SvgRoundtrip (JasSwift)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:jas}/JasSwift",
+            "name": "Release SvgRoundtrip (JasSwift)",
+            "target": "SvgRoundtrip",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release SvgRoundtrip (JasSwift)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:jas}/JasSwift",
+            "name": "Debug AlgorithmRoundtrip (JasSwift)",
+            "target": "AlgorithmRoundtrip",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug AlgorithmRoundtrip (JasSwift)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:jas}/JasSwift",
+            "name": "Release AlgorithmRoundtrip (JasSwift)",
+            "target": "AlgorithmRoundtrip",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release AlgorithmRoundtrip (JasSwift)"
         }
     ]
 }

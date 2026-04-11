@@ -785,32 +785,114 @@ Make a plan to propagate to other apps.
 # Restart
 
 Here is a description of the workspace.
-
-- The window contains a set of Pane elements. In some cases there mey be a menubar at the top of the window.
+- The window contains a set of Pane elements. In some cases there may be a menubar at the top of the window.
 - A Pane has a PaneConfig that describes its behavior, including whether it is fixed-width, maximized, etc.
 - Panes float within the open area of the window. If there is a menu bar, this is the area below the menu, otherwise it is the entire window.
 - Panes can be moved and resized (fixed-width panes cannot be resized horizontally).
 - Panes snap to each other, and to the open area of the window.
-- When the borders of two panes are snapped together, the border can be moved to resize both adjacent windows. If one of the windows is fixed-width, the other can still be resized, unsnappingg it from the border.
+- When the borders of two panes are snapped together, the border can be moved to resize both adjacent windows.
 - A Pane that is not snapped can also be resized.
 - When two fixed-width Panes are adjacent, their border cannot be moved, even if they are snapped together.
+- When a fixed-width Pane is adjacent to a Pane that is not fixed-width, and the border is dragged, the resize affects only the latter Pane, which should be unsnapped from the border. The implementation should be fixed.
 - When a Pane is being resized and the border approaches a snap, it will snap into place, unless the mouse pulls it away.
+- By default, snap distance is 20px and border hit tolerance is 6px.
 - When a Pane is being moved and it approaches a snap, the window will snap into place, unless the mouse pulls it away.
 - Snap borders are highlighted on mouseover, or when and edge or window snaps into position.
 - Every Pane has a title bar.
+- Every Pane has a z-order that it used to determine drawing order.
+- Clicking a pane brings it to the front. show_pane should bring the pane to the front.
+- A Pane can be hidden. When a Pane is closed, the Pane is hidden, and not drawn.
+- The Window menu contains a list of Pane and Panel elements, with a checkmark next to the elements that are visible. If the menu entry for a Panel is selected, the Panel visibility is toggled. If a Panel is made visible, the Panel Group and Dock that contains it are also made visible. If it is made invisible, then it is hidden from its Panel Group. If the menu entry is for a Pane, the Pane visibility is toggled. If the Pane becomes visible, the z-order should be updated so that it comes to the front.
+- When the outer window, the viewport, is resized, a best effort is made to arrange and resize the Panes to fit within the viewport, for example with proportional scaling with minimum enforcement.
 - There are three main kinds of Pane elements: a Pane for the Toolbar, a Pane for the Canvas container, and a Pane that contains a Dock.
 - the Toolbar pane is fixed-width.
-- the Canvas pane is resizable.
-- a Dock pane contains a list of Panel Group element. It can be collapsed using a small chevron on the titlebar. When a Dock pane is collapsed, it becomes fixed-width, hugging its contents.
+- the container Canvas pane is resizable.
+- The PaneConfig has a double_click_action field (maximize, redock, none). The Canvas container pane sets this to maximize, the Dock to redock, and the toolbar to none. double_click_action should be included in the JSON.
+- When the canvas container is maximized, the title bar should be hidden, and the canvas container covers the entire open part of the window. The maximized canvas container is in the back and cannot be brought forward in z-order. Clicking on the canvas container has no effect on the z-order. Fix the implementation.
+- Double-clicking on the title bar of a floating Dock redocks it. Redock on an already-anchored Dock has no effect. Redocking merges the floating Dock's Panel Groups into the nearest anchored Dock and deletes the floating Dock.
+- If a maximized pane is hidden, it is unmaximized first.
+- a Dock pane contains a list of Panel Group elements. It can be collapsed using a small chevron on the titlebar. When a Dock pane is collapsed, it becomes fixed-width at 36px wide.
 - The Workspace logic described here is generic, it should not depend on the Pane kind. Each Pane has a PaneConfig that describes the specific properties of that Pane.
 - The Pane sizes and positions are saved to a Workspace Layout, which is saved to a file and reloaded in JSON format. 
+- There is a Tile operation that unmaximizes all Pane elements, and snaps them together horizontally.
+- The default layout at startup has 3 panes: a toolbar pane, a canvas container pane, and a dock, tiled in tile_order.
+- All Dock panes, including floating Dock panes, participate in snapping.
+- A Dock is a container element that contains a list of Panel Group elements, from top to bottom.
+- A Panel Group is a tabbed container of Panel elements.
+  When multiple individual panels (like Layers, Color, and Stroke)
+  are stacked on top of each other within a single frame, they form
+  a Panel Group. The UI element at the top that allows you to switch
+  between them is the Tab Bar.
+- A Panel Group can be collapsed into a row just containing tabs of its elements. If any of the tabs is clicked, the Panel Group uncollapses.
+- A Panel Group has a height determined by its contents (to be specified later). If the Panel Group elements do not fit in their containing Dock, the Dock uses a scrollbar.
+- A Panel is a rectangular window that houses specific tools,
+  information, or controls related to a particular task. For example,
+  a color panel might contain the colors of the selected element. A
+  stroke panel could contain the stroke parameters of the selection.
+- Core Functions of a Dock
+   - Anchoring: It provides a "snapping" point. When you drag a panel near the edge of the screen, the dock grabs it and locks it into place.
+   - Management: It allows you to expand or collapse entire groups of tools at once.
+   - Persistent Location: It ensures that every time you open the app, your "Layers" or "Properties" are exactly where you left them.
+- Key Characteristics of a Panel
+   - Modular: It can often be moved, resized, or grouped with other panels.
+   - Persistent: Unlike a pop-up menu that disappears after you click something, a panel stays visible until you manually close or collapse it.
+   - Functional Focus: Each panel usually has a singular purpose. For example, the Layers Panel only handles layer stack management; the Color Panel only handles color selection.
+   - State-Aware: Panels often update in real-time based on what is selected in the main workspace.
+- Panel elements and Panel Group elements can be dragged out of a Dock.
+- When a Panel is dragged into an open area, meaning any area not covered by a Dock, a Panel Group is created to contain it, and a floating Dock to contain the Panel Group.
+- When a Panel Group is dragged into an open area, a floating Dock is created to contain it.
+- A floating Dock can be snapped to other Panes. It is appended to the tile order.
+- Panel and Panel Group elements can be dragged into another Dock into the order closest to where they were dragged.
+- Panel Group elements can be reordered within a dock by dragging.
+- Remove the always_visible flag from the PaneConfig.
+- Remove the closable flag, all panes are closeable. Increment the JSON version number.
+- Remove collapsable from the PaneConfig. A Pane is collapsible if the collapsed_width is not None.
+- If the Panel Group becomes empty, the Panel Group is removed from its Dock. 
+- When the last Panel Group is removed from a floating Dock, the Dock is deleted. Anchored docks are left empty.
+- Replace maximizable in PaneConfig with double_click_action==maximize.
 
-Please read and understand these requirements. Analyze them for inconsistencies and completeness. Make suggestions for improvements, ranking them in priority from high to low. Be ready for a deep dive on an
+Please read and understand these requirements. Analyze them for inconsistencies and completeness. Make suggestions for improvements, ranking them in priority from high to low, and giving each a number. Be ready for a deep dive into any of the suggestions.
 
+[...this was a really good idea...]
+
+# Layout
+
+Let's change the way we save the workspace layout. As the workspace updates, we save the changes to a layout called "Workspace", instead of the currently selected layout. The Workspace menu allows loading a layout. When a layout is loaded, we set it as the currently selected layout, but we save subsequent changes to the "Workspace" layout. Add an item "Save As..." to the Workspace menu that brings up a dialogue box to get the name of a workspace (prefill the dialogue box with the name of the currently selected layout if there is one), and saves the current workspace to that name, and sets the currently selected layout to that workspace. If the user selects an existing layout name, ask for confirmation. If the user selects the name "Workspace", notify them that this is a system workspace that is saved automatically. On startup, the "Workspace" workspace is loaded, if "Workspace" does not exisat, use factory defaults. The "Workspace" workspace does *not* appear in the Workspace menu. Remove the "New Workspace..." and "Reset" entries in the Workspace menu. Add a "Reset to Default" that resets the workspace to factory defaults, and "Revert to Saved" that reloads the current layout. "Revert to Saved" should be enabled only if there is a current layout.
+
+Please read and understand these requirements. Analyze them for inconsistencies and completeness. Make suggestions for improvements, ranking them in priority from high to low, and giving each a number. Be ready for a deep dive into any of the suggestions.
+
+# Tile
+
+Let's set a dynamic tile order. When the Tile menu item is selected, define the tile order of the panes by sorting them based on their position (x, y) and then indexing from left to right to get the tile order. If two panes have the same x, the pane with the larger y is moved to the right. Remove tile_order and tile_width from PaneConfig, and the TileFixed struct, we don't need them. Then, to perform the tiling, the width of fixed-width panes is not changed, we prefer to keep the current width for panes that are KeepCurrent, and panes with Flex are free to get all the remaining space.
+
+Please read and understand these requirements. Analyze them for inconsistencies and completeness. Make suggestions for improvements, ranking them in priority from high to low, and giving each a number. Be ready for a deep dive into any of the suggestions.
+
+# Update
+
+In Swift, OCaml, and Python, rename the dock source file to workspace, and the dock-layout type to workspace-layout. make a plan.
+
+Add workspace tests to all apps.
+
+Create WORKSPACE.md and add a comprehensive description of the workspace.
+
+Update all .md files.
+
+/clear
+review the codebase
+
+# Cross-language tests
+
+We have 4 apps in 4 languages. I've been thinking it would be great to show that the behavior is equivalent across implementations. This will help keep the implementations in sync, but it can really help with robustness when multiple implementations are compared. For example, it would be great to show that the document functions the same way across apps, or that the workspace has the same logic. If we use SVG+JSON as a common interchange format, we can imagine several types of tests.
+- Equivalence tests: where we show that a functions are identical across languages, that is, given the same input, they produce the same output.
+- Commutativity (the concept from category theory): let's say we have two functions $f$ and $g$ in languages $A$ and $B$, then $g_A(f_B(x)) = g_B(f_A(x))$ for equivalent inputs $x$.
+- I'm not as fond of breakage tests where we show that all app fail on broken input, that gives less information.
+The difficult part about equivalence testing is that comparing the outputs for equivalence can be difficult because semantically equivalent values can be represented in many different ways, for example there are many possible orderings of control points in a rectangle. If we take SVG or JSON as the output format, we want to test for equivalence, and that might be hard.
+
+Please read and understand these goals. What do you think of this idea? Make suggestions and improvements, ranking them in priority from high to low, and giving each a number. Be ready for a deep dive into any of the suggestions.
 
 # Colors
 
-Colors should support RGB, HSB, and CMYK.
+Element colors should support RGB, HSB, and CMYK.
 
 # Fill and Stroke tool
 
@@ -828,3 +910,5 @@ If either square contains a question marfk, it means that the selection contains
 If either square contains a white box with a red diagonal line, it means "None." This is different from the color white; it means the object is completely see-through in that area.
 
 Setting the color in the fill square sets the fill color of all elements in the selection. Setting the color in the stroke square sets the stroke color of all paths in the selection.
+
+Please read and understand these requirements. Analyze them for inconsistencies and completeness. Make suggestions for improvements, ranking them in priority from high to low, and giving each a number. Be ready for a deep dive into any of the suggestions.
