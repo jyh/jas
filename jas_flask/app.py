@@ -90,14 +90,8 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
                 'href="/" id="mode-toggle">Normal',
             )
 
-        # Render layout
-        layout_html = render_element(ws.get("layout", {}), theme, state, mode=mode)
-
-        if mode == "wireframe":
-            return render_template("wireframe.html", ws=ws, menubar_html=menubar_html,
-                                   layout_html=layout_html)
-
-        # Normal mode
+        # Both modes render the same layout in normal mode
+        layout_html = render_element(ws.get("layout", {}), theme, state, mode="normal")
         dialogs_html = render_dialogs(ws.get("dialogs", {}), theme, state)
         state_json = json.dumps(_state_defaults(ws))
         actions_json = json.dumps(ws.get("actions", {}))
@@ -106,7 +100,8 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
         icons_json = json.dumps(ws.get("icons", {}))
         theme_json = json.dumps(ws.get("theme", {}))
 
-        return render_template("normal.html", ws=ws, menubar_html=menubar_html,
+        template = "wireframe.html" if mode == "wireframe" else "normal.html"
+        return render_template(template, ws=ws, menubar_html=menubar_html,
                                layout_html=layout_html, dialogs_html=dialogs_html,
                                state_json=state_json, actions_json=actions_json,
                                shortcuts_json=shortcuts_json,

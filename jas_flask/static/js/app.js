@@ -556,6 +556,7 @@
     if (s.min_height) styles.push("min-height:" + s.min_height + "px");
     if (s.width) styles.push("width:" + s.width + "px");
     if (s.height) styles.push("height:" + s.height + "px");
+    if (s.aspect_ratio) styles.push("aspect-ratio:" + s.aspect_ratio);
     if (s.border) styles.push("border:" + resolve(s.border, ctx));
     if (s.gap != null) styles.push("gap:" + s.gap + "px");
     if (s.alignment) {
@@ -832,6 +833,12 @@
 
   document.addEventListener("keydown", function (e) {
     if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
+    // ESC toggles wireframe mode
+    if (e.key === "Escape") {
+      e.preventDefault();
+      document.body.classList.toggle("wireframe-active");
+      return;
+    }
     var pressed = buildKeyString(e);
     for (var i = 0; i < shortcuts.length; i++) {
       var s = shortcuts[i];
