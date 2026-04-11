@@ -10,8 +10,10 @@ from PySide6.QtWidgets import (
 from canvas.canvas import CanvasWidget
 from canvas.pane_rendering import compute_pane_geometries, compute_shared_borders, compute_snap_lines
 from document.controller import Controller
+from geometry.element import Fill, RgbColor, Stroke
 from menu.menu import create_menus
 from document.model import Model
+from tools.color_picker import ColorPickerDialog
 from tools.toolbar import Tool, Toolbar
 from workspace.pane import PaneKind, EdgeSide
 
@@ -216,6 +218,18 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_Backspace), self, self._delete_selection)
         QShortcut(QKeySequence.StandardKey.Undo, self, self._undo)
         QShortcut(QKeySequence.StandardKey.Redo, self, self._redo)
+        QShortcut(QKeySequence("D"), self, self._reset_fill_stroke_defaults)
+        QShortcut(QKeySequence("X"), self, self._toggle_fill_on_top)
+        QShortcut(QKeySequence("Shift+X"), self, self._swap_fill_stroke)
+
+        # Wire fill/stroke widget signals
+        fs = self.toolbar.fill_stroke_widget
+        fs.default_clicked.connect(self._reset_fill_stroke_defaults)
+        fs.swap_clicked.connect(self._swap_fill_stroke)
+        fs.fill_double_clicked.connect(lambda: self._open_color_picker(for_fill=True))
+        fs.stroke_double_clicked.connect(lambda: self._open_color_picker(for_fill=False))
+        fs.fill_none_clicked.connect(self._set_fill_none)
+        fs.stroke_none_clicked.connect(self._set_stroke_none)
 
     def _refresh_pane_positions(self):
         """Position all pane frames from PaneLayout coordinates."""
@@ -579,6 +593,13 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
+    def _active_tool_captures_keyboard(self) -> bool:
+        """Return True if the active canvas tool is capturing keyboard input."""
+        canvas = self.tab_widget.currentWidget()
+        if isinstance(canvas, CanvasWidget) and canvas._active_tool.captures_keyboard():
+            return True
+        return False
+
     def _delete_selection(self):
         m = self.active_model()
         if not m:
@@ -587,6 +608,123 @@ class MainWindow(QMainWindow):
         if doc.selection:
             m.snapshot()
             m.document = doc.delete_selection()
+
+    def _reset_fill_stroke_defaults(self):
+        """Reset fill/stroke to defaults (white fill, 1pt black stroke)."""
+        if self._active_tool_captures_keyboard():
+            return
+        m = self.active_model()
+        if m:
+            m.default_fill = Fill(color=RgbColor(1.0, 1.0, 1.0))
+            m.default_stroke = Stroke(color=RgbColor(0, 0, 0))
+            m.fill_on_top = True
+            canvas = self.tab_widget.currentWidget()
+            if isinstance(canvas, CanvasWidget) and m.document.selection:
+                m.snapshot()
+                canvas._controller.set_selection_fill(m.default_fill)
+                canvas._controller.set_selection_stroke(m.default_stroke)
+        self._sync_fill_stroke_widget()
+
+    def _toggle_fill_on_top(self):
+        """Toggle which color (fill or stroke) is in front."""
+        if self._active_tool_captures_keyboard():
+            return
+        m = self.active_model()
+        if m:
+            m.fill_on_top = not m.fill_on_top
+        self._sync_fill_stroke_widget()
+
+    def _swap_fill_stroke(self):
+        """Swap the fill and stroke colors."""
+        if self._active_tool_captures_keyboard():
+            return
+        m = self.active_model()
+        if m:
+            old_fill = m.default_fill
+            old_stroke = m.default_stroke
+            # Swap: fill color becomes stroke color and vice versa
+            if old_stroke is not None:
+                m.default_fill = Fill(color=old_stroke.color)
+            else:
+                m.default_fill = None
+            if old_fill is not None:
+                m.default_stroke = Stroke(color=old_fill.color)
+            else:
+                m.default_stroke = None
+            canvas = self.tab_widget.currentWidget()
+            if isinstance(canvas, CanvasWidget) and m.document.selection:
+                m.snapshot()
+                canvas._controller.set_selection_fill(m.default_fill)
+                canvas._controller.set_selection_stroke(m.default_stroke)
+        self._sync_fill_stroke_widget()
+
+    def _set_fill_none(self):
+        """Set fill to none."""
+        m = self.active_model()
+        if m:
+            m.default_fill = None
+            canvas = self.tab_widget.currentWidget()
+            if isinstance(canvas, CanvasWidget) and m.document.selection:
+                m.snapshot()
+                canvas._controller.set_selection_fill(None)
+        self._sync_fill_stroke_widget()
+
+    def _set_stroke_none(self):
+        """Set stroke to none."""
+        m = self.active_model()
+        if m:
+            m.default_stroke = None
+            canvas = self.tab_widget.currentWidget()
+            if isinstance(canvas, CanvasWidget) and m.document.selection:
+                m.snapshot()
+                canvas._controller.set_selection_stroke(None)
+        self._sync_fill_stroke_widget()
+
+    def _open_color_picker(self, for_fill: bool):
+        """Open the color picker dialog for fill or stroke."""
+        m = self.active_model()
+        if not m:
+            return
+        if for_fill:
+            current = m.default_fill
+            initial = current.color if current else RgbColor(1.0, 1.0, 1.0)
+        else:
+            current = m.default_stroke
+            initial = current.color if current else RgbColor(0, 0, 0)
+        dlg = ColorPickerDialog(initial, for_fill=for_fill, parent=self)
+        if dlg.exec():
+            color = dlg.selected_color()
+            if for_fill:
+                m.default_fill = Fill(color=color)
+                canvas = self.tab_widget.currentWidget()
+                if isinstance(canvas, CanvasWidget) and m.document.selection:
+                    m.snapshot()
+                    canvas._controller.set_selection_fill(m.default_fill)
+            else:
+                stroke_width = m.default_stroke.width if m.default_stroke else 1.0
+                m.default_stroke = Stroke(color=color, width=stroke_width)
+                canvas = self.tab_widget.currentWidget()
+                if isinstance(canvas, CanvasWidget) and m.document.selection:
+                    m.snapshot()
+                    canvas._controller.set_selection_stroke(m.default_stroke)
+            self._sync_fill_stroke_widget()
+
+    def _sync_fill_stroke_widget(self):
+        """Update the toolbar fill/stroke indicator from the active model."""
+        m = self.active_model()
+        fs = self.toolbar.fill_stroke_widget
+        if m:
+            if m.default_fill is not None:
+                r, g, b, _ = m.default_fill.color.to_rgba()
+                fs.set_fill_color(QColor(round(r * 255), round(g * 255), round(b * 255)))
+            else:
+                fs.set_fill_color(None)
+            if m.default_stroke is not None:
+                r, g, b, _ = m.default_stroke.color.to_rgba()
+                fs.set_stroke_color(QColor(round(r * 255), round(g * 255), round(b * 255)))
+            else:
+                fs.set_stroke_color(None)
+            fs.set_fill_on_top(m.fill_on_top)
 
 
 def main():
