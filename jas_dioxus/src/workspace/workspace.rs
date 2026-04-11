@@ -49,6 +49,16 @@ pub enum PanelKind {
     Properties,
 }
 
+impl PanelKind {
+    /// All panel kinds, for iteration.
+    pub const ALL: &[PanelKind] = &[
+        Self::Layers,
+        Self::Color,
+        Self::Stroke,
+        Self::Properties,
+    ];
+}
+
 /// A group of panels sharing a tab bar.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PanelGroup {
@@ -649,20 +659,6 @@ impl WorkspaceLayout {
     }
 
     // -----------------------------------------------------------------------
-    // Labels
-    // -----------------------------------------------------------------------
-
-    /// Human-readable label for a panel kind.
-    pub fn panel_label(kind: PanelKind) -> &'static str {
-        match kind {
-            PanelKind::Layers => "Layers",
-            PanelKind::Color => "Color",
-            PanelKind::Stroke => "Stroke",
-            PanelKind::Properties => "Properties",
-        }
-    }
-
-    // -----------------------------------------------------------------------
     // Close / show panels
     // -----------------------------------------------------------------------
 
@@ -718,8 +714,7 @@ impl WorkspaceLayout {
 
     /// Return all panel kinds with their visibility, for a Window menu.
     pub fn panel_menu_items(&self) -> Vec<(PanelKind, bool)> {
-        let all = [PanelKind::Layers, PanelKind::Color, PanelKind::Stroke, PanelKind::Properties];
-        all.iter().map(|&k| (k, self.is_panel_visible(k))).collect()
+        PanelKind::ALL.iter().map(|&k| (k, self.is_panel_visible(k))).collect()
     }
 
     // -----------------------------------------------------------------------
@@ -1639,15 +1634,20 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Labels
+    // PanelKind::ALL and label
     // -----------------------------------------------------------------------
 
     #[test]
-    fn panel_label_values() {
-        assert_eq!(WorkspaceLayout::panel_label(PanelKind::Layers), "Layers");
-        assert_eq!(WorkspaceLayout::panel_label(PanelKind::Color), "Color");
-        assert_eq!(WorkspaceLayout::panel_label(PanelKind::Stroke), "Stroke");
-        assert_eq!(WorkspaceLayout::panel_label(PanelKind::Properties), "Properties");
+    fn panel_kind_all_count() {
+        assert_eq!(PanelKind::ALL.len(), 4);
+    }
+
+    #[test]
+    fn panel_kind_all_contains_all_variants() {
+        assert!(PanelKind::ALL.contains(&PanelKind::Layers));
+        assert!(PanelKind::ALL.contains(&PanelKind::Color));
+        assert!(PanelKind::ALL.contains(&PanelKind::Stroke));
+        assert!(PanelKind::ALL.contains(&PanelKind::Properties));
     }
 
     #[test]
