@@ -63,7 +63,7 @@ impl CanvasTool for LineTool {
                     y1: start_y,
                     x2: x,
                     y2: y,
-                    stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+                    stroke: model.default_stroke,
                     common: CommonProps::default(),
                 });
                 Controller::add_element(model, elem);

@@ -1,5 +1,6 @@
 #[allow(dead_code)]
 pub mod app;
+pub mod color_picker;
 pub mod icons;
 pub mod menu;
 #[allow(dead_code)]

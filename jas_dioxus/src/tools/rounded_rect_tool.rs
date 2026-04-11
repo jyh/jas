@@ -65,8 +65,8 @@ impl CanvasTool for RoundedRectTool {
                     height: rh,
                     rx: ROUNDED_RECT_RADIUS,
                     ry: ROUNDED_RECT_RADIUS,
-                    fill: Some(Fill::new(Color::WHITE)),
-                    stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+                    fill: model.default_fill,
+                    stroke: model.default_stroke,
                     common: CommonProps::default(),
                 });
                 Controller::add_element(model, elem);

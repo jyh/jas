@@ -8,6 +8,7 @@
 //! manual callbacks. The Model still owns undo/redo stacks and filename state.
 
 use super::document::Document;
+use crate::geometry::element::{Color, Fill, Stroke};
 
 const MAX_UNDO: usize = 100;
 
@@ -28,6 +29,10 @@ pub struct Model {
     redo_stack: Vec<Document>,
     generation: u64,
     saved_generation: u64,
+    /// Default fill for newly created elements.
+    pub default_fill: Option<Fill>,
+    /// Default stroke for newly created elements.
+    pub default_stroke: Option<Stroke>,
 }
 
 impl Default for Model {
@@ -41,6 +46,8 @@ impl Default for Model {
             redo_stack: Vec::new(),
             generation: 0,
             saved_generation: 0,
+            default_fill: None,
+            default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
         }
     }
 }
@@ -59,6 +66,8 @@ impl Model {
             redo_stack: Vec::new(),
             generation: 0,
             saved_generation: 0,
+            default_fill: None,
+            default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
         }
     }
 

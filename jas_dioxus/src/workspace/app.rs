@@ -12,10 +12,13 @@ use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 use crate::canvas::render;
-use crate::document::controller::Controller;
+use crate::document::controller::{
+    Controller, FillSummary, StrokeSummary,
+    selection_fill_summary, selection_stroke_summary,
+};
 use crate::document::document::ElementSelection;
 use crate::document::model::Model;
-use crate::geometry::element::{translate_element, Element as GeoElement};
+use crate::geometry::element::{translate_element, Color, Fill, Stroke, Element as GeoElement};
 use crate::geometry::svg::{document_to_svg, svg_to_document};
 use crate::tools::direct_selection_tool::DirectSelectionTool;
 use crate::tools::group_selection_tool::GroupSelectionTool;
@@ -38,6 +41,70 @@ use crate::tools::type_on_path_tool::TypeOnPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind, PASTE_OFFSET};
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Fill/Stroke display helpers
+// ---------------------------------------------------------------------------
+
+/// What to show in a fill or stroke square.
+/// Eyedropper SVG icon for the color picker.
+const EYEDROPPER_SVG: &str = r##"<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M13.354 2.646a2.121 2.121 0 0 0-3 0l-1.5 1.5-.708-.708a.5.5 0 0 0-.707.708l.353.353-5.146 5.146A1.5 1.5 0 0 0 2.2 10.5L1.5 14a.5.5 0 0 0 .6.6l3.5-.7a1.5 1.5 0 0 0 .854-.44l5.146-5.146.354.354a.5.5 0 0 0 .707-.708l-.707-.707 1.5-1.5a2.121 2.121 0 0 0 0-3.001zM5.39 12.4a.5.5 0 0 1-.285.147L2.65 13.05l.504-2.454a.5.5 0 0 1 .147-.285L8.5 5.111l1.389 1.389z" fill="#ccc"/></svg>"##;
+
+enum FsDisplay {
+    Color(Color),
+    None,
+    Mixed,
+}
+
+/// CSS background string for a fill/stroke display state.
+fn fs_display_bg(d: &FsDisplay) -> String {
+    match d {
+        FsDisplay::Color(c) => {
+            let (r, g, b, _) = c.to_rgba();
+            format!("rgb({},{},{})", (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)
+        }
+        FsDisplay::None => "linear-gradient(to bottom right, #fff 45%, transparent 45%, transparent 50%, #f00 50%, #f00 55%, transparent 55%, transparent 100%, #fff 100%)".into(),
+        FsDisplay::Mixed => "#888".into(),
+    }
+}
+
+/// Label to show inside the square, if any.
+fn fs_display_label(d: &FsDisplay) -> Option<&'static str> {
+    match d {
+        FsDisplay::Mixed => Some("?"),
+        _ => Option::None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Eyedropper pixel sampling
+// ---------------------------------------------------------------------------
+
+/// Sample a pixel color from the canvas at page coordinates.
+fn sample_pixel_at(page_x: f64, page_y: f64) -> Option<(u8, u8, u8)> {
+    let window = web_sys::window()?;
+    let document = window.document()?;
+    let canvas_el = document.get_element_by_id("jas-canvas")
+        .or_else(|| document.query_selector("canvas").ok().flatten())?;
+    let canvas: HtmlCanvasElement = canvas_el.unchecked_into();
+    let rect = canvas.get_bounding_client_rect();
+    let cx = page_x - rect.left();
+    let cy = page_y - rect.top();
+    if cx < 0.0 || cy < 0.0 || cx > rect.width() || cy > rect.height() {
+        return None;
+    }
+    let ctx: CanvasRenderingContext2d = canvas.get_context("2d").ok()??.unchecked_into();
+    let scale_x = canvas.width() as f64 / rect.width();
+    let scale_y = canvas.height() as f64 / rect.height();
+    let px = (cx * scale_x).round();
+    let py = (cy * scale_y).round();
+    let data = ctx.get_image_data(px, py, 1.0, 1.0).ok()?.data();
+    if data.len() >= 4 {
+        Some((data[0], data[1], data[2]))
+    } else {
+        None
+    }
+}
+
 // Save As dialog state
 // ---------------------------------------------------------------------------
 
@@ -112,6 +179,8 @@ struct AppState {
     active_tool: ToolKind,
     app_config: super::workspace::AppConfig,
     workspace_layout: super::workspace::WorkspaceLayout,
+    /// Which fill/stroke square is on top (active). true = fill, false = stroke.
+    fill_on_top: bool,
 }
 
 impl AppState {
@@ -124,6 +193,7 @@ impl AppState {
             active_tool: ToolKind::Selection,
             app_config,
             workspace_layout,
+            fill_on_top: true,
         }
     }
 
@@ -319,6 +389,70 @@ impl AppState {
             }
         }
         self.active_tool = kind;
+    }
+
+    /// Toggle which fill/stroke square is on top.
+    fn toggle_fill_on_top(&mut self) {
+        self.fill_on_top = !self.fill_on_top;
+    }
+
+    /// Swap default fill and stroke colors (including None).
+    fn swap_fill_stroke(&mut self) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            let old_fill_color = tab.model.default_fill.map(|f| f.color);
+            let old_stroke_color = tab.model.default_stroke.map(|s| s.color);
+            // Swap: fill gets old stroke color, stroke gets old fill color
+            tab.model.default_fill = old_stroke_color.map(Fill::new);
+            tab.model.default_stroke = match old_fill_color {
+                Some(c) => {
+                    let mut s = tab.model.default_stroke.unwrap_or(Stroke::new(c, 1.0));
+                    s.color = c;
+                    Some(s)
+                }
+                None => None,
+            };
+            // Apply to selection
+            let new_fill = tab.model.default_fill;
+            let new_stroke = tab.model.default_stroke;
+            if !tab.model.document().selection.is_empty() {
+                tab.model.snapshot();
+                Controller::set_selection_fill(&mut tab.model, new_fill);
+                Controller::set_selection_stroke(&mut tab.model, new_stroke);
+            }
+        }
+    }
+
+    /// Reset defaults to No Fill + Black Stroke.
+    fn reset_fill_stroke_defaults(&mut self) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            tab.model.default_fill = None;
+            tab.model.default_stroke = Some(Stroke::new(Color::BLACK, 1.0));
+            // Apply to selection
+            if !tab.model.document().selection.is_empty() {
+                tab.model.snapshot();
+                Controller::set_selection_fill(&mut tab.model, None);
+                Controller::set_selection_stroke(&mut tab.model, Some(Stroke::new(Color::BLACK, 1.0)));
+            }
+        }
+    }
+
+    /// Set the active attribute (fill or stroke, per fill_on_top) to None.
+    fn set_active_to_none(&mut self) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            if self.fill_on_top {
+                tab.model.default_fill = None;
+                if !tab.model.document().selection.is_empty() {
+                    tab.model.snapshot();
+                    Controller::set_selection_fill(&mut tab.model, None);
+                }
+            } else {
+                tab.model.default_stroke = None;
+                if !tab.model.document().selection.is_empty() {
+                    tab.model.snapshot();
+                    Controller::set_selection_stroke(&mut tab.model, None);
+                }
+            }
+        }
     }
 
     fn repaint(&self) {
@@ -1134,6 +1268,24 @@ pub fn App() -> Element {
                             }
                     }));
                 }
+                // --- Fill/Stroke shortcuts ---
+                Key::Character(ref c) if c == "d" || c == "D" => {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.reset_fill_stroke_defaults();
+                    }));
+                }
+                Key::Character(ref c) if c == "x" && !cmd => {
+                    // Toggle fill/stroke stacking
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.toggle_fill_on_top();
+                    }));
+                }
+                Key::Character(ref c) if c == "X" && !cmd => {
+                    // Shift+X: swap fill/stroke colors
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        st.swap_fill_stroke();
+                    }));
+                }
                 Key::Delete | Key::Backspace => {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
@@ -1228,6 +1380,25 @@ pub fn App() -> Element {
     }
 
     let active_tool = app.borrow().active_tool;
+    let fill_on_top = app.borrow().fill_on_top;
+
+    // Compute fill/stroke display state for toolbar widget.
+    let (fs_fill_summary, fs_stroke_summary, fs_default_fill, fs_default_stroke) = {
+        let st = app.borrow();
+        let (fill_sum, stroke_sum, df, ds) = if let Some(tab) = st.tab() {
+            let doc = tab.model.document();
+            (
+                selection_fill_summary(doc),
+                selection_stroke_summary(doc),
+                tab.model.default_fill,
+                tab.model.default_stroke,
+            )
+        } else {
+            (FillSummary::NoSelection, StrokeSummary::NoSelection, None, Some(Stroke::new(Color::BLACK, 1.0)))
+        };
+        (fill_sum, stroke_sum, df, ds)
+    };
+
     // Per-frame cursor: tools may override (e.g. Type tool returns the
     // text-insertion SVG when hovering text, and "none" while editing).
     let canvas_cursor: String = {
@@ -1660,6 +1831,8 @@ pub fn App() -> Element {
     let mut open_menu = use_signal(|| Option::<String>::None);
     let mut workspace_submenu_open = use_signal(|| false);
     let mut save_as_dialog = use_signal(|| Option::<SaveAsDialog>::None);
+    let mut color_picker_state = use_signal(|| Option::<super::color_picker::ColorPickerState>::None);
+
 
     let menus = super::menu::MENU_BAR;
 
@@ -2664,6 +2837,218 @@ pub fn App() -> Element {
                     }
                 }
 
+                // --- Fill/Stroke indicator widget ---
+                {
+                    // Determine what to display for fill and stroke
+                    let fill_display = match &fs_fill_summary {
+                        FillSummary::NoSelection => match fs_default_fill {
+                            Some(f) => FsDisplay::Color(f.color),
+                            None => FsDisplay::None,
+                        },
+                        FillSummary::Uniform(Some(f)) => FsDisplay::Color(f.color),
+                        FillSummary::Uniform(None) => FsDisplay::None,
+                        FillSummary::Mixed => FsDisplay::Mixed,
+                    };
+                    let stroke_display = match &fs_stroke_summary {
+                        StrokeSummary::NoSelection => match fs_default_stroke {
+                            Some(s) => FsDisplay::Color(s.color),
+                            None => FsDisplay::None,
+                        },
+                        StrokeSummary::Uniform(Some(s)) => FsDisplay::Color(s.color),
+                        StrokeSummary::Uniform(None) => FsDisplay::None,
+                        StrokeSummary::Mixed => FsDisplay::Mixed,
+                    };
+
+                    let fill_css = fs_display_bg(&fill_display);
+                    let stroke_css = fs_display_bg(&stroke_display);
+                    let fill_label = fs_display_label(&fill_display);
+                    let stroke_label = fs_display_label(&stroke_display);
+                    // Active attribute determines mode button highlight
+                    let active_is_none = if fill_on_top {
+                        matches!(fill_display, FsDisplay::None)
+                    } else {
+                        matches!(stroke_display, FsDisplay::None)
+                    };
+                    let color_btn_bg = if !active_is_none { THEME_BG_TOOLBAR_BTN } else { "transparent" };
+                    let none_btn_bg = if active_is_none { THEME_BG_TOOLBAR_BTN } else { "transparent" };
+
+                    let act_fs = act.clone();
+                    let act_swap = act.clone();
+                    let act_default = act.clone();
+                    let act_none = act.clone();
+                    let act_fill_click = act.clone();
+                    let act_stroke_click = act.clone();
+
+                    rsx! {
+                        div {
+                            style: "padding:8px 4px 4px; border-top:1px solid {THEME_BORDER}; flex-shrink:0;",
+                            // Overlapping squares container
+                            div {
+                                style: "position:relative; width:54px; height:54px; margin:0 auto;",
+                                // Swap arrow (top-right)
+                                div {
+                                    style: "position:absolute; top:0; right:0; cursor:pointer; font-size:11px; color:{THEME_TEXT}; z-index:3; user-select:none; line-height:1;",
+                                    title: "Swap Fill and Stroke (Shift+X)",
+                                    onmousedown: move |evt: Event<MouseData>| {
+                                        evt.stop_propagation();
+                                        (act_swap.borrow_mut())(Box::new(|st: &mut AppState| {
+                                            st.swap_fill_stroke();
+                                        }));
+                                    },
+                                    "\u{21C4}" // ⇄
+                                }
+                                // Default button (bottom-left)
+                                div {
+                                    style: "position:absolute; bottom:0; left:0; width:14px; height:14px; cursor:pointer; z-index:3; user-select:none;",
+                                    title: "Default Fill and Stroke (D)",
+                                    onmousedown: move |evt: Event<MouseData>| {
+                                        evt.stop_propagation();
+                                        (act_default.borrow_mut())(Box::new(|st: &mut AppState| {
+                                            st.reset_fill_stroke_defaults();
+                                        }));
+                                    },
+                                    // Mini fill/stroke icon
+                                    div {
+                                        style: "position:absolute; top:0; left:0; width:9px; height:9px; background:#000; border:1px solid #888;",
+                                    }
+                                    div {
+                                        style: "position:absolute; bottom:0; right:0; width:9px; height:9px; background:#fff; border:1px solid #888;",
+                                    }
+                                }
+                                // Back square (behind)
+                                if fill_on_top {
+                                    // Stroke is behind
+                                    div {
+                                        style: "position:absolute; right:2px; bottom:2px; width:28px; height:28px; border:6px solid {stroke_css}; background:transparent; cursor:pointer; z-index:1; box-sizing:border-box;",
+                                        title: "Stroke",
+                                        onmousedown: move |evt: Event<MouseData>| {
+                                            evt.stop_propagation();
+                                            (act_stroke_click.borrow_mut())(Box::new(|st: &mut AppState| {
+                                                st.fill_on_top = false;
+                                            }));
+                                        },
+                                        if stroke_label.is_some() {
+                                            div {
+                                                style: "width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:{THEME_TEXT};",
+                                                "{stroke_label.unwrap()}"
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Fill is behind
+                                    div {
+                                        style: "position:absolute; left:2px; top:2px; width:28px; height:28px; background:{fill_css}; border:1px solid #888; cursor:pointer; z-index:1; box-sizing:border-box;",
+                                        title: "Fill",
+                                        onmousedown: move |evt: Event<MouseData>| {
+                                            evt.stop_propagation();
+                                            (act_fill_click.borrow_mut())(Box::new(|st: &mut AppState| {
+                                                st.fill_on_top = true;
+                                            }));
+                                        },
+                                        if fill_label.is_some() {
+                                            div {
+                                                style: "width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:{THEME_TEXT};",
+                                                "{fill_label.unwrap()}"
+                                            }
+                                        }
+                                    }
+                                }
+                                // Front square (on top)
+                                if fill_on_top {
+                                    // Fill is on top
+                                    div {
+                                        style: "position:absolute; left:2px; top:2px; width:28px; height:28px; background:{fill_css}; border:1px solid #888; cursor:pointer; z-index:2; box-sizing:border-box;",
+                                        title: "Fill (active)",
+                                        ondoubleclick: {
+                                            let app_dbl = app.clone();
+                                            move |evt: Event<MouseData>| {
+                                                evt.stop_propagation();
+                                                let st = app_dbl.borrow();
+                                                let initial_color = st.tab()
+                                                    .and_then(|t| t.model.default_fill.map(|f| f.color))
+                                                    .unwrap_or(Color::BLACK);
+                                                color_picker_state.set(Some(
+                                                    super::color_picker::ColorPickerState::new(initial_color, true)
+                                                ));
+                                            }
+                                        },
+                                        if fill_label.is_some() {
+                                            div {
+                                                style: "width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:{THEME_TEXT};",
+                                                "{fill_label.unwrap()}"
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Stroke is on top
+                                    div {
+                                        style: "position:absolute; right:2px; bottom:2px; width:28px; height:28px; border:6px solid {stroke_css}; background:transparent; cursor:pointer; z-index:2; box-sizing:border-box;",
+                                        title: "Stroke (active)",
+                                        ondoubleclick: {
+                                            let app_dbl = app.clone();
+                                            move |evt: Event<MouseData>| {
+                                                evt.stop_propagation();
+                                                let st = app_dbl.borrow();
+                                                let initial_color = st.tab()
+                                                    .and_then(|t| t.model.default_stroke.map(|s| s.color))
+                                                    .unwrap_or(Color::BLACK);
+                                                color_picker_state.set(Some(
+                                                    super::color_picker::ColorPickerState::new(initial_color, false)
+                                                ));
+                                            }
+                                        },
+                                        if stroke_label.is_some() {
+                                            div {
+                                                style: "width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:{THEME_TEXT};",
+                                                "{stroke_label.unwrap()}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Mode buttons: Color | Gradient | None
+                            div {
+                                style: "display:flex; gap:2px; margin-top:6px; justify-content:center;",
+                                // Color button
+                                div {
+                                    style: "width:18px; height:18px; background:{color_btn_bg}; border:1px solid {THEME_BORDER}; cursor:pointer; border-radius:2px;",
+                                    title: "Color",
+                                    // Solid color icon
+                                    div {
+                                        style: "margin:3px; width:12px; height:12px; background:linear-gradient(135deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f);",
+                                    }
+                                }
+                                // Gradient button (disabled)
+                                div {
+                                    style: "width:18px; height:18px; background:transparent; border:1px solid {THEME_BORDER}; cursor:default; border-radius:2px; opacity:0.4;",
+                                    title: "Gradient (not implemented)",
+                                    div {
+                                        style: "margin:3px; width:12px; height:12px; background:linear-gradient(to right, #000, #fff);",
+                                    }
+                                }
+                                // None button
+                                div {
+                                    style: "width:18px; height:18px; background:{none_btn_bg}; border:1px solid {THEME_BORDER}; cursor:pointer; border-radius:2px;",
+                                    title: "None",
+                                    onmousedown: move |evt: Event<MouseData>| {
+                                        evt.stop_propagation();
+                                        (act_none.borrow_mut())(Box::new(|st: &mut AppState| {
+                                            st.set_active_to_none();
+                                        }));
+                                    },
+                                    // Red diagonal "none" icon
+                                    div {
+                                        style: "margin:3px; width:12px; height:12px; background:white; position:relative; overflow:hidden;",
+                                        div {
+                                            style: "position:absolute; top:50%; left:-2px; width:16px; height:2px; background:red; transform:rotate(-45deg); transform-origin:center;",
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Toolbar width is not resizable
             }
             } // close toolbar visibility if
@@ -3072,6 +3457,403 @@ pub fn App() -> Element {
                                                 },
                                                 "OK"
                                             }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Color Picker dialog
+            if color_picker_state().is_some() {
+                {
+                    let cp = color_picker_state().unwrap();
+                    let (cr, cg, cb) = cp.rgb_u8();
+                    let swatch_css = format!("rgb({cr},{cg},{cb})");
+                    let hex_val = cp.hex_str();
+                    let (h_val, s_val, b_val) = cp.hsb_vals();
+                    let (cmyk_c, cmyk_m, cmyk_y, cmyk_k) = cp.cmyk_vals();
+                    // Field display: use override if mid-edit, computed otherwise
+                    let dv_h = cp.field_display("H", &format!("{h_val:.0}"));
+                    let dv_s = cp.field_display("S", &format!("{s_val:.0}"));
+                    let dv_b = cp.field_display("B", &format!("{b_val:.0}"));
+                    let dv_r = cp.field_display("R", &format!("{cr}"));
+                    let dv_g = cp.field_display("G", &format!("{cg}"));
+                    let dv_bl = cp.field_display("Bl", &format!("{cb}"));
+                    let dv_c = cp.field_display("C", &format!("{cmyk_c:.0}"));
+                    let dv_m = cp.field_display("M", &format!("{cmyk_m:.0}"));
+                    let dv_y = cp.field_display("Y", &format!("{cmyk_y:.0}"));
+                    let dv_k = cp.field_display("K", &format!("{cmyk_k:.0}"));
+                    let dv_hex = cp.field_display("hex", &hex_val);
+                    // Gradient cursor position (in pixels within 180x180)
+                    let (gx_norm, gy_norm) = cp.gradient_pos();
+                    let gx_px = gx_norm * 180.0;
+                    let gy_px = gy_norm * 180.0;
+                    // Colorbar slider position (in pixels within 180px height)
+                    let cb_pos = cp.colorbar_pos() * 180.0;
+                    // Circle color: use white or black depending on luminance for contrast
+                    let luminance = 0.299 * (cr as f64) + 0.587 * (cg as f64) + 0.114 * (cb as f64);
+                    let circle_color = if luminance > 128.0 { "#000" } else { "#fff" };
+                    let for_fill = cp.for_fill;
+                    let act_ok = act.clone();
+                    let act_cancel = act.clone();
+
+                    let eyedropper_active = cp.eyedropper_active;
+                    let backdrop_cursor = if eyedropper_active {
+                        // Custom SVG cursor: eyedropper with hotspot at tip (bottom-left)
+                        r##"url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M20.354 3.646a3.121 3.121 0 0 0-4.414 0l-2.5 2.5-1.06-1.06a.75.75 0 0 0-1.06 1.06l.53.53L3.6 14.93a2 2 0 0 0-.543 1.02L2 21.5a.75.75 0 0 0 .9.9l5.55-1.06a2 2 0 0 0 1.02-.543l8.25-8.25.53.53a.75.75 0 0 0 1.06-1.06l-1.06-1.06 2.5-2.5a3.121 3.121 0 0 0 0-4.414zM7.93 19.72a.5.5 0 0 1-.255.136L3.7 20.7l.844-3.975a.5.5 0 0 1 .136-.255L13 8.172l2.828 2.828z' fill='%23fff' stroke='%23000' stroke-width='.5'/%3E%3C/svg%3E") 1 23, crosshair"##
+                    } else { "default" };
+
+                    rsx! {
+                        // Eyedropper overlay — full screen, above everything, captures all clicks
+                        if eyedropper_active {
+                            div {
+                                style: "position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:3000; cursor:{backdrop_cursor}; background:rgba(0,0,0,0.01);",
+                                onmousemove: move |evt: Event<MouseData>| {
+                                    let coords = evt.data().page_coordinates();
+                                    let mut cp = color_picker_state().unwrap();
+                                    if let Some((sr, sg, sb)) = sample_pixel_at(coords.x, coords.y) {
+                                        cp.set_rgb(sr, sg, sb);
+                                    }
+                                    color_picker_state.set(Some(cp));
+                                },
+                                onclick: move |evt: Event<MouseData>| {
+                                    evt.stop_propagation();
+                                    let mut cp = color_picker_state().unwrap();
+                                    let coords = evt.data().page_coordinates();
+                                    if let Some((sr, sg, sb)) = sample_pixel_at(coords.x, coords.y) {
+                                        cp.set_rgb(sr, sg, sb);
+                                    }
+                                    cp.eyedropper_active = false;
+                                    color_picker_state.set(Some(cp));
+                                },
+                            }
+                        }
+                        // Dialog backdrop
+                        div {
+                            style: "position:fixed; inset:0; background:rgba(0,0,0,0.15); z-index:2000; display:flex; align-items:center; justify-content:center;",
+                            onmousedown: move |evt: Event<MouseData>| {
+                                evt.stop_propagation();
+                                color_picker_state.set(None);
+                            },
+
+                            div {
+                                style: "background:{THEME_BG}; border:1px solid {THEME_BORDER}; border-radius:8px; padding:16px; box-shadow:0 8px 32px rgba(0,0,0,0.25); min-width:480px;",
+                                onmousedown: move |evt: Event<MouseData>| {
+                                    evt.stop_propagation();
+                                },
+                                onkeydown: move |evt: Event<KeyboardData>| {
+                                    evt.stop_propagation();
+                                },
+
+                                // Title + eyedropper
+                                div {
+                                    style: "font-size:13px; color:{THEME_TEXT}; margin-bottom:12px; display:flex; align-items:center; gap:8px;",
+                                    "Select Color:"
+                                    // Eyedropper button
+                                    {
+                                        let eyedropper_bg = if cp.eyedropper_active { THEME_BG_TOOLBAR_BTN } else { "transparent" };
+                                        rsx! {
+                                            div {
+                                                style: "cursor:pointer; padding:2px 4px; border-radius:3px; background:{eyedropper_bg}; user-select:none; display:flex; align-items:center;",
+                                                title: "Sample a color from the screen",
+                                                onmousedown: move |evt: Event<MouseData>| {
+                                                    evt.stop_propagation();
+                                                    let mut cp = color_picker_state().unwrap();
+                                                    cp.eyedropper_active = !cp.eyedropper_active;
+                                                    color_picker_state.set(Some(cp));
+                                                },
+                                                dangerous_inner_html: EYEDROPPER_SVG,
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Main layout: gradient + colorbar + fields
+                                div {
+                                    style: "display:flex; gap:12px;",
+
+                                    // Left column: gradient + colorbar + Only Web Colors
+                                    div {
+                                        style: "display:flex; flex-direction:column; gap:6px; flex-shrink:0;",
+                                        // Gradient + colorbar row
+                                        div {
+                                            style: "display:flex; gap:4px;",
+                                            // Color gradient
+                                            div {
+                                                style: "width:180px; height:180px; background:linear-gradient(to bottom, transparent, #000), linear-gradient(to right, #fff, {swatch_css}); border:1px solid {THEME_BORDER}; cursor:crosshair; position:relative;",
+                                                onmousedown: move |evt: Event<MouseData>| {
+                                                    evt.stop_propagation();
+                                                    let coords = evt.data().element_coordinates();
+                                                    let x = (coords.x / 180.0).clamp(0.0, 1.0);
+                                                    let y = (coords.y / 180.0).clamp(0.0, 1.0);
+                                                    let mut cp = color_picker_state().unwrap();
+                                                    cp.set_from_gradient(x, y);
+                                                    color_picker_state.set(Some(cp));
+                                                },
+                                                onmousemove: move |evt: Event<MouseData>| {
+                                                    if evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary) {
+                                                        let coords = evt.data().element_coordinates();
+                                                        let x = (coords.x / 180.0).clamp(0.0, 1.0);
+                                                        let y = (coords.y / 180.0).clamp(0.0, 1.0);
+                                                        let mut cp = color_picker_state().unwrap();
+                                                        cp.set_from_gradient(x, y);
+                                                        color_picker_state.set(Some(cp));
+                                                    }
+                                                },
+                                                // Current color indicator circle
+                                                div {
+                                                    style: "position:absolute; left:{gx_px - 5.0}px; top:{gy_px - 5.0}px; width:10px; height:10px; border-radius:50%; border:1.5px solid {circle_color}; pointer-events:none; box-sizing:border-box;",
+                                                }
+                                            }
+                                            // Colorbar with drag area
+                                            // Wider container captures mouse moves during drag
+                                            div {
+                                                style: "width:32px; height:180px; position:relative; cursor:pointer; flex-shrink:0;",
+                                                onmousedown: move |evt: Event<MouseData>| {
+                                                    evt.stop_propagation();
+                                                    let coords = evt.data().element_coordinates();
+                                                    let t = (coords.y / 180.0).clamp(0.0, 1.0);
+                                                    let mut cp = color_picker_state().unwrap();
+                                                    cp.set_from_colorbar(t);
+                                                    color_picker_state.set(Some(cp));
+                                                },
+                                                onmousemove: move |evt: Event<MouseData>| {
+                                                    if evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary) {
+                                                        let coords = evt.data().element_coordinates();
+                                                        let t = (coords.y / 180.0).clamp(0.0, 1.0);
+                                                        let mut cp = color_picker_state().unwrap();
+                                                        cp.set_from_colorbar(t);
+                                                        color_picker_state.set(Some(cp));
+                                                    }
+                                                },
+                                                // Visible colorbar strip (centered)
+                                                div {
+                                                    style: "position:absolute; left:6px; top:0; width:20px; height:180px; background:linear-gradient(to bottom, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); border:1px solid {THEME_BORDER}; pointer-events:none; box-sizing:border-box;",
+                                                }
+                                                // Slider: left triangle
+                                                div {
+                                                    style: "position:absolute; left:0; top:{cb_pos - 4.0}px; width:0; height:0; border-top:4px solid transparent; border-bottom:4px solid transparent; border-left:5px solid #fff; pointer-events:none;",
+                                                }
+                                                // Slider: right triangle
+                                                div {
+                                                    style: "position:absolute; right:0; top:{cb_pos - 4.0}px; width:0; height:0; border-top:4px solid transparent; border-bottom:4px solid transparent; border-right:5px solid #fff; pointer-events:none;",
+                                                }
+                                            }
+                                        }
+                                        // Only Web Colors checkbox (below gradient)
+                                        div { style: "display:flex; align-items:center; gap:4px; font-size:12px; color:{THEME_TEXT};",
+                                            input {
+                                                r#type: "checkbox",
+                                                checked: cp.web_only,
+                                                onchange: move |_| {
+                                                    let mut cp = color_picker_state().unwrap();
+                                                    cp.web_only = !cp.web_only;
+                                                    if cp.web_only {
+                                                        let (r, g, b) = cp.rgb_u8();
+                                                        cp.set_rgb(r, g, b);
+                                                    }
+                                                    color_picker_state.set(Some(cp));
+                                                },
+                                            }
+                                            "Only Web Colors"
+                                        }
+                                    }
+
+                                    // Fields area
+                                    div {
+                                        style: "display:flex; flex-direction:column; gap:4px; font-size:12px; color:{THEME_TEXT};",
+
+                                        // HSB row with swatch to the right
+                                        div { style: "display:flex; gap:12px; align-items:flex-start;",
+                                            // HSB fields
+                                            div { style: "display:flex; flex-direction:column; gap:4px;",
+                                                div { style: "display:flex; align-items:center; gap:4px;",
+                                                    input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::H,
+                                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::H; color_picker_state.set(Some(cp)); },
+                                                    }
+                                                    "H:"
+                                                    input { r#type: "text", value: "{dv_h}",
+                                                        style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
+                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
+                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (_, s, b) = cp.hsb_vals(); cp.set_hsb(n, s, b); } else { cp.set_input_override("H", v); } color_picker_state.set(Some(cp)); },
+                                                    }
+                                                    "\u{00B0}"
+                                                }
+                                                div { style: "display:flex; align-items:center; gap:4px;",
+                                                    input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::S,
+                                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::S; color_picker_state.set(Some(cp)); },
+                                                    }
+                                                    "S:"
+                                                    input { r#type: "text", value: "{dv_s}",
+                                                        style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
+                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
+                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (h, _, b) = cp.hsb_vals(); cp.set_hsb(h, n, b); } else { cp.set_input_override("S", v); } color_picker_state.set(Some(cp)); },
+                                                    }
+                                                    "%"
+                                                }
+                                                div { style: "display:flex; align-items:center; gap:4px;",
+                                                    input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::B,
+                                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::B; color_picker_state.set(Some(cp)); },
+                                                    }
+                                                    "B:"
+                                                    input { r#type: "text", value: "{dv_b}",
+                                                        style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
+                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
+                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (h, s, _) = cp.hsb_vals(); cp.set_hsb(h, s, n); } else { cp.set_input_override("B", v); } color_picker_state.set(Some(cp)); },
+                                                    }
+                                                    "%"
+                                                }
+                                            }
+                                            // Color swatch preview
+                                            div { style: "width:50px; height:50px; background:{swatch_css}; border:1px solid {THEME_BORDER};" }
+                                        }
+
+                                        // RGB + CMYK side by side
+                                        div { style: "display:flex; gap:16px; align-items:flex-start;",
+                                            // RGB column
+                                            div { style: "display:flex; flex-direction:column; gap:4px;",
+                                                div { style: "display:flex; align-items:center; gap:4px;",
+                                                    input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::R,
+                                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::R; color_picker_state.set(Some(cp)); },
+                                                    }
+                                                    "R:"
+                                                    input { r#type: "text", value: "{dv_r}",
+                                                        style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
+                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
+                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<u8>() { cp.clear_input_override(); let (_, g, b) = cp.rgb_u8(); cp.set_rgb(n, g, b); } else { cp.set_input_override("R", v); } color_picker_state.set(Some(cp)); },
+                                                    }
+                                                }
+                                                div { style: "display:flex; align-items:center; gap:4px;",
+                                                    input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::G,
+                                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::G; color_picker_state.set(Some(cp)); },
+                                                    }
+                                                    "G:"
+                                                    input { r#type: "text", value: "{dv_g}",
+                                                        style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
+                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
+                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<u8>() { cp.clear_input_override(); let (r, _, b) = cp.rgb_u8(); cp.set_rgb(r, n, b); } else { cp.set_input_override("G", v); } color_picker_state.set(Some(cp)); },
+                                                    }
+                                                }
+                                                div { style: "display:flex; align-items:center; gap:4px;",
+                                                    input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::Blue,
+                                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::Blue; color_picker_state.set(Some(cp)); },
+                                                    }
+                                                    "B:"
+                                                    input { r#type: "text", value: "{dv_bl}",
+                                                        style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
+                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
+                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<u8>() { cp.clear_input_override(); let (r, g, _) = cp.rgb_u8(); cp.set_rgb(r, g, n); } else { cp.set_input_override("Bl", v); } color_picker_state.set(Some(cp)); },
+                                                    }
+                                                }
+                                            }
+                                            // CMYK column
+                                            div { style: "display:flex; flex-direction:column; gap:4px;",
+                                                div { style: "display:flex; align-items:center; gap:2px;",
+                                                    "C:"
+                                                    input { r#type: "text", value: "{dv_c}",
+                                                        style: "width:40px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
+                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
+                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (_, m, y, k) = cp.cmyk_vals(); cp.set_cmyk(n, m, y, k); } else { cp.set_input_override("C", v); } color_picker_state.set(Some(cp)); },
+                                                    }
+                                                    "%"
+                                                }
+                                                div { style: "display:flex; align-items:center; gap:2px;",
+                                                    "M:"
+                                                    input { r#type: "text", value: "{dv_m}",
+                                                        style: "width:40px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
+                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
+                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (c, _, y, k) = cp.cmyk_vals(); cp.set_cmyk(c, n, y, k); } else { cp.set_input_override("M", v); } color_picker_state.set(Some(cp)); },
+                                                    }
+                                                    "%"
+                                                }
+                                                div { style: "display:flex; align-items:center; gap:2px;",
+                                                    "Y:"
+                                                    input { r#type: "text", value: "{dv_y}",
+                                                        style: "width:40px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
+                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
+                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (c, m, _, k) = cp.cmyk_vals(); cp.set_cmyk(c, m, n, k); } else { cp.set_input_override("Y", v); } color_picker_state.set(Some(cp)); },
+                                                    }
+                                                    "%"
+                                                }
+                                                div { style: "display:flex; align-items:center; gap:2px;",
+                                                    "K:"
+                                                    input { r#type: "text", value: "{dv_k}",
+                                                        style: "width:40px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
+                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
+                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (c, m, y, _) = cp.cmyk_vals(); cp.set_cmyk(c, m, y, n); } else { cp.set_input_override("K", v); } color_picker_state.set(Some(cp)); },
+                                                    }
+                                                    "%"
+                                                }
+                                            }
+                                        }
+
+                                        // Hex field
+                                        div { style: "display:flex; align-items:center; gap:4px; margin-top:4px;",
+                                            "#"
+                                            input { r#type: "text", value: "{dv_hex}", maxlength: "6",
+                                                style: "width:60px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px; font-family:monospace;",
+                                                onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
+                                                oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); cp.set_hex(&v); if cp.hex_str() != v { cp.set_input_override("hex", v); } else { cp.clear_input_override(); } color_picker_state.set(Some(cp)); },
+                                            }
+                                        }
+                                    }
+
+                                    // Right column: buttons
+                                    div {
+                                        style: "display:flex; flex-direction:column; gap:6px; margin-left:8px;",
+
+                                        // OK button
+                                        div {
+                                            style: "padding:6px 20px; cursor:pointer; font-size:13px; border:1px solid {THEME_BORDER}; border-radius:4px; user-select:none; color:{THEME_TEXT}; text-align:center; background:{THEME_BG_ACTIVE};",
+                                            onmousedown: move |evt: Event<MouseData>| {
+                                                evt.stop_propagation();
+                                                let cp = color_picker_state().unwrap();
+                                                let chosen_color = cp.color();
+                                                let for_fill = cp.for_fill;
+                                                color_picker_state.set(None);
+                                                (act_ok.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                                    if let Some(tab) = st.tab_mut() {
+                                                        if for_fill {
+                                                            tab.model.default_fill = Some(Fill::new(chosen_color));
+                                                            let fill = tab.model.default_fill;
+                                                            if !tab.model.document().selection.is_empty() {
+                                                                tab.model.snapshot();
+                                                                Controller::set_selection_fill(&mut tab.model, fill);
+                                                            }
+                                                        } else {
+                                                            let new_stroke = match tab.model.default_stroke {
+                                                                Some(mut s) => { s.color = chosen_color; Some(s) }
+                                                                None => Some(Stroke::new(chosen_color, 1.0)),
+                                                            };
+                                                            tab.model.default_stroke = new_stroke;
+                                                            if !tab.model.document().selection.is_empty() {
+                                                                tab.model.snapshot();
+                                                                Controller::set_selection_stroke(&mut tab.model, new_stroke);
+                                                            }
+                                                        }
+                                                    }
+                                                }));
+                                            },
+                                            "OK"
+                                        }
+
+                                        // Cancel button
+                                        div {
+                                            style: "padding:6px 20px; cursor:pointer; font-size:13px; border:1px solid {THEME_BORDER}; border-radius:4px; user-select:none; color:{THEME_TEXT}; text-align:center;",
+                                            onmousedown: move |evt: Event<MouseData>| {
+                                                evt.stop_propagation();
+                                                color_picker_state.set(None);
+                                            },
+                                            "Cancel"
+                                        }
+
+                                        // Color Swatches button (disabled)
+                                        div {
+                                            style: "padding:6px 12px; font-size:12px; border:1px solid {THEME_BORDER}; border-radius:4px; user-select:none; color:{THEME_TEXT_DIM}; text-align:center; opacity:0.5; cursor:default;",
+                                            "Color Swatches"
                                         }
                                     }
                                 }

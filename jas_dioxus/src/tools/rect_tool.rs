@@ -62,8 +62,8 @@ impl CanvasTool for RectTool {
                     height: rh,
                     rx: 0.0,
                     ry: 0.0,
-                    fill: Some(Fill::new(Color::WHITE)),
-                    stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+                    fill: model.default_fill,
+                    stroke: model.default_stroke,
                     common: CommonProps::default(),
                 });
                 Controller::add_element(model, elem);
@@ -143,6 +143,23 @@ mod tests {
             assert_eq!(r.y, 20.0);
             assert_eq!(r.width, 90.0);
             assert_eq!(r.height, 60.0);
+        } else {
+            panic!("expected Rect element");
+        }
+    }
+
+    #[test]
+    fn rect_uses_model_defaults() {
+        let mut tool = RectTool::new();
+        let mut model = Model::default();
+        model.default_fill = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
+        model.default_stroke = Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 3.0));
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 110.0, 70.0, false, false);
+        let children = model.document().layers[0].children().unwrap();
+        if let Element::Rect(r) = &*children[0] {
+            assert_eq!(r.fill, Some(Fill::new(Color::rgb(1.0, 0.0, 0.0))));
+            assert_eq!(r.stroke, Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 3.0)));
         } else {
             panic!("expected Rect element");
         }
