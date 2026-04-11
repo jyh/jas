@@ -34,14 +34,20 @@ fn css_color(c: &Color) -> String {
     }
 }
 
-fn apply_fill(ctx: &CanvasRenderingContext2d, fill: Option<&Fill>) {
+fn apply_fill(ctx: &CanvasRenderingContext2d, fill: Option<&Fill>) -> f64 {
     match fill {
-        Some(f) => ctx.set_fill_style_str(&css_color(&f.color)),
-        None => ctx.set_fill_style_str("transparent"),
+        Some(f) => {
+            ctx.set_fill_style_str(&css_color(&f.color));
+            f.opacity
+        }
+        None => {
+            ctx.set_fill_style_str("transparent");
+            1.0
+        }
     }
 }
 
-fn apply_stroke(ctx: &CanvasRenderingContext2d, stroke: Option<&Stroke>) {
+fn apply_stroke(ctx: &CanvasRenderingContext2d, stroke: Option<&Stroke>) -> f64 {
     match stroke {
         Some(s) => {
             ctx.set_stroke_style_str(&css_color(&s.color));
@@ -56,10 +62,12 @@ fn apply_stroke(ctx: &CanvasRenderingContext2d, stroke: Option<&Stroke>) {
                 LineJoin::Round => "round",
                 LineJoin::Bevel => "bevel",
             });
+            s.opacity
         }
         None => {
             ctx.set_stroke_style_str("transparent");
             ctx.set_line_width(0.0);
+            1.0
         }
     }
 }
@@ -125,26 +133,30 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
 
     ctx.save();
     apply_transform(ctx, elem.transform());
-    ctx.set_global_alpha(elem.opacity());
+    let base_alpha = elem.opacity();
+    ctx.set_global_alpha(base_alpha);
 
     match elem {
         Element::Line(e) => {
+            let mut stroke_op = 1.0;
             if outline {
                 apply_outline_style(ctx);
             } else {
-                apply_stroke(ctx, e.stroke.as_ref());
+                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
             }
             ctx.begin_path();
             ctx.move_to(e.x1, e.y1);
             ctx.line_to(e.x2, e.y2);
+            ctx.set_global_alpha(base_alpha * stroke_op);
             ctx.stroke();
         }
         Element::Rect(e) => {
+            let (mut fill_op, mut stroke_op) = (1.0, 1.0);
             if outline {
                 apply_outline_style(ctx);
             } else {
-                apply_fill(ctx, e.fill.as_ref());
-                apply_stroke(ctx, e.stroke.as_ref());
+                fill_op = apply_fill(ctx, e.fill.as_ref());
+                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
             }
             let has_fill = !outline && e.fill.is_some();
             let has_stroke = outline || e.stroke.is_some();
@@ -167,59 +179,70 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                 ctx.quadratic_curve_to(x, y, x + rx, y);
                 ctx.close_path();
                 if has_fill {
+                    ctx.set_global_alpha(base_alpha * fill_op);
                     ctx.fill();
                 }
                 if has_stroke {
+                    ctx.set_global_alpha(base_alpha * stroke_op);
                     ctx.stroke();
                 }
             } else {
                 if has_fill {
+                    ctx.set_global_alpha(base_alpha * fill_op);
                     ctx.fill_rect(e.x, e.y, e.width, e.height);
                 }
                 if has_stroke {
+                    ctx.set_global_alpha(base_alpha * stroke_op);
                     ctx.stroke_rect(e.x, e.y, e.width, e.height);
                 }
             }
         }
         Element::Circle(e) => {
+            let (mut fill_op, mut stroke_op) = (1.0, 1.0);
             if outline {
                 apply_outline_style(ctx);
             } else {
-                apply_fill(ctx, e.fill.as_ref());
-                apply_stroke(ctx, e.stroke.as_ref());
+                fill_op = apply_fill(ctx, e.fill.as_ref());
+                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
             }
             ctx.begin_path();
             ctx.arc(e.cx, e.cy, e.r, 0.0, std::f64::consts::TAU).ok();
             if !outline && e.fill.is_some() {
+                ctx.set_global_alpha(base_alpha * fill_op);
                 ctx.fill();
             }
             if outline || e.stroke.is_some() {
+                ctx.set_global_alpha(base_alpha * stroke_op);
                 ctx.stroke();
             }
         }
         Element::Ellipse(e) => {
+            let (mut fill_op, mut stroke_op) = (1.0, 1.0);
             if outline {
                 apply_outline_style(ctx);
             } else {
-                apply_fill(ctx, e.fill.as_ref());
-                apply_stroke(ctx, e.stroke.as_ref());
+                fill_op = apply_fill(ctx, e.fill.as_ref());
+                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
             }
             ctx.begin_path();
             ctx.ellipse(e.cx, e.cy, e.rx, e.ry, 0.0, 0.0, std::f64::consts::TAU)
                 .ok();
             if !outline && e.fill.is_some() {
+                ctx.set_global_alpha(base_alpha * fill_op);
                 ctx.fill();
             }
             if outline || e.stroke.is_some() {
+                ctx.set_global_alpha(base_alpha * stroke_op);
                 ctx.stroke();
             }
         }
         Element::Polyline(e) => {
+            let (mut fill_op, mut stroke_op) = (1.0, 1.0);
             if outline {
                 apply_outline_style(ctx);
             } else {
-                apply_fill(ctx, e.fill.as_ref());
-                apply_stroke(ctx, e.stroke.as_ref());
+                fill_op = apply_fill(ctx, e.fill.as_ref());
+                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
             }
             if !e.points.is_empty() {
                 ctx.begin_path();
@@ -228,19 +251,22 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                     ctx.line_to(x, y);
                 }
                 if !outline && e.fill.is_some() {
+                    ctx.set_global_alpha(base_alpha * fill_op);
                     ctx.fill();
                 }
                 if outline || e.stroke.is_some() {
+                    ctx.set_global_alpha(base_alpha * stroke_op);
                     ctx.stroke();
                 }
             }
         }
         Element::Polygon(e) => {
+            let (mut fill_op, mut stroke_op) = (1.0, 1.0);
             if outline {
                 apply_outline_style(ctx);
             } else {
-                apply_fill(ctx, e.fill.as_ref());
-                apply_stroke(ctx, e.stroke.as_ref());
+                fill_op = apply_fill(ctx, e.fill.as_ref());
+                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
             }
             if !e.points.is_empty() {
                 ctx.begin_path();
@@ -250,31 +276,37 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                 }
                 ctx.close_path();
                 if !outline && e.fill.is_some() {
+                    ctx.set_global_alpha(base_alpha * fill_op);
                     ctx.fill();
                 }
                 if outline || e.stroke.is_some() {
+                    ctx.set_global_alpha(base_alpha * stroke_op);
                     ctx.stroke();
                 }
             }
         }
         Element::Path(e) => {
+            let (mut fill_op, mut stroke_op) = (1.0, 1.0);
             if outline {
                 apply_outline_style(ctx);
             } else {
-                apply_fill(ctx, e.fill.as_ref());
-                apply_stroke(ctx, e.stroke.as_ref());
+                fill_op = apply_fill(ctx, e.fill.as_ref());
+                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
             }
             ctx.begin_path();
             build_path(ctx, &e.d);
             if !outline && e.fill.is_some() {
+                ctx.set_global_alpha(base_alpha * fill_op);
                 ctx.fill();
             }
             if outline || e.stroke.is_some() {
+                ctx.set_global_alpha(base_alpha * stroke_op);
                 ctx.stroke();
             }
         }
         Element::Text(e) => {
-            apply_fill(ctx, e.fill.as_ref());
+            let fill_op = apply_fill(ctx, e.fill.as_ref());
+            ctx.set_global_alpha(base_alpha * fill_op);
             let font = format!("{} {} {}px {}", e.font_style, e.font_weight, e.font_size, e.font_family);
             ctx.set_font(&font);
             let measure = crate::tools::text_measure::make_measurer(&font, e.font_size);
@@ -302,7 +334,8 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
 
             // Draw text along the path
             if !e.content.is_empty() && !e.d.is_empty() {
-                apply_fill(ctx, e.fill.as_ref());
+                let fill_op = apply_fill(ctx, e.fill.as_ref());
+                ctx.set_global_alpha(base_alpha * fill_op);
                 let font = format!(
                     "{} {} {}px {}",
                     e.font_style, e.font_weight, e.font_size, e.font_family

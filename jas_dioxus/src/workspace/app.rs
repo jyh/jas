@@ -1184,7 +1184,7 @@ pub fn App() -> Element {
 
     // Dock drag-and-drop state.
     let drag_source = use_signal(|| Option::<super::workspace::DragPayload>::None);
-    let drop_target_sig = use_signal(|| Option::<super::workspace::DropTarget>::None);
+    let mut drop_target_sig = use_signal(|| Option::<super::workspace::DropTarget>::None);
     let was_dropped = use_signal(|| false);
     let mut last_drag_pos = use_signal(|| (0.0f64, 0.0f64));
     // Floating dock title bar drag (dock_id, offset_x, offset_y).

@@ -122,6 +122,7 @@ fn fill_json(fill: &Option<Fill>) -> String {
         Some(f) => {
             let mut o = JsonObj::new();
             o.raw("color", color_json(&f.color));
+            o.num("opacity", f.opacity);
             o.build()
         }
     }
@@ -135,6 +136,7 @@ fn stroke_json(stroke: &Option<Stroke>) -> String {
             o.raw("color", color_json(&s.color));
             o.str_val("linecap", linecap_str(s.linecap));
             o.str_val("linejoin", linejoin_str(s.linejoin));
+            o.num("opacity", s.opacity);
             o.num("width", s.width);
             o.build()
         }
@@ -451,7 +453,10 @@ fn parse_color(v: &serde_json::Value) -> Color {
 
 fn parse_fill(v: &serde_json::Value) -> Option<Fill> {
     if v.is_null() { return None; }
-    Some(Fill::new(parse_color(&v["color"])))
+    Some(Fill {
+        color: parse_color(&v["color"]),
+        opacity: v["opacity"].as_f64().unwrap_or(1.0),
+    })
 }
 
 fn parse_stroke(v: &serde_json::Value) -> Option<Stroke> {
@@ -466,7 +471,7 @@ fn parse_stroke(v: &serde_json::Value) -> Option<Stroke> {
         "bevel" => LineJoin::Bevel,
         _ => LineJoin::Miter,
     };
-    Some(Stroke { color: parse_color(&v["color"]), width: parse_f(&v["width"]), linecap: lc, linejoin: lj })
+    Some(Stroke { color: parse_color(&v["color"]), width: parse_f(&v["width"]), linecap: lc, linejoin: lj, opacity: v["opacity"].as_f64().unwrap_or(1.0) })
 }
 
 fn parse_transform(v: &serde_json::Value) -> Option<Transform> {
@@ -696,7 +701,7 @@ mod tests {
         });
         let json = element_json(&rect);
         assert!(json.contains("\"type\":\"rect\""));
-        assert!(json.contains("\"fill\":{\"color\":{\"a\":1.0,\"b\":0.0,\"g\":0.0,\"r\":1.0,\"space\":\"rgb\"}}"));
+        assert!(json.contains("\"fill\":{\"color\":{\"a\":1.0,\"b\":0.0,\"g\":0.0,\"r\":1.0,\"space\":\"rgb\"},\"opacity\":1.0}"));
         assert!(json.contains("\"stroke\":null"));
     }
 
