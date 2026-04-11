@@ -6,6 +6,8 @@
 /// Reads the fixture file, runs each test vector through the specified
 /// algorithm, and outputs a JSON array of results to stdout.
 
+use jas_dioxus::geometry::measure::{Measure, parse_unit};
+use jas_dioxus::geometry::test_json::parse_element;
 use jas_dioxus::algorithms::boolean::{
     boolean_exclude, boolean_intersect, boolean_subtract, boolean_union, PolygonSet, Ring,
 };
@@ -60,6 +62,8 @@ fn main() {
         .collect();
 
     let results: Vec<Value> = match algo.as_str() {
+        "measure" => run_measure(&vectors),
+        "element_bounds" => run_element_bounds(&vectors),
         "hit_test" => run_hit_test(&vectors),
         "boolean" => run_boolean(&vectors),
         "boolean_normalize" => run_boolean_normalize(&vectors),
@@ -78,6 +82,45 @@ fn main() {
         "{}",
         serde_json::to_string(&results).expect("Failed to serialize results")
     );
+}
+
+// ---------------------------------------------------------------
+// measure (unit conversion)
+// ---------------------------------------------------------------
+
+fn run_measure(vectors: &[Value]) -> Vec<Value> {
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let unit_str = tc["unit"].as_str().unwrap();
+            let value = tc["value"].as_f64().unwrap();
+            let font_size = tc.get("font_size").and_then(|v| v.as_f64()).unwrap_or(16.0);
+            let unit = parse_unit(unit_str).unwrap_or_else(|| {
+                eprintln!("Unknown unit: {}", unit_str);
+                std::process::exit(1);
+            });
+            let m = Measure::new(value, unit);
+            json!({"name": name, "result": m.to_px(font_size)})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// element_bounds
+// ---------------------------------------------------------------
+
+fn run_element_bounds(vectors: &[Value]) -> Vec<Value> {
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let elem_json = &tc["element"];
+            let elem = parse_element(elem_json);
+            let (x, y, w, h) = elem.bounds();
+            json!({"name": name, "result": [x, y, w, h]})
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------

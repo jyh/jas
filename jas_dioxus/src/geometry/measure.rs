@@ -1,6 +1,54 @@
 //! Path measurement utilities: arc lengths, point-at-offset, closest-offset.
+//! Also provides SVG/CSS unit conversion (px, pt, pc, in, cm, mm, em, rem).
 
 use super::element::{flatten_path_commands, PathCommand};
+
+/// SVG/CSS length units.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Unit {
+    Px, Pt, Pc, In, Cm, Mm, Em, Rem,
+}
+
+/// A numeric value paired with a unit of measurement.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Measure {
+    pub value: f64,
+    pub unit: Unit,
+}
+
+impl Measure {
+    pub fn new(value: f64, unit: Unit) -> Self {
+        Self { value, unit }
+    }
+
+    /// Convert to pixels (at 96 DPI).
+    pub fn to_px(&self, font_size: f64) -> f64 {
+        match self.unit {
+            Unit::Px => self.value,
+            Unit::Pt => self.value * 96.0 / 72.0,
+            Unit::Pc => self.value * 96.0 / 72.0 * 12.0,
+            Unit::In => self.value * 96.0,
+            Unit::Cm => self.value * 96.0 / 2.54,
+            Unit::Mm => self.value * 96.0 / 25.4,
+            Unit::Em | Unit::Rem => self.value * font_size,
+        }
+    }
+}
+
+/// Parse a unit name string.
+pub fn parse_unit(s: &str) -> Option<Unit> {
+    match s {
+        "px" => Some(Unit::Px),
+        "pt" => Some(Unit::Pt),
+        "pc" => Some(Unit::Pc),
+        "in" => Some(Unit::In),
+        "cm" => Some(Unit::Cm),
+        "mm" => Some(Unit::Mm),
+        "em" => Some(Unit::Em),
+        "rem" => Some(Unit::Rem),
+        _ => None,
+    }
+}
 
 /// Compute cumulative arc lengths for a polyline.
 pub fn arc_lengths(pts: &[(f64, f64)]) -> Vec<f64> {

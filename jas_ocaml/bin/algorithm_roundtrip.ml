@@ -165,6 +165,34 @@ let all_rings_simple ps =
  * Algorithm runners
  * --------------------------------------------------------------- *)
 
+let parse_unit s = match s with
+  | "px" -> Jas.Measure.Px | "pt" -> Jas.Measure.Pt
+  | "pc" -> Jas.Measure.Pc | "in" -> Jas.Measure.In
+  | "cm" -> Jas.Measure.Cm | "mm" -> Jas.Measure.Mm
+  | "em" -> Jas.Measure.Em | "rem" -> Jas.Measure.Rem
+  | _ -> Printf.eprintf "Unknown unit: %s\n" s; exit 1
+
+let run_element_bounds vectors =
+  List.map (fun tc ->
+    let name = member "name" tc |> to_string in
+    let elem_json = member "element" tc in
+    let elem = Jas.Test_json.parse_element elem_json in
+    let (x, y, w, h) = Jas.Element.bounds elem in
+    `Assoc [("name", `String name); ("result", `List [`Float x; `Float y; `Float w; `Float h])]
+  ) vectors
+
+let run_measure vectors =
+  List.map (fun tc ->
+    let name = member "name" tc |> to_string in
+    let unit_str = member "unit" tc |> to_string in
+    let value = member "value" tc |> to_float_lenient in
+    let font_size = try member "font_size" tc |> to_float_lenient with _ -> 16.0 in
+    let u = parse_unit unit_str in
+    let m = { Jas.Measure.value; unit = u } in
+    let result = Jas.Measure.to_px ~font_size m in
+    `Assoc [("name", `String name); ("result", `Float result)]
+  ) vectors
+
 let run_hit_test vectors =
   List.map (fun tc ->
     let name = member "name" tc |> to_string in
@@ -427,6 +455,8 @@ let () =
   in
   let vectors = List.filter (fun v -> not (is_skipped v)) vectors in
   let results = match algo with
+    | "measure" -> run_measure vectors
+    | "element_bounds" -> run_element_bounds vectors
     | "hit_test" -> run_hit_test vectors
     | "boolean" -> run_boolean vectors
     | "boolean_normalize" -> run_boolean_normalize vectors

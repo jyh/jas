@@ -43,6 +43,8 @@ let activeVectors = vectors.filter { !($0["_skip"] as? Bool ?? false) }
 
 let results: [[String: Any]]
 switch algo {
+case "measure":           results = runMeasure(activeVectors)
+case "element_bounds":    results = runElementBounds(activeVectors)
 case "hit_test":          results = runHitTest(activeVectors)
 case "boolean":           results = runBoolean(activeVectors)
 case "boolean_normalize": results = runBooleanNormalize(activeVectors)
@@ -59,6 +61,40 @@ default:
 let jsonData = try! JSONSerialization.data(withJSONObject: results,
                                             options: [.sortedKeys])
 print(String(data: jsonData, encoding: .utf8)!, terminator: "")
+
+// MARK: - Element Bounds
+
+func runElementBounds(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let elemJson = tc["element"]!
+        let elem = parseElement(elemJson)
+        let b = elem.bounds
+        return ["name": name, "result": [b.x, b.y, b.width, b.height]]
+    }
+}
+
+// MARK: - Measure
+
+func parseUnit(_ s: String) -> JasLib.Unit {
+    switch s {
+    case "px": return .px; case "pt": return .pt; case "pc": return .pc
+    case "in": return .in; case "cm": return .cm; case "mm": return .mm
+    case "em": return .em; case "rem": return .rem
+    default: fputs("Unknown unit: \(s)\n", stderr); exit(1)
+    }
+}
+
+func runMeasure(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let unitStr = tc["unit"] as! String
+        let value = tc["value"] as! Double
+        let fontSize = tc["font_size"] as? Double ?? 16.0
+        let m = Measure(value, parseUnit(unitStr))
+        return ["name": name, "result": m.toPx(fontSize: fontSize)]
+    }
+}
 
 // MARK: - Hit Test
 
