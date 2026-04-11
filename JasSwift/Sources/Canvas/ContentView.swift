@@ -191,7 +191,7 @@ public struct ContentView: View {
         switch geo.kind {
         case .toolbar:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: true,
-                          content: { ToolbarPanel(currentTool: $currentTool) },
+                          content: { ToolbarPanel(currentTool: $currentTool, model: workspace.activeModel) },
                           paneDrag: $paneDrag, edgeResize: $edgeResize, edgeSnappedCoord: $edgeSnappedCoord, snapPreview: $snapPreview)
         case .canvas:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: !(geo.config.doubleClickAction == .maximize && rs.canvasMaximized),
@@ -387,11 +387,14 @@ struct CanvasTab: View {
 
 struct ToolbarPanel: View {
     @Binding var currentTool: Tool
+    var model: Model?
     @State private var arrowSlotTool: Tool = .directSelection
     @State private var penSlotTool: Tool = .pen
     @State private var pencilSlotTool: Tool = .pencil
     @State private var textSlotTool: Tool = .typeTool
     @State private var shapeSlotTool: Tool = .rect
+    @State private var colorPickerState: ColorPickerState?
+    @State private var showColorPicker = false
 
     private let toolbarWidth: CGFloat = 80
 
@@ -440,10 +443,221 @@ struct ToolbarPanel: View {
             .frame(width: toolbarWidth)
             .background(SwiftUI.Color(nsColor: NSColor(white: 0.30, alpha: 1.0)))
 
+            // Fill/Stroke indicator
+            if let model = model {
+                FillStrokeWidget(model: model, onDoubleClick: { forFill in
+                    let initial: Color
+                    if forFill {
+                        initial = model.defaultFill?.color ?? .white
+                    } else {
+                        initial = model.defaultStroke?.color ?? .black
+                    }
+                    colorPickerState = ColorPickerState(color: initial, forFill: forFill)
+                    showColorPicker = true
+                })
+                .padding(.top, 8)
+                .frame(width: toolbarWidth)
+
+                // Mode buttons: Color, Gradient (disabled), None
+                HStack(spacing: 2) {
+                    fillModeButton(label: "C", tooltip: "Color") {
+                        // Set to color mode (ensure non-nil)
+                        if model.fillOnTop {
+                            if model.defaultFill == nil {
+                                model.defaultFill = Fill(color: .white)
+                            }
+                        } else {
+                            if model.defaultStroke == nil {
+                                model.defaultStroke = Stroke(color: .black)
+                            }
+                        }
+                    }
+                    fillModeButton(label: "G", tooltip: "Gradient") {
+                        // Gradient mode -- not yet implemented
+                    }
+                    .disabled(true)
+                    .opacity(0.4)
+                    fillModeButton(label: "/", tooltip: "None") {
+                        // Set to none
+                        if model.fillOnTop {
+                            model.defaultFill = nil
+                        } else {
+                            model.defaultStroke = nil
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            }
+
             Spacer()
         }
         .frame(width: toolbarWidth)
         .background(SwiftUI.Color(nsColor: NSColor(white: 0.25, alpha: 1.0)))
+        .sheet(isPresented: $showColorPicker) {
+            if let cpState = colorPickerState {
+                let originalColor = cpState.color()
+                ColorPickerView(
+                    state: cpState,
+                    onOK: { color in
+                        if let model = model {
+                            if cpState.forFill {
+                                model.defaultFill = Fill(color: color)
+                            } else {
+                                model.defaultStroke = Stroke(color: color)
+                            }
+                        }
+                        showColorPicker = false
+                    },
+                    onCancel: {
+                        showColorPicker = false
+                    },
+                    originalColor: originalColor
+                )
+            }
+        }
+    }
+
+    private func fillModeButton(label: String, tooltip: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            SwiftUI.Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.white)
+                .frame(width: 20, height: 16)
+                .background(SwiftUI.Color(nsColor: NSColor(white: 0.35, alpha: 1.0)))
+                .cornerRadius(2)
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+    }
+}
+
+/// Fill/Stroke overlapping squares widget for the toolbar.
+struct FillStrokeWidget: View {
+    @ObservedObject var model: Model
+    var onDoubleClick: (Bool) -> Void
+
+    private let squareSize: CGFloat = 28
+    private let offset: CGFloat = 10
+    private let totalSize: CGFloat = 46
+
+    var body: some View {
+        ZStack {
+            // Swap arrow (top-right corner)
+            Button(action: swapColors) {
+                SwiftUI.Canvas { context, size in
+                    // Draw a small swap arrow icon
+                    var path = SwiftUI.Path()
+                    path.move(to: CGPoint(x: 2, y: 8))
+                    path.addLine(to: CGPoint(x: 10, y: 8))
+                    path.addLine(to: CGPoint(x: 10, y: 4))
+                    path.addLine(to: CGPoint(x: 14, y: 9))
+                    path.addLine(to: CGPoint(x: 10, y: 14))
+                    path.addLine(to: CGPoint(x: 10, y: 10))
+                    path.addLine(to: CGPoint(x: 2, y: 10))
+                    path.closeSubpath()
+                    context.fill(path, with: .color(.white))
+                }
+                .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.plain)
+            .position(x: totalSize - 4, y: 4)
+
+            // Default reset (bottom-left corner)
+            Button(action: resetDefaults) {
+                SwiftUI.Canvas { context, size in
+                    // Small squares icon for reset
+                    let fillRect = CGRect(x: 0, y: 4, width: 8, height: 8)
+                    context.fill(SwiftUI.Path(fillRect), with: .color(.white))
+                    let strokeRect = CGRect(x: 4, y: 0, width: 8, height: 8)
+                    context.stroke(SwiftUI.Path(strokeRect), with: .color(.white), lineWidth: 1.5)
+                }
+                .frame(width: 14, height: 14)
+            }
+            .buttonStyle(.plain)
+            .position(x: 4, y: totalSize - 4)
+
+            // Background square (behind)
+            fillStrokeSquare(isFill: !model.fillOnTop)
+                .position(x: offset + squareSize / 2, y: offset + squareSize / 2)
+
+            // Foreground square (on top)
+            fillStrokeSquare(isFill: model.fillOnTop)
+                .position(x: squareSize / 2, y: squareSize / 2)
+        }
+        .frame(width: totalSize, height: totalSize)
+    }
+
+    @ViewBuilder
+    private func fillStrokeSquare(isFill: Bool) -> some View {
+        let color: SwiftUI.Color? = isFill
+            ? model.defaultFill.map { swiftColor($0.color) }
+            : model.defaultStroke.map { swiftColor($0.color) }
+
+        ZStack {
+            if let c = color {
+                if isFill {
+                    // Solid fill square
+                    Rectangle()
+                        .fill(c)
+                        .frame(width: squareSize, height: squareSize)
+                        .border(SwiftUI.Color.gray.opacity(0.5), width: 0.5)
+                } else {
+                    // Stroke square: thick border, transparent center
+                    Rectangle()
+                        .fill(SwiftUI.Color(nsColor: NSColor(white: 0.25, alpha: 1.0)))
+                        .frame(width: squareSize, height: squareSize)
+                        .overlay(
+                            Rectangle()
+                                .stroke(c, lineWidth: 5)
+                        )
+                }
+            } else {
+                // None state: white with red diagonal line
+                ZStack {
+                    Rectangle()
+                        .fill(SwiftUI.Color.white)
+                        .frame(width: squareSize, height: squareSize)
+                    SwiftUI.Path { path in
+                        path.move(to: CGPoint(x: 0, y: squareSize))
+                        path.addLine(to: CGPoint(x: squareSize, y: 0))
+                    }
+                    .stroke(SwiftUI.Color.red, lineWidth: 2)
+                    .frame(width: squareSize, height: squareSize)
+                }
+            }
+        }
+        .onTapGesture(count: 2) {
+            onDoubleClick(isFill)
+        }
+        .onTapGesture(count: 1) {
+            // Single click brings this square to front
+            model.fillOnTop = isFill
+        }
+    }
+
+    private func swapColors() {
+        let oldFill = model.defaultFill
+        let oldStroke = model.defaultStroke
+        if let s = oldStroke {
+            model.defaultFill = Fill(color: s.color)
+        } else {
+            model.defaultFill = nil
+        }
+        if let f = oldFill {
+            model.defaultStroke = Stroke(color: f.color)
+        } else {
+            model.defaultStroke = nil
+        }
+    }
+
+    private func resetDefaults() {
+        model.defaultFill = nil
+        model.defaultStroke = Stroke(color: .black)
+    }
+
+    private func swiftColor(_ c: Color) -> SwiftUI.Color {
+        let (r, g, b, a) = c.toRgba()
+        return SwiftUI.Color(nsColor: NSColor(red: r, green: g, blue: b, alpha: a))
     }
 }
 
