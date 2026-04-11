@@ -69,7 +69,7 @@ public struct DockPanelView: View {
     }
 
     private func collapsedIcon(kind: PanelKind, gi: Int, pi: Int) -> some View {
-        let label = WorkspaceLayout.panelLabel(kind)
+        let label = panelLabel(kind)
         let first = String(label.prefix(1))
         return Button(first) {
             workspaceLayout.toggleDockCollapsed(dockId)
@@ -137,6 +137,11 @@ public struct PanelGroupView: View {
 
                 // Collapse chevron
                 chevronButton()
+
+                // Hamburger menu button — hidden when collapsed
+                if !group.collapsed, let activeKind = group.activePanel() {
+                    hamburgerButton(activeKind: activeKind)
+                }
             }
             .frame(maxWidth: .infinity)
             .background(SwiftUI.Color(nsColor: NSColor(white: 0.2, alpha: 1.0))) // #333
@@ -147,7 +152,7 @@ public struct PanelGroupView: View {
             // Panel body (placeholder)
             if !group.collapsed {
                 if let kind = group.activePanel() {
-                    SwiftUI.Text(verbatim: WorkspaceLayout.panelLabel(kind))
+                    SwiftUI.Text(verbatim: panelLabel(kind))
                         .font(.system(size: 12))
                         .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.67, alpha: 1.0))) // #aaa
                         .frame(maxWidth: .infinity, minHeight: 60, alignment: .topLeading)
@@ -193,7 +198,7 @@ public struct PanelGroupView: View {
 
     private func tabButton(pi: Int, kind: PanelKind) -> some View {
         let isActive = pi == group.active
-        let label = WorkspaceLayout.panelLabel(kind)
+        let label = panelLabel(kind)
         let bg = isActive ? NSColor(white: 0.29, alpha: 1.0) : NSColor(white: 0.21, alpha: 1.0) // #4a4a4a / #353535
         return Button(label) {
             workspaceLayout.setActivePanel(PanelAddr(
@@ -211,16 +216,70 @@ public struct PanelGroupView: View {
     }
 
     private func chevronButton() -> some View {
-        let label = group.collapsed ? "\u{25BC}" : "\u{25B2}"
+        let label = group.collapsed ? "\u{00BB}" : "\u{00AB}"
         return Button(label) {
             workspaceLayout.toggleGroupCollapsed(GroupAddr(dockId: dockId, groupIdx: groupIdx))
             workspaceLayout.saveIfNeeded()
         }
-        .font(.system(size: 9))
+        .font(.system(size: 18))
         .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.53, alpha: 1.0))) // #888
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
         .buttonStyle(.plain)
+    }
+
+    private func hamburgerButton(activeKind: PanelKind) -> some View {
+        let addr = PanelAddr(
+            group: GroupAddr(dockId: dockId, groupIdx: groupIdx),
+            panelIdx: group.active
+        )
+        let items = panelMenu(activeKind)
+        return Menu {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                switch item {
+                case .action(let label, let command, _):
+                    Button(label) {
+                        panelDispatch(activeKind, cmd: command, addr: addr, layout: &workspaceLayout)
+                        workspaceLayout.saveIfNeeded()
+                    }
+                case .toggle(let label, let command):
+                    let checked = panelIsChecked(activeKind, cmd: command, layout: workspaceLayout)
+                    Button {
+                        panelDispatch(activeKind, cmd: command, addr: addr, layout: &workspaceLayout)
+                        workspaceLayout.saveIfNeeded()
+                    } label: {
+                        if checked {
+                            SwiftUI.Label(label, systemImage: "checkmark")
+                        } else {
+                            SwiftUI.Text(label)
+                        }
+                    }
+                case .radio(let label, let command, _):
+                    let selected = panelIsChecked(activeKind, cmd: command, layout: workspaceLayout)
+                    Button {
+                        panelDispatch(activeKind, cmd: command, addr: addr, layout: &workspaceLayout)
+                        workspaceLayout.saveIfNeeded()
+                    } label: {
+                        if selected {
+                            SwiftUI.Label(label, systemImage: "checkmark")
+                        } else {
+                            SwiftUI.Text(label)
+                        }
+                    }
+                case .separator:
+                    Divider()
+                }
+            }
+        } label: {
+            SwiftUI.Text(verbatim: "\u{2261}")
+                .font(.system(size: 18))
+                .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.53, alpha: 1.0))) // #888
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 }
 
