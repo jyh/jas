@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use dioxus::prelude::*;
 use wasm_bindgen::prelude::*;
 
-use super::app::{Act, AppState};
+use super::app_state::{Act, AppState};
 use super::icons::toolbar_svg_icon;
 use super::theme::*;
 use crate::tools::tool::ToolKind;

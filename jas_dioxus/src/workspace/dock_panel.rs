@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
-use super::app::{Act, AppState};
+use super::app_state::{Act, AppState};
 use super::theme::*;
 use super::workspace::{
     DockEdge, DockId, DragPayload, DropTarget, GroupAddr, PanelAddr, PanelGroup, WorkspaceLayout,
