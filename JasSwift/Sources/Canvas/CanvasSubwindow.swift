@@ -1171,6 +1171,50 @@ class CanvasNSView: NSView {
         default:
             switch chars {
             case "E": onToolChange?(.pathEraser)
+            case "d", "D":
+                // Reset fill/stroke defaults
+                if let model = controller?.model {
+                    model.defaultFill = nil
+                    model.defaultStroke = Stroke(color: .black)
+                    if !model.document.selection.isEmpty {
+                        model.snapshot()
+                        controller?.setSelectionFill(nil)
+                        controller?.setSelectionStroke(Stroke(color: .black))
+                    }
+                }
+            case "x":
+                // Toggle fillOnTop
+                if !hasCmd {
+                    controller?.model.fillOnTop.toggle()
+                } else {
+                    super.keyDown(with: event)
+                }
+            case "X":
+                // Swap fill and stroke colors (shift+x, no Cmd)
+                if !hasCmd {
+                    if let model = controller?.model {
+                        let oldFill = model.defaultFill
+                        let oldStroke = model.defaultStroke
+                        // Swap: fill color becomes stroke color and vice versa
+                        if let sf = oldStroke {
+                            model.defaultFill = Fill(color: sf.color)
+                        } else {
+                            model.defaultFill = nil
+                        }
+                        if let ff = oldFill {
+                            model.defaultStroke = Stroke(color: ff.color)
+                        } else {
+                            model.defaultStroke = nil
+                        }
+                        if !model.document.selection.isEmpty {
+                            model.snapshot()
+                            controller?.setSelectionFill(model.defaultFill)
+                            controller?.setSelectionStroke(model.defaultStroke)
+                        }
+                    }
+                } else {
+                    super.keyDown(with: event)
+                }
             default:
                 switch chars.lowercased() {
                 case "v": onToolChange?(.selection)

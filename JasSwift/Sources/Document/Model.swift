@@ -20,6 +20,7 @@ public class Model: ObservableObject {
     @Published public var filename: String
     @Published public var defaultFill: Fill? = nil
     @Published public var defaultStroke: Stroke? = Stroke(color: .black)
+    @Published public var fillOnTop: Bool = true
     public private(set) var savedDocument: Document
     private var listeners: [(Document) -> Void] = []
     private var undoStack: [Document] = []
