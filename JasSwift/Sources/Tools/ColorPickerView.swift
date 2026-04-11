@@ -19,50 +19,67 @@ struct ColorPickerView: View {
     private let colorbarHeight: CGFloat = 256
 
     var body: some View {
-        VStack(spacing: 16) {
-            HStack(alignment: .top, spacing: 16) {
-                // 2D gradient
-                gradientView
-                    .frame(width: gradientSize, height: gradientSize)
-
-                // Vertical colorbar
-                colorbarView
-                    .frame(width: colorbarWidth, height: colorbarHeight)
-
-                // Radio buttons and text inputs
-                VStack(alignment: .leading, spacing: 8) {
-                    radioAndInputSection
-                }
-                .frame(width: 200)
+        VStack(spacing: 12) {
+            // Title
+            HStack {
+                SwiftUI.Text("Select Color:")
+                    .foregroundColor(.white)
+                    .font(.system(size: 13))
+                Spacer()
             }
 
-            HStack(spacing: 16) {
-                // Color swatches
-                VStack(spacing: 0) {
-                    // New color
-                    SwiftUI.Rectangle()
-                        .fill(toSwiftUIColor(state.color()))
-                        .frame(width: 60, height: 30)
-                    // Old color
-                    SwiftUI.Rectangle()
-                        .fill(toSwiftUIColor(originalColor))
-                        .frame(width: 60, height: 30)
+            // Main layout: gradient + colorbar + fields + buttons
+            HStack(alignment: .top, spacing: 12) {
+                // Left: gradient + Only Web Colors
+                VStack(spacing: 6) {
+                    HStack(spacing: 4) {
+                        gradientView
+                            .frame(width: gradientSize, height: gradientSize)
+                        colorbarView
+                            .frame(width: colorbarWidth, height: colorbarHeight)
+                    }
+                    HStack {
+                        Toggle("Only Web Colors", isOn: $state.webOnly)
+                            .toggleStyle(.checkbox)
+                            .foregroundColor(.white)
+                            .font(.system(size: 11))
+                        Spacer()
+                    }
                 }
-                .border(SwiftUI.Color.gray, width: 1)
 
-                Toggle("Only Web Colors", isOn: $state.webOnly)
-                    .toggleStyle(.checkbox)
+                // Middle: fields
+                VStack(alignment: .leading, spacing: 4) {
+                    radioAndInputSection
+                }
 
-                Spacer()
+                // Right: swatch + buttons
+                VStack(spacing: 8) {
+                    // Color swatch
+                    VStack(spacing: 0) {
+                        SwiftUI.Rectangle()
+                            .fill(toSwiftUIColor(state.color()))
+                            .frame(width: 60, height: 30)
+                        SwiftUI.Rectangle()
+                            .fill(toSwiftUIColor(originalColor))
+                            .frame(width: 60, height: 30)
+                    }
+                    .border(SwiftUI.Color.gray, width: 1)
 
-                Button("Cancel") { onCancel() }
-                    .keyboardShortcut(.cancelAction)
-                Button("OK") { onOK(state.color()) }
-                    .keyboardShortcut(.defaultAction)
+                    Button("OK") { onOK(state.color()) }
+                        .keyboardShortcut(.defaultAction)
+                        .frame(width: 80)
+                    Button("Cancel") { onCancel() }
+                        .keyboardShortcut(.cancelAction)
+                        .frame(width: 80)
+                    Button("Color Swatches") {}
+                        .disabled(true)
+                        .frame(width: 80)
+                        .font(.system(size: 10))
+                }
             }
         }
         .padding(20)
-        .frame(minWidth: 560, minHeight: 380)
+        .frame(minWidth: 600, minHeight: 400)
         .background(SwiftUI.Color(nsColor: NSColor(white: 0.22, alpha: 1.0)))
     }
 
@@ -190,28 +207,28 @@ struct ColorPickerView: View {
     // MARK: - Radio Buttons and Text Inputs
 
     private var radioAndInputSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             // HSB section
             radioRow(channel: .h, label: "H:", value: hsbBinding(0), suffix: "\u{00B0}")
             radioRow(channel: .s, label: "S:", value: hsbBinding(1), suffix: "%")
             radioRow(channel: .b, label: "B:", value: hsbBinding(2), suffix: "%")
 
-            Divider()
-
-            // RGB section
-            radioRow(channel: .r, label: "R:", value: rgbBinding(0), suffix: "")
-            radioRow(channel: .g, label: "G:", value: rgbBinding(1), suffix: "")
-            radioRow(channel: .blue, label: "B:", value: rgbBinding(2), suffix: "")
-
-            Divider()
-
-            // CMYK section (no radio buttons)
-            cmykRow(label: "C:", index: 0)
-            cmykRow(label: "M:", index: 1)
-            cmykRow(label: "Y:", index: 2)
-            cmykRow(label: "K:", index: 3)
-
-            Divider()
+            // RGB + CMYK side by side
+            HStack(alignment: .top, spacing: 12) {
+                // RGB column
+                VStack(alignment: .leading, spacing: 4) {
+                    radioRow(channel: .r, label: "R:", value: rgbBinding(0), suffix: "")
+                    radioRow(channel: .g, label: "G:", value: rgbBinding(1), suffix: "")
+                    radioRow(channel: .blue, label: "B:", value: rgbBinding(2), suffix: "")
+                }
+                // CMYK column
+                VStack(alignment: .leading, spacing: 4) {
+                    cmykRow(label: "C:", index: 0)
+                    cmykRow(label: "M:", index: 1)
+                    cmykRow(label: "Y:", index: 2)
+                    cmykRow(label: "K:", index: 3)
+                }
+            }
 
             // Hex
             HStack {
