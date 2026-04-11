@@ -116,334 +116,320 @@ let square_edge_touching () : polygon_set = [ [|(10.0, 0.0); (20.0, 0.0); (20.0,
 
 let bowtie () : polygon_set = [ [|(0.0, 0.0); (10.0, 10.0); (10.0, 0.0); (0.0, 10.0)|] ]
 
-(* Test runner *)
+(* Property test helpers *)
 
-let pass = ref 0
-let fail = ref 0
+let property_grid =
+  let pts = ref [] in
+  for i = -2 to 18 do
+    for j = -2 to 18 do
+      pts := (float_of_int i +. 0.5, float_of_int j +. 0.5) :: !pts
+    done
+  done;
+  !pts
 
-let run name f =
-  try
-    f ();
-    incr pass;
-    Printf.printf "  PASS: %s\n" name
-  with e ->
-    incr fail;
-    Printf.printf "  FAIL: %s — %s\n" name (Printexc.to_string e)
+let regions_equal p q =
+  if not (approx_eq (polygon_set_area p) (polygon_set_area q)) then false
+  else if List.exists (fun pt ->
+      point_in_polygon_set p pt <> point_in_polygon_set q pt) property_grid then false
+  else
+    match polygon_set_bbox p, polygon_set_bbox q with
+    | None, None -> true
+    | Some _, None | None, Some _ -> false
+    | Some (a1, a2, a3, a4), Some (b1, b2, b3, b4) ->
+      approx_eq a1 b1 && approx_eq a2 b2 && approx_eq a3 b3 && approx_eq a4 b4
 
-(* Trivial cases *)
+(* Associativity fixtures *)
+
+let venn_a () : polygon_set = [ [|(0., 0.); (10., 0.); (10., 10.); (0., 10.)|] ]
+let venn_b () : polygon_set = [ [|(6., 0.); (16., 0.); (16., 10.); (6., 10.)|] ]
+let venn_c () : polygon_set = [ [|(3., 6.); (13., 6.); (13., 16.); (3., 16.)|] ]
+
+(* Perturbation helpers *)
+
+let perturbed delta : polygon_set * polygon_set =
+  let a : polygon_set = [ [|(0., 0.); (10., 0.); (10., 10.); (0., 10.)|] ] in
+  let b : polygon_set = [ [|(5., delta); (15., delta); (15., 10. +. delta); (5., 10. +. delta)|] ] in
+  (a, b)
+
+let test_perturb delta () =
+  let (a, b) = perturbed delta in
+  let u_area = polygon_set_area (boolean_union a b) in
+  let s_area = polygon_set_area (boolean_subtract a b) in
+  assert (abs_float (u_area -. 150.0) < 0.1);
+  assert (abs_float (s_area -. 50.0) < 0.1)
+
+(* Normalizer helper *)
+
+let total_area ps = List.fold_left (fun s r -> s +. abs_float (ring_signed_area r)) 0.0 ps
 
 let () =
-  Printf.printf "Boolean tests:\n";
-
-  run "union disjoint squares" (fun () ->
-    assert_region (boolean_union (square_a ()) (square_disjoint ())) 200.0
-      ~inside:[(5., 5.); (25., 5.)] ~outside:[(15., 5.); (-1., -1.)]);
-
-  run "intersect disjoint is empty" (fun () ->
-    assert_empty (boolean_intersect (square_a ()) (square_disjoint ())));
-
-  run "subtract disjoint returns a" (fun () ->
-    assert_region (boolean_subtract (square_a ()) (square_disjoint ())) 100.0
-      ~inside:[(5., 5.)] ~outside:[(25., 5.)] ~bbox:(0., 0., 10., 10.));
-
-  run "exclude disjoint is union" (fun () ->
-    assert_region (boolean_exclude (square_a ()) (square_disjoint ())) 200.0
-      ~inside:[(5., 5.); (25., 5.)] ~outside:[(15., 5.)]);
-
-  run "union identical is one" (fun () ->
-    assert_region (boolean_union (square_a ()) (square_a ())) 100.0
-      ~inside:[(5., 5.)] ~outside:[(11., 11.)] ~bbox:(0., 0., 10., 10.));
-
-  run "intersect identical is the polygon" (fun () ->
-    assert_region (boolean_intersect (square_a ()) (square_a ())) 100.0
-      ~inside:[(5., 5.)] ~outside:[(11., 11.)] ~bbox:(0., 0., 10., 10.));
-
-  run "subtract identical is empty" (fun () ->
-    assert_empty (boolean_subtract (square_a ()) (square_a ())));
-
-  run "exclude identical is empty" (fun () ->
-    assert_empty (boolean_exclude (square_a ()) (square_a ())));
-
-  run "union with inner is the outer" (fun () ->
-    assert_region (boolean_union (square_a ()) (square_inside ())) 100.0
-      ~inside:[(5., 5.); (4., 4.)] ~outside:[(11., 11.)] ~bbox:(0., 0., 10., 10.));
-
-  run "intersect with inner is the inner" (fun () ->
-    assert_region (boolean_intersect (square_a ()) (square_inside ())) 16.0
-      ~inside:[(5., 5.)] ~outside:[(2., 2.); (8., 8.)] ~bbox:(3., 3., 4., 4.));
-
-  run "subtract inner creates a hole" (fun () ->
-    assert_region (boolean_subtract (square_a ()) (square_inside ())) 84.0
-      ~inside:[(1., 1.); (9., 9.); (1., 9.); (9., 1.)]
-      ~outside:[(5., 5.)] ~bbox:(0., 0., 10., 10.));
-
-  (* Overlapping *)
-
-  run "union overlapping squares" (fun () ->
-    assert_region (boolean_union (square_a ()) (square_b_overlap ())) 175.0
-      ~inside:[(2., 2.); (12., 12.); (7., 7.)]
-      ~outside:[(2., 12.); (12., 2.)] ~bbox:(0., 0., 15., 15.));
-
-  run "intersect overlapping is 5x5 square" (fun () ->
-    assert_region (boolean_intersect (square_a ()) (square_b_overlap ())) 25.0
-      ~inside:[(7., 7.)] ~outside:[(2., 2.); (12., 12.)] ~bbox:(5., 5., 5., 5.));
-
-  run "subtract overlap leaves L-shape" (fun () ->
-    assert_region (boolean_subtract (square_a ()) (square_b_overlap ())) 75.0
-      ~inside:[(2., 2.); (2., 8.); (8., 2.)]
-      ~outside:[(7., 7.); (12., 12.)] ~bbox:(0., 0., 10., 10.));
-
-  run "exclude overlapping is two L-shapes" (fun () ->
-    assert_region (boolean_exclude (square_a ()) (square_b_overlap ())) 150.0
-      ~inside:[(2., 2.); (12., 12.)] ~outside:[(7., 7.)] ~bbox:(0., 0., 15., 15.));
-
-  (* Touching *)
-
-  run "union edge touching" (fun () ->
-    assert_region (boolean_union (square_a ()) (square_edge_touching ())) 200.0
-      ~inside:[(5., 5.); (15., 5.)] ~outside:[(-1., 5.); (25., 5.)]
-      ~bbox:(0., 0., 20., 10.));
-
-  run "intersect edge touching empty" (fun () ->
-    assert_empty (boolean_intersect (square_a ()) (square_edge_touching ())));
-
-  (* Empty operands *)
-
-  run "union with empty" (fun () ->
-    assert_region (boolean_union (square_a ()) []) 100.0
-      ~inside:[(5., 5.)] ~outside:[(15., 5.)] ~bbox:(0., 0., 10., 10.));
-
-  run "intersect with empty" (fun () ->
-    assert_empty (boolean_intersect (square_a ()) []));
-
-  run "subtract empty from a" (fun () ->
-    assert_region (boolean_subtract (square_a ()) []) 100.0
-      ~inside:[(5., 5.)] ~bbox:(0., 0., 10., 10.));
-
-  run "subtract a from empty" (fun () ->
-    assert_empty (boolean_subtract [] (square_a ())));
-
-  (* Property tests *)
-
-  let property_grid =
-    let pts = ref [] in
-    for i = -2 to 18 do
-      for j = -2 to 18 do
-        pts := (float_of_int i +. 0.5, float_of_int j +. 0.5) :: !pts
-      done
-    done;
-    !pts
-  in
-
-  let regions_equal p q =
-    if not (approx_eq (polygon_set_area p) (polygon_set_area q)) then false
-    else if List.exists (fun pt ->
-        point_in_polygon_set p pt <> point_in_polygon_set q pt) property_grid then false
-    else
-      match polygon_set_bbox p, polygon_set_bbox q with
-      | None, None -> true
-      | Some _, None | None, Some _ -> false
-      | Some (a1, a2, a3, a4), Some (b1, b2, b3, b4) ->
-        approx_eq a1 b1 && approx_eq a2 b2 && approx_eq a3 b3 && approx_eq a4 b4
-  in
-
-  run "union commutative overlapping" (fun () ->
-    let a = square_a () in let b = square_b_overlap () in
-    assert (regions_equal (boolean_union a b) (boolean_union b a)));
-
-  run "intersect commutative overlapping" (fun () ->
-    let a = square_a () in let b = square_b_overlap () in
-    assert (regions_equal (boolean_intersect a b) (boolean_intersect b a)));
-
-  run "exclude commutative overlapping" (fun () ->
-    let a = square_a () in let b = square_b_overlap () in
-    assert (regions_equal (boolean_exclude a b) (boolean_exclude b a)));
-
-  run "decomposition (a-b) ∪ (a∩b) = a" (fun () ->
-    let a = square_a () in let b = square_b_overlap () in
-    let lhs = boolean_union (boolean_subtract a b) (boolean_intersect a b) in
-    assert (regions_equal lhs a));
-
-  run "exclude involution (a⊕b)⊕b = a" (fun () ->
-    let a = square_a () in let b = square_b_overlap () in
-    let result = boolean_exclude (boolean_exclude a b) b in
-    assert (regions_equal result a));
-
-  (* Associativity *)
-
-  let venn_a () : polygon_set = [ [|(0., 0.); (10., 0.); (10., 10.); (0., 10.)|] ] in
-  let venn_b () : polygon_set = [ [|(6., 0.); (16., 0.); (16., 10.); (6., 10.)|] ] in
-  let venn_c () : polygon_set = [ [|(3., 6.); (13., 6.); (13., 16.); (3., 16.)|] ] in
-
-  run "union associative three squares" (fun () ->
-    let lhs = boolean_union (boolean_union (venn_a ()) (venn_b ())) (venn_c ()) in
-    let rhs = boolean_union (venn_a ()) (boolean_union (venn_b ()) (venn_c ())) in
-    assert (regions_equal lhs rhs));
-
-  run "intersect associative three squares" (fun () ->
-    let lhs = boolean_intersect (boolean_intersect (venn_a ()) (venn_b ())) (venn_c ()) in
-    let rhs = boolean_intersect (venn_a ()) (boolean_intersect (venn_b ()) (venn_c ())) in
-    assert (regions_equal lhs rhs));
-
-  run "exclude associative three squares" (fun () ->
-    let lhs = boolean_exclude (boolean_exclude (venn_a ()) (venn_b ())) (venn_c ()) in
-    let rhs = boolean_exclude (venn_a ()) (boolean_exclude (venn_b ()) (venn_c ())) in
-    assert (regions_equal lhs rhs));
-
-  (* Shared-edge regression *)
-
-  run "shared edges all ops" (fun () ->
-    let a : polygon_set = [ [|(0., 0.); (10., 0.); (10., 10.); (0., 10.)|] ] in
-    let b : polygon_set = [ [|(5., 0.); (15., 0.); (15., 10.); (5., 10.)|] ] in
-    assert (approx_eq (polygon_set_area (boolean_union a b)) 150.0);
-    assert (approx_eq (polygon_set_area (boolean_intersect a b)) 50.0);
-    assert (approx_eq (polygon_set_area (boolean_subtract a b)) 50.0);
-    assert (approx_eq (polygon_set_area (boolean_subtract b a)) 50.0);
-    assert (approx_eq (polygon_set_area (boolean_exclude a b)) 100.0));
-
-  (* Self-intersecting bowtie *)
-
-  run "union bowtie with empty is two triangles" (fun () ->
-    let result = boolean_union (bowtie ()) [] in
-    assert (approx_eq (polygon_set_area result) 50.0));
-
-  run "union bowtie with covering rect" (fun () ->
-    let rect : polygon_set = [ [|(0., 0.); (10., 0.); (10., 10.); (0., 10.)|] ] in
-    assert (approx_eq (polygon_set_area (boolean_union (bowtie ()) rect)) 100.0));
-
-  run "intersect bowtie with bottom half" (fun () ->
-    let rect : polygon_set = [ [|(0., 0.); (10., 0.); (10., 5.); (0., 5.)|] ] in
-    let result = boolean_intersect (bowtie ()) rect in
-    assert (approx_eq (polygon_set_area result) 25.0));
-
-  run "subtract rect from bowtie" (fun () ->
-    let rect : polygon_set = [ [|(0., 0.); (10., 0.); (10., 5.); (0., 5.)|] ] in
-    let result = boolean_subtract (bowtie ()) rect in
-    assert (approx_eq (polygon_set_area result) 25.0));
-
-  (* Hole / non-axis-aligned / non-commutativity coverage backported from
-     jas_dioxus/src/algorithms/boolean.rs *)
-
-  run "intersect with holed polygon preserves hole" (fun () ->
-    let donut : polygon_set = [
-      [|(0., 0.); (10., 0.); (10., 10.); (0., 10.)|];
-      [|(3., 3.); (7., 3.); (7., 7.); (3., 7.)|];
-    ] in
-    let clip : polygon_set = [ [|(5., 0.); (10., 0.); (10., 10.); (5., 10.)|] ] in
-    let result = boolean_intersect donut clip in
-    assert_region result 42.0
-      ~inside:[(6., 1.); (8., 8.); (9., 5.)]
-      ~outside:[(5.5, 5.); (1., 1.)]
-      ~bbox:(5., 0., 5., 10.));
-
-  run "triangle intersect square clips corner" (fun () ->
-    let triangle : polygon_set = [ [|(0., 0.); (10., 0.); (0., 10.)|] ] in
-    let result = boolean_intersect (square_a ()) triangle in
-    assert_region result 50.0
-      ~inside:[(1., 1.); (3., 3.)] ~outside:[(8., 8.); (6., 6.)]
-      ~bbox:(0., 0., 10., 10.));
-
-  run "triangle subtract square leaves other triangle" (fun () ->
-    let triangle : polygon_set = [ [|(0., 0.); (10., 0.); (0., 10.)|] ] in
-    let result = boolean_subtract (square_a ()) triangle in
-    assert_region result 50.0
-      ~inside:[(8., 8.); (7., 5.)] ~outside:[(1., 1.); (3., 3.)]
-      ~bbox:(0., 0., 10., 10.));
-
-  run "subtract edge touching returns a unchanged" (fun () ->
-    assert_region (boolean_subtract (square_a ()) (square_edge_touching ())) 100.0
-      ~inside:[(5., 5.)] ~outside:[(15., 5.)] ~bbox:(0., 0., 10., 10.));
-
-  run "subtract is not commutative" (fun () ->
-    let a = square_a () in let b = square_b_overlap () in
-    let ab = boolean_subtract a b in
-    let ba = boolean_subtract b a in
-    assert (not (regions_equal ab ba)));
-
-  run "subtract is not associative" (fun () ->
-    (* (a - b) - b = a - b ; a - (b - b) = a *)
-    let a = square_a () in
-    let b = square_b_overlap () in
-    let c = square_b_overlap () in
-    let lhs = boolean_subtract (boolean_subtract a b) c in
-    let rhs = boolean_subtract a (boolean_subtract b c) in
-    assert (not (regions_equal lhs rhs)));
-
-  (* Perturbation *)
-
-  let perturbed delta : polygon_set * polygon_set =
-    let a : polygon_set = [ [|(0., 0.); (10., 0.); (10., 10.); (0., 10.)|] ] in
-    let b : polygon_set = [ [|(5., delta); (15., delta); (15., 10. +. delta); (5., 10. +. delta)|] ] in
-    (a, b)
-  in
-  let check_perturb delta name =
-    run (Printf.sprintf "perturb %s" name) (fun () ->
-      let (a, b) = perturbed delta in
-      let u_area = polygon_set_area (boolean_union a b) in
-      let s_area = polygon_set_area (boolean_subtract a b) in
-      assert (abs_float (u_area -. 150.0) < 0.1);
-      assert (abs_float (s_area -. 50.0) < 0.1))
-  in
-  check_perturb 1e-15 "1e-15";
-  check_perturb 1e-11 "1e-11";
-  check_perturb 1e-10 "1e-10";
-  check_perturb 1e-8 "1e-8";
-  check_perturb 1e-6 "1e-6";
-  check_perturb 1e-3 "1e-3";
-
-  (* project_onto_segment *)
-
-  run "project_onto_segment horizontal" (fun () ->
-    let p = project_onto_segment (0., 0.) (10., 0.) (5., 1e-11) in
-    assert (p = (5., 0.)));
-
-  run "project_onto_segment vertical" (fun () ->
-    let p = project_onto_segment (5., 0.) (5., 10.) (5. +. 1e-11, 7.) in
-    assert (p = (5., 7.)));
-
-  run "project_onto_segment clamps low" (fun () ->
-    assert (project_onto_segment (0., 0.) (10., 0.) (-5., 0.) = (0., 0.)));
-
-  run "project_onto_segment clamps high" (fun () ->
-    assert (project_onto_segment (0., 0.) (10., 0.) (15., 0.) = (10., 0.)));
-
-  run "project_onto_segment degenerate" (fun () ->
-    assert (project_onto_segment (5., 5.) (5., 5.) (100., 100.) = (5., 5.)));
-
-  run "project_onto_segment diagonal" (fun () ->
-    let p = project_onto_segment (0., 0.) (10., 10.) (5., 5. +. 1e-10) in
-    assert (abs_float (fst p -. 5.) < 1e-10);
-    assert (abs_float (snd p -. 5.) < 1e-10);
-    assert (fst p = snd p));
-
-  (* Normalizer *)
-
-  let total_area ps = List.fold_left (fun s r -> s +. abs_float (ring_signed_area r)) 0.0 ps in
-
-  run "normalize simple square passes through" (fun () ->
-    let input : polygon_set = [ [|(0., 0.); (10., 0.); (10., 10.); (0., 10.)|] ] in
-    let out = Jas.Boolean_normalize.normalize input in
-    assert (List.length out = 1);
-    assert (approx_eq (total_area out) 100.0));
-
-  run "normalize empty input yields empty" (fun () ->
-    assert (Jas.Boolean_normalize.normalize [] = []));
-
-  run "normalize ring with consecutive duplicates" (fun () ->
-    let input : polygon_set = [ [|
-      (0., 0.); (0., 0.); (10., 0.); (10., 10.); (10., 10.); (0., 10.)
-    |] ] in
-    let out = Jas.Boolean_normalize.normalize input in
-    assert (List.length out = 1);
-    assert (Array.length (List.hd out) = 4);
-    assert (approx_eq (total_area out) 100.0));
-
-  run "normalize figure-8 becomes two triangles" (fun () ->
-    let input : polygon_set = [ [|(0., 0.); (10., 10.); (10., 0.); (0., 10.)|] ] in
-    let out = Jas.Boolean_normalize.normalize input in
-    assert (List.length out = 2);
-    assert (approx_eq (total_area out) 50.0);
-    List.iter (fun r -> assert (Array.length r = 3)) out);
-
-  Printf.printf "\n%d passed, %d failed\n" !pass !fail;
-  if !fail > 0 then exit 1
+  Alcotest.run "Boolean" [
+    "trivial", [
+      Alcotest.test_case "union disjoint squares" `Quick (fun () ->
+        assert_region (boolean_union (square_a ()) (square_disjoint ())) 200.0
+          ~inside:[(5., 5.); (25., 5.)] ~outside:[(15., 5.); (-1., -1.)]);
+
+      Alcotest.test_case "intersect disjoint is empty" `Quick (fun () ->
+        assert_empty (boolean_intersect (square_a ()) (square_disjoint ())));
+
+      Alcotest.test_case "subtract disjoint returns a" `Quick (fun () ->
+        assert_region (boolean_subtract (square_a ()) (square_disjoint ())) 100.0
+          ~inside:[(5., 5.)] ~outside:[(25., 5.)] ~bbox:(0., 0., 10., 10.));
+
+      Alcotest.test_case "exclude disjoint is union" `Quick (fun () ->
+        assert_region (boolean_exclude (square_a ()) (square_disjoint ())) 200.0
+          ~inside:[(5., 5.); (25., 5.)] ~outside:[(15., 5.)]);
+
+      Alcotest.test_case "union identical is one" `Quick (fun () ->
+        assert_region (boolean_union (square_a ()) (square_a ())) 100.0
+          ~inside:[(5., 5.)] ~outside:[(11., 11.)] ~bbox:(0., 0., 10., 10.));
+
+      Alcotest.test_case "intersect identical is the polygon" `Quick (fun () ->
+        assert_region (boolean_intersect (square_a ()) (square_a ())) 100.0
+          ~inside:[(5., 5.)] ~outside:[(11., 11.)] ~bbox:(0., 0., 10., 10.));
+
+      Alcotest.test_case "subtract identical is empty" `Quick (fun () ->
+        assert_empty (boolean_subtract (square_a ()) (square_a ())));
+
+      Alcotest.test_case "exclude identical is empty" `Quick (fun () ->
+        assert_empty (boolean_exclude (square_a ()) (square_a ())));
+
+      Alcotest.test_case "union with inner is the outer" `Quick (fun () ->
+        assert_region (boolean_union (square_a ()) (square_inside ())) 100.0
+          ~inside:[(5., 5.); (4., 4.)] ~outside:[(11., 11.)] ~bbox:(0., 0., 10., 10.));
+
+      Alcotest.test_case "intersect with inner is the inner" `Quick (fun () ->
+        assert_region (boolean_intersect (square_a ()) (square_inside ())) 16.0
+          ~inside:[(5., 5.)] ~outside:[(2., 2.); (8., 8.)] ~bbox:(3., 3., 4., 4.));
+
+      Alcotest.test_case "subtract inner creates a hole" `Quick (fun () ->
+        assert_region (boolean_subtract (square_a ()) (square_inside ())) 84.0
+          ~inside:[(1., 1.); (9., 9.); (1., 9.); (9., 1.)]
+          ~outside:[(5., 5.)] ~bbox:(0., 0., 10., 10.));
+    ];
+
+    "overlapping", [
+      Alcotest.test_case "union overlapping squares" `Quick (fun () ->
+        assert_region (boolean_union (square_a ()) (square_b_overlap ())) 175.0
+          ~inside:[(2., 2.); (12., 12.); (7., 7.)]
+          ~outside:[(2., 12.); (12., 2.)] ~bbox:(0., 0., 15., 15.));
+
+      Alcotest.test_case "intersect overlapping is 5x5 square" `Quick (fun () ->
+        assert_region (boolean_intersect (square_a ()) (square_b_overlap ())) 25.0
+          ~inside:[(7., 7.)] ~outside:[(2., 2.); (12., 12.)] ~bbox:(5., 5., 5., 5.));
+
+      Alcotest.test_case "subtract overlap leaves L-shape" `Quick (fun () ->
+        assert_region (boolean_subtract (square_a ()) (square_b_overlap ())) 75.0
+          ~inside:[(2., 2.); (2., 8.); (8., 2.)]
+          ~outside:[(7., 7.); (12., 12.)] ~bbox:(0., 0., 10., 10.));
+
+      Alcotest.test_case "exclude overlapping is two L-shapes" `Quick (fun () ->
+        assert_region (boolean_exclude (square_a ()) (square_b_overlap ())) 150.0
+          ~inside:[(2., 2.); (12., 12.)] ~outside:[(7., 7.)] ~bbox:(0., 0., 15., 15.));
+    ];
+
+    "touching", [
+      Alcotest.test_case "union edge touching" `Quick (fun () ->
+        assert_region (boolean_union (square_a ()) (square_edge_touching ())) 200.0
+          ~inside:[(5., 5.); (15., 5.)] ~outside:[(-1., 5.); (25., 5.)]
+          ~bbox:(0., 0., 20., 10.));
+
+      Alcotest.test_case "intersect edge touching empty" `Quick (fun () ->
+        assert_empty (boolean_intersect (square_a ()) (square_edge_touching ())));
+    ];
+
+    "empty operands", [
+      Alcotest.test_case "union with empty" `Quick (fun () ->
+        assert_region (boolean_union (square_a ()) []) 100.0
+          ~inside:[(5., 5.)] ~outside:[(15., 5.)] ~bbox:(0., 0., 10., 10.));
+
+      Alcotest.test_case "intersect with empty" `Quick (fun () ->
+        assert_empty (boolean_intersect (square_a ()) []));
+
+      Alcotest.test_case "subtract empty from a" `Quick (fun () ->
+        assert_region (boolean_subtract (square_a ()) []) 100.0
+          ~inside:[(5., 5.)] ~bbox:(0., 0., 10., 10.));
+
+      Alcotest.test_case "subtract a from empty" `Quick (fun () ->
+        assert_empty (boolean_subtract [] (square_a ())));
+    ];
+
+    "property tests", [
+      Alcotest.test_case "union commutative overlapping" `Quick (fun () ->
+        let a = square_a () in let b = square_b_overlap () in
+        assert (regions_equal (boolean_union a b) (boolean_union b a)));
+
+      Alcotest.test_case "intersect commutative overlapping" `Quick (fun () ->
+        let a = square_a () in let b = square_b_overlap () in
+        assert (regions_equal (boolean_intersect a b) (boolean_intersect b a)));
+
+      Alcotest.test_case "exclude commutative overlapping" `Quick (fun () ->
+        let a = square_a () in let b = square_b_overlap () in
+        assert (regions_equal (boolean_exclude a b) (boolean_exclude b a)));
+
+      Alcotest.test_case "decomposition (a-b) ∪ (a∩b) = a" `Quick (fun () ->
+        let a = square_a () in let b = square_b_overlap () in
+        let lhs = boolean_union (boolean_subtract a b) (boolean_intersect a b) in
+        assert (regions_equal lhs a));
+
+      Alcotest.test_case "exclude involution (a⊕b)⊕b = a" `Quick (fun () ->
+        let a = square_a () in let b = square_b_overlap () in
+        let result = boolean_exclude (boolean_exclude a b) b in
+        assert (regions_equal result a));
+    ];
+
+    "associativity", [
+      Alcotest.test_case "union associative three squares" `Quick (fun () ->
+        let lhs = boolean_union (boolean_union (venn_a ()) (venn_b ())) (venn_c ()) in
+        let rhs = boolean_union (venn_a ()) (boolean_union (venn_b ()) (venn_c ())) in
+        assert (regions_equal lhs rhs));
+
+      Alcotest.test_case "intersect associative three squares" `Quick (fun () ->
+        let lhs = boolean_intersect (boolean_intersect (venn_a ()) (venn_b ())) (venn_c ()) in
+        let rhs = boolean_intersect (venn_a ()) (boolean_intersect (venn_b ()) (venn_c ())) in
+        assert (regions_equal lhs rhs));
+
+      Alcotest.test_case "exclude associative three squares" `Quick (fun () ->
+        let lhs = boolean_exclude (boolean_exclude (venn_a ()) (venn_b ())) (venn_c ()) in
+        let rhs = boolean_exclude (venn_a ()) (boolean_exclude (venn_b ()) (venn_c ())) in
+        assert (regions_equal lhs rhs));
+    ];
+
+    "shared edge regression", [
+      Alcotest.test_case "shared edges all ops" `Quick (fun () ->
+        let a : polygon_set = [ [|(0., 0.); (10., 0.); (10., 10.); (0., 10.)|] ] in
+        let b : polygon_set = [ [|(5., 0.); (15., 0.); (15., 10.); (5., 10.)|] ] in
+        assert (approx_eq (polygon_set_area (boolean_union a b)) 150.0);
+        assert (approx_eq (polygon_set_area (boolean_intersect a b)) 50.0);
+        assert (approx_eq (polygon_set_area (boolean_subtract a b)) 50.0);
+        assert (approx_eq (polygon_set_area (boolean_subtract b a)) 50.0);
+        assert (approx_eq (polygon_set_area (boolean_exclude a b)) 100.0));
+    ];
+
+    "self-intersecting bowtie", [
+      Alcotest.test_case "union bowtie with empty is two triangles" `Quick (fun () ->
+        let result = boolean_union (bowtie ()) [] in
+        assert (approx_eq (polygon_set_area result) 50.0));
+
+      Alcotest.test_case "union bowtie with covering rect" `Quick (fun () ->
+        let rect : polygon_set = [ [|(0., 0.); (10., 0.); (10., 10.); (0., 10.)|] ] in
+        assert (approx_eq (polygon_set_area (boolean_union (bowtie ()) rect)) 100.0));
+
+      Alcotest.test_case "intersect bowtie with bottom half" `Quick (fun () ->
+        let rect : polygon_set = [ [|(0., 0.); (10., 0.); (10., 5.); (0., 5.)|] ] in
+        let result = boolean_intersect (bowtie ()) rect in
+        assert (approx_eq (polygon_set_area result) 25.0));
+
+      Alcotest.test_case "subtract rect from bowtie" `Quick (fun () ->
+        let rect : polygon_set = [ [|(0., 0.); (10., 0.); (10., 5.); (0., 5.)|] ] in
+        let result = boolean_subtract (bowtie ()) rect in
+        assert (approx_eq (polygon_set_area result) 25.0));
+    ];
+
+    "holes and non-axis-aligned", [
+      Alcotest.test_case "intersect with holed polygon preserves hole" `Quick (fun () ->
+        let donut : polygon_set = [
+          [|(0., 0.); (10., 0.); (10., 10.); (0., 10.)|];
+          [|(3., 3.); (7., 3.); (7., 7.); (3., 7.)|];
+        ] in
+        let clip : polygon_set = [ [|(5., 0.); (10., 0.); (10., 10.); (5., 10.)|] ] in
+        let result = boolean_intersect donut clip in
+        assert_region result 42.0
+          ~inside:[(6., 1.); (8., 8.); (9., 5.)]
+          ~outside:[(5.5, 5.); (1., 1.)]
+          ~bbox:(5., 0., 5., 10.));
+
+      Alcotest.test_case "triangle intersect square clips corner" `Quick (fun () ->
+        let triangle : polygon_set = [ [|(0., 0.); (10., 0.); (0., 10.)|] ] in
+        let result = boolean_intersect (square_a ()) triangle in
+        assert_region result 50.0
+          ~inside:[(1., 1.); (3., 3.)] ~outside:[(8., 8.); (6., 6.)]
+          ~bbox:(0., 0., 10., 10.));
+
+      Alcotest.test_case "triangle subtract square leaves other triangle" `Quick (fun () ->
+        let triangle : polygon_set = [ [|(0., 0.); (10., 0.); (0., 10.)|] ] in
+        let result = boolean_subtract (square_a ()) triangle in
+        assert_region result 50.0
+          ~inside:[(8., 8.); (7., 5.)] ~outside:[(1., 1.); (3., 3.)]
+          ~bbox:(0., 0., 10., 10.));
+
+      Alcotest.test_case "subtract edge touching returns a unchanged" `Quick (fun () ->
+        assert_region (boolean_subtract (square_a ()) (square_edge_touching ())) 100.0
+          ~inside:[(5., 5.)] ~outside:[(15., 5.)] ~bbox:(0., 0., 10., 10.));
+
+      Alcotest.test_case "subtract is not commutative" `Quick (fun () ->
+        let a = square_a () in let b = square_b_overlap () in
+        let ab = boolean_subtract a b in
+        let ba = boolean_subtract b a in
+        assert (not (regions_equal ab ba)));
+
+      Alcotest.test_case "subtract is not associative" `Quick (fun () ->
+        let a = square_a () in
+        let b = square_b_overlap () in
+        let c = square_b_overlap () in
+        let lhs = boolean_subtract (boolean_subtract a b) c in
+        let rhs = boolean_subtract a (boolean_subtract b c) in
+        assert (not (regions_equal lhs rhs)));
+    ];
+
+    "perturbation", [
+      Alcotest.test_case "perturb 1e-15" `Quick (test_perturb 1e-15);
+      Alcotest.test_case "perturb 1e-11" `Quick (test_perturb 1e-11);
+      Alcotest.test_case "perturb 1e-10" `Quick (test_perturb 1e-10);
+      Alcotest.test_case "perturb 1e-8" `Quick (test_perturb 1e-8);
+      Alcotest.test_case "perturb 1e-6" `Quick (test_perturb 1e-6);
+      Alcotest.test_case "perturb 1e-3" `Quick (test_perturb 1e-3);
+    ];
+
+    "project_onto_segment", [
+      Alcotest.test_case "horizontal" `Quick (fun () ->
+        let p = project_onto_segment (0., 0.) (10., 0.) (5., 1e-11) in
+        assert (p = (5., 0.)));
+
+      Alcotest.test_case "vertical" `Quick (fun () ->
+        let p = project_onto_segment (5., 0.) (5., 10.) (5. +. 1e-11, 7.) in
+        assert (p = (5., 7.)));
+
+      Alcotest.test_case "clamps low" `Quick (fun () ->
+        assert (project_onto_segment (0., 0.) (10., 0.) (-5., 0.) = (0., 0.)));
+
+      Alcotest.test_case "clamps high" `Quick (fun () ->
+        assert (project_onto_segment (0., 0.) (10., 0.) (15., 0.) = (10., 0.)));
+
+      Alcotest.test_case "degenerate" `Quick (fun () ->
+        assert (project_onto_segment (5., 5.) (5., 5.) (100., 100.) = (5., 5.)));
+
+      Alcotest.test_case "diagonal" `Quick (fun () ->
+        let p = project_onto_segment (0., 0.) (10., 10.) (5., 5. +. 1e-10) in
+        assert (abs_float (fst p -. 5.) < 1e-10);
+        assert (abs_float (snd p -. 5.) < 1e-10);
+        assert (fst p = snd p));
+    ];
+
+    "normalizer", [
+      Alcotest.test_case "normalize simple square passes through" `Quick (fun () ->
+        let input : polygon_set = [ [|(0., 0.); (10., 0.); (10., 10.); (0., 10.)|] ] in
+        let out = Jas.Boolean_normalize.normalize input in
+        assert (List.length out = 1);
+        assert (approx_eq (total_area out) 100.0));
+
+      Alcotest.test_case "normalize empty input yields empty" `Quick (fun () ->
+        assert (Jas.Boolean_normalize.normalize [] = []));
+
+      Alcotest.test_case "normalize ring with consecutive duplicates" `Quick (fun () ->
+        let input : polygon_set = [ [|
+          (0., 0.); (0., 0.); (10., 0.); (10., 10.); (10., 10.); (0., 10.)
+        |] ] in
+        let out = Jas.Boolean_normalize.normalize input in
+        assert (List.length out = 1);
+        assert (Array.length (List.hd out) = 4);
+        assert (approx_eq (total_area out) 100.0));
+
+      Alcotest.test_case "normalize figure-8 becomes two triangles" `Quick (fun () ->
+        let input : polygon_set = [ [|(0., 0.); (10., 10.); (10., 0.); (0., 10.)|] ] in
+        let out = Jas.Boolean_normalize.normalize input in
+        assert (List.length out = 2);
+        assert (approx_eq (total_area out) 50.0);
+        List.iter (fun r -> assert (Array.length r = 3)) out);
+    ];
+  ]

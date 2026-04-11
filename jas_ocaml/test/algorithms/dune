@@ -1,23 +1,23 @@
 (test
  (name boolean_test)
- (libraries jas))
+ (libraries jas alcotest))
 
 (test
  (name fit_curve_test)
- (libraries jas))
+ (libraries jas alcotest))
 
 (test
  (name hit_test_test)
- (libraries jas))
+ (libraries jas alcotest))
 
 (test
  (name path_text_layout_test)
- (libraries jas))
+ (libraries jas alcotest))
 
 (test
  (name planar_test)
- (libraries jas))
+ (libraries jas alcotest))
 
 (test
  (name shape_recognize_test)
- (libraries jas))
+ (libraries jas alcotest))

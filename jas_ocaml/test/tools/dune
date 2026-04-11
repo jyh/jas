@@ -1,24 +1,24 @@
 (test
  (name toolbar_test)
  (modules toolbar_test)
- (libraries jas lablgtk3))
+ (libraries jas lablgtk3 alcotest))
 
 (test
  (name tool_interaction_test)
  (modules tool_interaction_test)
- (libraries jas lablgtk3))
+ (libraries jas lablgtk3 alcotest))
 
 (test
  (name text_edit_test)
  (modules text_edit_test)
- (libraries jas))
+ (libraries jas alcotest))
 
 (test
  (name anchor_point_tool_test)
  (modules anchor_point_tool_test)
- (libraries jas))
+ (libraries jas alcotest))
 
 (test
  (name color_picker_test)
  (modules color_picker_test)
- (libraries jas))
+ (libraries jas alcotest))

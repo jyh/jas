@@ -1,11 +1,11 @@
 (test
  (name document_test)
- (libraries jas))
+ (libraries jas alcotest))
 
 (test
  (name model_test)
- (libraries jas))
+ (libraries jas alcotest))
 
 (test
  (name controller_test)
- (libraries jas))
+ (libraries jas alcotest))
