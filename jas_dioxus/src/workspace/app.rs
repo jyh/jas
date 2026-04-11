@@ -6,6 +6,14 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+/// Shared application state handle, available via `use_context::<AppHandle>()`.
+pub(crate) type AppHandle = Rc<RefCell<AppState>>;
+
+/// Universal state mutation handle, available via `use_context::<Act>()`.
+/// Call `(act.0.borrow_mut())(Box::new(|st| { ... }))` to mutate AppState.
+#[derive(Clone)]
+pub(crate) struct Act(pub Rc<RefCell<dyn FnMut(Box<dyn FnOnce(&mut AppState)>)>>);
+
 use dioxus::prelude::*;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -39,112 +47,24 @@ use crate::tools::selection_tool::SelectionTool;
 use crate::tools::type_tool::TypeTool;
 use crate::tools::type_on_path_tool::TypeOnPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind, PASTE_OFFSET};
+use super::theme::*;
+use super::color_picker_dialog::ColorPickerDialogView;
+use super::fill_stroke_widget::FillStrokeWidgetView;
+use super::menu_bar::MenuBarView;
+use super::save_dialog::{SaveAsDialog, SaveAsDialogView};
+use super::toolbar_grid::{ToolbarGrid, TOOLBAR_SLOTS};
 
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Fill/Stroke display helpers
-// ---------------------------------------------------------------------------
-
-/// What to show in a fill or stroke square.
-/// Eyedropper SVG icon for the color picker.
-const EYEDROPPER_SVG: &str = r##"<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M13.354 2.646a2.121 2.121 0 0 0-3 0l-1.5 1.5-.708-.708a.5.5 0 0 0-.707.708l.353.353-5.146 5.146A1.5 1.5 0 0 0 2.2 10.5L1.5 14a.5.5 0 0 0 .6.6l3.5-.7a1.5 1.5 0 0 0 .854-.44l5.146-5.146.354.354a.5.5 0 0 0 .707-.708l-.707-.707 1.5-1.5a2.121 2.121 0 0 0 0-3.001zM5.39 12.4a.5.5 0 0 1-.285.147L2.65 13.05l.504-2.454a.5.5 0 0 1 .147-.285L8.5 5.111l1.389 1.389z" fill="#ccc"/></svg>"##;
-
-enum FsDisplay {
-    Color(Color),
-    None,
-    Mixed,
-}
-
-/// CSS background string for a fill/stroke display state.
-fn fs_display_bg(d: &FsDisplay) -> String {
-    match d {
-        FsDisplay::Color(c) => {
-            let (r, g, b, _) = c.to_rgba();
-            format!("rgb({},{},{})", (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)
-        }
-        FsDisplay::None => "linear-gradient(to bottom right, #fff 45%, transparent 45%, transparent 50%, #f00 50%, #f00 55%, transparent 55%, transparent 100%, #fff 100%)".into(),
-        FsDisplay::Mixed => "#888".into(),
-    }
-}
-
-/// Label to show inside the square, if any.
-fn fs_display_label(d: &FsDisplay) -> Option<&'static str> {
-    match d {
-        FsDisplay::Mixed => Some("?"),
-        _ => Option::None,
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Eyedropper pixel sampling
-// ---------------------------------------------------------------------------
-
-/// Sample a pixel color from the canvas at page coordinates.
-fn sample_pixel_at(page_x: f64, page_y: f64) -> Option<(u8, u8, u8)> {
-    let window = web_sys::window()?;
-    let document = window.document()?;
-    let canvas_el = document.get_element_by_id("jas-canvas")
-        .or_else(|| document.query_selector("canvas").ok().flatten())?;
-    let canvas: HtmlCanvasElement = canvas_el.unchecked_into();
-    let rect = canvas.get_bounding_client_rect();
-    let cx = page_x - rect.left();
-    let cy = page_y - rect.top();
-    if cx < 0.0 || cy < 0.0 || cx > rect.width() || cy > rect.height() {
-        return None;
-    }
-    let ctx: CanvasRenderingContext2d = canvas.get_context("2d").ok()??.unchecked_into();
-    let scale_x = canvas.width() as f64 / rect.width();
-    let scale_y = canvas.height() as f64 / rect.height();
-    let px = (cx * scale_x).round();
-    let py = (cy * scale_y).round();
-    let data = ctx.get_image_data(px, py, 1.0, 1.0).ok()?.data();
-    if data.len() >= 4 {
-        Some((data[0], data[1], data[2]))
-    } else {
-        None
-    }
-}
-
-// Save As dialog state
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug)]
-enum SaveAsDialog {
-    /// User is typing a name.
-    Editing(String),
-    /// Confirm overwrite of an existing layout.
-    ConfirmOverwrite(String),
-    /// Reject the reserved "Workspace" name.
-    RejectWorkspace,
-}
-
-// ---------------------------------------------------------------------------
-// Theme colors
-// ---------------------------------------------------------------------------
-
-const THEME_BG: &str = "#3c3c3c";
-const THEME_BG_DARK: &str = "#333";
-const THEME_BG_ACTIVE: &str = "#505050";
-const THEME_BG_TAB: &str = "#4a4a4a";
-const THEME_BG_TAB_INACTIVE: &str = "#353535";
-const THEME_BG_TOOLBAR_BTN: &str = "#505050";
-const THEME_BORDER: &str = "#555";
-const THEME_TEXT: &str = "#ccc";
-const THEME_TEXT_DIM: &str = "#999";
-const THEME_TEXT_BODY: &str = "#aaa";
-const THEME_TEXT_HINT: &str = "#777";
-const THEME_TEXT_BUTTON: &str = "#888";
-const THEME_ACCENT: &str = "#4a90d9";
 
 /// Per-tab state: each tab has its own document, tools, and clipboard.
-struct TabState {
-    model: Model,
-    tools: HashMap<ToolKind, Box<dyn CanvasTool>>,
-    clipboard: Vec<GeoElement>,
+pub(crate) struct TabState {
+    pub(crate) model: Model,
+    pub(crate) tools: HashMap<ToolKind, Box<dyn CanvasTool>>,
+    pub(crate) clipboard: Vec<GeoElement>,
 }
 
 impl TabState {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::with_model(Model::default())
     }
 
@@ -173,14 +93,14 @@ impl TabState {
 }
 
 /// Shared application state.
-struct AppState {
-    tabs: Vec<TabState>,
-    active_tab: usize,
-    active_tool: ToolKind,
-    app_config: super::workspace::AppConfig,
-    workspace_layout: super::workspace::WorkspaceLayout,
+pub(crate) struct AppState {
+    pub(crate) tabs: Vec<TabState>,
+    pub(crate) active_tab: usize,
+    pub(crate) active_tool: ToolKind,
+    pub(crate) app_config: super::workspace::AppConfig,
+    pub(crate) workspace_layout: super::workspace::WorkspaceLayout,
     /// Which fill/stroke square is on top (active). true = fill, false = stroke.
-    fill_on_top: bool,
+    pub(crate) fill_on_top: bool,
 }
 
 impl AppState {
@@ -299,7 +219,7 @@ impl AppState {
     }
 
     /// Save the current workspace state as a named layout snapshot.
-    fn save_layout_as(&mut self, name: &str) {
+    pub(crate) fn save_layout_as(&mut self, name: &str) {
         #[cfg(target_arch = "wasm32")]
         {
             let key = super::workspace::WorkspaceLayout::storage_key_for(name);
@@ -321,7 +241,7 @@ impl AppState {
     }
 
     /// Switch to a different named layout (load it as the working copy).
-    fn switch_layout(&mut self, name: &str) {
+    pub(crate) fn switch_layout(&mut self, name: &str) {
         // Save current working copy
         self.save_workspace_layout();
         // Load the named layout as the new working copy
@@ -334,7 +254,7 @@ impl AppState {
     }
 
     /// Revert to the currently selected saved layout.
-    fn revert_to_saved(&mut self) {
+    pub(crate) fn revert_to_saved(&mut self) {
         let name = self.app_config.active_layout.clone();
         if name != super::workspace::WORKSPACE_LAYOUT_NAME {
             self.workspace_layout = Self::load_workspace_layout(&name);
@@ -344,7 +264,7 @@ impl AppState {
     }
 
     /// Reset to factory defaults.
-    fn reset_to_default(&mut self) {
+    pub(crate) fn reset_to_default(&mut self) {
         self.workspace_layout = super::workspace::WorkspaceLayout::named(
             super::workspace::WORKSPACE_LAYOUT_NAME,
         );
@@ -354,20 +274,20 @@ impl AppState {
         self.save_workspace_layout();
     }
 
-    fn tab(&self) -> Option<&TabState> {
+    pub(crate) fn tab(&self) -> Option<&TabState> {
         self.tabs.get(self.active_tab)
     }
 
-    fn tab_mut(&mut self) -> Option<&mut TabState> {
+    pub(crate) fn tab_mut(&mut self) -> Option<&mut TabState> {
         self.tabs.get_mut(self.active_tab)
     }
 
-    fn add_tab(&mut self, tab: TabState) {
+    pub(crate) fn add_tab(&mut self, tab: TabState) {
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
     }
 
-    fn close_tab(&mut self, index: usize) {
+    pub(crate) fn close_tab(&mut self, index: usize) {
         if index >= self.tabs.len() {
             return;
         }
@@ -381,7 +301,7 @@ impl AppState {
         }
     }
 
-    fn set_tool(&mut self, kind: ToolKind) {
+    pub(crate) fn set_tool(&mut self, kind: ToolKind) {
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             let active = self.active_tool;
             if let Some(tool) = tab.tools.get_mut(&active) {
@@ -397,7 +317,7 @@ impl AppState {
     }
 
     /// Swap default fill and stroke colors (including None).
-    fn swap_fill_stroke(&mut self) {
+    pub(crate) fn swap_fill_stroke(&mut self) {
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             let old_fill_color = tab.model.default_fill.map(|f| f.color);
             let old_stroke_color = tab.model.default_stroke.map(|s| s.color);
@@ -423,7 +343,7 @@ impl AppState {
     }
 
     /// Reset defaults to No Fill + Black Stroke.
-    fn reset_fill_stroke_defaults(&mut self) {
+    pub(crate) fn reset_fill_stroke_defaults(&mut self) {
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             tab.model.default_fill = None;
             tab.model.default_stroke = Some(Stroke::new(Color::BLACK, 1.0));
@@ -437,7 +357,7 @@ impl AppState {
     }
 
     /// Set the active attribute (fill or stroke, per fill_on_top) to None.
-    fn set_active_to_none(&mut self) {
+    pub(crate) fn set_active_to_none(&mut self) {
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             if self.fill_on_top {
                 tab.model.default_fill = None;
@@ -496,7 +416,7 @@ impl AppState {
 }
 
 /// Write text to the system clipboard (fire-and-forget async).
-fn clipboard_write(text: String) {
+pub(crate) fn clipboard_write(text: String) {
     if let Some(_window) = web_sys::window() {
         // Fire and forget — spawn to avoid blocking
         wasm_bindgen_futures::spawn_local(async move {
@@ -510,7 +430,7 @@ fn clipboard_write(text: String) {
 }
 
 /// Read text from the system clipboard, then call the callback with it.
-fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64>, offset: f64) {
+pub(crate) fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64>, offset: f64) {
     wasm_bindgen_futures::spawn_local(async move {
         let clipboard_text = async {
             let window = web_sys::window()?;
@@ -603,7 +523,7 @@ fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64
 }
 
 /// Build SVG string from selected elements for clipboard export.
-fn selection_to_svg(st: &AppState) -> Option<String> {
+pub(crate) fn selection_to_svg(st: &AppState) -> Option<String> {
     let tab = st.tab()?;
     let doc = tab.model.document();
     if doc.selection.is_empty() {
@@ -633,7 +553,7 @@ fn selection_to_svg(st: &AppState) -> Option<String> {
 }
 
 /// Download a string as a file in the browser.
-fn download_file(filename: &str, content: &str) {
+pub(crate) fn download_file(filename: &str, content: &str) {
     let window = match web_sys::window() {
         Some(w) => w,
         None => return,
@@ -665,7 +585,7 @@ fn download_file(filename: &str, content: &str) {
 }
 
 /// Trigger a file open dialog and load the file into a new tab.
-fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
+pub(crate) fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
     let window = match web_sys::window() {
         Some(w) => w,
         None => return,
@@ -726,30 +646,8 @@ fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>) {
     input.click();
 }
 
-/// Toolbar layout: 2-column grid matching the Python/Qt version.
-/// Each entry is (row, col, primary_tool, alternates).
-/// Slots with alternates show the current alternate and support long-press to switch.
-const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
-    (0, 0, &[ToolKind::Selection]),
-    (0, 1, &[ToolKind::DirectSelection, ToolKind::GroupSelection]),
-    (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint, ToolKind::AnchorPoint]),
-    (1, 1, &[ToolKind::Pencil, ToolKind::PathEraser, ToolKind::Smooth]),
-    (2, 0, &[ToolKind::Type, ToolKind::TypeOnPath]),
-    (2, 1, &[ToolKind::Line]),
-    (3, 0, &[ToolKind::Rect, ToolKind::RoundedRect, ToolKind::Polygon, ToolKind::Star]),
-    (3, 1, &[ToolKind::Lasso]),
-];
-
-/// Long-press threshold in milliseconds.
-const LONG_PRESS_MS: i32 = 500;
-
-use super::icons::toolbar_svg_icon;
-
-/// Icon color for toolbar alternate indicator triangles.
-const IC: &str = "rgb(204,204,204)";
-
 /// Find the address of a panel kind in the layout (first occurrence).
-fn find_panel(layout: &super::workspace::WorkspaceLayout, kind: super::workspace::PanelKind) -> Option<super::workspace::PanelAddr> {
+pub(crate) fn find_panel(layout: &super::workspace::WorkspaceLayout, kind: super::workspace::PanelKind) -> Option<super::workspace::PanelAddr> {
     for (_, dock) in &layout.anchored {
         for (gi, group) in dock.groups.iter().enumerate() {
             if let Some(pi) = group.panels.iter().position(|&k| k == kind) {
@@ -883,6 +781,11 @@ pub fn App() -> Element {
         }
     };
     let act = Rc::new(RefCell::new(act));
+
+    // Provide shared state via context so child components can access them.
+    use_context_provider(|| Act(act.clone()));
+    use_context_provider(|| app.clone());
+    use_context_provider(|| revision);
 
     // --- Mouse events ---
 
@@ -1322,7 +1225,7 @@ pub fn App() -> Element {
     // --- Tool buttons with shared slots ---
     // Track which alternate is visible in each shared slot.
     // Key: index into TOOLBAR_SLOTS for slots with alternates.
-    let mut slot_alternates = use_signal(|| {
+    let slot_alternates = use_signal(|| {
         let mut map = HashMap::<usize, usize>::new();
         for (i, (_r, _c, tools)) in TOOLBAR_SLOTS.iter().enumerate() {
             if tools.len() > 1 {
@@ -1336,7 +1239,7 @@ pub fn App() -> Element {
 
     // Dock drag-and-drop state.
     let drag_source = use_signal(|| Option::<super::workspace::DragPayload>::None);
-    let mut drop_target_sig = use_signal(|| Option::<super::workspace::DropTarget>::None);
+    let drop_target_sig = use_signal(|| Option::<super::workspace::DropTarget>::None);
     let was_dropped = use_signal(|| false);
     let mut last_drag_pos = use_signal(|| (0.0f64, 0.0f64));
     // Floating dock title bar drag (dock_id, offset_x, offset_y).
@@ -1407,127 +1310,6 @@ pub fn App() -> Element {
             .and_then(|tab| tab.tools.get(&active_tool).and_then(|t| t.cursor_css_override()))
             .unwrap_or_else(|| active_tool.cursor_css().to_string())
     };
-    // If active tool is an alternate that's not currently visible, update the slot.
-    // Collect updates first, then apply — writing to signals during render can cause
-    // borrow conflicts in the Dioxus runtime.
-    let slot_updates: Vec<(usize, usize)> = TOOLBAR_SLOTS.iter().enumerate()
-        .filter_map(|(si, (_r, _c, tools))| {
-            if tools.len() > 1
-                && let Some(pos) = tools.iter().position(|&t| t == active_tool) {
-                    let current = *slot_alternates.peek().get(&si).unwrap_or(&0);
-                    if current != pos {
-                        return Some((si, pos));
-                    }
-                }
-            None
-        })
-        .collect();
-    if !slot_updates.is_empty() {
-        let mut alts = slot_alternates.write();
-        for (si, pos) in slot_updates {
-            alts.insert(si, pos);
-        }
-    }
-
-    let tool_buttons: Vec<Result<VNode, RenderError>> = TOOLBAR_SLOTS
-        .iter()
-        .enumerate()
-        .map(|(si, &(row, col, tools))| {
-            let act = act.clone();
-            let alt_idx = *slot_alternates.peek().get(&si).unwrap_or(&0);
-            let kind = tools[alt_idx.min(tools.len() - 1)];
-            let has_alternates = tools.len() > 1;
-            let is_active = tools.contains(&active_tool);
-            let bg = if is_active { THEME_BG_TOOLBAR_BTN } else { "transparent" };
-
-            // Build SVG with optional alternate triangle indicator
-            let svg_inner = toolbar_svg_icon(kind);
-            let triangle = if has_alternates {
-                format!(r#"<path d="M28,28 L23,28 L28,23 Z" fill="{IC}"/>"#)
-            } else {
-                String::new()
-            };
-            let svg_html = format!(
-                r#"<svg viewBox="0 0 28 28" width="28" height="28" xmlns="http://www.w3.org/2000/svg">{svg_inner}{triangle}</svg>"#
-            );
-            let grid_col = col + 1;
-            let grid_row = row + 1;
-
-            rsx! {
-                div {
-                    key: "slot-{si}",
-                    style: "grid-column:{grid_col}; grid-row:{grid_row}; width:32px; height:32px; background:{bg}; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:2px; position:relative;",
-                    title: "{kind.label()}",
-                    onmousedown: {
-                        let act = act.clone();
-                        move |evt: Event<MouseData>| {
-                            evt.stop_propagation();
-                            if has_alternates {
-                                // Start long-press timer via setTimeout
-                                let slot_idx = si;
-                                let mut popup = popup_slot;
-                                let Some(window) = web_sys::window() else { return; };
-                                let cb = Closure::once(move || {
-                                    popup.set(Some(slot_idx));
-                                });
-                                window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                                    cb.as_ref().unchecked_ref(), LONG_PRESS_MS
-                                ).ok();
-                                cb.forget();
-                            }
-                            // Normal click: select this tool
-                            (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                st.set_tool(kind);
-                            }));
-                        }
-                    },
-                    onmouseup: move |_| {
-                        // If popup hasn't shown yet, cancel by ignoring
-                        // (timer will fire but popup will be dismissed on next click)
-                    },
-                    dangerous_inner_html: "{svg_html}",
-                }
-            }
-        })
-        .collect();
-
-    // Build popup for long-press alternate selection
-    let popup_node: Option<Result<VNode, RenderError>> = popup_slot().map(|si| {
-        let (_row, _col, tools) = TOOLBAR_SLOTS[si];
-        let items: Vec<Result<VNode, RenderError>> = tools.iter().enumerate().map(|(ti, &tool_kind)| {
-            let act = act.clone();
-            let label = tool_kind.label();
-            let is_current = tool_kind == active_tool;
-            let bg = if is_current { "#606060" } else { THEME_BG_TAB };
-            rsx! {
-                div {
-                    class: "jas-tool-popup-item",
-                    style: "padding:4px 10px; cursor:pointer; font-size:12px; color:{THEME_TEXT}; white-space:nowrap; background:{bg}; border-radius:2px;",
-                    onmousedown: move |evt: Event<MouseData>| {
-                        evt.stop_propagation();
-                        slot_alternates.write().insert(si, ti);
-                        popup_slot.set(None);
-                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            st.set_tool(tool_kind);
-                        }));
-                    },
-                    "{label}"
-                }
-            }
-        }).collect();
-        // Position the popup next to the toolbar
-        let top = _row as u32 * 34 + 4;
-        let left = 72;
-        rsx! {
-            div {
-                style: "position:fixed; top:{top}px; left:{left}px; background:{THEME_BG_TAB}; border:1px solid #666; box-shadow:2px 2px 8px rgba(0,0,0,0.3); z-index:2000; padding:4px; border-radius:4px;",
-                for item in items {
-                    {item}
-                }
-            }
-        }
-    });
-
     // --- Tab bar ---
     let borrowed = app.borrow();
     let tab_info: Vec<(usize, String, bool)> = borrowed.tabs.iter().enumerate().map(|(i, tab)| {
@@ -1572,510 +1354,11 @@ pub fn App() -> Element {
         }
     }).collect();
 
-    // --- Menu dispatch ---
-    // Shared dispatch function for menu items (avoids duplicating keyboard handler logic).
-    let dispatch = {
-        let act = act.clone();
-        let app_for_menu = app.clone();
-        let revision_for_menu = revision;
-        Rc::new(move |cmd: &str| {
-            match cmd {
-                "new" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        st.add_tab(TabState::new());
-                    }));
-                }
-                "open" => {
-                    open_file_dialog(app_for_menu.clone(), revision_for_menu);
-                }
-                "save" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            let svg = document_to_svg(tab.model.document());
-                            let filename = if tab.model.filename.ends_with(".svg") {
-                                tab.model.filename.clone()
-                            } else {
-                                format!("{}.svg", tab.model.filename)
-                            };
-                            download_file(&filename, &svg);
-                            tab.model.mark_saved();
-                        }
-                    }));
-                }
-                "close" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let idx = st.active_tab;
-                        st.close_tab(idx);
-                    }));
-                }
-                "undo" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() { tab.model.undo(); }
-                    }));
-                }
-                "redo" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() { tab.model.redo(); }
-                    }));
-                }
-                "cut" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.tab().is_none() { return; }
-                        if let Some(svg) = selection_to_svg(st) {
-                            clipboard_write(svg);
-                        }
-                        let elements: Vec<GeoElement> = {
-                            let Some(tab) = st.tab() else { return; };
-                            let doc = tab.model.document();
-                            doc.selection.iter()
-                                .filter_map(|es| doc.get_element(&es.path).cloned())
-                                .collect()
-                        };
-                        let Some(tab) = st.tab_mut() else { return; };
-                        tab.clipboard = elements;
-                        tab.model.snapshot();
-                        let new_doc = tab.model.document().delete_selection();
-                        tab.model.set_document(new_doc);
-                    }));
-                }
-                "copy" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.tab().is_none() { return; }
-                        if let Some(svg) = selection_to_svg(st) {
-                            clipboard_write(svg);
-                        }
-                        let elements: Vec<GeoElement> = {
-                            let Some(tab) = st.tab() else { return; };
-                            let doc = tab.model.document();
-                            doc.selection.iter()
-                                .filter_map(|es| doc.get_element(&es.path).cloned())
-                                .collect()
-                        };
-                        let Some(tab) = st.tab_mut() else { return; };
-                        tab.clipboard = elements;
-                    }));
-                }
-                "paste" => {
-                    clipboard_read_and_paste(
-                        app_for_menu.clone(), revision_for_menu, PASTE_OFFSET,
-                    );
-                }
-                "paste_in_place" => {
-                    clipboard_read_and_paste(
-                        app_for_menu.clone(), revision_for_menu, 0.0,
-                    );
-                }
-                "select_all" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() { Controller::select_all(&mut tab.model); }
-                    }));
-                }
-                "delete" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            let new_doc = tab.model.document().delete_selection();
-                            tab.model.set_document(new_doc);
-                        }
-                    }));
-                }
-                "group" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::group_selection(&mut tab.model);
-                        }
-                    }));
-                }
-                "ungroup" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::ungroup_selection(&mut tab.model);
-                        }
-                    }));
-                }
-                "ungroup_all" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::ungroup_all(&mut tab.model);
-                        }
-                    }));
-                }
-                "lock" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::lock_selection(&mut tab.model);
-                        }
-                    }));
-                }
-                "unlock_all" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::unlock_all(&mut tab.model);
-                        }
-                    }));
-                }
-                "hide" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::hide_selection(&mut tab.model);
-                        }
-                    }));
-                }
-                "show_all" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::show_all(&mut tab.model);
-                        }
-                    }));
-                }
-                "tile_panes" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let dock_collapsed = st.workspace_layout.anchored_dock(super::workspace::DockEdge::Right)
-                            .is_some_and(|d| d.collapsed);
-                        if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                            pl.canvas_maximized = false;
-                            let override_id = if dock_collapsed {
-                                pl.pane_by_kind(super::workspace::PaneKind::Dock).map(|p| (p.id, 36.0))
-                            } else {
-                                None
-                            };
-                            pl.tile_panes(override_id);
-                        }
-                    }));
-                }
-                // Window menu: pane visibility
-                "toggle_pane_toolbar" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                            if pl.is_pane_visible(super::workspace::PaneKind::Toolbar) {
-                                pl.hide_pane(super::workspace::PaneKind::Toolbar);
-                            } else {
-                                pl.show_pane(super::workspace::PaneKind::Toolbar);
-                            }
-                        }
-                    }));
-                }
-                "toggle_pane_dock" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                            if pl.is_pane_visible(super::workspace::PaneKind::Dock) {
-                                pl.hide_pane(super::workspace::PaneKind::Dock);
-                            } else {
-                                pl.show_pane(super::workspace::PaneKind::Dock);
-                            }
-                        }
-                    }));
-                }
-                // Window menu: panel visibility
-                "toggle_panel_layers" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Layers) {
-                            // Find and close it
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Layers) {
-                                st.workspace_layout.close_panel(addr);
-                            }
-                        } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Layers);
-                        }
-                    }));
-                }
-                "toggle_panel_color" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Color) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Color) {
-                                st.workspace_layout.close_panel(addr);
-                            }
-                        } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Color);
-                        }
-                    }));
-                }
-                "toggle_panel_stroke" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Stroke) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Stroke) {
-                                st.workspace_layout.close_panel(addr);
-                            }
-                        } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Stroke);
-                        }
-                    }));
-                }
-                "toggle_panel_properties" => {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Properties) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Properties) {
-                                st.workspace_layout.close_panel(addr);
-                            }
-                        } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Properties);
-                        }
-                    }));
-                }
-                "workspace_submenu" => {
-                    // Handled by dynamic submenu rendering, not dispatch
-                }
-                _ => {}
-            }
-        })
-    };
-
-    // --- Menu bar data ---
+    // --- Menu bar signals ---
     let mut open_menu = use_signal(|| Option::<String>::None);
-    let mut workspace_submenu_open = use_signal(|| false);
-    let mut save_as_dialog = use_signal(|| Option::<SaveAsDialog>::None);
-    let mut color_picker_state = use_signal(|| Option::<super::color_picker::ColorPickerState>::None);
-
-
-    let menus = super::menu::MENU_BAR;
-
-    // Workspace data for dynamic submenu
-    let config_snapshot = app.borrow().app_config.clone();
-    let active_layout_name = config_snapshot.active_layout.clone();
-    let saved_layout_names = config_snapshot.saved_layouts.clone();
-
-    // Pre-build each menu dropdown as a complete VNode
-    let menu_nodes: Vec<Result<VNode, RenderError>> = menus.iter().enumerate().map(|(mi, (menu_name, items))| {
-        let menu_name_str = menu_name.to_string();
-        let menu_name_str2 = menu_name_str.clone();
-        let is_open = open_menu() == Some(menu_name_str.clone());
-        let dispatch = dispatch.clone();
-        let mut open_menu_sig = open_menu;
-
-        // Pre-build item nodes for this menu
-        let item_nodes: Vec<Result<VNode, RenderError>> = if is_open {
-            items.iter().flat_map(|&(label, cmd, shortcut)| {
-                if label == "---" {
-                    vec![rsx! {
-                        div {
-                            style: "height:1px; background:{THEME_BORDER}; margin:4px 8px;",
-                        }
-                    }]
-                } else if cmd == "workspace_submenu" {
-                    // Dynamic workspace submenu
-                    let act_ws = act.clone();
-                    let open_menu_ws = open_menu_sig;
-                    let active_name = active_layout_name.clone();
-                    let has_saved_layout = active_name != super::workspace::WORKSPACE_LAYOUT_NAME;
-                    // Filter out "Workspace" from the layout list
-                    let visible_layouts: Vec<String> = saved_layout_names
-                        .iter()
-                        .filter(|n| n.as_str() != super::workspace::WORKSPACE_LAYOUT_NAME)
-                        .cloned()
-                        .collect();
-
-                    let mut items: Vec<Result<VNode, RenderError>> = Vec::new();
-
-                    // Submenu trigger with nested flyout
-                    items.push({
-                        let sub_open = workspace_submenu_open();
-                        rsx! {
-                            div {
-                                style: "position:relative;",
-                                onmouseenter: move |_| { workspace_submenu_open.set(true); },
-                                onmouseleave: move |_| { workspace_submenu_open.set(false); },
-
-                                div {
-                                    class: "jas-menu-item",
-                                    style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
-                                    span { "{label}" }
-                                }
-
-                                if sub_open {
-                                    div {
-                                        style: "position:absolute; left:100%; top:0; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
-                                        onmouseenter: move |_| { workspace_submenu_open.set(true); },
-
-                                        // List saved layouts with check mark
-                                        for name in visible_layouts.clone() {
-                                            {
-                                                let act = act_ws.clone();
-                                                let is_active = name == active_name;
-                                                let check = if is_active { "\u{2713} " } else { "    " };
-                                                let display = format!("{check}{name}");
-                                                let name_clone = name.clone();
-                                                let mut open_menu_cl = open_menu_ws;
-                                                rsx! {
-                                                    div {
-                                                        class: "jas-menu-item",
-                                                        style: "padding:4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; white-space:nowrap; border-radius:3px; margin:0 4px;",
-                                                        onmousedown: move |evt: Event<MouseData>| {
-                                                            evt.stop_propagation();
-                                                            let n = name_clone.clone();
-                                                            (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                                                st.switch_layout(&n);
-                                                            }));
-                                                            open_menu_cl.set(None);
-                                                            workspace_submenu_open.set(false);
-                                                        },
-                                                        "{display}"
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // Separator
-                                        div { style: "height:1px; background:{THEME_BORDER}; margin:4px 8px;" }
-
-                                        // Save As...
-                                        {
-                                            let mut open_menu_cl = open_menu_ws;
-                                            let prefill = if has_saved_layout { active_name.clone() } else { String::new() };
-                                            rsx! {
-                                                div {
-                                                    class: "jas-menu-item",
-                                                    style: "padding:4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; white-space:nowrap; border-radius:3px; margin:0 4px;",
-                                                    onmousedown: move |evt: Event<MouseData>| {
-                                                        evt.stop_propagation();
-                                                        save_as_dialog.set(Some(SaveAsDialog::Editing(prefill.clone())));
-                                                        open_menu_cl.set(None);
-                                                        workspace_submenu_open.set(false);
-                                                    },
-                                                    "Save As\u{2026}"
-                                                }
-                                            }
-                                        }
-
-                                        // Separator
-                                        div { style: "height:1px; background:{THEME_BORDER}; margin:4px 8px;" }
-
-                                        // Reset to Default
-                                        {
-                                            let act = act_ws.clone();
-                                            let mut open_menu_cl = open_menu_ws;
-                                            rsx! {
-                                                div {
-                                                    class: "jas-menu-item",
-                                                    style: "padding:4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; white-space:nowrap; border-radius:3px; margin:0 4px;",
-                                                    onmousedown: move |evt: Event<MouseData>| {
-                                                        evt.stop_propagation();
-                                                        (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                                                            st.reset_to_default();
-                                                        }));
-                                                        open_menu_cl.set(None);
-                                                        workspace_submenu_open.set(false);
-                                                    },
-                                                    "Reset to Default"
-                                                }
-                                            }
-                                        }
-
-                                        // Revert to Saved (enabled only when a named layout is selected)
-                                        {
-                                            let act = act_ws.clone();
-                                            let mut open_menu_cl = open_menu_ws;
-                                            let disabled_style = if has_saved_layout {
-                                                format!("padding:4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; white-space:nowrap; border-radius:3px; margin:0 4px;")
-                                            } else {
-                                                format!("padding:4px 16px; cursor:default; font-size:13px; color:{THEME_TEXT_DIM}; white-space:nowrap; border-radius:3px; margin:0 4px;")
-                                            };
-                                            rsx! {
-                                                div {
-                                                    class: if has_saved_layout { "jas-menu-item" } else { "" },
-                                                    style: "{disabled_style}",
-                                                    onmousedown: move |evt: Event<MouseData>| {
-                                                        evt.stop_propagation();
-                                                        if has_saved_layout {
-                                                            (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                                                                st.revert_to_saved();
-                                                            }));
-                                                            open_menu_cl.set(None);
-                                                            workspace_submenu_open.set(false);
-                                                        }
-                                                    },
-                                                    "Revert to Saved"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    });
-                    items
-                } else {
-                    let dispatch = dispatch.clone();
-                    let cmd = cmd.to_string();
-                    let mut open_menu_sig2 = open_menu_sig;
-                    // Add checkmark prefix for toggle items
-                    let display_label = {
-                        let st = app.borrow();
-                        let checked = match cmd.as_str() {
-                            "toggle_pane_toolbar" => st.workspace_layout.pane_layout.as_ref().is_some_and(|pl| pl.is_pane_visible(super::workspace::PaneKind::Toolbar)),
-                            "toggle_pane_dock" => st.workspace_layout.pane_layout.as_ref().is_some_and(|pl| pl.is_pane_visible(super::workspace::PaneKind::Dock)),
-                            "toggle_panel_layers" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Layers),
-                            "toggle_panel_color" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Color),
-                            "toggle_panel_stroke" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Stroke),
-                            "toggle_panel_properties" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Properties),
-                            _ => false,
-                        };
-                        if cmd.starts_with("toggle_") {
-                            if checked { format!("\u{2713} {}", label) } else { format!("    {}", label) }
-                        } else {
-                            format!("    {}", label)
-                        }
-                    };
-                    vec![rsx! {
-                        div {
-                            class: "jas-menu-item",
-                            style: "padding:4px 24px 4px 8px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
-                            onmousedown: move |evt: Event<MouseData>| {
-                                evt.stop_propagation();
-                                dispatch(&cmd);
-                                open_menu_sig2.set(None);
-                            },
-                            span { "{display_label}" }
-                            span {
-                                style: "color:{THEME_TEXT_HINT}; margin-left:24px; font-size:12px;",
-                                "{shortcut}"
-                            }
-                        }
-                    }]
-                }
-            }).collect()
-        } else {
-            Vec::new()
-        };
-
-        let bg = if is_open { THEME_BG_ACTIVE } else { "transparent" };
-        rsx! {
-            div {
-                key: "menu-{mi}",
-                style: "position:relative; display:inline-block;",
-                div {
-                    class: "jas-menu-title",
-                    style: "padding:3px 8px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; user-select:none; border-radius:3px; background:{bg};",
-                    onmousedown: move |evt: Event<MouseData>| {
-                        evt.stop_propagation();
-                        let name = menu_name_str2.clone();
-                        if open_menu() == Some(name.clone()) {
-                            open_menu_sig.set(None);
-                        } else {
-                            open_menu_sig.set(Some(name));
-                        }
-                    },
-                    "{menu_name_str}"
-                }
-                if is_open {
-                    div {
-                        style: "position:absolute; top:100%; left:0; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:200px; z-index:1000; padding:4px 0;",
-                        for node in item_nodes {
-                            {node}
-                        }
-                    }
-                }
-            }
-        }
-    }).collect();
-
-
+    let workspace_submenu_open = use_signal(|| false);
+    let save_as_dialog = use_signal(|| Option::<SaveAsDialog>::None);
+    let color_picker_state = use_signal(|| Option::<super::color_picker::ColorPickerState>::None);
 
     // --- Dock rendering helpers ---
     use super::workspace::{WorkspaceLayout, DockEdge, DockId, GroupAddr, PanelAddr, DragPayload, DropTarget};
@@ -2769,14 +2052,10 @@ pub fn App() -> Element {
             style: "position:relative; width:100%; height:100%; overflow:hidden; outline:none; font-family:sans-serif; background:{THEME_BG_DARK}; border-left:{snap_left}; border-right:{snap_right}; border-bottom:{snap_bottom}; box-sizing:border-box; display:flex; flex-direction:column;",
 
             // ===== Menu bar (full width, top of window) =====
-            div {
-                style: "display:flex; background:{THEME_BG}; border-bottom:1px solid {THEME_BORDER}; padding:0 4px; min-height:24px; align-items:center; flex-shrink:0; z-index:300;",
-                onmousedown: move |evt: Event<MouseData>| {
-                    evt.stop_propagation();
-                },
-                for node in menu_nodes {
-                    {node}
-                }
+            MenuBarView {
+                open_menu,
+                workspace_submenu_open,
+                save_as_dialog,
             }
 
             // ===== Pane container (fills remaining space) =====
@@ -2829,234 +2108,26 @@ pub fn App() -> Element {
                     }
                 }
 
-                // Tool buttons
-                div {
-                    style: "flex:1; padding:4px 2px; display:grid; grid-template-columns:repeat(auto-fill, 32px); grid-auto-rows:32px; gap:2px; justify-content:center; align-content:start; overflow-y:auto;",
-                    for btn in tool_buttons {
-                        {btn}
-                    }
+                // Tool buttons and popup
+                ToolbarGrid {
+                    active_tool,
+                    slot_alternates,
+                    popup_slot,
                 }
 
                 // --- Fill/Stroke indicator widget ---
-                {
-                    // Determine what to display for fill and stroke
-                    let fill_display = match &fs_fill_summary {
-                        FillSummary::NoSelection => match fs_default_fill {
-                            Some(f) => FsDisplay::Color(f.color),
-                            None => FsDisplay::None,
-                        },
-                        FillSummary::Uniform(Some(f)) => FsDisplay::Color(f.color),
-                        FillSummary::Uniform(None) => FsDisplay::None,
-                        FillSummary::Mixed => FsDisplay::Mixed,
-                    };
-                    let stroke_display = match &fs_stroke_summary {
-                        StrokeSummary::NoSelection => match fs_default_stroke {
-                            Some(s) => FsDisplay::Color(s.color),
-                            None => FsDisplay::None,
-                        },
-                        StrokeSummary::Uniform(Some(s)) => FsDisplay::Color(s.color),
-                        StrokeSummary::Uniform(None) => FsDisplay::None,
-                        StrokeSummary::Mixed => FsDisplay::Mixed,
-                    };
-
-                    let fill_css = fs_display_bg(&fill_display);
-                    let stroke_css = fs_display_bg(&stroke_display);
-                    let fill_label = fs_display_label(&fill_display);
-                    let stroke_label = fs_display_label(&stroke_display);
-                    // Active attribute determines mode button highlight
-                    let active_is_none = if fill_on_top {
-                        matches!(fill_display, FsDisplay::None)
-                    } else {
-                        matches!(stroke_display, FsDisplay::None)
-                    };
-                    let color_btn_bg = if !active_is_none { THEME_BG_TOOLBAR_BTN } else { "transparent" };
-                    let none_btn_bg = if active_is_none { THEME_BG_TOOLBAR_BTN } else { "transparent" };
-
-                    let act_fs = act.clone();
-                    let act_swap = act.clone();
-                    let act_default = act.clone();
-                    let act_none = act.clone();
-                    let act_fill_click = act.clone();
-                    let act_stroke_click = act.clone();
-
-                    rsx! {
-                        div {
-                            style: "padding:8px 4px 4px; border-top:1px solid {THEME_BORDER}; flex-shrink:0;",
-                            // Overlapping squares container
-                            div {
-                                style: "position:relative; width:54px; height:54px; margin:0 auto;",
-                                // Swap arrow (top-right)
-                                div {
-                                    style: "position:absolute; top:0; right:0; cursor:pointer; font-size:11px; color:{THEME_TEXT}; z-index:3; user-select:none; line-height:1;",
-                                    title: "Swap Fill and Stroke (Shift+X)",
-                                    onmousedown: move |evt: Event<MouseData>| {
-                                        evt.stop_propagation();
-                                        (act_swap.borrow_mut())(Box::new(|st: &mut AppState| {
-                                            st.swap_fill_stroke();
-                                        }));
-                                    },
-                                    "\u{21C4}" // ⇄
-                                }
-                                // Default button (bottom-left)
-                                div {
-                                    style: "position:absolute; bottom:0; left:0; width:14px; height:14px; cursor:pointer; z-index:3; user-select:none;",
-                                    title: "Default Fill and Stroke (D)",
-                                    onmousedown: move |evt: Event<MouseData>| {
-                                        evt.stop_propagation();
-                                        (act_default.borrow_mut())(Box::new(|st: &mut AppState| {
-                                            st.reset_fill_stroke_defaults();
-                                        }));
-                                    },
-                                    // Mini fill/stroke icon
-                                    div {
-                                        style: "position:absolute; top:0; left:0; width:9px; height:9px; background:#000; border:1px solid #888;",
-                                    }
-                                    div {
-                                        style: "position:absolute; bottom:0; right:0; width:9px; height:9px; background:#fff; border:1px solid #888;",
-                                    }
-                                }
-                                // Back square (behind)
-                                if fill_on_top {
-                                    // Stroke is behind
-                                    div {
-                                        style: "position:absolute; right:2px; bottom:2px; width:28px; height:28px; border:6px solid {stroke_css}; background:transparent; cursor:pointer; z-index:1; box-sizing:border-box;",
-                                        title: "Stroke",
-                                        onmousedown: move |evt: Event<MouseData>| {
-                                            evt.stop_propagation();
-                                            (act_stroke_click.borrow_mut())(Box::new(|st: &mut AppState| {
-                                                st.fill_on_top = false;
-                                            }));
-                                        },
-                                        if stroke_label.is_some() {
-                                            div {
-                                                style: "width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:{THEME_TEXT};",
-                                                "{stroke_label.unwrap()}"
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // Fill is behind
-                                    div {
-                                        style: "position:absolute; left:2px; top:2px; width:28px; height:28px; background:{fill_css}; border:1px solid #888; cursor:pointer; z-index:1; box-sizing:border-box;",
-                                        title: "Fill",
-                                        onmousedown: move |evt: Event<MouseData>| {
-                                            evt.stop_propagation();
-                                            (act_fill_click.borrow_mut())(Box::new(|st: &mut AppState| {
-                                                st.fill_on_top = true;
-                                            }));
-                                        },
-                                        if fill_label.is_some() {
-                                            div {
-                                                style: "width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:{THEME_TEXT};",
-                                                "{fill_label.unwrap()}"
-                                            }
-                                        }
-                                    }
-                                }
-                                // Front square (on top)
-                                if fill_on_top {
-                                    // Fill is on top
-                                    div {
-                                        style: "position:absolute; left:2px; top:2px; width:28px; height:28px; background:{fill_css}; border:1px solid #888; cursor:pointer; z-index:2; box-sizing:border-box;",
-                                        title: "Fill (active)",
-                                        ondoubleclick: {
-                                            let app_dbl = app.clone();
-                                            move |evt: Event<MouseData>| {
-                                                evt.stop_propagation();
-                                                let st = app_dbl.borrow();
-                                                let initial_color = st.tab()
-                                                    .and_then(|t| t.model.default_fill.map(|f| f.color))
-                                                    .unwrap_or(Color::BLACK);
-                                                color_picker_state.set(Some(
-                                                    super::color_picker::ColorPickerState::new(initial_color, true)
-                                                ));
-                                            }
-                                        },
-                                        if fill_label.is_some() {
-                                            div {
-                                                style: "width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:{THEME_TEXT};",
-                                                "{fill_label.unwrap()}"
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // Stroke is on top
-                                    div {
-                                        style: "position:absolute; right:2px; bottom:2px; width:28px; height:28px; border:6px solid {stroke_css}; background:transparent; cursor:pointer; z-index:2; box-sizing:border-box;",
-                                        title: "Stroke (active)",
-                                        ondoubleclick: {
-                                            let app_dbl = app.clone();
-                                            move |evt: Event<MouseData>| {
-                                                evt.stop_propagation();
-                                                let st = app_dbl.borrow();
-                                                let initial_color = st.tab()
-                                                    .and_then(|t| t.model.default_stroke.map(|s| s.color))
-                                                    .unwrap_or(Color::BLACK);
-                                                color_picker_state.set(Some(
-                                                    super::color_picker::ColorPickerState::new(initial_color, false)
-                                                ));
-                                            }
-                                        },
-                                        if stroke_label.is_some() {
-                                            div {
-                                                style: "width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:{THEME_TEXT};",
-                                                "{stroke_label.unwrap()}"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            // Mode buttons: Color | Gradient | None
-                            div {
-                                style: "display:flex; gap:2px; margin-top:6px; justify-content:center;",
-                                // Color button
-                                div {
-                                    style: "width:18px; height:18px; background:{color_btn_bg}; border:1px solid {THEME_BORDER}; cursor:pointer; border-radius:2px;",
-                                    title: "Color",
-                                    // Solid color icon
-                                    div {
-                                        style: "margin:3px; width:12px; height:12px; background:linear-gradient(135deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f);",
-                                    }
-                                }
-                                // Gradient button (disabled)
-                                div {
-                                    style: "width:18px; height:18px; background:transparent; border:1px solid {THEME_BORDER}; cursor:default; border-radius:2px; opacity:0.4;",
-                                    title: "Gradient (not implemented)",
-                                    div {
-                                        style: "margin:3px; width:12px; height:12px; background:linear-gradient(to right, #000, #fff);",
-                                    }
-                                }
-                                // None button
-                                div {
-                                    style: "width:18px; height:18px; background:{none_btn_bg}; border:1px solid {THEME_BORDER}; cursor:pointer; border-radius:2px;",
-                                    title: "None",
-                                    onmousedown: move |evt: Event<MouseData>| {
-                                        evt.stop_propagation();
-                                        (act_none.borrow_mut())(Box::new(|st: &mut AppState| {
-                                            st.set_active_to_none();
-                                        }));
-                                    },
-                                    // Red diagonal "none" icon
-                                    div {
-                                        style: "margin:3px; width:12px; height:12px; background:white; position:relative; overflow:hidden;",
-                                        div {
-                                            style: "position:absolute; top:50%; left:-2px; width:16px; height:2px; background:red; transform:rotate(-45deg); transform-origin:center;",
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                FillStrokeWidgetView {
+                    fill_summary: fs_fill_summary.clone(),
+                    stroke_summary: fs_stroke_summary.clone(),
+                    default_fill: fs_default_fill,
+                    default_stroke: fs_default_stroke,
+                    fill_on_top,
+                    color_picker_state,
                 }
 
                 // Toolbar width is not resizable
             }
             } // close toolbar visibility if
-
-            // Tool alternate popup (shown on long-press)
-            if let Some(popup) = popup_node {
-                {popup}
-            }
 
             // ===== Canvas pane (position:absolute) =====
             div {
@@ -3272,596 +2343,10 @@ pub fn App() -> Element {
             } // close pane container div
 
             // Save As dialog
-            if let Some(dialog_state) = save_as_dialog() {
-                {
-                    let act = act.clone();
-                    let saved_layouts = app.borrow().app_config.saved_layouts.clone();
-                    match dialog_state {
-                        SaveAsDialog::Editing(ref current_name) => {
-                            let current_name = current_name.clone();
-                            let submit_name = {
-                                let act = act.clone();
-                                let saved_layouts = saved_layouts.clone();
-                                move |name: String| {
-                                    let trimmed = name.trim().to_string();
-                                    if trimmed.is_empty() {
-                                        return;
-                                    }
-                                    if trimmed.eq_ignore_ascii_case(super::workspace::WORKSPACE_LAYOUT_NAME) {
-                                        save_as_dialog.set(Some(SaveAsDialog::RejectWorkspace));
-                                    } else if saved_layouts.iter().any(|n| n == &trimmed) {
-                                        save_as_dialog.set(Some(SaveAsDialog::ConfirmOverwrite(trimmed)));
-                                    } else {
-                                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                            st.save_layout_as(&trimmed);
-                                        }));
-                                        save_as_dialog.set(None);
-                                    }
-                                }
-                            };
-                            let mut submit_enter = submit_name.clone();
-                            let mut submit_ok = submit_name.clone();
-                            rsx! {
-                                div {
-                                    style: "position:fixed; inset:0; background:rgba(0,0,0,0.3); z-index:2000; display:flex; align-items:center; justify-content:center;",
-                                    onmousedown: move |evt: Event<MouseData>| {
-                                        evt.stop_propagation();
-                                        save_as_dialog.set(None);
-                                    },
-
-                                    div {
-                                        style: "background:{THEME_BG}; border:1px solid {THEME_BORDER}; border-radius:8px; padding:20px; box-shadow:0 8px 32px rgba(0,0,0,0.25); min-width:300px;",
-                                        onmousedown: move |evt: Event<MouseData>| {
-                                            evt.stop_propagation();
-                                        },
-
-                                        div {
-                                            style: "font-size:14px; font-weight:bold; margin-bottom:12px; color:{THEME_TEXT};",
-                                            "Save Workspace As"
-                                        }
-
-                                        input {
-                                            r#type: "text",
-                                            placeholder: "Workspace name",
-                                            value: "{current_name}",
-                                            autofocus: true,
-                                            style: "width:100%; padding:6px 8px; font-size:13px; border:1px solid {THEME_BORDER}; border-radius:4px; box-sizing:border-box; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT};",
-                                            oninput: move |evt: Event<FormData>| {
-                                                save_as_dialog.set(Some(SaveAsDialog::Editing(evt.value().to_string())));
-                                            },
-                                            onkeydown: move |evt: Event<KeyboardData>| {
-                                                if evt.data().key() == Key::Enter {
-                                                    if let Some(SaveAsDialog::Editing(ref name)) = save_as_dialog() {
-                                                        submit_enter(name.clone());
-                                                    }
-                                                } else if evt.data().key() == Key::Escape {
-                                                    save_as_dialog.set(None);
-                                                }
-                                            },
-                                        }
-
-                                        div {
-                                            style: "display:flex; justify-content:flex-end; gap:8px; margin-top:12px;",
-
-                                            div {
-                                                style: "padding:6px 16px; cursor:pointer; font-size:13px; border:1px solid {THEME_BORDER}; border-radius:4px; user-select:none; color:{THEME_TEXT};",
-                                                onmousedown: move |evt: Event<MouseData>| {
-                                                    evt.stop_propagation();
-                                                    save_as_dialog.set(None);
-                                                },
-                                                "Cancel"
-                                            }
-
-                                            {
-                                                rsx! {
-                                                    div {
-                                                        style: "padding:6px 16px; cursor:pointer; font-size:13px; background:{THEME_ACCENT}; color:#fff; border-radius:4px; user-select:none;",
-                                                        onmousedown: move |evt: Event<MouseData>| {
-                                                            evt.stop_propagation();
-                                                            if let Some(SaveAsDialog::Editing(ref name)) = save_as_dialog() {
-                                                                submit_ok(name.clone());
-                                                            }
-                                                        },
-                                                        "Save"
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        SaveAsDialog::ConfirmOverwrite(ref name) => {
-                            let name = name.clone();
-                            let confirm_name = name.clone();
-                            let message = format!("Layout \u{201C}{name}\u{201D} already exists. Overwrite?");
-                            rsx! {
-                                div {
-                                    style: "position:fixed; inset:0; background:rgba(0,0,0,0.3); z-index:2000; display:flex; align-items:center; justify-content:center;",
-                                    onmousedown: move |evt: Event<MouseData>| {
-                                        evt.stop_propagation();
-                                    },
-
-                                    div {
-                                        style: "background:{THEME_BG}; border:1px solid {THEME_BORDER}; border-radius:8px; padding:20px; box-shadow:0 8px 32px rgba(0,0,0,0.25); min-width:300px;",
-                                        onmousedown: move |evt: Event<MouseData>| {
-                                            evt.stop_propagation();
-                                        },
-
-                                        div {
-                                            style: "font-size:13px; margin-bottom:16px; color:{THEME_TEXT};",
-                                            "{message}"
-                                        }
-
-                                        div {
-                                            style: "display:flex; justify-content:flex-end; gap:8px;",
-
-                                            div {
-                                                style: "padding:6px 16px; cursor:pointer; font-size:13px; border:1px solid {THEME_BORDER}; border-radius:4px; user-select:none; color:{THEME_TEXT};",
-                                                onmousedown: move |evt: Event<MouseData>| {
-                                                    evt.stop_propagation();
-                                                    save_as_dialog.set(Some(SaveAsDialog::Editing(name.clone())));
-                                                },
-                                                "Cancel"
-                                            }
-
-                                            {
-                                                let act = act.clone();
-                                                rsx! {
-                                                    div {
-                                                        style: "padding:6px 16px; cursor:pointer; font-size:13px; background:{THEME_ACCENT}; color:#fff; border-radius:4px; user-select:none;",
-                                                        onmousedown: move |evt: Event<MouseData>| {
-                                                            evt.stop_propagation();
-                                                            let n = confirm_name.clone();
-                                                            (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                                                st.save_layout_as(&n);
-                                                            }));
-                                                            save_as_dialog.set(None);
-                                                        },
-                                                        "Overwrite"
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        SaveAsDialog::RejectWorkspace => {
-                            rsx! {
-                                div {
-                                    style: "position:fixed; inset:0; background:rgba(0,0,0,0.3); z-index:2000; display:flex; align-items:center; justify-content:center;",
-                                    onmousedown: move |evt: Event<MouseData>| {
-                                        evt.stop_propagation();
-                                    },
-
-                                    div {
-                                        style: "background:{THEME_BG}; border:1px solid {THEME_BORDER}; border-radius:8px; padding:20px; box-shadow:0 8px 32px rgba(0,0,0,0.25); min-width:300px;",
-                                        onmousedown: move |evt: Event<MouseData>| {
-                                            evt.stop_propagation();
-                                        },
-
-                                        div {
-                                            style: "font-size:13px; margin-bottom:16px; color:{THEME_TEXT};",
-                                            "\u{201C}Workspace\u{201D} is a system workspace that is saved automatically."
-                                        }
-
-                                        div {
-                                            style: "display:flex; justify-content:flex-end;",
-
-                                            div {
-                                                style: "padding:6px 16px; cursor:pointer; font-size:13px; background:{THEME_ACCENT}; color:#fff; border-radius:4px; user-select:none;",
-                                                onmousedown: move |evt: Event<MouseData>| {
-                                                    evt.stop_propagation();
-                                                    save_as_dialog.set(Some(SaveAsDialog::Editing(String::new())));
-                                                },
-                                                "OK"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            SaveAsDialogView { save_as_dialog }
 
             // Color Picker dialog
-            if color_picker_state().is_some() {
-                {
-                    let cp = color_picker_state().unwrap();
-                    let (cr, cg, cb) = cp.rgb_u8();
-                    let swatch_css = format!("rgb({cr},{cg},{cb})");
-                    let hex_val = cp.hex_str();
-                    let (h_val, s_val, b_val) = cp.hsb_vals();
-                    let (cmyk_c, cmyk_m, cmyk_y, cmyk_k) = cp.cmyk_vals();
-                    // Field display: use override if mid-edit, computed otherwise
-                    let dv_h = cp.field_display("H", &format!("{h_val:.0}"));
-                    let dv_s = cp.field_display("S", &format!("{s_val:.0}"));
-                    let dv_b = cp.field_display("B", &format!("{b_val:.0}"));
-                    let dv_r = cp.field_display("R", &format!("{cr}"));
-                    let dv_g = cp.field_display("G", &format!("{cg}"));
-                    let dv_bl = cp.field_display("Bl", &format!("{cb}"));
-                    let dv_c = cp.field_display("C", &format!("{cmyk_c:.0}"));
-                    let dv_m = cp.field_display("M", &format!("{cmyk_m:.0}"));
-                    let dv_y = cp.field_display("Y", &format!("{cmyk_y:.0}"));
-                    let dv_k = cp.field_display("K", &format!("{cmyk_k:.0}"));
-                    let dv_hex = cp.field_display("hex", &hex_val);
-                    // Gradient cursor position (in pixels within 180x180)
-                    let (gx_norm, gy_norm) = cp.gradient_pos();
-                    let gx_px = gx_norm * 180.0;
-                    let gy_px = gy_norm * 180.0;
-                    // Colorbar slider position (in pixels within 180px height)
-                    let cb_pos = cp.colorbar_pos() * 180.0;
-                    // Circle color: use white or black depending on luminance for contrast
-                    let luminance = 0.299 * (cr as f64) + 0.587 * (cg as f64) + 0.114 * (cb as f64);
-                    let circle_color = if luminance > 128.0 { "#000" } else { "#fff" };
-                    let for_fill = cp.for_fill;
-                    let act_ok = act.clone();
-                    let act_cancel = act.clone();
-
-                    let eyedropper_active = cp.eyedropper_active;
-                    let backdrop_cursor = if eyedropper_active {
-                        // Custom SVG cursor: eyedropper with hotspot at tip (bottom-left)
-                        r##"url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M20.354 3.646a3.121 3.121 0 0 0-4.414 0l-2.5 2.5-1.06-1.06a.75.75 0 0 0-1.06 1.06l.53.53L3.6 14.93a2 2 0 0 0-.543 1.02L2 21.5a.75.75 0 0 0 .9.9l5.55-1.06a2 2 0 0 0 1.02-.543l8.25-8.25.53.53a.75.75 0 0 0 1.06-1.06l-1.06-1.06 2.5-2.5a3.121 3.121 0 0 0 0-4.414zM7.93 19.72a.5.5 0 0 1-.255.136L3.7 20.7l.844-3.975a.5.5 0 0 1 .136-.255L13 8.172l2.828 2.828z' fill='%23fff' stroke='%23000' stroke-width='.5'/%3E%3C/svg%3E") 1 23, crosshair"##
-                    } else { "default" };
-
-                    rsx! {
-                        // Eyedropper overlay — full screen, above everything, captures all clicks
-                        if eyedropper_active {
-                            div {
-                                style: "position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:3000; cursor:{backdrop_cursor}; background:rgba(0,0,0,0.01);",
-                                onmousemove: move |evt: Event<MouseData>| {
-                                    let coords = evt.data().page_coordinates();
-                                    let mut cp = color_picker_state().unwrap();
-                                    if let Some((sr, sg, sb)) = sample_pixel_at(coords.x, coords.y) {
-                                        cp.set_rgb(sr, sg, sb);
-                                    }
-                                    color_picker_state.set(Some(cp));
-                                },
-                                onclick: move |evt: Event<MouseData>| {
-                                    evt.stop_propagation();
-                                    let mut cp = color_picker_state().unwrap();
-                                    let coords = evt.data().page_coordinates();
-                                    if let Some((sr, sg, sb)) = sample_pixel_at(coords.x, coords.y) {
-                                        cp.set_rgb(sr, sg, sb);
-                                    }
-                                    cp.eyedropper_active = false;
-                                    color_picker_state.set(Some(cp));
-                                },
-                            }
-                        }
-                        // Dialog backdrop
-                        div {
-                            style: "position:fixed; inset:0; background:rgba(0,0,0,0.15); z-index:2000; display:flex; align-items:center; justify-content:center;",
-                            onmousedown: move |evt: Event<MouseData>| {
-                                evt.stop_propagation();
-                                color_picker_state.set(None);
-                            },
-
-                            div {
-                                style: "background:{THEME_BG}; border:1px solid {THEME_BORDER}; border-radius:8px; padding:16px; box-shadow:0 8px 32px rgba(0,0,0,0.25); min-width:480px;",
-                                onmousedown: move |evt: Event<MouseData>| {
-                                    evt.stop_propagation();
-                                },
-                                onkeydown: move |evt: Event<KeyboardData>| {
-                                    evt.stop_propagation();
-                                },
-
-                                // Title + eyedropper
-                                div {
-                                    style: "font-size:13px; color:{THEME_TEXT}; margin-bottom:12px; display:flex; align-items:center; gap:8px;",
-                                    "Select Color:"
-                                    // Eyedropper button
-                                    {
-                                        let eyedropper_bg = if cp.eyedropper_active { THEME_BG_TOOLBAR_BTN } else { "transparent" };
-                                        rsx! {
-                                            div {
-                                                style: "cursor:pointer; padding:2px 4px; border-radius:3px; background:{eyedropper_bg}; user-select:none; display:flex; align-items:center;",
-                                                title: "Sample a color from the screen",
-                                                onmousedown: move |evt: Event<MouseData>| {
-                                                    evt.stop_propagation();
-                                                    let mut cp = color_picker_state().unwrap();
-                                                    cp.eyedropper_active = !cp.eyedropper_active;
-                                                    color_picker_state.set(Some(cp));
-                                                },
-                                                dangerous_inner_html: EYEDROPPER_SVG,
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Main layout: gradient + colorbar + fields
-                                div {
-                                    style: "display:flex; gap:12px;",
-
-                                    // Left column: gradient + colorbar + Only Web Colors
-                                    div {
-                                        style: "display:flex; flex-direction:column; gap:6px; flex-shrink:0;",
-                                        // Gradient + colorbar row
-                                        div {
-                                            style: "display:flex; gap:4px;",
-                                            // Color gradient
-                                            div {
-                                                style: "width:180px; height:180px; background:linear-gradient(to bottom, transparent, #000), linear-gradient(to right, #fff, {swatch_css}); border:1px solid {THEME_BORDER}; cursor:crosshair; position:relative;",
-                                                onmousedown: move |evt: Event<MouseData>| {
-                                                    evt.stop_propagation();
-                                                    let coords = evt.data().element_coordinates();
-                                                    let x = (coords.x / 180.0).clamp(0.0, 1.0);
-                                                    let y = (coords.y / 180.0).clamp(0.0, 1.0);
-                                                    let mut cp = color_picker_state().unwrap();
-                                                    cp.set_from_gradient(x, y);
-                                                    color_picker_state.set(Some(cp));
-                                                },
-                                                onmousemove: move |evt: Event<MouseData>| {
-                                                    if evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary) {
-                                                        let coords = evt.data().element_coordinates();
-                                                        let x = (coords.x / 180.0).clamp(0.0, 1.0);
-                                                        let y = (coords.y / 180.0).clamp(0.0, 1.0);
-                                                        let mut cp = color_picker_state().unwrap();
-                                                        cp.set_from_gradient(x, y);
-                                                        color_picker_state.set(Some(cp));
-                                                    }
-                                                },
-                                                // Current color indicator circle
-                                                div {
-                                                    style: "position:absolute; left:{gx_px - 5.0}px; top:{gy_px - 5.0}px; width:10px; height:10px; border-radius:50%; border:1.5px solid {circle_color}; pointer-events:none; box-sizing:border-box;",
-                                                }
-                                            }
-                                            // Colorbar with drag area
-                                            // Wider container captures mouse moves during drag
-                                            div {
-                                                style: "width:32px; height:180px; position:relative; cursor:pointer; flex-shrink:0;",
-                                                onmousedown: move |evt: Event<MouseData>| {
-                                                    evt.stop_propagation();
-                                                    let coords = evt.data().element_coordinates();
-                                                    let t = (coords.y / 180.0).clamp(0.0, 1.0);
-                                                    let mut cp = color_picker_state().unwrap();
-                                                    cp.set_from_colorbar(t);
-                                                    color_picker_state.set(Some(cp));
-                                                },
-                                                onmousemove: move |evt: Event<MouseData>| {
-                                                    if evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary) {
-                                                        let coords = evt.data().element_coordinates();
-                                                        let t = (coords.y / 180.0).clamp(0.0, 1.0);
-                                                        let mut cp = color_picker_state().unwrap();
-                                                        cp.set_from_colorbar(t);
-                                                        color_picker_state.set(Some(cp));
-                                                    }
-                                                },
-                                                // Visible colorbar strip (centered)
-                                                div {
-                                                    style: "position:absolute; left:6px; top:0; width:20px; height:180px; background:linear-gradient(to bottom, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); border:1px solid {THEME_BORDER}; pointer-events:none; box-sizing:border-box;",
-                                                }
-                                                // Slider: left triangle
-                                                div {
-                                                    style: "position:absolute; left:0; top:{cb_pos - 4.0}px; width:0; height:0; border-top:4px solid transparent; border-bottom:4px solid transparent; border-left:5px solid #fff; pointer-events:none;",
-                                                }
-                                                // Slider: right triangle
-                                                div {
-                                                    style: "position:absolute; right:0; top:{cb_pos - 4.0}px; width:0; height:0; border-top:4px solid transparent; border-bottom:4px solid transparent; border-right:5px solid #fff; pointer-events:none;",
-                                                }
-                                            }
-                                        }
-                                        // Only Web Colors checkbox (below gradient)
-                                        div { style: "display:flex; align-items:center; gap:4px; font-size:12px; color:{THEME_TEXT};",
-                                            input {
-                                                r#type: "checkbox",
-                                                checked: cp.web_only,
-                                                onchange: move |_| {
-                                                    let mut cp = color_picker_state().unwrap();
-                                                    cp.web_only = !cp.web_only;
-                                                    if cp.web_only {
-                                                        let (r, g, b) = cp.rgb_u8();
-                                                        cp.set_rgb(r, g, b);
-                                                    }
-                                                    color_picker_state.set(Some(cp));
-                                                },
-                                            }
-                                            "Only Web Colors"
-                                        }
-                                    }
-
-                                    // Fields area
-                                    div {
-                                        style: "display:flex; flex-direction:column; gap:4px; font-size:12px; color:{THEME_TEXT};",
-
-                                        // HSB row with swatch to the right
-                                        div { style: "display:flex; gap:12px; align-items:flex-start;",
-                                            // HSB fields
-                                            div { style: "display:flex; flex-direction:column; gap:4px;",
-                                                div { style: "display:flex; align-items:center; gap:4px;",
-                                                    input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::H,
-                                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::H; color_picker_state.set(Some(cp)); },
-                                                    }
-                                                    "H:"
-                                                    input { r#type: "text", value: "{dv_h}",
-                                                        style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
-                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (_, s, b) = cp.hsb_vals(); cp.set_hsb(n, s, b); } else { cp.set_input_override("H", v); } color_picker_state.set(Some(cp)); },
-                                                    }
-                                                    "\u{00B0}"
-                                                }
-                                                div { style: "display:flex; align-items:center; gap:4px;",
-                                                    input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::S,
-                                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::S; color_picker_state.set(Some(cp)); },
-                                                    }
-                                                    "S:"
-                                                    input { r#type: "text", value: "{dv_s}",
-                                                        style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
-                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (h, _, b) = cp.hsb_vals(); cp.set_hsb(h, n, b); } else { cp.set_input_override("S", v); } color_picker_state.set(Some(cp)); },
-                                                    }
-                                                    "%"
-                                                }
-                                                div { style: "display:flex; align-items:center; gap:4px;",
-                                                    input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::B,
-                                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::B; color_picker_state.set(Some(cp)); },
-                                                    }
-                                                    "B:"
-                                                    input { r#type: "text", value: "{dv_b}",
-                                                        style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
-                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (h, s, _) = cp.hsb_vals(); cp.set_hsb(h, s, n); } else { cp.set_input_override("B", v); } color_picker_state.set(Some(cp)); },
-                                                    }
-                                                    "%"
-                                                }
-                                            }
-                                            // Color swatch preview
-                                            div { style: "width:50px; height:50px; background:{swatch_css}; border:1px solid {THEME_BORDER};" }
-                                        }
-
-                                        // RGB + CMYK side by side
-                                        div { style: "display:flex; gap:16px; align-items:flex-start;",
-                                            // RGB column
-                                            div { style: "display:flex; flex-direction:column; gap:4px;",
-                                                div { style: "display:flex; align-items:center; gap:4px;",
-                                                    input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::R,
-                                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::R; color_picker_state.set(Some(cp)); },
-                                                    }
-                                                    "R:"
-                                                    input { r#type: "text", value: "{dv_r}",
-                                                        style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
-                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<u8>() { cp.clear_input_override(); let (_, g, b) = cp.rgb_u8(); cp.set_rgb(n, g, b); } else { cp.set_input_override("R", v); } color_picker_state.set(Some(cp)); },
-                                                    }
-                                                }
-                                                div { style: "display:flex; align-items:center; gap:4px;",
-                                                    input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::G,
-                                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::G; color_picker_state.set(Some(cp)); },
-                                                    }
-                                                    "G:"
-                                                    input { r#type: "text", value: "{dv_g}",
-                                                        style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
-                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<u8>() { cp.clear_input_override(); let (r, _, b) = cp.rgb_u8(); cp.set_rgb(r, n, b); } else { cp.set_input_override("G", v); } color_picker_state.set(Some(cp)); },
-                                                    }
-                                                }
-                                                div { style: "display:flex; align-items:center; gap:4px;",
-                                                    input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::Blue,
-                                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::Blue; color_picker_state.set(Some(cp)); },
-                                                    }
-                                                    "B:"
-                                                    input { r#type: "text", value: "{dv_bl}",
-                                                        style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
-                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<u8>() { cp.clear_input_override(); let (r, g, _) = cp.rgb_u8(); cp.set_rgb(r, g, n); } else { cp.set_input_override("Bl", v); } color_picker_state.set(Some(cp)); },
-                                                    }
-                                                }
-                                            }
-                                            // CMYK column
-                                            div { style: "display:flex; flex-direction:column; gap:4px;",
-                                                div { style: "display:flex; align-items:center; gap:2px;",
-                                                    "C:"
-                                                    input { r#type: "text", value: "{dv_c}",
-                                                        style: "width:40px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
-                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (_, m, y, k) = cp.cmyk_vals(); cp.set_cmyk(n, m, y, k); } else { cp.set_input_override("C", v); } color_picker_state.set(Some(cp)); },
-                                                    }
-                                                    "%"
-                                                }
-                                                div { style: "display:flex; align-items:center; gap:2px;",
-                                                    "M:"
-                                                    input { r#type: "text", value: "{dv_m}",
-                                                        style: "width:40px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
-                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (c, _, y, k) = cp.cmyk_vals(); cp.set_cmyk(c, n, y, k); } else { cp.set_input_override("M", v); } color_picker_state.set(Some(cp)); },
-                                                    }
-                                                    "%"
-                                                }
-                                                div { style: "display:flex; align-items:center; gap:2px;",
-                                                    "Y:"
-                                                    input { r#type: "text", value: "{dv_y}",
-                                                        style: "width:40px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
-                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (c, m, _, k) = cp.cmyk_vals(); cp.set_cmyk(c, m, n, k); } else { cp.set_input_override("Y", v); } color_picker_state.set(Some(cp)); },
-                                                    }
-                                                    "%"
-                                                }
-                                                div { style: "display:flex; align-items:center; gap:2px;",
-                                                    "K:"
-                                                    input { r#type: "text", value: "{dv_k}",
-                                                        style: "width:40px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
-                                                        onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (c, m, y, _) = cp.cmyk_vals(); cp.set_cmyk(c, m, y, n); } else { cp.set_input_override("K", v); } color_picker_state.set(Some(cp)); },
-                                                    }
-                                                    "%"
-                                                }
-                                            }
-                                        }
-
-                                        // Hex field
-                                        div { style: "display:flex; align-items:center; gap:4px; margin-top:4px;",
-                                            "#"
-                                            input { r#type: "text", value: "{dv_hex}", maxlength: "6",
-                                                style: "width:60px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px; font-family:monospace;",
-                                                onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                                oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); cp.set_hex(&v); if cp.hex_str() != v { cp.set_input_override("hex", v); } else { cp.clear_input_override(); } color_picker_state.set(Some(cp)); },
-                                            }
-                                        }
-                                    }
-
-                                    // Right column: buttons
-                                    div {
-                                        style: "display:flex; flex-direction:column; gap:6px; margin-left:8px;",
-
-                                        // OK button
-                                        div {
-                                            style: "padding:6px 20px; cursor:pointer; font-size:13px; border:1px solid {THEME_BORDER}; border-radius:4px; user-select:none; color:{THEME_TEXT}; text-align:center; background:{THEME_BG_ACTIVE};",
-                                            onmousedown: move |evt: Event<MouseData>| {
-                                                evt.stop_propagation();
-                                                let cp = color_picker_state().unwrap();
-                                                let chosen_color = cp.color();
-                                                let for_fill = cp.for_fill;
-                                                color_picker_state.set(None);
-                                                (act_ok.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                                    if let Some(tab) = st.tab_mut() {
-                                                        if for_fill {
-                                                            tab.model.default_fill = Some(Fill::new(chosen_color));
-                                                            let fill = tab.model.default_fill;
-                                                            if !tab.model.document().selection.is_empty() {
-                                                                tab.model.snapshot();
-                                                                Controller::set_selection_fill(&mut tab.model, fill);
-                                                            }
-                                                        } else {
-                                                            let new_stroke = match tab.model.default_stroke {
-                                                                Some(mut s) => { s.color = chosen_color; Some(s) }
-                                                                None => Some(Stroke::new(chosen_color, 1.0)),
-                                                            };
-                                                            tab.model.default_stroke = new_stroke;
-                                                            if !tab.model.document().selection.is_empty() {
-                                                                tab.model.snapshot();
-                                                                Controller::set_selection_stroke(&mut tab.model, new_stroke);
-                                                            }
-                                                        }
-                                                    }
-                                                }));
-                                            },
-                                            "OK"
-                                        }
-
-                                        // Cancel button
-                                        div {
-                                            style: "padding:6px 20px; cursor:pointer; font-size:13px; border:1px solid {THEME_BORDER}; border-radius:4px; user-select:none; color:{THEME_TEXT}; text-align:center;",
-                                            onmousedown: move |evt: Event<MouseData>| {
-                                                evt.stop_propagation();
-                                                color_picker_state.set(None);
-                                            },
-                                            "Cancel"
-                                        }
-
-                                        // Color Swatches button (disabled)
-                                        div {
-                                            style: "padding:6px 12px; font-size:12px; border:1px solid {THEME_BORDER}; border-radius:4px; user-select:none; color:{THEME_TEXT_DIM}; text-align:center; opacity:0.5; cursor:default;",
-                                            "Color Swatches"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            ColorPickerDialogView { color_picker_state }
         }
     }
 }
