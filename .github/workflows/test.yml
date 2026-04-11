@@ -1,0 +1,72 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  rust:
+    name: Rust tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cd jas_dioxus && cargo test
+
+  python:
+    name: Python tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy PySide6 pytest absl-py
+      - run: cd jas && python -m pytest
+
+  ocaml:
+    name: OCaml tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.2"
+      - run: opam install --yes dune lablgtk3 xmlm yojson
+      - run: cd jas_ocaml && opam exec -- dune test
+
+  swift:
+    name: Swift tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cd JasSwift && swift test
+
+  cross-language:
+    name: Cross-language equivalence
+    needs: [rust, python, ocaml, swift]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.2"
+      - run: pip install numpy PySide6 pytest absl-py
+      - run: opam install --yes dune lablgtk3 xmlm yojson
+      - name: Build all
+        run: |
+          (cd jas_dioxus && cargo build --bins)
+          (cd jas_ocaml && opam exec -- dune build)
+          (cd JasSwift && swift build -c release)
+      - name: Algorithm equivalence
+        run: opam exec -- python scripts/cross_language_algorithms.py
+      - name: SVG commutativity
+        run: opam exec -- python scripts/cross_language_commutativity.py
+      - name: Workspace equivalence
+        run: opam exec -- python scripts/cross_language_workspace.py

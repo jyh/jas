@@ -93,12 +93,7 @@ public class WorkspaceState: ObservableObject {
 public struct ContentView: View {
     @ObservedObject var workspace: WorkspaceState
     @State private var currentTool: Tool = .selection
-    @State private var paneDrag: (paneId: PaneId, offX: Double, offY: Double)?
-    @State private var borderDrag: (snapIdx: Int, startCoord: Double)?
-    @State private var edgeResize: (paneId: PaneId, edge: EdgeSide, startX: Double, startY: Double, startW: Double, startH: Double)?
-    @State private var edgeSnappedCoord: Double?
-    @State private var hoveredBorder: Int?
-    @State private var snapPreview: [SnapConstraint] = []
+    @State private var paneState = PaneInteractionState()
     @State private var colorPickerState: ColorPickerState?
     @State private var showColorPicker = false
 
@@ -109,8 +104,8 @@ public struct ContentView: View {
     public var body: some View {
         GeometryReader { geometry in
             let dockCollapsed = workspace.workspaceLayout.anchoredDock(.right)?.collapsed ?? false
-            let rs = RenderingState.from(workspace.workspaceLayout.panes(), dockCollapsed: dockCollapsed, activeBorderSnap: borderDrag?.snapIdx)
-            let snapLines = RenderingState.snapLines(from: snapPreview,
+            let rs = RenderingState.from(workspace.workspaceLayout.panes(), dockCollapsed: dockCollapsed, activeBorderSnap: paneState.borderDrag?.snapIdx)
+            let snapLines = RenderingState.snapLines(from: paneState.snapPreview,
                                                       paneLayout: workspace.workspaceLayout.panes())
 
             ZStack {
@@ -129,13 +124,13 @@ public struct ContentView: View {
 
                 // Shared border handles
                 ForEach(rs.borders) { border in
-                    let isActive = borderDrag?.snapIdx == border.snapIdx
-                        || hoveredBorder == border.snapIdx
-                        || (edgeResize != nil && edgeSnappedCoord != nil && {
+                    let isActive = paneState.borderDrag?.snapIdx == border.snapIdx
+                        || paneState.hoveredBorder == border.snapIdx
+                        || (paneState.edgeResize != nil && paneState.edgeSnappedCoord != nil && {
                             let center = border.isVertical ? border.x + 3 : border.y + 3
-                            return abs(center - edgeSnappedCoord!) < 1
+                            return abs(center - paneState.edgeSnappedCoord!) < 1
                         }())
-                    BorderHandleView(border: border, isDragging: isActive, hoveredBorder: $hoveredBorder)
+                    BorderHandleView(border: border, isDragging: isActive, hoveredBorder: $paneState.hoveredBorder)
                         .frame(width: border.width, height: border.height)
                         .position(x: border.x + border.width / 2, y: border.y + border.height / 2)
                         .gesture(borderDragGesture(border: border))
@@ -235,15 +230,15 @@ public struct ContentView: View {
                               colorPickerState = ColorPickerState(color: initial, forFill: forFill)
                               showColorPicker = true
                           }) },
-                          paneDrag: $paneDrag, edgeResize: $edgeResize, edgeSnappedCoord: $edgeSnappedCoord, snapPreview: $snapPreview)
+                          paneDrag: $paneState.paneDrag, edgeResize: $paneState.edgeResize, edgeSnappedCoord: $paneState.edgeSnappedCoord, snapPreview: $paneState.snapPreview)
         case .canvas:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: !(geo.config.doubleClickAction == .maximize && rs.canvasMaximized),
                           content: { canvasContent },
-                          paneDrag: $paneDrag, edgeResize: $edgeResize, edgeSnappedCoord: $edgeSnappedCoord, snapPreview: $snapPreview)
+                          paneDrag: $paneState.paneDrag, edgeResize: $paneState.edgeResize, edgeSnappedCoord: $paneState.edgeSnappedCoord, snapPreview: $paneState.snapPreview)
         case .dock:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: true,
                           content: { dockContent },
-                          paneDrag: $paneDrag, edgeResize: $edgeResize, edgeSnappedCoord: $edgeSnappedCoord, snapPreview: $snapPreview)
+                          paneDrag: $paneState.paneDrag, edgeResize: $paneState.edgeResize, edgeSnappedCoord: $paneState.edgeSnappedCoord, snapPreview: $paneState.snapPreview)
         }
     }
 
@@ -301,9 +296,9 @@ public struct ContentView: View {
             .onChanged { value in
                 let translation = border.isVertical ? value.translation.width : value.translation.height
                 let newAccum = Double(translation)
-                let prevAccum = borderDrag?.startCoord ?? 0
+                let prevAccum = paneState.borderDrag?.startCoord ?? 0
                 let delta = newAccum - prevAccum
-                borderDrag = (border.snapIdx, newAccum)
+                paneState.borderDrag = (border.snapIdx, newAccum)
                 if abs(delta) > 0.001 {
                     workspace.workspaceLayout.panesMut { pl in
                         pl.dragSharedBorder(snapIdx: border.snapIdx, delta: delta)
@@ -311,7 +306,7 @@ public struct ContentView: View {
                 }
             }
             .onEnded { _ in
-                borderDrag = nil
+                paneState.borderDrag = nil
                 workspace.workspaceLayout.saveIfNeeded()
             }
     }

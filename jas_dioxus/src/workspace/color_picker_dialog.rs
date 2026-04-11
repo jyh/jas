@@ -41,11 +41,9 @@ pub(crate) fn ColorPickerDialogView(
 ) -> Element {
     let act = use_context::<Act>();
 
-    if color_picker_state().is_none() {
+    let Some(cp) = color_picker_state() else {
         return rsx! {};
-    }
-
-    let cp = color_picker_state().unwrap();
+    };
     let (cr, cg, cb) = cp.rgb_u8();
     let swatch_css = format!("rgb({cr},{cg},{cb})");
     let hex_val = cp.hex_str();
@@ -87,7 +85,7 @@ pub(crate) fn ColorPickerDialogView(
                 style: "position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:3000; cursor:{backdrop_cursor}; background:rgba(0,0,0,0.01);",
                 onmousemove: move |evt: Event<MouseData>| {
                     let coords = evt.data().page_coordinates();
-                    let mut cp = color_picker_state().unwrap();
+                    let Some(mut cp) = color_picker_state() else { return };
                     if let Some((sr, sg, sb)) = sample_pixel_at(coords.x, coords.y) {
                         cp.set_rgb(sr, sg, sb);
                     }
@@ -95,7 +93,7 @@ pub(crate) fn ColorPickerDialogView(
                 },
                 onclick: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
-                    let mut cp = color_picker_state().unwrap();
+                    let Some(mut cp) = color_picker_state() else { return };
                     let coords = evt.data().page_coordinates();
                     if let Some((sr, sg, sb)) = sample_pixel_at(coords.x, coords.y) {
                         cp.set_rgb(sr, sg, sb);
@@ -135,7 +133,7 @@ pub(crate) fn ColorPickerDialogView(
                                 title: "Sample a color from the screen",
                                 onmousedown: move |evt: Event<MouseData>| {
                                     evt.stop_propagation();
-                                    let mut cp = color_picker_state().unwrap();
+                                    let Some(mut cp) = color_picker_state() else { return };
                                     cp.eyedropper_active = !cp.eyedropper_active;
                                     color_picker_state.set(Some(cp));
                                 },
@@ -163,7 +161,7 @@ pub(crate) fn ColorPickerDialogView(
                                     let coords = evt.data().element_coordinates();
                                     let x = (coords.x / 180.0).clamp(0.0, 1.0);
                                     let y = (coords.y / 180.0).clamp(0.0, 1.0);
-                                    let mut cp = color_picker_state().unwrap();
+                                    let Some(mut cp) = color_picker_state() else { return };
                                     cp.set_from_gradient(x, y);
                                     color_picker_state.set(Some(cp));
                                 },
@@ -172,7 +170,7 @@ pub(crate) fn ColorPickerDialogView(
                                         let coords = evt.data().element_coordinates();
                                         let x = (coords.x / 180.0).clamp(0.0, 1.0);
                                         let y = (coords.y / 180.0).clamp(0.0, 1.0);
-                                        let mut cp = color_picker_state().unwrap();
+                                        let Some(mut cp) = color_picker_state() else { return };
                                         cp.set_from_gradient(x, y);
                                         color_picker_state.set(Some(cp));
                                     }
@@ -190,7 +188,7 @@ pub(crate) fn ColorPickerDialogView(
                                     evt.stop_propagation();
                                     let coords = evt.data().element_coordinates();
                                     let t = (coords.y / 180.0).clamp(0.0, 1.0);
-                                    let mut cp = color_picker_state().unwrap();
+                                    let Some(mut cp) = color_picker_state() else { return };
                                     cp.set_from_colorbar(t);
                                     color_picker_state.set(Some(cp));
                                 },
@@ -198,7 +196,7 @@ pub(crate) fn ColorPickerDialogView(
                                     if evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary) {
                                         let coords = evt.data().element_coordinates();
                                         let t = (coords.y / 180.0).clamp(0.0, 1.0);
-                                        let mut cp = color_picker_state().unwrap();
+                                        let Some(mut cp) = color_picker_state() else { return };
                                         cp.set_from_colorbar(t);
                                         color_picker_state.set(Some(cp));
                                     }
@@ -223,7 +221,7 @@ pub(crate) fn ColorPickerDialogView(
                                 r#type: "checkbox",
                                 checked: cp.web_only,
                                 onchange: move |_| {
-                                    let mut cp = color_picker_state().unwrap();
+                                    let Some(mut cp) = color_picker_state() else { return };
                                     cp.web_only = !cp.web_only;
                                     if cp.web_only {
                                         let (r, g, b) = cp.rgb_u8();
@@ -246,37 +244,37 @@ pub(crate) fn ColorPickerDialogView(
                             div { style: "display:flex; flex-direction:column; gap:4px;",
                                 div { style: "display:flex; align-items:center; gap:4px;",
                                     input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::H,
-                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::H; color_picker_state.set(Some(cp)); },
+                                        onchange: move |_| { let Some(mut cp) = color_picker_state() else { return }; cp.radio = super::color_picker::RadioChannel::H; color_picker_state.set(Some(cp)); },
                                     }
                                     "H:"
                                     input { r#type: "text", value: "{dv_h}",
                                         style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
                                         onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (_, s, b) = cp.hsb_vals(); cp.set_hsb(n, s, b); } else { cp.set_input_override("H", v); } color_picker_state.set(Some(cp)); },
+                                        oninput: move |evt: Event<FormData>| { let Some(mut cp) = color_picker_state() else { return }; let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (_, s, b) = cp.hsb_vals(); cp.set_hsb(n, s, b); } else { cp.set_input_override("H", v); } color_picker_state.set(Some(cp)); },
                                     }
                                     "\u{00B0}"
                                 }
                                 div { style: "display:flex; align-items:center; gap:4px;",
                                     input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::S,
-                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::S; color_picker_state.set(Some(cp)); },
+                                        onchange: move |_| { let Some(mut cp) = color_picker_state() else { return }; cp.radio = super::color_picker::RadioChannel::S; color_picker_state.set(Some(cp)); },
                                     }
                                     "S:"
                                     input { r#type: "text", value: "{dv_s}",
                                         style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
                                         onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (h, _, b) = cp.hsb_vals(); cp.set_hsb(h, n, b); } else { cp.set_input_override("S", v); } color_picker_state.set(Some(cp)); },
+                                        oninput: move |evt: Event<FormData>| { let Some(mut cp) = color_picker_state() else { return }; let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (h, _, b) = cp.hsb_vals(); cp.set_hsb(h, n, b); } else { cp.set_input_override("S", v); } color_picker_state.set(Some(cp)); },
                                     }
                                     "%"
                                 }
                                 div { style: "display:flex; align-items:center; gap:4px;",
                                     input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::B,
-                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::B; color_picker_state.set(Some(cp)); },
+                                        onchange: move |_| { let Some(mut cp) = color_picker_state() else { return }; cp.radio = super::color_picker::RadioChannel::B; color_picker_state.set(Some(cp)); },
                                     }
                                     "B:"
                                     input { r#type: "text", value: "{dv_b}",
                                         style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
                                         onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (h, s, _) = cp.hsb_vals(); cp.set_hsb(h, s, n); } else { cp.set_input_override("B", v); } color_picker_state.set(Some(cp)); },
+                                        oninput: move |evt: Event<FormData>| { let Some(mut cp) = color_picker_state() else { return }; let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (h, s, _) = cp.hsb_vals(); cp.set_hsb(h, s, n); } else { cp.set_input_override("B", v); } color_picker_state.set(Some(cp)); },
                                     }
                                     "%"
                                 }
@@ -291,35 +289,35 @@ pub(crate) fn ColorPickerDialogView(
                             div { style: "display:flex; flex-direction:column; gap:4px;",
                                 div { style: "display:flex; align-items:center; gap:4px;",
                                     input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::R,
-                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::R; color_picker_state.set(Some(cp)); },
+                                        onchange: move |_| { let Some(mut cp) = color_picker_state() else { return }; cp.radio = super::color_picker::RadioChannel::R; color_picker_state.set(Some(cp)); },
                                     }
                                     "R:"
                                     input { r#type: "text", value: "{dv_r}",
                                         style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
                                         onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<u8>() { cp.clear_input_override(); let (_, g, b) = cp.rgb_u8(); cp.set_rgb(n, g, b); } else { cp.set_input_override("R", v); } color_picker_state.set(Some(cp)); },
+                                        oninput: move |evt: Event<FormData>| { let Some(mut cp) = color_picker_state() else { return }; let v = evt.value(); if let Ok(n) = v.parse::<u8>() { cp.clear_input_override(); let (_, g, b) = cp.rgb_u8(); cp.set_rgb(n, g, b); } else { cp.set_input_override("R", v); } color_picker_state.set(Some(cp)); },
                                     }
                                 }
                                 div { style: "display:flex; align-items:center; gap:4px;",
                                     input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::G,
-                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::G; color_picker_state.set(Some(cp)); },
+                                        onchange: move |_| { let Some(mut cp) = color_picker_state() else { return }; cp.radio = super::color_picker::RadioChannel::G; color_picker_state.set(Some(cp)); },
                                     }
                                     "G:"
                                     input { r#type: "text", value: "{dv_g}",
                                         style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
                                         onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<u8>() { cp.clear_input_override(); let (r, _, b) = cp.rgb_u8(); cp.set_rgb(r, n, b); } else { cp.set_input_override("G", v); } color_picker_state.set(Some(cp)); },
+                                        oninput: move |evt: Event<FormData>| { let Some(mut cp) = color_picker_state() else { return }; let v = evt.value(); if let Ok(n) = v.parse::<u8>() { cp.clear_input_override(); let (r, _, b) = cp.rgb_u8(); cp.set_rgb(r, n, b); } else { cp.set_input_override("G", v); } color_picker_state.set(Some(cp)); },
                                     }
                                 }
                                 div { style: "display:flex; align-items:center; gap:4px;",
                                     input { r#type: "radio", name: "cp-radio", checked: cp.radio == super::color_picker::RadioChannel::Blue,
-                                        onchange: move |_| { let mut cp = color_picker_state().unwrap(); cp.radio = super::color_picker::RadioChannel::Blue; color_picker_state.set(Some(cp)); },
+                                        onchange: move |_| { let Some(mut cp) = color_picker_state() else { return }; cp.radio = super::color_picker::RadioChannel::Blue; color_picker_state.set(Some(cp)); },
                                     }
                                     "B:"
                                     input { r#type: "text", value: "{dv_bl}",
                                         style: "width:45px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
                                         onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<u8>() { cp.clear_input_override(); let (r, g, _) = cp.rgb_u8(); cp.set_rgb(r, g, n); } else { cp.set_input_override("Bl", v); } color_picker_state.set(Some(cp)); },
+                                        oninput: move |evt: Event<FormData>| { let Some(mut cp) = color_picker_state() else { return }; let v = evt.value(); if let Ok(n) = v.parse::<u8>() { cp.clear_input_override(); let (r, g, _) = cp.rgb_u8(); cp.set_rgb(r, g, n); } else { cp.set_input_override("Bl", v); } color_picker_state.set(Some(cp)); },
                                     }
                                 }
                             }
@@ -330,7 +328,7 @@ pub(crate) fn ColorPickerDialogView(
                                     input { r#type: "text", value: "{dv_c}",
                                         style: "width:40px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
                                         onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (_, m, y, k) = cp.cmyk_vals(); cp.set_cmyk(n, m, y, k); } else { cp.set_input_override("C", v); } color_picker_state.set(Some(cp)); },
+                                        oninput: move |evt: Event<FormData>| { let Some(mut cp) = color_picker_state() else { return }; let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (_, m, y, k) = cp.cmyk_vals(); cp.set_cmyk(n, m, y, k); } else { cp.set_input_override("C", v); } color_picker_state.set(Some(cp)); },
                                     }
                                     "%"
                                 }
@@ -339,7 +337,7 @@ pub(crate) fn ColorPickerDialogView(
                                     input { r#type: "text", value: "{dv_m}",
                                         style: "width:40px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
                                         onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (c, _, y, k) = cp.cmyk_vals(); cp.set_cmyk(c, n, y, k); } else { cp.set_input_override("M", v); } color_picker_state.set(Some(cp)); },
+                                        oninput: move |evt: Event<FormData>| { let Some(mut cp) = color_picker_state() else { return }; let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (c, _, y, k) = cp.cmyk_vals(); cp.set_cmyk(c, n, y, k); } else { cp.set_input_override("M", v); } color_picker_state.set(Some(cp)); },
                                     }
                                     "%"
                                 }
@@ -348,7 +346,7 @@ pub(crate) fn ColorPickerDialogView(
                                     input { r#type: "text", value: "{dv_y}",
                                         style: "width:40px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
                                         onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (c, m, _, k) = cp.cmyk_vals(); cp.set_cmyk(c, m, n, k); } else { cp.set_input_override("Y", v); } color_picker_state.set(Some(cp)); },
+                                        oninput: move |evt: Event<FormData>| { let Some(mut cp) = color_picker_state() else { return }; let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (c, m, _, k) = cp.cmyk_vals(); cp.set_cmyk(c, m, n, k); } else { cp.set_input_override("Y", v); } color_picker_state.set(Some(cp)); },
                                     }
                                     "%"
                                 }
@@ -357,7 +355,7 @@ pub(crate) fn ColorPickerDialogView(
                                     input { r#type: "text", value: "{dv_k}",
                                         style: "width:40px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px;",
                                         onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                        oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (c, m, y, _) = cp.cmyk_vals(); cp.set_cmyk(c, m, y, n); } else { cp.set_input_override("K", v); } color_picker_state.set(Some(cp)); },
+                                        oninput: move |evt: Event<FormData>| { let Some(mut cp) = color_picker_state() else { return }; let v = evt.value(); if let Ok(n) = v.parse::<f64>() { cp.clear_input_override(); let (c, m, y, _) = cp.cmyk_vals(); cp.set_cmyk(c, m, y, n); } else { cp.set_input_override("K", v); } color_picker_state.set(Some(cp)); },
                                     }
                                     "%"
                                 }
@@ -370,7 +368,7 @@ pub(crate) fn ColorPickerDialogView(
                             input { r#type: "text", value: "{dv_hex}", maxlength: "6",
                                 style: "width:60px; background:{THEME_BG_ACTIVE}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; padding:2px 4px; font-size:11px; font-family:monospace;",
                                 onfocus: move |_| { if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) { if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() { input.select(); } } },
-                                oninput: move |evt: Event<FormData>| { let mut cp = color_picker_state().unwrap(); let v = evt.value(); cp.set_hex(&v); if cp.hex_str() != v { cp.set_input_override("hex", v); } else { cp.clear_input_override(); } color_picker_state.set(Some(cp)); },
+                                oninput: move |evt: Event<FormData>| { let Some(mut cp) = color_picker_state() else { return }; let v = evt.value(); cp.set_hex(&v); if cp.hex_str() != v { cp.set_input_override("hex", v); } else { cp.clear_input_override(); } color_picker_state.set(Some(cp)); },
                             }
                         }
                     }
@@ -384,7 +382,7 @@ pub(crate) fn ColorPickerDialogView(
                             style: "padding:6px 20px; cursor:pointer; font-size:13px; border:1px solid {THEME_BORDER}; border-radius:4px; user-select:none; color:{THEME_TEXT}; text-align:center; background:{THEME_BG_ACTIVE};",
                             onmousedown: move |evt: Event<MouseData>| {
                                 evt.stop_propagation();
-                                let cp = color_picker_state().unwrap();
+                                let Some(cp) = color_picker_state() else { return };
                                 let chosen_color = cp.color();
                                 let for_fill = cp.for_fill;
                                 color_picker_state.set(None);
