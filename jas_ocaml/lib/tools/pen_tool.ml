@@ -50,7 +50,7 @@ class pen_tool = object (self)
                                  p0.hx_in, p0.hy_in,
                                  p0.px, p0.py) :: !cmds
       end;
-      let elem = Element.make_path ~stroke:Canvas_tool.default_stroke (List.rev !cmds) in
+      let elem = Element.make_path ~fill:ctx.model#default_fill ~stroke:ctx.model#default_stroke (List.rev !cmds) in
       ctx.controller#add_element elem
     end;
     points <- [];

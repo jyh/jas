@@ -30,11 +30,11 @@ func starShapePoints(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double,
 }
 
 class StarTool: DrawingToolBase {
-    override func createElement(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
+    override func createElement(_ ctx: ToolContext, _ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
         guard abs(ex - sx) > 0 && abs(ey - sy) > 0 else { return nil }
         let pts = starShapePoints(sx, sy, ex, ey, starPoints)
         return .polygon(Polygon(points: pts,
-                                stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)))
+                                fill: ctx.model.defaultFill, stroke: ctx.model.defaultStroke))
     }
 
     override func drawPreview(_ cgCtx: CGContext, _ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) {

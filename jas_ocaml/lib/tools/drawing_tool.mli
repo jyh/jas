@@ -16,7 +16,7 @@
 class virtual drawing_tool_base : object
   inherit Canvas_tool.default_methods
   method virtual private create_element :
-    float -> float -> float -> float -> Element.element option
+    Canvas_tool.tool_context -> float -> float -> float -> float -> Element.element option
   method virtual private draw_preview :
     Cairo.context -> float -> float -> float -> float -> unit
 

@@ -6,7 +6,7 @@ that replaces the old one in the Model.
 """
 
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from document.document import (
     Document, ElementPath, ElementSelection, Selection,
@@ -14,9 +14,11 @@ from document.document import (
     selection_all, selection_partial,
 )
 from geometry.element import (
-    Element, Group, Layer, Path, Visibility,
+    Element, Fill, Group, Layer, Path, Stroke, Visibility,
     control_point_count, control_points, move_control_points,
     move_path_handle as _move_path_handle,
+    with_fill as _with_fill, with_stroke as _with_stroke,
+    element_fill as _element_fill, element_stroke as _element_stroke,
 )
 from algorithms.hit_test import (
     element_intersects_rect, point_in_rect,
@@ -450,3 +452,101 @@ class Controller:
         )
         self._model.document = replace(
             doc, layers=new_layers, selection=new_selection)
+
+    def set_selection_fill(self, fill: Fill | None) -> None:
+        """Set the fill of all selected elements."""
+        doc = self._model.document
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            new_elem = _with_fill(elem, fill)
+            if new_elem is not elem:
+                new_doc = new_doc.replace_element(es.path, new_elem)
+        self._model.document = new_doc
+
+    def set_selection_stroke(self, stroke: Stroke | None) -> None:
+        """Set the stroke of all selected elements."""
+        doc = self._model.document
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            new_elem = _with_stroke(elem, stroke)
+            if new_elem is not elem:
+                new_doc = new_doc.replace_element(es.path, new_elem)
+        self._model.document = new_doc
+
+
+# -- Fill/Stroke summary types --
+
+@dataclass(frozen=True)
+class FillSummaryNoSelection:
+    """No elements are selected."""
+    pass
+
+
+@dataclass(frozen=True)
+class FillSummaryUniform:
+    """All selected elements have the same fill."""
+    fill: Fill | None
+
+
+@dataclass(frozen=True)
+class FillSummaryMixed:
+    """Selected elements have different fills."""
+    pass
+
+
+FillSummary = FillSummaryNoSelection | FillSummaryUniform | FillSummaryMixed
+
+
+@dataclass(frozen=True)
+class StrokeSummaryNoSelection:
+    """No elements are selected."""
+    pass
+
+
+@dataclass(frozen=True)
+class StrokeSummaryUniform:
+    """All selected elements have the same stroke."""
+    stroke: Stroke | None
+
+
+@dataclass(frozen=True)
+class StrokeSummaryMixed:
+    """Selected elements have different strokes."""
+    pass
+
+
+StrokeSummary = StrokeSummaryNoSelection | StrokeSummaryUniform | StrokeSummaryMixed
+
+
+def selection_fill_summary(doc: Document) -> FillSummary:
+    """Compute the fill summary for the current selection."""
+    if not doc.selection:
+        return FillSummaryNoSelection()
+    first = None
+    first_set = False
+    for es in doc.selection:
+        fill = _element_fill(doc.get_element(es.path))
+        if not first_set:
+            first = fill
+            first_set = True
+        elif first != fill:
+            return FillSummaryMixed()
+    return FillSummaryUniform(fill=first)
+
+
+def selection_stroke_summary(doc: Document) -> StrokeSummary:
+    """Compute the stroke summary for the current selection."""
+    if not doc.selection:
+        return StrokeSummaryNoSelection()
+    first = None
+    first_set = False
+    for es in doc.selection:
+        stroke = _element_stroke(doc.get_element(es.path))
+        if not first_set:
+            first = stroke
+            first_set = True
+        elif first != stroke:
+            return StrokeSummaryMixed()
+    return StrokeSummaryUniform(stroke=first)

@@ -479,3 +479,85 @@ private let straightPath: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
     #expect(abs(k - 0.4) < 1e-10)
     #expect(abs(a - 0.5) < 1e-10)
 }
+
+// MARK: - withFill / withStroke tests
+
+@Test func withFillSetsRectFill() {
+    let elem = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let fill = Fill(color: Color(r: 1, g: 0, b: 0))
+    let result = withFill(elem, fill: fill)
+    if case .rect(let r) = result {
+        #expect(r.fill == fill)
+    } else {
+        Issue.record("Expected Rect element")
+    }
+}
+
+@Test func withFillOnLineIsNoop() {
+    let stroke = Stroke(color: .black, width: 2.0)
+    let elem = Element.line(Line(x1: 0, y1: 0, x2: 10, y2: 10, stroke: stroke))
+    let fill = Fill(color: Color(r: 1, g: 0, b: 0))
+    let result = withFill(elem, fill: fill)
+    #expect(result == elem)
+}
+
+@Test func withStrokeSetsPathStroke() {
+    let elem = Element.path(Path(d: [.moveTo(0, 0), .lineTo(10, 10)]))
+    let stroke = Stroke(color: Color(r: 0, g: 1, b: 0), width: 3.0)
+    let result = withStroke(elem, stroke: stroke)
+    if case .path(let p) = result {
+        #expect(p.stroke == stroke)
+    } else {
+        Issue.record("Expected Path element")
+    }
+}
+
+@Test func withFillOnGroupIsNoop() {
+    let inner = Element.rect(Rect(x: 0, y: 0, width: 5, height: 5))
+    let elem = Element.group(Group(children: [inner]))
+    let fill = Fill(color: Color(r: 1, g: 0, b: 0))
+    let result = withFill(elem, fill: fill)
+    #expect(result == elem)
+}
+
+// MARK: - Color hex conversion tests
+
+@Test func colorToHexBlack() {
+    #expect(Color.black.toHex() == "000000")
+}
+
+@Test func colorToHexRed() {
+    let c = Color(r: 1, g: 0, b: 0)
+    #expect(c.toHex() == "ff0000")
+}
+
+@Test func colorFromHexValid() {
+    let c = Color.fromHex("ff8000")
+    #expect(c != nil)
+    if let c = c {
+        let (r, g, b, _) = c.toRgba()
+        #expect(abs(r - 1.0) < 0.01)
+        #expect(abs(g - 0.502) < 0.01)
+        #expect(abs(b) < 0.01)
+    }
+}
+
+@Test func colorFromHexInvalidReturnsNil() {
+    #expect(Color.fromHex("xyz") == nil)
+    #expect(Color.fromHex("12345") == nil)
+    #expect(Color.fromHex("") == nil)
+}
+
+@Test func colorHexRoundtrip() {
+    let orig = Color(r: 0.2, g: 0.6, b: 0.8)
+    let hex = orig.toHex()
+    let back = Color.fromHex(hex)
+    #expect(back != nil)
+    if let back = back {
+        let (r1, g1, b1, _) = orig.toRgba()
+        let (r2, g2, b2, _) = back.toRgba()
+        #expect(abs(r1 - r2) < 0.01)
+        #expect(abs(g1 - g2) < 0.01)
+        #expect(abs(b1 - b2) < 0.01)
+    }
+}

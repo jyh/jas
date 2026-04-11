@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from abc import ABC, abstractmethod
+import dataclasses
 from dataclasses import dataclass
 from enum import Enum
 
@@ -50,6 +51,28 @@ class Color:
 
     def to_cmyka(self) -> tuple[float, float, float, float, float]:
         raise NotImplementedError
+
+    def to_hex(self) -> str:
+        """Convert to 6-char lowercase hex string (no #)."""
+        r, g, b, _a = self.to_rgba()
+        ri = max(0, min(255, round(r * 255)))
+        gi = max(0, min(255, round(g * 255)))
+        bi = max(0, min(255, round(b * 255)))
+        return f"{ri:02x}{gi:02x}{bi:02x}"
+
+    @staticmethod
+    def from_hex(s: str) -> "Color | None":
+        """Parse 6-char hex string (optional # prefix). Returns None on invalid."""
+        s = s.lstrip("#")
+        if len(s) != 6:
+            return None
+        try:
+            ri = int(s[0:2], 16)
+            gi = int(s[2:4], 16)
+            bi = int(s[4:6], 16)
+        except ValueError:
+            return None
+        return RgbColor(ri / 255.0, gi / 255.0, bi / 255.0)
 
 
 @dataclass(frozen=True)
@@ -735,6 +758,34 @@ class Group(Element):
 class Layer(Group):
     """A named group (layer) of elements."""
     name: str = "Layer"
+
+
+def with_fill(element: Element, fill: Fill | None) -> Element:
+    """Return a copy of element with fill replaced. Line/Group/Layer unchanged."""
+    if isinstance(element, (Line, Group)):
+        return element
+    if hasattr(element, 'fill'):
+        return dataclasses.replace(element, fill=fill)
+    return element
+
+
+def with_stroke(element: Element, stroke: Stroke | None) -> Element:
+    """Return a copy of element with stroke replaced. Group/Layer unchanged."""
+    if isinstance(element, Group):
+        return element
+    if hasattr(element, 'stroke'):
+        return dataclasses.replace(element, stroke=stroke)
+    return element
+
+
+def element_fill(element: Element) -> Fill | None:
+    """Return the element's fill, or None if it has no fill field."""
+    return getattr(element, 'fill', None)
+
+
+def element_stroke(element: Element) -> Stroke | None:
+    """Return the element's stroke, or None if it has no stroke field."""
+    return getattr(element, 'stroke', None)
 
 
 def move_control_points(elem: Element, kind, dx: float, dy: float) -> Element:

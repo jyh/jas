@@ -1030,5 +1030,25 @@ class TypeOnPathToolTest(absltest.TestCase):
         self.assertIsNone(tool._control)
 
 
+class RectToolDefaultsTest(absltest.TestCase):
+    """Test that the rect tool reads model defaults for fill and stroke."""
+
+    def test_rect_tool_uses_model_defaults(self):
+        from tools.rect_tool import RectTool
+        tool = RectTool()
+        model = Model()
+        model.default_fill = Fill(RgbColor(1, 0, 0))
+        model.default_stroke = Stroke(RgbColor(0, 0, 1), width=3.0)
+        ctx, model, ctrl = _make_ctx(model)
+        tool.on_press(ctx, 10, 20)
+        tool.on_release(ctx, 50, 60)
+        children = _layer_children(model)
+        self.assertEqual(len(children), 1)
+        elem = children[0]
+        self.assertIsInstance(elem, Rect)
+        self.assertEqual(elem.fill, Fill(RgbColor(1, 0, 0)))
+        self.assertEqual(elem.stroke, Stroke(RgbColor(0, 0, 1), width=3.0))
+
+
 if __name__ == '__main__':
     absltest.main()

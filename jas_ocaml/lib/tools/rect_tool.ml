@@ -3,12 +3,12 @@
 class rect_tool = object
   inherit Drawing_tool.drawing_tool_base
 
-  method private create_element sx sy ex ey =
+  method private create_element (ctx : Canvas_tool.tool_context) sx sy ex ey =
     Some (Element.Rect {
       x = min sx ex; y = min sy ey;
       width = abs_float (ex -. sx); height = abs_float (ey -. sy);
       rx = 0.0; ry = 0.0;
-      fill = None; stroke = Canvas_tool.default_stroke;
+      fill = ctx.model#default_fill; stroke = ctx.model#default_stroke;
       opacity = 1.0; transform = None; locked = false; visibility = Preview;
     })
 

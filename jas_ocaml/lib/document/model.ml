@@ -22,6 +22,9 @@ class model ?(document = Document.default_document ()) ?filename () =
     val mutable filename_listeners : (string -> unit) list = []
     val mutable undo_stack : Document.document list = []
     val mutable redo_stack : Document.document list = []
+    val mutable default_fill : Element.fill option = None
+    val mutable default_stroke : Element.stroke option =
+      Some (Element.make_stroke Element.black)
 
     method document = doc
 
@@ -73,6 +76,11 @@ class model ?(document = Document.default_document ()) ?filename () =
 
     method can_undo = undo_stack <> []
     method can_redo = redo_stack <> []
+
+    method default_fill = default_fill
+    method set_default_fill (f : Element.fill option) = default_fill <- f
+    method default_stroke = default_stroke
+    method set_default_stroke (s : Element.stroke option) = default_stroke <- s
   end
 
 let create ?document ?filename () = new model ?document ?filename ()

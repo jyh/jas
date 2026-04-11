@@ -234,6 +234,13 @@ val set_locked : bool -> element -> element
 val get_visibility : element -> visibility
 val set_visibility : visibility -> element -> element
 
+(** {2 Fill and stroke} *)
+
+val with_fill : element -> fill option -> element
+val with_stroke : element -> stroke option -> element
+val color_to_hex : color -> string
+val color_from_hex : string -> color option
+
 (** {2 Control points} *)
 
 val path_handle_positions : path_command list -> int ->

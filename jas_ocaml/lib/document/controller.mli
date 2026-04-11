@@ -24,6 +24,14 @@ class controller : ?model:Model.model -> unit -> object
   method show_all : unit
   method move_selection : float -> float -> unit
   method copy_selection : float -> float -> unit
+  method set_selection_fill : Element.fill option -> unit
+  method set_selection_stroke : Element.stroke option -> unit
 end
+
+type fill_summary = FillNoSelection | FillUniform of Element.fill option | FillMixed
+type stroke_summary = StrokeNoSelection | StrokeUniform of Element.stroke option | StrokeMixed
+
+val selection_fill_summary : Document.document -> fill_summary
+val selection_stroke_summary : Document.document -> stroke_summary
 
 val create : ?model:Model.model -> unit -> controller

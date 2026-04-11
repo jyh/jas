@@ -43,12 +43,13 @@ def _star_points(sx: float, sy: float, ex: float, ey: float,
 class StarTool(DrawingToolBase):
     """Star tool. Draws a star inscribed in the dragged bounding box."""
 
-    def _create_element(self, sx, sy, ex, ey):
+    def _create_element(self, ctx, sx, sy, ex, ey):
         if abs(ex - sx) <= 0 or abs(ey - sy) <= 0:
             return None
         pts = _star_points(sx, sy, ex, ey, STAR_POINTS)
         return Polygon(points=tuple(pts),
-                       stroke=Stroke(color=RgbColor(0, 0, 0), width=1.0))
+                       fill=ctx.model.default_fill,
+                       stroke=ctx.model.default_stroke)
 
     def _draw_preview(self, painter, sx, sy, ex, ey):
         from PySide6.QtCore import QPointF

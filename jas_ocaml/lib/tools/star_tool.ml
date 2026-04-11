@@ -26,13 +26,13 @@ let compute_star_points sx sy ex ey n =
 class star_tool = object
   inherit Drawing_tool.drawing_tool_base
 
-  method private create_element sx sy ex ey =
+  method private create_element (ctx : Canvas_tool.tool_context) sx sy ex ey =
     if abs_float (ex -. sx) <= 0.0 || abs_float (ey -. sy) <= 0.0 then None
     else
       let pts = compute_star_points sx sy ex ey star_points in
       Some (Element.Polygon {
         points = pts;
-        fill = None; stroke = Canvas_tool.default_stroke;
+        fill = ctx.model#default_fill; stroke = ctx.model#default_stroke;
         opacity = 1.0; transform = None; locked = false; visibility = Preview;
       })
 

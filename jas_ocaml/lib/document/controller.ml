@@ -368,6 +368,90 @@ class controller ?(model = Model.create ()) () =
         (doc', Document.PathMap.add copy_path copy_es acc_sel)
       ) (doc, Document.PathMap.empty) sorted_sels in
       model#set_document { new_doc with Document.selection = new_sel }
+
+    method set_selection_fill (f : Element.fill option) =
+      let doc = model#document in
+      let new_doc = Document.PathMap.fold (fun path _ acc ->
+        let elem = Document.get_element acc path in
+        let new_elem = Element.with_fill elem f in
+        Document.replace_element acc path new_elem
+      ) doc.Document.selection doc in
+      model#set_document new_doc
+
+    method set_selection_stroke (s : Element.stroke option) =
+      let doc = model#document in
+      let new_doc = Document.PathMap.fold (fun path _ acc ->
+        let elem = Document.get_element acc path in
+        let new_elem = Element.with_stroke elem s in
+        Document.replace_element acc path new_elem
+      ) doc.Document.selection doc in
+      model#set_document new_doc
   end
+
+(* ------------------------------------------------------------------ *)
+(* Fill/stroke summary                                                 *)
+(* ------------------------------------------------------------------ *)
+
+type fill_summary = FillNoSelection | FillUniform of Element.fill option | FillMixed
+type stroke_summary = StrokeNoSelection | StrokeUniform of Element.stroke option | StrokeMixed
+
+let element_fill = function
+  | Element.Rect { fill; _ } | Element.Circle { fill; _ }
+  | Element.Ellipse { fill; _ } | Element.Polyline { fill; _ }
+  | Element.Polygon { fill; _ } | Element.Path { fill; _ }
+  | Element.Text { fill; _ } | Element.Text_path { fill; _ } -> Some fill
+  | Element.Line _ | Element.Group _ | Element.Layer _ -> None
+
+let element_stroke = function
+  | Element.Line { stroke; _ } | Element.Rect { stroke; _ }
+  | Element.Circle { stroke; _ } | Element.Ellipse { stroke; _ }
+  | Element.Polyline { stroke; _ } | Element.Polygon { stroke; _ }
+  | Element.Path { stroke; _ } | Element.Text { stroke; _ }
+  | Element.Text_path { stroke; _ } -> Some stroke
+  | Element.Group _ | Element.Layer _ -> None
+
+let selection_fill_summary (doc : Document.document) =
+  if Document.PathMap.is_empty doc.Document.selection then FillNoSelection
+  else
+    let first = ref true in
+    let uniform = ref None in
+    let mixed = ref false in
+    Document.PathMap.iter (fun path _ ->
+      if not !mixed then
+        let elem = Document.get_element doc path in
+        match element_fill elem with
+        | None -> ()
+        | Some f ->
+          if !first then begin
+            first := false;
+            uniform := Some f
+          end else if !uniform <> Some f then
+            mixed := true
+    ) doc.Document.selection;
+    if !first then FillNoSelection
+    else if !mixed then FillMixed
+    else FillUniform (match !uniform with Some f -> f | None -> None)
+
+let selection_stroke_summary (doc : Document.document) =
+  if Document.PathMap.is_empty doc.Document.selection then StrokeNoSelection
+  else
+    let first = ref true in
+    let uniform = ref None in
+    let mixed = ref false in
+    Document.PathMap.iter (fun path _ ->
+      if not !mixed then
+        let elem = Document.get_element doc path in
+        match element_stroke elem with
+        | None -> ()
+        | Some s ->
+          if !first then begin
+            first := false;
+            uniform := Some s
+          end else if !uniform <> Some s then
+            mixed := true
+    ) doc.Document.selection;
+    if !first then StrokeNoSelection
+    else if !mixed then StrokeMixed
+    else StrokeUniform (match !uniform with Some s -> s | None -> None)
 
 let create ?model () = new controller ?model ()

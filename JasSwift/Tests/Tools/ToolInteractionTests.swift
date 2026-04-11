@@ -974,3 +974,23 @@ private func makeClosedPath() -> Element {
     tool.onRelease(ctx, x: 60, y: 80, shift: false, alt: false)
     #expect(model.canUndo == true)
 }
+
+// MARK: - Drawing tools use model defaults
+
+@Test func rectToolUsesModelDefaults() {
+    let m = Model()
+    m.defaultFill = Fill(color: Color(r: 1, g: 0, b: 0))
+    m.defaultStroke = Stroke(color: Color(r: 0, g: 0, b: 1), width: 3.0)
+    let tool = RectTool()
+    let (ctx, _, _) = makeCtx(model: m)
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    tool.onRelease(ctx, x: 110, y: 70, shift: false, alt: false)
+    let children = layerChildren(m)
+    #expect(children.count == 1)
+    if case .rect(let r) = children[0] {
+        #expect(r.fill == Fill(color: Color(r: 1, g: 0, b: 0)))
+        #expect(r.stroke == Stroke(color: Color(r: 0, g: 0, b: 1), width: 3.0))
+    } else {
+        Issue.record("Expected Rect element")
+    }
+}

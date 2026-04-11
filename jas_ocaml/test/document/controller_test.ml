@@ -572,4 +572,64 @@ let () =
     assert (Array.length (Jas.Document.children_of dm_grp2) = 1);
     assert ((Jas.Document.children_of dm_grp2).(0) = dm_l2));
 
+  (* === Fill/Stroke controller tests === *)
+
+  run_test "set_selection_fill updates rect" (fun () ->
+    let fs_rect = make_rect 0.0 0.0 10.0 10.0 in
+    let fs_layer = make_layer ~name:"L0" [|fs_rect|] in
+    let fs_doc = Jas.Document.make_document [|fs_layer|] in
+    let fs_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:fs_doc ()) () in
+    fs_ctrl#select_element [0; 0];
+    let red_fill = Some (Jas.Element.make_fill (Jas.Element.color_rgb 1.0 0.0 0.0)) in
+    fs_ctrl#set_selection_fill red_fill;
+    let elem = Jas.Document.get_element fs_ctrl#document [0; 0] in
+    (match elem with
+     | Rect { fill = Some { fill_color; _ }; _ } ->
+       let (r, _, _, _) = Jas.Element.color_to_rgba fill_color in
+       assert (r = 1.0)
+     | _ -> assert false));
+
+  run_test "set_selection_stroke updates line" (fun () ->
+    let fs_line = make_line 0.0 0.0 10.0 10.0 in
+    let fs_layer = make_layer ~name:"L0" [|fs_line|] in
+    let fs_doc = Jas.Document.make_document [|fs_layer|] in
+    let fs_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:fs_doc ()) () in
+    fs_ctrl#select_element [0; 0];
+    let blue_stroke = Some (Jas.Element.make_stroke ~width:5.0 (Jas.Element.color_rgb 0.0 0.0 1.0)) in
+    fs_ctrl#set_selection_stroke blue_stroke;
+    let elem = Jas.Document.get_element fs_ctrl#document [0; 0] in
+    (match elem with
+     | Line { stroke = Some { stroke_width; stroke_color; _ }; _ } ->
+       assert (stroke_width = 5.0);
+       let (_, _, b, _) = Jas.Element.color_to_rgba stroke_color in
+       assert (b = 1.0)
+     | _ -> assert false));
+
+  run_test "fill_summary_no_selection" (fun () ->
+    let fs_doc = Jas.Document.make_document [|make_layer [||]|] in
+    let summary = Jas.Controller.selection_fill_summary fs_doc in
+    assert (summary = Jas.Controller.FillNoSelection));
+
+  run_test "fill_summary_mixed" (fun () ->
+    let fs_r1 = make_rect ~fill:(Some (make_fill (color_rgb 1.0 0.0 0.0))) 0.0 0.0 10.0 10.0 in
+    let fs_r2 = make_rect ~fill:(Some (make_fill (color_rgb 0.0 1.0 0.0))) 20.0 0.0 10.0 10.0 in
+    let fs_layer = make_layer ~name:"L0" [|fs_r1; fs_r2|] in
+    let fs_sel = List.fold_left (fun acc p ->
+      Jas.Document.PathMap.add p (Jas.Document.element_selection_all p) acc
+    ) Jas.Document.PathMap.empty [[0; 0]; [0; 1]] in
+    let fs_doc = Jas.Document.make_document ~selection:fs_sel [|fs_layer|] in
+    let summary = Jas.Controller.selection_fill_summary fs_doc in
+    assert (summary = Jas.Controller.FillMixed));
+
+  run_test "stroke_summary_uniform_none" (fun () ->
+    let fs_r1 = make_rect ~stroke:None 0.0 0.0 10.0 10.0 in
+    let fs_r2 = make_rect ~stroke:None 20.0 0.0 10.0 10.0 in
+    let fs_layer = make_layer ~name:"L0" [|fs_r1; fs_r2|] in
+    let fs_sel = List.fold_left (fun acc p ->
+      Jas.Document.PathMap.add p (Jas.Document.element_selection_all p) acc
+    ) Jas.Document.PathMap.empty [[0; 0]; [0; 1]] in
+    let fs_doc = Jas.Document.make_document ~selection:fs_sel [|fs_layer|] in
+    let summary = Jas.Controller.selection_stroke_summary fs_doc in
+    assert (summary = Jas.Controller.StrokeUniform None));
+
   Printf.printf "All controller tests passed.\n"

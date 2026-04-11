@@ -18,6 +18,8 @@ public class Model: ObservableObject {
         didSet { notify() }
     }
     @Published public var filename: String
+    @Published public var defaultFill: Fill? = nil
+    @Published public var defaultStroke: Stroke? = Stroke(color: .black)
     public private(set) var savedDocument: Document
     private var listeners: [(Document) -> Void] = []
     private var undoStack: [Document] = []

@@ -81,7 +81,8 @@ class PenTool(CanvasTool):
             ))
             cmds.append(ClosePath())
         elem = Path(d=tuple(cmds),
-                    stroke=Stroke(color=RgbColor(0, 0, 0), width=1.0))
+                    fill=ctx.model.default_fill,
+                    stroke=ctx.model.default_stroke)
         ctx.controller.add_element(elem)
         self._points.clear()
         self._state = _PenState.IDLE

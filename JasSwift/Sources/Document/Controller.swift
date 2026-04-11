@@ -493,6 +493,30 @@ public class Controller {
                                   selection: newSelection)
     }
 
+    /// Set the fill of every element in the current selection.
+    public func setSelectionFill(_ fill: Fill?) {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let newElem = withFill(elem, fill: fill)
+            doc = doc.replaceElement(es.path, with: newElem)
+        }
+        model.document = doc
+    }
+
+    /// Set the stroke of every element in the current selection.
+    public func setSelectionStroke(_ stroke: Stroke?) {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let newElem = withStroke(elem, stroke: stroke)
+            doc = doc.replaceElement(es.path, with: newElem)
+        }
+        model.document = doc
+    }
+
     public func copySelection(dx: Double, dy: Double) {
         var doc = model.document
         var newSelection: Selection = []
@@ -510,4 +534,63 @@ public class Controller {
         model.document = Document(layers: doc.layers,
                                      selectedLayer: doc.selectedLayer, selection: newSelection)
     }
+}
+
+// MARK: - Fill / Stroke summary
+
+public enum FillSummary: Equatable {
+    case noSelection
+    case uniform(Fill?)
+    case mixed
+}
+
+public enum StrokeSummary: Equatable {
+    case noSelection
+    case uniform(Stroke?)
+    case mixed
+}
+
+/// Summarize the fill of all selected elements.
+public func selectionFillSummary(_ doc: Document) -> FillSummary {
+    let sel = doc.selection
+    guard !sel.isEmpty else { return .noSelection }
+    var first = true
+    var value: Fill? = nil
+    for es in sel {
+        let elem = doc.getElement(es.path)
+        // Skip groups/layers -- they have no fill.
+        if case .group = elem { continue }
+        if case .layer = elem { continue }
+        let f = elem.fill
+        if first {
+            value = f
+            first = false
+        } else if f != value {
+            return .mixed
+        }
+    }
+    if first { return .noSelection }
+    return .uniform(value)
+}
+
+/// Summarize the stroke of all selected elements.
+public func selectionStrokeSummary(_ doc: Document) -> StrokeSummary {
+    let sel = doc.selection
+    guard !sel.isEmpty else { return .noSelection }
+    var first = true
+    var value: Stroke? = nil
+    for es in sel {
+        let elem = doc.getElement(es.path)
+        if case .group = elem { continue }
+        if case .layer = elem { continue }
+        let s = elem.stroke
+        if first {
+            value = s
+            first = false
+        } else if s != value {
+            return .mixed
+        }
+    }
+    if first { return .noSelection }
+    return .uniform(value)
 }

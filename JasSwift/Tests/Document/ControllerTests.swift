@@ -722,3 +722,98 @@ private func makeMarqueeCtrl() -> Controller {
         #expect(g.children[0] == l2)
     } else { Issue.record("Expected group") }
 }
+
+// MARK: - Fill/Stroke controller tests
+
+@Test func setSelectionFillUpdatesRect() {
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [rect])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
+    ctrl.selectElement([0, 0])
+    let fill = Fill(color: Color(r: 1, g: 0, b: 0))
+    ctrl.setSelectionFill(fill)
+    if case .rect(let r) = ctrl.document.getElement([0, 0]) {
+        #expect(r.fill == fill)
+    } else {
+        Issue.record("Expected Rect element")
+    }
+}
+
+@Test func setSelectionStrokeUpdatesLine() {
+    let line = Element.line(Line(x1: 0, y1: 0, x2: 10, y2: 10))
+    let layer = Layer(name: "L0", children: [line])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
+    ctrl.selectElement([0, 0])
+    let stroke = Stroke(color: Color(r: 0, g: 1, b: 0), width: 3.0)
+    ctrl.setSelectionStroke(stroke)
+    if case .line(let l) = ctrl.document.getElement([0, 0]) {
+        #expect(l.stroke == stroke)
+    } else {
+        Issue.record("Expected Line element")
+    }
+}
+
+@Test func setSelectionFillNoSelectionIsNoop() {
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [rect])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
+    let fill = Fill(color: Color(r: 1, g: 0, b: 0))
+    ctrl.setSelectionFill(fill)
+    if case .rect(let r) = ctrl.document.getElement([0, 0]) {
+        #expect(r.fill == nil)
+    } else {
+        Issue.record("Expected Rect element")
+    }
+}
+
+@Test func fillSummaryNoSelection() {
+    let ctrl = Controller()
+    let summary = selectionFillSummary(ctrl.document)
+    #expect(summary == .noSelection)
+}
+
+@Test func fillSummaryUniform() {
+    let fill = Fill(color: Color(r: 1, g: 0, b: 0))
+    let r1 = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, fill: fill))
+    let r2 = Element.rect(Rect(x: 20, y: 20, width: 10, height: 10, fill: fill))
+    let layer = Layer(name: "L0", children: [r1, r2])
+    let doc = Document(layers: [layer], selection: [
+        ElementSelection.all([0, 0]),
+        ElementSelection.all([0, 1]),
+    ])
+    let summary = selectionFillSummary(doc)
+    #expect(summary == .uniform(fill))
+}
+
+@Test func fillSummaryMixed() {
+    let fill1 = Fill(color: Color(r: 1, g: 0, b: 0))
+    let fill2 = Fill(color: Color(r: 0, g: 1, b: 0))
+    let r1 = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, fill: fill1))
+    let r2 = Element.rect(Rect(x: 20, y: 20, width: 10, height: 10, fill: fill2))
+    let layer = Layer(name: "L0", children: [r1, r2])
+    let doc = Document(layers: [layer], selection: [
+        ElementSelection.all([0, 0]),
+        ElementSelection.all([0, 1]),
+    ])
+    let summary = selectionFillSummary(doc)
+    #expect(summary == .mixed)
+}
+
+@Test func strokeSummaryNoSelection() {
+    let ctrl = Controller()
+    let summary = selectionStrokeSummary(ctrl.document)
+    #expect(summary == .noSelection)
+}
+
+@Test func strokeSummaryUniform() {
+    let stroke = Stroke(color: Color(r: 0, g: 0, b: 0), width: 2.0)
+    let l1 = Element.line(Line(x1: 0, y1: 0, x2: 10, y2: 10, stroke: stroke))
+    let l2 = Element.line(Line(x1: 20, y1: 20, x2: 30, y2: 30, stroke: stroke))
+    let layer = Layer(name: "L0", children: [l1, l2])
+    let doc = Document(layers: [layer], selection: [
+        ElementSelection.all([0, 0]),
+        ElementSelection.all([0, 1]),
+    ])
+    let summary = selectionStrokeSummary(doc)
+    #expect(summary == .uniform(stroke))
+}

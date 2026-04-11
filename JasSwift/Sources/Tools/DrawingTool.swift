@@ -35,12 +35,12 @@ class DrawingToolBase: CanvasTool {
         }
         dragStart = nil
         dragEnd = nil
-        if let elem = createElement(sx, sy, fx, fy) {
+        if let elem = createElement(ctx, sx, sy, fx, fy) {
             ctx.controller.addElement(elem)
         }
     }
 
-    func createElement(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
+    func createElement(_ ctx: ToolContext, _ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
         fatalError("Subclasses must implement createElement")
     }
 
