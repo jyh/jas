@@ -287,100 +287,160 @@ actions:
   new_document:
     description: "Create a new untitled document in a new tab"
     category: file
+    effects:
+      - increment: { key: active_tab, by: 1 }
+      - log: "new_document: create untitled tab"
   open_file:
     description: "Show Open dialog, load an SVG file into a new tab (or focus existing tab)"
     category: file
+    effects:
+      - log: "open_file: show native file dialog"
   save:
     description: "Save active document; if untitled, fall through to save_as"
     category: file
+    effects:
+      - if:
+          condition: "not model.has_filename"
+          then:
+            - dispatch: save_as
+          else:
+            - log: "save: write to {{model.filename}}"
   save_as:
     description: "Show Save As dialog for the active document"
     category: file
+    effects:
+      - log: "save_as: show native save dialog"
   revert:
     description: "Reload the active document from disk, discarding unsaved changes"
     category: file
     enabled_when: "model.is_modified and model.has_filename"
+    effects:
+      - log: "revert: reload {{model.filename}}"
   quit:
     description: "Close the application; prompt to save any modified documents"
     category: file
+    effects:
+      - if:
+          condition: "model.any_modified"
+          then:
+            - open_dialog: { id: save_changes_window }
+          else:
+            - log: "quit: close window"
 
   # ── Edit ──────────────────────────────────────────────────
   undo:
     description: "Undo the last editing operation on the active document"
     category: edit
     tier: 3
+    effects:
+      - log: "undo"
   redo:
     description: "Redo the last undone operation"
     category: edit
     tier: 3
+    effects:
+      - log: "redo"
   cut:
     description: "Copy selection to clipboard as SVG, then delete it"
     category: edit
     tier: 3
+    effects:
+      - dispatch: copy
+      - dispatch: delete_selection
   copy:
     description: "Copy selection to clipboard as SVG"
     category: edit
     tier: 3
+    effects:
+      - log: "copy: selection to clipboard"
   paste:
     description: "Paste from clipboard with a 24pt offset"
     category: edit
     tier: 3
+    effects:
+      - log: "paste: offset 24pt"
   paste_in_place:
     description: "Paste from clipboard at the original position"
     category: edit
     tier: 3
+    effects:
+      - log: "paste_in_place: offset 0"
   select_all:
     description: "Select all objects in the active document"
     category: edit
     tier: 3
+    effects:
+      - log: "select_all"
   delete_selection:
     description: "Delete the selected objects"
     category: edit
     tier: 3
+    effects:
+      - log: "delete_selection"
 
   # ── Object ────────────────────────────────────────────────
   group:
     description: "Group selected sibling elements into a single Group"
     category: object
     tier: 3
+    effects:
+      - log: "group"
   ungroup:
     description: "Ungroup selected Group elements, replacing each with its children"
     category: object
     tier: 3
+    effects:
+      - log: "ungroup"
   ungroup_all:
     description: "Recursively ungroup all unlocked Group elements"
     category: object
     tier: 3
+    effects:
+      - log: "ungroup_all"
   lock:
     description: "Lock selected elements to prevent editing"
     category: object
     tier: 3
+    effects:
+      - log: "lock"
   unlock_all:
     description: "Unlock all locked elements in the document"
     category: object
     tier: 3
+    effects:
+      - log: "unlock_all"
   hide_selection:
     description: "Hide selected elements from the canvas"
     category: object
     tier: 3
+    effects:
+      - log: "hide_selection"
   show_all:
     description: "Show all hidden elements"
     category: object
     tier: 3
+    effects:
+      - log: "show_all"
 
   # ── View ──────────────────────────────────────────────────
   zoom_in:
     description: "Zoom the canvas in"
     category: view
     tier: 3
+    effects:
+      - log: "zoom_in"
   zoom_out:
     description: "Zoom the canvas out"
     category: view
     tier: 3
+    effects:
+      - log: "zoom_out"
   fit_in_window:
     description: "Fit all content within the viewport"
     category: view
     tier: 3
+    effects:
+      - log: "fit_in_window"
 
   # ── Tool ──────────────────────────────────────────────────
   select_tool:
@@ -388,28 +448,42 @@ actions:
     category: tool
     params:
       tool: { type: state_ref, ref: "active_tool" }
+    effects:
+      - set: { active_tool: "{{param.tool}}" }
 
   # ── Fill / Stroke ─────────────────────────────────────────
   swap_fill_stroke:
     description: "Swap fill and stroke colors"
     category: fill_stroke
+    effects:
+      - swap: [fill_color, stroke_color]
   reset_fill_stroke:
     description: "Reset to default white fill and 1pt black stroke"
     category: fill_stroke
+    effects:
+      - set: { fill_color: "#ffffff", stroke_color: "#000000", stroke_width: 1.0, fill_on_top: true }
   toggle_fill_on_top:
     description: "Toggle whether fill or stroke swatch is in front"
     category: fill_stroke
+    effects:
+      - toggle: fill_on_top
   set_fill_none:
     description: "Set the fill color to none"
     category: fill_stroke
+    effects:
+      - set: { fill_color: null }
   set_stroke_none:
     description: "Set the stroke color to none"
     category: fill_stroke
+    effects:
+      - set: { stroke_color: null }
   open_color_picker:
     description: "Open the color picker dialog for fill or stroke"
     category: fill_stroke
     params:
       target: { type: enum, values: [fill, stroke] }
+    effects:
+      - open_dialog: { id: color_picker, params: { target: "{{param.target}}" } }
 
   # ── Window / Layout ──────────────────────────────────────
   toggle_pane:
@@ -417,37 +491,55 @@ actions:
     category: window
     params:
       pane: { type: enum, values: [toolbar, canvas, dock] }
+    effects:
+      - toggle: "{{param.pane}}_visible"
   toggle_panel:
     description: "Show or hide a dock panel"
     category: window
     params:
       panel: { type: enum, values: [layers, color, stroke, properties] }
+    effects:
+      - log: "toggle_panel: {{param.panel}}"
   toggle_canvas_maximize:
     description: "Toggle canvas between maximized and normal layout"
     category: window
+    effects:
+      - toggle: canvas_maximized
   toggle_dock_collapse:
     description: "Collapse or expand the dock panel"
     category: window
+    effects:
+      - toggle: dock_collapsed
   tile_panes:
     description: "Arrange all visible panes in a tiled grid"
     category: window
+    effects:
+      - log: "tile_panes"
 
   # ── Workspace ─────────────────────────────────────────────
   save_workspace_as:
     description: "Save the current pane layout under a new name"
     category: workspace
+    effects:
+      - open_dialog: { id: workspace_save_as }
   reset_workspace:
     description: "Reset pane layout to factory defaults"
     category: workspace
+    effects:
+      - log: "reset_workspace"
   revert_workspace:
     description: "Revert pane layout to last saved version"
     category: workspace
     enabled_when: "workspace.has_saved_layout"
+    effects:
+      - log: "revert_workspace"
   switch_workspace:
     description: "Switch to a named workspace layout"
     category: workspace
     params:
       name: { type: string }
+    effects:
+      - log: "switch_workspace: {{param.name}}"
 
   # ── Tab ───────────────────────────────────────────────────
   close_tab:
@@ -455,25 +547,53 @@ actions:
     category: tab
     params:
       index: { type: number }
+    effects:
+      - if:
+          condition: "model.is_modified"
+          then:
+            - open_dialog: { id: save_changes_tab, params: { filename: "{{model.filename}}" } }
+          else:
+            - dispatch: { action: remove_tab, params: { index: "{{param.index}}" } }
+  remove_tab:
+    description: "Remove a tab without prompting"
+    category: tab
+    params:
+      index: { type: number }
+    effects:
+      - log: "remove_tab: {{param.index}}"
 
   # ── Panel ─────────────────────────────────────────────────
   close_panel:
     description: "Close the panel that owns this menu"
     category: panel
+    effects:
+      - log: "close_panel"
 
   # ── Dialog ────────────────────────────────────────────────
   dismiss_dialog:
     description: "Dismiss the current modal dialog"
     category: dialog
+    effects:
+      - close_dialog: null
   close_without_saving:
     description: "Close the tab/window without saving"
     category: dialog
+    effects:
+      - close_dialog: null
+      - log: "close_without_saving"
   save_and_close:
     description: "Save the active document then close the tab"
     category: dialog
+    effects:
+      - dispatch: save
+      - close_dialog: null
+      - log: "save_and_close"
   save_all_and_close:
     description: "Save all modified documents then close the window"
     category: dialog
+    effects:
+      - log: "save_all_and_close"
+      - close_dialog: null
 
 # ═══════════════════════════════════════════════════════════════
 # Keyboard shortcuts
@@ -612,15 +732,39 @@ layout:
   style:
     background: "{{theme.colors.window_bg}}"
   behavior:
-    - event: drag
-      description: >
-        Click-hold on a title bar to drag a pane. Snap preview lines
-        appear near other pane edges. Release within snap_distance to
-        auto-align.
-    - event: resize
-      description: >
-        Click-drag a 6px border handle to resize a pane. Respects
-        min/max width/height. Snaps to viewport and adjacent pane edges.
+    # Pane title bar drag protocol
+    - event: drag_start
+      description: "Begin dragging a pane by its title bar"
+      effects:
+        - cursor: grabbing
+        - set: { _drag_pane: "{{event.target_id}}", _drag_offset_x: "{{event.offset_x}}", _drag_offset_y: "{{event.offset_y}}" }
+    - event: drag_move
+      description: "Move pane to follow cursor, snap to edges within snap_distance"
+      effects:
+        - set_style:
+            target: "{{state._drag_pane}}"
+            left: "{{event.client_x - state._drag_offset_x}}"
+            top: "{{event.client_y - state._drag_offset_y}}"
+    - event: drag_end
+      description: "Drop the pane; apply snap alignment if within threshold"
+      effects:
+        - cursor: grab
+        - set: { _drag_pane: null }
+    # Edge resize protocol
+    - event: drag_start
+      condition: "event.target_class == 'jas-edge-handle'"
+      description: "Begin resizing a pane by its edge handle"
+      effects:
+        - cursor: "{{event.resize_cursor}}"
+        - set: { _resize_pane: "{{event.target_id}}", _resize_edge: "{{event.edge}}", _resize_start_x: "{{event.client_x}}", _resize_start_y: "{{event.client_y}}" }
+    - event: drag_move
+      condition: "state._resize_pane != null"
+      description: "Resize the pane edge, respecting min/max constraints"
+    - event: drag_end
+      condition: "state._resize_pane != null"
+      effects:
+        - cursor: default
+        - set: { _resize_pane: null }
   children:
 
     # ─── Toolbar pane ───────────────────────────────────────
@@ -671,6 +815,7 @@ layout:
                 style:
                   size: "{{theme.sizes.tool_button}}"
                   checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
                 behavior:
                   - event: click
                     action: select_tool
@@ -688,14 +833,21 @@ layout:
                 style:
                   size: "{{theme.sizes.tool_button}}"
                   checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
                 behavior:
+                  - event: mouse_down
+                    effects:
+                      - start_timer:
+                          id: "long_press_btn_arrow_slot"
+                          delay_ms: 250
+                          effects:
+                            - open_dialog: { id: arrow_alternates }
+                  - event: mouse_up
+                    effects:
+                      - cancel_timer: "long_press_btn_arrow_slot"
                   - event: click
                     action: select_tool
                     params: { tool: direct_selection }
-                  - event: long_press
-                    delay_ms: "{{theme.sizes.long_press_ms}}"
-                    menu: arrow_alternates
-                    description: "Hold to show alternate arrow tools"
                 bind:
                   checked: "{{state.active_tool}} in [direct_selection, group_selection]"
                 alternates:
@@ -720,14 +872,21 @@ layout:
                 style:
                   size: "{{theme.sizes.tool_button}}"
                   checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
                 behavior:
+                  - event: mouse_down
+                    effects:
+                      - start_timer:
+                          id: "long_press_btn_pen_slot"
+                          delay_ms: 250
+                          effects:
+                            - open_dialog: { id: pen_alternates }
+                  - event: mouse_up
+                    effects:
+                      - cancel_timer: "long_press_btn_pen_slot"
                   - event: click
                     action: select_tool
                     params: { tool: pen }
-                  - event: long_press
-                    delay_ms: "{{theme.sizes.long_press_ms}}"
-                    menu: pen_alternates
-                    description: "Hold to show alternate pen tools"
                 bind:
                   checked: "{{state.active_tool}} in [pen, add_anchor, delete_anchor, anchor_point]"
                 alternates:
@@ -752,14 +911,21 @@ layout:
                 style:
                   size: "{{theme.sizes.tool_button}}"
                   checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
                 behavior:
+                  - event: mouse_down
+                    effects:
+                      - start_timer:
+                          id: "long_press_btn_pencil_slot"
+                          delay_ms: 250
+                          effects:
+                            - open_dialog: { id: pencil_alternates }
+                  - event: mouse_up
+                    effects:
+                      - cancel_timer: "long_press_btn_pencil_slot"
                   - event: click
                     action: select_tool
                     params: { tool: pencil }
-                  - event: long_press
-                    delay_ms: "{{theme.sizes.long_press_ms}}"
-                    menu: pencil_alternates
-                    description: "Hold to show alternate pencil tools"
                 bind:
                   checked: "{{state.active_tool}} in [pencil, path_eraser, smooth]"
                 alternates:
@@ -782,14 +948,21 @@ layout:
                 style:
                   size: "{{theme.sizes.tool_button}}"
                   checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
                 behavior:
+                  - event: mouse_down
+                    effects:
+                      - start_timer:
+                          id: "long_press_btn_text_slot"
+                          delay_ms: 250
+                          effects:
+                            - open_dialog: { id: text_alternates }
+                  - event: mouse_up
+                    effects:
+                      - cancel_timer: "long_press_btn_text_slot"
                   - event: click
                     action: select_tool
                     params: { tool: type }
-                  - event: long_press
-                    delay_ms: "{{theme.sizes.long_press_ms}}"
-                    menu: text_alternates
-                    description: "Hold to show alternate text tools"
                 bind:
                   checked: "{{state.active_tool}} in [type, type_on_path]"
                 alternates:
@@ -810,6 +983,7 @@ layout:
                 style:
                   size: "{{theme.sizes.tool_button}}"
                   checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
                 behavior:
                   - event: click
                     action: select_tool
@@ -827,14 +1001,21 @@ layout:
                 style:
                   size: "{{theme.sizes.tool_button}}"
                   checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
                 behavior:
+                  - event: mouse_down
+                    effects:
+                      - start_timer:
+                          id: "long_press_btn_shape_slot"
+                          delay_ms: 250
+                          effects:
+                            - open_dialog: { id: shape_alternates }
+                  - event: mouse_up
+                    effects:
+                      - cancel_timer: "long_press_btn_shape_slot"
                   - event: click
                     action: select_tool
                     params: { tool: rect }
-                  - event: long_press
-                    delay_ms: "{{theme.sizes.long_press_ms}}"
-                    menu: shape_alternates
-                    description: "Hold to show alternate shape tools"
                 bind:
                   checked: "{{state.active_tool}} in [rect, rounded_rect, polygon, star]"
                 alternates:
@@ -859,6 +1040,7 @@ layout:
                 style:
                   size: "{{theme.sizes.tool_button}}"
                   checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
                 behavior:
                   - event: click
                     action: select_tool
@@ -1004,10 +1186,12 @@ layout:
             behavior:
               - event: tab_click
                 description: "Switch the active document to the clicked tab"
+                effects:
+                  - set: { active_tab: "{{event.value}}" }
               - event: tab_close
                 description: "Close the tab; show save_changes_tab dialog if modified"
                 action: close_tab
-                dialog: save_changes_tab
+                params: { index: "{{event.value}}" }
 
           - id: drawing_surface
             type: canvas

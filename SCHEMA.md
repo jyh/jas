@@ -172,7 +172,9 @@ state:
 ## `actions` — Action Catalog
 
 Every triggerable operation is defined here by name. Behaviors, menus, and
-shortcuts reference actions by id.
+shortcuts reference actions by id. Each action has an `effects` list that
+describes exactly what the action does — state mutations, visual changes,
+dialog control, etc. — in a form the renderer can execute directly.
 
 ```yaml
 actions:
@@ -186,6 +188,7 @@ actions:
         values: [...]            # when type=enum
         ref: <string>            # when type=state_ref
     enabled_when: <interpolated> # optional boolean expression
+    effects: <list of effect>    # optional; what the action does (see Effects)
 ```
 
 The `tier` field indicates implementation complexity for the renderer:
@@ -200,20 +203,170 @@ Example:
 
 ```yaml
 actions:
-  save:
-    description: "Save active document; if untitled, fall through to save_as"
-    category: file
-
   select_tool:
     description: "Switch the active tool"
     category: tool
     params:
       tool: { type: state_ref, ref: "active_tool" }
+    effects:
+      - set: { active_tool: "{{param.tool}}" }
+
+  swap_fill_stroke:
+    description: "Swap fill and stroke colors"
+    category: fill_stroke
+    effects:
+      - swap: [fill_color, stroke_color]
+
+  toggle_pane:
+    description: "Show or hide a pane"
+    category: window
+    params:
+      pane: { type: enum, values: [toolbar, canvas, dock] }
+    effects:
+      - toggle: "{{param.pane}}_visible"
 
   revert:
     description: "Reload document from disk"
     category: file
     enabled_when: "model.is_modified and model.has_filename"
+    effects:
+      - dispatch: reload_from_disk
+```
+
+---
+
+## `effect` — Executable Operations
+
+Effects describe what an action does. They are executed in order. Each effect
+is a single-key map where the key is the operation type.
+
+### State Mutations
+
+```yaml
+# Set one or more state variables
+- set: { <key>: <value>, ... }
+
+# Toggle a boolean state variable
+- toggle: <state_key>
+
+# Swap the values of two state variables
+- swap: [<state_key_a>, <state_key_b>]
+
+# Increment / decrement a numeric state variable
+- increment: { key: <state_key>, by: <number> }
+- decrement: { key: <state_key>, by: <number> }
+
+# Reset state variables to their declared defaults
+- reset: [<state_key>, ...]
+```
+
+### Conditional Logic
+
+```yaml
+# Execute effects conditionally
+- if:
+    condition: <interpolated>      # boolean expression
+    then: <list of effect>         # executed when true
+    else: <list of effect>         # optional; executed when false
+```
+
+### Element Manipulation
+
+```yaml
+# Show / hide an element by id
+- show: <element_id>
+- hide: <element_id>
+
+# Add / remove a CSS class on an element
+- add_class: { target: <element_id>, class: <string> }
+- remove_class: { target: <element_id>, class: <string> }
+
+# Set a CSS property on an element
+- set_style: { target: <element_id>, <property>: <value>, ... }
+
+# Set focus to an element
+- focus: <element_id>
+
+# Scroll an element into view
+- scroll_to: <element_id>
+```
+
+### Dialog Control
+
+```yaml
+# Open a dialog by id, passing parameters
+- open_dialog: { id: <dialog_id>, params: { ... } }
+
+# Close the current dialog (or a specific one)
+- close_dialog: <dialog_id>       # optional; omit to close topmost
+```
+
+### Action Chaining
+
+```yaml
+# Dispatch another action (for composition)
+- dispatch: <action_id>
+- dispatch: { action: <action_id>, params: { ... } }
+```
+
+### Visual Feedback
+
+```yaml
+# Set the cursor on an element (or globally)
+- cursor: <cursor_type>           # pointer, grab, grabbing, crosshair, etc.
+- cursor: { target: <element_id>, type: <cursor_type> }
+
+# Flash/highlight an element briefly
+- flash: <element_id>
+
+# Show a tooltip or status message
+- status: <string>
+```
+
+### Timer Control
+
+```yaml
+# Start a named timer (for long-press, auto-save, etc.)
+- start_timer:
+    id: <string>
+    delay_ms: <number>
+    effects: <list of effect>      # executed when timer fires
+
+# Cancel a named timer
+- cancel_timer: <string>
+```
+
+### Logging
+
+```yaml
+# Log a message to the console (useful for tier 3 placeholders)
+- log: <string>
+```
+
+### Example: Complete action with conditional effects
+
+```yaml
+actions:
+  close_tab:
+    description: "Close a document tab"
+    category: tab
+    params:
+      index: { type: number }
+    effects:
+      - if:
+          condition: "model.is_modified"
+          then:
+            - open_dialog:
+                id: save_changes_tab
+                params: { filename: "{{model.filename}}" }
+          else:
+            - dispatch: { action: remove_tab, params: { index: "{{param.index}}" } }
+
+  reset_fill_stroke:
+    description: "Reset to default white fill and 1pt black stroke"
+    category: fill_stroke
+    effects:
+      - set: { fill_color: "#ffffff", stroke_color: "#000000", stroke_width: 1.0, fill_on_top: true }
 ```
 
 ---
@@ -458,23 +611,52 @@ style:
   # Positioning (within absolute-positioned parents)
   position: { x: <number>, y: <number> }
   z_index: <number>
+
+  # Cursor
+  cursor: <string>                   # CSS cursor value (pointer, grab, crosshair, etc.)
+
+  # Interactive states (applied automatically by the renderer)
+  hover:                             # style overrides when hovered
+    background: <color_value>
+    border: <string>
+    # ... any style property
+  active:                            # style overrides when mouse is pressed
+    background: <color_value>
+  focus:                             # style overrides when focused
+    border: <string>
+  checked:                           # style overrides when in checked state (bound via bind.checked)
+    background: <color_value>
+  disabled:                          # style overrides when disabled (enabled_when is false)
+    opacity: <number>
+    cursor: <string>
 ```
 
 ---
 
 ## `behavior` — Event → Action Binding
 
+Each behavior entry binds a DOM event to either a named action or an inline
+list of effects. This is the primary mechanism for making the UI interactive.
+
 ```yaml
 behavior:
   - event: <event_type>
-    action: <action_id>              # optional (omit for description-only)
+    action: <action_id>              # dispatch a named action (simple form)
     params: { ... }                  # optional, passed to action
+    effects: <list of effect>        # inline effects (alternative to action)
     condition: <interpolated>        # optional boolean guard
     delay_ms: <number>               # optional (e.g. for long_press)
     menu: <string>                   # optional menu id to open
     dialog: <string>                 # optional dialog id to open
+    prevent_default: <bool>          # optional; suppress native browser behavior
+    stop_propagation: <bool>         # optional; prevent event bubbling
     description: <string>            # English explanation of behavior
 ```
+
+An entry may specify `action` (dispatches a named action from the catalog),
+`effects` (inline list executed directly), or both (action runs first, then
+inline effects). If `condition` is present, the handler only fires when the
+expression is true.
 
 ### Event Types
 
@@ -482,22 +664,114 @@ behavior:
 |---|---|
 | `click` | Mouse click / tap |
 | `double_click` | Double click |
-| `long_press` | Press and hold (use `delay_ms`) |
+| `long_press` | Press and hold (fires after `delay_ms`) |
 | `right_click` | Context menu click |
-| `drag_start` | Begin drag |
-| `drag` | During drag |
-| `drop` | Drop target receives |
-| `hover_enter` | Mouse enters element |
-| `hover_leave` | Mouse leaves element |
-| `key` | Keyboard event (use `params.key`) |
-| `change` | Value changed (inputs, toggles) |
-| `tab_click` | Tab selected (within `tabs`) |
+| `mouse_down` | Mouse button pressed |
+| `mouse_up` | Mouse button released |
+| `mouse_move` | Mouse moved (while over element) |
+| `drag_start` | Begin drag (mouse_down + move threshold) |
+| `drag_move` | During drag (each mouse_move while dragging) |
+| `drag_end` | Drag released (mouse_up while dragging) |
+| `drop` | Drop target receives a dragged item |
+| `hover_enter` | Mouse enters element bounds |
+| `hover_leave` | Mouse leaves element bounds |
+| `key_down` | Keyboard key pressed |
+| `key_up` | Keyboard key released |
+| `change` | Value changed (inputs, toggles, selects) |
+| `tab_click` | Tab header selected (within `tabs`) |
 | `tab_close` | Tab close button clicked |
 | `resize` | Element resized |
-| `collapse_toggle` | Collapse / expand toggled |
+| `collapse_toggle` | Collapse/expand toggled |
+| `timer` | Named timer fired (see `start_timer` effect) |
 
 The event list is extensible — unknown event names are preserved in the spec
 and displayed in wireframe inspection mode.
+
+### Interaction Protocols
+
+Complex interactions like dragging and long-press menus are composed from
+primitive events and effects. The schema provides standard protocols.
+
+#### Drag Protocol
+
+Pane dragging and edge resizing are expressed as three cooperating behaviors.
+The `drag_start` event fires when a mouse_down is followed by movement beyond
+a threshold (default 3px). The renderer tracks the drag state internally.
+
+```yaml
+behavior:
+  - event: drag_start
+    description: "Begin dragging this pane"
+    effects:
+      - cursor: grabbing
+      - set: { _drag_offset_x: "{{event.offset_x}}", _drag_offset_y: "{{event.offset_y}}" }
+  - event: drag_move
+    description: "Move pane to follow cursor, snapping to nearby edges"
+    effects:
+      - set_style:
+          target: "{{self.id}}"
+          left: "{{event.client_x - state._drag_offset_x}}"
+          top: "{{event.client_y - state._drag_offset_y}}"
+  - event: drag_end
+    effects:
+      - cursor: grab
+```
+
+#### Long-Press Protocol
+
+Long-press is expressed using `mouse_down` to start a timer, and `mouse_up`
+to cancel it if released early. If the timer fires, the menu opens.
+
+```yaml
+behavior:
+  - event: mouse_down
+    effects:
+      - start_timer:
+          id: "long_press_{{self.id}}"
+          delay_ms: 250
+          effects:
+            - open_dialog: { id: "{{self.alternates.menu_id}}" }
+  - event: mouse_up
+    effects:
+      - cancel_timer: "long_press_{{self.id}}"
+  - event: click
+    action: select_tool
+    params: { tool: pen }
+```
+
+#### Hover Feedback Protocol
+
+```yaml
+behavior:
+  - event: hover_enter
+    effects:
+      - add_class: { target: "{{self.id}}", class: "hover" }
+      - cursor: pointer
+  - event: hover_leave
+    effects:
+      - remove_class: { target: "{{self.id}}", class: "hover" }
+      - cursor: default
+```
+
+### Event Context Variables
+
+Within behavior `effects` and `condition` expressions, the following context
+variables are available in addition to `state.*` and `theme.*`:
+
+| Variable | Meaning |
+|---|---|
+| `event.client_x` | Mouse X relative to viewport |
+| `event.client_y` | Mouse Y relative to viewport |
+| `event.offset_x` | Mouse X relative to element |
+| `event.offset_y` | Mouse Y relative to element |
+| `event.key` | Key name for keyboard events |
+| `event.ctrl` | Whether Ctrl/Cmd is held |
+| `event.shift` | Whether Shift is held |
+| `event.alt` | Whether Alt is held |
+| `event.target_id` | The id of the element that received the event |
+| `event.value` | New value for `change` events |
+| `self.id` | The id of the element that owns this behavior |
+| `self.type` | The type of the element |
 
 ---
 
