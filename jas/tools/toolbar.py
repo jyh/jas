@@ -832,29 +832,18 @@ class FillStrokeWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Layout: two overlapping 28x28 squares offset by 10px
-        back_x, back_y = 10, 10
-        front_x, front_y = 0, 0
+        # Layout: two overlapping 28x28 squares
+        # Fill is always top-left, stroke is always offset to bottom-right
         sq_size = 28
+        fill_x, fill_y = 0, 0
+        stroke_x, stroke_y = 10, 10
 
-        # Determine which is front and back
+        # Draw back square first (behind), then front square (on top)
         if self._fill_on_top:
-            fill_x, fill_y = front_x, front_y
-            stroke_x, stroke_y = back_x, back_y
-        else:
-            fill_x, fill_y = back_x, back_y
-            stroke_x, stroke_y = front_x, front_y
-
-        # Draw back square first
-        if not self._fill_on_top:
-            self._draw_fill_square(painter, fill_x, fill_y, sq_size)
-        else:
             self._draw_stroke_square(painter, stroke_x, stroke_y, sq_size)
-
-        # Draw front square
-        if self._fill_on_top:
             self._draw_fill_square(painter, fill_x, fill_y, sq_size)
         else:
+            self._draw_fill_square(painter, fill_x, fill_y, sq_size)
             self._draw_stroke_square(painter, stroke_x, stroke_y, sq_size)
 
         # Swap arrow (top-right)
@@ -909,16 +898,50 @@ class FillStrokeWidget(QWidget):
             painter.drawLine(x + 1, y + size - 1, x + size - 1, y + 1)
 
     def _draw_stroke_square(self, painter, x, y, size):
-        """Draw the stroke square (hollow with thick border)."""
-        if self._stroke_color is not None:
-            painter.setPen(QPen(self._stroke_color, 3))
-        else:
-            painter.setPen(QPen(QColor(0, 0, 0), 3))
-        painter.setBrush(QColor(255, 255, 255))
-        painter.drawRect(x + 3, y + 3, size - 6, size - 6)
+        """Draw the stroke square (hollow with thick border, transparent center)."""
         if self._stroke_color is None:
+            # None: white square with red diagonal
+            painter.setPen(QPen(QColor(128, 128, 128), 1))
+            painter.setBrush(QColor(255, 255, 255))
+            painter.drawRect(x, y, size, size)
             painter.setPen(QPen(QColor(255, 0, 0), 1.5))
             painter.drawLine(x + 1, y + size - 1, x + size - 1, y + 1)
+        else:
+            # Hollow square: thick colored border, white center, thin outline
+            bw = 6  # border width
+            # Outer outline
+            painter.setPen(QPen(QColor(128, 128, 128), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(x, y, size, size)
+            # Thick colored border
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self._stroke_color)
+            painter.drawRect(x + 1, y + 1, size - 1, bw)
+            painter.drawRect(x + 1, y + size - bw, size - 1, bw)
+            painter.drawRect(x + 1, y + bw, bw, size - 2 * bw)
+            painter.drawRect(x + size - bw, y + bw, bw, size - 2 * bw)
+            # White center
+            painter.setBrush(QColor(255, 255, 255))
+            painter.drawRect(x + bw + 1, y + bw + 1,
+                             size - 2 * bw - 1, size - 2 * bw - 1)
+
+    def _hit_square(self, x, y):
+        """Return 'fill', 'stroke', or None based on click position.
+        Check front square first (higher z-order), then back."""
+        sq = 28
+        fill_hit = 0 <= x <= sq and 0 <= y <= sq
+        stroke_hit = 10 <= x <= 10 + sq and 10 <= y <= 10 + sq
+        if self._fill_on_top:
+            if fill_hit:
+                return 'fill'
+            if stroke_hit:
+                return 'stroke'
+        else:
+            if stroke_hit:
+                return 'stroke'
+            if fill_hit:
+                return 'fill'
+        return None
 
     def mousePressEvent(self, event):
         x, y = event.position().x(), event.position().y()
@@ -933,44 +956,33 @@ class FillStrokeWidget(QWidget):
         # Check mode buttons
         if 62 <= y <= 76:
             if 38 <= x <= 52:
-                # None button
                 if self._fill_on_top:
                     self.fill_none_clicked.emit()
                 else:
                     self.stroke_none_clicked.emit()
                 return
-        # Check fill/stroke squares
-        front_x, front_y = 0, 0
-        back_x, back_y = 10, 10
-        sq = 28
-        if self._fill_on_top:
-            if front_x <= x <= front_x + sq and front_y <= y <= front_y + sq:
-                self.fill_clicked.emit()
-                return
-            if back_x <= x <= back_x + sq and back_y <= y <= back_y + sq:
-                self.stroke_clicked.emit()
-                self._fill_on_top = False
-                self.update()
-                return
-        else:
-            if front_x <= x <= front_x + sq and front_y <= y <= front_y + sq:
-                self.stroke_clicked.emit()
-                return
-            if back_x <= x <= back_x + sq and back_y <= y <= back_y + sq:
-                self.fill_clicked.emit()
-                self._fill_on_top = True
-                self.update()
-                return
+        # Check fill/stroke squares — click brings to front
+        hit = self._hit_square(x, y)
+        if hit == 'fill':
+            self._fill_on_top = True
+            self.fill_clicked.emit()
+            self.update()
+        elif hit == 'stroke':
+            self._fill_on_top = False
+            self.stroke_clicked.emit()
+            self.update()
 
     def mouseDoubleClickEvent(self, event):
         x, y = event.position().x(), event.position().y()
-        front_x, front_y = 0, 0
-        sq = 28
-        if front_x <= x <= front_x + sq and front_y <= y <= front_y + sq:
-            if self._fill_on_top:
-                self.fill_double_clicked.emit()
-            else:
-                self.stroke_double_clicked.emit()
+        hit = self._hit_square(x, y)
+        if hit == 'fill':
+            self._fill_on_top = True
+            self.update()
+            self.fill_double_clicked.emit()
+        elif hit == 'stroke':
+            self._fill_on_top = False
+            self.update()
+            self.stroke_double_clicked.emit()
 
 
 class Toolbar(QWidget):
