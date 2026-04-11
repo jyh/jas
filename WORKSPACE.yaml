@@ -186,6 +186,34 @@ icons:
       <path d="M14,5 C6,5 3,10 3,14 C3,20 8,24 14,22 C20,20 22,16 20,12 C18,8 12,9 12,13 C12,16 16,17 17,15"
         fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
 
+  chevron_right:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M6,3 L11,8 L6,13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  chevron_left:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M10,3 L5,8 L10,13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  chevron_down:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M3,6 L8,11 L13,6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  hamburger:
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="2" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <line x1="2" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+
+  maximize:
+    viewbox: "0 0 16 16"
+    svg: >
+      <rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" rx="1"/>
+      <line x1="2" y1="5" x2="14" y2="5" stroke="currentColor" stroke-width="1.5"/>
+
   swap_arrows:
     viewbox: "0 0 16 16"
     svg: >
@@ -274,10 +302,20 @@ state:
     default: 0
     description: "Active panel index in dock group 0"
 
+  dock_group0_collapsed:
+    type: bool
+    default: false
+    description: "Whether dock group 0 (Layers) is collapsed"
+
   dock_group1_active:
     type: number
     default: 0
     description: "Active panel index in dock group 1"
+
+  dock_group1_collapsed:
+    type: bool
+    default: false
+    description: "Whether dock group 1 (Color/Stroke/Properties) is collapsed"
 
 # ═══════════════════════════════════════════════════════════════
 # Actions
@@ -1230,10 +1268,18 @@ layout:
         label: "Panels"
         draggable: true
         closeable: true
+        buttons:
+          - id: dock_collapse_btn
+            type: icon_button
+            summary: "Collapse/Expand dock"
+            icon: "chevron_right"
+            style: { size: 16 }
+            behavior:
+              - event: click
+                action: toggle_dock_collapse
+            bind:
+              icon: "{{state.dock_collapsed}} == true ? chevron_left : chevron_right"
       behavior:
-        - event: collapse_toggle
-          action: toggle_dock_collapse
-          description: "Chevron button toggles between expanded (240px) and collapsed (36px) state"
         - event: drop
           description: >
             Panels can be dragged between groups. Groups can be reordered
@@ -1245,77 +1291,162 @@ layout:
 
           # Group 0: Layers
           - id: dock_group_0
-            type: tabs
+            type: container
             summary: "Layers group"
-            description: "Panel group containing the Layers panel"
-            bind:
-              active: "{{state.dock_group0_active}}"
+            description: "Panel group containing the Layers panel, with collapse chevron"
+            layout: column
             children:
+              - id: dock_group_0_header
+                type: container
+                layout: row
+                style:
+                  background: "{{theme.colors.pane_bg_dark}}"
+                  padding: "2 4"
+                  gap: 4
+                  alignment: center
+                children:
+                  - id: dock_group_0_chevron
+                    type: icon_button
+                    summary: "Collapse group"
+                    icon: "chevron_down"
+                    style: { size: 14 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - toggle: dock_group0_collapsed
+                    bind:
+                      icon: "{{state.dock_group0_collapsed}} == true ? chevron_right : chevron_down"
+                  - id: dock_group_0_tabs
+                    type: tabs
+                    summary: "Layers tabs"
+                    bind:
+                      active: "{{state.dock_group0_active}}"
+                    children:
+                      - id: layers_panel
+                        type: panel
+                        summary: "Layers"
+                        description: >
+                          Displays the layer hierarchy of the active document.
+                          Shows layer names, visibility toggles, and lock state.
+                        panel_kind: layers
+                        menu:
+                          - { label: "Close Layers", action: close_panel }
+                        content:
+                          type: placeholder
+                          summary: "Layer list"
+                          description: "Will contain the layer hierarchy tree with visibility and lock toggles"
+                  - type: spacer
+                  - id: dock_group_0_hamburger
+                    type: icon_button
+                    summary: "Panel menu"
+                    icon: "hamburger"
+                    style: { size: 14 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - open_dialog: { id: panel_menu_layers }
 
-              - id: layers_panel
-                type: panel
-                summary: "Layers"
-                description: >
-                  Displays the layer hierarchy of the active document.
-                  Shows layer names, visibility toggles, and lock state.
-                panel_kind: layers
-                menu:
-                  - { label: "Close Layers", action: close_panel }
-                content:
-                  type: placeholder
-                  summary: "Layer list"
-                  description: "Will contain the layer hierarchy tree with visibility and lock toggles"
+              - id: dock_group_0_body
+                type: container
+                summary: "Layers panel body"
+                layout: column
+                bind:
+                  visible: "not {{state.dock_group0_collapsed}}"
+                children:
+                  - type: placeholder
+                    summary: "Layer list"
+                    description: "Will contain the layer hierarchy tree with visibility and lock toggles"
+
+          - type: separator
 
           # Group 1: Color, Stroke, Properties
           - id: dock_group_1
-            type: tabs
+            type: container
             summary: "Properties group"
-            description: "Panel group with Color, Stroke, and Properties tabs"
-            bind:
-              active: "{{state.dock_group1_active}}"
+            description: "Panel group with Color, Stroke, and Properties tabs, with collapse chevron"
+            layout: column
             children:
+              - id: dock_group_1_header
+                type: container
+                layout: row
+                style:
+                  background: "{{theme.colors.pane_bg_dark}}"
+                  padding: "2 4"
+                  gap: 4
+                  alignment: center
+                children:
+                  - id: dock_group_1_chevron
+                    type: icon_button
+                    summary: "Collapse group"
+                    icon: "chevron_down"
+                    style: { size: 14 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - toggle: dock_group1_collapsed
+                    bind:
+                      icon: "{{state.dock_group1_collapsed}} == true ? chevron_right : chevron_down"
+                  - id: dock_group_1_tabs
+                    type: tabs
+                    summary: "Property tabs"
+                    bind:
+                      active: "{{state.dock_group1_active}}"
+                    children:
+                      - id: color_panel
+                        type: panel
+                        summary: "Color"
+                        panel_kind: color
+                        menu:
+                          - { label: "Close Color", action: close_panel }
+                      - id: stroke_panel
+                        type: panel
+                        summary: "Stroke"
+                        panel_kind: stroke
+                        menu:
+                          - { label: "Close Stroke", action: close_panel }
+                      - id: properties_panel
+                        type: panel
+                        summary: "Properties"
+                        panel_kind: properties
+                        menu:
+                          - { label: "Close Properties", action: close_panel }
+                  - type: spacer
+                  - id: dock_group_1_hamburger
+                    type: icon_button
+                    summary: "Panel menu"
+                    icon: "hamburger"
+                    style: { size: 14 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - open_dialog: { id: panel_menu_active }
 
-              - id: color_panel
-                type: panel
-                summary: "Color"
-                description: >
-                  Color mixing panel with color wheel, RGB/HSB sliders,
-                  hex input, and recent colors.
-                panel_kind: color
-                menu:
-                  - { label: "Close Color", action: close_panel }
-                content:
-                  type: placeholder
-                  summary: "Color picker"
-                  description: "Will contain color wheel, RGB/HSB sliders, and hex input"
-
-              - id: stroke_panel
-                type: panel
-                summary: "Stroke"
-                description: >
-                  Stroke properties: width, cap style (butt/round/square),
-                  join style (miter/round/bevel), dash pattern, arrowheads.
-                panel_kind: stroke
-                menu:
-                  - { label: "Close Stroke", action: close_panel }
-                content:
-                  type: placeholder
-                  summary: "Stroke properties"
-                  description: "Will contain width, cap, join, dash, and arrowhead controls"
-
-              - id: properties_panel
-                type: panel
-                summary: "Properties"
-                description: >
-                  Object properties: position (x, y), dimensions (w, h),
-                  rotation, opacity, and blend mode for selected objects.
-                panel_kind: properties
-                menu:
-                  - { label: "Close Properties", action: close_panel }
-                content:
-                  type: placeholder
-                  summary: "Object properties"
-                  description: "Will contain position, size, rotation, opacity, and blend mode fields"
+              - id: dock_group_1_body
+                type: container
+                summary: "Active panel body"
+                layout: column
+                style: { flex: 1 }
+                bind:
+                  visible: "not {{state.dock_group1_collapsed}}"
+                children:
+                  - id: color_panel_content
+                    type: placeholder
+                    summary: "Color picker"
+                    description: "Will contain color wheel, RGB/HSB sliders, and hex input"
+                    bind:
+                      visible: "{{state.dock_group1_active}} == 0"
+                  - id: stroke_panel_content
+                    type: placeholder
+                    summary: "Stroke properties"
+                    description: "Will contain width, cap, join, dash, and arrowhead controls"
+                    bind:
+                      visible: "{{state.dock_group1_active}} == 1"
+                  - id: properties_panel_content
+                    type: placeholder
+                    summary: "Object properties"
+                    description: "Will contain position, size, rotation, opacity, and blend mode fields"
+                    bind:
+                      visible: "{{state.dock_group1_active}} == 2"
 
 # ═══════════════════════════════════════════════════════════════
 # Dialogs
