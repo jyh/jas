@@ -1,14 +1,15 @@
 """Qt widget for rendering the dock panel system."""
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QMenu,
 )
-from PySide6.QtCore import Qt, QMimeData
+from PySide6.QtCore import Qt, QMimeData, QPoint
 from PySide6.QtGui import QDrag
 
 from workspace.workspace_layout import (
     WorkspaceLayout, DockEdge, PanelKind, GroupAddr, PanelAddr,
 )
+from panels.panel_menu import panel_label, panel_menu, panel_dispatch, panel_is_checked, PanelMenuItemKind
 
 DOCK_DRAG_MIME = "application/x-jas-dock-drag"
 
@@ -137,7 +138,7 @@ class DockPanelWidget(QWidget):
         # Icon buttons
         for gi, group in enumerate(dock.groups):
             for pi, kind in enumerate(group.panels):
-                label = WorkspaceLayout.panel_label(kind)
+                label = panel_label(kind)
                 btn = QPushButton(label[0] if label else "?")
                 btn.setFixedSize(28, 28)
                 btn.setToolTip(label)
@@ -180,8 +181,8 @@ class DockPanelWidget(QWidget):
 
         # Tab buttons (draggable — drags individual panel)
         for pi, kind in enumerate(group.panels):
-            label = WorkspaceLayout.panel_label(kind)
-            btn = DraggableTabButton(label, f"panel:{dock_id}:{gi}:{pi}")
+            lbl = panel_label(kind)
+            btn = DraggableTabButton(lbl, f"panel:{dock_id}:{gi}:{pi}")
             is_active = pi == group.active
             weight = "bold" if is_active else "normal"
             bg = THEME_BG_TAB if is_active else THEME_BG_TAB_INACTIVE
@@ -192,11 +193,24 @@ class DockPanelWidget(QWidget):
         hbox.addStretch()
 
         # Chevron
-        chevron = QPushButton("\u25BC" if group.collapsed else "\u25B2")
+        chevron = QPushButton("\u00BB" if group.collapsed else "\u00AB")
         chevron.setFlat(True)
-        chevron.setStyleSheet(f"font-size: 9px; color: {THEME_TEXT_BUTTON}; padding: 3px 6px;")
+        chevron.setStyleSheet(f"font-size: 18px; color: {THEME_TEXT_BUTTON}; padding: 3px 6px;")
         chevron.clicked.connect(lambda _, d=dock_id, g=gi: self._toggle_group(d, g))
         hbox.addWidget(chevron)
+
+        # Hamburger menu button — hidden when collapsed
+        if not group.collapsed:
+            active_kind = group.active_panel()
+            if active_kind is not None:
+                hamburger = QPushButton("\u2261")
+                hamburger.setFlat(True)
+                hamburger.setStyleSheet(f"font-size: 18px; color: {THEME_TEXT_BUTTON}; padding: 3px 6px;")
+                hamburger.clicked.connect(
+                    lambda _, d=dock_id, g=gi, k=active_kind, a=group.active:
+                        self._show_panel_menu(d, g, k, a)
+                )
+                hbox.addWidget(hamburger)
 
         vbox.addWidget(tab_bar)
 
@@ -204,7 +218,7 @@ class DockPanelWidget(QWidget):
         if not group.collapsed:
             active = group.active_panel()
             if active is not None:
-                body = QLabel(WorkspaceLayout.panel_label(active))
+                body = QLabel(panel_label(active))
                 body.setStyleSheet(f"color: {THEME_TEXT_BODY}; font-size: 12px; padding: 12px;")
                 body.setMinimumHeight(60)
                 body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
@@ -229,6 +243,38 @@ class DockPanelWidget(QWidget):
     def _set_active(self, dock_id, group_idx, panel_idx):
         self._layout_data.set_active_panel(
             PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx))
+        self.rebuild()
+
+    def _show_panel_menu(self, dock_id, group_idx, kind, panel_idx):
+        addr = PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx)
+        items = panel_menu(kind)
+        menu = QMenu(self)
+        for item in items:
+            if item.kind == PanelMenuItemKind.ACTION:
+                action = menu.addAction(item.label)
+                cmd = item.command
+                action.triggered.connect(
+                    lambda _, c=cmd: self._dispatch_panel_cmd(kind, c, addr))
+            elif item.kind == PanelMenuItemKind.TOGGLE:
+                action = menu.addAction(item.label)
+                action.setCheckable(True)
+                action.setChecked(panel_is_checked(kind, item.command, self._layout_data))
+                cmd = item.command
+                action.triggered.connect(
+                    lambda _, c=cmd: self._dispatch_panel_cmd(kind, c, addr))
+            elif item.kind == PanelMenuItemKind.RADIO:
+                action = menu.addAction(item.label)
+                action.setCheckable(True)
+                action.setChecked(panel_is_checked(kind, item.command, self._layout_data))
+                cmd = item.command
+                action.triggered.connect(
+                    lambda _, c=cmd: self._dispatch_panel_cmd(kind, c, addr))
+            elif item.kind == PanelMenuItemKind.SEPARATOR:
+                menu.addSeparator()
+        menu.exec(self.cursor().pos())
+
+    def _dispatch_panel_cmd(self, kind, cmd, addr):
+        panel_dispatch(kind, cmd, addr, self._layout_data)
         self.rebuild()
 
     def _expand_to(self, dock_id, group_idx, panel_idx):
@@ -309,7 +355,7 @@ class FloatingDockWindow(QWidget):
         hbox.addWidget(grip)
 
         for pi, kind in enumerate(group.panels):
-            label = WorkspaceLayout.panel_label(kind)
+            label = panel_label(kind)
             btn = QPushButton(label)
             btn.setFlat(True)
             is_active = pi == group.active
@@ -325,7 +371,7 @@ class FloatingDockWindow(QWidget):
         if not group.collapsed:
             active = group.active_panel()
             if active is not None:
-                body = QLabel(WorkspaceLayout.panel_label(active))
+                body = QLabel(panel_label(active))
                 body.setStyleSheet(f"color: {THEME_TEXT_BODY}; font-size: 12px; padding: 12px;")
                 body.setMinimumHeight(60)
                 body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
