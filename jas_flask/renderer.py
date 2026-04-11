@@ -249,10 +249,10 @@ def _render_pane(el, theme, state):
         f' style="position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;'
         f'background:{bg};border:{border};display:flex;flex-direction:column;overflow:hidden"'
         f'{extra_data}>'
-        f'<div class="jas-pane-title" style="height:20px;background:#383838;display:flex;'
+        f'<div class="jas-pane-title" style="height:20px;background:#2a2a2a;display:flex;'
         f'align-items:center;padding:0 6px;cursor:grab;font-size:11px;color:#d9d9d9">'
         f'<span class="ms-auto d-flex gap-1">{title_btns}</span></div>'
-        f'<div class="jas-pane-content" style="flex:1;overflow:auto">{content_html}</div>'
+        f'<div class="jas-pane-content" style="flex:1;overflow:auto;display:flex;flex-direction:column">{content_html}</div>'
         f'<div class="jas-edge-handle left"></div>'
         f'<div class="jas-edge-handle right"></div>'
         f'<div class="jas-edge-handle top"></div>'
@@ -264,9 +264,14 @@ def _render_pane(el, theme, state):
 def _render_container(el, theme, state):
     layout = el.get("layout", "column")
     direction = "flex-column" if layout == "column" else "flex-row"
+    # If any child uses absolute positioning, this container needs position:relative
+    has_abs_children = any(
+        c.get("style", {}).get("position") for c in el.get("children", []) if isinstance(c, dict)
+    )
+    extra = "position:relative" if has_abs_children else ""
     children = _render_children(el, theme, state)
     return Markup(
-        f'<div{_id_attr(el)} class="d-flex {direction}"{_style_str(el, theme, state)}{_data_attrs(el)}>'
+        f'<div{_id_attr(el)} class="d-flex {direction}"{_style_str(el, theme, state, extra)}{_data_attrs(el)}>'
         f'{children}</div>'
     )
 
@@ -346,7 +351,7 @@ def _render_panel(el, theme, state):
 
     return Markup(
         f'<div{_id_attr(el)} class="jas-panel">'
-        f'<div class="d-flex align-items-center p-1" style="background:#383838;font-size:11px;color:#ccc">'
+        f'<div class="d-flex align-items-center p-1" style="background:#2a2a2a;font-size:11px;color:#ccc">'
         f'{summary}{menu_html}</div>'
         f'<div class="p-2">{content_html}</div>'
         f'</div>'
@@ -426,17 +431,20 @@ def _render_color_swatch(el, theme, state):
     bind = el.get("bind", {})
     color_ref = bind.get("color", "#888")
     color = _resolve(color_ref, theme, state) if isinstance(color_ref, str) else "#888"
-    sz = el.get("style", {}).get("size", 28)
+    style = el.get("style", {})
+    sz = style.get("size", 28)
     hollow = el.get("hollow", False)
+    pos = style.get("position", {})
+    pos_css = f"position:absolute;left:{pos['x']}px;top:{pos['y']}px;" if pos else ""
     if hollow:
         return Markup(
             f'<div{_id_attr(el)} class="jas-color-swatch"'
-            f' style="width:{sz}px;height:{sz}px;border:6px solid {color};background:#fff"'
+            f' style="{pos_css}width:{sz}px;height:{sz}px;border:6px solid {color};background:#fff;box-sizing:border-box"'
             f'{_data_attrs(el)}></div>'
         )
     return Markup(
         f'<div{_id_attr(el)} class="jas-color-swatch"'
-        f' style="width:{sz}px;height:{sz}px;background:{color};border:1px solid #666"'
+        f' style="{pos_css}width:{sz}px;height:{sz}px;background:{color};border:1px solid #666"'
         f'{_data_attrs(el)}></div>'
     )
 
@@ -466,7 +474,8 @@ def _render_canvas(el, theme, state):
     return Markup(
         f'<div{_id_attr(el)} class="jas-canvas" '
         f'style="flex:1;background:#fff;display:flex;align-items:center;justify-content:center;'
-        f'color:#999;font-size:14px;min-height:200px">'
+        f'color:#999;font-size:14px;min-height:200px"'
+        f'{_data_attrs(el)}>'
         f'{summary} (tier 3)</div>'
     )
 
