@@ -36,6 +36,7 @@ class Model:
         self._redo_stack: list[Document] = []
         self.default_fill: Fill | None = None
         self.default_stroke: Stroke | None = Stroke(color=RgbColor(0, 0, 0))
+        self.fill_on_top: bool = True
 
     @property
     def filename(self) -> str:

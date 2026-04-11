@@ -3,9 +3,10 @@ from enum import Enum, auto
 from tools.tool import LONG_PRESS_MS
 
 from PySide6.QtCore import Qt, Signal, QTimer, QPoint
-from PySide6.QtGui import QPainter, QColor, QPen, QPainterPath, QFont
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QFont
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QGridLayout, QToolButton, QButtonGroup, QMenu,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QToolButton, QButtonGroup,
+    QMenu, QPushButton,
 )
 
 
@@ -785,6 +786,193 @@ _SHAPE_SLOT_TOOLS = {Tool.RECT, Tool.ROUNDED_RECT, Tool.POLYGON, Tool.STAR}
 _LONG_PRESS_MS = LONG_PRESS_MS
 
 
+class FillStrokeWidget(QWidget):
+    """Fill/stroke indicator with overlapping squares, swap, and default buttons.
+
+    Signals:
+        fill_clicked: emitted when the fill square is clicked.
+        stroke_clicked: emitted when the stroke square is clicked.
+        fill_double_clicked: emitted when the fill square is double-clicked.
+        stroke_double_clicked: emitted when the stroke square is double-clicked.
+        swap_clicked: emitted when the swap arrow is clicked.
+        default_clicked: emitted when the default reset button is clicked.
+        fill_none_clicked: emitted when fill-none mode is chosen.
+        stroke_none_clicked: emitted when stroke-none mode is chosen.
+    """
+
+    fill_clicked = Signal()
+    stroke_clicked = Signal()
+    fill_double_clicked = Signal()
+    stroke_double_clicked = Signal()
+    swap_clicked = Signal()
+    default_clicked = Signal()
+    fill_none_clicked = Signal()
+    stroke_none_clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._fill_color: QColor | None = QColor(255, 255, 255)
+        self._stroke_color: QColor | None = QColor(0, 0, 0)
+        self._fill_on_top = True
+        self.setFixedSize(64, 80)
+
+    def set_fill_color(self, color: QColor | None):
+        self._fill_color = color
+        self.update()
+
+    def set_stroke_color(self, color: QColor | None):
+        self._stroke_color = color
+        self.update()
+
+    def set_fill_on_top(self, on_top: bool):
+        self._fill_on_top = on_top
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Layout: two overlapping 28x28 squares offset by 10px
+        back_x, back_y = 10, 10
+        front_x, front_y = 0, 0
+        sq_size = 28
+
+        # Determine which is front and back
+        if self._fill_on_top:
+            fill_x, fill_y = front_x, front_y
+            stroke_x, stroke_y = back_x, back_y
+        else:
+            fill_x, fill_y = back_x, back_y
+            stroke_x, stroke_y = front_x, front_y
+
+        # Draw back square first
+        if not self._fill_on_top:
+            self._draw_fill_square(painter, fill_x, fill_y, sq_size)
+        else:
+            self._draw_stroke_square(painter, stroke_x, stroke_y, sq_size)
+
+        # Draw front square
+        if self._fill_on_top:
+            self._draw_fill_square(painter, fill_x, fill_y, sq_size)
+        else:
+            self._draw_stroke_square(painter, stroke_x, stroke_y, sq_size)
+
+        # Swap arrow (top-right)
+        painter.setPen(QPen(QColor("#cccccc"), 1))
+        ax, ay = 44, 4
+        # Curved arrow hint
+        painter.drawLine(ax, ay, ax + 8, ay)
+        painter.drawLine(ax + 8, ay, ax + 8, ay + 8)
+        painter.drawLine(ax + 8, ay + 8, ax + 5, ay + 5)
+        painter.drawLine(ax + 8, ay + 8, ax + 8 + 3, ay + 5)
+
+        # Default reset (bottom-left, small icon)
+        dx, dy = 0, 44
+        # Small fill square (white)
+        painter.setPen(QPen(QColor("#999"), 1))
+        painter.setBrush(QColor(255, 255, 255))
+        painter.drawRect(dx + 3, dy + 3, 8, 8)
+        # Small stroke square (black border)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(0, 0, 0), 2))
+        painter.drawRect(dx, dy, 8, 8)
+
+        # Mode buttons row: Color, None
+        btn_y = 62
+        # Color button
+        painter.setPen(QPen(QColor("#999"), 1))
+        painter.setBrush(QColor("#666"))
+        painter.drawRect(2, btn_y, 14, 14)
+        # Gradient button (disabled)
+        painter.setPen(QPen(QColor("#555"), 1))
+        painter.setBrush(QColor("#444"))
+        painter.drawRect(20, btn_y, 14, 14)
+        # None button (red line)
+        painter.setPen(QPen(QColor("#555"), 1))
+        painter.setBrush(QColor("#fff"))
+        painter.drawRect(38, btn_y, 14, 14)
+        painter.setPen(QPen(QColor(255, 0, 0), 1.5))
+        painter.drawLine(39, btn_y + 13, 51, btn_y + 1)
+
+    def _draw_fill_square(self, painter, x, y, size):
+        """Draw the fill square (solid fill)."""
+        if self._fill_color is not None:
+            painter.setPen(QPen(QColor("#666"), 1))
+            painter.setBrush(self._fill_color)
+        else:
+            painter.setPen(QPen(QColor("#666"), 1))
+            painter.setBrush(QColor(255, 255, 255))
+        painter.drawRect(x, y, size, size)
+        if self._fill_color is None:
+            # Draw red slash for "none"
+            painter.setPen(QPen(QColor(255, 0, 0), 1.5))
+            painter.drawLine(x + 1, y + size - 1, x + size - 1, y + 1)
+
+    def _draw_stroke_square(self, painter, x, y, size):
+        """Draw the stroke square (hollow with thick border)."""
+        if self._stroke_color is not None:
+            painter.setPen(QPen(self._stroke_color, 3))
+        else:
+            painter.setPen(QPen(QColor(0, 0, 0), 3))
+        painter.setBrush(QColor(255, 255, 255))
+        painter.drawRect(x + 3, y + 3, size - 6, size - 6)
+        if self._stroke_color is None:
+            painter.setPen(QPen(QColor(255, 0, 0), 1.5))
+            painter.drawLine(x + 1, y + size - 1, x + size - 1, y + 1)
+
+    def mousePressEvent(self, event):
+        x, y = event.position().x(), event.position().y()
+        # Check swap arrow region (top-right)
+        if 44 <= x <= 56 and 0 <= y <= 14:
+            self.swap_clicked.emit()
+            return
+        # Check default reset region (bottom-left)
+        if 0 <= x <= 14 and 42 <= y <= 56:
+            self.default_clicked.emit()
+            return
+        # Check mode buttons
+        if 62 <= y <= 76:
+            if 38 <= x <= 52:
+                # None button
+                if self._fill_on_top:
+                    self.fill_none_clicked.emit()
+                else:
+                    self.stroke_none_clicked.emit()
+                return
+        # Check fill/stroke squares
+        front_x, front_y = 0, 0
+        back_x, back_y = 10, 10
+        sq = 28
+        if self._fill_on_top:
+            if front_x <= x <= front_x + sq and front_y <= y <= front_y + sq:
+                self.fill_clicked.emit()
+                return
+            if back_x <= x <= back_x + sq and back_y <= y <= back_y + sq:
+                self.stroke_clicked.emit()
+                self._fill_on_top = False
+                self.update()
+                return
+        else:
+            if front_x <= x <= front_x + sq and front_y <= y <= front_y + sq:
+                self.stroke_clicked.emit()
+                return
+            if back_x <= x <= back_x + sq and back_y <= y <= back_y + sq:
+                self.fill_clicked.emit()
+                self._fill_on_top = True
+                self.update()
+                return
+
+    def mouseDoubleClickEvent(self, event):
+        x, y = event.position().x(), event.position().y()
+        front_x, front_y = 0, 0
+        sq = 28
+        if front_x <= x <= front_x + sq and front_y <= y <= front_y + sq:
+            if self._fill_on_top:
+                self.fill_double_clicked.emit()
+            else:
+                self.stroke_double_clicked.emit()
+
+
 class Toolbar(QWidget):
     """Vertical toolbar with tool icons in a 2-column grid."""
 
@@ -811,6 +999,12 @@ class Toolbar(QWidget):
         grid = QGridLayout()
         grid.setSpacing(2)
         layout.addLayout(grid)
+
+        # Fill/stroke indicator
+        self.fill_stroke_widget = FillStrokeWidget()
+        layout.addSpacing(8)
+        layout.addWidget(self.fill_stroke_widget, alignment=Qt.AlignmentFlag.AlignHCenter)
+
         layout.addStretch()
 
         self.button_group = QButtonGroup(self)
