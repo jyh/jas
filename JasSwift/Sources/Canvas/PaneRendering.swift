@@ -264,7 +264,7 @@ struct PaneFrameView<Content: View>: View {
                     }
                 }) {
                     SwiftUI.Text("\u{00AB}")
-                        .font(.system(size: 12))
+                        .font(.system(size: 18))
                         .foregroundColor(SwiftUI.Color(nsColor: paneButtonColor))
                 }
                 .buttonStyle(.plain)

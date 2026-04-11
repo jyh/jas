@@ -40,6 +40,9 @@ public enum DockEdge: Hashable, Codable {
 
 public enum PanelKind: Hashable, Codable {
     case layers, color, stroke, properties
+
+    /// All panel kinds, for iteration.
+    public static let all: [PanelKind] = [.layers, .color, .stroke, .properties]
 }
 
 public struct PanelGroup: Codable {
@@ -582,8 +585,7 @@ public struct WorkspaceLayout: Codable {
     }
 
     public func panelMenuItems() -> [(PanelKind, Bool)] {
-        let all: [PanelKind] = [.layers, .color, .stroke, .properties]
-        return all.map { ($0, isPanelVisible($0)) }
+        PanelKind.all.map { ($0, isPanelVisible($0)) }
     }
 
     // MARK: - Z-Index
