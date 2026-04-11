@@ -2,6 +2,7 @@
 pub mod app;
 pub mod color_picker;
 pub mod color_picker_dialog;
+pub(crate) mod dock_panel;
 pub mod fill_stroke_widget;
 pub mod icons;
 pub mod menu;
