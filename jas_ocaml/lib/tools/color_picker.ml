@@ -309,22 +309,23 @@ let run_dialog ?parent st =
     ?parent
     ~width:540 ~height:400
     ~resizable:false () in
-  dialog#add_button_stock `OK `OK;
-  dialog#add_button_stock `CANCEL `CANCEL;
-
   let main_hbox = GPack.hbox ~spacing:12
     ~packing:(dialog#vbox#pack ~expand:true ~fill:true) () in
 
-  (* Left side: gradient + colorbar *)
-  let left_vbox = GPack.vbox ~spacing:8
+  (* Left side: gradient + colorbar + Only Web Colors *)
+  let left_vbox = GPack.vbox ~spacing:6
     ~packing:(main_hbox#pack ~expand:false) () in
 
-  (* Eyedropper button *)
-  let _eyedropper_btn = GButton.button ~label:"Eyedropper"
+  (* Title + eyedropper *)
+  let title_hbox = GPack.hbox ~spacing:8
     ~packing:(left_vbox#pack ~expand:false) () in
+  let _title_label = GMisc.label ~text:"Select Color:"
+    ~packing:(title_hbox#pack ~expand:false) () in
+  let eyedropper_btn = GButton.button ~label:"\240\159\146\167"
+    ~packing:(title_hbox#pack ~expand:false) () in
 
-  let gradient_hbox = GPack.hbox ~spacing:8
-    ~packing:(left_vbox#pack ~expand:true ~fill:true) () in
+  let gradient_hbox = GPack.hbox ~spacing:4
+    ~packing:(left_vbox#pack ~expand:false) () in
 
   (* Gradient drawing area *)
   let gradient_area = GMisc.drawing_area
@@ -336,18 +337,22 @@ let run_dialog ?parent st =
     ~packing:(gradient_hbox#pack ~expand:false) () in
   colorbar_area#misc#set_size_request ~width:(colorbar_width + 8) ~height:colorbar_height ();
 
-  (* Right side: radio buttons, entries, swatch *)
+  (* Right side: swatch + HSB/buttons + RGB/CMYK + hex *)
   let right_vbox = GPack.vbox ~spacing:4
     ~packing:(main_hbox#pack ~expand:true ~fill:true) () in
 
-  (* Color swatch *)
+  (* Row 1: Swatch above HSB *)
   let swatch_area = GMisc.drawing_area
     ~packing:(right_vbox#pack ~expand:false) () in
   swatch_area#misc#set_size_request ~width:60 ~height:40 ();
 
+  (* Row 2: HSB on left, OK/Cancel/Swatches on right *)
+  let hsb_buttons_hbox = GPack.hbox ~spacing:12
+    ~packing:(right_vbox#pack ~expand:false) () in
+
   (* HSB radio + entries *)
   let hsb_table = GPack.table ~rows:3 ~columns:3 ~row_spacings:4 ~col_spacings:4
-    ~packing:(right_vbox#pack ~expand:false) () in
+    ~packing:(hsb_buttons_hbox#pack ~expand:false) () in
 
   let h_radio = GButton.radio_button ~label:"H:"
     ~packing:(hsb_table#attach ~left:0 ~top:0) () in
@@ -369,6 +374,19 @@ let run_dialog ?parent st =
     ~packing:(hsb_table#attach ~left:1 ~top:2) () in
   let _b_unit = GMisc.label ~text:"%"
     ~packing:(hsb_table#attach ~left:2 ~top:2) () in
+
+  (* OK / Cancel / Color Swatches buttons to the right of HSB *)
+  let buttons_vbox = GPack.vbox ~spacing:4
+    ~packing:(hsb_buttons_hbox#pack ~expand:false) () in
+  let ok_btn = GButton.button ~label:"OK"
+    ~packing:(buttons_vbox#pack ~expand:false) () in
+  ok_btn#misc#set_size_request ~width:80 ();
+  let cancel_btn = GButton.button ~label:"Cancel"
+    ~packing:(buttons_vbox#pack ~expand:false) () in
+  cancel_btn#misc#set_size_request ~width:80 ();
+  let _swatches_btn = GButton.button ~label:"Color Swatches"
+    ~packing:(buttons_vbox#pack ~expand:false) () in
+  _swatches_btn#misc#set_sensitive false;
 
   (* RGB radio + entries *)
   let rgb_cmyk_table = GPack.table ~rows:4 ~columns:5 ~row_spacings:4 ~col_spacings:4
@@ -418,9 +436,9 @@ let run_dialog ?parent st =
   let _k_unit = GMisc.label ~text:"%"
     ~packing:(rgb_cmyk_table#attach ~left:4 ~top:3) () in
 
-  (* Web colors checkbox *)
+  (* Web colors checkbox - below gradient *)
   let web_check = GButton.check_button ~label:"Only Web Colors"
-    ~packing:(right_vbox#pack ~expand:false) () in
+    ~packing:(left_vbox#pack ~expand:false) () in
 
   (* Hex entry *)
   let hex_hbox = GPack.hbox ~spacing:4
@@ -616,11 +634,28 @@ let run_dialog ?parent st =
     end
   ) |> ignore;
 
+  (* Eyedropper: not available in lablgtk3/macOS (no root window access) *)
+  eyedropper_btn#misc#set_tooltip_text "Eyedropper (not available on this platform)";
+  eyedropper_btn#misc#set_sensitive false;
+
   (* Initialize entries *)
   update_entries ();
 
+  (* Add hidden response buttons so dialog#run works *)
+  dialog#add_button_stock `OK `OK;
+  dialog#add_button_stock `CANCEL `CANCEL;
+  (* Hide the default action area since we have custom buttons *)
+  dialog#action_area#misc#hide ();
+
+  (* Wire custom OK/Cancel buttons to emit dialog response *)
+  ignore (ok_btn#connect#clicked ~callback:(fun () ->
+    dialog#response `OK));
+  ignore (cancel_btn#connect#clicked ~callback:(fun () ->
+    dialog#response `CANCEL));
+
   let response = dialog#run () in
+  let result = (match response with
+    | `OK -> Some (color st)
+    | _ -> None) in
   dialog#destroy ();
-  match response with
-  | `OK -> Some (color st)
-  | _ -> None
+  result
