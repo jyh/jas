@@ -99,6 +99,8 @@ public struct ContentView: View {
     @State private var edgeSnappedCoord: Double?
     @State private var hoveredBorder: Int?
     @State private var snapPreview: [SnapConstraint] = []
+    @State private var colorPickerState: ColorPickerState?
+    @State private var showColorPicker = false
 
     public init(workspace: WorkspaceState) {
         self.workspace = workspace
@@ -183,6 +185,40 @@ public struct ContentView: View {
                     pl.onViewportResize(newW: newSize.width, newH: newSize.height)
                 }
             }
+            .sheet(isPresented: $showColorPicker) {
+                if let cpState = colorPickerState {
+                    let originalColor = cpState.color()
+                    ColorPickerView(
+                        state: cpState,
+                        onOK: { color in
+                            if let model = workspace.activeModel {
+                                if cpState.forFill {
+                                    model.defaultFill = Fill(color: color)
+                                    if !model.document.selection.isEmpty {
+                                        model.snapshot()
+                                        let ctrl = Controller(model: model)
+                                        ctrl.setSelectionFill(Fill(color: color))
+                                    }
+                                } else {
+                                    let newStroke = Stroke(color: color,
+                                        width: model.defaultStroke?.width ?? 1.0)
+                                    model.defaultStroke = newStroke
+                                    if !model.document.selection.isEmpty {
+                                        model.snapshot()
+                                        let ctrl = Controller(model: model)
+                                        ctrl.setSelectionStroke(newStroke)
+                                    }
+                                }
+                            }
+                            showColorPicker = false
+                        },
+                        onCancel: {
+                            showColorPicker = false
+                        },
+                        originalColor: originalColor
+                    )
+                }
+            }
         }
     }
 
@@ -191,7 +227,14 @@ public struct ContentView: View {
         switch geo.kind {
         case .toolbar:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: true,
-                          content: { ToolbarPanel(currentTool: $currentTool, model: workspace.activeModel) },
+                          content: { ToolbarPanel(currentTool: $currentTool, model: workspace.activeModel, onOpenColorPicker: { forFill in
+                              guard let model = workspace.activeModel else { return }
+                              let initial: Color = forFill
+                                  ? (model.defaultFill?.color ?? .white)
+                                  : (model.defaultStroke?.color ?? .black)
+                              colorPickerState = ColorPickerState(color: initial, forFill: forFill)
+                              showColorPicker = true
+                          }) },
                           paneDrag: $paneDrag, edgeResize: $edgeResize, edgeSnappedCoord: $edgeSnappedCoord, snapPreview: $snapPreview)
         case .canvas:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: !(geo.config.doubleClickAction == .maximize && rs.canvasMaximized),
@@ -388,13 +431,12 @@ struct CanvasTab: View {
 struct ToolbarPanel: View {
     @Binding var currentTool: Tool
     var model: Model?
+    var onOpenColorPicker: ((Bool) -> Void)?
     @State private var arrowSlotTool: Tool = .directSelection
     @State private var penSlotTool: Tool = .pen
     @State private var pencilSlotTool: Tool = .pencil
     @State private var textSlotTool: Tool = .typeTool
     @State private var shapeSlotTool: Tool = .rect
-    @State private var colorPickerState: ColorPickerState?
-    @State private var showColorPicker = false
 
     private let toolbarWidth: CGFloat = 80
 
@@ -446,14 +488,7 @@ struct ToolbarPanel: View {
             // Fill/Stroke indicator
             if let model = model {
                 FillStrokeWidget(model: model, onDoubleClick: { forFill in
-                    let initial: Color
-                    if forFill {
-                        initial = model.defaultFill?.color ?? .white
-                    } else {
-                        initial = model.defaultStroke?.color ?? .black
-                    }
-                    colorPickerState = ColorPickerState(color: initial, forFill: forFill)
-                    showColorPicker = true
+                    onOpenColorPicker?(forFill)
                 })
                 .padding(.top, 8)
                 .frame(width: toolbarWidth)
@@ -493,28 +528,6 @@ struct ToolbarPanel: View {
         }
         .frame(width: toolbarWidth)
         .background(SwiftUI.Color(nsColor: NSColor(white: 0.25, alpha: 1.0)))
-        .sheet(isPresented: $showColorPicker) {
-            if let cpState = colorPickerState {
-                let originalColor = cpState.color()
-                ColorPickerView(
-                    state: cpState,
-                    onOK: { color in
-                        if let model = model {
-                            if cpState.forFill {
-                                model.defaultFill = Fill(color: color)
-                            } else {
-                                model.defaultStroke = Stroke(color: color)
-                            }
-                        }
-                        showColorPicker = false
-                    },
-                    onCancel: {
-                        showColorPicker = false
-                    },
-                    originalColor: originalColor
-                )
-            }
-        }
     }
 
     private func fillModeButton(label: String, tooltip: String, action: @escaping () -> Void) -> some View {
