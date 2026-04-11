@@ -12,9 +12,9 @@ if TYPE_CHECKING:
 
 
 class LineTool(DrawingToolBase):
-    def _create_element(self, sx, sy, ex, ey):
+    def _create_element(self, ctx, sx, sy, ex, ey):
         return Line(x1=sx, y1=sy, x2=ex, y2=ey,
-                    stroke=Stroke(color=RgbColor(0, 0, 0), width=1.0))
+                    stroke=ctx.model.default_stroke)
 
     def _draw_preview(self, painter, sx, sy, ex, ey):
         from PySide6.QtCore import QPointF

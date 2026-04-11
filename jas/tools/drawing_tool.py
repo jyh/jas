@@ -58,11 +58,11 @@ class DrawingToolBase(CanvasTool):
             x, y = _constrain_angle(sx, sy, x, y)
         self._drag_start = None
         self._drag_end = None
-        elem = self._create_element(sx, sy, x, y)
+        elem = self._create_element(ctx, sx, sy, x, y)
         if elem is not None:
             ctx.controller.add_element(elem)
 
-    def _create_element(self, sx, sy, ex, ey):
+    def _create_element(self, ctx, sx, sy, ex, ey):
         raise NotImplementedError
 
     def _draw_preview(self, painter: QPainter, sx, sy, ex, ey) -> None:

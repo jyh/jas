@@ -119,6 +119,29 @@ public enum Color: Equatable, Hashable {
             return (c, m, y, k, a)
         }
     }
+
+    /// Return the color as a 6-character lowercase hex string (no `#` prefix).
+    /// The color is first converted to RGB; alpha is ignored.
+    public func toHex() -> String {
+        let (r, g, b, _) = toRgba()
+        let ri = max(0, min(255, Int(round(r * 255))))
+        let gi = max(0, min(255, Int(round(g * 255))))
+        let bi = max(0, min(255, Int(round(b * 255))))
+        return String(format: "%02x%02x%02x", ri, gi, bi)
+    }
+
+    /// Parse a 6-character hex string into an RGB color. An optional leading
+    /// `#` is stripped. Returns `nil` if the string is not valid hex.
+    public static func fromHex(_ s: String) -> Color? {
+        var hex = s
+        if hex.hasPrefix("#") { hex = String(hex.dropFirst()) }
+        guard hex.count == 6 else { return nil }
+        guard let val = UInt32(hex, radix: 16) else { return nil }
+        let r = Double((val >> 16) & 0xFF) / 255.0
+        let g = Double((val >> 8) & 0xFF) / 255.0
+        let b = Double(val & 0xFF) / 255.0
+        return Color(r: r, g: g, b: b)
+    }
 }
 
 // MARK: - Color-space conversion helpers
@@ -574,6 +597,40 @@ public enum Element: Equatable {
         }
     }
 
+    /// The element's fill, if it has one. Line, Group, and Layer return nil.
+    public var fill: Fill? {
+        switch self {
+        case .line: return nil
+        case .rect(let v): return v.fill
+        case .circle(let v): return v.fill
+        case .ellipse(let v): return v.fill
+        case .polyline(let v): return v.fill
+        case .polygon(let v): return v.fill
+        case .path(let v): return v.fill
+        case .text(let v): return v.fill
+        case .textPath(let v): return v.fill
+        case .group: return nil
+        case .layer: return nil
+        }
+    }
+
+    /// The element's stroke, if it has one. Group and Layer return nil.
+    public var stroke: Stroke? {
+        switch self {
+        case .line(let v): return v.stroke
+        case .rect(let v): return v.stroke
+        case .circle(let v): return v.stroke
+        case .ellipse(let v): return v.stroke
+        case .polyline(let v): return v.stroke
+        case .polygon(let v): return v.stroke
+        case .path(let v): return v.stroke
+        case .text(let v): return v.stroke
+        case .textPath(let v): return v.stroke
+        case .group: return nil
+        case .layer: return nil
+        }
+    }
+
     public var isLocked: Bool {
         switch self {
         case .line(let v): return v.locked
@@ -749,6 +806,122 @@ public enum Element: Equatable {
                                 transform: v.transform, locked: v.locked,
                                 visibility: visibility))
         }
+    }
+}
+
+// MARK: - Fill / Stroke replacement helpers
+
+/// Return a copy of `element` with the fill replaced. Line has no fill
+/// (returned unchanged). Group and Layer have no fill (returned unchanged).
+public func withFill(_ element: Element, fill: Fill?) -> Element {
+    switch element {
+    case .line:
+        return element
+    case .rect(let v):
+        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
+                          rx: v.rx, ry: v.ry, fill: fill, stroke: v.stroke,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility))
+    case .circle(let v):
+        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
+                              fill: fill, stroke: v.stroke,
+                              opacity: v.opacity, transform: v.transform, locked: v.locked,
+                              visibility: v.visibility))
+    case .ellipse(let v):
+        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
+                                fill: fill, stroke: v.stroke,
+                                opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                visibility: v.visibility))
+    case .polyline(let v):
+        return .polyline(Polyline(points: v.points, fill: fill, stroke: v.stroke,
+                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                  visibility: v.visibility))
+    case .polygon(let v):
+        return .polygon(Polygon(points: v.points, fill: fill, stroke: v.stroke,
+                                opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                visibility: v.visibility))
+    case .path(let v):
+        return .path(Path(d: v.d, fill: fill, stroke: v.stroke,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility))
+    case .text(let v):
+        return .text(Text(x: v.x, y: v.y, content: v.content,
+                          fontFamily: v.fontFamily, fontSize: v.fontSize,
+                          fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                          textDecoration: v.textDecoration,
+                          width: v.width, height: v.height,
+                          fill: fill, stroke: v.stroke,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility))
+    case .textPath(let v):
+        return .textPath(TextPath(d: v.d, content: v.content,
+                                  startOffset: v.startOffset,
+                                  fontFamily: v.fontFamily, fontSize: v.fontSize,
+                                  fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                                  textDecoration: v.textDecoration,
+                                  fill: fill, stroke: v.stroke,
+                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                  visibility: v.visibility))
+    case .group, .layer:
+        return element
+    }
+}
+
+/// Return a copy of `element` with the stroke replaced. Group and Layer
+/// have no stroke (returned unchanged).
+public func withStroke(_ element: Element, stroke: Stroke?) -> Element {
+    switch element {
+    case .line(let v):
+        return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
+                          stroke: stroke, opacity: v.opacity, transform: v.transform,
+                          locked: v.locked, visibility: v.visibility))
+    case .rect(let v):
+        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
+                          rx: v.rx, ry: v.ry, fill: v.fill, stroke: stroke,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility))
+    case .circle(let v):
+        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
+                              fill: v.fill, stroke: stroke,
+                              opacity: v.opacity, transform: v.transform, locked: v.locked,
+                              visibility: v.visibility))
+    case .ellipse(let v):
+        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
+                                fill: v.fill, stroke: stroke,
+                                opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                visibility: v.visibility))
+    case .polyline(let v):
+        return .polyline(Polyline(points: v.points, fill: v.fill, stroke: stroke,
+                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                  visibility: v.visibility))
+    case .polygon(let v):
+        return .polygon(Polygon(points: v.points, fill: v.fill, stroke: stroke,
+                                opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                visibility: v.visibility))
+    case .path(let v):
+        return .path(Path(d: v.d, fill: v.fill, stroke: stroke,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility))
+    case .text(let v):
+        return .text(Text(x: v.x, y: v.y, content: v.content,
+                          fontFamily: v.fontFamily, fontSize: v.fontSize,
+                          fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                          textDecoration: v.textDecoration,
+                          width: v.width, height: v.height,
+                          fill: v.fill, stroke: stroke,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility))
+    case .textPath(let v):
+        return .textPath(TextPath(d: v.d, content: v.content,
+                                  startOffset: v.startOffset,
+                                  fontFamily: v.fontFamily, fontSize: v.fontSize,
+                                  fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                                  textDecoration: v.textDecoration,
+                                  fill: v.fill, stroke: stroke,
+                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
+                                  visibility: v.visibility))
+    case .group, .layer:
+        return element
     }
 }
 

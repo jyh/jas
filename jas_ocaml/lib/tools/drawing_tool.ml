@@ -9,7 +9,7 @@ class virtual drawing_tool_base = object (_self)
   val mutable drag_start : (float * float) option = None
   val mutable drag_end : (float * float) option = None
 
-  method virtual private create_element : float -> float -> float -> float -> Element.element option
+  method virtual private create_element : Canvas_tool.tool_context -> float -> float -> float -> float -> Element.element option
   method virtual private draw_preview : Cairo.context -> float -> float -> float -> float -> unit
 
   method on_press (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
@@ -35,7 +35,7 @@ class virtual drawing_tool_base = object (_self)
       let (ex, ey) = if shift then Canvas_tool.constrain_angle sx sy x y else (x, y) in
       drag_start <- None;
       drag_end <- None;
-      (match _self#create_element sx sy ex ey with
+      (match _self#create_element ctx sx sy ex ey with
        | Some elem -> ctx.controller#add_element elem
        | None -> ())
 

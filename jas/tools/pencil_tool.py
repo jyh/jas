@@ -56,7 +56,8 @@ class PencilTool(CanvasTool):
         for seg in segments:
             cmds.append(CurveTo(seg[2], seg[3], seg[4], seg[5], seg[6], seg[7]))
         elem = Path(d=tuple(cmds),
-                    stroke=Stroke(color=RgbColor(0, 0, 0), width=1.0))
+                    fill=ctx.model.default_fill,
+                    stroke=ctx.model.default_stroke)
         ctx.controller.add_element(elem)
         self._points.clear()
         ctx.request_update()

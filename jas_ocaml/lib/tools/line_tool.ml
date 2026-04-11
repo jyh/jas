@@ -3,10 +3,10 @@
 class line_tool = object
   inherit Drawing_tool.drawing_tool_base
 
-  method private create_element sx sy ex ey =
+  method private create_element (ctx : Canvas_tool.tool_context) sx sy ex ey =
     Some (Element.Line {
       x1 = sx; y1 = sy; x2 = ex; y2 = ey;
-      stroke = Canvas_tool.default_stroke;
+      stroke = ctx.model#default_stroke;
       opacity = 1.0; transform = None; locked = false; visibility = Preview;
     })
 

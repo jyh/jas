@@ -6,6 +6,7 @@ from geometry.element import (
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, TextPath, Group, Layer,
     path_point_at_offset, path_closest_offset, path_distance_to_point,
+    with_fill, with_stroke,
 )
 
 
@@ -627,6 +628,83 @@ class PenToolPathTest(absltest.TestCase):
         self.assertEqual((p.hx_in, p.hy_in), (42, 99))
         self.assertEqual((p.hx_out, p.hy_out), (42, 99))
         self.assertFalse(p.smooth)
+
+
+class WithFillStrokeTest(absltest.TestCase):
+    """Tests for with_fill and with_stroke helper functions."""
+
+    def test_with_fill_sets_fill_on_rect(self):
+        from geometry.element import with_fill
+        r = Rect(x=10, y=20, width=100, height=50)
+        red_fill = Fill(RgbColor(1, 0, 0))
+        r2 = with_fill(r, red_fill)
+        self.assertEqual(r2.fill, red_fill)
+        # Original unchanged
+        self.assertIsNone(r.fill)
+
+    def test_with_fill_on_line_is_noop(self):
+        from geometry.element import with_fill
+        line = Line(x1=0, y1=0, x2=100, y2=100,
+                    stroke=Stroke(RgbColor(0, 0, 0)))
+        line2 = with_fill(line, Fill(RgbColor(1, 0, 0)))
+        self.assertEqual(line2, line)
+
+    def test_with_stroke_sets_stroke(self):
+        from geometry.element import with_stroke
+        p = Path(d=(MoveTo(0, 0), LineTo(10, 10)))
+        blue_stroke = Stroke(RgbColor(0, 0, 1), width=3.0)
+        p2 = with_stroke(p, blue_stroke)
+        self.assertEqual(p2.stroke, blue_stroke)
+        self.assertIsNone(p.stroke)
+
+    def test_with_fill_on_group_is_noop(self):
+        from geometry.element import with_fill
+        g = Group(children=())
+        g2 = with_fill(g, Fill(RgbColor(1, 0, 0)))
+        self.assertEqual(g2, g)
+
+
+class ColorHexTest(absltest.TestCase):
+    """Tests for Color.to_hex and Color.from_hex."""
+
+    def test_color_to_hex_black(self):
+        self.assertEqual(RgbColor(0, 0, 0).to_hex(), "000000")
+
+    def test_color_to_hex_red(self):
+        self.assertEqual(RgbColor(1, 0, 0).to_hex(), "ff0000")
+
+    def test_color_from_hex_valid(self):
+        c = Color.from_hex("ff0000")
+        self.assertIsNotNone(c)
+        self.assertIsInstance(c, RgbColor)
+        r, g, b, a = c.to_rgba()
+        self.assertEqual(r, 1.0)
+        self.assertEqual(g, 0.0)
+        self.assertEqual(b, 0.0)
+
+    def test_color_from_hex_invalid(self):
+        self.assertIsNone(Color.from_hex("xyz"))
+        self.assertIsNone(Color.from_hex(""))
+        self.assertIsNone(Color.from_hex("gg0000"))
+
+    def test_color_hex_roundtrip(self):
+        c = RgbColor(0.5, 0.25, 0.75)
+        hex_str = c.to_hex()
+        c2 = Color.from_hex(hex_str)
+        self.assertIsNotNone(c2)
+        r1, g1, b1, _ = c.to_rgba()
+        r2, g2, b2, _ = c2.to_rgba()
+        self.assertAlmostEqual(r1, r2, places=2)
+        self.assertAlmostEqual(g1, g2, places=2)
+        self.assertAlmostEqual(b1, b2, places=2)
+
+    def test_color_from_hex_with_hash(self):
+        c = Color.from_hex("#00ff00")
+        self.assertIsNotNone(c)
+        r, g, b, a = c.to_rgba()
+        self.assertEqual(r, 0.0)
+        self.assertEqual(g, 1.0)
+        self.assertEqual(b, 0.0)
 
 
 if __name__ == "__main__":

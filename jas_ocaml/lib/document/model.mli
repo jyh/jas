@@ -14,6 +14,10 @@ class model : ?document:Document.document -> ?filename:string -> unit -> object
   method mark_saved : unit
   method can_undo : bool
   method can_redo : bool
+  method default_fill : Element.fill option
+  method set_default_fill : Element.fill option -> unit
+  method default_stroke : Element.stroke option
+  method set_default_stroke : Element.stroke option -> unit
 end
 
 val create : ?document:Document.document -> ?filename:string -> unit -> model

@@ -12,11 +12,12 @@ if TYPE_CHECKING:
 
 
 class RectTool(DrawingToolBase):
-    def _create_element(self, sx, sy, ex, ey):
+    def _create_element(self, ctx, sx, sy, ex, ey):
         x, y = min(sx, ex), min(sy, ey)
         w, h = abs(ex - sx), abs(ey - sy)
         return Rect(x=x, y=y, width=w, height=h,
-                    stroke=Stroke(color=RgbColor(0, 0, 0), width=1.0))
+                    fill=ctx.model.default_fill,
+                    stroke=ctx.model.default_stroke)
 
     def _draw_preview(self, painter, sx, sy, ex, ey):
         from PySide6.QtCore import QPointF, QRectF

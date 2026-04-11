@@ -40,7 +40,7 @@ class pencil_tool = object (_self)
           ) segments;
           let d = List.rev !cmds in
           let path = Element.make_path d
-            ~stroke:(Some (Element.make_stroke ~width:1.0 (Element.make_color 0.0 0.0 0.0))) in
+            ~fill:ctx.model#default_fill ~stroke:ctx.model#default_stroke in
           ctx.controller#add_element path;
           points <- [];
           ctx.request_update ()

@@ -420,4 +420,85 @@ let () =
     let (cv, m, y, k, a) = color_to_cmyka c in
     assert (cv = 0.1 && m = 0.2 && y = 0.3 && k = 0.4 && a = 0.5));
 
+  (* ---- with_fill / with_stroke tests ---- *)
+
+  run_test "with_fill sets fill on rect" (fun () ->
+    let r = make_rect 0.0 0.0 10.0 10.0 in
+    let f = Some (make_fill (color_rgb 1.0 0.0 0.0)) in
+    let r2 = with_fill r f in
+    match r2 with
+    | Rect { fill = Some { fill_color; _ }; _ } ->
+      let (rv, _, _, _) = color_to_rgba fill_color in
+      assert (rv = 1.0)
+    | _ -> assert false);
+
+  run_test "with_fill on Line is noop" (fun () ->
+    let ln = make_line 0.0 0.0 10.0 10.0 in
+    let f = Some (make_fill (color_rgb 1.0 0.0 0.0)) in
+    let ln2 = with_fill ln f in
+    (match ln2 with Line _ -> () | _ -> assert false));
+
+  run_test "with_stroke sets stroke on path" (fun () ->
+    let p = make_path [MoveTo (0.0, 0.0); LineTo (10.0, 10.0)] in
+    let s = Some (make_stroke ~width:3.0 (color_rgb 0.0 0.0 1.0)) in
+    let p2 = with_stroke p s in
+    match p2 with
+    | Path { stroke = Some { stroke_width; _ }; _ } ->
+      assert (stroke_width = 3.0)
+    | _ -> assert false);
+
+  run_test "with_fill on Group is noop" (fun () ->
+    let g = make_group [|make_rect 0.0 0.0 5.0 5.0|] in
+    let f = Some (make_fill (color_rgb 1.0 0.0 0.0)) in
+    let g2 = with_fill g f in
+    (match g2 with Group _ -> () | _ -> assert false));
+
+  run_test "with_stroke on Layer is noop" (fun () ->
+    let l = make_layer [|make_rect 0.0 0.0 5.0 5.0|] in
+    let s = Some (make_stroke (color_rgb 1.0 0.0 0.0)) in
+    let l2 = with_stroke l s in
+    (match l2 with Layer _ -> () | _ -> assert false));
+
+  (* ---- color_to_hex / color_from_hex tests ---- *)
+
+  run_test "color_to_hex black -> 000000" (fun () ->
+    assert (color_to_hex black = "000000"));
+
+  run_test "color_to_hex red -> ff0000" (fun () ->
+    assert (color_to_hex (color_rgb 1.0 0.0 0.0) = "ff0000"));
+
+  run_test "color_to_hex white -> ffffff" (fun () ->
+    assert (color_to_hex white = "ffffff"));
+
+  run_test "color_from_hex valid" (fun () ->
+    match color_from_hex "ff0000" with
+    | Some c ->
+      let (r, g, b, _) = color_to_rgba c in
+      assert (abs_float (r -. 1.0) < 0.01 && abs_float g < 0.01 && abs_float b < 0.01)
+    | None -> assert false);
+
+  run_test "color_from_hex with # prefix" (fun () ->
+    match color_from_hex "#00ff00" with
+    | Some c ->
+      let (r, g, b, _) = color_to_rgba c in
+      assert (abs_float r < 0.01 && abs_float (g -. 1.0) < 0.01 && abs_float b < 0.01)
+    | None -> assert false);
+
+  run_test "color_from_hex invalid returns None" (fun () ->
+    assert (color_from_hex "xyz" = None);
+    assert (color_from_hex "gggggg" = None);
+    assert (color_from_hex "" = None));
+
+  run_test "hex roundtrip" (fun () ->
+    let c = color_rgb 0.2 0.4 0.6 in
+    let hex = color_to_hex c in
+    match color_from_hex hex with
+    | Some c2 ->
+      let (r1, g1, b1, _) = color_to_rgba c in
+      let (r2, g2, b2, _) = color_to_rgba c2 in
+      assert (abs_float (r1 -. r2) < 0.01 &&
+              abs_float (g1 -. g2) < 0.01 &&
+              abs_float (b1 -. b2) < 0.01)
+    | None -> assert false);
+
   Printf.printf "All element tests passed.\n"

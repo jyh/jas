@@ -6,7 +6,7 @@ let rounded_rect_radius = 10.0
 class rounded_rect_tool = object
   inherit Drawing_tool.drawing_tool_base
 
-  method private create_element sx sy ex ey =
+  method private create_element (ctx : Canvas_tool.tool_context) sx sy ex ey =
     let w = abs_float (ex -. sx) in
     let h = abs_float (ey -. sy) in
     if w <= 0.0 || h <= 0.0 then None
@@ -15,7 +15,7 @@ class rounded_rect_tool = object
         x = min sx ex; y = min sy ey;
         width = w; height = h;
         rx = rounded_rect_radius; ry = rounded_rect_radius;
-        fill = None; stroke = Canvas_tool.default_stroke;
+        fill = ctx.model#default_fill; stroke = ctx.model#default_stroke;
         opacity = 1.0; transform = None; locked = false; visibility = Preview;
       })
 

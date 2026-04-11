@@ -7,14 +7,14 @@ import Foundation
 let roundedRectRadius: Double = 10.0
 
 class RoundedRectTool: DrawingToolBase {
-    override func createElement(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
+    override func createElement(_ ctx: ToolContext, _ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) -> Element? {
         let w = abs(ex - sx)
         let h = abs(ey - sy)
         guard w > 0 && h > 0 else { return nil }
         return .rect(Rect(x: min(sx, ex), y: min(sy, ey),
                           width: w, height: h,
                           rx: roundedRectRadius, ry: roundedRectRadius,
-                          stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)))
+                          fill: ctx.model.defaultFill, stroke: ctx.model.defaultStroke))
     }
 
     override func drawPreview(_ cgCtx: CGContext, _ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double) {

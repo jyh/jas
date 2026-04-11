@@ -572,6 +572,55 @@ let set_visibility v = function
   | Group r -> Group { r with visibility = v }
   | Layer r -> Layer { r with visibility = v }
 
+let with_fill elem f =
+  match elem with
+  | Rect r -> Rect { r with fill = f }
+  | Circle r -> Circle { r with fill = f }
+  | Ellipse r -> Ellipse { r with fill = f }
+  | Polyline r -> Polyline { r with fill = f }
+  | Polygon r -> Polygon { r with fill = f }
+  | Path r -> Path { r with fill = f }
+  | Text r -> Text { r with fill = f }
+  | Text_path r -> Text_path { r with fill = f }
+  | Line _ | Group _ | Layer _ -> elem
+
+let with_stroke elem s =
+  match elem with
+  | Line r -> Line { r with stroke = s }
+  | Rect r -> Rect { r with stroke = s }
+  | Circle r -> Circle { r with stroke = s }
+  | Ellipse r -> Ellipse { r with stroke = s }
+  | Polyline r -> Polyline { r with stroke = s }
+  | Polygon r -> Polygon { r with stroke = s }
+  | Path r -> Path { r with stroke = s }
+  | Text r -> Text { r with stroke = s }
+  | Text_path r -> Text_path { r with stroke = s }
+  | Group _ | Layer _ -> elem
+
+let color_to_hex c =
+  let (r, g, b, _) = color_to_rgba c in
+  let ri = int_of_float (Float.round (r *. 255.0)) in
+  let gi = int_of_float (Float.round (g *. 255.0)) in
+  let bi = int_of_float (Float.round (b *. 255.0)) in
+  Printf.sprintf "%02x%02x%02x" ri gi bi
+
+let color_from_hex s =
+  let s = if String.length s > 0 && s.[0] = '#' then String.sub s 1 (String.length s - 1) else s in
+  if String.length s <> 6 then None
+  else
+    let is_hex c =
+      (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+    in
+    let all_hex = ref true in
+    String.iter (fun c -> if not (is_hex c) then all_hex := false) s;
+    if not !all_hex then None
+    else
+      let v = int_of_string ("0x" ^ s) in
+      let r = float_of_int ((v lsr 16) land 0xff) /. 255.0 in
+      let g = float_of_int ((v lsr 8) land 0xff) /. 255.0 in
+      let b = float_of_int (v land 0xff) /. 255.0 in
+      Some (Rgb { r; g; b; a = 1.0 })
+
 let path_anchor_points d =
   List.fold_left (fun acc cmd ->
     match cmd with

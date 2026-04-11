@@ -7,6 +7,7 @@ whenever the document is replaced.
 from collections.abc import Callable
 
 from document.document import Document
+from geometry.element import Fill, RgbColor, Stroke
 
 _MAX_UNDO = 100
 _next_untitled = 1
@@ -33,6 +34,8 @@ class Model:
         self._filename_listeners: list[Callable[[str], None]] = []
         self._undo_stack: list[Document] = []
         self._redo_stack: list[Document] = []
+        self.default_fill: Fill | None = None
+        self.default_stroke: Stroke | None = Stroke(color=RgbColor(0, 0, 0))
 
     @property
     def filename(self) -> str:

@@ -31,10 +31,11 @@ def _regular_polygon_points(x1: float, y1: float, x2: float, y2: float,
 
 
 class PolygonTool(DrawingToolBase):
-    def _create_element(self, sx, sy, ex, ey):
+    def _create_element(self, ctx, sx, sy, ex, ey):
         pts = _regular_polygon_points(sx, sy, ex, ey, POLYGON_SIDES)
         return Polygon(points=tuple(pts),
-                       stroke=Stroke(color=RgbColor(0, 0, 0), width=1.0))
+                       fill=ctx.model.default_fill,
+                       stroke=ctx.model.default_stroke)
 
     def _draw_preview(self, painter, sx, sy, ex, ey):
         from PySide6.QtCore import QPointF

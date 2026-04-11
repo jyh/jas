@@ -49,7 +49,7 @@ class PencilTool: CanvasTool {
         }
         let elem = Element.path(Path(
             d: cmds,
-            stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)
+            fill: ctx.model.defaultFill, stroke: ctx.model.defaultStroke
         ))
         ctx.controller.addElement(elem)
         points.removeAll()

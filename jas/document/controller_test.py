@@ -4,7 +4,7 @@ from absl.testing import absltest
 
 from document.controller import Controller
 from document.document import Document, ElementSelection
-from geometry.element import Circle, Ellipse, Group, Layer, Line, Polygon, Rect, control_points, control_point_count, move_control_points
+from geometry.element import Circle, Ellipse, Fill, Group, Layer, Line, Polygon, RgbColor, Rect, Stroke, control_points, control_point_count, move_control_points
 from document.model import Model
 
 
@@ -808,6 +808,70 @@ class DeleteSelectionNestedTest(absltest.TestCase):
         inner = doc2.layers[0].children[0]
         self.assertIsInstance(inner, Group)
         self.assertEqual(len(inner.children), 0)
+
+
+class FillStrokeControllerTest(absltest.TestCase):
+
+    def test_set_selection_fill_updates_rect(self):
+        from geometry.element import Fill, Stroke
+        rect = Rect(x=0, y=0, width=10, height=10)
+        layer = Layer(children=(rect,))
+        doc = Document(layers=(layer,))
+        model = Model(document=doc)
+        ctrl = Controller(model=model)
+        # Select the rect
+        ctrl.set_selection(frozenset({ElementSelection.all((0, 0))}))
+        red_fill = Fill(RgbColor(1, 0, 0))
+        ctrl.set_selection_fill(red_fill)
+        updated = ctrl.document.layers[0].children[0]
+        self.assertEqual(updated.fill, red_fill)
+
+    def test_set_selection_stroke_updates_line(self):
+        from geometry.element import Fill, Stroke
+        line = Line(x1=0, y1=0, x2=10, y2=10)
+        layer = Layer(children=(line,))
+        doc = Document(layers=(layer,))
+        model = Model(document=doc)
+        ctrl = Controller(model=model)
+        ctrl.set_selection(frozenset({ElementSelection.all((0, 0))}))
+        blue_stroke = Stroke(RgbColor(0, 0, 1), width=2.0)
+        ctrl.set_selection_stroke(blue_stroke)
+        updated = ctrl.document.layers[0].children[0]
+        self.assertEqual(updated.stroke, blue_stroke)
+
+    def test_fill_summary_no_selection(self):
+        from document.controller import selection_fill_summary, FillSummaryNoSelection
+        doc = Document()
+        summary = selection_fill_summary(doc)
+        self.assertIsInstance(summary, FillSummaryNoSelection)
+
+    def test_fill_summary_mixed(self):
+        from geometry.element import Fill
+        from document.controller import (
+            selection_fill_summary, FillSummaryMixed,
+        )
+        r1 = Rect(x=0, y=0, width=10, height=10, fill=Fill(RgbColor(1, 0, 0)))
+        r2 = Rect(x=20, y=20, width=10, height=10, fill=Fill(RgbColor(0, 1, 0)))
+        layer = Layer(children=(r1, r2))
+        doc = Document(layers=(layer,), selection=frozenset({
+            ElementSelection.all((0, 0)),
+            ElementSelection.all((0, 1)),
+        }))
+        summary = selection_fill_summary(doc)
+        self.assertIsInstance(summary, FillSummaryMixed)
+
+    def test_stroke_summary_uniform_none(self):
+        from document.controller import (
+            selection_stroke_summary, StrokeSummaryUniform,
+        )
+        rect = Rect(x=0, y=0, width=10, height=10)
+        layer = Layer(children=(rect,))
+        doc = Document(layers=(layer,), selection=frozenset({
+            ElementSelection.all((0, 0)),
+        }))
+        summary = selection_stroke_summary(doc)
+        self.assertIsInstance(summary, StrokeSummaryUniform)
+        self.assertIsNone(summary.stroke)
 
 
 if __name__ == "__main__":

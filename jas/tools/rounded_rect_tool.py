@@ -18,14 +18,15 @@ ROUNDED_RECT_RADIUS = 10.0
 class RoundedRectTool(DrawingToolBase):
     """Rounded rectangle tool. Uses ROUNDED_RECT_RADIUS for corner radius."""
 
-    def _create_element(self, sx, sy, ex, ey):
+    def _create_element(self, ctx, sx, sy, ex, ey):
         x, y = min(sx, ex), min(sy, ey)
         w, h = abs(ex - sx), abs(ey - sy)
         if w <= 0 or h <= 0:
             return None
         return Rect(x=x, y=y, width=w, height=h,
                     rx=ROUNDED_RECT_RADIUS, ry=ROUNDED_RECT_RADIUS,
-                    stroke=Stroke(color=RgbColor(0, 0, 0), width=1.0))
+                    fill=ctx.model.default_fill,
+                    stroke=ctx.model.default_stroke)
 
     def _draw_preview(self, painter, sx, sy, ex, ey):
         from PySide6.QtCore import QPointF, QRectF
