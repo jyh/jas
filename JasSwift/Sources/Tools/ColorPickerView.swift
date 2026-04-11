@@ -21,10 +21,46 @@ struct ColorPickerView: View {
     var body: some View {
         VStack(spacing: 12) {
             // Title
-            HStack {
+            HStack(spacing: 8) {
                 SwiftUI.Text("Select Color:")
                     .foregroundColor(.white)
                     .font(.system(size: 13))
+                // Eyedropper button
+                Button(action: {
+                    // Close the sheet temporarily, sample, then reopen would be complex.
+                    // Instead use NSColorSampler which works even with the sheet open.
+                    let sampler = NSColorSampler()
+                    sampler.show { nsColor in
+                        if let nsColor = nsColor {
+                            let c = nsColor.usingColorSpace(.deviceRGB) ?? nsColor
+                            state.setRgb(
+                                UInt8((c.redComponent * 255).rounded()),
+                                UInt8((c.greenComponent * 255).rounded()),
+                                UInt8((c.blueComponent * 255).rounded())
+                            )
+                        }
+                    }
+                }) {
+                    SwiftUI.Canvas { context, size in
+                        let path = SwiftUI.Path { p in
+                            // Pipette icon
+                            p.move(to: CGPoint(x: 12, y: 2))
+                            p.addLine(to: CGPoint(x: 14, y: 4))
+                            p.addLine(to: CGPoint(x: 9, y: 9))
+                            p.addLine(to: CGPoint(x: 5, y: 13))
+                            p.addLine(to: CGPoint(x: 3, y: 13))
+                            p.addLine(to: CGPoint(x: 2, y: 14))
+                            p.addLine(to: CGPoint(x: 3, y: 13))
+                            p.addLine(to: CGPoint(x: 3, y: 11))
+                            p.addLine(to: CGPoint(x: 7, y: 7))
+                            p.addLine(to: CGPoint(x: 12, y: 2))
+                        }
+                        context.stroke(path, with: .color(.white), lineWidth: 1.5)
+                    }
+                    .frame(width: 16, height: 16)
+                }
+                .buttonStyle(.plain)
+                .help("Sample a color from the canvas")
                 Spacer()
             }
 
@@ -47,34 +83,68 @@ struct ColorPickerView: View {
                     }
                 }
 
-                // Middle: fields
+                // Right: swatch + HSB/buttons + RGB/CMYK + hex
                 VStack(alignment: .leading, spacing: 4) {
-                    radioAndInputSection
-                }
-
-                // Right: swatch + buttons
-                VStack(spacing: 8) {
-                    // Color swatch
+                    // Color swatch (above HSB)
                     VStack(spacing: 0) {
                         SwiftUI.Rectangle()
                             .fill(toSwiftUIColor(state.color()))
-                            .frame(width: 60, height: 30)
+                            .frame(width: 60, height: 25)
                         SwiftUI.Rectangle()
                             .fill(toSwiftUIColor(originalColor))
-                            .frame(width: 60, height: 30)
+                            .frame(width: 60, height: 25)
                     }
                     .border(SwiftUI.Color.gray, width: 1)
+                    .padding(.bottom, 2)
 
-                    Button("OK") { onOK(state.color()) }
-                        .keyboardShortcut(.defaultAction)
-                        .frame(width: 80)
-                    Button("Cancel") { onCancel() }
-                        .keyboardShortcut(.cancelAction)
-                        .frame(width: 80)
-                    Button("Color Swatches") {}
-                        .disabled(true)
-                        .frame(width: 80)
-                        .font(.system(size: 10))
+                    // HSB on left, OK/Cancel on right
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            radioRow(channel: .h, label: "H:", value: hsbBinding(0), suffix: "\u{00B0}")
+                            radioRow(channel: .s, label: "S:", value: hsbBinding(1), suffix: "%")
+                            radioRow(channel: .b, label: "B:", value: hsbBinding(2), suffix: "%")
+                        }
+                        VStack(spacing: 6) {
+                            Button("OK") { onOK(state.color()) }
+                                .keyboardShortcut(.defaultAction)
+                                .frame(width: 70)
+                                .foregroundColor(.white)
+                            Button("Cancel") { onCancel() }
+                                .keyboardShortcut(.cancelAction)
+                                .frame(width: 70)
+                                .foregroundColor(SwiftUI.Color(white: 0.8))
+                            Button("Color Swatches") {}
+                                .disabled(true)
+                                .frame(width: 70)
+                                .font(.system(size: 10))
+                                .foregroundColor(SwiftUI.Color(white: 0.5))
+                        }
+                    }
+
+                    // RGB + CMYK side by side
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            radioRow(channel: .r, label: "R:", value: rgbBinding(0), suffix: "")
+                            radioRow(channel: .g, label: "G:", value: rgbBinding(1), suffix: "")
+                            radioRow(channel: .blue, label: "B:", value: rgbBinding(2), suffix: "")
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            cmykRow(label: "C:", index: 0)
+                            cmykRow(label: "M:", index: 1)
+                            cmykRow(label: "Y:", index: 2)
+                            cmykRow(label: "K:", index: 3)
+                        }
+                    }
+
+                    // Hex
+                    HStack {
+                        SwiftUI.Text("#")
+                            .foregroundColor(.white)
+                            .frame(width: 16, alignment: .trailing)
+                        TextField("", text: hexBinding)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 80)
+                    }
                 }
             }
         }
@@ -201,44 +271,6 @@ struct ColorPickerView: View {
             return Color(r: 0, g: 1.0 - t, b: 0)
         case .blue:
             return Color(r: 0, g: 0, b: 1.0 - t)
-        }
-    }
-
-    // MARK: - Radio Buttons and Text Inputs
-
-    private var radioAndInputSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            // HSB section
-            radioRow(channel: .h, label: "H:", value: hsbBinding(0), suffix: "\u{00B0}")
-            radioRow(channel: .s, label: "S:", value: hsbBinding(1), suffix: "%")
-            radioRow(channel: .b, label: "B:", value: hsbBinding(2), suffix: "%")
-
-            // RGB + CMYK side by side
-            HStack(alignment: .top, spacing: 12) {
-                // RGB column
-                VStack(alignment: .leading, spacing: 4) {
-                    radioRow(channel: .r, label: "R:", value: rgbBinding(0), suffix: "")
-                    radioRow(channel: .g, label: "G:", value: rgbBinding(1), suffix: "")
-                    radioRow(channel: .blue, label: "B:", value: rgbBinding(2), suffix: "")
-                }
-                // CMYK column
-                VStack(alignment: .leading, spacing: 4) {
-                    cmykRow(label: "C:", index: 0)
-                    cmykRow(label: "M:", index: 1)
-                    cmykRow(label: "Y:", index: 2)
-                    cmykRow(label: "K:", index: 3)
-                }
-            }
-
-            // Hex
-            HStack {
-                SwiftUI.Text("#")
-                    .foregroundColor(.white)
-                    .frame(width: 16, alignment: .trailing)
-                TextField("", text: hexBinding)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 80)
-            }
         }
     }
 
