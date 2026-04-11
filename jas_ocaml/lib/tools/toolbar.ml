@@ -6,7 +6,8 @@ let tool_button_size = 32
 let _title_bar_height = 24
 let long_press_ms = Canvas_tool.long_press_ms
 
-class toolbar ~title:(_title : string) ~x ~y (fixed : GPack.fixed) =
+class toolbar ~title:(_title : string) ~x ~y
+    ?(get_model : (unit -> Model.model) option) (fixed : GPack.fixed) =
   let frame = GBin.frame ~shadow_type:`NONE () in
   let vbox = GPack.vbox ~packing:frame#add () in
 
@@ -40,6 +41,15 @@ class toolbar ~title:(_title : string) ~x ~y (fixed : GPack.fixed) =
     grid#attach ~left:0 ~top:3 shape_btn#coerce;
     grid#attach ~left:1 ~top:3 lasso_btn#coerce
   in
+
+  (* Fill/stroke indicator widget *)
+  let fs_area = GMisc.drawing_area () in
+  let () =
+    let fs_height = 60 in
+    fs_area#misc#set_size_request ~width:(tool_button_size * 2 + 2)
+      ~height:fs_height ();
+    vbox#pack ~expand:false fs_area#coerce
+  in
   object (self)
     val mutable pos_x = x
     val mutable pos_y = y
@@ -57,11 +67,52 @@ class toolbar ~title:(_title : string) ~x ~y (fixed : GPack.fixed) =
     val mutable pencil_long_press_timer : GMain.Timeout.id option = None
     val mutable text_long_press_timer : GMain.Timeout.id option = None
     val mutable shape_long_press_timer : GMain.Timeout.id option = None
+    val mutable fill_on_top = true
 
     method current_tool = current_tool
     method widget = frame#coerce
     method x = pos_x
     method y = pos_y
+    method fill_on_top = fill_on_top
+    method set_fill_on_top v =
+      fill_on_top <- v;
+      fs_area#misc#queue_draw ()
+
+    method toggle_fill_on_top =
+      fill_on_top <- not fill_on_top;
+      fs_area#misc#queue_draw ()
+
+    method reset_defaults =
+      (match get_model with
+       | Some gm ->
+         let m = gm () in
+         m#set_default_fill None;
+         m#set_default_stroke (Some (Element.make_stroke Element.black));
+         fs_area#misc#queue_draw ()
+       | None -> ())
+
+    method swap_fill_stroke =
+      (match get_model with
+       | Some gm ->
+         let m = gm () in
+         let old_fill = m#default_fill in
+         let old_stroke = m#default_stroke in
+         (* Convert fill color to stroke, stroke color to fill *)
+         let new_fill = (match old_stroke with
+           | Some s -> Some { Element.fill_color = s.Element.stroke_color;
+                              fill_opacity = s.Element.stroke_opacity }
+           | None -> None) in
+         let new_stroke = (match old_fill with
+           | Some f -> Some (Element.make_stroke ~opacity:f.Element.fill_opacity
+                               f.Element.fill_color)
+           | None -> None) in
+         m#set_default_fill new_fill;
+         m#set_default_stroke new_stroke;
+         fs_area#misc#queue_draw ()
+       | None -> ())
+
+    method redraw_fill_stroke =
+      fs_area#misc#queue_draw ()
 
     method select_tool t =
       current_tool <- t;
@@ -87,11 +138,12 @@ class toolbar ~title:(_title : string) ~x ~y (fixed : GPack.fixed) =
       text_btn#misc#queue_draw ();
       line_btn#misc#queue_draw ();
       shape_btn#misc#queue_draw ();
-      lasso_btn#misc#queue_draw ()
+      lasso_btn#misc#queue_draw ();
+      fs_area#misc#queue_draw ()
 
     initializer
       fixed#put frame#coerce ~x:pos_x ~y:pos_y;
-      frame#misc#set_size_request ~height:(tool_button_size * 4 + 24) ();
+      frame#misc#set_size_request ~height:(tool_button_size * 4 + 24 + 60) ();
 
       (* Draw tool buttons *)
       let arrow_path cr ~alloc =
@@ -1112,6 +1164,296 @@ class toolbar ~title:(_title : string) ~x ~y (fixed : GPack.fixed) =
         end else false
       ) |> ignore;
 
+      (* Fill/stroke indicator drawing *)
+      fs_area#misc#connect#draw ~callback:(fun cr ->
+        let alloc = fs_area#misc#allocation in
+        let aw = float_of_int alloc.Gtk.width in
+        let ah = float_of_int alloc.Gtk.height in
+        (* Background *)
+        Cairo.set_source_rgb cr 0.27 0.27 0.27;
+        Cairo.rectangle cr 0.0 0.0 ~w:aw ~h:ah;
+        Cairo.fill cr;
+
+        let get_fill_color () = match get_model with
+          | Some gm -> (gm ())#default_fill
+          | None -> None
+        in
+        let get_stroke_color () = match get_model with
+          | Some gm -> (gm ())#default_stroke
+          | None -> Some (Element.make_stroke Element.black)
+        in
+
+        let sq = 24.0 in
+        let offset = 8.0 in
+        let base_x = (aw -. sq -. offset) /. 2.0 in
+        let base_y = 6.0 in
+
+        (* Draw the fill and stroke squares, with fill_on_top determining order *)
+        let draw_fill_square x y =
+          match get_fill_color () with
+          | Some f ->
+            let (r, g, b, _) = Element.color_to_rgba f.Element.fill_color in
+            Cairo.set_source_rgb cr r g b;
+            Cairo.rectangle cr x y ~w:sq ~h:sq;
+            Cairo.fill cr;
+            Cairo.set_source_rgb cr 0.0 0.0 0.0;
+            Cairo.set_line_width cr 1.0;
+            Cairo.rectangle cr x y ~w:sq ~h:sq;
+            Cairo.stroke cr
+          | None ->
+            (* None = white with red diagonal *)
+            Cairo.set_source_rgb cr 1.0 1.0 1.0;
+            Cairo.rectangle cr x y ~w:sq ~h:sq;
+            Cairo.fill cr;
+            Cairo.set_source_rgb cr 1.0 0.0 0.0;
+            Cairo.set_line_width cr 1.5;
+            Cairo.move_to cr x (y +. sq);
+            Cairo.line_to cr (x +. sq) y;
+            Cairo.stroke cr;
+            Cairo.set_source_rgb cr 0.0 0.0 0.0;
+            Cairo.set_line_width cr 1.0;
+            Cairo.rectangle cr x y ~w:sq ~h:sq;
+            Cairo.stroke cr
+        in
+        let draw_stroke_square x y =
+          match get_stroke_color () with
+          | Some s ->
+            (* Hollow square with thick border *)
+            let (r, g, b, _) = Element.color_to_rgba s.Element.stroke_color in
+            Cairo.set_source_rgb cr r g b;
+            Cairo.set_line_width cr 4.0;
+            Cairo.rectangle cr (x +. 2.0) (y +. 2.0)
+              ~w:(sq -. 4.0) ~h:(sq -. 4.0);
+            Cairo.stroke cr;
+            (* White center *)
+            Cairo.set_source_rgb cr 1.0 1.0 1.0;
+            Cairo.rectangle cr (x +. 5.0) (y +. 5.0)
+              ~w:(sq -. 10.0) ~h:(sq -. 10.0);
+            Cairo.fill cr
+          | None ->
+            (* None = white with red diagonal *)
+            Cairo.set_source_rgb cr 1.0 1.0 1.0;
+            Cairo.rectangle cr x y ~w:sq ~h:sq;
+            Cairo.fill cr;
+            Cairo.set_source_rgb cr 1.0 0.0 0.0;
+            Cairo.set_line_width cr 1.5;
+            Cairo.move_to cr x (y +. sq);
+            Cairo.line_to cr (x +. sq) y;
+            Cairo.stroke cr;
+            Cairo.set_source_rgb cr 0.0 0.0 0.0;
+            Cairo.set_line_width cr 1.0;
+            Cairo.rectangle cr x y ~w:sq ~h:sq;
+            Cairo.stroke cr
+        in
+
+        let fill_x = base_x and fill_y = base_y in
+        let stroke_x = base_x +. offset and stroke_y = base_y +. offset in
+
+        if fill_on_top then begin
+          draw_stroke_square stroke_x stroke_y;
+          draw_fill_square fill_x fill_y
+        end else begin
+          draw_fill_square fill_x fill_y;
+          draw_stroke_square stroke_x stroke_y
+        end;
+
+        (* Swap arrow (top-right corner) *)
+        let ax = base_x +. sq +. offset +. 2.0 in
+        let ay = base_y in
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.set_line_width cr 1.0;
+        Cairo.move_to cr ax (ay +. 8.0);
+        Cairo.line_to cr (ax +. 8.0) (ay +. 8.0);
+        Cairo.line_to cr (ax +. 8.0) ay;
+        Cairo.stroke cr;
+        (* Arrow heads *)
+        Cairo.move_to cr (ax +. 6.0) (ay +. 2.0);
+        Cairo.line_to cr (ax +. 8.0) ay;
+        Cairo.line_to cr (ax +. 10.0) (ay +. 2.0);
+        Cairo.stroke cr;
+        Cairo.move_to cr (ax +. 2.0) (ay +. 6.0);
+        Cairo.line_to cr ax (ay +. 8.0);
+        Cairo.line_to cr (ax +. 2.0) (ay +. 10.0);
+        Cairo.stroke cr;
+
+        (* Default reset (bottom-left corner) *)
+        let dx = base_x -. 12.0 in
+        let dy = base_y +. sq +. offset -. 4.0 in
+        (* Small fill square *)
+        Cairo.set_source_rgb cr 1.0 1.0 1.0;
+        Cairo.rectangle cr dx dy ~w:8.0 ~h:8.0;
+        Cairo.fill cr;
+        Cairo.set_source_rgb cr 0.0 0.0 0.0;
+        Cairo.set_line_width cr 1.0;
+        Cairo.rectangle cr dx dy ~w:8.0 ~h:8.0;
+        Cairo.stroke cr;
+        (* Small stroke square *)
+        Cairo.set_source_rgb cr 0.0 0.0 0.0;
+        Cairo.set_line_width cr 2.0;
+        Cairo.rectangle cr (dx +. 3.0) (dy +. 3.0) ~w:8.0 ~h:8.0;
+        Cairo.stroke cr;
+
+        (* Mode buttons row: Color | None *)
+        let btn_y = base_y +. sq +. offset +. 10.0 in
+        let btn_w = 20.0 and btn_h = 14.0 in
+        (* Color button *)
+        Cairo.set_source_rgb cr 0.5 0.5 0.5;
+        Cairo.rectangle cr base_x btn_y ~w:btn_w ~h:btn_h;
+        Cairo.fill cr;
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.set_line_width cr 1.0;
+        Cairo.rectangle cr base_x btn_y ~w:btn_w ~h:btn_h;
+        Cairo.stroke cr;
+        (* Gradient button (disabled) *)
+        Cairo.set_source_rgb cr 0.35 0.35 0.35;
+        Cairo.rectangle cr (base_x +. btn_w +. 2.0) btn_y ~w:btn_w ~h:btn_h;
+        Cairo.fill cr;
+        Cairo.set_source_rgb cr 0.5 0.5 0.5;
+        Cairo.rectangle cr (base_x +. btn_w +. 2.0) btn_y ~w:btn_w ~h:btn_h;
+        Cairo.stroke cr;
+        (* None button *)
+        Cairo.set_source_rgb cr 0.5 0.5 0.5;
+        Cairo.rectangle cr (base_x +. (btn_w +. 2.0) *. 2.0) btn_y ~w:btn_w ~h:btn_h;
+        Cairo.fill cr;
+        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        Cairo.rectangle cr (base_x +. (btn_w +. 2.0) *. 2.0) btn_y ~w:btn_w ~h:btn_h;
+        Cairo.stroke cr;
+        (* Red diagonal for None button *)
+        Cairo.set_source_rgb cr 1.0 0.0 0.0;
+        Cairo.set_line_width cr 1.0;
+        Cairo.move_to cr (base_x +. (btn_w +. 2.0) *. 2.0) (btn_y +. btn_h);
+        Cairo.line_to cr (base_x +. (btn_w +. 2.0) *. 2.0 +. btn_w) btn_y;
+        Cairo.stroke cr;
+
+        true
+      ) |> ignore;
+
+      (* Fill/stroke click events *)
+      fs_area#event#add [`BUTTON_PRESS];
+      fs_area#event#connect#button_press ~callback:(fun ev ->
+        if GdkEvent.Button.button ev = 1 then begin
+          let ex = GdkEvent.Button.x ev in
+          let ey = GdkEvent.Button.y ev in
+          let alloc = fs_area#misc#allocation in
+          let aw = float_of_int alloc.Gtk.width in
+          let sq = 24.0 and offset = 8.0 in
+          let base_x = (aw -. sq -. offset) /. 2.0 in
+          let base_y = 6.0 in
+          let fill_x = base_x and fill_y = base_y in
+          let stroke_x = base_x +. offset and stroke_y = base_y +. offset in
+
+          (* Swap arrow region *)
+          let ax = base_x +. sq +. offset +. 2.0 in
+          let ay = base_y in
+          if ex >= ax && ex <= ax +. 12.0 && ey >= ay && ey <= ay +. 12.0 then begin
+            self#swap_fill_stroke;
+            true
+          end
+          (* Default reset region *)
+          else
+          let dx = base_x -. 12.0 in
+          let dy = base_y +. sq +. offset -. 4.0 in
+          if ex >= dx && ex <= dx +. 12.0 && ey >= dy && ey <= dy +. 12.0 then begin
+            self#reset_defaults;
+            true
+          end
+          (* Mode buttons *)
+          else
+          let btn_y = base_y +. sq +. offset +. 10.0 in
+          let btn_w = 20.0 and btn_h = 14.0 in
+          if ey >= btn_y && ey <= btn_y +. btn_h then begin
+            (* Color button *)
+            if ex >= base_x && ex <= base_x +. btn_w then begin
+              (* Open color picker for the active side *)
+              (match get_model with
+               | Some gm ->
+                 let m = gm () in
+                 let initial_color = if fill_on_top then
+                   (match m#default_fill with
+                    | Some f -> f.Element.fill_color
+                    | None -> Element.white)
+                 else
+                   (match m#default_stroke with
+                    | Some s -> s.Element.stroke_color
+                    | None -> Element.black)
+                 in
+                 let st = Color_picker.create_state initial_color fill_on_top in
+                 (match Color_picker.run_dialog st with
+                  | Some c ->
+                    if fill_on_top then
+                      m#set_default_fill (Some { Element.fill_color = c;
+                                                 fill_opacity = 1.0 })
+                    else
+                      m#set_default_stroke (Some (Element.make_stroke c));
+                    fs_area#misc#queue_draw ()
+                  | None -> ())
+               | None -> ());
+              true
+            end
+            (* None button *)
+            else if ex >= base_x +. (btn_w +. 2.0) *. 2.0
+                 && ex <= base_x +. (btn_w +. 2.0) *. 2.0 +. btn_w then begin
+              (match get_model with
+               | Some gm ->
+                 let m = gm () in
+                 if fill_on_top then m#set_default_fill None
+                 else m#set_default_stroke None;
+                 fs_area#misc#queue_draw ()
+               | None -> ());
+              true
+            end
+            else false
+          end
+          (* Click on fill square to bring to front *)
+          else if ex >= fill_x && ex <= fill_x +. sq
+               && ey >= fill_y && ey <= fill_y +. sq then begin
+            let is_double = GdkEvent.get_type ev = `TWO_BUTTON_PRESS in
+            if is_double then begin
+              (* Double-click opens color picker *)
+              (match get_model with
+               | Some gm ->
+                 let m = gm () in
+                 let initial = match m#default_fill with
+                   | Some f -> f.Element.fill_color | None -> Element.white in
+                 let st = Color_picker.create_state initial true in
+                 (match Color_picker.run_dialog st with
+                  | Some c ->
+                    m#set_default_fill (Some { Element.fill_color = c;
+                                               fill_opacity = 1.0 });
+                    fs_area#misc#queue_draw ()
+                  | None -> ())
+               | None -> ())
+            end else
+              fill_on_top <- true;
+            fs_area#misc#queue_draw ();
+            true
+          end
+          (* Click on stroke square to bring to front *)
+          else if ex >= stroke_x && ex <= stroke_x +. sq
+               && ey >= stroke_y && ey <= stroke_y +. sq then begin
+            let is_double = GdkEvent.get_type ev = `TWO_BUTTON_PRESS in
+            if is_double then begin
+              (* Double-click opens color picker *)
+              (match get_model with
+               | Some gm ->
+                 let m = gm () in
+                 let initial = match m#default_stroke with
+                   | Some s -> s.Element.stroke_color | None -> Element.black in
+                 let st = Color_picker.create_state initial false in
+                 (match Color_picker.run_dialog st with
+                  | Some c ->
+                    m#set_default_stroke (Some (Element.make_stroke c));
+                    fs_area#misc#queue_draw ()
+                  | None -> ())
+               | None -> ())
+            end else
+              fill_on_top <- false;
+            fs_area#misc#queue_draw ();
+            true
+          end
+          else false
+        end else false
+      ) |> ignore;
 
     method private show_pen_slot_menu =
       let menu = GMenu.menu () in
@@ -1194,5 +1536,5 @@ class toolbar ~title:(_title : string) ~x ~y (fixed : GPack.fixed) =
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
   end
 
-let create ~title ~x ~y fixed =
-  new toolbar ~title ~x ~y fixed
+let create ~title ~x ~y ?get_model fixed =
+  new toolbar ~title ~x ~y ?get_model fixed

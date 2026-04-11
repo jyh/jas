@@ -2,12 +2,18 @@
 
 type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star | Lasso
 
-class toolbar : title:string -> x:int -> y:int -> GPack.fixed -> object
+class toolbar : title:string -> x:int -> y:int -> ?get_model:(unit -> Model.model) -> GPack.fixed -> object
   method current_tool : tool
   method widget : GObj.widget
   method x : int
   method y : int
   method select_tool : tool -> unit
+  method fill_on_top : bool
+  method set_fill_on_top : bool -> unit
+  method toggle_fill_on_top : unit
+  method reset_defaults : unit
+  method swap_fill_stroke : unit
+  method redraw_fill_stroke : unit
 end
 
-val create : title:string -> x:int -> y:int -> GPack.fixed -> toolbar
+val create : title:string -> x:int -> y:int -> ?get_model:(unit -> Model.model) -> GPack.fixed -> toolbar
