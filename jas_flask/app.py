@@ -1,0 +1,90 @@
+"""Flask application for rendering WORKSPACE.yaml in normal and wireframe modes."""
+
+import json
+import os
+
+from flask import Flask, render_template, request, jsonify
+
+from loader import load_workspace, find_element_by_id
+from renderer import render_element, render_menubar, render_dialogs, set_icons
+
+
+def create_app(workspace: dict | None = None, workspace_path: str | None = None) -> Flask:
+    """Create and configure the Flask app.
+
+    Args:
+        workspace: Pre-loaded workspace dict (for testing).
+        workspace_path: Path to WORKSPACE.yaml (used if workspace is None).
+    """
+    app = Flask(__name__)
+
+    if workspace is None:
+        if workspace_path is None:
+            workspace_path = os.environ.get(
+                "WORKSPACE_YAML",
+                os.path.join(os.path.dirname(__file__), "..", "WORKSPACE.yaml"),
+            )
+        workspace = load_workspace(workspace_path)
+
+    ws = workspace
+    set_icons(ws.get("icons", {}))
+
+    def _state_defaults() -> dict:
+        """Extract default values from state definitions."""
+        return {name: defn.get("default") for name, defn in ws.get("state", {}).items()}
+
+    @app.route("/")
+    def index():
+        mode = request.args.get("mode", "normal")
+        theme = ws.get("theme", {})
+        state = _state_defaults()
+
+        # Render menubar (swap mode toggle link based on current mode)
+        menubar_html = render_menubar(ws.get("menubar", []), ws.get("actions", {}), theme)
+        if mode == "wireframe":
+            menubar_html = menubar_html.replace(
+                'href="?mode=wireframe" id="mode-toggle">Wireframe',
+                'href="/" id="mode-toggle">Normal',
+            )
+
+        # Render layout
+        layout_html = render_element(ws.get("layout", {}), theme, state, mode=mode)
+
+        if mode == "wireframe":
+            return render_template("wireframe.html", ws=ws, menubar_html=menubar_html,
+                                   layout_html=layout_html)
+
+        # Normal mode
+        dialogs_html = render_dialogs(ws.get("dialogs", {}), theme, state)
+        state_json = json.dumps(_state_defaults())
+        actions_json = json.dumps(ws.get("actions", {}))
+        shortcuts_json = json.dumps(ws.get("shortcuts", []))
+
+        return render_template("normal.html", ws=ws, menubar_html=menubar_html,
+                               layout_html=layout_html, dialogs_html=dialogs_html,
+                               state_json=state_json, actions_json=actions_json,
+                               shortcuts_json=shortcuts_json)
+
+    @app.route("/api/spec/<element_id>")
+    def element_spec(element_id):
+        """Return the full YAML spec for an element as JSON."""
+        layout = ws.get("layout", {})
+        elem = find_element_by_id(layout, element_id)
+        if elem is None:
+            # Also search in dialogs
+            for dialog in ws.get("dialogs", {}).values():
+                content = dialog.get("content")
+                if isinstance(content, dict):
+                    elem = find_element_by_id(content, element_id)
+                    if elem:
+                        break
+        if elem is None:
+            return jsonify({"error": "not found"}), 404
+        return jsonify(elem)
+
+    return app
+
+
+if __name__ == "__main__":
+    app = create_app()
+    app.run(debug=True, host='0.0.0.0', port=5050)
