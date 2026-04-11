@@ -164,26 +164,42 @@ def _justify(val):
 
 
 def _data_attrs(el: dict) -> str:
-    """Build data-action and data-action-params attributes from behavior."""
+    """Build data-action, data-action-params, data-behaviors, and data-bind-* attributes."""
+    parts = []
     behaviors = el.get("behavior", [])
+
+    # Find the first click action for data-action (simple dispatch)
+    click_action = None
     if not behaviors:
-        action = el.get("action")
-        if action:
-            params = el.get("params")
-            s = f' data-action="{escape(action)}"'
-            if params:
-                s += f" data-action-params='{escape(json.dumps(params))}'"
-            return s
+        click_action = el.get("action")
+        click_params = el.get("params")
+    else:
+        for b in behaviors:
+            if b.get("event") == "click" and b.get("action"):
+                click_action = b["action"]
+                click_params = b.get("params")
+                break
+        else:
+            click_params = None
+
+    if click_action:
+        parts.append(f'data-action="{escape(click_action)}"')
+        if click_params:
+            parts.append(f"data-action-params='{escape(json.dumps(click_params))}'")
+
+    # Emit non-click behaviors as data-behaviors JSON for the JS engine
+    non_click = [b for b in behaviors if b.get("event") != "click"]
+    if non_click:
+        parts.append(f"data-behaviors='{escape(json.dumps(non_click))}'")
+
+    # Emit bind attributes
+    bind = el.get("bind", {})
+    for prop, expr in bind.items():
+        parts.append(f'data-bind-{prop}="{escape(str(expr))}"')
+
+    if not parts:
         return ""
-    # Use the first click behavior
-    for b in behaviors:
-        if b.get("event") == "click" and b.get("action"):
-            s = f' data-action="{escape(b["action"])}"'
-            params = b.get("params")
-            if params:
-                s += f" data-action-params='{escape(json.dumps(params))}'"
-            return s
-    return ""
+    return " " + " ".join(parts)
 
 
 def _id_attr(el: dict) -> str:
