@@ -68,7 +68,7 @@ class TestRenderPaneSystem:
             ],
         }
         html = render_element(el, theme, state, mode="normal")
-        assert "P1" in html
+        assert "p1" in html
 
 
 class TestRenderPane:
@@ -79,27 +79,36 @@ class TestRenderPane:
             "type": "pane",
             "summary": "Test",
             "default_position": {"x": 10, "y": 20, "width": 300, "height": 400},
-            "title_bar": {"label": "Test Pane", "draggable": True, "closeable": True},
+            "title_bar": {"label": "Test Pane", "draggable": True},
             "content": {"type": "placeholder", "summary": "Content"},
         }
         html = render_element(el, theme, state, mode="normal")
         assert "position" in html
         assert "absolute" in html
         assert "left:10px" in html or "left: 10px" in html
-        assert "Test Pane" in html
+        assert "jas-pane-title" in html
 
-    def test_close_button_when_closeable(self, theme, state):
+    def test_title_bar_buttons_rendered(self, theme, state):
         from renderer import render_element
         el = {
             "id": "tp",
             "type": "pane",
             "summary": "Test",
             "default_position": {"x": 0, "y": 0, "width": 100, "height": 100},
-            "title_bar": {"label": "T", "draggable": True, "closeable": True},
+            "title_bar": {
+                "label": "T",
+                "draggable": True,
+                "buttons": [
+                    {"type": "icon_button", "id": "close_btn", "summary": "Close",
+                     "icon": "close", "style": {"size": 14},
+                     "behavior": [{"event": "click", "action": "toggle_pane", "params": {"pane": "tp"}}]},
+                ],
+            },
             "content": {"type": "placeholder", "summary": "C"},
         }
         html = render_element(el, theme, state, mode="normal")
-        assert "btn-close" in html
+        assert "close_btn" in html
+        assert "toggle_pane" in html
 
 
 class TestRenderGrid:

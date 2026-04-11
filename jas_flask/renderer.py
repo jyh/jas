@@ -168,8 +168,9 @@ def _data_attrs(el: dict) -> str:
     parts = []
     behaviors = el.get("behavior", [])
 
-    # Find the first click action for data-action (simple dispatch)
+    # Find the first click behavior with a named action for data-action (simple dispatch)
     click_action = None
+    click_params = None
     if not behaviors:
         click_action = el.get("action")
         click_params = el.get("params")
@@ -179,18 +180,17 @@ def _data_attrs(el: dict) -> str:
                 click_action = b["action"]
                 click_params = b.get("params")
                 break
-        else:
-            click_params = None
 
     if click_action:
         parts.append(f'data-action="{escape(click_action)}"')
         if click_params:
             parts.append(f"data-action-params='{escape(json.dumps(click_params))}'")
 
-    # Emit non-click behaviors as data-behaviors JSON for the JS engine
-    non_click = [b for b in behaviors if b.get("event") != "click"]
-    if non_click:
-        parts.append(f"data-behaviors='{escape(json.dumps(non_click))}'")
+    # Emit all behaviors that need JS wiring: non-click events, or click with inline effects
+    wired = [b for b in behaviors
+             if b.get("event") != "click" or (b.get("effects") and not b.get("action"))]
+    if wired:
+        parts.append(f"data-behaviors='{escape(json.dumps(wired))}'")
 
     # Emit bind attributes
     bind = el.get("bind", {})
@@ -225,22 +225,10 @@ def _render_pane(el, theme, state):
     x, y = pos.get("x", 0), pos.get("y", 0)
     w, h = pos.get("width", 200), pos.get("height", 400)
     title_bar = el.get("title_bar", {})
-    label = escape(title_bar.get("label", ""))
-    closeable = title_bar.get("closeable", False)
 
-    close_btn = ""
-    if closeable:
-        eid = el.get("id", "")
-        close_btn = (
-            f'<button class="btn-close btn-close-white btn-sm ms-auto"'
-            f' style="font-size:8px"'
-            f' data-action="toggle_pane" data-action-params=\'{{"pane":"{eid}"}}\'>'
-            f'</button>'
-        )
-
-    extra_btns = ""
+    title_btns = ""
     for btn in title_bar.get("buttons", []):
-        extra_btns += render_element(btn, theme, state, mode="normal")
+        title_btns += render_element(btn, theme, state, mode="normal")
 
     content_html = ""
     content = el.get("content")
@@ -250,13 +238,20 @@ def _render_pane(el, theme, state):
     bg = _resolve(el.get("style", {}).get("background", "#3c3c3c"), theme, state)
     border = _resolve(el.get("style", {}).get("border", "1px solid #555"), theme, state)
 
+    # Extra data attributes for generic bindings
+    extra_data = _data_attrs(el)
+    collapsed_width = el.get("collapsed_width")
+    if collapsed_width is not None:
+        extra_data += f' data-collapsed-width="{collapsed_width}"'
+
     return Markup(
         f'<div{_id_attr(el)} class="jas-pane"'
         f' style="position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;'
-        f'background:{bg};border:{border};display:flex;flex-direction:column;overflow:hidden">'
+        f'background:{bg};border:{border};display:flex;flex-direction:column;overflow:hidden"'
+        f'{extra_data}>'
         f'<div class="jas-pane-title" style="height:20px;background:#383838;display:flex;'
         f'align-items:center;padding:0 6px;cursor:grab;font-size:11px;color:#d9d9d9">'
-        f'{label}{extra_btns}{close_btn}</div>'
+        f'<span class="ms-auto d-flex gap-1">{title_btns}</span></div>'
         f'<div class="jas-pane-content" style="flex:1;overflow:auto">{content_html}</div>'
         f'<div class="jas-edge-handle left"></div>'
         f'<div class="jas-edge-handle right"></div>'
@@ -271,7 +266,7 @@ def _render_container(el, theme, state):
     direction = "flex-column" if layout == "column" else "flex-row"
     children = _render_children(el, theme, state)
     return Markup(
-        f'<div{_id_attr(el)} class="d-flex {direction}"{_style_str(el, theme, state)}>'
+        f'<div{_id_attr(el)} class="d-flex {direction}"{_style_str(el, theme, state)}{_data_attrs(el)}>'
         f'{children}</div>'
     )
 
@@ -279,7 +274,7 @@ def _render_container(el, theme, state):
 def _render_row(el, theme, state):
     children = _render_children(el, theme, state)
     return Markup(
-        f'<div{_id_attr(el)} class="d-flex flex-row"{_style_str(el, theme, state)}>'
+        f'<div{_id_attr(el)} class="d-flex flex-row"{_style_str(el, theme, state)}{_data_attrs(el)}>'
         f'{children}</div>'
     )
 
@@ -483,7 +478,7 @@ def _render_placeholder(el, theme, state):
         f'<div{_id_attr(el)} class="jas-placeholder"'
         f' style="border:1px dashed #666;padding:12px;color:#888;text-align:center;'
         f'font-size:11px;min-height:40px"'
-        f' title="{desc}">{summary}</div>'
+        f' title="{desc}"{_data_attrs(el)}>{summary}</div>'
     )
 
 
@@ -504,6 +499,55 @@ def _render_spacer(el, theme, state):
 def _render_image(el, theme, state):
     src = escape(el.get("src", ""))
     return Markup(f'<img{_id_attr(el)} src="{src}" class="img-fluid">')
+
+
+def _render_dropdown(el, theme, state):
+    """Render a dropdown button with a menu of items."""
+    icon_name = el.get("icon", "")
+    label_text = el.get("label", "")
+    items = el.get("items", [])
+    sz = el.get("style", {}).get("size", 16)
+
+    # Button content: icon or label
+    btn_content = ""
+    icon_def = _icons.get(icon_name)
+    if icon_def:
+        viewbox = icon_def.get("viewbox", "0 0 16 16")
+        svg_content = icon_def.get("svg", "")
+        icon_sz = int(float(sz) * 0.75)
+        btn_content = (
+            f'<svg viewBox="{viewbox}" width="{icon_sz}" height="{icon_sz}"'
+            f' fill="currentColor" style="color:#cccccc">{svg_content}</svg>'
+        )
+    elif label_text:
+        btn_content = escape(label_text)
+    else:
+        btn_content = "&#8942;"
+
+    # Menu items
+    menu_html = ""
+    for item in items:
+        if isinstance(item, str) and item == "separator":
+            menu_html += '<li><hr class="dropdown-divider"></li>'
+            continue
+        if not isinstance(item, dict):
+            continue
+        il = escape(item.get("label", ""))
+        ia = item.get("action", "")
+        ip = item.get("params")
+        data = f' data-action="{escape(ia)}"' if ia else ""
+        if ip:
+            data += f" data-action-params='{escape(json.dumps(ip))}'"
+        menu_html += f'<li><a class="dropdown-item" href="#"{data}>{il}</a></li>'
+
+    return Markup(
+        f'<div{_id_attr(el)} class="dropdown" style="display:inline-block"{_data_attrs(el)}>'
+        f'<button class="btn btn-sm p-0" data-bs-toggle="dropdown"'
+        f' style="width:{sz}px;height:{sz}px;display:flex;align-items:center;'
+        f'justify-content:center;color:#999;border:none;background:transparent">'
+        f'{btn_content}</button>'
+        f'<ul class="dropdown-menu">{menu_html}</ul></div>'
+    )
 
 
 def _render_unknown(el, theme, state):
@@ -589,6 +633,7 @@ _RENDERERS = {
     "panel": _render_panel,
     "button": _render_button,
     "icon_button": _render_icon_button,
+    "dropdown": _render_dropdown,
     "toggle": _render_toggle,
     "text": _render_text,
     "text_input": _render_text_input,

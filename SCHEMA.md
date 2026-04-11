@@ -494,6 +494,7 @@ recommended for every element.
 | `panel` | Named content region within tabs | `panel_kind`, `menu` |
 | `button` | Clickable button | `label`, `action`, `params`, `variant`, `icon` |
 | `icon_button` | Small icon-only button | `icon`, `action`, `params` |
+| `dropdown` | Button that opens a menu of items | `icon`, `label`, `items`: list of `{label, action, params}` |
 | `toggle` | Toggle / checkbox | `label`, `bind` |
 | `radio_group` | Mutually exclusive options | `options`: `[{id, label}]`, `bind` |
 | `text` | Static or interpolated text | `content`: interpolated string |

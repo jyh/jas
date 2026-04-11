@@ -69,19 +69,25 @@
   }
 
   function updateBindings(key, value) {
-    // Update visibility bindings (pane_visible, etc.)
-    if (key.endsWith("_visible")) {
-      var paneId = key.replace("_visible", "_pane");
-      var el = document.getElementById(paneId);
-      if (el) el.style.display = value ? "" : "none";
-    }
-    // Update checked state on tool buttons
+    // Generic data-bind-visible: show/hide based on boolean expression
+    document.querySelectorAll("[data-bind-visible]").forEach(function (el) {
+      var expr = el.getAttribute("data-bind-visible");
+      var result = evalCondition(resolve(expr, {}), {});
+      el.style.display = result ? "" : "none";
+    });
+    // Generic data-bind-checked: toggle "active" class
     document.querySelectorAll("[data-bind-checked]").forEach(function (el) {
       var expr = el.getAttribute("data-bind-checked");
-      var result = evalCondition(expr, {});
+      var result = evalCondition(resolve(expr, {}), {});
       el.classList.toggle("active", result);
     });
-    // Update bound colors on swatches
+    // Generic data-bind-active: toggle "active" class (alias for checked)
+    document.querySelectorAll("[data-bind-active]").forEach(function (el) {
+      var expr = el.getAttribute("data-bind-active");
+      var result = evalCondition(resolve(expr, {}), {});
+      el.classList.toggle("active", result);
+    });
+    // Generic data-bind-color: set background color
     document.querySelectorAll("[data-bind-color]").forEach(function (el) {
       var ref = el.getAttribute("data-bind-color");
       var color = resolve(ref, {});
@@ -91,15 +97,39 @@
         el.style.background = "#fff";
       }
     });
-    // Update collapsed state
-    if (key === "dock_collapsed") {
-      var dock = document.getElementById("dock_pane");
-      if (dock) {
-        dock.style.width = value ? "36px" : "";
-        var content = dock.querySelector(".jas-pane-content");
-        if (content) content.style.display = value ? "none" : "";
+    // Generic data-bind-icon: swap SVG content via ternary expression
+    document.querySelectorAll("[data-bind-icon]").forEach(function (el) {
+      var expr = el.getAttribute("data-bind-icon");
+      var resolved = resolve(expr, {});
+      var ternary = resolved.match(/^(.+?)\s*\?\s*(\S+)\s*:\s*(\S+)$/);
+      if (ternary) {
+        var cond = evalCondition(ternary[1], {});
+        var iconName = cond ? ternary[2] : ternary[3];
+        var iconDef = (typeof JAS_ICONS !== "undefined") ? JAS_ICONS[iconName] : null;
+        if (iconDef) {
+          var svg = el.querySelector("svg");
+          if (svg) {
+            svg.setAttribute("viewBox", iconDef.viewbox || "0 0 16 16");
+            svg.innerHTML = iconDef.svg || "";
+          }
+        }
       }
-    }
+    });
+    // Generic data-bind-collapsed: collapse pane to collapsed_width, hide content
+    document.querySelectorAll("[data-bind-collapsed]").forEach(function (el) {
+      var expr = el.getAttribute("data-bind-collapsed");
+      var result = evalCondition(resolve(expr, {}), {});
+      var cw = el.getAttribute("data-collapsed-width");
+      if (result && cw) {
+        el.style.width = cw + "px";
+        var content = el.querySelector(".jas-pane-content");
+        if (content) content.style.display = "none";
+      } else if (!result && cw) {
+        el.style.width = "";
+        var content = el.querySelector(".jas-pane-content");
+        if (content) content.style.display = "";
+      }
+    });
   }
 
   // ── Effects interpreter ────────────────────────────────────
@@ -239,7 +269,7 @@
 
     // tile: { container }
     // Horizontal single-row tile matching the Rust algorithm:
-    //   1. Unhide all panes, unmaximize canvas
+    //   1. Unhide all panes
     //   2. Sort panes left-to-right by current x, then descending y
     //   3. Classify widths: fixed_width → Fixed, collapsed_width → KeepCurrent, else → Flex
     //   4. Flex panes split remaining space equally (respecting min_width)
@@ -249,16 +279,17 @@
       var container = document.getElementById(resolve(effect.tile.container, ctx));
       if (!container) return;
 
-      // Phase 1: unhide all panes, unmaximize
-      setState("canvas_maximized", false);
+      // Phase 1: unhide all panes by setting any bound visible state to true
       var paneEls = Array.from(container.querySelectorAll(".jas-pane"));
-      paneEls.forEach(function (p) { p.style.display = ""; });
-      for (var vid in configs) {
-        if (vid.endsWith("_pane")) {
-          var visKey = vid.replace("_pane", "") + "_visible";
-          if (state.hasOwnProperty(visKey)) setState(visKey, true);
+      paneEls.forEach(function (p) {
+        p.style.display = "";
+        // Find the state key this pane's visibility is bound to and set it true
+        var bindVis = p.getAttribute("data-bind-visible");
+        if (bindVis) {
+          var m = bindVis.match(/\{\{state\.(.+?)\}\}/);
+          if (m && state.hasOwnProperty(m[1])) setState(m[1], true);
         }
-      }
+      });
 
       // Phase 2: sort by x ascending, then y descending
       paneEls.sort(function (a, b) {
@@ -317,6 +348,7 @@
 
     // reset_layout: { container }
     if (effect.reset_layout) {
+      // Reset pane positions to defaults
       var configs = typeof JAS_PANE_CONFIGS !== "undefined" ? JAS_PANE_CONFIGS : {};
       for (var paneId in configs) {
         if (configs.hasOwnProperty(paneId)) {
@@ -332,12 +364,13 @@
           }
         }
       }
-      // Reset visibility state
-      setState("toolbar_visible", true);
-      setState("canvas_visible", true);
-      setState("dock_visible", true);
-      setState("dock_collapsed", false);
-      setState("canvas_maximized", false);
+      // Reset all state variables to their declared defaults
+      var defaults = typeof JAS_STATE !== "undefined" ? JAS_STATE : {};
+      for (var dk in defaults) {
+        if (defaults.hasOwnProperty(dk)) {
+          setState(dk, defaults[dk]);
+        }
+      }
       return;
     }
 

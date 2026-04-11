@@ -186,15 +186,23 @@ icons:
       <path d="M14,5 C6,5 3,10 3,14 C3,20 8,24 14,22 C20,20 22,16 20,12 C18,8 12,9 12,13 C12,16 16,17 17,15"
         fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
 
+  close:
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="3" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <line x1="13" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+
   chevron_right:
     viewbox: "0 0 16 16"
     svg: >
-      <path d="M6,3 L11,8 L6,13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M3,3 L8,8 L3,13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M9,3 L14,8 L9,13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 
   chevron_left:
     viewbox: "0 0 16 16"
     svg: >
-      <path d="M10,3 L5,8 L10,13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M13,3 L8,8 L13,13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M7,3 L2,8 L7,13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 
   chevron_down:
     viewbox: "0 0 16 16"
@@ -824,7 +832,16 @@ layout:
       title_bar:
         label: "Tools"
         draggable: true
-        closeable: true
+        buttons:
+          - id: toolbar_close_btn
+            type: icon_button
+            summary: "Close toolbar"
+            icon: "close"
+            style: { size: 14 }
+            behavior:
+              - event: click
+                action: toggle_pane
+                params: { pane: toolbar }
       content:
         type: container
         layout: column
@@ -1197,15 +1214,24 @@ layout:
       title_bar:
         label: "Canvas"
         draggable: true
-        closeable: true
         buttons:
           - id: maximize_btn
             type: icon_button
             summary: "Maximize"
             icon: "maximize"
+            style: { size: 14 }
             behavior:
               - event: click
                 action: toggle_canvas_maximize
+          - id: canvas_close_btn
+            type: icon_button
+            summary: "Close canvas"
+            icon: "close"
+            style: { size: 14 }
+            behavior:
+              - event: click
+                action: toggle_pane
+                params: { pane: canvas }
       content:
         type: container
         layout: column
@@ -1267,18 +1293,26 @@ layout:
       title_bar:
         label: "Panels"
         draggable: true
-        closeable: true
         buttons:
           - id: dock_collapse_btn
             type: icon_button
             summary: "Collapse/Expand dock"
             icon: "chevron_right"
-            style: { size: 16 }
+            style: { size: 14 }
             behavior:
               - event: click
                 action: toggle_dock_collapse
             bind:
               icon: "{{state.dock_collapsed}} == true ? chevron_left : chevron_right"
+          - id: dock_close_btn
+            type: icon_button
+            summary: "Close panels"
+            icon: "close"
+            style: { size: 14 }
+            behavior:
+              - event: click
+                action: toggle_pane
+                params: { pane: dock }
       behavior:
         - event: drop
           description: >
@@ -1293,7 +1327,7 @@ layout:
           - id: dock_group_0
             type: container
             summary: "Layers group"
-            description: "Panel group containing the Layers panel, with collapse chevron"
+            description: "Panel group containing the Layers panel, with collapse chevron and hamburger"
             layout: column
             children:
               - id: dock_group_0_header
@@ -1302,49 +1336,41 @@ layout:
                 style:
                   background: "{{theme.colors.pane_bg_dark}}"
                   padding: "2 4"
-                  gap: 4
+                  gap: 2
                   alignment: center
                 children:
+                  - id: dock_group_0_tab_layers
+                    type: button
+                    label: "Layers"
+                    summary: "Layers tab"
+                    style: { padding: "1 6", font_size: 11 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - set: { dock_group0_active: 0 }
+                    bind:
+                      active: "{{state.dock_group0_active}} == 0"
+                  - type: spacer
                   - id: dock_group_0_chevron
                     type: icon_button
-                    summary: "Collapse group"
-                    icon: "chevron_down"
+                    summary: "Collapse/Expand group"
+                    icon: "chevron_right"
                     style: { size: 14 }
                     behavior:
                       - event: click
                         effects:
                           - toggle: dock_group0_collapsed
                     bind:
-                      icon: "{{state.dock_group0_collapsed}} == true ? chevron_right : chevron_down"
-                  - id: dock_group_0_tabs
-                    type: tabs
-                    summary: "Layers tabs"
-                    bind:
-                      active: "{{state.dock_group0_active}}"
-                    children:
-                      - id: layers_panel
-                        type: panel
-                        summary: "Layers"
-                        description: >
-                          Displays the layer hierarchy of the active document.
-                          Shows layer names, visibility toggles, and lock state.
-                        panel_kind: layers
-                        menu:
-                          - { label: "Close Layers", action: close_panel }
-                        content:
-                          type: placeholder
-                          summary: "Layer list"
-                          description: "Will contain the layer hierarchy tree with visibility and lock toggles"
-                  - type: spacer
+                      icon: "{{state.dock_group0_collapsed}} == true ? chevron_left : chevron_right"
                   - id: dock_group_0_hamburger
-                    type: icon_button
+                    type: dropdown
                     summary: "Panel menu"
                     icon: "hamburger"
                     style: { size: 14 }
-                    behavior:
-                      - event: click
-                        effects:
-                          - open_dialog: { id: panel_menu_layers }
+                    items:
+                      - { label: "Close Layers", action: close_panel }
+                    bind:
+                      visible: "not {{state.dock_group0_collapsed}}"
 
               - id: dock_group_0_body
                 type: container
@@ -1363,7 +1389,7 @@ layout:
           - id: dock_group_1
             type: container
             summary: "Properties group"
-            description: "Panel group with Color, Stroke, and Properties tabs, with collapse chevron"
+            description: "Panel group with Color, Stroke, and Properties tabs, with collapse chevron and hamburger"
             layout: column
             children:
               - id: dock_group_1_header
@@ -1372,54 +1398,65 @@ layout:
                 style:
                   background: "{{theme.colors.pane_bg_dark}}"
                   padding: "2 4"
-                  gap: 4
+                  gap: 2
                   alignment: center
                 children:
+                  - id: dock_group_1_tab_color
+                    type: button
+                    label: "Color"
+                    summary: "Color tab"
+                    style: { padding: "1 6", font_size: 11 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - set: { dock_group1_active: 0 }
+                    bind:
+                      active: "{{state.dock_group1_active}} == 0"
+                  - id: dock_group_1_tab_stroke
+                    type: button
+                    label: "Stroke"
+                    summary: "Stroke tab"
+                    style: { padding: "1 6", font_size: 11 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - set: { dock_group1_active: 1 }
+                    bind:
+                      active: "{{state.dock_group1_active}} == 1"
+                  - id: dock_group_1_tab_properties
+                    type: button
+                    label: "Properties"
+                    summary: "Properties tab"
+                    style: { padding: "1 6", font_size: 11 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - set: { dock_group1_active: 2 }
+                    bind:
+                      active: "{{state.dock_group1_active}} == 2"
+                  - type: spacer
                   - id: dock_group_1_chevron
                     type: icon_button
-                    summary: "Collapse group"
-                    icon: "chevron_down"
+                    summary: "Collapse/Expand group"
+                    icon: "chevron_right"
                     style: { size: 14 }
                     behavior:
                       - event: click
                         effects:
                           - toggle: dock_group1_collapsed
                     bind:
-                      icon: "{{state.dock_group1_collapsed}} == true ? chevron_right : chevron_down"
-                  - id: dock_group_1_tabs
-                    type: tabs
-                    summary: "Property tabs"
-                    bind:
-                      active: "{{state.dock_group1_active}}"
-                    children:
-                      - id: color_panel
-                        type: panel
-                        summary: "Color"
-                        panel_kind: color
-                        menu:
-                          - { label: "Close Color", action: close_panel }
-                      - id: stroke_panel
-                        type: panel
-                        summary: "Stroke"
-                        panel_kind: stroke
-                        menu:
-                          - { label: "Close Stroke", action: close_panel }
-                      - id: properties_panel
-                        type: panel
-                        summary: "Properties"
-                        panel_kind: properties
-                        menu:
-                          - { label: "Close Properties", action: close_panel }
-                  - type: spacer
+                      icon: "{{state.dock_group1_collapsed}} == true ? chevron_left : chevron_right"
                   - id: dock_group_1_hamburger
-                    type: icon_button
+                    type: dropdown
                     summary: "Panel menu"
                     icon: "hamburger"
                     style: { size: 14 }
-                    behavior:
-                      - event: click
-                        effects:
-                          - open_dialog: { id: panel_menu_active }
+                    items:
+                      - { label: "Close Color", action: close_panel }
+                      - { label: "Close Stroke", action: close_panel }
+                      - { label: "Close Properties", action: close_panel }
+                    bind:
+                      visible: "not {{state.dock_group1_collapsed}}"
 
               - id: dock_group_1_body
                 type: container
