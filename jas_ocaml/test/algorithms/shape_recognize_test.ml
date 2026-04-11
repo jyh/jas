@@ -396,7 +396,7 @@ let () =
     let open Jas.Element in
     let template = Path { d = []; fill = None;
       stroke = Some { stroke_color = make_color 0.0 0.0 0.0; stroke_width = 2.5;
-                       stroke_linecap = Butt; stroke_linejoin = Miter };
+                       stroke_linecap = Butt; stroke_linejoin = Miter; stroke_opacity = 1.0 };
       opacity = 0.7; transform = None; locked = false; visibility = Preview } in
     let shape = Recognized_rectangle { x = 10.0; y = 20.0; w = 30.0; h = 40.0 } in
     match recognized_to_element shape template with

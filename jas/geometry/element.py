@@ -38,6 +38,10 @@ class Color:
     def alpha(self) -> float:
         return self.a
 
+    def with_alpha(self, a: float) -> "Color":
+        """Return a copy of this color with the alpha component replaced."""
+        raise NotImplementedError
+
     def to_rgba(self) -> tuple[float, float, float, float]:
         raise NotImplementedError
 
@@ -55,6 +59,9 @@ class RgbColor(Color):
     g: float
     b: float
     a: float = 1.0
+
+    def with_alpha(self, a: float) -> "RgbColor":
+        return RgbColor(self.r, self.g, self.b, a)
 
     def to_rgba(self) -> tuple[float, float, float, float]:
         return (self.r, self.g, self.b, self.a)
@@ -97,6 +104,9 @@ class HsbColor(Color):
     b: float
     a: float = 1.0
 
+    def with_alpha(self, a: float) -> "HsbColor":
+        return HsbColor(self.h, self.s, self.b, a)
+
     def to_rgba(self) -> tuple[float, float, float, float]:
         h, s, v = self.h, self.s, self.b
         if s == 0.0:
@@ -136,6 +146,9 @@ class CmykColor(Color):
     y: float
     k: float
     a: float = 1.0
+
+    def with_alpha(self, a: float) -> "CmykColor":
+        return CmykColor(self.c, self.m, self.y, self.k, a)
 
     def to_rgba(self) -> tuple[float, float, float, float]:
         r = (1.0 - self.c) * (1.0 - self.k)
@@ -205,6 +218,7 @@ class LineJoin(Enum):
 class Fill:
     """SVG fill presentation attribute. None means fill='none'."""
     color: Color
+    opacity: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -214,6 +228,7 @@ class Stroke:
     width: float = 1.0
     linecap: LineCap = LineCap.BUTT
     linejoin: LineJoin = LineJoin.MITER
+    opacity: float = 1.0
 
 
 @dataclass(frozen=True)

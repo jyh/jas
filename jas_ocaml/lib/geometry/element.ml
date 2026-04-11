@@ -23,6 +23,12 @@ let black = Rgb { r = 0.; g = 0.; b = 0.; a = 1. }
 let white = Rgb { r = 1.; g = 1.; b = 1.; a = 1. }
 let color_alpha = function Rgb { a; _ } | Hsb { a; _ } | Cmyk { a; _ } -> a
 
+(** Return a copy of this color with the alpha component replaced. *)
+let color_with_alpha a = function
+  | Rgb { r; g; b; _ } -> Rgb { r; g; b; a }
+  | Hsb { h; s; b; _ } -> Hsb { h; s; b; a }
+  | Cmyk { c; m; y; k; _ } -> Cmyk { c; m; y; k; a }
+
 (** HSB to RGB component conversion. *)
 let hsb_to_rgb_components h s v =
   if s = 0.0 then (v, v, v)
@@ -116,6 +122,7 @@ type linejoin =
 (** SVG fill presentation attribute. *)
 type fill = {
   fill_color : color;
+  fill_opacity : float;
 }
 
 (** SVG stroke presentation attributes. *)
@@ -124,6 +131,7 @@ type stroke = {
   stroke_width : float;
   stroke_linecap : linecap;
   stroke_linejoin : linejoin;
+  stroke_opacity : float;
 }
 
 (** SVG transform as a 2D affine matrix [a b c d e f]. *)
@@ -452,10 +460,10 @@ let rec bounds = function
 
 let make_color ?(a = 1.0) r g b = Rgb { r; g; b; a }
 
-let make_fill color = { fill_color = color }
+let make_fill ?(opacity = 1.0) color = { fill_color = color; fill_opacity = opacity }
 
-let make_stroke ?(width = 1.0) ?(linecap = Butt) ?(linejoin = Miter) color =
-  { stroke_color = color; stroke_width = width; stroke_linecap = linecap; stroke_linejoin = linejoin }
+let make_stroke ?(width = 1.0) ?(linecap = Butt) ?(linejoin = Miter) ?(opacity = 1.0) color =
+  { stroke_color = color; stroke_width = width; stroke_linecap = linecap; stroke_linejoin = linejoin; stroke_opacity = opacity }
 
 let identity_transform = { a = 1.0; b = 0.0; c = 0.0; d = 1.0; e = 0.0; f = 0.0 }
 

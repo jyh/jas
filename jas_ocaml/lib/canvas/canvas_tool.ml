@@ -122,5 +122,6 @@ let default_stroke = Some Element.{
   stroke_width = 1.0;
   stroke_linecap = Butt;
   stroke_linejoin = Miter;
+  stroke_opacity = 1.0;
 }
 

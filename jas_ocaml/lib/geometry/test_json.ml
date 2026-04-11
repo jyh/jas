@@ -108,6 +108,7 @@ let fill_json = function
   | Some f ->
     let o = json_obj () in
     json_raw o "color" (color_json f.fill_color);
+    json_num o "opacity" f.fill_opacity;
     json_build o
 
 let linecap_str = function
@@ -127,6 +128,7 @@ let stroke_json = function
     json_raw o "color" (color_json s.stroke_color);
     json_str o "linecap" (linecap_str s.stroke_linecap);
     json_str o "linejoin" (linejoin_str s.stroke_linejoin);
+    json_num o "opacity" s.stroke_opacity;
     json_num o "width" s.stroke_width;
     json_build o
 
@@ -413,7 +415,9 @@ let parse_color j =
 
 let parse_fill j =
   if j = `Null then None
-  else Some { fill_color = parse_color (j |> member "color") }
+  else
+    let opacity = try j |> member "opacity" |> to_num with _ -> 1.0 in
+    Some { fill_color = parse_color (j |> member "color"); fill_opacity = opacity }
 
 let parse_stroke j =
   if j = `Null then None
@@ -428,10 +432,12 @@ let parse_stroke j =
       | "bevel" -> Bevel
       | _ -> Miter
     in
+    let opacity = try j |> member "opacity" |> to_num with _ -> 1.0 in
     Some { stroke_color = parse_color (j |> member "color");
            stroke_width = j |> member "width" |> to_num;
            stroke_linecap = lc;
-           stroke_linejoin = lj }
+           stroke_linejoin = lj;
+           stroke_opacity = opacity }
 
 let parse_transform j =
   if j = `Null then None

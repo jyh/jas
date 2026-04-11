@@ -24,6 +24,9 @@ val white : color
 (** Alpha component, regardless of color space. *)
 val color_alpha : color -> float
 
+(** Return a copy of this color with the alpha component replaced. *)
+val color_with_alpha : float -> color -> color
+
 (** Convert any color to (r, g, b, a). *)
 val color_to_rgba : color -> float * float * float * float
 
@@ -49,7 +52,7 @@ type linecap = Butt | Round_cap | Square
 type linejoin = Miter | Round_join | Bevel
 
 (** SVG fill presentation attribute. *)
-type fill = { fill_color : color }
+type fill = { fill_color : color; fill_opacity : float }
 
 (** SVG stroke presentation attributes. *)
 type stroke = {
@@ -57,6 +60,7 @@ type stroke = {
   stroke_width : float;
   stroke_linecap : linecap;
   stroke_linejoin : linejoin;
+  stroke_opacity : float;
 }
 
 (** SVG transform as a 2D affine matrix [a b c d e f]. *)
@@ -199,8 +203,8 @@ val bounds : element -> float * float * float * float
 (** {2 Helper constructors} *)
 
 val make_color : ?a:float -> float -> float -> float -> color
-val make_fill : color -> fill
-val make_stroke : ?width:float -> ?linecap:linecap -> ?linejoin:linejoin -> color -> stroke
+val make_fill : ?opacity:float -> color -> fill
+val make_stroke : ?width:float -> ?linecap:linecap -> ?linejoin:linejoin -> ?opacity:float -> color -> stroke
 val identity_transform : transform
 val make_translate : float -> float -> transform
 val make_scale : float -> float -> transform

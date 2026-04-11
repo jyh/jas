@@ -134,7 +134,7 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
     Cairo.Group.push cr;
     apply_transform cr transform;
     begin match fill with
-    | Some { fill_color = c } ->
+    | Some { fill_color = c; _ } ->
       let (r, g, b, a) = Element.color_to_rgba c in
       Cairo.set_source_rgba cr r g b a
     | None -> Cairo.set_source_rgb cr 0.0 0.0 0.0
@@ -181,7 +181,7 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
     Cairo.Group.push cr;
     apply_transform cr transform;
     begin match fill with
-    | Some { fill_color = c } ->
+    | Some { fill_color = c; _ } ->
       let (r, g, b, a) = Element.color_to_rgba c in
       Cairo.set_source_rgba cr r g b a
     | None -> Cairo.set_source_rgb cr 0.0 0.0 0.0
