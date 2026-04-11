@@ -55,7 +55,7 @@ let create (dock_box : GPack.box) (layout : workspace_layout) =
         (* Collapsed: show icon strip *)
         Array.iteri (fun gi group ->
           Array.iteri (fun pi kind ->
-            let label = panel_label kind in
+            let label = Panel_menu.panel_label kind in
             let first = String.sub label 0 1 in
             let btn = GButton.button ~label:first ~packing:(dock_box#pack ~expand:false) () in
             btn#misc#set_size_request ~width:28 ~height:28 ();
@@ -91,7 +91,7 @@ let create (dock_box : GPack.box) (layout : workspace_layout) =
 
           (* Tab buttons — set drag state on press, click to activate *)
           Array.iteri (fun pi kind ->
-            let label = panel_label kind in
+            let label = Panel_menu.panel_label kind in
             let btn = GButton.button ~label ~packing:(tab_bar#pack ~expand:false) () in
             let tab_bg = if pi = group.active then theme_bg_tab else theme_bg_tab_inactive in
             apply_dark_css btn (Printf.sprintf "button { color: %s; background: %s; font-size: 11px; padding: 3px 8px; border: none; border-radius: 0; box-shadow: none; min-height: 0; }" theme_text tab_bg);
@@ -109,19 +109,62 @@ let create (dock_box : GPack.box) (layout : workspace_layout) =
           ) group.panels;
 
           (* Collapse chevron *)
-          let chevron_label = if group.collapsed then "\xE2\x96\xBC" else "\xE2\x96\xB2" in
+          let chevron_label = if group.collapsed then "\xC2\xBB" else "\xC2\xAB" in
           let chevron = GButton.button ~label:chevron_label ~packing:(tab_bar#pack ~from:`END ~expand:false) () in
-          apply_dark_css chevron (Printf.sprintf "button { color: %s; background: %s; font-size: 9px; border: none; border-radius: 0; box-shadow: none; min-height: 0; min-width: 0; padding: 0 4px; }" theme_text_button theme_bg_dark);
+          apply_dark_css chevron (Printf.sprintf "button { color: %s; background: %s; font-size: 18px; border: none; border-radius: 0; box-shadow: none; min-height: 0; min-width: 0; padding: 0 4px; }" theme_text_button theme_bg_dark);
           chevron#connect#clicked ~callback:(fun () ->
             toggle_group_collapsed layout { dock_id = dock.id; group_idx = gi };
             rebuild ()
           ) |> ignore;
 
+          (* Hamburger menu button — hidden when collapsed *)
+          if not group.collapsed then begin
+            match active_panel group with
+            | Some active_kind ->
+              let hamburger = GButton.button ~label:"\xE2\x89\xA1" ~packing:(tab_bar#pack ~from:`END ~expand:false) () in
+              apply_dark_css hamburger (Printf.sprintf "button { color: %s; background: %s; font-size: 18px; border: none; border-radius: 0; box-shadow: none; min-height: 0; min-width: 0; padding: 0 4px; }" theme_text_button theme_bg_dark);
+              hamburger#connect#clicked ~callback:(fun () ->
+                let menu = GMenu.menu () in
+                let items = Panel_menu.panel_menu active_kind in
+                let addr = { group = { dock_id = dock.id; group_idx = gi }; panel_idx = group.active } in
+                List.iter (fun item ->
+                  match item with
+                  | Panel_menu.Action { label; command; _ } ->
+                    let mi = GMenu.menu_item ~label ~packing:menu#append () in
+                    mi#connect#activate ~callback:(fun () ->
+                      Panel_menu.panel_dispatch active_kind command addr layout;
+                      rebuild ()
+                    ) |> ignore
+                  | Panel_menu.Toggle { label; command } ->
+                    let checked = Panel_menu.panel_is_checked active_kind command layout in
+                    let mi = GMenu.check_menu_item ~label ~packing:menu#append () in
+                    mi#set_active checked;
+                    mi#connect#activate ~callback:(fun () ->
+                      Panel_menu.panel_dispatch active_kind command addr layout;
+                      rebuild ()
+                    ) |> ignore
+                  | Panel_menu.Radio { label; command; _ } ->
+                    let selected = Panel_menu.panel_is_checked active_kind command layout in
+                    let mi = GMenu.check_menu_item ~label ~packing:menu#append () in
+                    mi#set_active selected;
+                    mi#connect#activate ~callback:(fun () ->
+                      Panel_menu.panel_dispatch active_kind command addr layout;
+                      rebuild ()
+                    ) |> ignore
+                  | Panel_menu.Separator ->
+                    let _sep = GMenu.separator_item ~packing:menu#append () in
+                    ()
+                ) items;
+                menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
+              ) |> ignore
+            | None -> ()
+          end;
+
           (* Panel body placeholder *)
           if not group.collapsed then begin
             match active_panel group with
             | Some kind ->
-              let body = GMisc.label ~text:(panel_label kind) ~packing:(group_box#pack ~expand:false) () in
+              let body = GMisc.label ~text:(Panel_menu.panel_label kind) ~packing:(group_box#pack ~expand:false) () in
               body#misc#set_size_request ~height:60 ();
               body#set_xalign 0.0;
               body#set_yalign 0.0;
@@ -228,7 +271,7 @@ let create (dock_box : GPack.box) (layout : workspace_layout) =
         grip#misc#set_size_request ~width:20 ();
         apply_dark_css grip (Printf.sprintf "* { color: %s; }" theme_text_hint);
         Array.iteri (fun pi kind ->
-          let label = Workspace_layout.panel_label kind in
+          let label = Panel_menu.panel_label kind in
           let btn = GButton.button ~label ~packing:(tab_bar#pack ~expand:false) () in
           let tab_bg = if pi = group.active then theme_bg_tab else theme_bg_tab_inactive in
           apply_dark_css btn (Printf.sprintf "* { color: %s; background-color: %s; }" theme_text tab_bg);
@@ -240,7 +283,7 @@ let create (dock_box : GPack.box) (layout : workspace_layout) =
         if not group.collapsed then begin
           match Workspace_layout.active_panel group with
           | Some kind ->
-            let body = GMisc.label ~text:(Workspace_layout.panel_label kind) ~packing:(group_box#pack ~expand:false) () in
+            let body = GMisc.label ~text:(Panel_menu.panel_label kind) ~packing:(group_box#pack ~expand:false) () in
             body#misc#set_size_request ~height:60 ();
             body#set_xalign 0.0;
             apply_dark_css body (Printf.sprintf "* { color: %s; font-size: 12px; }" theme_text_body)
