@@ -97,6 +97,7 @@ private func fillJson(_ fill: Fill?) -> String {
     guard let f = fill else { return "null" }
     let o = JsonObj()
     o.raw("color", colorJson(f.color))
+    o.num("opacity", f.opacity)
     return o.build()
 }
 
@@ -106,6 +107,7 @@ private func strokeJson(_ stroke: Stroke?) -> String {
     o.raw("color", colorJson(s.color))
     o.str("linecap", linecapStr(s.linecap))
     o.str("linejoin", linejoinStr(s.linejoin))
+    o.num("opacity", s.opacity)
     o.num("width", s.width)
     return o.build()
 }
@@ -377,7 +379,8 @@ private func parseColor(_ v: Any?) -> Color {
 
 private func parseFill(_ v: Any?) -> Fill? {
     guard let d = v as? [String: Any] else { return nil }
-    return Fill(color: parseColor(d["color"]))
+    let opacity = (d["opacity"] as? Double) ?? 1.0
+    return Fill(color: parseColor(d["color"]), opacity: opacity)
 }
 
 private func parseStroke(_ v: Any?) -> Stroke? {
@@ -394,7 +397,8 @@ private func parseStroke(_ v: Any?) -> Stroke? {
     case "bevel": lj = .bevel
     default: lj = .miter
     }
-    return Stroke(color: parseColor(d["color"]), width: parseF(d["width"]), linecap: lc, linejoin: lj)
+    let opacity = (d["opacity"] as? Double) ?? 1.0
+    return Stroke(color: parseColor(d["color"]), width: parseF(d["width"]), linecap: lc, linejoin: lj, opacity: opacity)
 }
 
 private func parseTransform(_ v: Any?) -> Transform? {

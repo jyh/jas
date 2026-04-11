@@ -179,7 +179,7 @@ class type_on_path_tool = object (_self)
              let start_off = Element.path_closest_offset d x y in
              let tp = Element.make_text_path
                ~start_offset:start_off
-               ~fill:(Some Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 } })
+               ~fill:(Some Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }; fill_opacity = 1.0 })
                d "" in
              let new_doc = Document.replace_element ctx.model#document path tp in
              ctx.controller#set_document new_doc;
@@ -280,7 +280,7 @@ class type_on_path_tool = object (_self)
                  [Element.MoveTo (sx, sy); Element.LineTo (x, y)]
              in
              let elem = Element.make_text_path
-               ~fill:(Some Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 } })
+               ~fill:(Some Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }; fill_opacity = 1.0 })
                d "" in
              ctx.controller#add_element elem;
              let doc = ctx.model#document in

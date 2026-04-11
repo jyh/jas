@@ -38,7 +38,10 @@ let escape_xml s =
 
 let fill_attrs = function
   | None -> " fill=\"none\""
-  | Some (f : Element.fill) -> Printf.sprintf " fill=\"%s\"" (color_str f.fill_color)
+  | Some (f : Element.fill) ->
+    let s = Printf.sprintf " fill=\"%s\"" (color_str f.fill_color) in
+    if f.fill_opacity < 1.0 then s ^ Printf.sprintf " fill-opacity=\"%s\"" (fmt f.fill_opacity)
+    else s
 
 let stroke_attrs = function
   | None -> " stroke=\"none\""
@@ -54,6 +57,8 @@ let stroke_attrs = function
      | Element.Miter -> ()
      | Element.Round_join -> parts := " stroke-linejoin=\"round\"" :: !parts
      | Element.Bevel -> parts := " stroke-linejoin=\"bevel\"" :: !parts);
+    if s.stroke_opacity < 1.0 then
+      parts := Printf.sprintf " stroke-opacity=\"%s\"" (fmt s.stroke_opacity) :: !parts;
     String.concat "" (List.rev !parts)
 
 let transform_attr = function
@@ -231,19 +236,34 @@ let parse_color s =
   else match lookup_named_color s with
   | Some _ as c -> c
   | None ->
-  if String.length s = 7 && s.[0] = '#' then
-    (* #RRGGBB *)
-    (try
-       let r = parse_hex2 s 1 in let g = parse_hex2 s 3 in let b = parse_hex2 s 5 in
-       Some (Element.make_color (float r /. 255.0) (float g /. 255.0) (float b /. 255.0))
-     with _ -> None)
-  else if String.length s = 4 && s.[0] = '#' then
+  if String.length s = 4 && s.[0] = '#' then
     (* #RGB *)
     (try
        let c1 = int_of_string ("0x" ^ String.make 2 s.[1]) in
        let c2 = int_of_string ("0x" ^ String.make 2 s.[2]) in
        let c3 = int_of_string ("0x" ^ String.make 2 s.[3]) in
        Some (Element.make_color (float c1 /. 255.0) (float c2 /. 255.0) (float c3 /. 255.0))
+     with _ -> None)
+  else if String.length s = 5 && s.[0] = '#' then
+    (* #RGBA *)
+    (try
+       let c1 = int_of_string ("0x" ^ String.make 2 s.[1]) in
+       let c2 = int_of_string ("0x" ^ String.make 2 s.[2]) in
+       let c3 = int_of_string ("0x" ^ String.make 2 s.[3]) in
+       let c4 = int_of_string ("0x" ^ String.make 2 s.[4]) in
+       Some (Element.make_color ~a:(float c4 /. 255.0) (float c1 /. 255.0) (float c2 /. 255.0) (float c3 /. 255.0))
+     with _ -> None)
+  else if String.length s = 7 && s.[0] = '#' then
+    (* #RRGGBB *)
+    (try
+       let r = parse_hex2 s 1 in let g = parse_hex2 s 3 in let b = parse_hex2 s 5 in
+       Some (Element.make_color (float r /. 255.0) (float g /. 255.0) (float b /. 255.0))
+     with _ -> None)
+  else if String.length s = 9 && s.[0] = '#' then
+    (* #RRGGBBAA *)
+    (try
+       let r = parse_hex2 s 1 in let g = parse_hex2 s 3 in let b = parse_hex2 s 5 in let a = parse_hex2 s 7 in
+       Some (Element.make_color ~a:(float a /. 255.0) (float r /. 255.0) (float g /. 255.0) (float b /. 255.0))
      with _ -> None)
   else
     try Scanf.sscanf s "rgba(%d,%d,%d,%f)"
@@ -268,7 +288,9 @@ let parse_fill attrs =
   | None | Some "none" -> None
   | Some s ->
     match parse_color s with
-    | Some c -> Some (Element.make_fill c)
+    | Some c ->
+      let opacity = get_attr_f attrs "fill-opacity" 1.0 in
+      Some (Element.make_fill ~opacity c)
     | None -> None
 
 let parse_stroke attrs =
@@ -287,7 +309,8 @@ let parse_stroke attrs =
         | Some "round" -> Element.Round_join
         | Some "bevel" -> Element.Bevel
         | _ -> Element.Miter in
-      Some (Element.make_stroke ~width ~linecap ~linejoin c)
+      let opacity = get_attr_f attrs "stroke-opacity" 1.0 in
+      Some (Element.make_stroke ~width ~linecap ~linejoin ~opacity c)
 
 let parse_transform attrs =
   match get_attr attrs "transform" with
@@ -625,7 +648,7 @@ and skip_element_full i =
   | `El_start _ -> skip_element i
   | _ -> ()
 
-let svg_to_document svg =
+let rec svg_to_document svg =
   try
     let i = Xmlm.make_input (`String (0, svg)) in
     (* skip dtd *)
@@ -642,7 +665,53 @@ let svg_to_document svg =
         Element.make_layer ~name:"" [|elem|]
     ) children) in
     let layers = if layers = [] then [Element.make_layer [||]] else layers in
-    Document.make_document (Array.of_list layers)
+    normalize_document (Document.make_document (Array.of_list layers))
   with e ->
     Printf.eprintf "Warning: SVG parse error: %s\n" (Printexc.to_string e);
     Document.make_document [|Element.make_layer [||]|]
+
+(** Normalize all elements in a document: extract color alpha into
+    fill/stroke opacity and set color alpha to 1.0. *)
+and normalize_document (doc : Document.document) =
+  Document.make_document (Array.map normalize_element doc.Document.layers)
+
+and normalize_fill (f : Element.fill) =
+  let alpha = Element.color_alpha f.fill_color in
+  Element.make_fill ~opacity:(f.fill_opacity *. alpha) (Element.color_with_alpha 1.0 f.fill_color)
+
+and normalize_stroke (s : Element.stroke) =
+  let alpha = Element.color_alpha s.stroke_color in
+  Element.make_stroke ~width:s.stroke_width ~linecap:s.stroke_linecap ~linejoin:s.stroke_linejoin
+    ~opacity:(s.stroke_opacity *. alpha) (Element.color_with_alpha 1.0 s.stroke_color)
+
+and normalize_element = function
+  | Element.Line e ->
+    Element.Line { e with stroke = Option.map normalize_stroke e.stroke }
+  | Element.Rect e ->
+    Element.Rect { e with fill = Option.map normalize_fill e.fill;
+                          stroke = Option.map normalize_stroke e.stroke }
+  | Element.Circle e ->
+    Element.Circle { e with fill = Option.map normalize_fill e.fill;
+                            stroke = Option.map normalize_stroke e.stroke }
+  | Element.Ellipse e ->
+    Element.Ellipse { e with fill = Option.map normalize_fill e.fill;
+                             stroke = Option.map normalize_stroke e.stroke }
+  | Element.Polyline e ->
+    Element.Polyline { e with fill = Option.map normalize_fill e.fill;
+                              stroke = Option.map normalize_stroke e.stroke }
+  | Element.Polygon e ->
+    Element.Polygon { e with fill = Option.map normalize_fill e.fill;
+                             stroke = Option.map normalize_stroke e.stroke }
+  | Element.Path e ->
+    Element.Path { e with fill = Option.map normalize_fill e.fill;
+                          stroke = Option.map normalize_stroke e.stroke }
+  | Element.Text e ->
+    Element.Text { e with fill = Option.map normalize_fill e.fill;
+                          stroke = Option.map normalize_stroke e.stroke }
+  | Element.Text_path e ->
+    Element.Text_path { e with fill = Option.map normalize_fill e.fill;
+                               stroke = Option.map normalize_stroke e.stroke }
+  | Element.Group e ->
+    Element.Group { e with children = Array.map normalize_element e.children }
+  | Element.Layer e ->
+    Element.Layer { e with children = Array.map normalize_element e.children }

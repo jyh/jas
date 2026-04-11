@@ -64,6 +64,15 @@ public enum Color: Equatable, Hashable {
         }
     }
 
+    /// Return a copy of this color with the alpha component replaced.
+    public func withAlpha(_ a: Double) -> Color {
+        switch self {
+        case .rgb(let r, let g, let b, _): return .rgb(r: r, g: g, b: b, a: a)
+        case .hsb(let h, let s, let b, _): return .hsb(h: h, s: s, b: b, a: a)
+        case .cmyk(let c, let m, let y, let k, _): return .cmyk(c: c, m: m, y: y, k: k, a: a)
+        }
+    }
+
     /// Convert to (r, g, b, a) with all components in [0, 1].
     public func toRgba() -> (Double, Double, Double, Double) {
         switch self {
@@ -199,7 +208,8 @@ public enum LineJoin: Equatable, Hashable {
 /// SVG fill presentation attribute.
 public struct Fill: Equatable, Hashable {
     public let color: Color
-    public init(color: Color) { self.color = color }
+    public let opacity: Double
+    public init(color: Color, opacity: Double = 1.0) { self.color = color; self.opacity = opacity }
 }
 
 /// SVG stroke presentation attributes.
@@ -208,12 +218,14 @@ public struct Stroke: Equatable, Hashable {
     public let width: Double
     public let linecap: LineCap
     public let linejoin: LineJoin
+    public let opacity: Double
 
-    public init(color: Color, width: Double = 1.0, linecap: LineCap = .butt, linejoin: LineJoin = .miter) {
+    public init(color: Color, width: Double = 1.0, linecap: LineCap = .butt, linejoin: LineJoin = .miter, opacity: Double = 1.0) {
         self.color = color
         self.width = width
         self.linecap = linecap
         self.linejoin = linejoin
+        self.opacity = opacity
     }
 }
 

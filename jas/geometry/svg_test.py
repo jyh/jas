@@ -413,7 +413,9 @@ class SvgImportTest(absltest.TestCase):
         ))
         doc2 = self._roundtrip(Document(layers=(layer,)))
         elem = doc2.layers[0].children[0]
-        self.assertAlmostEqual(elem.fill.color.a, 0.5, places=2)
+        # After roundtrip + normalization, alpha moves to fill.opacity
+        self.assertAlmostEqual(elem.fill.color.a, 1.0, places=2)
+        self.assertAlmostEqual(elem.fill.opacity, 0.5, places=1)
 
     def test_roundtrip_group(self):
         layer = Layer(children=(

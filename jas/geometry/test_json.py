@@ -109,6 +109,7 @@ def _fill_json(fill: Fill | None) -> str:
         return "null"
     o = _JsonObj()
     o.raw("color", _color_json(fill.color))
+    o.num("opacity", fill.opacity)
     return o.build()
 
 
@@ -119,6 +120,7 @@ def _stroke_json(stroke: Stroke | None) -> str:
     o.raw("color", _color_json(stroke.color))
     o.str("linecap", stroke.linecap.value)
     o.str("linejoin", stroke.linejoin.value)
+    o.num("opacity", stroke.opacity)
     o.num("width", stroke.width)
     return o.build()
 
@@ -374,7 +376,7 @@ def _parse_color(d: dict) -> Color:
 def _parse_fill(d) -> Fill | None:
     if d is None:
         return None
-    return Fill(color=_parse_color(d["color"]))
+    return Fill(color=_parse_color(d["color"]), opacity=d.get("opacity", 1.0))
 
 
 def _parse_stroke(d) -> Stroke | None:
@@ -385,6 +387,7 @@ def _parse_stroke(d) -> Stroke | None:
         width=d["width"],
         linecap=_LINECAP_MAP[d["linecap"]],
         linejoin=_LINEJOIN_MAP[d["linejoin"]],
+        opacity=d.get("opacity", 1.0),
     )
 
 

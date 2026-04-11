@@ -146,10 +146,10 @@ let apply_to_document t doc =
 let empty_text_elem x y w h =
   Element.make_text
     ~text_width:w ~text_height:h
-    ~fill:(Some Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 } })
+    ~fill:(Some Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }; fill_opacity = 1.0 })
     x y ""
 
 let empty_text_path_elem d =
   Element.make_text_path
-    ~fill:(Some Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 } })
+    ~fill:(Some Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }; fill_opacity = 1.0 })
     d ""

@@ -412,7 +412,9 @@ private func roundtrip(_ doc: Document) -> Document {
     let doc2 = roundtrip(doc)
     if case .rect(let v) = doc2.layers[0].children[0] {
         #expect(v.fill != nil)
-        #expect(abs(v.fill!.color.alpha - 0.5) < 0.1)
+        // After roundtrip + normalization, alpha moves to fill.opacity
+        #expect(abs(v.fill!.color.alpha - 1.0) < 0.01)
+        #expect(abs(v.fill!.opacity - 0.5) < 0.1)
     } else {
         Issue.record("Expected rect")
     }
@@ -604,4 +606,162 @@ private func pt(_ px: Double) -> Double { px * 72.0 / 96.0 }
         #expect(abs(v.fill!.color.toRgba().1 - 130.0/255.0) < 0.01)
         #expect(abs(v.fill!.color.toRgba().2 - 180.0/255.0) < 0.01)
     } else { Issue.record("Expected rect") }
+}
+
+// MARK: - Hex color parsing (4-digit and 8-digit)
+
+@Test func parseColor4DigitHex() {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="96" height="96" fill="#F00A"/></svg>
+    """
+    let doc = svgToDocument(svg)
+    if case .rect(let v) = doc.layers[0].children[0] {
+        let c = v.fill!.color
+        let (r, g, b, _) = c.toRgba()
+        #expect(abs(r - 1.0) < 0.01)
+        #expect(abs(g) < 0.01)
+        #expect(abs(b) < 0.01)
+        // Alpha extracted to fill.opacity by normalizer
+        #expect(abs(v.fill!.opacity - 0.667) < 0.01)
+        #expect(abs(c.alpha - 1.0) < 1e-9)
+    } else { Issue.record("Expected rect") }
+}
+
+@Test func parseColor8DigitHex() {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="96" height="96" fill="#FF000080"/></svg>
+    """
+    let doc = svgToDocument(svg)
+    if case .rect(let v) = doc.layers[0].children[0] {
+        let c = v.fill!.color
+        let (r, _, _, _) = c.toRgba()
+        #expect(abs(r - 1.0) < 0.01)
+        #expect(abs(v.fill!.opacity - 0.502) < 0.01)
+        #expect(abs(c.alpha - 1.0) < 1e-9)
+    } else { Issue.record("Expected rect") }
+}
+
+// MARK: - fill-opacity / stroke-opacity
+
+@Test func importFillOpacity() {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="96" height="96" fill="red" fill-opacity="0.5"/></svg>
+    """
+    let doc = svgToDocument(svg)
+    if case .rect(let v) = doc.layers[0].children[0] {
+        #expect(abs(v.fill!.opacity - 0.5) < 0.01)
+    } else { Issue.record("Expected rect") }
+}
+
+@Test func importStrokeOpacity() {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="96" height="96" stroke="blue" stroke-width="2" stroke-opacity="0.3"/></svg>
+    """
+    let doc = svgToDocument(svg)
+    if case .rect(let v) = doc.layers[0].children[0] {
+        #expect(abs(v.stroke!.opacity - 0.3) < 0.01)
+    } else { Issue.record("Expected rect") }
+}
+
+@Test func exportFillOpacity() {
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 72, height: 72,
+                    fill: Fill(color: Color(r: 1, g: 0, b: 0), opacity: 0.5)))
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("fill-opacity=\"0.5\""))
+}
+
+@Test func exportStrokeOpacity() {
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 72, height: 72,
+                    stroke: Stroke(color: .black, opacity: 0.4)))
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("stroke-opacity=\"0.4\""))
+}
+
+@Test func exportOmitsOpacityWhenOne() {
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 72, height: 72, fill: Fill(color: .black)))
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(!svg.contains("fill-opacity"))
+    #expect(!svg.contains("stroke-opacity"))
+}
+
+// MARK: - Normalizer
+
+@Test func normalizeExtractsFillAlpha() {
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 72, height: 72,
+                    fill: Fill(color: Color(r: 1, g: 0, b: 0, a: 0.5))))
+    ])])
+    let doc2 = normalizeDocument(doc)
+    if case .rect(let v) = doc2.layers[0].children[0] {
+        #expect(abs(v.fill!.opacity - 0.5) < 1e-9)
+        #expect(abs(v.fill!.color.alpha - 1.0) < 1e-9)
+    } else { Issue.record("Expected rect") }
+}
+
+@Test func normalizeMultipliesExisting() {
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 72, height: 72,
+                    fill: Fill(color: Color(r: 1, g: 0, b: 0, a: 0.5), opacity: 0.8)))
+    ])])
+    let doc2 = normalizeDocument(doc)
+    if case .rect(let v) = doc2.layers[0].children[0] {
+        #expect(abs(v.fill!.opacity - 0.4) < 1e-9)
+        #expect(abs(v.fill!.color.alpha - 1.0) < 1e-9)
+    } else { Issue.record("Expected rect") }
+}
+
+@Test func normalizeIdempotent() {
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 72, height: 72,
+                    fill: Fill(color: Color(r: 1, g: 0, b: 0, a: 0.5), opacity: 0.8)))
+    ])])
+    let doc2 = normalizeDocument(doc)
+    let doc3 = normalizeDocument(doc2)
+    if case .rect(let v2) = doc2.layers[0].children[0],
+       case .rect(let v3) = doc3.layers[0].children[0] {
+        #expect(abs(v2.fill!.opacity - v3.fill!.opacity) < 1e-9)
+    } else { Issue.record("Expected rect") }
+}
+
+@Test func roundtripFillOpacity() {
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 10, y: 20, width: 72, height: 72,
+                    fill: Fill(color: Color(r: 1, g: 0, b: 0), opacity: 0.5)))
+    ])])
+    let svg = documentToSvg(doc)
+    let doc2 = svgToDocument(svg)
+    if case .rect(let v) = doc2.layers[0].children[0] {
+        #expect(abs(v.fill!.opacity - 0.5) < 0.01)
+    } else { Issue.record("Expected rect") }
+}
+
+// MARK: - Color.withAlpha
+
+@Test func colorWithAlphaRgb() {
+    let c = Color(r: 1, g: 0, b: 0).withAlpha(0.5)
+    #expect(c == Color.rgb(r: 1, g: 0, b: 0, a: 0.5))
+}
+
+@Test func colorWithAlphaHsb() {
+    let c = Color.hsb(h: 180, s: 1, b: 1, a: 1).withAlpha(0.3)
+    #expect(c == Color.hsb(h: 180, s: 1, b: 1, a: 0.3))
+}
+
+@Test func colorWithAlphaCmyk() {
+    let c = Color.cmyk(c: 0, m: 1, y: 1, k: 0, a: 1).withAlpha(0.7)
+    #expect(c == Color.cmyk(c: 0, m: 1, y: 1, k: 0, a: 0.7))
+}
+
+@Test func fillDefaultOpacity() {
+    #expect(Fill(color: .black).opacity == 1.0)
+}
+
+@Test func strokeDefaultOpacity() {
+    #expect(Stroke(color: .black).opacity == 1.0)
 }

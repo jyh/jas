@@ -854,7 +854,7 @@ let () =
   run_test "type tool: click on existing text starts session" (fun () ->
     let tool = new Jas.Type_tool.type_tool in
     let existing = Jas.Element.make_text
-      ~fill:(Some Jas.Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 } })
+      ~fill:(Some Jas.Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }; fill_opacity = 1.0 })
       0.0 0.0 "hello" in
     let model = Jas.Model.create () in
     let layer = Jas.Element.make_layer ~name:"L" [| existing |] in
@@ -951,7 +951,7 @@ let () =
     let tool = new Jas.Type_on_path_tool.type_on_path_tool in
     let path_elem = Jas.Element.make_path
       ~stroke:(Some Jas.Element.{ stroke_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
-                                   stroke_width = 1.0; stroke_linecap = Butt; stroke_linejoin = Miter })
+                                   stroke_width = 1.0; stroke_linecap = Butt; stroke_linejoin = Miter; stroke_opacity = 1.0 })
       [MoveTo (0.0, 0.0); LineTo (100.0, 0.0)] in
     let model = Jas.Model.create () in
     let layer = Jas.Element.make_layer ~name:"L" [| path_elem |] in
@@ -1001,7 +1001,7 @@ let () =
     let tool = new Jas.Type_on_path_tool.type_on_path_tool in
     let path_elem = Jas.Element.make_path
       ~stroke:(Some Jas.Element.{ stroke_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
-                                   stroke_width = 1.0; stroke_linecap = Butt; stroke_linejoin = Miter })
+                                   stroke_width = 1.0; stroke_linecap = Butt; stroke_linejoin = Miter; stroke_opacity = 1.0 })
       [MoveTo (0.0, 0.0); LineTo (100.0, 0.0)] in
     let model = Jas.Model.create () in
     let layer = Jas.Element.make_layer ~name:"L" [| path_elem |] in

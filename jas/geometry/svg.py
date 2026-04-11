@@ -45,7 +45,10 @@ def _color_str(c: Color) -> str:
 def _fill_attrs(fill: Fill | None) -> str:
     if fill is None:
         return ' fill="none"'
-    return f' fill="{_color_str(fill.color)}"'
+    s = f' fill="{_color_str(fill.color)}"'
+    if fill.opacity < 1.0:
+        s += f' fill-opacity="{_fmt(fill.opacity)}"'
+    return s
 
 
 def _stroke_attrs(stroke: Stroke | None) -> str:
@@ -57,6 +60,8 @@ def _stroke_attrs(stroke: Stroke | None) -> str:
         parts.append(f' stroke-linecap="{stroke.linecap.value}"')
     if stroke.linejoin != LineJoin.MITER:
         parts.append(f' stroke-linejoin="{stroke.linejoin.value}"')
+    if stroke.opacity < 1.0:
+        parts.append(f' stroke-opacity="{_fmt(stroke.opacity)}"')
     return "".join(parts)
 
 
@@ -290,7 +295,7 @@ def _parse_color(s: str) -> Color | None:
     named = _NAMED_COLORS.get(s.lower())
     if named is not None:
         return RgbColor(named[0] / 255.0, named[1] / 255.0, named[2] / 255.0)
-    # Hex colors: #RRGGBB or #RGB
+    # Hex colors: #RGB, #RGBA, #RRGGBB, #RRGGBBAA
     if s.startswith("#"):
         h = s[1:]
         if len(h) == 3:
@@ -298,11 +303,23 @@ def _parse_color(s: str) -> Color | None:
             g = int(h[1] + h[1], 16) / 255.0
             b = int(h[2] + h[2], 16) / 255.0
             return RgbColor(r, g, b)
+        if len(h) == 4:
+            r = int(h[0] + h[0], 16) / 255.0
+            g = int(h[1] + h[1], 16) / 255.0
+            b = int(h[2] + h[2], 16) / 255.0
+            a = int(h[3] + h[3], 16) / 255.0
+            return RgbColor(r, g, b, a)
         if len(h) == 6:
             r = int(h[0:2], 16) / 255.0
             g = int(h[2:4], 16) / 255.0
             b = int(h[4:6], 16) / 255.0
             return RgbColor(r, g, b)
+        if len(h) == 8:
+            r = int(h[0:2], 16) / 255.0
+            g = int(h[2:4], 16) / 255.0
+            b = int(h[4:6], 16) / 255.0
+            a = int(h[6:8], 16) / 255.0
+            return RgbColor(r, g, b, a)
         return None
     # rgb()/rgba() functional notation
     m = re.match(r"rgba?\(([^)]+)\)", s)
@@ -323,7 +340,10 @@ def _parse_fill(node: ET.Element) -> Fill | None:
     if val is None or val == "none":
         return None
     c = _parse_color(val)
-    return Fill(c) if c else None
+    if c is None:
+        return None
+    opacity = _safe_float(node.get("fill-opacity"), 1.0)
+    return Fill(c, opacity)
 
 
 def _parse_stroke(node: ET.Element) -> Stroke | None:
@@ -338,7 +358,8 @@ def _parse_stroke(node: ET.Element) -> Stroke | None:
     lj_str = node.get("stroke-linejoin", "miter")
     lc = {"butt": LineCap.BUTT, "round": LineCap.ROUND, "square": LineCap.SQUARE}.get(lc_str, LineCap.BUTT)
     lj = {"miter": LineJoin.MITER, "round": LineJoin.ROUND, "bevel": LineJoin.BEVEL}.get(lj_str, LineJoin.MITER)
-    return Stroke(c, width, lc, lj)
+    opacity = _safe_float(node.get("stroke-opacity"), 1.0)
+    return Stroke(c, width, lc, lj, opacity)
 
 
 def _parse_transform(node: ET.Element) -> Transform | None:
@@ -689,4 +710,41 @@ def svg_to_document(svg: str) -> Document:
                     transform=layers[-1].transform)
     if not layers:
         layers = [Layer(children=())]
-    return Document(layers=tuple(layers))
+    return normalize_document(Document(layers=tuple(layers)))
+
+
+# ---------------------------------------------------------------------------
+# Opacity normalizer
+# ---------------------------------------------------------------------------
+
+def normalize_document(doc: Document) -> Document:
+    """Normalize all elements: extract color alpha into fill/stroke opacity,
+    set color alpha to 1.0."""
+    from dataclasses import replace
+    return replace(doc, layers=tuple(_normalize_element(l) for l in doc.layers))
+
+
+def _normalize_fill(fill: Fill) -> Fill:
+    from dataclasses import replace
+    alpha = fill.color.alpha
+    return Fill(color=fill.color.with_alpha(1.0), opacity=fill.opacity * alpha)
+
+
+def _normalize_stroke(stroke: Stroke) -> Stroke:
+    from dataclasses import replace
+    alpha = stroke.color.alpha
+    return Stroke(color=stroke.color.with_alpha(1.0), width=stroke.width,
+                  linecap=stroke.linecap, linejoin=stroke.linejoin,
+                  opacity=stroke.opacity * alpha)
+
+
+def _normalize_element(elem):
+    from dataclasses import replace
+    kwargs = {}
+    if hasattr(elem, 'fill') and elem.fill is not None:
+        kwargs['fill'] = _normalize_fill(elem.fill)
+    if hasattr(elem, 'stroke') and elem.stroke is not None:
+        kwargs['stroke'] = _normalize_stroke(elem.stroke)
+    if hasattr(elem, 'children'):
+        kwargs['children'] = tuple(_normalize_element(c) for c in elem.children)
+    return replace(elem, **kwargs) if kwargs else elem
