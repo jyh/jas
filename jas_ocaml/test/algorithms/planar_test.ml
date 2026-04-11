@@ -234,33 +234,25 @@ let test_hit_test_in_hole () =
   check "hole_hit.hole_parent" (g.faces.(hole_hit).parent = Some outer_hit)
 
 let () =
-  let tests = [
-    "two_crossing_segments_have_no_bounded_faces", test_two_crossing_segments_have_no_bounded_faces;
-    "closed_square_is_one_face", test_closed_square_is_one_face;
-    "square_with_one_diagonal", test_square_with_one_diagonal;
-    "square_with_both_diagonals", test_square_with_both_diagonals;
-    "two_disjoint_squares", test_two_disjoint_squares;
-    "two_squares_sharing_an_edge", test_two_squares_sharing_an_edge;
-    "square_with_inner_square", test_square_with_inner_square;
-    "hit_test_diagonal_quadrants", test_hit_test_diagonal_quadrants;
-    "empty_input", test_empty_input;
-    "zero_length_segment", test_zero_length_segment;
-    "single_point_polyline", test_single_point_polyline;
-    "square_with_external_tail", test_square_with_external_tail;
-    "square_with_internal_tail", test_square_with_internal_tail;
-    "square_with_internal_tree", test_square_with_internal_tree;
-    "isolated_open_stroke", test_isolated_open_stroke;
-    "square_with_two_disjoint_holes", test_square_with_two_disjoint_holes;
-    "three_deep_nested", test_three_deep_nested;
-    "hit_test_in_hole", test_hit_test_in_hole;
-  ] in
-  let failed = ref 0 in
-  List.iter (fun (name, fn) ->
-    try
-      fn ();
-      print_endline ("ok " ^ name)
-    with e ->
-      incr failed;
-      print_endline ("FAIL " ^ name ^ ": " ^ Printexc.to_string e)
-  ) tests;
-  if !failed > 0 then exit 1
+  Alcotest.run "Planar" [
+    "planar", [
+      Alcotest.test_case "two_crossing_segments_have_no_bounded_faces" `Quick test_two_crossing_segments_have_no_bounded_faces;
+      Alcotest.test_case "closed_square_is_one_face" `Quick test_closed_square_is_one_face;
+      Alcotest.test_case "square_with_one_diagonal" `Quick test_square_with_one_diagonal;
+      Alcotest.test_case "square_with_both_diagonals" `Quick test_square_with_both_diagonals;
+      Alcotest.test_case "two_disjoint_squares" `Quick test_two_disjoint_squares;
+      Alcotest.test_case "two_squares_sharing_an_edge" `Quick test_two_squares_sharing_an_edge;
+      Alcotest.test_case "square_with_inner_square" `Quick test_square_with_inner_square;
+      Alcotest.test_case "hit_test_diagonal_quadrants" `Quick test_hit_test_diagonal_quadrants;
+      Alcotest.test_case "empty_input" `Quick test_empty_input;
+      Alcotest.test_case "zero_length_segment" `Quick test_zero_length_segment;
+      Alcotest.test_case "single_point_polyline" `Quick test_single_point_polyline;
+      Alcotest.test_case "square_with_external_tail" `Quick test_square_with_external_tail;
+      Alcotest.test_case "square_with_internal_tail" `Quick test_square_with_internal_tail;
+      Alcotest.test_case "square_with_internal_tree" `Quick test_square_with_internal_tree;
+      Alcotest.test_case "isolated_open_stroke" `Quick test_isolated_open_stroke;
+      Alcotest.test_case "square_with_two_disjoint_holes" `Quick test_square_with_two_disjoint_holes;
+      Alcotest.test_case "three_deep_nested" `Quick test_three_deep_nested;
+      Alcotest.test_case "hit_test_in_hole" `Quick test_hit_test_in_hole;
+    ];
+  ]

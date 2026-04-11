@@ -1,7 +1,7 @@
 (test
  (name canvas_test)
- (libraries jas lablgtk3))
+ (libraries jas lablgtk3 alcotest))
 
 (test
  (name pane_rendering_test)
- (libraries jas))
+ (libraries jas alcotest))

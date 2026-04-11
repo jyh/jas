@@ -1,14 +1,9 @@
-let run_test name f =
-  f ();
-  Printf.printf "  PASS: %s\n" name
+open Jas.Element
 
-let () =
-  let open Jas.Element in
-  Printf.printf "Menu tests:\n";
-
+let tests = [
   (* === group_selection tests === *)
 
-  run_test "group_selection groups 2 sibling rects" (fun () ->
+  Alcotest.test_case "group_selection groups 2 sibling rects" `Quick (fun () ->
     let r1 = make_rect 0.0 0.0 10.0 10.0 in
     let r2 = make_rect 20.0 20.0 10.0 10.0 in
     let layer = make_layer ~name:"L0" [|r1; r2|] in
@@ -30,7 +25,7 @@ let () =
       assert (Array.length children = 2)
     | _ -> assert false);
 
-  run_test "group_selection with fewer than 2 elements does nothing" (fun () ->
+  Alcotest.test_case "group_selection with fewer than 2 elements does nothing" `Quick (fun () ->
     let r1 = make_rect 0.0 0.0 10.0 10.0 in
     let layer = make_layer ~name:"L0" [|r1|] in
     let doc = Jas.Document.make_document [|layer|] in
@@ -45,7 +40,7 @@ let () =
 
   (* === ungroup_selection tests === *)
 
-  run_test "ungroup_selection ungroups a selected group" (fun () ->
+  Alcotest.test_case "ungroup_selection ungroups a selected group" `Quick (fun () ->
     let r1 = make_rect 0.0 0.0 10.0 10.0 in
     let r2 = make_rect 20.0 20.0 10.0 10.0 in
     let group = make_group [|r1; r2|] in
@@ -62,7 +57,7 @@ let () =
     (* Layer should now have 2 children (the ungrouped rects) *)
     assert (Array.length layer_children = 2));
 
-  run_test "ungroup_selection on non-group does nothing" (fun () ->
+  Alcotest.test_case "ungroup_selection on non-group does nothing" `Quick (fun () ->
     let r1 = make_rect 0.0 0.0 10.0 10.0 in
     let layer = make_layer ~name:"L0" [|r1|] in
     let doc = Jas.Document.make_document [|layer|] in
@@ -77,7 +72,7 @@ let () =
 
   (* === ungroup_all tests === *)
 
-  run_test "ungroup_all flattens nested groups" (fun () ->
+  Alcotest.test_case "ungroup_all flattens nested groups" `Quick (fun () ->
     let r1 = make_rect 0.0 0.0 10.0 10.0 in
     let r2 = make_rect 20.0 20.0 10.0 10.0 in
     let r3 = make_rect 40.0 40.0 10.0 10.0 in
@@ -92,7 +87,7 @@ let () =
     (* All 3 rects should be direct children of the layer *)
     assert (Array.length layer_children = 3));
 
-  run_test "ungroup_all preserves locked groups" (fun () ->
+  Alcotest.test_case "ungroup_all preserves locked groups" `Quick (fun () ->
     let r1 = make_rect 0.0 0.0 10.0 10.0 in
     let r2 = make_rect 20.0 20.0 10.0 10.0 in
     let locked_group = make_group ~locked:true [|r1; r2|] in
@@ -108,7 +103,7 @@ let () =
     | Group _ -> ()
     | _ -> assert false);
 
-  run_test "ungroup_all with no groups does nothing" (fun () ->
+  Alcotest.test_case "ungroup_all with no groups does nothing" `Quick (fun () ->
     let r1 = make_rect 0.0 0.0 10.0 10.0 in
     let r2 = make_rect 20.0 20.0 10.0 10.0 in
     let layer = make_layer ~name:"L0" [|r1; r2|] in
@@ -121,27 +116,27 @@ let () =
 
   (* === is_svg tests === *)
 
-  run_test "is_svg returns true for <svg> string" (fun () ->
+  Alcotest.test_case "is_svg returns true for <svg> string" `Quick (fun () ->
     assert (Jas.Menubar.is_svg "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"));
 
-  run_test "is_svg returns true for <?xml> string" (fun () ->
+  Alcotest.test_case "is_svg returns true for <?xml> string" `Quick (fun () ->
     assert (Jas.Menubar.is_svg "<?xml version=\"1.0\"?><svg></svg>"));
 
-  run_test "is_svg returns true with leading whitespace" (fun () ->
+  Alcotest.test_case "is_svg returns true with leading whitespace" `Quick (fun () ->
     assert (Jas.Menubar.is_svg "  \n  <svg></svg>"));
 
-  run_test "is_svg returns false for plain text" (fun () ->
+  Alcotest.test_case "is_svg returns false for plain text" `Quick (fun () ->
     assert (not (Jas.Menubar.is_svg "hello world")));
 
-  run_test "is_svg returns false for empty string" (fun () ->
+  Alcotest.test_case "is_svg returns false for empty string" `Quick (fun () ->
     assert (not (Jas.Menubar.is_svg "")));
 
-  run_test "is_svg returns false for HTML" (fun () ->
+  Alcotest.test_case "is_svg returns false for HTML" `Quick (fun () ->
     assert (not (Jas.Menubar.is_svg "<html><body></body></html>")));
 
   (* === lock_selection / unlock_all tests === *)
 
-  run_test "lock_selection locks selected elements" (fun () ->
+  Alcotest.test_case "lock_selection locks selected elements" `Quick (fun () ->
     let r1 = make_rect 0.0 0.0 10.0 10.0 in
     let r2 = make_rect 20.0 20.0 10.0 10.0 in
     let layer = make_layer ~name:"L0" [|r1; r2|] in
@@ -161,7 +156,7 @@ let () =
     (* Selection should be cleared after locking *)
     assert (Jas.Document.PathMap.is_empty doc.Jas.Document.selection));
 
-  run_test "unlock_all unlocks all locked elements" (fun () ->
+  Alcotest.test_case "unlock_all unlocks all locked elements" `Quick (fun () ->
     let r1 = make_rect ~locked:true 0.0 0.0 10.0 10.0 in
     let r2 = make_rect ~locked:true 20.0 20.0 10.0 10.0 in
     let layer = make_layer ~name:"L0" [|r1; r2|] in
@@ -175,7 +170,7 @@ let () =
     assert (not (is_locked layer_children.(0)));
     assert (not (is_locked layer_children.(1))));
 
-  run_test "lock then unlock round-trip" (fun () ->
+  Alcotest.test_case "lock then unlock round-trip" `Quick (fun () ->
     let r1 = make_rect 0.0 0.0 10.0 10.0 in
     let layer = make_layer ~name:"L0" [|r1|] in
     let doc = Jas.Document.make_document [|layer|] in
@@ -197,7 +192,7 @@ let () =
 
   (* === hide_selection / show_all tests === *)
 
-  run_test "hide_selection hides selected elements" (fun () ->
+  Alcotest.test_case "hide_selection hides selected elements" `Quick (fun () ->
     let r1 = make_rect 0.0 0.0 10.0 10.0 in
     let r2 = make_rect 20.0 20.0 10.0 10.0 in
     let layer = make_layer ~name:"L0" [|r1; r2|] in
@@ -217,7 +212,7 @@ let () =
     (* Selection should be cleared after hiding *)
     assert (Jas.Document.PathMap.is_empty doc.Jas.Document.selection));
 
-  run_test "show_all restores hidden elements" (fun () ->
+  Alcotest.test_case "show_all restores hidden elements" `Quick (fun () ->
     let r1 = set_visibility Invisible (make_rect 0.0 0.0 10.0 10.0) in
     let r2 = set_visibility Invisible (make_rect 20.0 20.0 10.0 10.0) in
     let layer = make_layer ~name:"L0" [|r1; r2|] in
@@ -231,7 +226,7 @@ let () =
     assert (get_visibility layer_children.(0) = Preview);
     assert (get_visibility layer_children.(1) = Preview));
 
-  run_test "hide then show round-trip" (fun () ->
+  Alcotest.test_case "hide then show round-trip" `Quick (fun () ->
     let r1 = make_rect 0.0 0.0 10.0 10.0 in
     let layer = make_layer ~name:"L0" [|r1|] in
     let doc = Jas.Document.make_document [|layer|] in
@@ -250,5 +245,9 @@ let () =
     ctrl#show_all;
     let layer_children = Jas.Document.children_of model#document.Jas.Document.layers.(0) in
     assert (get_visibility layer_children.(0) = Preview));
+]
 
-  Printf.printf "All menu tests passed.\n"
+let () =
+  Alcotest.run "Menu" [
+    "Menu tests", tests;
+  ]

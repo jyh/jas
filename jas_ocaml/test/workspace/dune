@@ -1,9 +1,9 @@
 (test
  (name workspace_layout_test)
  (modules workspace_layout_test)
- (libraries jas))
+ (libraries jas alcotest))
 
 (test
  (name pane_test)
  (modules pane_test)
- (libraries jas))
+ (libraries jas alcotest))

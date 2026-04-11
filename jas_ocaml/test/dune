@@ -4,4 +4,4 @@
 ; Run with: dune exec test/cross_language_test.exe
 (executable
  (name cross_language_test)
- (libraries jas))
+ (libraries jas alcotest))

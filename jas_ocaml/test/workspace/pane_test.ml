@@ -1,22 +1,13 @@
 open Jas.Pane
 
-let pass = ref 0
-let fail = ref 0
-
-let run name f =
-  try f (); incr pass; Printf.printf "  PASS: %s\n" name
-  with e -> incr fail; Printf.printf "  FAIL: %s — %s\n" name (Printexc.to_string e)
-
 let near a b = abs_float (a -. b) < 0.001
 
 (* ================================================================== *)
 (* Initialization & lookup                                            *)
 (* ================================================================== *)
 
-let () = Printf.printf "Pane tests:\n"
-
-let () =
-  run "default_three_pane_fills_viewport" (fun () ->
+let init_and_lookup = [
+  Alcotest.test_case "default_three_pane_fills_viewport" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     assert (Array.length pl.panes = 3);
     let toolbar = Option.get (pane_by_kind pl Toolbar) in
@@ -32,27 +23,27 @@ let () =
     assert (canvas.height = 700.0);
     assert (dock.height = 700.0));
 
-  run "default_three_pane_snap_count" (fun () ->
+  Alcotest.test_case "default_three_pane_snap_count" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     assert (List.length pl.snaps = 10));
 
-  run "pane_lookup_by_id" (fun () ->
+  Alcotest.test_case "pane_lookup_by_id" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     assert (find_pane pl 0 <> None);
     assert (find_pane pl 1 <> None);
     assert (find_pane pl 2 <> None));
 
-  run "pane_lookup_by_kind" (fun () ->
+  Alcotest.test_case "pane_lookup_by_kind" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     assert ((Option.get (pane_by_kind pl Toolbar)).kind = Toolbar);
     assert ((Option.get (pane_by_kind pl Canvas)).kind = Canvas);
     assert ((Option.get (pane_by_kind pl Dock)).kind = Dock));
 
-  run "pane_lookup_invalid_id" (fun () ->
+  Alcotest.test_case "pane_lookup_invalid_id" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     assert (find_pane pl 99 = None));
 
-  run "pane_config_defaults" (fun () ->
+  Alcotest.test_case "pane_config_defaults" `Quick (fun () ->
     let tc = config_for_kind Toolbar in
     assert (tc.min_width = min_toolbar_width);
     assert tc.fixed_width;
@@ -68,14 +59,15 @@ let () =
     (* collapsed_width drives collapsibility *)
     assert (tc.collapsed_width = None);
     assert (cc.collapsed_width = None);
-    assert (dc.collapsed_width = Some 36.0))
+    assert (dc.collapsed_width = Some 36.0));
+]
 
 (* ================================================================== *)
 (* Position & sizing                                                  *)
 (* ================================================================== *)
 
-let () =
-  run "set_pane_position_moves_pane" (fun () ->
+let position_and_sizing = [
+  Alcotest.test_case "set_pane_position_moves_pane" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let id = (Option.get (pane_by_kind pl Canvas)).id in
     set_pane_position pl id ~x:100.0 ~y:50.0;
@@ -83,7 +75,7 @@ let () =
     assert (p.x = 100.0);
     assert (p.y = 50.0));
 
-  run "set_pane_position_clears_snaps" (fun () ->
+  Alcotest.test_case "set_pane_position_clears_snaps" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
     let snaps_before = List.length pl.snaps in
@@ -96,7 +88,7 @@ let () =
     assert (not has_canvas_snap);
     assert (List.length pl.snaps < snaps_before));
 
-  run "resize_pane_clamps_min_toolbar" (fun () ->
+  Alcotest.test_case "resize_pane_clamps_min_toolbar" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let id = (Option.get (pane_by_kind pl Toolbar)).id in
     resize_pane pl id ~width:10.0 ~height:10.0;
@@ -104,7 +96,7 @@ let () =
     assert (p.width = min_toolbar_width);
     assert (p.height = min_toolbar_height));
 
-  run "resize_pane_clamps_min_canvas" (fun () ->
+  Alcotest.test_case "resize_pane_clamps_min_canvas" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let id = (Option.get (pane_by_kind pl Canvas)).id in
     resize_pane pl id ~width:10.0 ~height:10.0;
@@ -112,7 +104,7 @@ let () =
     assert (p.width = min_canvas_width);
     assert (p.height = min_canvas_height));
 
-  run "resize_pane_clamps_min_dock" (fun () ->
+  Alcotest.test_case "resize_pane_clamps_min_dock" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let id = (Option.get (pane_by_kind pl Dock)).id in
     resize_pane pl id ~width:10.0 ~height:10.0;
@@ -120,20 +112,21 @@ let () =
     assert (p.width = min_pane_dock_width);
     assert (p.height = min_pane_dock_height));
 
-  run "resize_pane_accepts_large_values" (fun () ->
+  Alcotest.test_case "resize_pane_accepts_large_values" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let id = (Option.get (pane_by_kind pl Canvas)).id in
     resize_pane pl id ~width:800.0 ~height:600.0;
     let p = Option.get (find_pane pl id) in
     assert (p.width = 800.0);
-    assert (p.height = 600.0))
+    assert (p.height = 600.0));
+]
 
 (* ================================================================== *)
 (* Snap detection                                                     *)
 (* ================================================================== *)
 
-let () =
-  run "detect_snaps_near_window_edge" (fun () ->
+let snap_detection = [
+  Alcotest.test_case "detect_snaps_near_window_edge" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
     set_pane_position pl canvas_id ~x:5.0 ~y:0.0;
@@ -142,7 +135,7 @@ let () =
       s.snap_pane = canvas_id && s.edge = Left && s.target = Window_target Left
     ) snaps));
 
-  run "detect_snaps_near_other_pane" (fun () ->
+  Alcotest.test_case "detect_snaps_near_other_pane" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
     let toolbar = Option.get (pane_by_kind pl Toolbar) in
@@ -154,20 +147,21 @@ let () =
       s.snap_pane = toolbar_id && s.edge = Right && s.target = Pane_target (canvas_id, Left)
     ) snaps));
 
-  run "detect_snaps_no_match" (fun () ->
+  Alcotest.test_case "detect_snaps_no_match" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
     set_pane_position pl canvas_id ~x:400.0 ~y:300.0;
     resize_pane pl canvas_id ~width:200.0 ~height:200.0;
     let snaps = detect_snaps pl ~dragged:canvas_id ~viewport_w:1000.0 ~viewport_h:700.0 in
-    assert (snaps = []))
+    assert (snaps = []));
+]
 
 (* ================================================================== *)
 (* Snap application                                                   *)
 (* ================================================================== *)
 
-let () =
-  run "apply_snaps_aligns_position" (fun () ->
+let snap_application = [
+  Alcotest.test_case "apply_snaps_aligns_position" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
     set_pane_position pl canvas_id ~x:5.0 ~y:3.0;
@@ -180,7 +174,7 @@ let () =
     assert (p.x = 0.0);
     assert (p.y = 0.0));
 
-  run "apply_snaps_aligns_via_normalized_pane_snap" (fun () ->
+  Alcotest.test_case "apply_snaps_aligns_via_normalized_pane_snap" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
     let toolbar_id = (Option.get (pane_by_kind pl Toolbar)).id in
@@ -192,7 +186,7 @@ let () =
     let p = Option.get (find_pane pl canvas_id) in
     assert (near p.x default_toolbar_width));
 
-  run "drag_canvas_snap_to_toolbar_full_workflow" (fun () ->
+  Alcotest.test_case "drag_canvas_snap_to_toolbar_full_workflow" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
     (* 1. Drag canvas away *)
@@ -219,7 +213,7 @@ let () =
     let border = shared_border_at pl ~x:default_toolbar_width ~y:350.0 ~tolerance:border_hit_tolerance in
     assert (border <> None));
 
-  run "apply_snaps_replaces_old" (fun () ->
+  Alcotest.test_case "apply_snaps_replaces_old" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
     let old_count = List.length pl.snaps in
@@ -230,7 +224,7 @@ let () =
     assert (List.length pl.snaps < old_count);
     assert (List.exists (fun s -> s.snap_pane = canvas_id && s.edge = Left) pl.snaps));
 
-  run "align_to_snaps_does_not_modify_snap_list" (fun () ->
+  Alcotest.test_case "align_to_snaps_does_not_modify_snap_list" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
     let toolbar_id = (Option.get (pane_by_kind pl Toolbar)).id in
@@ -244,14 +238,15 @@ let () =
     assert (List.length pl.snaps = snaps_before);
     let p = Option.get (find_pane pl canvas_id) in
     assert (near p.x default_toolbar_width);
-    assert (p.y = 0.0))
+    assert (p.y = 0.0));
+]
 
 (* ================================================================== *)
 (* Shared border                                                      *)
 (* ================================================================== *)
 
-let () =
-  run "shared_border_at_vertical" (fun () ->
+let shared_border = [
+  Alcotest.test_case "shared_border_at_vertical" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let toolbar = Option.get (pane_by_kind pl Toolbar) in
     let border_x = toolbar.x +. toolbar.width in
@@ -260,12 +255,12 @@ let () =
     let (_, orientation) = Option.get result in
     assert (orientation = Left));
 
-  run "shared_border_at_miss" (fun () ->
+  Alcotest.test_case "shared_border_at_miss" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let result = shared_border_at pl ~x:500.0 ~y:350.0 ~tolerance:border_hit_tolerance in
     assert (result = None));
 
-  run "drag_shared_border_widens_left_narrows_right" (fun () ->
+  Alcotest.test_case "drag_shared_border_widens_left_narrows_right" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let canvas = Option.get (pane_by_kind pl Canvas) in
     let border_x = canvas.x +. canvas.width in
@@ -281,7 +276,7 @@ let () =
     assert (near dock_w_after (dock_w_before -. 30.0));
     assert (near dock_x_after (dock_x_before +. 30.0)));
 
-  run "drag_shared_border_toolbar_is_fixed" (fun () ->
+  Alcotest.test_case "drag_shared_border_toolbar_is_fixed" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let toolbar = Option.get (pane_by_kind pl Toolbar) in
     let border_x = toolbar.x +. toolbar.width in
@@ -293,7 +288,7 @@ let () =
     let toolbar_w_after = (Option.get (pane_by_kind pl Toolbar)).width in
     assert (near toolbar_w_after toolbar_w_before));
 
-  run "drag_shared_border_respects_min_size" (fun () ->
+  Alcotest.test_case "drag_shared_border_respects_min_size" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let toolbar = Option.get (pane_by_kind pl Toolbar) in
     let border_x = toolbar.x +. toolbar.width in
@@ -302,7 +297,7 @@ let () =
     let toolbar2 = Option.get (pane_by_kind pl Toolbar) in
     assert (toolbar2.width >= min_toolbar_width));
 
-  run "drag_shared_border_propagates_to_chained_pane" (fun () ->
+  Alcotest.test_case "drag_shared_border_propagates_to_chained_pane" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let toolbar = Option.get (pane_by_kind pl Toolbar) in
     let border_x = toolbar.x +. toolbar.width in
@@ -310,14 +305,15 @@ let () =
     drag_shared_border pl ~snap_idx ~delta:30.0;
     let canvas = Option.get (pane_by_kind pl Canvas) in
     let dock = Option.get (pane_by_kind pl Dock) in
-    assert (near (canvas.x +. canvas.width) dock.x))
+    assert (near (canvas.x +. canvas.width) dock.x));
+]
 
 (* ================================================================== *)
 (* Z-order & visibility                                               *)
 (* ================================================================== *)
 
-let () =
-  run "bring_pane_to_front" (fun () ->
+let z_order_and_visibility = [
+  Alcotest.test_case "bring_pane_to_front" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let toolbar_id = (Option.get (pane_by_kind pl Toolbar)).id in
     let dock_id = (Option.get (pane_by_kind pl Dock)).id in
@@ -325,7 +321,7 @@ let () =
     bring_pane_to_front pl toolbar_id;
     assert (List.nth pl.z_order (List.length pl.z_order - 1) = toolbar_id));
 
-  run "pane_z_index_ordering" (fun () ->
+  Alcotest.test_case "pane_z_index_ordering" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
     let toolbar_id = (Option.get (pane_by_kind pl Toolbar)).id in
@@ -333,7 +329,7 @@ let () =
     assert (pane_z_index pl canvas_id < pane_z_index pl toolbar_id);
     assert (pane_z_index pl toolbar_id < pane_z_index pl dock_id));
 
-  run "hide_show_pane_round_trip" (fun () ->
+  Alcotest.test_case "hide_show_pane_round_trip" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     assert (is_pane_visible pl Toolbar);
     hide_pane pl Toolbar;
@@ -341,44 +337,46 @@ let () =
     show_pane pl Toolbar;
     assert (is_pane_visible pl Toolbar));
 
-  run "hide_pane_idempotent" (fun () ->
+  Alcotest.test_case "hide_pane_idempotent" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     hide_pane pl Dock;
     hide_pane pl Dock;
     assert (List.length pl.hidden_panes = 1));
 
-  run "show_pane_not_hidden_is_noop" (fun () ->
+  Alcotest.test_case "show_pane_not_hidden_is_noop" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let count_before = List.length pl.hidden_panes in
     show_pane pl Canvas;
-    assert (List.length pl.hidden_panes = count_before))
+    assert (List.length pl.hidden_panes = count_before));
+]
 
 (* ================================================================== *)
 (* Viewport resize                                                    *)
 (* ================================================================== *)
 
-let () =
-  run "on_viewport_resize_proportional" (fun () ->
+let viewport_resize = [
+  Alcotest.test_case "on_viewport_resize_proportional" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let canvas_w_before = (Option.get (pane_by_kind pl Canvas)).width in
     on_viewport_resize pl ~new_w:2000.0 ~new_h:700.0;
     let canvas_w_after = (Option.get (pane_by_kind pl Canvas)).width in
     assert (abs_float (canvas_w_after -. canvas_w_before *. 2.0) < 1.0));
 
-  run "on_viewport_resize_clamps_min" (fun () ->
+  Alcotest.test_case "on_viewport_resize_clamps_min" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     on_viewport_resize pl ~new_w:100.0 ~new_h:100.0;
     Array.iter (fun p ->
       assert (p.width >= p.config.min_width);
       assert (p.height >= p.config.min_height)
-    ) pl.panes)
+    ) pl.panes);
+]
 
 (* ================================================================== *)
 (* Utilities                                                          *)
 (* ================================================================== *)
 
-let () =
-  run "clamp_panes_offscreen" (fun () ->
+let utilities = [
+  Alcotest.test_case "clamp_panes_offscreen" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let id = (Option.get (pane_by_kind pl Canvas)).id in
     set_pane_position pl id ~x:5000.0 ~y:5000.0;
@@ -387,7 +385,7 @@ let () =
     assert (p.x <= 1000.0 -. min_pane_visible);
     assert (p.y <= 700.0 -. min_pane_visible));
 
-  run "toggle_canvas_maximized" (fun () ->
+  Alcotest.test_case "toggle_canvas_maximized" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     assert (not pl.canvas_maximized);
     toggle_canvas_maximized pl;
@@ -395,7 +393,7 @@ let () =
     toggle_canvas_maximized pl;
     assert (not pl.canvas_maximized));
 
-  run "repair_snaps_adds_missing" (fun () ->
+  Alcotest.test_case "repair_snaps_adds_missing" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     pl.snaps <- [];
     repair_snaps pl ~viewport_w:1000.0 ~viewport_h:700.0;
@@ -405,18 +403,19 @@ let () =
       s.snap_pane = toolbar_id && s.edge = Right && s.target = Pane_target (canvas_id, Left)
     ) pl.snaps));
 
-  run "repair_snaps_no_duplicates" (fun () ->
+  Alcotest.test_case "repair_snaps_no_duplicates" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let count_before = List.length pl.snaps in
     repair_snaps pl ~viewport_w:1000.0 ~viewport_h:700.0;
-    assert (List.length pl.snaps = count_before))
+    assert (List.length pl.snaps = count_before));
+]
 
 (* ================================================================== *)
 (* Tiling                                                             *)
 (* ================================================================== *)
 
-let () =
-  run "tile_panes_fills_viewport" (fun () ->
+let tiling = [
+  Alcotest.test_case "tile_panes_fills_viewport" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     tile_panes pl ~collapsed_override:None;
     let t = Option.get (pane_by_kind pl Toolbar) in
@@ -431,7 +430,7 @@ let () =
     assert (d.height = 700.0);
     assert (t.width = default_toolbar_width));
 
-  run "tile_panes_collapsed_dock" (fun () ->
+  Alcotest.test_case "tile_panes_collapsed_dock" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let dock_id = (Option.get (pane_by_kind pl Dock)).id in
     tile_panes pl ~collapsed_override:(Some (dock_id, 36.0));
@@ -441,7 +440,7 @@ let () =
     assert (near c.width (1000.0 -. default_toolbar_width -. 36.0));
     assert (near (d.x +. d.width) 1000.0));
 
-  run "tile_panes_clears_hidden" (fun () ->
+  Alcotest.test_case "tile_panes_clears_hidden" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     hide_pane pl Toolbar;
     hide_pane pl Dock;
@@ -449,7 +448,7 @@ let () =
     tile_panes pl ~collapsed_override:None;
     assert (pl.hidden_panes = []));
 
-  run "tile_panes_rebuilds_snaps" (fun () ->
+  Alcotest.test_case "tile_panes_rebuilds_snaps" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     pl.snaps <- [];
     tile_panes pl ~collapsed_override:None;
@@ -458,45 +457,48 @@ let () =
     let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
     assert (List.exists (fun s ->
       s.snap_pane = toolbar_id && s.edge = Right && s.target = Pane_target (canvas_id, Left)
-    ) pl.snaps))
+    ) pl.snaps));
+]
 
 (* ================================================================== *)
 (* show_pane brings to front                                         *)
 (* ================================================================== *)
 
-let () =
-  run "show_pane_brings_to_front" (fun () ->
+let show_pane_front = [
+  Alcotest.test_case "show_pane_brings_to_front" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let toolbar_id = (Option.get (pane_by_kind pl Toolbar)).id in
     hide_pane pl Toolbar;
     show_pane pl Toolbar;
-    assert (List.nth pl.z_order (List.length pl.z_order - 1) = toolbar_id))
+    assert (List.nth pl.z_order (List.length pl.z_order - 1) = toolbar_id));
+]
 
 (* ================================================================== *)
 (* hide_pane unmaximizes                                              *)
 (* ================================================================== *)
 
-let () =
-  run "hide_maximized_pane_unmaximizes" (fun () ->
+let hide_pane_unmaximizes = [
+  Alcotest.test_case "hide_maximized_pane_unmaximizes" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     toggle_canvas_maximized pl;
     assert pl.canvas_maximized;
     hide_pane pl Canvas;
     assert (not pl.canvas_maximized));
 
-  run "hide_non_maximizable_pane_preserves_maximized" (fun () ->
+  Alcotest.test_case "hide_non_maximizable_pane_preserves_maximized" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     toggle_canvas_maximized pl;
     assert pl.canvas_maximized;
     hide_pane pl Toolbar;
-    assert pl.canvas_maximized)
+    assert pl.canvas_maximized);
+]
 
 (* ================================================================== *)
 (* fixed-width border drag unsnaps                                    *)
 (* ================================================================== *)
 
-let () =
-  run "drag_shared_border_fixed_width_resizes_canvas" (fun () ->
+let fixed_width_border_drag = [
+  Alcotest.test_case "drag_shared_border_fixed_width_resizes_canvas" `Quick (fun () ->
     let pl = default_three_pane ~viewport_w:1000.0 ~viewport_h:700.0 in
     let toolbar_id = (Option.get (pane_by_kind pl Toolbar)).id in
     let canvas_id = (Option.get (pane_by_kind pl Canvas)).id in
@@ -509,10 +511,23 @@ let () =
     ) pl.snaps;
     drag_shared_border pl ~snap_idx:!snap_idx ~delta:30.0;
     assert ((Option.get (find_pane pl toolbar_id)).width = toolbar_w_before);
-    assert (abs_float ((Option.get (find_pane pl canvas_id)).width -. (canvas_w_before -. 30.0)) < 0.001))
+    assert (abs_float ((Option.get (find_pane pl canvas_id)).width -. (canvas_w_before -. 30.0)) < 0.001));
+]
 
 (* ================================================================== *)
 
 let () =
-  Printf.printf "\n%d passed, %d failed\n" !pass !fail;
-  if !fail > 0 then exit 1
+  Alcotest.run "Pane" [
+    "Initialization & lookup", init_and_lookup;
+    "Position & sizing", position_and_sizing;
+    "Snap detection", snap_detection;
+    "Snap application", snap_application;
+    "Shared border", shared_border;
+    "Z-order & visibility", z_order_and_visibility;
+    "Viewport resize", viewport_resize;
+    "Utilities", utilities;
+    "Tiling", tiling;
+    "show_pane brings to front", show_pane_front;
+    "hide_pane unmaximizes", hide_pane_unmaximizes;
+    "fixed-width border drag", fixed_width_border_drag;
+  ]

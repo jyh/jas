@@ -1,11 +1,11 @@
 (test
  (name element_test)
- (libraries jas))
+ (libraries jas alcotest))
 
 (test
  (name measure_test)
- (libraries jas))
+ (libraries jas alcotest))
 
 (test
  (name svg_test)
- (libraries jas str))
+ (libraries jas str alcotest))

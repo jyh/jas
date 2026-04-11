@@ -1,50 +1,44 @@
-let run_test name f =
-  f ();
-  Printf.printf "  PASS: %s\n" name
+let () = ignore (GMain.init ())
 
-let () =
-  ignore (GMain.init ());
+let model = Jas.Model.create ()
+let main_window, toolbar_fixed, notebook, _dock_box = Jas.Canvas.create_main_window ~get_model:(fun () -> model) ~on_open:(fun _ -> ()) ()
+let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:10 ~y:10 toolbar_fixed
+let controller = Jas.Controller.create ~model ()
+let canvas = Jas.Canvas_subwindow.create
+  ~model ~controller ~toolbar notebook
+let model2 = Jas.Model.create ~filename:"My Drawing" ()
+let controller2 = Jas.Controller.create ~model:model2 ()
+let canvas2 = Jas.Canvas_subwindow.create
+  ~model:model2 ~controller:controller2 ~toolbar notebook
 
-  let model = Jas.Model.create () in
-  let main_window, toolbar_fixed, notebook, _dock_box = Jas.Canvas.create_main_window ~get_model:(fun () -> model) ~on_open:(fun _ -> ()) () in
-  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:10 ~y:10 toolbar_fixed in
-  let controller = Jas.Controller.create ~model () in
-  let canvas = Jas.Canvas_subwindow.create
-    ~model ~controller ~toolbar notebook in
-  let model2 = Jas.Model.create ~filename:"My Drawing" () in
-  let controller2 = Jas.Controller.create ~model:model2 () in
-  let canvas2 = Jas.Canvas_subwindow.create
-    ~model:model2 ~controller:controller2 ~toolbar notebook in
-
-  Printf.printf "Canvas tests:\n";
-
-  run_test "main window creation" (fun () ->
+let tests = [
+  Alcotest.test_case "main window creation" `Quick (fun () ->
     assert (main_window#title = "Jas")
   );
 
-  run_test "toolbar initial tool is Selection" (fun () ->
+  Alcotest.test_case "toolbar initial tool is Selection" `Quick (fun () ->
     assert (toolbar#current_tool = Jas.Toolbar.Selection)
   );
 
-  run_test "toolbar select Direct_selection" (fun () ->
+  Alcotest.test_case "toolbar select Direct_selection" `Quick (fun () ->
     toolbar#select_tool Jas.Toolbar.Direct_selection;
     assert (toolbar#current_tool = Jas.Toolbar.Direct_selection)
   );
 
-  run_test "canvas subwindow default title starts with Untitled-" (fun () ->
+  Alcotest.test_case "canvas subwindow default title starts with Untitled-" `Quick (fun () ->
     assert (String.sub canvas#title 0 9 = "Untitled-")
   );
 
-  run_test "canvas subwindow named model title" (fun () ->
+  Alcotest.test_case "canvas subwindow named model title" `Quick (fun () ->
     assert (canvas2#title = "My Drawing")
   );
 
-  run_test "canvas title updates when model filename changes" (fun () ->
+  Alcotest.test_case "canvas title updates when model filename changes" `Quick (fun () ->
     model2#set_filename "Renamed";
     assert (canvas2#title = "Renamed")
   );
 
-  run_test "default bounding box values" (fun () ->
+  Alcotest.test_case "default bounding box values" `Quick (fun () ->
     let bbox = canvas#bbox in
     assert (bbox.Jas.Canvas_subwindow.bbox_x = 0.0);
     assert (bbox.Jas.Canvas_subwindow.bbox_y = 0.0);
@@ -52,33 +46,33 @@ let () =
     assert (bbox.Jas.Canvas_subwindow.bbox_height = 600.0)
   );
 
-  run_test "custom bounding box values" (fun () ->
+  Alcotest.test_case "custom bounding box values" `Quick (fun () ->
     let custom_bbox = Jas.Canvas_subwindow.make_bounding_box ~x:10.0 ~y:20.0 ~width:1024.0 ~height:768.0 () in
     assert (custom_bbox.Jas.Canvas_subwindow.bbox_x = 10.0);
     assert (custom_bbox.Jas.Canvas_subwindow.bbox_width = 1024.0)
   );
 
-  run_test "keyboard shortcuts: select Selection tool" (fun () ->
+  Alcotest.test_case "keyboard shortcuts: select Selection tool" `Quick (fun () ->
     toolbar#select_tool Jas.Toolbar.Selection;
     assert (toolbar#current_tool = Jas.Toolbar.Selection)
   );
 
-  run_test "keyboard shortcuts: select Direct_selection tool" (fun () ->
+  Alcotest.test_case "keyboard shortcuts: select Direct_selection tool" `Quick (fun () ->
     toolbar#select_tool Jas.Toolbar.Direct_selection;
     assert (toolbar#current_tool = Jas.Toolbar.Direct_selection)
   );
 
-  run_test "keyboard shortcuts: select Line tool" (fun () ->
+  Alcotest.test_case "keyboard shortcuts: select Line tool" `Quick (fun () ->
     toolbar#select_tool Jas.Toolbar.Line;
     assert (toolbar#current_tool = Jas.Toolbar.Line)
   );
 
-  run_test "keyboard shortcuts: select Rect tool" (fun () ->
+  Alcotest.test_case "keyboard shortcuts: select Rect tool" `Quick (fun () ->
     toolbar#select_tool Jas.Toolbar.Rect;
     assert (toolbar#current_tool = Jas.Toolbar.Rect)
   );
 
-  run_test "add line element via controller" (fun () ->
+  Alcotest.test_case "add line element via controller" `Quick (fun () ->
     let model3 = Jas.Model.create () in
     let ctrl3 = Jas.Controller.create ~model:model3 () in
     let line = Jas.Element.Line {
@@ -107,7 +101,7 @@ let () =
     end
   );
 
-  run_test "add rect element via controller" (fun () ->
+  Alcotest.test_case "add rect element via controller" `Quick (fun () ->
     let model3 = Jas.Model.create () in
     let ctrl3 = Jas.Controller.create ~model:model3 () in
     let rect = Jas.Element.Rect {
@@ -135,5 +129,9 @@ let () =
     | _ -> assert false
     end
   );
+]
 
-  Printf.printf "All canvas tests passed.\n"
+let () =
+  Alcotest.run "Canvas" [
+    "Canvas tests", tests;
+  ]
