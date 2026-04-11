@@ -60,6 +60,21 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
         """Extract default values from state definitions."""
         return {name: defn.get("default") for name, defn in ws.get("state", {}).items()}
 
+    def _pane_configs(ws: dict) -> dict:
+        """Extract layout config for each pane: default_position, fixed_width, flex, min_width, collapsed_width."""
+        configs = {}
+        layout = ws.get("layout", {})
+        for child in layout.get("children", []):
+            if child.get("type") == "pane" and "id" in child:
+                configs[child["id"]] = {
+                    "default_position": child.get("default_position", {}),
+                    "fixed_width": child.get("fixed_width", False),
+                    "flex": child.get("flex", False),
+                    "min_width": child.get("min_width", 50),
+                    "collapsed_width": child.get("collapsed_width"),
+                }
+        return configs
+
     @app.route("/")
     def index():
         ws = _get_ws()
@@ -87,11 +102,13 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
         state_json = json.dumps(_state_defaults(ws))
         actions_json = json.dumps(ws.get("actions", {}))
         shortcuts_json = json.dumps(ws.get("shortcuts", []))
+        positions_json = json.dumps(_pane_configs(ws))
 
         return render_template("normal.html", ws=ws, menubar_html=menubar_html,
                                layout_html=layout_html, dialogs_html=dialogs_html,
                                state_json=state_json, actions_json=actions_json,
-                               shortcuts_json=shortcuts_json)
+                               shortcuts_json=shortcuts_json,
+                               positions_json=positions_json)
 
     @app.route("/api/spec/<element_id>")
     def element_spec(element_id):

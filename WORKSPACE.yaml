@@ -514,7 +514,7 @@ actions:
     description: "Arrange all visible panes in a tiled grid"
     category: window
     effects:
-      - log: "tile_panes"
+      - tile: { container: main }
 
   # ── Workspace ─────────────────────────────────────────────
   save_workspace_as:
@@ -526,7 +526,7 @@ actions:
     description: "Reset pane layout to factory defaults"
     category: workspace
     effects:
-      - log: "reset_workspace"
+      - reset_layout: { container: main }
   revert_workspace:
     description: "Revert pane layout to last saved version"
     category: workspace
@@ -777,6 +777,7 @@ layout:
       default_position: { x: 0, y: 0, width: 72, height: 900 }
       min_width: 72
       max_width: 72
+      fixed_width: true
       style:
         background: "{{theme.colors.pane_bg}}"
         border: "1px solid {{theme.colors.border}}"
@@ -1148,6 +1149,8 @@ layout:
         modified). Supports zoom and scroll. Can be maximized to fill
         the viewport.
       default_position: { x: 72, y: 0, width: 888, height: 900 }
+      min_width: 200
+      flex: true
       style:
         background: "{{theme.colors.window_bg}}"
         border: "1px solid {{theme.colors.border}}"
@@ -1216,6 +1219,7 @@ layout:
       default_position: { x: 960, y: 0, width: 240, height: 900 }
       min_width: 150
       max_width: 500
+      collapsed_width: 36
       style:
         background: "{{theme.colors.pane_bg}}"
         border: "1px solid {{theme.colors.border}}"
