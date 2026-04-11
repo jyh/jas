@@ -1,0 +1,128 @@
+/* Dark theme and pane system styles for normal mode */
+
+.jas-pane-system {
+    position: relative;
+    width: 100%;
+    height: calc(100vh - 28px);
+    overflow: hidden;
+}
+
+/* Pane */
+.jas-pane {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+
+.jas-pane-title {
+    height: 20px;
+    background: var(--jas-title-bar-bg, #383838);
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    cursor: grab;
+    font-size: 11px;
+    color: var(--jas-title-bar-text, #d9d9d9);
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.jas-pane-title:active {
+    cursor: grabbing;
+}
+
+.jas-pane-content {
+    flex: 1;
+    overflow: auto;
+}
+
+/* Edge resize handles */
+.jas-edge-handle {
+    position: absolute;
+    z-index: 10;
+    background: transparent;
+}
+.jas-edge-handle:hover {
+    background: var(--jas-handle-hover, rgba(74,144,217,0.3));
+}
+.jas-edge-handle.left   { left: 0; top: 0; width: 6px; height: 100%; cursor: ew-resize; }
+.jas-edge-handle.right  { right: 0; top: 0; width: 6px; height: 100%; cursor: ew-resize; }
+.jas-edge-handle.top    { left: 6px; top: 0; width: calc(100% - 12px); height: 6px; cursor: ns-resize; }
+.jas-edge-handle.bottom { left: 6px; bottom: 0; width: calc(100% - 12px); height: 6px; cursor: ns-resize; }
+
+/* Tool grid */
+.jas-grid {
+    padding: 4px 2px;
+}
+
+.jas-tool-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--jas-text, #ccc);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.1s;
+}
+.jas-tool-btn:hover {
+    background: var(--jas-button-checked, #505050);
+    border-color: transparent;
+    color: var(--jas-text, #ccc);
+}
+.jas-tool-btn.active,
+.jas-tool-btn[aria-pressed="true"] {
+    background: var(--jas-button-checked, #505050);
+    border-color: transparent;
+}
+
+/* Color swatches */
+.jas-color-swatch {
+    cursor: pointer;
+    border-radius: 1px;
+}
+.jas-color-swatch:hover {
+    box-shadow: 0 0 0 1px var(--jas-accent, #4a90d9);
+}
+
+/* Canvas placeholder */
+.jas-canvas {
+    border: 1px solid var(--jas-border, #555);
+}
+
+/* Panel */
+.jas-panel {
+    border-bottom: 1px solid var(--jas-border, #555);
+}
+
+/* Placeholder */
+.jas-placeholder {
+    margin: 4px;
+}
+
+/* Unknown element */
+.jas-unknown {
+    margin: 2px;
+}
+
+/* Tab overrides for dark theme */
+.nav-tabs {
+    border-bottom-color: var(--jas-border, #555);
+}
+.nav-tabs .nav-link {
+    color: var(--jas-text-dim, #999);
+    border-color: transparent;
+    padding: 2px 10px;
+    font-size: 11px;
+}
+.nav-tabs .nav-link:hover {
+    color: var(--jas-text, #ccc);
+    border-color: transparent;
+}
+.nav-tabs .nav-link.active {
+    color: var(--jas-text, #ccc);
+    background: var(--jas-tab-active, #4a4a4a);
+    border-color: var(--jas-border, #555);
+    border-bottom-color: var(--jas-tab-active, #4a4a4a);
+}
