@@ -481,22 +481,24 @@ class ColorPickerDialog(QDialog):
     def _build_ui(self):
         main_layout = QHBoxLayout(self)
 
-        # Left: gradient + colorbar
+        # Left column: title + gradient/colorbar + Only Web Colors
         left = QVBoxLayout()
         top_row = QHBoxLayout()
         lbl = QLabel("Select Color:")
         lbl.setStyleSheet("font-weight: bold;")
         top_row.addWidget(lbl)
-        top_row.addStretch()
-        self._eyedropper_btn = QPushButton("Eyedropper")
-        self._eyedropper_btn.setFixedWidth(80)
+        # Eyedropper button with pipette icon
+        self._eyedropper_btn = QPushButton("\U0001f4a7")
+        self._eyedropper_btn.setFixedSize(24, 24)
+        self._eyedropper_btn.setToolTip("Sample a color from the screen")
         top_row.addWidget(self._eyedropper_btn)
+        top_row.addStretch()
         left.addLayout(top_row)
 
         gradient_row = QHBoxLayout()
         self._gradient = GradientWidget(self._state)
         gradient_row.addWidget(self._gradient)
-        gradient_row.addSpacing(8)
+        gradient_row.addSpacing(4)
         self._colorbar = ColorbarWidget(self._state)
         gradient_row.addWidget(self._colorbar)
         left.addLayout(gradient_row)
@@ -506,12 +508,24 @@ class ColorPickerDialog(QDialog):
         main_layout.addLayout(left)
         main_layout.addSpacing(12)
 
-        # Middle: radio buttons and text inputs
-        mid = QGridLayout()
+        # Right column: swatch + HSB/buttons + RGB/CMYK + hex
+        right_col = QVBoxLayout()
+
+        # Color swatch (above HSB)
+        self._swatch = SwatchWidget()
+        r, g, b, _ = self._initial_color.to_rgba()
+        qc = QColor(round(r * 255), round(g * 255), round(b * 255))
+        self._swatch.set_old_color(qc)
+        self._swatch.set_new_color(qc)
+        right_col.addWidget(self._swatch)
+        right_col.addSpacing(4)
+
+        # HSB on left, OK/Cancel on right
+        hsb_buttons = QHBoxLayout()
+
+        hsb_grid = QGridLayout()
         self._radios = {}
         self._inputs = {}
-
-        # HSB
         for row, (ch, label) in enumerate([
             (RadioChannel.H, "H:"),
             (RadioChannel.S, "S:"),
@@ -521,67 +535,75 @@ class ColorPickerDialog(QDialog):
             if ch == RadioChannel.H:
                 radio.setChecked(True)
             self._radios[ch] = radio
-            mid.addWidget(radio, row, 0)
+            hsb_grid.addWidget(radio, row, 0)
             inp = QLineEdit()
             inp.setFixedWidth(50)
             self._inputs[ch] = inp
-            mid.addWidget(inp, row, 1)
+            hsb_grid.addWidget(inp, row, 1)
             suffix = QLabel("\u00b0" if ch == RadioChannel.H else "%")
-            mid.addWidget(suffix, row, 2)
+            hsb_grid.addWidget(suffix, row, 2)
+        hsb_buttons.addLayout(hsb_grid)
+        hsb_buttons.addSpacing(12)
 
-        # RGB
+        # OK/Cancel/Swatches buttons
+        btn_col = QVBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.setFixedWidth(80)
+        ok_btn.clicked.connect(self.accept)
+        btn_col.addWidget(ok_btn)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedWidth(80)
+        cancel_btn.clicked.connect(self.reject)
+        btn_col.addWidget(cancel_btn)
+        swatches_btn = QPushButton("Color Swatches")
+        swatches_btn.setFixedWidth(80)
+        swatches_btn.setEnabled(False)
+        btn_col.addWidget(swatches_btn)
+        hsb_buttons.addLayout(btn_col)
+
+        right_col.addLayout(hsb_buttons)
+
+        # RGB + CMYK side by side
+        rgb_cmyk = QHBoxLayout()
+        rgb_grid = QGridLayout()
         for row, (ch, label) in enumerate([
             (RadioChannel.R, "R:"),
             (RadioChannel.G, "G:"),
             (RadioChannel.BLUE, "B:"),
-        ], start=3):
+        ]):
             radio = QRadioButton(label)
             self._radios[ch] = radio
-            mid.addWidget(radio, row, 0)
+            rgb_grid.addWidget(radio, row, 0)
             inp = QLineEdit()
             inp.setFixedWidth(50)
             self._inputs[ch] = inp
-            mid.addWidget(inp, row, 1)
+            rgb_grid.addWidget(inp, row, 1)
+        rgb_cmyk.addLayout(rgb_grid)
+        rgb_cmyk.addSpacing(8)
 
-        # CMYK labels and inputs (no radio buttons)
+        cmyk_grid = QGridLayout()
         self._cmyk_inputs = {}
-        for row, label in enumerate(["C:", "M:", "Y:", "K:"], start=3):
-            lbl = QLabel(label)
-            mid.addWidget(lbl, row, 3)
+        for row, label in enumerate(["C:", "M:", "Y:", "K:"]):
+            cmyk_grid.addWidget(QLabel(label), row, 0)
             inp = QLineEdit()
             inp.setFixedWidth(50)
             self._cmyk_inputs[label[0]] = inp
-            mid.addWidget(inp, row, 4)
-            mid.addWidget(QLabel("%"), row, 5)
+            cmyk_grid.addWidget(inp, row, 1)
+            cmyk_grid.addWidget(QLabel("%"), row, 2)
+        rgb_cmyk.addLayout(cmyk_grid)
+
+        right_col.addLayout(rgb_cmyk)
 
         # Hex
-        hex_lbl = QLabel("#")
-        mid.addWidget(hex_lbl, 7, 0)
+        hex_row = QHBoxLayout()
+        hex_row.addWidget(QLabel("#"))
         self._hex_input = QLineEdit()
         self._hex_input.setFixedWidth(70)
-        mid.addWidget(self._hex_input, 7, 1, 1, 2)
+        hex_row.addWidget(self._hex_input)
+        hex_row.addStretch()
+        right_col.addLayout(hex_row)
 
-        main_layout.addLayout(mid)
-        main_layout.addSpacing(12)
-
-        # Right: swatch + buttons
-        right = QVBoxLayout()
-        self._swatch = SwatchWidget()
-        r, g, b, _ = self._initial_color.to_rgba()
-        qc = QColor(round(r * 255), round(g * 255), round(b * 255))
-        self._swatch.set_old_color(qc)
-        self._swatch.set_new_color(qc)
-        right.addWidget(self._swatch)
-        right.addStretch()
-
-        btn_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel)
-        btn_box.accepted.connect(self.accept)
-        btn_box.rejected.connect(self.reject)
-        right.addWidget(btn_box)
-
-        main_layout.addLayout(right)
+        main_layout.addLayout(right_col)
 
     def _connect_signals(self):
         self._gradient.clicked.connect(self._on_gradient_click)
