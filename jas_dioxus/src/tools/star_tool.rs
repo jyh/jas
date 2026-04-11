@@ -105,8 +105,8 @@ impl CanvasTool for StarTool {
                 let pts = star_points(start_x, start_y, x, y, STAR_POINTS);
                 let elem = Element::Polygon(PolygonElem {
                     points: pts,
-                    fill: None,
-                    stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+                    fill: model.default_fill,
+                    stroke: model.default_stroke,
                     common: CommonProps::default(),
                 });
                 Controller::add_element(model, elem);

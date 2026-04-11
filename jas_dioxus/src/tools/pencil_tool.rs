@@ -54,8 +54,8 @@ impl PencilTool {
 
         let elem = Element::Path(PathElem {
             d: cmds,
-            fill: None,
-            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            fill: model.default_fill,
+            stroke: model.default_stroke,
             common: CommonProps::default(),
         });
         Controller::add_element(model, elem);

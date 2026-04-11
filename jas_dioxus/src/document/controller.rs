@@ -12,7 +12,7 @@ use crate::document::document::{
 use crate::document::model::Model;
 use crate::geometry::element::{
     control_point_count, control_points, move_control_points,
-    move_path_handle, Element,
+    move_path_handle, with_fill, with_stroke, Element, Fill, Stroke,
 };
 use crate::algorithms::hit_test::{element_intersects_polygon, element_intersects_rect, point_in_rect};
 
@@ -186,6 +186,30 @@ impl Controller {
             if let Some(elem) = doc.get_element(&es.path) {
                 let new_elem = move_control_points(elem, &es.kind, dx, dy);
                 new_doc = new_doc.replace_element(&es.path, new_elem);
+            }
+        }
+        model.set_document(new_doc);
+    }
+
+    /// Set the fill of all selected elements.
+    pub fn set_selection_fill(model: &mut Model, fill: Option<Fill>) {
+        let doc = model.document().clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                new_doc = new_doc.replace_element(&es.path, with_fill(elem, fill));
+            }
+        }
+        model.set_document(new_doc);
+    }
+
+    /// Set the stroke of all selected elements.
+    pub fn set_selection_stroke(model: &mut Model, stroke: Option<Stroke>) {
+        let doc = model.document().clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                new_doc = new_doc.replace_element(&es.path, with_stroke(elem, stroke));
             }
         }
         model.set_document(new_doc);
@@ -689,10 +713,77 @@ fn toggle_selection(current: &Selection, new: &Selection) -> Selection {
     result
 }
 
+// ---------------------------------------------------------------------------
+// Selection fill/stroke summaries
+// ---------------------------------------------------------------------------
+
+use crate::document::document::Document;
+
+/// Summary of the fill state across a selection.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FillSummary {
+    /// No elements are selected.
+    NoSelection,
+    /// All selected elements have the same fill (or all are None).
+    Uniform(Option<Fill>),
+    /// Selected elements differ in fill.
+    Mixed,
+}
+
+/// Summary of the stroke state across a selection.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StrokeSummary {
+    /// No elements are selected.
+    NoSelection,
+    /// All selected elements have the same stroke color (or all are None).
+    Uniform(Option<Stroke>),
+    /// Selected elements differ in stroke.
+    Mixed,
+}
+
+/// Compute the fill summary for the current selection.
+pub fn selection_fill_summary(doc: &Document) -> FillSummary {
+    if doc.selection.is_empty() {
+        return FillSummary::NoSelection;
+    }
+    let mut first: Option<Option<Fill>> = None;
+    for es in &doc.selection {
+        let fill = doc.get_element(&es.path).and_then(|e| e.fill()).copied();
+        match &first {
+            None => first = Some(fill),
+            Some(prev) => {
+                if *prev != fill {
+                    return FillSummary::Mixed;
+                }
+            }
+        }
+    }
+    FillSummary::Uniform(first.unwrap_or(None))
+}
+
+/// Compute the stroke summary for the current selection.
+pub fn selection_stroke_summary(doc: &Document) -> StrokeSummary {
+    if doc.selection.is_empty() {
+        return StrokeSummary::NoSelection;
+    }
+    let mut first: Option<Option<Stroke>> = None;
+    for es in &doc.selection {
+        let stroke = doc.get_element(&es.path).and_then(|e| e.stroke()).copied();
+        match &first {
+            None => first = Some(stroke),
+            Some(prev) => {
+                if *prev != stroke {
+                    return StrokeSummary::Mixed;
+                }
+            }
+        }
+    }
+    StrokeSummary::Uniform(first.unwrap_or(None))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::document::Document;
     use crate::geometry::element::*;
 
     fn make_rect(x: f64, y: f64, w: f64, h: f64) -> Element {
@@ -1378,5 +1469,95 @@ mod tests {
         // Behaviour may vary; if hit, the path should contain [0, 0].
         // We just assert "selection not empty" as the loose check.
         let _ = sel_paths(&model);
+    }
+
+    // ----------------------------------------------------------------------
+    // set_selection_fill / set_selection_stroke
+    // ----------------------------------------------------------------------
+
+    #[test]
+    fn set_selection_fill_updates_rect() {
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        // add_element selects the new element
+        let red = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
+        Controller::set_selection_fill(&mut model, red);
+        let elem = model.document().get_element(&vec![0, 0]).unwrap();
+        assert_eq!(elem.fill(), Some(&Fill::new(Color::rgb(1.0, 0.0, 0.0))));
+    }
+
+    #[test]
+    fn set_selection_stroke_updates_line() {
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_line(0.0, 0.0, 50.0, 50.0));
+        let blue = Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 3.0));
+        Controller::set_selection_stroke(&mut model, blue);
+        let elem = model.document().get_element(&vec![0, 0]).unwrap();
+        assert_eq!(elem.stroke(), Some(&Stroke::new(Color::rgb(0.0, 0.0, 1.0), 3.0)));
+    }
+
+    #[test]
+    fn set_selection_fill_no_selection_noop() {
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        // Clear selection
+        Controller::set_selection(&mut model, vec![]);
+        let gen_before = model.document().selection.len();
+        Controller::set_selection_fill(&mut model, Some(Fill::new(Color::WHITE)));
+        assert_eq!(model.document().selection.len(), gen_before);
+    }
+
+    // ----------------------------------------------------------------------
+    // fill / stroke summary
+    // ----------------------------------------------------------------------
+
+    #[test]
+    fn fill_summary_no_selection() {
+        let doc = Document::default();
+        assert_eq!(selection_fill_summary(&doc), FillSummary::NoSelection);
+    }
+
+    #[test]
+    fn fill_summary_single_element() {
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        let doc = model.document();
+        match selection_fill_summary(doc) {
+            FillSummary::Uniform(Some(f)) => assert_eq!(f.color, Color::BLACK),
+            other => panic!("expected Uniform(Some(...)), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fill_summary_uniform_same() {
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::add_element(&mut model, make_rect(20.0, 20.0, 10.0, 10.0));
+        Controller::select_all(&mut model);
+        let doc = model.document();
+        match selection_fill_summary(doc) {
+            FillSummary::Uniform(Some(f)) => assert_eq!(f.color, Color::BLACK),
+            other => panic!("expected Uniform(Some(...)), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fill_summary_mixed() {
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        // Change first rect's fill to red
+        Controller::set_selection_fill(&mut model, Some(Fill::new(Color::rgb(1.0, 0.0, 0.0))));
+        Controller::add_element(&mut model, make_rect(20.0, 20.0, 10.0, 10.0));
+        Controller::select_all(&mut model);
+        assert_eq!(selection_fill_summary(model.document()), FillSummary::Mixed);
+    }
+
+    #[test]
+    fn stroke_summary_uniform_none() {
+        let mut model = Model::default();
+        // make_rect has stroke: None
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        let doc = model.document();
+        assert_eq!(selection_stroke_summary(doc), StrokeSummary::Uniform(None));
     }
 }

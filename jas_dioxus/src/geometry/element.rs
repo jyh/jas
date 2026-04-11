@@ -103,6 +103,28 @@ impl Color {
         }
     }
 
+    /// Convert to a 6-character lowercase hex string (no `#` prefix).
+    pub fn to_hex(&self) -> String {
+        let (r, g, b, _) = self.to_rgba();
+        let ri = (r * 255.0).round() as u8;
+        let gi = (g * 255.0).round() as u8;
+        let bi = (b * 255.0).round() as u8;
+        format!("{ri:02x}{gi:02x}{bi:02x}")
+    }
+
+    /// Parse a 6-character hex string into an opaque RGB color.
+    /// An optional leading `#` is stripped.
+    pub fn from_hex(s: &str) -> Option<Self> {
+        let s = s.strip_prefix('#').unwrap_or(s);
+        if s.len() != 6 {
+            return None;
+        }
+        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+        Some(Self::rgb(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0))
+    }
+
     /// Convert to (c, m, y, k, a) with all components in [0, 1].
     pub fn to_cmyka(&self) -> (f64, f64, f64, f64, f64) {
         match *self {
@@ -1665,6 +1687,39 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
     }
 }
 
+/// Return a copy of the element with its fill replaced.
+/// Elements that do not support fill (Line, Group, Layer) are returned unchanged.
+pub fn with_fill(elem: &Element, fill: Option<Fill>) -> Element {
+    match elem {
+        Element::Rect(e) => Element::Rect(RectElem { fill, ..e.clone() }),
+        Element::Circle(e) => Element::Circle(CircleElem { fill, ..e.clone() }),
+        Element::Ellipse(e) => Element::Ellipse(EllipseElem { fill, ..e.clone() }),
+        Element::Polyline(e) => Element::Polyline(PolylineElem { fill, ..e.clone() }),
+        Element::Polygon(e) => Element::Polygon(PolygonElem { fill, ..e.clone() }),
+        Element::Path(e) => Element::Path(PathElem { fill, ..e.clone() }),
+        Element::Text(e) => Element::Text(TextElem { fill, ..e.clone() }),
+        Element::TextPath(e) => Element::TextPath(TextPathElem { fill, ..e.clone() }),
+        Element::Line(_) | Element::Group(_) | Element::Layer(_) => elem.clone(),
+    }
+}
+
+/// Return a copy of the element with its stroke replaced.
+/// Elements that do not support stroke (Group, Layer) are returned unchanged.
+pub fn with_stroke(elem: &Element, stroke: Option<Stroke>) -> Element {
+    match elem {
+        Element::Line(e) => Element::Line(LineElem { stroke, ..e.clone() }),
+        Element::Rect(e) => Element::Rect(RectElem { stroke, ..e.clone() }),
+        Element::Circle(e) => Element::Circle(CircleElem { stroke, ..e.clone() }),
+        Element::Ellipse(e) => Element::Ellipse(EllipseElem { stroke, ..e.clone() }),
+        Element::Polyline(e) => Element::Polyline(PolylineElem { stroke, ..e.clone() }),
+        Element::Polygon(e) => Element::Polygon(PolygonElem { stroke, ..e.clone() }),
+        Element::Path(e) => Element::Path(PathElem { stroke, ..e.clone() }),
+        Element::Text(e) => Element::Text(TextElem { stroke, ..e.clone() }),
+        Element::TextPath(e) => Element::TextPath(TextPathElem { stroke, ..e.clone() }),
+        Element::Group(_) | Element::Layer(_) => elem.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2270,5 +2325,117 @@ mod tests {
     #[test]
     fn stroke_default_opacity() {
         assert_eq!(Stroke::new(Color::BLACK, 1.0).opacity, 1.0);
+    }
+
+    // --- with_fill / with_stroke ---
+
+    #[test]
+    fn with_fill_sets_fill_on_rect() {
+        let r = rect(10.0, 20.0, 100.0, 50.0);
+        let red_fill = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
+        let r2 = with_fill(&r, red_fill);
+        assert_eq!(r2.fill(), Some(&Fill::new(Color::rgb(1.0, 0.0, 0.0))));
+    }
+
+    #[test]
+    fn with_fill_on_line_is_noop() {
+        let line = Element::Line(LineElem {
+            x1: 0.0, y1: 0.0, x2: 100.0, y2: 100.0,
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            common: CommonProps::default(),
+        });
+        let red_fill = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
+        let line2 = with_fill(&line, red_fill);
+        // Line has no fill field, so it should be unchanged
+        assert_eq!(line2.fill(), None);
+    }
+
+    #[test]
+    fn with_stroke_sets_stroke_on_path() {
+        let path = Element::Path(PathElem {
+            d: vec![],
+            fill: None,
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            common: CommonProps::default(),
+        });
+        let blue_stroke = Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 2.0));
+        let path2 = with_stroke(&path, blue_stroke);
+        assert_eq!(path2.stroke(), Some(&Stroke::new(Color::rgb(0.0, 0.0, 1.0), 2.0)));
+    }
+
+    #[test]
+    fn with_fill_on_group_is_noop() {
+        let group = Element::Group(GroupElem {
+            children: vec![],
+            common: CommonProps::default(),
+        });
+        let red_fill = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
+        let group2 = with_fill(&group, red_fill);
+        assert_eq!(group2.fill(), None);
+    }
+
+    #[test]
+    fn with_stroke_none_clears_stroke() {
+        let r = rect(10.0, 20.0, 100.0, 50.0);
+        // First give it a stroke
+        let r2 = with_stroke(&r, Some(Stroke::new(Color::BLACK, 1.0)));
+        assert!(r2.stroke().is_some());
+        // Now clear it
+        let r3 = with_stroke(&r2, None);
+        assert_eq!(r3.stroke(), None);
+    }
+
+    // --- Color::to_hex / Color::from_hex ---
+
+    #[test]
+    fn color_to_hex_black() {
+        assert_eq!(Color::BLACK.to_hex(), "000000");
+    }
+
+    #[test]
+    fn color_to_hex_red() {
+        assert_eq!(Color::rgb(1.0, 0.0, 0.0).to_hex(), "ff0000");
+    }
+
+    #[test]
+    fn color_to_hex_white() {
+        assert_eq!(Color::WHITE.to_hex(), "ffffff");
+    }
+
+    #[test]
+    fn color_from_hex_valid() {
+        let c = Color::from_hex("ff0000").unwrap();
+        let (r, g, b, _) = c.to_rgba();
+        assert_eq!(r, 1.0);
+        assert_eq!(g, 0.0);
+        assert_eq!(b, 0.0);
+    }
+
+    #[test]
+    fn color_from_hex_with_hash() {
+        let c = Color::from_hex("#00ff00").unwrap();
+        let (r, g, b, _) = c.to_rgba();
+        assert_eq!(r, 0.0);
+        assert_near(g, 1.0, "green");
+        assert_eq!(b, 0.0);
+    }
+
+    #[test]
+    fn color_from_hex_invalid_returns_none() {
+        assert!(Color::from_hex("xyz").is_none());
+        assert!(Color::from_hex("").is_none());
+        assert!(Color::from_hex("gg0000").is_none());
+    }
+
+    #[test]
+    fn color_hex_roundtrip() {
+        let c = Color::rgb(0.5019607843137255, 0.25098039215686274, 0.7529411764705882);
+        let hex = c.to_hex();
+        let c2 = Color::from_hex(&hex).unwrap();
+        let (r1, g1, b1, _) = c.to_rgba();
+        let (r2, g2, b2, _) = c2.to_rgba();
+        assert!((r1 - r2).abs() < 0.004);
+        assert!((g1 - g2).abs() < 0.004);
+        assert!((b1 - b2).abs() < 0.004);
     }
 }
