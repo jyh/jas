@@ -34,7 +34,18 @@
     if (parts[0] === "param" && ctx.params) return ctx.params[parts[1]];
     if (parts[0] === "event" && ctx.event) return ctx.event[parts[1]];
     if (parts[0] === "self" && ctx.self) return ctx.self[parts[1]];
-    if (parts[0] === "theme") return ""; // theme resolved server-side
+    if (parts[0] === "theme") {
+      var themeData = typeof JAS_THEME !== "undefined" ? JAS_THEME : {};
+      var obj = themeData;
+      for (var ti = 1; ti < parts.length; ti++) {
+        if (obj && typeof obj === "object" && parts[ti] in obj) {
+          obj = obj[parts[ti]];
+        } else {
+          return "";
+        }
+      }
+      return obj;
+    }
     return "";
   }
 
@@ -73,7 +84,17 @@
     document.querySelectorAll("[data-bind-visible]").forEach(function (el) {
       var expr = el.getAttribute("data-bind-visible");
       var result = evalCondition(resolve(expr, {}), {});
-      el.style.display = result ? "" : "none";
+      if (result) {
+        // Restore original display (saved on first hide)
+        var saved = el.getAttribute("data-original-display");
+        el.style.display = saved || "";
+      } else {
+        // Save current display before hiding
+        if (el.style.display !== "none") {
+          el.setAttribute("data-original-display", el.style.display);
+        }
+        el.style.display = "none";
+      }
     });
     // Generic data-bind-checked: toggle "active" class
     document.querySelectorAll("[data-bind-checked]").forEach(function (el) {
@@ -113,6 +134,18 @@
             svg.innerHTML = iconDef.svg || "";
           }
         }
+      }
+    });
+    // Generic data-bind-z_index: set z-index via ternary expression
+    document.querySelectorAll("[data-bind-z_index]").forEach(function (el) {
+      var expr = el.getAttribute("data-bind-z_index");
+      var resolved = resolve(expr, {});
+      var ternary = resolved.match(/^(.+?)\s*\?\s*(\S+)\s*:\s*(\S+)$/);
+      if (ternary) {
+        var cond = evalCondition(ternary[1], {});
+        el.style.zIndex = cond ? ternary[2] : ternary[3];
+      } else {
+        el.style.zIndex = resolved;
       }
     });
     // Generic data-bind-collapsed: collapse pane to collapsed_width, hide content
@@ -222,6 +255,26 @@
     if (effect.hide) {
       var hideEl = document.getElementById(resolve(effect.hide, ctx));
       if (hideEl) hideEl.style.display = "none";
+      return;
+    }
+
+    // create_child: { parent, element }
+    if (effect.create_child) {
+      var parentId = resolve(effect.create_child.parent, ctx);
+      var parentEl = document.getElementById(parentId);
+      if (parentEl && effect.create_child.element) {
+        var spec = effect.create_child.element;
+        var child = createElementFromSpec(spec, ctx);
+        parentEl.appendChild(child);
+      }
+      return;
+    }
+
+    // remove_child: element_id
+    if (effect.remove_child) {
+      var childId = resolve(effect.remove_child, ctx);
+      var childEl = document.getElementById(childId);
+      if (childEl) childEl.remove();
       return;
     }
 
@@ -479,6 +532,166 @@
       clearTimeout(timers[id]);
       delete timers[id];
     }
+  }
+
+  // ── Dynamic element creation ─────────────────────────────────
+
+  function createElementFromSpec(spec, ctx) {
+    var type = spec.type || "placeholder";
+    var el = document.createElement("div");
+
+    // Set id
+    if (spec.id) el.id = resolve(spec.id, ctx);
+
+    // Apply label for buttons
+    var label = spec.label ? resolve(spec.label, ctx) : "";
+
+    // Build styles
+    var styles = [];
+    var s = spec.style || {};
+    if (s.flex) styles.push("flex:" + s.flex);
+    if (s.background) styles.push("background:" + resolve(s.background, ctx));
+    if (s.padding) styles.push("padding:" + s.padding.split(" ").map(function(v) { return v + "px"; }).join(" "));
+    if (s.font_size) styles.push("font-size:" + s.font_size + "px");
+    if (s.min_height) styles.push("min-height:" + s.min_height + "px");
+    if (s.width) styles.push("width:" + s.width + "px");
+    if (s.height) styles.push("height:" + s.height + "px");
+    if (s.border) styles.push("border:" + resolve(s.border, ctx));
+    if (s.gap != null) styles.push("gap:" + s.gap + "px");
+    if (s.alignment) {
+      var alignMap = {start:"flex-start", end:"flex-end", center:"center", stretch:"stretch"};
+      styles.push("align-items:" + (alignMap[s.alignment] || s.alignment));
+    }
+    if (s.justify) {
+      var justMap = {start:"flex-start", end:"flex-end", center:"center", between:"space-between", around:"space-around"};
+      styles.push("justify-content:" + (justMap[s.justify] || s.justify));
+    }
+
+    if (type === "container") {
+      var dir = (spec.layout === "row") ? "flex-row" : "flex-column";
+      el.className = "d-flex " + dir;
+      el.style.cssText = styles.join(";");
+      if (spec.id) el.id = resolve(spec.id, ctx);
+      // Recurse into children
+      (spec.children || []).forEach(function (childSpec) {
+        var childEl = createElementFromSpec(childSpec, ctx);
+        el.appendChild(childEl);
+      });
+    } else if (type === "text") {
+      el = document.createElement("span");
+      if (spec.id) el.id = resolve(spec.id, ctx);
+      el.textContent = resolve(spec.content || "", ctx);
+      el.style.cssText = styles.join(";");
+    } else if (type === "button") {
+      el = document.createElement("button");
+      el.className = "btn btn-sm btn-secondary";
+      el.textContent = label;
+      if (spec.id) el.id = resolve(spec.id, ctx);
+      el.style.cssText = styles.join(";");
+    } else if (type === "icon_button") {
+      el = document.createElement("button");
+      el.className = "btn btn-sm btn-outline-secondary jas-tool-btn p-0";
+      if (spec.id) el.id = resolve(spec.id, ctx);
+      var ibSz = s.size || 16;
+      styles.push("width:" + ibSz + "px", "height:" + ibSz + "px",
+                   "display:flex", "align-items:center", "justify-content:center");
+      el.style.cssText = styles.join(";");
+      var iconName = spec.icon ? resolve(spec.icon, ctx) : "";
+      var iconDef = (typeof JAS_ICONS !== "undefined") ? JAS_ICONS[iconName] : null;
+      if (iconDef) {
+        var iconSz = Math.floor(ibSz * 0.75);
+        el.innerHTML = '<svg viewBox="' + (iconDef.viewbox || "0 0 16 16") + '" width="' + iconSz +
+          '" height="' + iconSz + '" fill="currentColor" style="color:#cccccc">' + (iconDef.svg || "") + '</svg>';
+      } else {
+        el.textContent = iconName;
+      }
+    } else if (type === "canvas") {
+      el.className = "jas-canvas";
+      styles.push("display:flex", "align-items:center", "justify-content:center",
+                   "color:#999", "font-size:14px", "min-height:200px");
+      el.style.cssText = styles.join(";");
+      el.textContent = (spec.summary || "Canvas") + " (tier 3)";
+    } else if (type === "placeholder") {
+      el.className = "jas-placeholder";
+      styles.push("border:1px dashed #666", "padding:12px", "color:#888",
+                   "text-align:center", "font-size:11px", "min-height:40px");
+      el.style.cssText = styles.join(";");
+      el.textContent = spec.summary || "Placeholder";
+    } else {
+      el.style.cssText = styles.join(";");
+      el.textContent = label || spec.summary || type;
+    }
+
+    // Deep-resolve all {{}} in an object tree (freezes state refs at creation time)
+    function deepResolve(obj) {
+      if (typeof obj === "string") return resolve(obj, ctx);
+      if (Array.isArray(obj)) return obj.map(deepResolve);
+      if (obj && typeof obj === "object") {
+        var out = {};
+        for (var k in obj) {
+          if (obj.hasOwnProperty(k)) out[k] = deepResolve(obj[k]);
+        }
+        return out;
+      }
+      return obj;
+    }
+
+    // Apply bind attributes (resolved to freeze tab indices)
+    if (spec.bind) {
+      var resolvedBind = deepResolve(spec.bind);
+      for (var prop in resolvedBind) {
+        if (resolvedBind.hasOwnProperty(prop)) {
+          el.setAttribute("data-bind-" + prop, resolvedBind[prop]);
+        }
+      }
+    }
+
+    // Wire behaviors (resolved to freeze tab indices in effects)
+    if (spec.behavior) {
+      var resolvedBehavior = deepResolve(spec.behavior);
+      el.setAttribute("data-behaviors", JSON.stringify(resolvedBehavior));
+      wireBehaviors(el);
+    }
+
+    return el;
+  }
+
+  function wireBehaviors(el) {
+    var behaviors;
+    try { behaviors = JSON.parse(el.getAttribute("data-behaviors")); } catch (ex) { return; }
+    behaviors.forEach(function (b) {
+      var domEvent = eventMap[b.event];
+      if (!domEvent) return;
+      el.addEventListener(domEvent, function (e) {
+        var ctx = {
+          params: {},
+          event: {
+            client_x: e.clientX, client_y: e.clientY,
+            offset_x: e.offsetX, offset_y: e.offsetY,
+            target_id: el.id,
+            key: e.key, ctrl: e.ctrlKey || e.metaKey,
+            shift: e.shiftKey, alt: e.altKey,
+            value: e.target.value
+          },
+          self: { id: el.id, type: el.getAttribute("data-element-type") || "" }
+        };
+        if (b.condition && !evalCondition(resolve(b.condition, ctx), ctx)) return;
+        if (b.prevent_default) e.preventDefault();
+        if (b.stop_propagation) e.stopPropagation();
+        if (b.effects) runEffects(b.effects, ctx);
+        if (b.action) {
+          var params = {};
+          if (b.params) {
+            for (var pk in b.params) {
+              if (b.params.hasOwnProperty(pk)) {
+                params[pk] = resolve(b.params[pk], ctx);
+              }
+            }
+          }
+          dispatch(b.action, params);
+        }
+      });
+    });
   }
 
   // ── Action dispatch (generic, effects-driven) ──────────────

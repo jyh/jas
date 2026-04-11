@@ -291,6 +291,18 @@ is a single-key map where the key is the operation type.
 - scroll_to: <element_id>
 ```
 
+### Dynamic Element Creation
+
+```yaml
+# Create a new child element inside a container
+- create_child:
+    parent: <element_id>            # container to append to
+    element: <element>              # full element spec to create
+    
+# Remove a child element by id
+- remove_child: <element_id>
+```
+
 ### Layout Operations
 
 ```yaml

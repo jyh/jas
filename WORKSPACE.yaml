@@ -20,7 +20,7 @@ theme:
     window_bg:        "#2e2e2e"
     pane_bg:          "#3c3c3c"
     pane_bg_dark:     "#333333"
-    title_bar_bg:     "#383838"
+    title_bar_bg:     "#2a2a2a"
     title_bar_text:   "#d9d9d9"
     border:           "#555555"
     text:             "#cccccc"
@@ -302,8 +302,13 @@ state:
 
   active_tab:
     type: number
+    default: -1
+    description: "Index of the active document tab (-1 = none)"
+
+  tab_count:
+    type: number
     default: 0
-    description: "Index of the active document tab"
+    description: "Number of open document tabs"
 
   dock_group0_active:
     type: number
@@ -334,8 +339,49 @@ actions:
     description: "Create a new untitled document in a new tab"
     category: file
     effects:
-      - increment: { key: active_tab, by: 1 }
-      - log: "new_document: create untitled tab"
+      # Set active tab and increment count first so create_child
+      # deepResolve sees the correct values
+      - set: { active_tab: "{{state.tab_count}}" }
+      # Create the tab button (with close x) in the tab bar
+      - create_child:
+          parent: canvas_tab_bar
+          element:
+            id: "canvas_tab_{{state.tab_count}}"
+            type: container
+            layout: row
+            style: { padding: "2 4 2 8", font_size: 11, gap: 4, alignment: center, background: "#4a4a4a", border: "1px solid #666" }
+            behavior:
+              - event: click
+                effects:
+                  - set: { active_tab: "{{state.tab_count}}" }
+            bind:
+              active: "{{state.active_tab}} == {{state.tab_count}}"
+            children:
+              - type: text
+                content: "Untitled-{{state.tab_count}}"
+              - type: icon_button
+                icon: "close"
+                summary: "Close tab"
+                style: { size: 12 }
+                behavior:
+                  - event: click
+                    stop_propagation: true
+                    effects:
+                      - remove_child: "canvas_tab_{{state.tab_count}}"
+                      - remove_child: "canvas_surface_{{state.tab_count}}"
+      # Create the canvas in the drawing surface
+      - create_child:
+          parent: drawing_surface
+          element:
+            id: "canvas_surface_{{state.tab_count}}"
+            type: canvas
+            summary: "Drawing surface"
+            tier: 3
+            style: { flex: 1, background: "#ffffff" }
+            bind:
+              visible: "{{state.active_tab}} == {{state.tab_count}}"
+      # Increment tab count after creation so the frozen index is correct
+      - increment: { key: tab_count, by: 1 }
   open_file:
     description: "Show Open dialog, load an SVG file into a new tab (or focus existing tab)"
     category: file
@@ -1122,7 +1168,6 @@ layout:
               alignment: center
               width: 56
               height: 76
-              position: { x: 8, y: 0 }
             children:
 
               - id: fill_swatch
@@ -1132,9 +1177,11 @@ layout:
                 style: { size: 28, position: { x: 0, y: 0 } }
                 bind:
                   color: "{{state.fill_color}}"
+                  z_index: "{{state.fill_on_top}} == true ? 2 : 1"
                 behavior:
                   - event: click
-                    action: toggle_fill_on_top
+                    effects:
+                      - set: { fill_on_top: true }
                     description: "Bring fill swatch to front"
                   - event: double_click
                     action: open_color_picker
@@ -1148,9 +1195,11 @@ layout:
                 style: { size: 28, position: { x: 10, y: 10 } }
                 bind:
                   color: "{{state.stroke_color}}"
+                  z_index: "{{state.fill_on_top}} == true ? 1 : 2"
                 behavior:
                   - event: click
-                    action: toggle_fill_on_top
+                    effects:
+                      - set: { fill_on_top: false }
                     description: "Bring stroke swatch to front"
                   - event: double_click
                     action: open_color_picker
@@ -1235,42 +1284,39 @@ layout:
       content:
         type: container
         layout: column
+        style: { flex: 1 }
         children:
 
-          - id: tab_bar
-            type: tabs
+          # Tab bar (populated dynamically by new_document)
+          - id: canvas_tab_bar
+            type: container
             summary: "Document tabs"
             description: >
-              Horizontal row of tab buttons. Each tab shows a document
-              filename (with * suffix if modified) and a close button.
-              Clicking switches documents. Closing a modified tab prompts
-              to save.
+              Horizontal row of tab buttons. Populated dynamically
+              when documents are opened via new_document/open_file.
+            layout: row
             style:
-              background: "{{theme.colors.title_bar_bg}}"
-              height: 24
+              background: "{{theme.colors.pane_bg_dark}}"
+              min_height: 24
+              gap: 0
+              alignment: center
             bind:
-              active: "{{state.active_tab}}"
-            behavior:
-              - event: tab_click
-                description: "Switch the active document to the clicked tab"
-                effects:
-                  - set: { active_tab: "{{event.value}}" }
-              - event: tab_close
-                description: "Close the tab; show save_changes_tab dialog if modified"
-                action: close_tab
-                params: { index: "{{event.value}}" }
+              visible: "{{state.tab_count}} != 0"
+            children: []
 
+          # Drawing surface area (canvases added dynamically)
           - id: drawing_surface
-            type: canvas
+            type: container
             summary: "Drawing surface"
             description: >
-              The main SVG rendering area. Displays the active document's
-              vector graphics. Handles mouse events for the active tool.
-              Supports zoom and scroll.
-            tier: 3
+              Container for document canvases. Each open document gets a
+              canvas here. Starts empty; populated by new_document/open_file.
+            layout: column
             style:
               flex: 1
-              background: "#ffffff"
+              min_height: 200
+              background: "{{theme.colors.window_bg}}"
+            children: []
 
     # ─── Dock panel pane ────────────────────────────────────
     - id: dock_pane

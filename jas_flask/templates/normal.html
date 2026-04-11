@@ -18,6 +18,7 @@
   const JAS_SHORTCUTS = {{ shortcuts_json | safe }};
   const JAS_PANE_CONFIGS = {{ positions_json | safe }};
   const JAS_ICONS = {{ icons_json | safe }};
+  const JAS_THEME = {{ theme_json | safe }};
 </script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 {% endblock %}
