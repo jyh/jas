@@ -17,3 +17,8 @@
  (name anchor_point_tool_test)
  (modules anchor_point_tool_test)
  (libraries jas))
+
+(test
+ (name color_picker_test)
+ (modules color_picker_test)
+ (libraries jas))

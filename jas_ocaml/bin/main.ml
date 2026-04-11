@@ -43,7 +43,7 @@ let () =
   let main_window, toolbar_fixed, notebook, dock_box = Jas.Canvas.create_main_window ~get_model ~on_open:add_canvas () in
   main_window_ref := Some main_window;
   notebook_ref := Some notebook;
-  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 toolbar_fixed in
+  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 ~get_model toolbar_fixed in
   toolbar_ref := Some toolbar;
 
   ignore dock_box; (* Dock panel is created inside create_main_window *)
@@ -112,6 +112,18 @@ let () =
         (!active_model)#undo; true
       end else if has_ctrl && has_shift && key = GdkKeysyms._Z then begin
         (!active_model)#redo; true
+      end else if not has_ctrl && (key = GdkKeysyms._d || key = GdkKeysyms._D) then begin
+        (* Reset fill/stroke defaults *)
+        toolbar#reset_defaults;
+        true
+      end else if not has_ctrl && not has_shift && key = GdkKeysyms._x then begin
+        (* Toggle fill_on_top *)
+        toolbar#toggle_fill_on_top;
+        true
+      end else if not has_ctrl && has_shift && key = GdkKeysyms._X then begin
+        (* Swap fill and stroke colors *)
+        toolbar#swap_fill_stroke;
+        true
       end else false
     end
   ) |> ignore;
