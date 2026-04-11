@@ -648,7 +648,7 @@ and skip_element_full i =
   | `El_start _ -> skip_element i
   | _ -> ()
 
-let rec svg_to_document svg =
+let svg_to_document svg =
   try
     let i = Xmlm.make_input (`String (0, svg)) in
     (* skip dtd *)
@@ -665,53 +665,7 @@ let rec svg_to_document svg =
         Element.make_layer ~name:"" [|elem|]
     ) children) in
     let layers = if layers = [] then [Element.make_layer [||]] else layers in
-    normalize_document (Document.make_document (Array.of_list layers))
+    Normalize.normalize_document (Document.make_document (Array.of_list layers))
   with e ->
     Printf.eprintf "Warning: SVG parse error: %s\n" (Printexc.to_string e);
     Document.make_document [|Element.make_layer [||]|]
-
-(** Normalize all elements in a document: extract color alpha into
-    fill/stroke opacity and set color alpha to 1.0. *)
-and normalize_document (doc : Document.document) =
-  Document.make_document (Array.map normalize_element doc.Document.layers)
-
-and normalize_fill (f : Element.fill) =
-  let alpha = Element.color_alpha f.fill_color in
-  Element.make_fill ~opacity:(f.fill_opacity *. alpha) (Element.color_with_alpha 1.0 f.fill_color)
-
-and normalize_stroke (s : Element.stroke) =
-  let alpha = Element.color_alpha s.stroke_color in
-  Element.make_stroke ~width:s.stroke_width ~linecap:s.stroke_linecap ~linejoin:s.stroke_linejoin
-    ~opacity:(s.stroke_opacity *. alpha) (Element.color_with_alpha 1.0 s.stroke_color)
-
-and normalize_element = function
-  | Element.Line e ->
-    Element.Line { e with stroke = Option.map normalize_stroke e.stroke }
-  | Element.Rect e ->
-    Element.Rect { e with fill = Option.map normalize_fill e.fill;
-                          stroke = Option.map normalize_stroke e.stroke }
-  | Element.Circle e ->
-    Element.Circle { e with fill = Option.map normalize_fill e.fill;
-                            stroke = Option.map normalize_stroke e.stroke }
-  | Element.Ellipse e ->
-    Element.Ellipse { e with fill = Option.map normalize_fill e.fill;
-                             stroke = Option.map normalize_stroke e.stroke }
-  | Element.Polyline e ->
-    Element.Polyline { e with fill = Option.map normalize_fill e.fill;
-                              stroke = Option.map normalize_stroke e.stroke }
-  | Element.Polygon e ->
-    Element.Polygon { e with fill = Option.map normalize_fill e.fill;
-                             stroke = Option.map normalize_stroke e.stroke }
-  | Element.Path e ->
-    Element.Path { e with fill = Option.map normalize_fill e.fill;
-                          stroke = Option.map normalize_stroke e.stroke }
-  | Element.Text e ->
-    Element.Text { e with fill = Option.map normalize_fill e.fill;
-                          stroke = Option.map normalize_stroke e.stroke }
-  | Element.Text_path e ->
-    Element.Text_path { e with fill = Option.map normalize_fill e.fill;
-                               stroke = Option.map normalize_stroke e.stroke }
-  | Element.Group e ->
-    Element.Group { e with children = Array.map normalize_element e.children }
-  | Element.Layer e ->
-    Element.Layer { e with children = Array.map normalize_element e.children }

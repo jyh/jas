@@ -240,7 +240,7 @@ pub fn App() -> Element {
 
     // Dock drag-and-drop state.
     let drag_source = use_signal(|| Option::<super::workspace::DragPayload>::None);
-    let drop_target_sig = use_signal(|| Option::<super::workspace::DropTarget>::None);
+    let mut drop_target_sig = use_signal(|| Option::<super::workspace::DropTarget>::None);
     let was_dropped = use_signal(|| false);
     let mut last_drag_pos = use_signal(|| (0.0f64, 0.0f64));
     // Floating dock title bar drag (dock_id, offset_x, offset_y).
@@ -398,13 +398,12 @@ pub fn App() -> Element {
     let canvas_maximized = pane_snapshot.as_ref().is_some_and(|pl| pl.canvas_maximized);
 
     let (tx, ty, tw, th, toolbar_z) = pane_snapshot.as_ref()
-        .and_then(|pl| pl.pane_by_kind(PaneKind::Toolbar))
-        .map(|p| {
-            let z = pane_snapshot.as_ref().unwrap().pane_z_index(p.id);
+        .and_then(|pl| pl.pane_by_kind(PaneKind::Toolbar).map(|p| {
+            let z = pl.pane_z_index(p.id);
             // When canvas is maximized, toolbar floats on top
             let z = if canvas_maximized { z + 50 } else { z };
             (p.x, p.y, p.width, p.height, z)
-        })
+        }))
         .unwrap_or((0.0, 0.0, 72.0, 700.0, 0));
     let toolbar_pane_id = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Toolbar))
@@ -416,15 +415,13 @@ pub fn App() -> Element {
         .unwrap_or_else(|| super::workspace::PaneConfig::for_kind(PaneKind::Toolbar));
 
     let (cx, cy, cw, ch, canvas_z) = pane_snapshot.as_ref()
-        .and_then(|pl| pl.pane_by_kind(PaneKind::Canvas))
-        .map(|p| {
-            let pl = pane_snapshot.as_ref().unwrap();
+        .and_then(|pl| pl.pane_by_kind(PaneKind::Canvas).map(|p| {
             if canvas_maximized {
                 (0.0, 0.0, pl.viewport_width, pl.viewport_height, 0)
             } else {
                 (p.x, p.y, p.width, p.height, pl.pane_z_index(p.id))
             }
-        })
+        }))
         .unwrap_or((72.0, 0.0, 688.0, 700.0, 0));
     let canvas_pane_id = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Canvas))
@@ -438,9 +435,8 @@ pub fn App() -> Element {
 
     let collapsed_dock_width = 36.0;
     let (dx, dy, dw, dh, dock_z) = pane_snapshot.as_ref()
-        .and_then(|pl| pl.pane_by_kind(PaneKind::Dock))
-        .map(|p| {
-            let z = pane_snapshot.as_ref().unwrap().pane_z_index(p.id);
+        .and_then(|pl| pl.pane_by_kind(PaneKind::Dock).map(|p| {
+            let z = pl.pane_z_index(p.id);
             let z = if canvas_maximized { z + 50 } else { z };
             if dock_collapsed {
                 // Anchor collapsed dock at its right edge
@@ -449,7 +445,7 @@ pub fn App() -> Element {
             } else {
                 (p.x, p.y, p.width, p.height, z)
             }
-        })
+        }))
         .unwrap_or((760.0, 0.0, 240.0, 700.0, 0));
     let dock_pane_id = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Dock))

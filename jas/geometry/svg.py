@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
 from document.document import Document
+from geometry.normalize import normalize_document
 from geometry.element import (
     APPROX_CHAR_WIDTH_FACTOR,
     ArcTo, Circle, ClosePath, Color, RgbColor, CurveTo, Element, Ellipse, Fill,
@@ -711,40 +712,3 @@ def svg_to_document(svg: str) -> Document:
     if not layers:
         layers = [Layer(children=())]
     return normalize_document(Document(layers=tuple(layers)))
-
-
-# ---------------------------------------------------------------------------
-# Opacity normalizer
-# ---------------------------------------------------------------------------
-
-def normalize_document(doc: Document) -> Document:
-    """Normalize all elements: extract color alpha into fill/stroke opacity,
-    set color alpha to 1.0."""
-    from dataclasses import replace
-    return replace(doc, layers=tuple(_normalize_element(l) for l in doc.layers))
-
-
-def _normalize_fill(fill: Fill) -> Fill:
-    from dataclasses import replace
-    alpha = fill.color.alpha
-    return Fill(color=fill.color.with_alpha(1.0), opacity=fill.opacity * alpha)
-
-
-def _normalize_stroke(stroke: Stroke) -> Stroke:
-    from dataclasses import replace
-    alpha = stroke.color.alpha
-    return Stroke(color=stroke.color.with_alpha(1.0), width=stroke.width,
-                  linecap=stroke.linecap, linejoin=stroke.linejoin,
-                  opacity=stroke.opacity * alpha)
-
-
-def _normalize_element(elem):
-    from dataclasses import replace
-    kwargs = {}
-    if hasattr(elem, 'fill') and elem.fill is not None:
-        kwargs['fill'] = _normalize_fill(elem.fill)
-    if hasattr(elem, 'stroke') and elem.stroke is not None:
-        kwargs['stroke'] = _normalize_stroke(elem.stroke)
-    if hasattr(elem, 'children'):
-        kwargs['children'] = tuple(_normalize_element(c) for c in elem.children)
-    return replace(elem, **kwargs) if kwargs else elem
