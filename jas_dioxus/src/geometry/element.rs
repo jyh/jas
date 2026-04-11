@@ -65,6 +65,15 @@ impl Color {
         }
     }
 
+    /// Return a copy of this color with the alpha component replaced.
+    pub fn with_alpha(&self, a: f64) -> Self {
+        match *self {
+            Self::Rgb { r, g, b, .. } => Self::Rgb { r, g, b, a },
+            Self::Hsb { h, s, b, .. } => Self::Hsb { h, s, b, a },
+            Self::Cmyk { c, m, y, k, .. } => Self::Cmyk { c, m, y, k, a },
+        }
+    }
+
     /// Convert to (r, g, b, a) with all components in [0, 1].
     pub fn to_rgba(&self) -> (f64, f64, f64, f64) {
         match *self {
@@ -189,11 +198,12 @@ pub enum LineJoin {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Fill {
     pub color: Color,
+    pub opacity: f64,
 }
 
 impl Fill {
     pub const fn new(color: Color) -> Self {
-        Self { color }
+        Self { color, opacity: 1.0 }
     }
 }
 
@@ -204,6 +214,7 @@ pub struct Stroke {
     pub width: f64,
     pub linecap: LineCap,
     pub linejoin: LineJoin,
+    pub opacity: f64,
 }
 
 impl Stroke {
@@ -213,6 +224,7 @@ impl Stroke {
             width,
             linecap: LineCap::Butt,
             linejoin: LineJoin::Miter,
+            opacity: 1.0,
         }
     }
 }
@@ -2230,5 +2242,33 @@ mod tests {
         assert_near(y, 0.3, "y");
         assert_near(k, 0.4, "k");
         assert_near(a, 0.5, "a");
+    }
+
+    #[test]
+    fn color_with_alpha_rgb() {
+        let c = Color::rgb(1.0, 0.0, 0.0).with_alpha(0.5);
+        assert_eq!(c, Color::Rgb { r: 1.0, g: 0.0, b: 0.0, a: 0.5 });
+    }
+
+    #[test]
+    fn color_with_alpha_hsb() {
+        let c = Color::hsb(180.0, 1.0, 1.0).with_alpha(0.3);
+        assert_eq!(c, Color::Hsb { h: 180.0, s: 1.0, b: 1.0, a: 0.3 });
+    }
+
+    #[test]
+    fn color_with_alpha_cmyk() {
+        let c = Color::cmyk(0.0, 1.0, 1.0, 0.0).with_alpha(0.7);
+        assert_eq!(c, Color::Cmyk { c: 0.0, m: 1.0, y: 1.0, k: 0.0, a: 0.7 });
+    }
+
+    #[test]
+    fn fill_default_opacity() {
+        assert_eq!(Fill::new(Color::BLACK).opacity, 1.0);
+    }
+
+    #[test]
+    fn stroke_default_opacity() {
+        assert_eq!(Stroke::new(Color::BLACK, 1.0).opacity, 1.0);
     }
 }

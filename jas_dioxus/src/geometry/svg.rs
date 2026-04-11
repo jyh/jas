@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use crate::document::document::Document;
 use crate::geometry::element::*;
+use crate::geometry::normalize::normalize_document;
 
 const PT_TO_PX: f64 = 96.0 / 72.0;
 const PX_TO_PT: f64 = 72.0 / 96.0;
@@ -42,7 +43,13 @@ fn color_str(c: &Color) -> String {
 fn fill_attrs(fill: &Option<Fill>) -> String {
     match fill {
         None => " fill=\"none\"".to_string(),
-        Some(f) => format!(" fill=\"{}\"", color_str(&f.color)),
+        Some(f) => {
+            let mut s = format!(" fill=\"{}\"", color_str(&f.color));
+            if f.opacity < 1.0 {
+                s.push_str(&format!(" fill-opacity=\"{}\"", fmt(f.opacity)));
+            }
+            s
+        }
     }
 }
 
@@ -61,6 +68,9 @@ fn stroke_attrs(stroke: &Option<Stroke>) -> String {
                 LineJoin::Round => parts.push(" stroke-linejoin=\"round\"".to_string()),
                 LineJoin::Bevel => parts.push(" stroke-linejoin=\"bevel\"".to_string()),
                 _ => {}
+            }
+            if s.opacity < 1.0 {
+                parts.push(format!(" stroke-opacity=\"{}\"", fmt(s.opacity)));
             }
             parts.join("")
         }
@@ -529,11 +539,25 @@ fn parse_color(s: &str) -> Option<Color> {
             let b = u8::from_str_radix(&h[2..3].repeat(2), 16).ok()? as f64 / 255.0;
             return Some(Color::Rgb { r, g, b, a: 1.0 });
         }
+        if h.len() == 4 {
+            let r = u8::from_str_radix(&h[0..1].repeat(2), 16).ok()? as f64 / 255.0;
+            let g = u8::from_str_radix(&h[1..2].repeat(2), 16).ok()? as f64 / 255.0;
+            let b = u8::from_str_radix(&h[2..3].repeat(2), 16).ok()? as f64 / 255.0;
+            let a = u8::from_str_radix(&h[3..4].repeat(2), 16).ok()? as f64 / 255.0;
+            return Some(Color::Rgb { r, g, b, a });
+        }
         if h.len() == 6 {
             let r = u8::from_str_radix(&h[0..2], 16).ok()? as f64 / 255.0;
             let g = u8::from_str_radix(&h[2..4], 16).ok()? as f64 / 255.0;
             let b = u8::from_str_radix(&h[4..6], 16).ok()? as f64 / 255.0;
             return Some(Color::Rgb { r, g, b, a: 1.0 });
+        }
+        if h.len() == 8 {
+            let r = u8::from_str_radix(&h[0..2], 16).ok()? as f64 / 255.0;
+            let g = u8::from_str_radix(&h[2..4], 16).ok()? as f64 / 255.0;
+            let b = u8::from_str_radix(&h[4..6], 16).ok()? as f64 / 255.0;
+            let a = u8::from_str_radix(&h[6..8], 16).ok()? as f64 / 255.0;
+            return Some(Color::Rgb { r, g, b, a });
         }
         return None;
     }
@@ -557,7 +581,8 @@ fn parse_fill(node: &XmlNode) -> Option<Fill> {
     if val == "none" {
         return None;
     }
-    Some(Fill { color: parse_color(val)? })
+    let opacity = get_f(node, "fill-opacity", 1.0);
+    Some(Fill { color: parse_color(val)?, opacity })
 }
 
 fn parse_stroke(node: &XmlNode) -> Option<Stroke> {
@@ -577,7 +602,8 @@ fn parse_stroke(node: &XmlNode) -> Option<Stroke> {
         "bevel" => LineJoin::Bevel,
         _ => LineJoin::Miter,
     };
-    Some(Stroke { color, width, linecap: lc, linejoin: lj })
+    let opacity = get_f(node, "stroke-opacity", 1.0);
+    Some(Stroke { color, width, linecap: lc, linejoin: lj, opacity })
 }
 
 fn parse_transform(node: &XmlNode) -> Option<Transform> {
@@ -1101,11 +1127,12 @@ pub fn svg_to_document(svg: &str) -> Document {
     if layers.is_empty() {
         return Document::default();
     }
-    Document {
+    let doc = Document {
         layers,
         selected_layer: 0,
         selection: Vec::new(),
-    }
+    };
+    normalize_document(&doc)
 }
 
 // ---------------------------------------------------------------------------
@@ -1406,5 +1433,232 @@ mod tests {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#;
         let doc = svg_to_document(svg);
         assert!(!doc.layers.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Hex color parsing (4-digit and 8-digit)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_color_4_digit_hex() {
+        let c = parse_color("#F00A").unwrap();
+        let (r, g, b, a) = c.to_rgba();
+        assert!((r - 1.0).abs() < 0.01, "r={r}");
+        assert!((g - 0.0).abs() < 0.01, "g={g}");
+        assert!((b - 0.0).abs() < 0.01, "b={b}");
+        // 0xAA / 255 ≈ 0.667
+        assert!((a - 0.667).abs() < 0.01, "a={a}");
+    }
+
+    #[test]
+    fn parse_color_8_digit_hex() {
+        let c = parse_color("#FF000080").unwrap();
+        let (r, g, b, a) = c.to_rgba();
+        assert!((r - 1.0).abs() < 0.01, "r={r}");
+        assert!((g - 0.0).abs() < 0.01, "g={g}");
+        assert!((b - 0.0).abs() < 0.01, "b={b}");
+        // 0x80 / 255 ≈ 0.502
+        assert!((a - 0.502).abs() < 0.01, "a={a}");
+    }
+
+    // -----------------------------------------------------------------------
+    // fill-opacity / stroke-opacity parsing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn import_fill_opacity() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="10" height="10" fill="red" fill-opacity="0.5"/></svg>"#;
+        let doc = svg_to_document(svg);
+        let children = doc.layers[0].children().unwrap();
+        if let Element::Rect(r) = &*children[0] {
+            // After normalization, fill.opacity should be 0.5 (color was opaque)
+            assert!((r.fill.unwrap().opacity - 0.5).abs() < 0.01);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn import_stroke_opacity() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="10" height="10" stroke="blue" stroke-width="2" stroke-opacity="0.3"/></svg>"#;
+        let doc = svg_to_document(svg);
+        let children = doc.layers[0].children().unwrap();
+        if let Element::Rect(r) = &*children[0] {
+            assert!((r.stroke.unwrap().opacity - 0.3).abs() < 0.01);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // fill-opacity / stroke-opacity export
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn export_fill_opacity() {
+        let doc = make_doc(vec![Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color: Color::rgb(1.0, 0.0, 0.0), opacity: 0.5 }),
+            stroke: None, common: CommonProps::default(),
+        })]);
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("fill-opacity=\"0.5\""), "svg={svg}");
+    }
+
+    #[test]
+    fn export_stroke_opacity() {
+        let doc = make_doc(vec![Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None,
+            stroke: Some(Stroke { color: Color::BLACK, width: 1.0, linecap: LineCap::Butt, linejoin: LineJoin::Miter, opacity: 0.4 }),
+            common: CommonProps::default(),
+        })]);
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("stroke-opacity=\"0.4\""), "svg={svg}");
+    }
+
+    #[test]
+    fn export_omits_opacity_when_one() {
+        let doc = make_doc(vec![make_rect(0.0, 0.0, 10.0, 10.0)]);
+        let svg = document_to_svg(&doc);
+        assert!(!svg.contains("fill-opacity"), "svg={svg}");
+        assert!(!svg.contains("stroke-opacity"), "svg={svg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Normalizer
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn normalize_extracts_fill_alpha() {
+        use crate::geometry::normalize::normalize_document;
+        let doc = make_doc(vec![Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color: Color::new(1.0, 0.0, 0.0, 0.5), opacity: 1.0 }),
+            stroke: None, common: CommonProps::default(),
+        })]);
+        let doc2 = normalize_document(&doc);
+        let children = doc2.layers[0].children().unwrap();
+        if let Element::Rect(r) = &*children[0] {
+            let f = r.fill.unwrap();
+            assert!((f.opacity - 0.5).abs() < 1e-9, "fill opacity={}", f.opacity);
+            assert!((f.color.alpha() - 1.0).abs() < 1e-9, "color alpha={}", f.color.alpha());
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn normalize_multiplies_existing() {
+        use crate::geometry::normalize::normalize_document;
+        let doc = make_doc(vec![Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color: Color::new(1.0, 0.0, 0.0, 0.5), opacity: 0.8 }),
+            stroke: None, common: CommonProps::default(),
+        })]);
+        let doc2 = normalize_document(&doc);
+        let children = doc2.layers[0].children().unwrap();
+        if let Element::Rect(r) = &*children[0] {
+            let f = r.fill.unwrap();
+            assert!((f.opacity - 0.4).abs() < 1e-9, "fill opacity={}", f.opacity);
+            assert!((f.color.alpha() - 1.0).abs() < 1e-9);
+        } else {
+            panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn normalize_stroke_alpha() {
+        use crate::geometry::normalize::normalize_document;
+        let doc = make_doc(vec![Element::Line(LineElem {
+            x1: 0.0, y1: 0.0, x2: 10.0, y2: 10.0,
+            stroke: Some(Stroke { color: Color::new(0.0, 0.0, 0.0, 0.25), width: 1.0, linecap: LineCap::Butt, linejoin: LineJoin::Miter, opacity: 1.0 }),
+            common: CommonProps::default(),
+        })]);
+        let doc2 = normalize_document(&doc);
+        let children = doc2.layers[0].children().unwrap();
+        if let Element::Line(e) = &*children[0] {
+            let s = e.stroke.unwrap();
+            assert!((s.opacity - 0.25).abs() < 1e-9, "stroke opacity={}", s.opacity);
+            assert!((s.color.alpha() - 1.0).abs() < 1e-9);
+        } else {
+            panic!("expected Line");
+        }
+    }
+
+    #[test]
+    fn normalize_no_fill_unchanged() {
+        use crate::geometry::normalize::normalize_document;
+        let doc = make_doc(vec![make_line(0.0, 0.0, 10.0, 10.0)]);
+        let doc2 = normalize_document(&doc);
+        let children = doc2.layers[0].children().unwrap();
+        if let Element::Line(e) = &*children[0] {
+            assert!(e.stroke.is_some());
+            assert!((e.stroke.unwrap().opacity - 1.0).abs() < 1e-9);
+        } else {
+            panic!("expected Line");
+        }
+    }
+
+    #[test]
+    fn normalize_recursive() {
+        use crate::geometry::normalize::normalize_document;
+        let inner = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color: Color::new(1.0, 0.0, 0.0, 0.5), opacity: 1.0 }),
+            stroke: None, common: CommonProps::default(),
+        });
+        let group = Element::Group(GroupElem {
+            children: vec![Rc::new(inner)],
+            common: CommonProps::default(),
+        });
+        let doc = make_doc(vec![group]);
+        let doc2 = normalize_document(&doc);
+        let layers = doc2.layers[0].children().unwrap();
+        let group_children = layers[0].children().unwrap();
+        if let Element::Rect(r) = &*group_children[0] {
+            let f = r.fill.unwrap();
+            assert!((f.opacity - 0.5).abs() < 1e-9);
+            assert!((f.color.alpha() - 1.0).abs() < 1e-9);
+        } else {
+            panic!("expected Rect inside group");
+        }
+    }
+
+    #[test]
+    fn normalize_idempotent() {
+        use crate::geometry::normalize::normalize_document;
+        let doc = make_doc(vec![Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color: Color::new(1.0, 0.0, 0.0, 0.5), opacity: 0.8 }),
+            stroke: None, common: CommonProps::default(),
+        })]);
+        let doc2 = normalize_document(&doc);
+        let doc3 = normalize_document(&doc2);
+        let c2 = doc2.layers[0].children().unwrap();
+        let c3 = doc3.layers[0].children().unwrap();
+        if let (Element::Rect(r2), Element::Rect(r3)) = (&*c2[0], &*c3[0]) {
+            let f2 = r2.fill.unwrap();
+            let f3 = r3.fill.unwrap();
+            assert!((f2.opacity - f3.opacity).abs() < 1e-9);
+            assert!((f2.color.alpha() - f3.color.alpha()).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn roundtrip_fill_opacity() {
+        let doc = make_doc(vec![Element::Rect(RectElem {
+            x: 10.0, y: 20.0, width: 30.0, height: 40.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color: Color::rgb(1.0, 0.0, 0.0), opacity: 0.5 }),
+            stroke: None, common: CommonProps::default(),
+        })]);
+        let svg = document_to_svg(&doc);
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        if let Element::Rect(r) = &*children[0] {
+            assert!((r.fill.unwrap().opacity - 0.5).abs() < 0.01, "opacity={}", r.fill.unwrap().opacity);
+        } else {
+            panic!("expected Rect");
+        }
     }
 }
