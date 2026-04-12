@@ -6,8 +6,8 @@ import UniformTypeIdentifiers
 
 public enum Tool: String, CaseIterable {
     case selection
-    case directSelection
-    case groupSelection
+    case partialSelection
+    case interiorSelection
     case pen
     case addAnchorPoint
     case deleteAnchorPoint
@@ -427,7 +427,7 @@ struct ToolbarPanel: View {
     @Binding var currentTool: Tool
     var model: Model?
     var onOpenColorPicker: ((Bool) -> Void)?
-    @State private var arrowSlotTool: Tool = .directSelection
+    @State private var arrowSlotTool: Tool = .partialSelection
     @State private var penSlotTool: Tool = .pen
     @State private var pencilSlotTool: Tool = .pencil
     @State private var textSlotTool: Tool = .typeTool
@@ -444,7 +444,7 @@ struct ToolbarPanel: View {
                     ToolbarView.toolButtonWithAlternates(
                         currentTool: $currentTool,
                         visibleTool: $arrowSlotTool,
-                        alternates: [.directSelection, .groupSelection]
+                        alternates: [.partialSelection, .interiorSelection]
                     )
                 }
                 HStack(spacing: 2) {

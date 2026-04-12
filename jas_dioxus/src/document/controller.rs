@@ -1137,11 +1137,11 @@ mod tests {
 
     #[test]
     fn direct_select_rect_body_only_yields_partial_empty() {
-        // Direct selection marquee over an element's body but missing
+        // Partial selection marquee over an element's body but missing
         // every control point must yield `Partial(empty)` — the
         // element is selected but no CPs are highlighted. The old
         // behavior promoted body-hit to `All`, which effectively
-        // "selected every CP", contradicting the Direct Selection
+        // "selected every CP", contradicting the Partial Selection
         // contract.
         use crate::document::document::SortedCps;
         let mut model = setup_model();
@@ -1416,8 +1416,8 @@ mod tests {
         assert!(!paths.contains(&vec![0, 1]));
     }
 
-    // Note: Rust does not have a separate group_select_rect method;
-    // group selection happens via select_rect with the auto-expand
+    // Note: Rust does not have a separate interior_select_rect method;
+    // interior selection happens via select_rect with the auto-expand
     // behaviour built in. Skipped here.
 
     // ----------------------------------------------------------------------

@@ -1,7 +1,7 @@
 state:
   active_tool:
     type: enum
-    values: [selection, direct_selection, group_selection,
+    values: [selection, partial_selection, interior_selection,
              pen, add_anchor, delete_anchor, anchor_point,
              pencil, path_eraser, smooth,
              type, type_on_path,

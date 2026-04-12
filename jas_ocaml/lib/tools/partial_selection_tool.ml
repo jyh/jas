@@ -1,6 +1,6 @@
-(** Direct Selection tool: select control points and drag Bezier handles. *)
+(** Partial Selection tool: select control points and drag Bezier handles. *)
 
-class direct_selection_tool = object (self)
+class partial_selection_tool = object (self)
   inherit Selection_tool.selection_tool_base as super
 
   val mutable handle_drag : (int list * int * string) option = None

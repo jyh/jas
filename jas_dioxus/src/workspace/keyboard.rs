@@ -281,7 +281,7 @@ pub(crate) fn make_keydown_handler(
             }
             Key::Character(ref c) if c == "a" || c == "A" => {
                 (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::DirectSelection);
+                    st.set_tool(ToolKind::PartialSelection);
                 }));
             }
             Key::Character(ref c) if c == "p" || c == "P" => {

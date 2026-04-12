@@ -1,7 +1,7 @@
 (** Selection tool: marquee select, drag-to-move, Alt+drag copies.
 
     [selection_tool_base] is the shared base for the three selection
-    variants. [Direct_selection_tool] and [Group_selection_tool] live
+    variants. [Partial_selection_tool] and [Interior_selection_tool] live
     in their own files and inherit from it. *)
 
 (** Drag-to-marquee or drag-to-move state machine. Subclasses choose

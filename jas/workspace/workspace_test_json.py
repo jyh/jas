@@ -243,7 +243,7 @@ def toolbar_structure_json() -> str:
     """Return canonical JSON for the toolbar slot layout."""
     slots = [
         (0, 0, ["selection"]),
-        (0, 1, ["direct_selection", "group_selection"]),
+        (0, 1, ["partial_selection", "interior_selection"]),
         (1, 0, ["pen", "add_anchor_point", "delete_anchor_point", "anchor_point"]),
         (1, 1, ["pencil", "path_eraser", "smooth"]),
         (2, 0, ["type", "type_on_path"]),
@@ -430,7 +430,7 @@ SHORTCUTS = [
     ("Ctrl+-", "zoom_out", None),
     ("Ctrl+0", "fit_in_window", None),
     ("V", "select_tool", {"tool": "selection"}),
-    ("A", "select_tool", {"tool": "direct_selection"}),
+    ("A", "select_tool", {"tool": "partial_selection"}),
     ("P", "select_tool", {"tool": "pen"}),
     ("=", "select_tool", {"tool": "add_anchor"}),
     ("-", "select_tool", {"tool": "delete_anchor"}),

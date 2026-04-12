@@ -1,8 +1,8 @@
 (** Selection tool: marquee select elements, drag-to-move, Alt+drag copies.
 
     This file also defines [selection_tool_base], the shared base class for
-    the three selection variants. [Direct_selection_tool] and
-    [Group_selection_tool] live in their own files and inherit from
+    the three selection variants. [Partial_selection_tool] and
+    [Interior_selection_tool] live in their own files and inherit from
     [selection_tool_base] here. *)
 
 type selection_state = Idle | Marquee | Moving

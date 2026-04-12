@@ -800,9 +800,9 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
           match current_tool_type with
           | Toolbar.Selection ->
             _self#make_arrow_cursor 0.0 0.0 0.0 1.0 1.0 1.0 false
-          | Toolbar.Direct_selection ->
+          | Toolbar.Partial_selection ->
             _self#make_arrow_cursor 1.0 1.0 1.0 0.0 0.0 0.0 false
-          | Toolbar.Group_selection ->
+          | Toolbar.Interior_selection ->
             _self#make_arrow_cursor 1.0 1.0 1.0 0.0 0.0 0.0 true
           | Toolbar.Pen -> _self#make_pen_cursor
           | Toolbar.Add_anchor_point -> _self#make_add_anchor_point_cursor

@@ -30,7 +30,7 @@ The two cases capture two distinct user intents:
 | kind | Meaning | How dragging behaves |
 |------|---------|----------------------|
 | `All` | The element is selected as a whole — bounding-box selection, the typical Selection Tool result. | Move/copy translates the primitive in place; Rect stays a Rect, Circle stays a Circle. |
-| `Partial(s)` | Only the listed control points are selected (Direct Selection). `s` is a `SortedCps` — sorted, de-duplicated, fixed-width. | Move drags only the listed CPs; Rect/Circle/Ellipse may convert to a Polygon when the resulting shape is no longer axis-aligned. |
+| `Partial(s)` | Only the listed control points are selected (Partial Selection). `s` is a `SortedCps` — sorted, de-duplicated, fixed-width. | Move drags only the listed CPs; Rect/Circle/Ellipse may convert to a Polygon when the resulting shape is no longer axis-aligned. |
 
 `Partial(SortedCps[0..n))` (every CP listed individually) is *not* the
 same as `All`: the user picked CPs one at a time and expects per-CP
@@ -38,7 +38,7 @@ manipulation, not whole-element translation.
 
 `Partial(empty)` **is** a legal, retained state — it means "the
 element is selected, but zero control points are individually
-highlighted". This is what the Direct Selection marquee produces when
+highlighted". This is what the Partial Selection marquee produces when
 it crosses an element's body without catching any of its CPs, and it
 is also the result of toggling off the last remaining CP of a
 `Partial` via shift-click. Move/drag on `Partial(empty)` is a no-op
@@ -116,9 +116,9 @@ for each layer:
 This is the standard selection behavior. Dragging over a group selects the
 entire group, and moving the selection moves everything together.
 
-### Group Selection Tool
+### Interior Selection Tool
 
-**Controller method:** `group_select_rect(x, y, width, height, extend)`
+**Controller method:** `interior_select_rect(x, y, width, height, extend)`
 
 Traverses **into** groups. Selects individual elements (not their parent
 groups) with all their control points. This allows selecting elements
@@ -134,12 +134,12 @@ recursive check(path, elem):
       select elem (kind: All)
 ```
 
-### Direct Selection Tool
+### Partial Selection Tool
 
-**Controller method:** `direct_select_rect(x, y, width, height, extend)`
+**Controller method:** `partial_select_rect(x, y, width, height, extend)`
 
 Selects individual **control points** rather than whole elements. Traverses
-into groups like Group Selection. The element ends up in the selection
+into groups like Interior Selection. The element ends up in the selection
 in one of two ways:
 
 ```
@@ -161,7 +161,7 @@ recursive check(path, elem):
 This enables moving individual vertices of a polygon, individual anchor
 points of a path, or individual corners of a rectangle.
 
-The Direct Selection Tool also supports **Bezier handle dragging**: when
+The Partial Selection Tool also supports **Bezier handle dragging**: when
 the user clicks on a path handle (detected via `hit_test_handle`), dragging
 moves that handle. Moving one handle automatically rotates the opposite
 handle to maintain collinearity (smooth constraint), while preserving the
@@ -194,7 +194,7 @@ merge.
 This means:
 - Shift-marquee over an unselected element adds it.
 - Shift-marquee over an already-selected element deselects it.
-- Shift-marquee over a partially selected element (Direct Selection)
+- Shift-marquee over a partially selected element (Partial Selection)
   toggles individual control points.
 - Mixing All and Partial via Shift collapses to All for that
   element — the rare case that doesn't appear in normal use.
@@ -250,7 +250,7 @@ IDLE ──────────────────────> MOVING
 | State | Behavior |
 |-------|----------|
 | **Idle** | Waiting for input. No drag in progress. |
-| **Marquee** | A dashed rectangle is drawn from press point to current cursor. On release, `select_rect` / `group_select_rect` / `direct_select_rect` is called. |
+| **Marquee** | A dashed rectangle is drawn from press point to current cursor. On release, `select_rect` / `interior_select_rect` / `partial_select_rect` is called. |
 | **Moving** | Selected elements follow the cursor (shown as dashed outlines). On release, `move_selection(dx, dy)` or `copy_selection(dx, dy)` is committed. |
 
 Shift constrains movement to 45-degree angles (horizontal, vertical, or
@@ -307,7 +307,7 @@ The canvas provides hit-test callbacks to tools via the ToolContext:
 | Callback | Returns | Used by |
 |----------|---------|---------|
 | `hit_test_selection(x, y)` | `bool` | All selection tools: determines Moving vs Marquee state |
-| `hit_test_handle(x, y)` | `(path, anchor_idx, handle_type)?` | Direct Selection: detect Bezier handle clicks |
+| `hit_test_handle(x, y)` | `(path, anchor_idx, handle_type)?` | Partial Selection: detect Bezier handle clicks |
 | `hit_test_text(x, y)` | `(path, element)?` | Type tool: detect clicks on text for editing |
 | `hit_test_path_curve(x, y)` | `(path, element)?` | Pen tool: detect clicks on path curves |
 
@@ -326,7 +326,7 @@ given delta. For each ElementSelection in the selection, it calls
 document.
 
 When all CPs of an element are selected, this translates the element
-rigidly. When a subset is selected (Direct Selection), only those points
+rigidly. When a subset is selected (Partial Selection), only those points
 move, potentially reshaping the element.
 
 ### Copy

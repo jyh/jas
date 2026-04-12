@@ -261,7 +261,7 @@ fn panel_addr_json(a: &PanelAddr) -> String {
 pub fn toolbar_structure_json() -> String {
     let slots: &[(usize, usize, &[&str])] = &[
         (0, 0, &["selection"]),
-        (0, 1, &["direct_selection", "group_selection"]),
+        (0, 1, &["partial_selection", "interior_selection"]),
         (1, 0, &["pen", "add_anchor_point", "delete_anchor_point", "anchor_point"]),
         (1, 1, &["pencil", "path_eraser", "smooth"]),
         (2, 0, &["type", "type_on_path"]),
@@ -394,7 +394,7 @@ pub fn shortcut_structure_json() -> String {
         ("Ctrl+-", "zoom_out", None),
         ("Ctrl+0", "fit_in_window", None),
         ("V", "select_tool", Some(("tool", "selection"))),
-        ("A", "select_tool", Some(("tool", "direct_selection"))),
+        ("A", "select_tool", Some(("tool", "partial_selection"))),
         ("P", "select_tool", Some(("tool", "pen"))),
         ("=", "select_tool", Some(("tool", "add_anchor"))),
         ("-", "select_tool", Some(("tool", "delete_anchor"))),

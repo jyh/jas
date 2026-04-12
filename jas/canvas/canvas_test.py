@@ -21,8 +21,8 @@ class ToolbarTest(absltest.TestCase):
         tools = list(Tool)
         self.assertEqual(len(tools), 18)
         self.assertIn(Tool.SELECTION, tools)
-        self.assertIn(Tool.DIRECT_SELECTION, tools)
-        self.assertIn(Tool.GROUP_SELECTION, tools)
+        self.assertIn(Tool.PARTIAL_SELECTION, tools)
+        self.assertIn(Tool.INTERIOR_SELECTION, tools)
         self.assertIn(Tool.PEN, tools)
         self.assertIn(Tool.ADD_ANCHOR_POINT, tools)
         self.assertIn(Tool.DELETE_ANCHOR_POINT, tools)
@@ -42,8 +42,8 @@ class ToolbarTest(absltest.TestCase):
     def test_tool_selection_value(self):
         self.assertEqual(Tool.SELECTION.value, 1)
 
-    def test_tool_direct_selection_value(self):
-        self.assertEqual(Tool.DIRECT_SELECTION.value, 2)
+    def test_tool_partial_selection_value(self):
+        self.assertEqual(Tool.PARTIAL_SELECTION.value, 2)
 
     def test_tool_pen_value(self):
         self.assertEqual(Tool.PEN.value, 4)

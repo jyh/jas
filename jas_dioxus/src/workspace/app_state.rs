@@ -13,8 +13,8 @@ use crate::canvas::render;
 use crate::document::controller::Controller;
 use crate::document::model::Model;
 use crate::geometry::element::{Color, Fill, Stroke, Element as GeoElement};
-use crate::tools::direct_selection_tool::DirectSelectionTool;
-use crate::tools::group_selection_tool::GroupSelectionTool;
+use crate::tools::partial_selection_tool::PartialSelectionTool;
+use crate::tools::interior_selection_tool::InteriorSelectionTool;
 use crate::tools::line_tool::LineTool;
 use crate::tools::pen_tool::PenTool;
 use crate::tools::add_anchor_point_tool::AddAnchorPointTool;
@@ -58,8 +58,8 @@ impl TabState {
     pub(crate) fn with_model(model: Model) -> Self {
         let mut tools: HashMap<ToolKind, Box<dyn CanvasTool>> = HashMap::new();
         tools.insert(ToolKind::Selection, Box::new(SelectionTool::new()));
-        tools.insert(ToolKind::DirectSelection, Box::new(DirectSelectionTool::new()));
-        tools.insert(ToolKind::GroupSelection, Box::new(GroupSelectionTool::new()));
+        tools.insert(ToolKind::PartialSelection, Box::new(PartialSelectionTool::new()));
+        tools.insert(ToolKind::InteriorSelection, Box::new(InteriorSelectionTool::new()));
         tools.insert(ToolKind::Pen, Box::new(PenTool::new()));
         tools.insert(ToolKind::AddAnchorPoint, Box::new(AddAnchorPointTool::new()));
         tools.insert(ToolKind::DeleteAnchorPoint, Box::new(DeleteAnchorPointTool::new()));

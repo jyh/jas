@@ -250,10 +250,10 @@ class SelectionControllerTest(absltest.TestCase):
         self.assertIsInstance(es.kind, _SelectionAll)
 
 
-class DirectSelectionControllerTest(absltest.TestCase):
+class PartialSelectionControllerTest(absltest.TestCase):
 
     def test_direct_select_rect_no_group_expansion(self):
-        """Direct selection does NOT expand groups — only the hit child is selected."""
+        """Partial selection does NOT expand groups — only the hit child is selected."""
         line1 = Line(x1=0, y1=0, x2=5, y2=5)
         line2 = Line(x1=50, y1=50, x2=55, y2=55)
         group = Group(children=(line1, line2))
@@ -283,7 +283,7 @@ class DirectSelectionControllerTest(absltest.TestCase):
     def test_direct_select_rect_body_only_yields_partial_empty(self):
         """If the marquee crosses the body but hits no CPs, the element is
         selected with ``_SelectionPartial(empty)`` — not ``.all``. The
-        Direct Selection tool must not promote "body intersects" to
+        Partial Selection tool must not promote "body intersects" to
         "every CP selected".
         """
         from document.document import _SelectionPartial
@@ -453,10 +453,10 @@ class VisibilityControllerTest(absltest.TestCase):
         self.assertEqual(ctrl.document.selection, frozenset())
 
 
-class GroupSelectionControllerTest(absltest.TestCase):
+class InteriorSelectionControllerTest(absltest.TestCase):
 
     def test_group_select_rect_no_group_expansion(self):
-        """Group selection does NOT expand groups — only the hit child is selected."""
+        """Interior selection does NOT expand groups — only the hit child is selected."""
         line1 = Line(x1=0, y1=0, x2=5, y2=5)
         line2 = Line(x1=50, y1=50, x2=55, y2=55)
         group = Group(children=(line1, line2))
@@ -468,7 +468,7 @@ class GroupSelectionControllerTest(absltest.TestCase):
         self.assertNotIn((0, 0, 1), paths)
 
     def test_group_select_rect_selects_all_cps(self):
-        """Group selection always selects elements as a whole."""
+        """Interior selection always selects elements as a whole."""
         from document.document import _SelectionAll
         rect = Rect(x=0, y=0, width=100, height=100)
         layer = Layer(children=(rect,), name="L0")
@@ -480,7 +480,7 @@ class GroupSelectionControllerTest(absltest.TestCase):
         self.assertIsInstance(es.kind, _SelectionAll)
 
     def test_group_select_rect_misses_element(self):
-        """Group selection marquee outside all elements selects nothing."""
+        """Interior selection marquee outside all elements selects nothing."""
         rect = Rect(x=0, y=0, width=10, height=10)
         layer = Layer(children=(rect,), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))

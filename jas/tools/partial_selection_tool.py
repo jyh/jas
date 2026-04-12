@@ -1,11 +1,11 @@
-"""Direct Selection tool: select control points and drag Bezier handles."""
+"""Partial Selection tool: select control points and drag Bezier handles."""
 
 from __future__ import annotations
 
 from tools.selection_tool import SelectionToolBase
 
 
-class DirectSelectionTool(SelectionToolBase):
+class PartialSelectionTool(SelectionToolBase):
     def __init__(self):
         super().__init__()
         # Live Bezier-handle drag. (path, anchor_idx, handle_type, last_x, last_y)

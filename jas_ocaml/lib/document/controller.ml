@@ -183,7 +183,7 @@ class controller ?(model = Model.create ()) () =
           Some (Document.element_selection_partial path hit_cps)
         else if element_intersects_rect elem x y w h then
           (* Marquee crosses the body but no CPs. Select the
-             element with an empty CP set — the Direct Selection
+             element with an empty CP set — the Partial Selection
              tool must not promote "body intersects" to "every CP
              selected" (which is what `element_selection_all` would
              mean). *)

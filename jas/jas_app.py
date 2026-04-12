@@ -195,7 +195,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("V"), self,
                   lambda: self.toolbar.select_tool(Tool.SELECTION))
         QShortcut(QKeySequence("A"), self,
-                  lambda: self.toolbar.select_tool(Tool.DIRECT_SELECTION))
+                  lambda: self.toolbar.select_tool(Tool.PARTIAL_SELECTION))
         QShortcut(QKeySequence("P"), self,
                   lambda: self.toolbar.select_tool(Tool.PEN))
         QShortcut(QKeySequence("="), self,

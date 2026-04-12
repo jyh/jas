@@ -4,8 +4,8 @@ from tools.tool import CanvasTool
 from tools.toolbar import Tool
 
 from tools.selection_tool import SelectionTool
-from tools.direct_selection_tool import DirectSelectionTool
-from tools.group_selection_tool import GroupSelectionTool
+from tools.partial_selection_tool import PartialSelectionTool
+from tools.interior_selection_tool import InteriorSelectionTool
 from tools.line_tool import LineTool
 from tools.rect_tool import RectTool
 from tools.rounded_rect_tool import RoundedRectTool
@@ -27,8 +27,8 @@ def create_tools() -> dict[Tool, CanvasTool]:
     """Create one instance of each tool, keyed by Tool enum."""
     return {
         Tool.SELECTION: SelectionTool(),
-        Tool.DIRECT_SELECTION: DirectSelectionTool(),
-        Tool.GROUP_SELECTION: GroupSelectionTool(),
+        Tool.PARTIAL_SELECTION: PartialSelectionTool(),
+        Tool.INTERIOR_SELECTION: InteriorSelectionTool(),
         Tool.PEN: PenTool(),
         Tool.ADD_ANCHOR_POINT: AddAnchorPointTool(),
         Tool.DELETE_ANCHOR_POINT: DeleteAnchorPointTool(),

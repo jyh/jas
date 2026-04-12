@@ -55,7 +55,7 @@ let () =
     ignore page  (* We track focus via on_focus callbacks on click *)
   ) |> ignore;
 
-  (* Keyboard shortcuts: V = Selection, A = Direct Selection, \ = Line *)
+  (* Keyboard shortcuts: V = Selection, A = Partial Selection, \ = Line *)
   main_window#event#connect#key_press ~callback:(fun ev ->
     let key = GdkEvent.Key.keyval ev in
     (* If a tool is in an editing session (e.g. type tool), give it first
@@ -75,7 +75,7 @@ let () =
     else if key = GdkKeysyms._v || key = GdkKeysyms._V then begin
       toolbar#select_tool Jas.Toolbar.Selection; true
     end else if key = GdkKeysyms._a || key = GdkKeysyms._A then begin
-      toolbar#select_tool Jas.Toolbar.Direct_selection; true
+      toolbar#select_tool Jas.Toolbar.Partial_selection; true
     end else if key = GdkKeysyms._p || key = GdkKeysyms._P then begin
       toolbar#select_tool Jas.Toolbar.Pen; true
     end else if key = GdkKeysyms._plus || key = GdkKeysyms._equal then begin

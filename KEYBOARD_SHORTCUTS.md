@@ -53,7 +53,7 @@
 | ----- | ----- | ----- |
 | Artboard tool | Shift \+ O | Shift \+ O |
 | Selection tool | V | V |
-| Direct Selection tool | A | A |
+| Partial Selection tool | A | A |
 | Magic Wand tool | Y | Y |
 | Lasso tool | Q | Q |
 | Pen tool | P | P |
@@ -146,10 +146,10 @@
 
 | Shortcuts | Windows | macOS |
 | ----- | ----- | ----- |
-| Switch to last-used selection tool (Selection tool, Direct Selection tool, or Group Selection tool) | Ctrl \+ \` | Command \+ \` |
-| Switch between Direct Selection tool and Group Selection tool | Alt | Option |
-| Add to a selection with Selection tool, Direct Selection tool, Group Selection tool, Live Paint Selection tool, or Magic Wand tool | Shift-click | Shift-click |
-| Subtract a selection with Selection tool, Direct Selection tool, Group Selection tool, or LIve Paint Selection tool | Shift-click | Shift-click |
+| Switch to last-used selection tool (Selection tool, Partial Selection tool, or Interior Selection tool) | Ctrl \+ \` | Command \+ \` |
+| Switch between Partial Selection tool and Interior Selection tool | Alt | Option |
+| Add to a selection with Selection tool, Partial Selection tool, Interior Selection tool, Live Paint Selection tool, or Magic Wand tool | Shift-click | Shift-click |
+| Subtract a selection with Selection tool, Partial Selection tool, Interior Selection tool, or LIve Paint Selection tool | Shift-click | Shift-click |
 | Subtract from selection with Magic Wand tool | Alt-click | Option-click |
 | Add to selection with Lasso tool | Shift-drag | Shift-drag |
 | Subtract from selection with Lasso tool | Alt-drag | Option-drag |

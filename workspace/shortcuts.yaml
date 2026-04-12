@@ -28,7 +28,7 @@ shortcuts:
   - { key: "Ctrl+0",       action: fit_in_window }
   # Tools
   - { key: "V",            action: select_tool,      params: { tool: selection } }
-  - { key: "A",            action: select_tool,      params: { tool: direct_selection } }
+  - { key: "A",            action: select_tool,      params: { tool: partial_selection } }
   - { key: "P",            action: select_tool,      params: { tool: pen } }
   - { key: "=",            action: select_tool,      params: { tool: add_anchor } }
   - { key: "-",            action: select_tool,      params: { tool: delete_anchor } }

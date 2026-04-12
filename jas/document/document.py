@@ -77,7 +77,7 @@ class _SelectionAll:
 
 @dataclass(frozen=True)
 class _SelectionPartial:
-    """Subset of CPs selected (Direct Selection)."""
+    """Subset of CPs selected (Partial Selection)."""
     cps: SortedCps
 
 

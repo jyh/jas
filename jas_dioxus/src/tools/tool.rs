@@ -24,8 +24,8 @@ pub const SMOOTH_SIZE: f64 = 100.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ToolKind {
     Selection,
-    DirectSelection,
-    GroupSelection,
+    PartialSelection,
+    InteriorSelection,
     Pen,
     AddAnchorPoint,
     DeleteAnchorPoint,
@@ -47,8 +47,8 @@ impl ToolKind {
     pub fn label(&self) -> &'static str {
         match self {
             ToolKind::Selection => "Selection (V)",
-            ToolKind::DirectSelection => "Direct Selection (A)",
-            ToolKind::GroupSelection => "Group Selection",
+            ToolKind::PartialSelection => "Partial Selection (A)",
+            ToolKind::InteriorSelection => "Interior Selection",
             ToolKind::Pen => "Pen (P)",
             ToolKind::AddAnchorPoint => "Add Anchor Point (+)",
             ToolKind::DeleteAnchorPoint => "Delete Anchor Point (-)",
@@ -71,10 +71,10 @@ impl ToolKind {
     pub fn cursor_css(&self) -> &'static str {
         match self {
             ToolKind::Selection => "default",
-            ToolKind::DirectSelection => {
+            ToolKind::PartialSelection => {
                 "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cpath d='M4,1 L4,19 L8,15 L12,22 L15,20 L11,13 L16,13 Z' fill='white' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E\") 4 1, default"
             }
-            ToolKind::GroupSelection => {
+            ToolKind::InteriorSelection => {
                 "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cpath d='M4,1 L4,19 L8,15 L12,22 L15,20 L11,13 L16,13 Z' fill='white' stroke='black' stroke-width='1.5'/%3E%3Cline x1='17' y1='20' x2='23' y2='20' stroke='black' stroke-width='2'/%3E%3Cline x1='20' y1='17' x2='20' y2='23' stroke='black' stroke-width='2'/%3E%3C/svg%3E\") 4 1, default"
             }
             ToolKind::Pen => {
@@ -109,7 +109,7 @@ impl ToolKind {
     pub fn shortcut(&self) -> Option<&'static str> {
         match self {
             ToolKind::Selection => Some("v"),
-            ToolKind::DirectSelection => Some("a"),
+            ToolKind::PartialSelection => Some("a"),
             ToolKind::Pen => Some("p"),
             ToolKind::Pencil => Some("n"),
             ToolKind::Type => Some("t"),
@@ -182,8 +182,8 @@ mod tests {
     fn tool_kind_has_eighteen_variants() {
         let all = [
             ToolKind::Selection,
-            ToolKind::DirectSelection,
-            ToolKind::GroupSelection,
+            ToolKind::PartialSelection,
+            ToolKind::InteriorSelection,
             ToolKind::Pen,
             ToolKind::AddAnchorPoint,
             ToolKind::DeleteAnchorPoint,
@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn tool_kind_equality() {
         assert_eq!(ToolKind::Selection, ToolKind::Selection);
-        assert_ne!(ToolKind::Selection, ToolKind::DirectSelection);
+        assert_ne!(ToolKind::Selection, ToolKind::PartialSelection);
         assert_ne!(ToolKind::Type, ToolKind::TypeOnPath);
         assert_ne!(ToolKind::Rect, ToolKind::Polygon);
     }
@@ -229,7 +229,7 @@ mod tests {
         use std::collections::HashSet;
         let mut set = HashSet::new();
         let all = [
-            ToolKind::Selection, ToolKind::DirectSelection, ToolKind::GroupSelection,
+            ToolKind::Selection, ToolKind::PartialSelection, ToolKind::InteriorSelection,
             ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint,
             ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::PathEraser,
             ToolKind::Smooth, ToolKind::Type, ToolKind::TypeOnPath, ToolKind::Line,
@@ -245,7 +245,7 @@ mod tests {
     #[test]
     fn labels_all_non_empty() {
         let all = [
-            ToolKind::Selection, ToolKind::DirectSelection, ToolKind::GroupSelection,
+            ToolKind::Selection, ToolKind::PartialSelection, ToolKind::InteriorSelection,
             ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint,
             ToolKind::AnchorPoint, ToolKind::Pencil, ToolKind::PathEraser,
             ToolKind::Smooth, ToolKind::Type, ToolKind::TypeOnPath, ToolKind::Line,
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn shortcuts_for_primary_tools() {
         assert_eq!(ToolKind::Selection.shortcut(), Some("v"));
-        assert_eq!(ToolKind::DirectSelection.shortcut(), Some("a"));
+        assert_eq!(ToolKind::PartialSelection.shortcut(), Some("a"));
         assert_eq!(ToolKind::Pen.shortcut(), Some("p"));
         assert_eq!(ToolKind::Pencil.shortcut(), Some("n"));
         assert_eq!(ToolKind::Type.shortcut(), Some("t"));
@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn shortcuts_none_for_alternates() {
-        assert_eq!(ToolKind::GroupSelection.shortcut(), None);
+        assert_eq!(ToolKind::InteriorSelection.shortcut(), None);
         assert_eq!(ToolKind::Smooth.shortcut(), None);
         assert_eq!(ToolKind::TypeOnPath.shortcut(), None);
         assert_eq!(ToolKind::Polygon.shortcut(), None);
@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn arrow_slot_alternates() {
-        let alternates = [ToolKind::DirectSelection, ToolKind::GroupSelection];
+        let alternates = [ToolKind::PartialSelection, ToolKind::InteriorSelection];
         assert_eq!(alternates.len(), 2);
     }
 
@@ -417,7 +417,7 @@ mod tests {
         // 4 rows x 2 columns, 8 slots total
         let slots: &[(usize, usize, &[ToolKind])] = &[
             (0, 0, &[ToolKind::Selection]),
-            (0, 1, &[ToolKind::DirectSelection, ToolKind::GroupSelection]),
+            (0, 1, &[ToolKind::PartialSelection, ToolKind::InteriorSelection]),
             (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint, ToolKind::AnchorPoint]),
             (1, 1, &[ToolKind::Pencil, ToolKind::PathEraser, ToolKind::Smooth]),
             (2, 0, &[ToolKind::Type, ToolKind::TypeOnPath]),

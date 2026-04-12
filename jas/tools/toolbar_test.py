@@ -27,7 +27,7 @@ class ToolEnumTest(absltest.TestCase):
 
     def test_all_tools_present(self):
         expected = {
-            "SELECTION", "DIRECT_SELECTION", "GROUP_SELECTION",
+            "SELECTION", "PARTIAL_SELECTION", "INTERIOR_SELECTION",
             "PEN", "ADD_ANCHOR_POINT", "DELETE_ANCHOR_POINT", "ANCHOR_POINT",
             "PENCIL", "PATH_ERASER", "SMOOTH",
             "TYPE", "TYPE_ON_PATH",
@@ -80,7 +80,7 @@ class SharedSlotsTest(absltest.TestCase):
     """Tests for shared toolbar slot definitions."""
 
     def test_arrow_slot_tools(self):
-        self.assertEqual(_ARROW_SLOT_TOOLS, {Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION})
+        self.assertEqual(_ARROW_SLOT_TOOLS, {Tool.PARTIAL_SELECTION, Tool.INTERIOR_SELECTION})
 
     def test_text_slot_tools(self):
         self.assertEqual(_TEXT_SLOT_TOOLS, {Tool.TYPE, Tool.TYPE_ON_PATH})
@@ -116,7 +116,7 @@ class ToolButtonTest(absltest.TestCase):
         self.assertFalse(btn.has_alternates)
 
     def test_button_with_alternates(self):
-        btn = ToolButton(Tool.DIRECT_SELECTION, has_alternates=True)
+        btn = ToolButton(Tool.PARTIAL_SELECTION, has_alternates=True)
         self.assertTrue(btn.has_alternates)
 
     def test_button_size(self):
@@ -151,8 +151,8 @@ class ToolbarLayoutTest(absltest.TestCase):
     def test_toolbar_visible_button_count(self):
         """7 visible slots in grid (4 hidden alternates)."""
         toolbar = Toolbar()
-        # Grid has 7 slots: selection, direct, pen, pencil, text, line, rect
-        visible = [Tool.SELECTION, Tool.DIRECT_SELECTION, Tool.PEN,
+        # Grid has 7 slots: selection, partial, pen, pencil, text, line, rect
+        visible = [Tool.SELECTION, Tool.PARTIAL_SELECTION, Tool.PEN,
                    Tool.PENCIL, Tool.TYPE, Tool.LINE, Tool.RECT]
         for tool in visible:
             self.assertIn(tool, toolbar.buttons)
@@ -164,8 +164,8 @@ class ToolbarLayoutTest(absltest.TestCase):
 
     def test_toolbar_select_arrow_slot_tool(self):
         toolbar = Toolbar()
-        toolbar.select_tool(Tool.GROUP_SELECTION)
-        self.assertEqual(toolbar.current_tool, Tool.GROUP_SELECTION)
+        toolbar.select_tool(Tool.INTERIOR_SELECTION)
+        self.assertEqual(toolbar.current_tool, Tool.INTERIOR_SELECTION)
 
     def test_toolbar_select_text_slot_tool(self):
         toolbar = Toolbar()

@@ -56,7 +56,7 @@ supports:
   blinking caret, selection highlighting, multi-line area text, and a
   Type-on-Path variant where glyphs flow along a curve with an
   interactive start-offset handle.
-- **Selection** — three modes (Selection, Direct Selection, Group
+- **Selection** — three modes (Selection, Partial Selection, Interior
   Selection) covering element selection, control-point selection, and
   group-traversal selection, with marquee, shift-extend, alt-copy,
   keyboard nudge, and hit-testing against filled, stroked, and curved

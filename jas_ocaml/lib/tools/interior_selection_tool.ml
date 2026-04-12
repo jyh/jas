@@ -1,6 +1,6 @@
-(** Group Selection tool: marquee select that picks groups as units. *)
+(** Interior Selection tool: marquee select that picks groups as units. *)
 
-class group_selection_tool = object
+class interior_selection_tool = object
   inherit Selection_tool.selection_tool_base
 
   method private check_handle_hit (_ctx : Canvas_tool.tool_context) (_x : float) (_y : float) = false
