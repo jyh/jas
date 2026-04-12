@@ -250,7 +250,7 @@ class MainWindow(QMainWindow):
             self.tab_widget.currentChanged.connect(lambda _: self._update_canvas_logo())
 
         # Dock pane
-        self.dock_panel = DockPanelWidget(self.workspace_layout)
+        self.dock_panel = DockPanelWidget(self.workspace_layout, get_model=self.active_model)
         self.dock_panel.setStyleSheet(f"background: {self.theme.pane_bg};")
         self._dock_title = PaneTitleBar(
             "", pane_id=did,

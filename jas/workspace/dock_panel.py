@@ -117,10 +117,12 @@ class DroppablePanelGroup(QWidget):
 class DockPanelWidget(QWidget):
     """Renders an anchored dock with panel groups, tab bars, and placeholders."""
 
-    def __init__(self, workspace_layout: WorkspaceLayout, edge: DockEdge = DockEdge.RIGHT):
+    def __init__(self, workspace_layout: WorkspaceLayout, edge: DockEdge = DockEdge.RIGHT,
+                 get_model=None):
         super().__init__()
         self._layout_data = workspace_layout
         self._edge = edge
+        self._get_model = get_model
         self._vbox = QVBoxLayout(self)
         self._vbox.setContentsMargins(0, 0, 0, 0)
         self._vbox.setSpacing(0)
@@ -237,11 +239,20 @@ class DockPanelWidget(QWidget):
         if not group.collapsed:
             active = group.active_panel()
             if active is not None:
-                body = QLabel(panel_label(active))
-                body.setStyleSheet(f"color: {THEME_TEXT_BODY}; font-size: 12px; padding: 12px;")
-                body.setMinimumHeight(60)
-                body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-                vbox.addWidget(body)
+                if active == PanelKind.COLOR and self._get_model is not None:
+                    from panels.color_panel_view import ColorPanelView
+                    body = ColorPanelView(
+                        layout=self._layout_data,
+                        get_model=self._get_model,
+                        rebuild_fn=self.rebuild,
+                    )
+                    vbox.addWidget(body)
+                else:
+                    body = QLabel(panel_label(active))
+                    body.setStyleSheet(f"color: {THEME_TEXT_BODY}; font-size: 12px; padding: 12px;")
+                    body.setMinimumHeight(60)
+                    body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+                    vbox.addWidget(body)
 
         # Separator
         sep = QWidget()
@@ -293,7 +304,8 @@ class DockPanelWidget(QWidget):
         menu.exec(self.cursor().pos())
 
     def _dispatch_panel_cmd(self, kind, cmd, addr):
-        panel_dispatch(kind, cmd, addr, self._layout_data)
+        model = self._get_model() if self._get_model else None
+        panel_dispatch(kind, cmd, addr, self._layout_data, model=model)
         self.rebuild()
 
     def _expand_to(self, dock_id, group_idx, panel_idx):
@@ -390,11 +402,20 @@ class FloatingDockWindow(QWidget):
         if not group.collapsed:
             active = group.active_panel()
             if active is not None:
-                body = QLabel(panel_label(active))
-                body.setStyleSheet(f"color: {THEME_TEXT_BODY}; font-size: 12px; padding: 12px;")
-                body.setMinimumHeight(60)
-                body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-                vbox.addWidget(body)
+                if active == PanelKind.COLOR and self._parent_panel._get_model is not None:
+                    from panels.color_panel_view import ColorPanelView
+                    body = ColorPanelView(
+                        layout=self._layout_data,
+                        get_model=self._parent_panel._get_model,
+                        rebuild_fn=self._parent_panel.rebuild_all,
+                    )
+                    vbox.addWidget(body)
+                else:
+                    body = QLabel(panel_label(active))
+                    body.setStyleSheet(f"color: {THEME_TEXT_BODY}; font-size: 12px; padding: 12px;")
+                    body.setMinimumHeight(60)
+                    body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+                    vbox.addWidget(body)
 
         return widget
 

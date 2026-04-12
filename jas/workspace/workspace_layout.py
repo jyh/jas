@@ -193,6 +193,7 @@ class WorkspaceLayout:
         self._next_id = next_id
         self._generation = 0
         self._saved_generation = 0
+        self.color_panel_mode: str = "hsb"  # transient, not persisted
 
     # -- Construction --
 
