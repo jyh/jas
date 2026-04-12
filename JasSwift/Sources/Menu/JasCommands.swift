@@ -28,6 +28,10 @@ public struct FocusedWorkspaceKey: FocusedValueKey {
     public typealias Value = WorkspaceState
 }
 
+public struct FocusedActiveAppearanceKey: FocusedValueKey {
+    public typealias Value = String
+}
+
 public extension FocusedValues {
     var workspace: WorkspaceState? {
         get { self[FocusedWorkspaceKey.self] }
@@ -53,6 +57,10 @@ public extension FocusedValues {
         get { self[FocusedAddCanvasKey.self] }
         set { self[FocusedAddCanvasKey.self] = newValue }
     }
+    var activeAppearance: String? {
+        get { self[FocusedActiveAppearanceKey.self] }
+        set { self[FocusedActiveAppearanceKey.self] = newValue }
+    }
 }
 
 /// Custom menu commands for Jas app (File, Edit, View menus).
@@ -63,6 +71,7 @@ public struct JasCommands: Commands {
     @FocusedValue(\.canRedo) private var canRedo
     @FocusedValue(\.addCanvas) private var addCanvas
     @FocusedValue(\.workspace) private var workspace
+    @FocusedValue(\.activeAppearance) private var activeAppearanceName
 
     public init() {}
 
@@ -278,7 +287,7 @@ public struct JasCommands: Commands {
 
                 Menu("Appearance \u{25B6}") {
                     ForEach(predefinedAppearances, id: \.name) { entry in
-                        let isActive = entry.name == ws.appConfig.activeAppearance
+                        let isActive = entry.name == (activeAppearanceName ?? "dark_gray")
                         let prefix = isActive ? "\u{2713} " : "    "
                         Button(prefix + entry.label) {
                             ws.switchAppearance(entry.name)
