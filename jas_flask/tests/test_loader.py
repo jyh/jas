@@ -170,10 +170,12 @@ class TestResolveIncludes:
     def test_include_preserves_bind(self, workspace_path):
         from loader import load_workspace, find_element_by_id
         data = load_workspace(workspace_path)
-        # The color panel is included with a bind override
-        color_panel = find_element_by_id(data["layout"], "color_panel_content")
-        assert color_panel is not None
-        assert "bind" in color_panel or "visible" in str(color_panel.get("bind", {}))
+        # The dock_view element should be present with groups
+        dock_main = find_element_by_id(data["layout"], "dock_main")
+        assert dock_main is not None
+        assert dock_main.get("type") == "dock_view"
+        assert "groups" in dock_main
+        assert len(dock_main["groups"]) == 2
 
 
 class TestValidateActionRefs:

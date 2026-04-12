@@ -8,14 +8,14 @@ default_layouts:
     state:
       canvas_maximized: false
       dock_collapsed: false
-      dock_group0_active: 0
-      dock_group1_active: 0
-      dock_group0_collapsed: false
-      dock_group1_collapsed: false
-      layers_visible: true
-      color_visible: true
-      stroke_visible: true
-      properties_visible: true
+    dock:
+      dock_main:
+        groups:
+          - panels: [layers]
+            active: 0
+          - panels: [color, stroke, properties]
+            active: 0
+    floating: []
 
   Minimal:
     panes:
@@ -25,14 +25,14 @@ default_layouts:
     state:
       canvas_maximized: false
       dock_collapsed: false
-      dock_group0_active: 0
-      dock_group1_active: 0
-      dock_group0_collapsed: false
-      dock_group1_collapsed: false
-      layers_visible: true
-      color_visible: true
-      stroke_visible: true
-      properties_visible: true
+    dock:
+      dock_main:
+        groups:
+          - panels: [layers]
+            active: 0
+          - panels: [color, stroke, properties]
+            active: 0
+    floating: []
 
   Painting:
     panes:
@@ -42,11 +42,11 @@ default_layouts:
     state:
       canvas_maximized: false
       dock_collapsed: false
-      dock_group0_active: 0
-      dock_group1_active: 0
-      dock_group0_collapsed: false
-      dock_group1_collapsed: false
-      layers_visible: true
-      color_visible: true
-      stroke_visible: true
-      properties_visible: true
+    dock:
+      dock_main:
+        groups:
+          - panels: [layers]
+            active: 0
+          - panels: [color, stroke, properties]
+            active: 0
+    floating: []
