@@ -77,13 +77,13 @@ pub(crate) fn build_dock_groups(
             let label = crate::panels::panel_label(kind);
             let is_active = pi == group.active;
             let bg = if is_active { THEME_BG_TAB } else { THEME_BG_TAB_INACTIVE };
-            let border_bottom = if is_active { "2px solid #4a4a4a" } else { "2px solid #555" };
+            let border_bottom = if is_active { format!("2px solid {THEME_BG_TAB}") } else { format!("2px solid {THEME_BORDER}") };
             let font_weight = if is_active { "bold" } else { "normal" };
             let is_focused = focused == Some(PanelAddr {
                 group: GroupAddr { dock_id: did, group_idx: gi },
                 panel_idx: pi,
             });
-            let outline = if is_focused { "outline:2px solid #4a90d9; outline-offset:-2px;" } else { "" };
+            let outline = "";
 
             // Insertion indicator before this tab
             let show_caret = tab_drop_idx == Some(pi);
