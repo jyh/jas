@@ -1842,8 +1842,11 @@
     return { dockId: dockId, groupIdx: groupIdx };
   }
 
-  // Find drop target: which dock_view header is the cursor over?
+  // Find drop target: a group header tab bar, or an empty area of a dock_view.
+  // Returns { dockId, groupIdx, tabIdx, header } for tab drops, or
+  // { dockId, newGroup: true, insertAt, dockView } for empty-area drops.
   function findDropTarget(clientX, clientY) {
+    // First check group headers (tab bar drops)
     var headers = document.querySelectorAll(".jas-dock-group-header");
     for (var i = 0; i < headers.length; i++) {
       var rect = headers[i].getBoundingClientRect();
@@ -1852,7 +1855,6 @@
         var group = headers[i].closest(".jas-dock-group");
         var dockId = group ? group.getAttribute("data-dock") : null;
         var groupIdx = group ? parseInt(group.getAttribute("data-group-index") || "0") : 0;
-        // Find tab insertion point
         var tabs = headers[i].querySelectorAll(".jas-dock-tab");
         var insertIdx = tabs.length;
         for (var j = 0; j < tabs.length; j++) {
@@ -1860,6 +1862,26 @@
           if (clientX < tr.left + tr.width / 2) { insertIdx = j; break; }
         }
         return { dockId: dockId, groupIdx: groupIdx, tabIdx: insertIdx, header: headers[i] };
+      }
+    }
+    // Then check dock_view empty areas (between groups or below last group)
+    var dockViews = document.querySelectorAll(".jas-dock-view");
+    for (var d = 0; d < dockViews.length; d++) {
+      var dv = dockViews[d];
+      var dvRect = dv.getBoundingClientRect();
+      if (clientX >= dvRect.left && clientX <= dvRect.right &&
+          clientY >= dvRect.top && clientY <= dvRect.bottom) {
+        var dockId = dv.id;
+        var model = dockModels[dockId];
+        if (!model) continue;
+        // Find insertion position: check each group's vertical position
+        var groups = dv.querySelectorAll(".jas-dock-group");
+        var insertAt = model.groups.length;
+        for (var g = 0; g < groups.length; g++) {
+          var gr = groups[g].getBoundingClientRect();
+          if (clientY < gr.top + gr.height / 2) { insertAt = g; break; }
+        }
+        return { dockId: dockId, newGroup: true, insertAt: insertAt, dockView: dv };
       }
     }
     return null;
@@ -1902,6 +1924,7 @@
 
     var target = findDropTarget(e.clientX, e.clientY);
     if (target && target.header) {
+      // Tab bar drop: vertical indicator between tabs
       var tabs = target.header.querySelectorAll(".jas-dock-tab");
       if (target.tabIdx < tabs.length) {
         var r = tabs[target.tabIdx].getBoundingClientRect();
@@ -1910,6 +1933,21 @@
         var r = tabs[tabs.length - 1].getBoundingClientRect();
         showIndicator(r.right + 1, r.top, 3, r.height);
       }
+    } else if (target && target.newGroup) {
+      // Empty dock area: horizontal indicator for new group insertion
+      var dv = target.dockView;
+      var dvRect = dv.getBoundingClientRect();
+      var groups = dv.querySelectorAll(".jas-dock-group");
+      var yPos;
+      if (target.insertAt < groups.length) {
+        yPos = groups[target.insertAt].getBoundingClientRect().top;
+      } else if (groups.length > 0) {
+        var lastG = groups[groups.length - 1].getBoundingClientRect();
+        yPos = lastG.bottom;
+      } else {
+        yPos = dvRect.top + 4;
+      }
+      showIndicator(dvRect.left + 4, yPos - 1, dvRect.width - 8, 3);
     } else {
       hideIndicator();
     }
@@ -1950,7 +1988,7 @@
       return;
     }
 
-    // Dropped on a dock group
+    // Dropped on a dock target
     if (pd.type === "panel" && pd.panelName) {
       var srcModel = dockModels[pd.context.dockId];
       var tgtModel = dockModels[target.dockId];
@@ -1967,16 +2005,34 @@
         }
       }
 
-      // Insert into target
-      var tgtGroup = tgtModel.groups[target.groupIdx];
-      if (tgtGroup) {
-        tgtGroup.panels.splice(target.tabIdx, 0, pd.panelName);
-        tgtGroup.active = target.tabIdx;
+      if (target.newGroup) {
+        // Insert as new panel group at the indicated position
+        var newGroup = { panels: [pd.panelName], active: 0, collapsed: false };
+        tgtModel.groups.splice(target.insertAt, 0, newGroup);
+      } else {
+        // Insert into existing group's tab bar
+        var tgtGroup = tgtModel.groups[target.groupIdx];
+        if (tgtGroup) {
+          tgtGroup.panels.splice(target.tabIdx, 0, pd.panelName);
+          tgtGroup.active = target.tabIdx;
+        }
       }
 
       rerenderDockView(pd.context.dockId);
       removeIfEmptyFloating(pd.context.dockId);
       if (target.dockId !== pd.context.dockId) rerenderDockView(target.dockId);
+    } else if (pd.type === "group" && target.newGroup) {
+      // Move entire group to a new position in the target dock
+      var srcModel = dockModels[pd.context.dockId];
+      var tgtModel = dockModels[target.dockId];
+      if (!srcModel || !tgtModel) return;
+      if (pd.context.groupIdx < srcModel.groups.length) {
+        var group = srcModel.groups.splice(pd.context.groupIdx, 1)[0];
+        tgtModel.groups.splice(target.insertAt, 0, group);
+        rerenderDockView(pd.context.dockId);
+        removeIfEmptyFloating(pd.context.dockId);
+        if (target.dockId !== pd.context.dockId) rerenderDockView(target.dockId);
+      }
     }
   });
 
