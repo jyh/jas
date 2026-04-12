@@ -213,7 +213,7 @@ pub(crate) fn build_dock_groups(
         // Highlight tab bar when it's a TabBar drop target
         let tab_bar_drop = cur_drag.is_some()
             && matches!(cur_drop, Some(DropTarget::TabBar { group, .. }) if group == GroupAddr { dock_id: did, group_idx: gi });
-        let tab_bar_border = if tab_bar_drop { "2px solid #4a90d9" } else { "1px solid #555" };
+        let tab_bar_border = if tab_bar_drop { format!("2px solid {THEME_ACCENT}") } else { format!("1px solid {THEME_BORDER}") };
 
         let is_dragged_group = matches!(cur_drag,
             Some(DragPayload::Group(addr)) if addr.dock_id == did && addr.group_idx == gi);
