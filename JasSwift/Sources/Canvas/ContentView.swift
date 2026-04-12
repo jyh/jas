@@ -72,7 +72,10 @@ public class WorkspaceState: ObservableObject {
     }
 
     public func resetToDefault() {
+        let vw = workspaceLayout.panes()?.viewportWidth ?? 1200
+        let vh = workspaceLayout.panes()?.viewportHeight ?? 800
         workspaceLayout = WorkspaceLayout.named(workspaceLayoutName)
+        workspaceLayout.ensurePaneLayout(viewportW: vw, viewportH: vh)
         appConfig.activeLayout = workspaceLayoutName
         appConfig.save()
         workspaceLayout.save()
