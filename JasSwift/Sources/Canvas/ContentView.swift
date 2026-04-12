@@ -49,6 +49,7 @@ public class WorkspaceState: ObservableObject {
     }
 
     public func switchAppearance(_ name: String) {
+        objectWillChange.send()
         theme = resolveAppearance(name)
         appConfig.activeAppearance = name
         appConfig.save()
