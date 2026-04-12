@@ -329,6 +329,116 @@ pub fn menu_structure_json() -> String {
 }
 
 // ---------------------------------------------------------------------------
+// State defaults (must match workspace/state.yaml)
+// ---------------------------------------------------------------------------
+
+/// Return canonical JSON for all user-facing state variable defaults.
+pub fn state_defaults_json() -> String {
+    let vars: &[(&str, &str, &str)] = &[
+        ("active_tab", "number", "-1"),
+        ("active_tool", "enum", "\"selection\""),
+        ("canvas_maximized", "bool", "false"),
+        ("canvas_visible", "bool", "true"),
+        ("color_visible", "bool", "true"),
+        ("dock_collapsed", "bool", "false"),
+        ("dock_group0_active", "number", "0"),
+        ("dock_group0_collapsed", "bool", "false"),
+        ("dock_group1_active", "number", "0"),
+        ("dock_group1_collapsed", "bool", "false"),
+        ("dock_visible", "bool", "true"),
+        ("fill_color", "color", "\"#ffffff\""),
+        ("fill_on_top", "bool", "true"),
+        ("layers_visible", "bool", "true"),
+        ("properties_visible", "bool", "true"),
+        ("stroke_color", "color", "\"#000000\""),
+        ("stroke_visible", "bool", "true"),
+        ("stroke_width", "number", "1"),
+        ("tab_count", "number", "0"),
+        ("toolbar_visible", "bool", "true"),
+    ];
+
+    let var_jsons: Vec<String> = vars.iter().map(|(name, stype, default)| {
+        let mut o = JsonObj::new();
+        o.raw("default", default.to_string());
+        o.str_val("name", name);
+        o.str_val("type", stype);
+        o.build()
+    }).collect();
+
+    let mut o = JsonObj::new();
+    o.int("count", vars.len());
+    o.raw("variables", json_array(&var_jsons));
+    o.build()
+}
+
+// ---------------------------------------------------------------------------
+// Shortcut structure (must match workspace/shortcuts.yaml)
+// ---------------------------------------------------------------------------
+
+/// Return canonical JSON for all keyboard shortcuts.
+pub fn shortcut_structure_json() -> String {
+    let shortcuts: &[(&str, &str, Option<(&str, &str)>)] = &[
+        ("Ctrl+N", "new_document", None),
+        ("Ctrl+O", "open_file", None),
+        ("Ctrl+S", "save", None),
+        ("Ctrl+Shift+S", "save_as", None),
+        ("Ctrl+Q", "quit", None),
+        ("Ctrl+Z", "undo", None),
+        ("Ctrl+Shift+Z", "redo", None),
+        ("Ctrl+X", "cut", None),
+        ("Ctrl+C", "copy", None),
+        ("Ctrl+V", "paste", None),
+        ("Ctrl+Shift+V", "paste_in_place", None),
+        ("Ctrl+A", "select_all", None),
+        ("Delete", "delete_selection", None),
+        ("Backspace", "delete_selection", None),
+        ("Ctrl+G", "group", None),
+        ("Ctrl+Shift+G", "ungroup", None),
+        ("Ctrl+2", "lock", None),
+        ("Ctrl+Alt+2", "unlock_all", None),
+        ("Ctrl+3", "hide_selection", None),
+        ("Ctrl+Alt+3", "show_all", None),
+        ("Ctrl+=", "zoom_in", None),
+        ("Ctrl+-", "zoom_out", None),
+        ("Ctrl+0", "fit_in_window", None),
+        ("V", "select_tool", Some(("tool", "selection"))),
+        ("A", "select_tool", Some(("tool", "direct_selection"))),
+        ("P", "select_tool", Some(("tool", "pen"))),
+        ("=", "select_tool", Some(("tool", "add_anchor"))),
+        ("-", "select_tool", Some(("tool", "delete_anchor"))),
+        ("T", "select_tool", Some(("tool", "type"))),
+        ("\\", "select_tool", Some(("tool", "line"))),
+        ("M", "select_tool", Some(("tool", "rect"))),
+        ("N", "select_tool", Some(("tool", "pencil"))),
+        ("Shift+E", "select_tool", Some(("tool", "path_eraser"))),
+        ("Q", "select_tool", Some(("tool", "lasso"))),
+        ("D", "reset_fill_stroke", None),
+        ("X", "toggle_fill_on_top", None),
+        ("Shift+X", "swap_fill_stroke", None),
+    ];
+
+    let shortcut_jsons: Vec<String> = shortcuts.iter().map(|(key, action, params)| {
+        let mut o = JsonObj::new();
+        o.str_val("action", action);
+        o.str_val("key", key);
+        match params {
+            Some((pk, pv)) => {
+                let mut po = JsonObj::new();
+                po.str_val(pk, pv);
+                o.raw("params", po.build());
+            }
+            None => o.null("params"),
+        }
+        o.build()
+    }).collect();
+
+    let mut o = JsonObj::new();
+    o.int("count", shortcuts.len());
+    o.raw("shortcuts", json_array(&shortcut_jsons));
+    o.build()
+}
+
+// ---------------------------------------------------------------------------
 // Public API: workspace → test JSON
 // ---------------------------------------------------------------------------
 

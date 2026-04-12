@@ -316,6 +316,106 @@ let menu_structure_json () =
   json_build o
 
 (* ------------------------------------------------------------------ *)
+(* State defaults (must match workspace/state.yaml)                    *)
+(* ------------------------------------------------------------------ *)
+
+let state_defaults_json () =
+  let vars = [
+    ("active_tab", "number", "-1");
+    ("active_tool", "enum", "\"selection\"");
+    ("canvas_maximized", "bool", "false");
+    ("canvas_visible", "bool", "true");
+    ("color_visible", "bool", "true");
+    ("dock_collapsed", "bool", "false");
+    ("dock_group0_active", "number", "0");
+    ("dock_group0_collapsed", "bool", "false");
+    ("dock_group1_active", "number", "0");
+    ("dock_group1_collapsed", "bool", "false");
+    ("dock_visible", "bool", "true");
+    ("fill_color", "color", "\"#ffffff\"");
+    ("fill_on_top", "bool", "true");
+    ("layers_visible", "bool", "true");
+    ("properties_visible", "bool", "true");
+    ("stroke_color", "color", "\"#000000\"");
+    ("stroke_visible", "bool", "true");
+    ("stroke_width", "number", "1");
+    ("tab_count", "number", "0");
+    ("toolbar_visible", "bool", "true");
+  ] in
+  let var_jsons = List.map (fun (name, stype, def_val) ->
+    let o = json_obj () in
+    json_raw o "default" def_val;
+    json_str o "name" name;
+    json_str o "type" stype;
+    json_build o
+  ) vars in
+  let o = json_obj () in
+  json_int o "count" (List.length vars);
+  json_raw o "variables" (json_array var_jsons);
+  json_build o
+
+(* ------------------------------------------------------------------ *)
+(* Shortcut structure (must match workspace/shortcuts.yaml)            *)
+(* ------------------------------------------------------------------ *)
+
+let shortcut_structure_json () =
+  let shortcuts = [
+    ("Ctrl+N", "new_document", None);
+    ("Ctrl+O", "open_file", None);
+    ("Ctrl+S", "save", None);
+    ("Ctrl+Shift+S", "save_as", None);
+    ("Ctrl+Q", "quit", None);
+    ("Ctrl+Z", "undo", None);
+    ("Ctrl+Shift+Z", "redo", None);
+    ("Ctrl+X", "cut", None);
+    ("Ctrl+C", "copy", None);
+    ("Ctrl+V", "paste", None);
+    ("Ctrl+Shift+V", "paste_in_place", None);
+    ("Ctrl+A", "select_all", None);
+    ("Delete", "delete_selection", None);
+    ("Backspace", "delete_selection", None);
+    ("Ctrl+G", "group", None);
+    ("Ctrl+Shift+G", "ungroup", None);
+    ("Ctrl+2", "lock", None);
+    ("Ctrl+Alt+2", "unlock_all", None);
+    ("Ctrl+3", "hide_selection", None);
+    ("Ctrl+Alt+3", "show_all", None);
+    ("Ctrl+=", "zoom_in", None);
+    ("Ctrl+-", "zoom_out", None);
+    ("Ctrl+0", "fit_in_window", None);
+    ("V", "select_tool", Some ("tool", "selection"));
+    ("A", "select_tool", Some ("tool", "direct_selection"));
+    ("P", "select_tool", Some ("tool", "pen"));
+    ("=", "select_tool", Some ("tool", "add_anchor"));
+    ("-", "select_tool", Some ("tool", "delete_anchor"));
+    ("T", "select_tool", Some ("tool", "type"));
+    ("\\", "select_tool", Some ("tool", "line"));
+    ("M", "select_tool", Some ("tool", "rect"));
+    ("N", "select_tool", Some ("tool", "pencil"));
+    ("Shift+E", "select_tool", Some ("tool", "path_eraser"));
+    ("Q", "select_tool", Some ("tool", "lasso"));
+    ("D", "reset_fill_stroke", None);
+    ("X", "toggle_fill_on_top", None);
+    ("Shift+X", "swap_fill_stroke", None);
+  ] in
+  let shortcut_jsons = List.map (fun (key, action, params) ->
+    let o = json_obj () in
+    json_str o "action" action;
+    json_str o "key" key;
+    (match params with
+     | Some (pk, pv) ->
+       let po = json_obj () in
+       json_str po pk pv;
+       json_raw o "params" (json_build po)
+     | None -> json_null o "params");
+    json_build o
+  ) shortcuts in
+  let o = json_obj () in
+  json_int o "count" (List.length shortcuts);
+  json_raw o "shortcuts" (json_array shortcut_jsons);
+  json_build o
+
+(* ------------------------------------------------------------------ *)
 (* Public API: workspace -> test JSON                                  *)
 (* ------------------------------------------------------------------ *)
 

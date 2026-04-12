@@ -298,6 +298,16 @@ private func assertWorkspaceFixture(_ name: String, _ json: String) {
     assertWorkspaceFixture("menu_structure", json)
 }
 
+@Test func testStateDefaults() {
+    let json = stateDefaultsJson()
+    assertWorkspaceFixture("state_defaults", json)
+}
+
+@Test func testShortcutStructure() {
+    let json = shortcutStructureJson()
+    assertWorkspaceFixture("shortcut_structure", json)
+}
+
 // MARK: - Workspace operation equivalence tests
 
 private func applyWorkspaceOp(_ layout: inout WorkspaceLayout, _ op: [String: Any]) {

@@ -348,6 +348,109 @@ public func menuStructureJson() -> String {
     return o.build()
 }
 
+// MARK: - State defaults (must match workspace/state.yaml)
+
+public func stateDefaultsJson() -> String {
+    let vars: [(String, String, String)] = [
+        ("active_tab", "number", "-1"),
+        ("active_tool", "enum", "\"selection\""),
+        ("canvas_maximized", "bool", "false"),
+        ("canvas_visible", "bool", "true"),
+        ("color_visible", "bool", "true"),
+        ("dock_collapsed", "bool", "false"),
+        ("dock_group0_active", "number", "0"),
+        ("dock_group0_collapsed", "bool", "false"),
+        ("dock_group1_active", "number", "0"),
+        ("dock_group1_collapsed", "bool", "false"),
+        ("dock_visible", "bool", "true"),
+        ("fill_color", "color", "\"#ffffff\""),
+        ("fill_on_top", "bool", "true"),
+        ("layers_visible", "bool", "true"),
+        ("properties_visible", "bool", "true"),
+        ("stroke_color", "color", "\"#000000\""),
+        ("stroke_visible", "bool", "true"),
+        ("stroke_width", "number", "1"),
+        ("tab_count", "number", "0"),
+        ("toolbar_visible", "bool", "true"),
+    ]
+
+    let varJsons = vars.map { (name, stype, defVal) -> String in
+        let o = JsonObj()
+        o.raw("default", defVal)
+        o.str("name", name)
+        o.str("type", stype)
+        return o.build()
+    }
+
+    let o = JsonObj()
+    o.int("count", vars.count)
+    o.raw("variables", jsonArray(varJsons))
+    return o.build()
+}
+
+// MARK: - Shortcut structure (must match workspace/shortcuts.yaml)
+
+public func shortcutStructureJson() -> String {
+    let shortcuts: [(String, String, (String, String)?)] = [
+        ("Ctrl+N", "new_document", nil),
+        ("Ctrl+O", "open_file", nil),
+        ("Ctrl+S", "save", nil),
+        ("Ctrl+Shift+S", "save_as", nil),
+        ("Ctrl+Q", "quit", nil),
+        ("Ctrl+Z", "undo", nil),
+        ("Ctrl+Shift+Z", "redo", nil),
+        ("Ctrl+X", "cut", nil),
+        ("Ctrl+C", "copy", nil),
+        ("Ctrl+V", "paste", nil),
+        ("Ctrl+Shift+V", "paste_in_place", nil),
+        ("Ctrl+A", "select_all", nil),
+        ("Delete", "delete_selection", nil),
+        ("Backspace", "delete_selection", nil),
+        ("Ctrl+G", "group", nil),
+        ("Ctrl+Shift+G", "ungroup", nil),
+        ("Ctrl+2", "lock", nil),
+        ("Ctrl+Alt+2", "unlock_all", nil),
+        ("Ctrl+3", "hide_selection", nil),
+        ("Ctrl+Alt+3", "show_all", nil),
+        ("Ctrl+=", "zoom_in", nil),
+        ("Ctrl+-", "zoom_out", nil),
+        ("Ctrl+0", "fit_in_window", nil),
+        ("V", "select_tool", ("tool", "selection")),
+        ("A", "select_tool", ("tool", "direct_selection")),
+        ("P", "select_tool", ("tool", "pen")),
+        ("=", "select_tool", ("tool", "add_anchor")),
+        ("-", "select_tool", ("tool", "delete_anchor")),
+        ("T", "select_tool", ("tool", "type")),
+        ("\\", "select_tool", ("tool", "line")),
+        ("M", "select_tool", ("tool", "rect")),
+        ("N", "select_tool", ("tool", "pencil")),
+        ("Shift+E", "select_tool", ("tool", "path_eraser")),
+        ("Q", "select_tool", ("tool", "lasso")),
+        ("D", "reset_fill_stroke", nil),
+        ("X", "toggle_fill_on_top", nil),
+        ("Shift+X", "swap_fill_stroke", nil),
+    ]
+
+    let shortcutJsons = shortcuts.map { (key, action, params) -> String in
+        let o = JsonObj()
+        o.str("action", action)
+        o.str("key", key)
+        if let (pk, pv) = params {
+            let po = JsonObj()
+            po.str(pk, pv)
+            o.raw("params", po.build())
+        } else {
+            o.null("params")
+        }
+        return o.build()
+    }
+
+    let o = JsonObj()
+    o.int("count", shortcuts.count)
+    o.raw("shortcuts", jsonArray(shortcutJsons))
+    return o.build()
+}
+
 // MARK: - Public API: workspace -> test JSON
 
 /// Serialize a WorkspaceLayout to canonical test JSON.
