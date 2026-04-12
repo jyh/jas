@@ -6,6 +6,11 @@ let tool_button_size = 32
 let _title_bar_height = 24
 let long_press_ms = Canvas_tool.long_press_ms
 
+(* Theme-aware colors for Cairo rendering *)
+let icon_rgb () = Theme.hex_to_rgb !(Dock_panel.theme_text)
+let active_bg_rgb () = Theme.hex_to_rgb !(Dock_panel.theme_bg_tab)
+let inactive_bg_rgb () = Theme.hex_to_rgb !(Dock_panel.theme_bg_dark)
+
 class toolbar ~title:(_title : string) ~x ~y
     ?(get_model : (unit -> Model.model) option) (fixed : GPack.fixed) =
   let frame = GBin.frame ~shadow_type:`NONE () in
@@ -208,7 +213,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.save cr;
         Cairo.translate cr ox oy;
         Cairo.scale cr s s;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.set_line_width cr 8.0;
         Cairo.move_to cr 30.79 232.04;
         Cairo.line_to cr 231.78 31.05;
@@ -222,11 +227,11 @@ class toolbar ~title:(_title : string) ~x ~y
           let bw = float_of_int alloc.Gtk.width in
           let bh = float_of_int alloc.Gtk.height in
           if current_tool = tool_id then begin
-            Cairo.set_source_rgb cr 0.4 0.4 0.4;
+            let (ar, ag, ab) = active_bg_rgb () in Cairo.set_source_rgb cr ar ag ab;
             Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
             Cairo.fill cr
           end else begin
-            Cairo.set_source_rgb cr 0.27 0.27 0.27;
+            let (ir, ig, ib) = inactive_bg_rgb () in Cairo.set_source_rgb cr ir ig ib;
             Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
             Cairo.fill cr
           end;
@@ -239,7 +244,7 @@ class toolbar ~title:(_title : string) ~x ~y
         let bh = float_of_int alloc.Gtk.height in
         let ox = (bw -. 28.0) /. 2.0 in
         let oy = (bh -. 28.0) /. 2.0 in
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.set_line_width cr 1.5;
         Cairo.rectangle cr (ox +. 4.0) (oy +. 6.0) ~w:20.0 ~h:16.0;
         Cairo.stroke cr
@@ -255,7 +260,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.save cr;
         Cairo.translate cr ox oy;
         Cairo.scale cr s s;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.set_line_width cr 8.0;
         let x = 23.33 and y = 58.26 in
         let w = 212.06 and h = 139.47 in
@@ -284,7 +289,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.save cr;
         Cairo.translate cr ox oy;
         Cairo.scale cr s s;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.set_line_width cr 8.0;
         let pts = [
           (128.0, 50.18); (145.47, 103.95); (202.01, 103.95);
@@ -310,7 +315,7 @@ class toolbar ~title:(_title : string) ~x ~y
         let cx = ox +. 14.0 and cy = oy +. 14.0 in
         let r = 11.0 in
         let n = 6 in
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.set_line_width cr 1.5;
         for i = 0 to n - 1 do
           let angle = -. Float.pi /. 2.0 +. 2.0 *. Float.pi *. float_of_int i /. float_of_int n in
@@ -328,7 +333,7 @@ class toolbar ~title:(_title : string) ~x ~y
         let bh = float_of_int alloc.Gtk.height in
         let ox = (bw -. 28.0) /. 2.0 in
         let oy = (bh -. 28.0) /. 2.0 in
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.set_line_width cr 1.5;
         Cairo.set_line_cap cr Cairo.ROUND;
         Cairo.move_to cr (ox +. 14.0) (oy +. 5.0);
@@ -346,11 +351,11 @@ class toolbar ~title:(_title : string) ~x ~y
         let bh = float_of_int alloc.Gtk.height in
         (* Highlight if current tool matches the slot tool *)
         if current_tool = arrow_slot_tool then begin
-          Cairo.set_source_rgb cr 0.4 0.4 0.4;
+          let (ar, ag, ab) = active_bg_rgb () in Cairo.set_source_rgb cr ar ag ab;
           Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
           Cairo.fill cr
         end else begin
-          Cairo.set_source_rgb cr 0.27 0.27 0.27;
+          let (ir, ig, ib) = inactive_bg_rgb () in Cairo.set_source_rgb cr ir ig ib;
           Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
           Cairo.fill cr
         end;
@@ -366,7 +371,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.line_to cr (ox +. 28.0 -. s) (oy +. 28.0);
         Cairo.line_to cr (ox +. 28.0) (oy +. 28.0 -. s);
         Cairo.Path.close cr;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.fill cr
       in
 
@@ -380,7 +385,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.save cr;
         Cairo.translate cr ox oy;
         Cairo.scale cr s s;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.move_to cr 156.78 197.66;
         Cairo.line_to cr 100.75 197.48;
         Cairo.curve_to cr 96.82 194.4 96.71 181.39 100.77 178.84;
@@ -414,7 +419,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.save cr;
         Cairo.translate cr ox oy;
         Cairo.scale cr s s;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         (* Caret/insertion-point glyph (top stroke) *)
         Cairo.move_to cr 146.65 143.92;
         Cairo.curve_to cr 146.90 149.81 136.63 147.47 133.15 143.77;
@@ -461,7 +466,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.save cr;
         Cairo.translate cr ox oy;
         Cairo.scale cr s s;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         (* Outer path *)
         Cairo.move_to cr 163.07 190.51;
         Cairo.line_to cr 175.61 210.03;
@@ -505,7 +510,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.save cr;
         Cairo.translate cr ox oy;
         Cairo.scale cr s s;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         (* Outer nib path *)
         Cairo.move_to cr 170.82 209.27;
         Cairo.line_to cr 82.74 256.0;
@@ -565,7 +570,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.save cr;
         Cairo.translate cr ox oy;
         Cairo.scale cr s s;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         (* Outer nib path *)
         Cairo.move_to cr 171.16 209.05;
         Cairo.line_to cr 83.32 256.0;
@@ -612,7 +617,7 @@ class toolbar ~title:(_title : string) ~x ~y
         let oy = (bh -. 28.0) /. 2.0 in
         let cx = ox +. 14.0 and cy = oy +. 14.0 in
         Cairo.save cr;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         (* Diagonal handle line *)
         Cairo.set_line_width cr 1.5;
         Cairo.move_to cr (cx -. 10.0) (cy -. 10.0);
@@ -645,7 +650,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.save cr;
         Cairo.translate cr ox oy;
         Cairo.scale cr s s;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         (* Outer path (main outline) *)
         Cairo.move_to cr 57.6 233.77;
         Cairo.line_to cr 5.83 255.77;
@@ -724,7 +729,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.save cr;
         Cairo.translate cr ox oy;
         Cairo.scale cr s s;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         (* Outer path *)
         Cairo.move_to cr 169.86 33.13;
         Cairo.line_to cr 243.34 1.82;
@@ -810,7 +815,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.translate cr ox oy;
         Cairo.scale cr s s;
         (* Pencil body *)
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.move_to cr 70.89 227.68;
         Cairo.line_to cr 4.52 255.09;
         Cairo.curve_to cr 0.88 256.59 (-0.91) 248.43 (-0.16) 245.21;
@@ -878,7 +883,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.Path.close cr;
         Cairo.fill cr;
         (* "S" lettering *)
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.move_to cr 210.2 175.94;
         Cairo.curve_to cr 221.68 185.28 259.83 188.72 255.69 222.01;
         Cairo.curve_to cr 254.5 231.57 248.08 241.8 237.42 246.05;
@@ -905,11 +910,11 @@ class toolbar ~title:(_title : string) ~x ~y
         let bw = float_of_int alloc.Gtk.width in
         let bh = float_of_int alloc.Gtk.height in
         if current_tool = pen_slot_tool then begin
-          Cairo.set_source_rgb cr 0.4 0.4 0.4;
+          let (ar, ag, ab) = active_bg_rgb () in Cairo.set_source_rgb cr ar ag ab;
           Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
           Cairo.fill cr
         end else begin
-          Cairo.set_source_rgb cr 0.27 0.27 0.27;
+          let (ir, ig, ib) = inactive_bg_rgb () in Cairo.set_source_rgb cr ir ig ib;
           Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
           Cairo.fill cr
         end;
@@ -927,7 +932,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.line_to cr (ox +. 28.0 -. s) (oy +. 28.0);
         Cairo.line_to cr (ox +. 28.0) (oy +. 28.0 -. s);
         Cairo.Path.close cr;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.fill cr;
         true
       ) |> ignore;
@@ -937,11 +942,11 @@ class toolbar ~title:(_title : string) ~x ~y
         let bw = float_of_int alloc.Gtk.width in
         let bh = float_of_int alloc.Gtk.height in
         if current_tool = pencil_slot_tool then begin
-          Cairo.set_source_rgb cr 0.4 0.4 0.4;
+          let (ar, ag, ab) = active_bg_rgb () in Cairo.set_source_rgb cr ar ag ab;
           Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
           Cairo.fill cr
         end else begin
-          Cairo.set_source_rgb cr 0.27 0.27 0.27;
+          let (ir, ig, ib) = inactive_bg_rgb () in Cairo.set_source_rgb cr ir ig ib;
           Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
           Cairo.fill cr
         end;
@@ -958,7 +963,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.line_to cr (ox +. 28.0 -. s) (oy +. 28.0);
         Cairo.line_to cr (ox +. 28.0) (oy +. 28.0 -. s);
         Cairo.Path.close cr;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.fill cr;
         true
       ) |> ignore;
@@ -968,11 +973,11 @@ class toolbar ~title:(_title : string) ~x ~y
         let bw = float_of_int alloc.Gtk.width in
         let bh = float_of_int alloc.Gtk.height in
         if current_tool = text_slot_tool then begin
-          Cairo.set_source_rgb cr 0.4 0.4 0.4;
+          let (ar, ag, ab) = active_bg_rgb () in Cairo.set_source_rgb cr ar ag ab;
           Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
           Cairo.fill cr
         end else begin
-          Cairo.set_source_rgb cr 0.27 0.27 0.27;
+          let (ir, ig, ib) = inactive_bg_rgb () in Cairo.set_source_rgb cr ir ig ib;
           Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
           Cairo.fill cr
         end;
@@ -988,7 +993,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.line_to cr (ox +. 28.0 -. s) (oy +. 28.0);
         Cairo.line_to cr (ox +. 28.0) (oy +. 28.0 -. s);
         Cairo.Path.close cr;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.fill cr;
         true
       ) |> ignore;
@@ -1006,11 +1011,11 @@ class toolbar ~title:(_title : string) ~x ~y
         let bw = float_of_int alloc.Gtk.width in
         let bh = float_of_int alloc.Gtk.height in
         if current_tool = shape_slot_tool then begin
-          Cairo.set_source_rgb cr 0.4 0.4 0.4;
+          let (ar, ag, ab) = active_bg_rgb () in Cairo.set_source_rgb cr ar ag ab;
           Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
           Cairo.fill cr
         end else begin
-          Cairo.set_source_rgb cr 0.27 0.27 0.27;
+          let (ir, ig, ib) = inactive_bg_rgb () in Cairo.set_source_rgb cr ir ig ib;
           Cairo.rectangle cr 0.0 0.0 ~w:bw ~h:bh;
           Cairo.fill cr
         end;
@@ -1028,7 +1033,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.line_to cr (ox +. 28.0 -. s) (oy +. 28.0);
         Cairo.line_to cr (ox +. 28.0) (oy +. 28.0 -. s);
         Cairo.Path.close cr;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.fill cr;
         true
       ) |> ignore;
@@ -1170,7 +1175,7 @@ class toolbar ~title:(_title : string) ~x ~y
         let aw = float_of_int alloc.Gtk.width in
         let ah = float_of_int alloc.Gtk.height in
         (* Background *)
-        Cairo.set_source_rgb cr 0.27 0.27 0.27;
+        let (ir, ig, ib) = inactive_bg_rgb () in Cairo.set_source_rgb cr ir ig ib;
         Cairo.rectangle cr 0.0 0.0 ~w:aw ~h:ah;
         Cairo.fill cr;
 
@@ -1260,7 +1265,7 @@ class toolbar ~title:(_title : string) ~x ~y
         (* Swap arrow (top-right corner) *)
         let ax = base_x +. sq +. offset +. 2.0 in
         let ay = base_y in
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.set_line_width cr 1.0;
         Cairo.move_to cr ax (ay +. 8.0);
         Cairo.line_to cr (ax +. 8.0) (ay +. 8.0);
@@ -1300,7 +1305,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.set_source_rgb cr 0.5 0.5 0.5;
         Cairo.rectangle cr base_x btn_y ~w:btn_w ~h:btn_h;
         Cairo.fill cr;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.set_line_width cr 1.0;
         Cairo.rectangle cr base_x btn_y ~w:btn_w ~h:btn_h;
         Cairo.stroke cr;
@@ -1315,7 +1320,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.set_source_rgb cr 0.5 0.5 0.5;
         Cairo.rectangle cr (base_x +. (btn_w +. 2.0) *. 2.0) btn_y ~w:btn_w ~h:btn_h;
         Cairo.fill cr;
-        Cairo.set_source_rgb cr 0.8 0.8 0.8;
+        let (fr, fg, fb) = icon_rgb () in Cairo.set_source_rgb cr fr fg fb;
         Cairo.rectangle cr (base_x +. (btn_w +. 2.0) *. 2.0) btn_y ~w:btn_w ~h:btn_h;
         Cairo.stroke cr;
         (* Red diagonal for None button *)
