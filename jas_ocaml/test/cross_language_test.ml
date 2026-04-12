@@ -375,6 +375,24 @@ let () =
           Printf.eprintf "=== ACTUAL (menu_structure) ===\n%s\n" actual;
           assert false
         end);
+
+      Alcotest.test_case "state_defaults" `Quick (fun () ->
+        let expected = read_fixture "expected/state_defaults.json" in
+        let actual = Jas.Workspace_test_json.state_defaults_json () in
+        if actual <> expected then begin
+          Printf.eprintf "=== EXPECTED (state_defaults) ===\n%s\n" expected;
+          Printf.eprintf "=== ACTUAL (state_defaults) ===\n%s\n" actual;
+          assert false
+        end);
+
+      Alcotest.test_case "shortcut_structure" `Quick (fun () ->
+        let expected = read_fixture "expected/shortcut_structure.json" in
+        let actual = Jas.Workspace_test_json.shortcut_structure_json () in
+        if actual <> expected then begin
+          Printf.eprintf "=== EXPECTED (shortcut_structure) ===\n%s\n" expected;
+          Printf.eprintf "=== ACTUAL (shortcut_structure) ===\n%s\n" actual;
+          assert false
+        end);
     ];
 
     (* Workspace operation tests *)
