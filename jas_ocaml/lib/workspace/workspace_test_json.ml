@@ -631,5 +631,6 @@ let test_json_to_workspace json_str =
     appearance;
     pane_layout;
     next_id;
+    color_panel_mode = Hsb_mode;
     generation = 0;
     saved_generation = 0; }

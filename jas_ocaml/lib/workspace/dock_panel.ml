@@ -45,8 +45,9 @@ let apply_dark_css w css_str =
   css#load_from_data css_str;
   w#misc#style_context#add_provider css 600
 
-let create (dock_box : GPack.box) (layout : workspace_layout) =
+let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspace_layout) =
   let drag_ref = ref No_drag in
+  let color_panel_refresh = ref (fun () -> ()) in
 
   let rec rebuild () =
     (* Clear existing children *)
@@ -147,7 +148,7 @@ let create (dock_box : GPack.box) (layout : workspace_layout) =
                   | Panel_menu.Action { label; command; _ } ->
                     let mi = GMenu.menu_item ~label ~packing:menu#append () in
                     mi#connect#activate ~callback:(fun () ->
-                      Panel_menu.panel_dispatch active_kind command addr layout;
+                      Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model;
                       rebuild ()
                     ) |> ignore
                   | Panel_menu.Toggle { label; command } ->
@@ -155,7 +156,7 @@ let create (dock_box : GPack.box) (layout : workspace_layout) =
                     let mi = GMenu.check_menu_item ~label ~packing:menu#append () in
                     mi#set_active checked;
                     mi#connect#activate ~callback:(fun () ->
-                      Panel_menu.panel_dispatch active_kind command addr layout;
+                      Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model;
                       rebuild ()
                     ) |> ignore
                   | Panel_menu.Radio { label; command; _ } ->
@@ -163,7 +164,7 @@ let create (dock_box : GPack.box) (layout : workspace_layout) =
                     let mi = GMenu.check_menu_item ~label ~packing:menu#append () in
                     mi#set_active selected;
                     mi#connect#activate ~callback:(fun () ->
-                      Panel_menu.panel_dispatch active_kind command addr layout;
+                      Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model;
                       rebuild ()
                     ) |> ignore
                   | Panel_menu.Separator ->
@@ -175,9 +176,17 @@ let create (dock_box : GPack.box) (layout : workspace_layout) =
             | None -> ()
           end;
 
-          (* Panel body placeholder *)
+          (* Panel body *)
           if not group.collapsed then begin
             match active_panel group with
+            | Some Color ->
+              let refresh_fn = Color_panel_view.create
+                ~packing:(fun w -> group_box#pack ~expand:false w)
+                ~layout ~get_model ~get_fill_on_top
+                ~rebuild
+                ~theme_text ~theme_text_dim ~theme_bg_dark ~theme_border
+                () in
+              color_panel_refresh := refresh_fn
             | Some kind ->
               let body = GMisc.label ~text:(Panel_menu.panel_label kind) ~packing:(group_box#pack ~expand:false) () in
               body#misc#set_size_request ~height:60 ();
@@ -297,6 +306,14 @@ let create (dock_box : GPack.box) (layout : workspace_layout) =
         ) group.panels;
         if not group.collapsed then begin
           match Workspace_layout.active_panel group with
+          | Some Color ->
+            let refresh_fn = Color_panel_view.create
+              ~packing:(fun w -> group_box#pack ~expand:false w)
+              ~layout ~get_model ~get_fill_on_top
+              ~rebuild:rebuild_floating
+              ~theme_text ~theme_text_dim ~theme_bg_dark ~theme_border
+              () in
+            color_panel_refresh := refresh_fn
           | Some kind ->
             let body = GMisc.label ~text:(Panel_menu.panel_label kind) ~packing:(group_box#pack ~expand:false) () in
             body#misc#set_size_request ~height:60 ();

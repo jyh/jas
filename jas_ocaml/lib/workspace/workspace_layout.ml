@@ -32,6 +32,32 @@ type dock_edge = Left | Right | Bottom
 
 type panel_kind = Layers | Color | Stroke | Properties
 
+type color_panel_mode = Grayscale | Hsb_mode | Rgb_mode | Cmyk_mode | Web_safe_rgb
+
+let color_panel_mode_label = function
+  | Grayscale -> "Grayscale"
+  | Hsb_mode -> "HSB"
+  | Rgb_mode -> "RGB"
+  | Cmyk_mode -> "CMYK"
+  | Web_safe_rgb -> "Web Safe RGB"
+
+let color_panel_mode_command = function
+  | Grayscale -> "mode_grayscale"
+  | Hsb_mode -> "mode_hsb"
+  | Rgb_mode -> "mode_rgb"
+  | Cmyk_mode -> "mode_cmyk"
+  | Web_safe_rgb -> "mode_web_safe_rgb"
+
+let color_panel_mode_of_command = function
+  | "mode_grayscale" -> Some Grayscale
+  | "mode_hsb" -> Some Hsb_mode
+  | "mode_rgb" -> Some Rgb_mode
+  | "mode_cmyk" -> Some Cmyk_mode
+  | "mode_web_safe_rgb" -> Some Web_safe_rgb
+  | _ -> None
+
+let all_color_panel_modes = [| Grayscale; Hsb_mode; Rgb_mode; Cmyk_mode; Web_safe_rgb |]
+
 type panel_group = {
   mutable panels : panel_kind array;
   mutable active : int;
@@ -142,6 +168,7 @@ type workspace_layout = {
   mutable appearance : string;
   mutable pane_layout : Pane.pane_layout option;
   mutable next_id : int;
+  mutable color_panel_mode : color_panel_mode;
   mutable generation : int;
   mutable saved_generation : int;
 }
@@ -161,6 +188,7 @@ let named name = {
   appearance = Theme.default_appearance_name;
   pane_layout = None;
   next_id = 1;
+  color_panel_mode = Hsb_mode;
   generation = 0;
   saved_generation = 0;
 }
@@ -799,6 +827,7 @@ let layout_of_json (j : Yojson.Safe.t) =
     appearance = (try j |> member "appearance" |> to_string with _ -> Theme.default_appearance_name);
     pane_layout = (try Some (pane_layout_of_json (j |> member "pane_layout")) with _ -> None);
     next_id = j |> member "next_id" |> to_int;
+    color_panel_mode = Hsb_mode;
     generation = 0;
     saved_generation = 0; }
 
