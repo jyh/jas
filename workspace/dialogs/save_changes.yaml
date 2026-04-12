@@ -1,0 +1,41 @@
+save_changes_tab:
+  summary: "Save Changes"
+  description: >
+    Confirmation dialog shown when closing a tab with unsaved changes.
+    Three options: Save the document, Discard changes, or Cancel.
+  modal: true
+  params:
+    filename: { type: string }
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16 }
+    children:
+      - { type: text, content: "Save changes to \"{{param.filename}}\"?" }
+      - type: row
+        style: { justify: end, gap: 8 }
+        children:
+          - { type: button, label: "Cancel",  action: dismiss_dialog }
+          - { type: button, label: "Discard", action: close_without_saving }
+          - { type: button, label: "Save",    action: save_and_close, variant: primary }
+
+save_changes_window:
+  summary: "Save All Changes"
+  description: >
+    Confirmation dialog shown when closing the window with one or more
+    modified documents. Four options: Save All, Save (active only),
+    Don't Save, Cancel.
+  modal: true
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16 }
+    children:
+      - { type: text, content: "You have unsaved changes. Save before closing?" }
+      - type: row
+        style: { justify: end, gap: 8 }
+        children:
+          - { type: button, label: "Cancel",     action: dismiss_dialog }
+          - { type: button, label: "Don't Save", action: close_without_saving }
+          - { type: button, label: "Save",       action: save_and_close }
+          - { type: button, label: "Save All",   action: save_all_and_close, variant: primary }

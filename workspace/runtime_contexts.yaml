@@ -1,0 +1,59 @@
+runtime_contexts:
+
+  active_document:
+    description: >
+      Properties of the currently active document tab. When no tab is
+      open (active_tab == -1), all properties resolve to their defaults.
+    defaults:
+      is_modified: false
+      has_filename: false
+      filename: ""
+      any_modified: false
+      has_selection: false
+      selection_count: 0
+      can_undo: false
+      can_redo: false
+      zoom_level: 1.0
+    properties:
+      is_modified:
+        type: bool
+        description: "The active document has unsaved changes"
+      has_filename:
+        type: bool
+        description: "The active document has been saved to a file at least once"
+      filename:
+        type: string
+        description: "The active document's filename (empty string if untitled)"
+      any_modified:
+        type: bool
+        description: "Any open document has unsaved changes"
+      has_selection:
+        type: bool
+        description: "One or more objects are selected"
+      selection_count:
+        type: number
+        description: "Number of selected objects"
+      can_undo:
+        type: bool
+        description: "The undo stack is non-empty"
+      can_redo:
+        type: bool
+        description: "The redo stack is non-empty"
+      zoom_level:
+        type: number
+        description: "Current zoom factor (1.0 = 100%)"
+
+  workspace:
+    description: >
+      Properties of the workspace layout system, managed by the layout
+      save/load engine.
+    defaults:
+      has_saved_layout: false
+      active_layout_name: ""
+    properties:
+      has_saved_layout:
+        type: bool
+        description: "A named layout is currently active (was loaded or saved)"
+      active_layout_name:
+        type: string
+        description: "Name of the currently active layout (empty if none)"

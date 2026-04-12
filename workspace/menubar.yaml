@@ -4,45 +4,64 @@ menubar:
     items:
       - { id: menu_new,      label: "&New",         action: new_document,  shortcut: "Ctrl+N" }
       - { id: menu_open,     label: "&Open...",     action: open_file,     shortcut: "Ctrl+O" }
-      - { id: menu_save,     label: "&Save",        action: save,          shortcut: "Ctrl+S" }
-      - { id: menu_save_as,  label: "Save &As...",  action: save_as,       shortcut: "Ctrl+Shift+S" }
+      - { id: menu_save,     label: "&Save",        action: save,          shortcut: "Ctrl+S",
+          enabled_when: "state.tab_count > 0" }
+      - { id: menu_save_as,  label: "Save &As...",  action: save_as,       shortcut: "Ctrl+Shift+S",
+          enabled_when: "state.tab_count > 0" }
       - { id: menu_revert,   label: "&Revert",      action: revert,
-          enabled_when: "model.is_modified and model.has_filename" }
+          enabled_when: "active_document.is_modified and active_document.has_filename" }
       - separator
       - { id: menu_quit,     label: "&Quit",        action: quit,          shortcut: "Ctrl+Q" }
 
   - id: edit_menu
     label: "&Edit"
     items:
-      - { id: menu_undo,           label: "&Undo",           action: undo,           shortcut: "Ctrl+Z" }
-      - { id: menu_redo,           label: "&Redo",           action: redo,           shortcut: "Ctrl+Shift+Z" }
+      - { id: menu_undo,           label: "&Undo",           action: undo,           shortcut: "Ctrl+Z",
+          enabled_when: "active_document.can_undo" }
+      - { id: menu_redo,           label: "&Redo",           action: redo,           shortcut: "Ctrl+Shift+Z",
+          enabled_when: "active_document.can_redo" }
       - separator
-      - { id: menu_cut,            label: "Cu&t",            action: cut,            shortcut: "Ctrl+X" }
-      - { id: menu_copy,           label: "&Copy",           action: copy,           shortcut: "Ctrl+C" }
-      - { id: menu_paste,          label: "&Paste",          action: paste,          shortcut: "Ctrl+V" }
-      - { id: menu_paste_in_place, label: "Paste in &Place", action: paste_in_place, shortcut: "Ctrl+Shift+V" }
+      - { id: menu_cut,            label: "Cu&t",            action: cut,            shortcut: "Ctrl+X",
+          enabled_when: "active_document.has_selection" }
+      - { id: menu_copy,           label: "&Copy",           action: copy,           shortcut: "Ctrl+C",
+          enabled_when: "active_document.has_selection" }
+      - { id: menu_paste,          label: "&Paste",          action: paste,          shortcut: "Ctrl+V",
+          enabled_when: "state.tab_count > 0" }
+      - { id: menu_paste_in_place, label: "Paste in &Place", action: paste_in_place, shortcut: "Ctrl+Shift+V",
+          enabled_when: "state.tab_count > 0" }
       - separator
-      - { id: menu_select_all,     label: "Select &All",     action: select_all,     shortcut: "Ctrl+A" }
+      - { id: menu_select_all,     label: "Select &All",     action: select_all,     shortcut: "Ctrl+A",
+          enabled_when: "state.tab_count > 0" }
 
   - id: object_menu
     label: "&Object"
     items:
-      - { id: menu_group,       label: "&Group",       action: group,       shortcut: "Ctrl+G" }
-      - { id: menu_ungroup,     label: "&Ungroup",     action: ungroup,     shortcut: "Ctrl+Shift+G" }
-      - { id: menu_ungroup_all, label: "Ungroup A&ll", action: ungroup_all }
+      - { id: menu_group,       label: "&Group",       action: group,       shortcut: "Ctrl+G",
+          enabled_when: "active_document.selection_count >= 2" }
+      - { id: menu_ungroup,     label: "&Ungroup",     action: ungroup,     shortcut: "Ctrl+Shift+G",
+          enabled_when: "active_document.has_selection" }
+      - { id: menu_ungroup_all, label: "Ungroup A&ll", action: ungroup_all,
+          enabled_when: "state.tab_count > 0" }
       - separator
-      - { id: menu_lock,        label: "&Lock",        action: lock,        shortcut: "Ctrl+2" }
-      - { id: menu_unlock_all,  label: "Unlock &All",  action: unlock_all,  shortcut: "Ctrl+Alt+2" }
+      - { id: menu_lock,        label: "&Lock",        action: lock,        shortcut: "Ctrl+2",
+          enabled_when: "active_document.has_selection" }
+      - { id: menu_unlock_all,  label: "Unlock &All",  action: unlock_all,  shortcut: "Ctrl+Alt+2",
+          enabled_when: "state.tab_count > 0" }
       - separator
-      - { id: menu_hide,        label: "&Hide",        action: hide_selection,  shortcut: "Ctrl+3" }
-      - { id: menu_show_all,    label: "&Show All",    action: show_all,        shortcut: "Ctrl+Alt+3" }
+      - { id: menu_hide,        label: "&Hide",        action: hide_selection,  shortcut: "Ctrl+3",
+          enabled_when: "active_document.has_selection" }
+      - { id: menu_show_all,    label: "&Show All",    action: show_all,        shortcut: "Ctrl+Alt+3",
+          enabled_when: "state.tab_count > 0" }
 
   - id: view_menu
     label: "&View"
     items:
-      - { id: menu_zoom_in,  label: "Zoom &In",       action: zoom_in,       shortcut: "Ctrl+=" }
-      - { id: menu_zoom_out, label: "Zoom &Out",      action: zoom_out,      shortcut: "Ctrl+-" }
-      - { id: menu_fit,      label: "&Fit in Window",  action: fit_in_window, shortcut: "Ctrl+0" }
+      - { id: menu_zoom_in,  label: "Zoom &In",       action: zoom_in,       shortcut: "Ctrl+=",
+          enabled_when: "state.tab_count > 0" }
+      - { id: menu_zoom_out, label: "Zoom &Out",      action: zoom_out,      shortcut: "Ctrl+-",
+          enabled_when: "state.tab_count > 0" }
+      - { id: menu_fit,      label: "&Fit in Window",  action: fit_in_window, shortcut: "Ctrl+0",
+          enabled_when: "state.tab_count > 0" }
 
   - id: window_menu
     label: "&Window"

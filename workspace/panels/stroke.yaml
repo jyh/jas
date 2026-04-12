@@ -1,0 +1,9 @@
+id: stroke_panel_content
+type: placeholder
+summary: "Stroke properties"
+description: >
+  Stroke attribute controls: width (number input with unit selector),
+  cap style (butt, round, square), join style (miter, round, bevel),
+  miter limit, dash pattern editor (dash/gap array with preview),
+  and arrowhead selectors (start/end). All changes apply to the
+  current selection immediately.

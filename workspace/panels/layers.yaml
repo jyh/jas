@@ -1,0 +1,8 @@
+id: layers_panel_content
+type: placeholder
+summary: "Layer list"
+description: >
+  Layer hierarchy tree with visibility and lock toggles per layer.
+  Supports drag-and-drop reordering, nested groups, and multi-select.
+  Each row shows: visibility eye icon, lock icon, layer thumbnail,
+  layer name (editable on double-click), and target indicator.

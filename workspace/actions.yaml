@@ -1,29 +1,37 @@
 actions:
   # ── File ──────────────────────────────────────────────────
   new_document:
-    description: "Create a new untitled document in a new tab"
+    description: >
+      Create a new untitled document. Adds a tab labeled "Untitled-N" to the
+      canvas tab bar and a blank white canvas to the drawing surface. The new
+      tab becomes active immediately. The tab's close button dispatches
+      close_tab (which checks for unsaved changes). Tab index is captured at
+      creation time via prop so click handlers remain correct as more tabs
+      are added.
     category: file
     effects:
-      # Set active tab and increment count first so create_child
-      # deepResolve sees the correct values
       - set: { active_tab: "{{state.tab_count}}" }
-      # Create the tab button (with close x) in the tab bar
+      # Create the tab button (with close x) in the tab bar.
+      # {{prop.index}} is resolved once at creation time; {{state.*}}
+      # references remain reactive.
       - create_child:
           parent: canvas_tab_bar
+          props:
+            index: "{{state.tab_count}}"
           element:
-            id: "canvas_tab_{{state.tab_count}}"
+            id: "canvas_tab_{{prop.index}}"
             type: container
             layout: row
             style: { padding: "2 4 2 8", font_size: 11, gap: 4, alignment: center, background: "#4a4a4a", border: "1px solid #666" }
             behavior:
               - event: click
                 effects:
-                  - set: { active_tab: "{{state.tab_count}}" }
+                  - set: { active_tab: "{{prop.index}}" }
             bind:
-              active: "{{state.active_tab}} == {{state.tab_count}}"
+              active: "{{state.active_tab}} == {{prop.index}}"
             children:
               - type: text
-                content: "Untitled-{{state.tab_count}}"
+                content: "Untitled-{{prop.index}}"
               - type: icon_button
                 icon: "close"
                 summary: "Close tab"
@@ -31,54 +39,76 @@ actions:
                 behavior:
                   - event: click
                     stop_propagation: true
-                    effects:
-                      - remove_child: "canvas_tab_{{state.tab_count}}"
-                      - remove_child: "canvas_surface_{{state.tab_count}}"
+                    action: close_tab
+                    params: { index: "{{prop.index}}" }
       # Create the canvas in the drawing surface
       - create_child:
           parent: drawing_surface
+          props:
+            index: "{{state.tab_count}}"
           element:
-            id: "canvas_surface_{{state.tab_count}}"
+            id: "canvas_surface_{{prop.index}}"
             type: canvas
             summary: "Drawing surface"
             tier: 3
             style: { flex: 1, background: "#ffffff" }
             bind:
-              visible: "{{state.active_tab}} == {{state.tab_count}}"
-      # Increment tab count after creation so the frozen index is correct
+              visible: "{{state.active_tab}} == {{prop.index}}"
       - increment: { key: tab_count, by: 1 }
   open_file:
-    description: "Show Open dialog, load an SVG file into a new tab (or focus existing tab)"
+    description: >
+      Show the native file-open dialog filtered to SVG files. If the chosen
+      file is already open in a tab, switch to that tab instead of opening a
+      duplicate. Otherwise create a new tab, parse the SVG, and display it
+      on the canvas. The tab label shows the filename.
     category: file
     effects:
       - log: "open_file: show native file dialog"
   save:
-    description: "Save active document; if untitled, fall through to save_as"
+    description: >
+      Save the active document to its current file path. If the document has
+      never been saved (no filename), dispatches save_as to show a Save As
+      dialog instead. After a successful save, clears the document's modified
+      flag and removes the * indicator from the tab label.
     category: file
+    enabled_when: "state.tab_count > 0"
     effects:
       - if:
-          condition: "not model.has_filename"
+          condition: "not active_document.has_filename"
           then:
             - dispatch: save_as
           else:
-            - log: "save: write to {{model.filename}}"
+            - log: "save: write to {{active_document.filename}}"
   save_as:
-    description: "Show Save As dialog for the active document"
+    description: >
+      Show the native file-save dialog for the active document. The user
+      chooses a filename and location. On confirm, writes the document as
+      SVG, updates the tab label to the new filename, and clears the
+      modified flag.
     category: file
+    enabled_when: "state.tab_count > 0"
     effects:
       - log: "save_as: show native save dialog"
   revert:
-    description: "Reload the active document from disk, discarding unsaved changes"
+    description: >
+      Reload the active document from its file on disk, discarding all
+      unsaved changes since the last save. The canvas re-renders with the
+      file contents, the undo stack is cleared, and the modified flag is
+      reset. Only enabled when the document has a filename and has been
+      modified.
     category: file
-    enabled_when: "model.is_modified and model.has_filename"
+    enabled_when: "active_document.is_modified and active_document.has_filename"
     effects:
-      - log: "revert: reload {{model.filename}}"
+      - log: "revert: reload {{active_document.filename}}"
   quit:
-    description: "Close the application; prompt to save any modified documents"
+    description: >
+      Close the application. If any open documents have unsaved changes,
+      opens the save_changes_window dialog offering Save All, Save, Don't
+      Save, or Cancel. If no documents are modified, closes immediately.
     category: file
     effects:
       - if:
-          condition: "model.any_modified"
+          condition: "active_document.any_modified"
           then:
             - open_dialog: { id: save_changes_window }
           else:
@@ -86,122 +116,203 @@ actions:
 
   # ── Edit ──────────────────────────────────────────────────
   undo:
-    description: "Undo the last editing operation on the active document"
+    description: >
+      Undo the last editing operation on the active document. Pops the most
+      recent entry from the undo stack, reverses its effect on the canvas,
+      and pushes it onto the redo stack. The canvas re-renders to reflect the
+      prior state. Disabled when the undo stack is empty.
     category: edit
     tier: 3
+    enabled_when: "active_document.can_undo"
     effects:
       - log: "undo"
   redo:
-    description: "Redo the last undone operation"
+    description: >
+      Redo the last undone operation. Pops the most recent entry from the
+      redo stack, re-applies its effect, and pushes it back onto the undo
+      stack. Disabled when the redo stack is empty. Any new editing
+      operation clears the redo stack.
     category: edit
     tier: 3
+    enabled_when: "active_document.can_redo"
     effects:
       - log: "redo"
   cut:
-    description: "Copy selection to clipboard as SVG, then delete it"
+    description: >
+      Copy the selected objects to the clipboard as SVG markup, then delete
+      them from the canvas. Equivalent to copy followed by delete_selection.
+      Disabled when nothing is selected.
     category: edit
     tier: 3
+    enabled_when: "active_document.has_selection"
     effects:
       - dispatch: copy
       - dispatch: delete_selection
   copy:
-    description: "Copy selection to clipboard as SVG"
+    description: >
+      Copy the selected objects to the clipboard as SVG markup, preserving
+      their positions, styles, and grouping. The original objects remain on
+      the canvas. Disabled when nothing is selected.
     category: edit
     tier: 3
+    enabled_when: "active_document.has_selection"
     effects:
       - log: "copy: selection to clipboard"
   paste:
-    description: "Paste from clipboard with a 24pt offset"
+    description: >
+      Paste objects from the clipboard into the active document, offset 24
+      points down and to the right from the original position. The pasted
+      objects become the new selection. Repeated pastes stack with
+      cumulative offsets. Disabled when no document is open.
     category: edit
     tier: 3
+    enabled_when: "state.tab_count > 0"
     effects:
       - log: "paste: offset 24pt"
   paste_in_place:
-    description: "Paste from clipboard at the original position"
+    description: >
+      Paste objects from the clipboard at their original coordinates (no
+      offset). Useful for pasting objects into the same position in a
+      different document or layer. The pasted objects become the new
+      selection.
     category: edit
     tier: 3
+    enabled_when: "state.tab_count > 0"
     effects:
       - log: "paste_in_place: offset 0"
   select_all:
-    description: "Select all objects in the active document"
+    description: >
+      Select all unlocked, visible objects in the active document. Hidden
+      and locked objects are excluded from the selection.
     category: edit
     tier: 3
+    enabled_when: "state.tab_count > 0"
     effects:
       - log: "select_all"
   delete_selection:
-    description: "Delete the selected objects"
+    description: >
+      Delete the selected objects from the canvas. The deletion is recorded
+      on the undo stack. After deletion, the selection becomes empty.
     category: edit
     tier: 3
+    enabled_when: "active_document.has_selection"
     effects:
       - log: "delete_selection"
 
   # ── Object ────────────────────────────────────────────────
   group:
-    description: "Group selected sibling elements into a single Group"
+    description: >
+      Wrap the selected objects in a new Group element. The group inherits
+      the z-order position of the frontmost selected object. The selection
+      changes to the new group. Requires at least 2 selected objects.
     category: object
     tier: 3
+    enabled_when: "active_document.selection_count >= 2"
     effects:
       - log: "group"
   ungroup:
-    description: "Ungroup selected Group elements, replacing each with its children"
+    description: >
+      Ungroup the selected Group elements one level, replacing each group
+      with its direct children at the group's z-order position. Non-group
+      objects in the selection are left unchanged. The children become the
+      new selection.
     category: object
     tier: 3
+    enabled_when: "active_document.has_selection"
     effects:
       - log: "ungroup"
   ungroup_all:
-    description: "Recursively ungroup all unlocked Group elements"
+    description: >
+      Recursively ungroup every unlocked Group in the document until no
+      groups remain (except locked ones). Operates on the entire document,
+      not just the selection.
     category: object
     tier: 3
+    enabled_when: "state.tab_count > 0"
     effects:
       - log: "ungroup_all"
   lock:
-    description: "Lock selected elements to prevent editing"
+    description: >
+      Lock the selected elements to prevent editing. Locked objects cannot
+      be selected, moved, resized, or deleted until unlocked. They remain
+      visible on the canvas and in the Layers panel (shown with a lock
+      icon). The selection is cleared after locking.
     category: object
     tier: 3
+    enabled_when: "active_document.has_selection"
     effects:
       - log: "lock"
   unlock_all:
-    description: "Unlock all locked elements in the document"
+    description: >
+      Unlock all locked elements in the active document, making them
+      selectable and editable again. The lock icon is removed from their
+      Layers panel entries.
     category: object
     tier: 3
+    enabled_when: "state.tab_count > 0"
     effects:
       - log: "unlock_all"
   hide_selection:
-    description: "Hide selected elements from the canvas"
+    description: >
+      Hide the selected elements from the canvas. Hidden objects are not
+      rendered and cannot be selected, but remain in the document and
+      Layers panel (shown dimmed with a hidden-eye icon). The selection
+      is cleared after hiding.
     category: object
     tier: 3
+    enabled_when: "active_document.has_selection"
     effects:
       - log: "hide_selection"
   show_all:
-    description: "Show all hidden elements"
+    description: >
+      Show all hidden elements in the active document, making them visible
+      on the canvas and selectable again. Their eye icons are restored in
+      the Layers panel.
     category: object
     tier: 3
+    enabled_when: "state.tab_count > 0"
     effects:
       - log: "show_all"
 
   # ── View ──────────────────────────────────────────────────
   zoom_in:
-    description: "Zoom the canvas in"
+    description: >
+      Zoom the canvas in by one step (e.g. 150% -> 200%). Zoom is centered
+      on the current viewport center. The zoom level is reflected in
+      active_document.zoom_level.
     category: view
     tier: 3
+    enabled_when: "state.tab_count > 0"
     effects:
       - log: "zoom_in"
   zoom_out:
-    description: "Zoom the canvas out"
+    description: >
+      Zoom the canvas out by one step (e.g. 200% -> 150%). Zoom is centered
+      on the current viewport center.
     category: view
     tier: 3
+    enabled_when: "state.tab_count > 0"
     effects:
       - log: "zoom_out"
   fit_in_window:
-    description: "Fit all content within the viewport"
+    description: >
+      Adjust zoom and scroll so the bounding box of all objects in the
+      document fits within the visible canvas area with a small margin.
+      If the document is empty, resets to 100% zoom centered on the
+      artboard origin.
     category: view
     tier: 3
+    enabled_when: "state.tab_count > 0"
     effects:
       - log: "fit_in_window"
 
   # ── Tool ──────────────────────────────────────────────────
   select_tool:
-    description: "Switch the active drawing tool"
+    description: >
+      Switch the active drawing tool. Updates active_tool state, which
+      causes the corresponding toolbar button to show its checked style
+      and changes the canvas cursor to match the tool. The previously
+      active tool is deactivated.
     category: tool
     params:
       tool: { type: state_ref, ref: "active_tool" }
@@ -210,32 +321,51 @@ actions:
 
   # ── Fill / Stroke ─────────────────────────────────────────
   swap_fill_stroke:
-    description: "Swap fill and stroke colors"
+    description: >
+      Swap the fill and stroke colors. The fill color becomes the stroke
+      color and vice versa. Null values (no fill / no stroke) are swapped
+      too. The toolbar swatches update immediately.
     category: fill_stroke
     effects:
       - swap: [fill_color, stroke_color]
   reset_fill_stroke:
-    description: "Reset to default white fill and 1pt black stroke"
+    description: >
+      Reset colors to defaults: white fill (#ffffff), black stroke
+      (#000000), 1pt stroke width, and fill swatch on top. The toolbar
+      swatches update immediately.
     category: fill_stroke
     effects:
       - set: { fill_color: "#ffffff", stroke_color: "#000000", stroke_width: 1.0, fill_on_top: true }
   toggle_fill_on_top:
-    description: "Toggle whether fill or stroke swatch is in front"
+    description: >
+      Toggle which swatch is in front in the toolbar fill/stroke widget.
+      The front swatch is the one that receives color changes and is
+      targeted by the None button. Visually the swatches swap z-order.
     category: fill_stroke
     effects:
       - toggle: fill_on_top
   set_fill_none:
-    description: "Set the fill color to none"
+    description: >
+      Remove the fill color (set to null). Objects with no fill are
+      transparent — only their stroke is visible. The fill swatch shows
+      a red diagonal line indicating "none".
     category: fill_stroke
     effects:
       - set: { fill_color: null }
   set_stroke_none:
-    description: "Set the stroke color to none"
+    description: >
+      Remove the stroke color (set to null). Objects with no stroke have
+      no visible outline. The stroke swatch shows a red diagonal line
+      indicating "none".
     category: fill_stroke
     effects:
       - set: { stroke_color: null }
   open_color_picker:
-    description: "Open the color picker dialog for fill or stroke"
+    description: >
+      Open the modal color picker dialog for either the fill or stroke
+      color (determined by the target param). The dialog initializes from
+      the current color and commits back to the corresponding state
+      variable when OK is pressed.
     category: fill_stroke
     params:
       target: { type: enum, values: [fill, stroke] }
@@ -244,44 +374,108 @@ actions:
 
   # ── Window / Layout ──────────────────────────────────────
   toggle_pane:
-    description: "Show or hide a pane"
+    description: >
+      Toggle a pane's visibility. When hidden, the pane is removed from
+      the layout and adjacent panes may expand to fill the space. When
+      shown, the pane reappears at its last position. Controlled via the
+      Window menu checkmarks for Toolbar and Panels.
     category: window
     params:
       pane: { type: enum, values: [toolbar, canvas, dock] }
     effects:
       - toggle: "{{param.pane}}_visible"
   toggle_panel:
-    description: "Show or hide a dock panel"
+    description: >
+      Show or hide a dock panel via the Window menu. When showing, the dock
+      is made visible and expanded, and the panel is activated in its group.
+      When hiding, the next visible panel in the group becomes active; if no
+      panels remain visible the group collapses.
     category: window
     params:
       panel: { type: enum, values: [layers, color, stroke, properties] }
     effects:
-      - log: "toggle_panel: {{param.panel}}"
+      # Layers (group 0)
+      - if:
+          condition: "{{param.panel}} == layers"
+          then:
+            - if:
+                condition: "state.layers_visible"
+                then:
+                  - set: { layers_visible: false }
+                else:
+                  - set: { layers_visible: true, dock_visible: true, dock_collapsed: false, dock_group0_collapsed: false, dock_group0_active: 0 }
+      # Color (group 1, index 0)
+      - if:
+          condition: "{{param.panel}} == color"
+          then:
+            - if:
+                condition: "state.color_visible"
+                then:
+                  - set: { color_visible: false }
+                  - dispatch: _select_first_visible_group1
+                else:
+                  - set: { color_visible: true, dock_visible: true, dock_collapsed: false, dock_group1_collapsed: false, dock_group1_active: 0 }
+      # Stroke (group 1, index 1)
+      - if:
+          condition: "{{param.panel}} == stroke"
+          then:
+            - if:
+                condition: "state.stroke_visible"
+                then:
+                  - set: { stroke_visible: false }
+                  - dispatch: _select_first_visible_group1
+                else:
+                  - set: { stroke_visible: true, dock_visible: true, dock_collapsed: false, dock_group1_collapsed: false, dock_group1_active: 1 }
+      # Properties (group 1, index 2)
+      - if:
+          condition: "{{param.panel}} == properties"
+          then:
+            - if:
+                condition: "state.properties_visible"
+                then:
+                  - set: { properties_visible: false }
+                  - dispatch: _select_first_visible_group1
+                else:
+                  - set: { properties_visible: true, dock_visible: true, dock_collapsed: false, dock_group1_collapsed: false, dock_group1_active: 2 }
   toggle_canvas_maximize:
-    description: "Toggle canvas between maximized and normal layout"
+    description: >
+      Toggle the canvas pane between maximized (fills the entire viewport,
+      title bar hidden) and its normal size within the pane layout.
     category: window
     effects:
       - toggle: canvas_maximized
   maximize_canvas:
-    description: "Maximize the canvas to fill the viewport, hide its title bar"
+    description: >
+      Maximize the canvas pane to fill the entire viewport. The canvas
+      title bar is hidden to maximize drawing space. Toolbar and dock
+      panes float on top if visible. Double-click the canvas title bar
+      or click the maximize button again to restore.
     category: window
     effects:
       - set: { canvas_maximized: true }
       - maximize: { target: canvas_pane, hide_title: true }
   restore_canvas:
-    description: "Restore the canvas to its original size, show its title bar"
+    description: >
+      Restore the canvas from maximized state to its normal pane size.
+      The title bar reappears and all panes return to their default
+      layout positions.
     category: window
     effects:
       - set: { canvas_maximized: false }
       - restore: { target: canvas_pane }
       - reset_layout: { container: main }
   toggle_dock_collapse:
-    description: "Collapse or expand the dock panel"
+    description: >
+      Toggle the dock between expanded (showing full panel content) and
+      collapsed (showing only the icon strip at collapsed_width).
     category: window
     effects:
       - toggle: dock_collapsed
   collapse_dock:
-    description: "Collapse the dock to icon strip"
+    description: >
+      Collapse the dock to its narrow icon strip (36px). Panel group
+      headers and bodies are hidden; only the collapsed strip with panel
+      icons is shown. The chevron button icon flips to point left.
     category: window
     effects:
       - set: { dock_collapsed: true }
@@ -290,7 +484,10 @@ actions:
       - hide: dock_group_separator
       - hide: dock_group_1
   expand_dock:
-    description: "Expand the dock to full panels"
+    description: >
+      Expand the dock from the collapsed icon strip to full width, showing
+      panel group headers, tab bars, and panel content. The collapsed strip
+      is hidden and the chevron button icon flips to point right.
     category: window
     effects:
       - set: { dock_collapsed: false }
@@ -299,42 +496,66 @@ actions:
       - show: dock_group_separator
       - show: dock_group_1
   tile_panes:
-    description: "Arrange all visible panes in a tiled grid"
+    description: >
+      Tile all visible panes in a horizontal row filling the viewport.
+      Panes with fixed_width keep their width. Panes with collapsed_width
+      keep their current width. Flex panes split the remaining space
+      equally (respecting min_width). All panes are set to full viewport
+      height. Panes are sorted left-to-right by their current x position.
+      Hidden panes are made visible.
     category: window
     effects:
       - tile: { container: main }
 
   # ── Workspace ─────────────────────────────────────────────
   save_workspace_as:
-    description: "Save the current pane layout under a new name"
+    description: >
+      Open the workspace_save_as dialog prompting the user for a layout
+      name. The dialog validates the name and warns about overwrites.
     category: workspace
     effects:
       - open_dialog: { id: workspace_save_as }
   save_workspace_confirm:
-    description: "Save workspace with the name from the dialog input"
+    description: >
+      Confirm the workspace save. Reads the name from the dialog text
+      input, captures all pane positions/sizes and layout_state variables,
+      and writes them to browser storage. The saved layout appears in the
+      Workspace menu with a checkmark. Closes the dialog on success.
     category: workspace
     effects:
       - save_layout: { container: main, name_input: ws_name_input }
       - close_dialog: null
   reset_workspace:
-    description: "Reset pane layout to factory defaults"
+    description: >
+      Reset all pane positions, sizes, and layout_state variables to
+      their declared defaults from the workspace YAML. Clears the active
+      layout name (no layout is active after reset).
     category: workspace
     effects:
       - reset_layout: { container: main }
   revert_workspace:
-    description: "Revert pane layout to last saved version"
+    description: >
+      Revert the pane layout to the currently active saved layout,
+      discarding any manual repositioning or resizing done since the
+      layout was loaded. Only enabled when a saved layout is active.
     category: workspace
     effects:
       - revert_layout: { container: main }
   switch_workspace:
-    description: "Switch to a named workspace layout"
+    description: >
+      Load a named workspace layout from storage, applying its saved pane
+      positions/sizes and layout_state values. The layout name becomes
+      the active layout (shown with a checkmark in the Workspace menu).
     category: workspace
     params:
       name: { type: string }
     effects:
       - load_layout: { container: main, name: "{{param.name}}" }
   delete_workspace:
-    description: "Delete a saved workspace layout"
+    description: >
+      Delete a user-saved workspace layout from storage. The layout is
+      removed from the Workspace menu. Default layouts cannot be deleted.
+      If the deleted layout was active, the active layout name is cleared.
     category: workspace
     params:
       name: { type: string }
@@ -343,53 +564,133 @@ actions:
 
   # ── Tab ───────────────────────────────────────────────────
   close_tab:
-    description: "Close a document tab (prompt to save if modified)"
+    description: >
+      Close a document tab. If the document has unsaved changes, opens the
+      save_changes_tab dialog offering Save, Discard, or Cancel. If the
+      document is unmodified, dispatches remove_tab immediately to remove
+      the tab and canvas elements.
     category: tab
     params:
       index: { type: number }
     effects:
       - if:
-          condition: "model.is_modified"
+          condition: "active_document.is_modified"
           then:
-            - open_dialog: { id: save_changes_tab, params: { filename: "{{model.filename}}" } }
+            - open_dialog: { id: save_changes_tab, params: { filename: "{{active_document.filename}}" } }
           else:
             - dispatch: { action: remove_tab, params: { index: "{{param.index}}" } }
   remove_tab:
-    description: "Remove a tab without prompting"
+    description: >
+      Remove a tab and its canvas without prompting. Removes both the tab
+      button and canvas surface elements, then selects an adjacent tab
+      (prefer the tab to the left; if none, the tab to the right; if the
+      last tab was closed, set active_tab to -1).
     category: tab
     params:
       index: { type: number }
     effects:
-      - log: "remove_tab: {{param.index}}"
+      - remove_child: "canvas_tab_{{param.index}}"
+      - remove_child: "canvas_surface_{{param.index}}"
+      - decrement: { key: tab_count, by: 1 }
+      - if:
+          condition: "state.tab_count == 0"
+          then:
+            - set: { active_tab: -1 }
+          else:
+            - if:
+                condition: "{{param.index}} > 0"
+                then:
+                  - set: { active_tab: "{{param.index}} - 1" }
+                else:
+                  - set: { active_tab: 0 }
 
   # ── Panel ─────────────────────────────────────────────────
   close_panel:
-    description: "Close the panel that owns this menu"
+    description: >
+      Close (hide) a specific dock panel. The next visible panel in the
+      group becomes active; if no panels remain the group collapses.
+    category: panel
+    params:
+      panel: { type: enum, values: [layers, color, stroke, properties] }
+    effects:
+      - if:
+          condition: "{{param.panel}} == layers"
+          then:
+            - set: { layers_visible: false }
+      - if:
+          condition: "{{param.panel}} == color"
+          then:
+            - set: { color_visible: false }
+            - dispatch: _select_first_visible_group1
+      - if:
+          condition: "{{param.panel}} == stroke"
+          then:
+            - set: { stroke_visible: false }
+            - dispatch: _select_first_visible_group1
+      - if:
+          condition: "{{param.panel}} == properties"
+          then:
+            - set: { properties_visible: false }
+            - dispatch: _select_first_visible_group1
+
+  _select_first_visible_group1:
+    description: >
+      Internal helper: activate the first visible panel in dock group 1.
+      If no panels are visible, collapse the group.
     category: panel
     effects:
-      - log: "close_panel"
+      - if:
+          condition: "state.color_visible"
+          then:
+            - set: { dock_group1_active: 0 }
+          else:
+            - if:
+                condition: "state.stroke_visible"
+                then:
+                  - set: { dock_group1_active: 1 }
+                else:
+                  - if:
+                      condition: "state.properties_visible"
+                      then:
+                        - set: { dock_group1_active: 2 }
+                      else:
+                        - set: { dock_group1_collapsed: true }
 
   # ── Dialog ────────────────────────────────────────────────
   dismiss_dialog:
-    description: "Dismiss the current modal dialog"
+    description: >
+      Dismiss the topmost modal dialog without taking any action. The
+      dialog closes and focus returns to the main workspace.
     category: dialog
     effects:
       - close_dialog: null
   close_without_saving:
-    description: "Close the tab/window without saving"
+    description: >
+      Close the tab or window without saving changes. Called from the
+      save-changes dialog when the user clicks Discard or Don't Save.
+      Closes the dialog first, then proceeds with the close operation,
+      discarding any unsaved modifications.
     category: dialog
     effects:
       - close_dialog: null
       - log: "close_without_saving"
   save_and_close:
-    description: "Save the active document then close the tab"
+    description: >
+      Save the active document and then close its tab. Called from the
+      save-changes dialog when the user clicks Save. Dispatches the save
+      action first (which may show Save As if untitled), then closes the
+      dialog and removes the tab.
     category: dialog
     effects:
       - dispatch: save
       - close_dialog: null
       - log: "save_and_close"
   save_all_and_close:
-    description: "Save all modified documents then close the window"
+    description: >
+      Save all modified documents and then close the application window.
+      Called from the save_changes_window dialog when the user clicks
+      Save All. Iterates through all open tabs, saves any with unsaved
+      changes, then closes the dialog and the application.
     category: dialog
     effects:
       - log: "save_all_and_close"

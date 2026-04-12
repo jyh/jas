@@ -1,7 +1,12 @@
 version: 1
 app:
   name: "Jas"
-  description: "Vector graphics editor with multi-language implementations"
+  description: >
+    Vector illustration application with draggable pane-based workspace,
+    multi-document tabbed canvas, toolbar with tool slots and long-press
+    alternates, and a collapsible dock with panel groups. Designed to be
+    rendered by a generic web app using Bootstrap for layout and JavaScript
+    for interaction.
   window:
     width: 1200
     height: 900
