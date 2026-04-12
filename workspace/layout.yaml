@@ -594,7 +594,24 @@ layout:
               flex: 1
               min_height: 200
               background: "{{theme.colors.window_bg}}"
-            children: []
+            children:
+              - id: canvas_brand_logo
+                type: brand_logo
+                summary: "Brand logo placeholder"
+                description: >
+                  Brand logo shown in the top-right of the drawing surface when
+                  no documents are open. Spans 2 Bootstrap columns wide (16.67%)
+                  and is positioned in the top-right corner. Hidden once any
+                  document tab is open.
+                style:
+                  position: absolute
+                  top: 10
+                  right: 12
+                  width: "16.667%"
+                  height: auto
+                  opacity: 0.35
+                bind:
+                  visible: "{{state.tab_count}} == 0"
 
     # ─── Dock panel pane ────────────────────────────────────
     - id: dock_pane

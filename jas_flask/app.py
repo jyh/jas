@@ -6,7 +6,24 @@ import os
 from flask import Flask, render_template, request, jsonify
 
 from loader import load_workspace, find_element_by_id, resolve_appearance, list_appearances
-from renderer import render_element, render_menubar, render_dialogs, set_icons, set_initial_state
+from renderer import render_element, render_menubar, render_dialogs, set_icons, set_initial_state, set_brand
+
+
+def _resolve_brand(ws: dict, workspace_path: str | None) -> None:
+    """Read brand logo SVG files from disk and store inlined content in ws['app']['brand']."""
+    brand = ws.get("app", {}).get("brand")
+    if not brand or workspace_path is None:
+        return
+    project_root = os.path.dirname(workspace_path) if os.path.isdir(workspace_path) else os.path.dirname(os.path.dirname(workspace_path))
+    for key in ("logo", "logo_small"):
+        rel = brand.get(key)
+        if rel:
+            path = os.path.join(project_root, rel)
+            try:
+                with open(path) as f:
+                    brand[key + "_svg"] = f.read()
+            except OSError:
+                brand[key + "_svg"] = ""
 
 
 def create_app(workspace: dict | None = None, workspace_path: str | None = None) -> Flask:
@@ -59,13 +76,17 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
             _cached_mtime = mtime
             set_icons(_cached_ws.get("icons", {}))
             set_initial_state(_cached_ws.get("state", {}))
+            _resolve_brand(_cached_ws, workspace_path)
+            set_brand(_cached_ws.get("app", {}).get("brand", {}))
 
         return _cached_ws
 
-    # Ensure icons and initial state are set on first load
+    # Ensure icons, initial state, and brand are set on first load
     ws_init = _get_ws()
     set_icons(ws_init.get("icons", {}))
     set_initial_state(ws_init.get("state", {}))
+    _resolve_brand(ws_init, workspace_path)
+    set_brand(ws_init.get("app", {}).get("brand", {}))
 
     def _state_defaults(ws: dict) -> dict:
         """Extract default values from state definitions."""
@@ -100,7 +121,8 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
         ws_for_template["theme"] = resolved
 
         # Render menubar (swap mode toggle link based on current mode)
-        menubar_html = render_menubar(ws.get("menubar", []), ws.get("actions", {}), resolved)
+        brand = ws.get("app", {}).get("brand")
+        menubar_html = render_menubar(ws.get("menubar", []), ws.get("actions", {}), resolved, brand)
         if mode == "wireframe":
             menubar_html = menubar_html.replace(
                 'href="?mode=wireframe" id="mode-toggle">Wireframe',
@@ -109,7 +131,7 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
 
         # Both modes render the same layout in normal mode
         layout_html = render_element(ws.get("layout", {}), resolved, state, mode="normal")
-        dialogs_html = render_dialogs(ws.get("dialogs", {}), resolved, state)
+        dialogs_html = render_dialogs(ws.get("dialogs", {}), resolved, state, brand)
         state_json = json.dumps(_state_defaults(ws))
         actions_json = json.dumps(ws.get("actions", {}))
         shortcuts_json = json.dumps(ws.get("shortcuts", []))

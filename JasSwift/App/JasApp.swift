@@ -59,6 +59,11 @@ struct JasApp: App {
                     NSApp.setActivationPolicy(.regular)
                     NSApp.activate(ignoringOtherApps: true)
                     appDelegate.workspace = workspace
+                    if let icnsURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
+                        ?? URL(string: "file://" + #file)
+                            .flatMap({ URL(string: "../../../../assets/brand/icons/AppIcon.icns", relativeTo: $0.deletingLastPathComponent()) }) {
+                        NSApp.applicationIconImage = NSImage(contentsOf: icnsURL)
+                    }
                 }
         }
         .defaultSize(width: 1200, height: 900)

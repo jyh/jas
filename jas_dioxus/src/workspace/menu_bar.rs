@@ -601,6 +601,10 @@ pub(crate) fn MenuBarView(
             onmousedown: move |evt: Event<MouseData>| {
                 evt.stop_propagation();
             },
+            span {
+                style: "display:inline-block; width:45px; height:20px; flex-shrink:0; margin-right:4px;",
+                dangerous_inner_html: BRAND_LOGO_SVG,
+            }
             for node in menu_nodes {
                 {node}
             }

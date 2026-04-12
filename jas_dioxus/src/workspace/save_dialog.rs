@@ -69,8 +69,15 @@ pub(crate) fn SaveAsDialogView(
                         },
 
                         div {
-                            style: "font-size:14px; font-weight:bold; margin-bottom:12px; color:{THEME_TEXT};",
-                            "Save Workspace As"
+                            style: "display:flex; align-items:center; gap:8px; margin-bottom:12px;",
+                            span {
+                                style: "display:inline-block; width:36px; height:16px; flex-shrink:0;",
+                                dangerous_inner_html: BRAND_LOGO_SVG,
+                            }
+                            span {
+                                style: "font-size:14px; font-weight:bold; color:{THEME_TEXT};",
+                                "Save Workspace As"
+                            }
                         }
 
                         input {

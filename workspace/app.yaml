@@ -12,3 +12,8 @@ app:
     height: 900
     min_width: 800
     min_height: 600
+  brand:
+    logo: "assets/brand/logo.svg"
+    logo_small: "assets/brand/logo-small.svg"
+    color: "#C9900A"
+    color_light: "#42210b"

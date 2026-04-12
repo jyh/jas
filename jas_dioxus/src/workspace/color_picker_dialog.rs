@@ -123,6 +123,10 @@ pub(crate) fn ColorPickerDialogView(
                 // Title + eyedropper
                 div {
                     style: "font-size:13px; color:{THEME_TEXT}; margin-bottom:12px; display:flex; align-items:center; gap:8px;",
+                    span {
+                        style: "display:inline-block; width:32px; height:14px; flex-shrink:0;",
+                        dangerous_inner_html: BRAND_LOGO_SVG,
+                    }
                     "Select Color:"
                     // Eyedropper button
                     {

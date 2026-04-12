@@ -2,6 +2,11 @@
 
 use crate::geometry::element::Color;
 
+/// Brand logo SVG (color-baked, for use in menu bar, dialogs, and empty-state canvas).
+pub(crate) const BRAND_LOGO_SVG: &str = include_str!("../../../assets/brand/logo-baked.svg");
+/// Brand color (brass gold).
+pub(crate) const BRAND_COLOR: &str = "#C9900A";
+
 /// Eyedropper SVG icon for the color picker.
 pub(crate) const EYEDROPPER_SVG: &str = r##"<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M13.354 2.646a2.121 2.121 0 0 0-3 0l-1.5 1.5-.708-.708a.5.5 0 0 0-.707.708l.353.353-5.146 5.146A1.5 1.5 0 0 0 2.2 10.5L1.5 14a.5.5 0 0 0 .6.6l3.5-.7a1.5 1.5 0 0 0 .854-.44l5.146-5.146.354.354a.5.5 0 0 0 .707-.708l-.707-.707 1.5-1.5a2.121 2.121 0 0 0 0-3.001zM5.39 12.4a.5.5 0 0 1-.285.147L2.65 13.05l.504-2.454a.5.5 0 0 1 .147-.285L8.5 5.111l1.389 1.389z" fill="#ccc"/></svg>"##;
 
