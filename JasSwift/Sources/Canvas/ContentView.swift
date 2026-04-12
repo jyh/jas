@@ -170,6 +170,7 @@ public struct ContentView: View {
                 SwiftUI.Color.clear
                     .focusedSceneValue(\.addCanvas, { newModel in addCanvas(newModel) })
                     .focusedSceneValue(\.workspace, workspace)
+                    .focusedSceneValue(\.activeAppearance, workspace.appConfig.activeAppearance)
                     .allowsHitTesting(false)
             }
             .overlay {
