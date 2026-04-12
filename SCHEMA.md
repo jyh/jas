@@ -763,10 +763,55 @@ The `dock_view` renders automatically based on its `groups` list:
 - **Collapsed**: A vertical icon strip showing one icon per panel. Click
   an icon to expand the dock and activate that panel.
 
-Panel groups can be dragged within a dock (reorder), between docks
-(move), or to empty space (creating a floating dock pane). Individual
-panel tabs can be dragged to reorder within their group or move to a
-different group in any dock.
+### Drag-and-Drop Behavior
+
+Panel tabs and panel groups support drag-and-drop:
+
+- **Tab drag to another group's tab bar**: moves the panel into the
+  target group at the indicated position.
+- **Tab drag to empty area of a dock_view**: creates a new panel group
+  containing that panel and inserts it at the indicated position
+  (between existing groups or at the end).
+- **Tab drag to empty space** (outside any dock): creates a new floating
+  dock pane containing a single-panel group at the cursor position.
+- **Group grip drag within dock**: reorders the group vertically.
+- **Group grip drag to empty space**: detaches the group as a floating
+  dock pane.
+
+### Automatic Cleanup
+
+- **Empty panel groups**: when the last panel is removed from a group
+  (via drag, close, or move), the group is automatically removed from
+  the dock.
+- **Empty floating docks**: when the last group is removed from a
+  floating dock pane, the pane is automatically removed from the pane
+  system.
+
+### Floating Dock Panes
+
+A floating dock pane is a regular pane (draggable, resizable) whose
+content is a `dock_view`. It is created dynamically by `detach_group`
+or by dragging a panel/group to empty space. Floating docks:
+
+- Are positioned absolutely in the pane system like any other pane.
+- Have a title bar with "Panels" label; **double-click the title bar
+  to redock** (merges all groups back into the anchored dock via
+  `redock` effect).
+- Participate in workspace save/load — their positions and dock model
+  state are captured alongside anchored pane positions.
+
+### Workspace Save/Load
+
+When a workspace layout is saved, the saved data includes:
+
+- Pane positions and sizes (all panes including floating docks)
+- State variables (dock_collapsed, canvas_maximized, etc.)
+- Dock model for each `dock_view` (groups list with panel names,
+  active index, collapsed state)
+- Floating dock list (dock_view groups, position, size)
+
+When a layout is loaded, floating docks from the previous session are
+removed and the saved floating docks are recreated.
 
 ### `panel_menu_item`
 

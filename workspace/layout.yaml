@@ -650,15 +650,20 @@ layout:
         summary: "Main dock"
         description: >
           The primary anchored dock containing all panel groups. The
-          dock_view element renders the group headers (tab bars with
-          panel tabs, collapse chevrons, hamburger menus), group bodies
+          dock_view element renders group headers (tab bars with panel
+          tabs, collapse chevrons, hamburger menus), group bodies
           (active panel content from workspace/panels/*.yaml), group
           separators, and the collapsed icon strip. Panel tabs can be
-          dragged to reorder within a group, move to another group, or
-          detach to create a floating dock pane. Groups can be dragged
-          by their grip handle to reorder within the dock or detach as
-          floating dock panes. Double-clicking a floating dock's title
-          bar redocks its groups back into this dock.
+          dragged to reorder within a group, move to another group's
+          tab bar, or dropped on an empty area of a dock to create a
+          new panel group at that position. Dragging a tab or group to
+          empty space outside any dock creates a new floating dock pane.
+          Groups can be dragged by their grip handle to reorder within
+          the dock or detach as floating dock panes. Empty groups are
+          removed automatically when their last panel is moved or
+          closed. Empty floating docks are removed when their last
+          group is emptied. Double-clicking a floating dock's title bar
+          merges its groups back into this anchored dock.
         collapsed_width: 36
         groups:
           - panels: [layers]
