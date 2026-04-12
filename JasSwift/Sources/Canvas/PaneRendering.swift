@@ -173,9 +173,10 @@ let paneTitleBarHeight: Double = 20
 let paneEdgeHandleSize: Double = 6
 let paneBorderHandleSize: Double = 6
 
-let paneTitleBgColor = NSColor(white: 0.22, alpha: 1.0)
-let paneTitleTextColor = NSColor(white: 0.85, alpha: 1.0)
-let paneButtonColor = NSColor(white: 0.65, alpha: 1.0)
+// These are fallback defaults; views should use theme colors from WorkspaceState.
+let paneTitleBgColor = NSColor(hex: "#2a2a2a")
+let paneTitleTextColor = NSColor(hex: "#d9d9d9")
+let paneButtonColor = NSColor(hex: "#888888")
 let snapLineColor = NSColor(red: 50/255, green: 120/255, blue: 220/255, alpha: 0.8)
 
 // ---------------------------------------------------------------------------
@@ -230,8 +231,8 @@ struct PaneFrameView<Content: View>: View {
             content()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(SwiftUI.Color(nsColor: NSColor(white: 0.25, alpha: 1.0)))
-        .border(SwiftUI.Color(nsColor: NSColor(white: 0.33, alpha: 1.0)), width: 1)
+        .background(SwiftUI.Color(nsColor: workspace.theme.paneBgDark))
+        .border(SwiftUI.Color(nsColor: workspace.theme.border), width: 1)
         .overlay { edgeHandles }
         .simultaneousGesture(
             TapGesture().onEnded {
@@ -246,7 +247,7 @@ struct PaneFrameView<Content: View>: View {
         HStack(spacing: 0) {
             SwiftUI.Text(geo.config.label)
                 .font(.system(size: 11))
-                .foregroundColor(SwiftUI.Color(nsColor: paneTitleTextColor))
+                .foregroundColor(SwiftUI.Color(nsColor: workspace.theme.titleBarText))
                 .padding(.leading, 6)
 
             Spacer()
@@ -265,7 +266,7 @@ struct PaneFrameView<Content: View>: View {
                 }) {
                     SwiftUI.Text("\u{00AB}")
                         .font(.system(size: 18))
-                        .foregroundColor(SwiftUI.Color(nsColor: paneButtonColor))
+                        .foregroundColor(SwiftUI.Color(nsColor: workspace.theme.textButton))
                 }
                 .buttonStyle(.plain)
                 .padding(.trailing, 4)
@@ -278,14 +279,14 @@ struct PaneFrameView<Content: View>: View {
             }) {
                 SwiftUI.Text("\u{00D7}")
                     .font(.system(size: 12))
-                    .foregroundColor(SwiftUI.Color(nsColor: paneButtonColor))
+                    .foregroundColor(SwiftUI.Color(nsColor: workspace.theme.textButton))
             }
             .buttonStyle(.plain)
             .padding(.trailing, 4)
         }
         .frame(height: paneTitleBarHeight)
         .frame(maxWidth: .infinity)
-        .background(SwiftUI.Color(nsColor: paneTitleBgColor))
+        .background(SwiftUI.Color(nsColor: workspace.theme.titleBarBg))
         .gesture(paneDragGesture)
         .if(geo.config.doubleClickAction == .maximize) { view in
             view.onTapGesture(count: 2) {
