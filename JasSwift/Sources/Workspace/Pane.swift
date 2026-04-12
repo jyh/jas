@@ -666,7 +666,9 @@ public struct PaneLayout: Codable {
         for i in panes.indices {
             panes[i].x *= sx
             panes[i].y *= sy
-            panes[i].width = max(panes[i].width * sx, panes[i].config.minWidth)
+            if !panes[i].config.fixedWidth {
+                panes[i].width = max(panes[i].width * sx, panes[i].config.minWidth)
+            }
             panes[i].height = max(panes[i].height * sy, panes[i].config.minHeight)
         }
         viewportWidth = newW

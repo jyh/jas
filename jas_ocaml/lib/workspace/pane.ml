@@ -552,7 +552,8 @@ let on_viewport_resize pl ~new_w ~new_h =
     Array.iter (fun p ->
       p.x <- p.x *. sx;
       p.y <- p.y *. sy;
-      p.width <- max (p.width *. sx) p.config.min_width;
+      if not p.config.fixed_width then
+        p.width <- max (p.width *. sx) p.config.min_width;
       p.height <- max (p.height *. sy) p.config.min_height
     ) pl.panes;
     pl.viewport_width <- new_w;
