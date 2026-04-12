@@ -310,6 +310,12 @@ actions:
     category: workspace
     effects:
       - open_dialog: { id: workspace_save_as }
+  save_workspace_confirm:
+    description: "Save workspace with the name from the dialog input"
+    category: workspace
+    effects:
+      - save_layout: { container: main, name_input: ws_name_input }
+      - close_dialog: null
   reset_workspace:
     description: "Reset pane layout to factory defaults"
     category: workspace
@@ -318,16 +324,22 @@ actions:
   revert_workspace:
     description: "Revert pane layout to last saved version"
     category: workspace
-    enabled_when: "workspace.has_saved_layout"
     effects:
-      - log: "revert_workspace"
+      - revert_layout: { container: main }
   switch_workspace:
     description: "Switch to a named workspace layout"
     category: workspace
     params:
       name: { type: string }
     effects:
-      - log: "switch_workspace: {{param.name}}"
+      - load_layout: { container: main, name: "{{param.name}}" }
+  delete_workspace:
+    description: "Delete a saved workspace layout"
+    category: workspace
+    params:
+      name: { type: string }
+    effects:
+      - delete_layout: { name: "{{param.name}}" }
 
   # ── Tab ───────────────────────────────────────────────────
   close_tab:

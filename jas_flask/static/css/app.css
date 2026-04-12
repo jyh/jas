@@ -108,6 +108,11 @@
     margin: 2px;
 }
 
+/* Nested dropdown submenus */
+.dropdown-submenu:hover > .dropdown-menu {
+    display: block !important;
+}
+
 /* Tab overrides for dark theme */
 .nav-tabs {
     border-bottom-color: var(--jas-border, #555);

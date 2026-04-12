@@ -314,7 +314,27 @@ is a single-key map where the key is the operation type.
 - tile: { container: <element_id> }
 
 # Reset all pane positions/sizes to their default_position values
+# and restore all layout_state variables to their defaults
 - reset_layout: { container: <element_id> }
+
+# Save current pane layout to browser storage under a name
+# read from a text input element
+- save_layout: { container: <element_id>, name_input: <element_id> }
+
+# Load a named layout from browser storage
+- load_layout: { container: <element_id>, name: <string> }
+
+# Reload the currently active saved layout
+- revert_layout: { container: <element_id> }
+
+# Delete a named layout from browser storage
+- delete_layout: { name: <string> }
+
+# Maximize a pane to fill its parent container
+- maximize: { target: <element_id> }
+
+# Restore a previously maximized pane
+- restore: { target: <element_id> }
 ```
 
 ### Dialog Control
@@ -538,11 +558,18 @@ default_position:
 min_width: <number>              # optional
 max_width: <number>              # optional
 min_height: <number>             # optional
+fixed_width: <bool>              # optional; pane cannot be resized horizontally
+flex: <bool>                     # optional; pane expands to fill remaining space
+collapsed_width: <number>        # optional; width when collapsed
+
+layout_state: [<state_key>, ...] # optional; state variables saved/restored
+                                 # with workspace layouts (see Saved Layouts)
 
 title_bar:
+  id: <string>                   # optional; enables behaviors on the title bar
   label: <string>
   draggable: <bool>
-  closeable: <bool>
+  behavior: <list of behavior>   # optional; e.g. double_click to maximize
   buttons: <list of icon_button> # optional extra title bar buttons
 
 content: <element>               # the pane's body (single element tree)
@@ -907,6 +934,91 @@ Example:
 enabled_when: "model.is_modified and model.has_filename"
 condition: "not state.fill_on_top"
 ```
+
+---
+
+## Saved Layouts (Workspaces)
+
+A workspace layout captures the positions, sizes, and associated state of all
+panes, allowing the user to save, switch between, and restore named layouts.
+
+### What gets saved
+
+When a layout is saved (via `save_layout` effect), the following data is
+captured for each pane in the container:
+
+```yaml
+# Saved layout format (stored in browser localStorage)
+<layout_name>:
+  panes:
+    <pane_id>:
+      left: <number>               # x position in pixels
+      top: <number>                # y position in pixels
+      width: <number>              # width in pixels
+      height: <number>             # height in pixels
+  state:                           # layout-specific state variables
+    <state_key>: <value>
+    ...
+```
+
+### `layout_state` — declaring layout-specific state
+
+Panes and containers may declare which state variables are part of the
+workspace layout using the `layout_state` property:
+
+```yaml
+- id: dock_pane
+  type: pane
+  layout_state: [dock_collapsed, dock_group0_active, dock_group1_active,
+                 dock_group0_collapsed, dock_group1_collapsed]
+```
+
+When a layout is saved, the current values of all `layout_state` variables
+(from all panes in the container) are captured alongside pane positions. When
+a layout is loaded, those state variables are restored to their saved values.
+
+State variables NOT listed in any `layout_state` property are considered
+app state and are not affected by workspace save/load/reset.
+
+### `default_layouts` — pre-defined layouts
+
+The top-level `default_layouts` section (optional) defines named layouts
+that ship with the app. These appear in the Workspace menu alongside
+user-saved layouts but cannot be overwritten or deleted.
+
+```yaml
+default_layouts:
+  <name>:
+    panes:
+      <pane_id>:
+        left: <number>
+        top: <number>
+        width: <number>
+        height: <number>
+    state:
+      <state_key>: <value>
+```
+
+### Storage
+
+The storage backend for saved layouts is implementation-defined. A web
+renderer may use browser `localStorage`; a desktop app may use the local
+filesystem; a collaborative tool may use a database. The schema defines
+only the data format — a map of layout names to layout data — not the
+storage mechanism.
+
+The active layout name is tracked by the renderer engine (not as a state
+variable) and is used to show a checkmark in the Workspace menu and to
+enable the "Revert to Saved" command.
+
+### Workspace menu
+
+The `dynamic: true` property on a submenu signals the renderer to
+populate it at runtime. For the Workspace submenu, the renderer:
+
+1. Lists all saved layout names (from localStorage + default_layouts)
+2. Shows a checkmark next to the active layout
+3. Appends the static menu items (Save As, Reset, Revert) from the YAML
 
 ---
 
