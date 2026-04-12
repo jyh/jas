@@ -195,13 +195,12 @@ def create_menus(window: QMainWindow) -> None:
                 lambda checked=False, n=entry.name: _switch_appearance(window, n))
 
     def _switch_appearance(window, name):
-        from workspace.theme import resolve_appearance
         if not hasattr(window, 'app_config'):
             return
         window.app_config.active_appearance = name
         window.app_config.save()
-        if hasattr(window, 'refresh_panes'):
-            window.refresh_panes()
+        if hasattr(window, 'refresh_theme'):
+            window.refresh_theme()
 
     appearance_menu.aboutToShow.connect(_rebuild_appearance_menu)
 

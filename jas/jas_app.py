@@ -26,26 +26,38 @@ class PaneTitleBar(QWidget):
 
     def __init__(self, label: str, pane_id: int = 0,
                  on_close=None, on_maximize_toggle=None,
-                 on_drag_start=None, parent=None):
+                 on_drag_start=None, theme=None, parent=None):
         super().__init__(parent)
         self.setFixedHeight(TITLE_BAR_HEIGHT)
         self._pane_id = pane_id
         self._on_maximize_toggle = on_maximize_toggle
         self._on_drag_start = on_drag_start
+        self._theme = theme
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 0, 4, 0)
         layout.setSpacing(4)
-        lbl = QLabel(label)
-        lbl.setStyleSheet("color: #d9d9d9; font-size: 11px;")
-        layout.addWidget(lbl, stretch=1)
+        self._label = QLabel(label)
+        layout.addWidget(self._label, stretch=1)
         if on_close:
-            btn = QPushButton("\u00D7")
-            btn.setFixedSize(16, 16)
-            btn.setStyleSheet("color: #a5a5a5; border: none; font-size: 12px;")
-            btn.clicked.connect(on_close)
-            layout.addWidget(btn)
-        self.setStyleSheet("background: #383838;")
+            self._close_btn = QPushButton("\u00D7")
+            self._close_btn.setFixedSize(16, 16)
+            self._close_btn.clicked.connect(on_close)
+            layout.addWidget(self._close_btn)
+        else:
+            self._close_btn = None
+        self.apply_theme(theme)
         self.setCursor(QCursor(Qt.OpenHandCursor))
+
+    def apply_theme(self, theme=None):
+        if theme is None:
+            theme = self._theme
+        if theme is None:
+            return
+        self._theme = theme
+        self._label.setStyleSheet(f"color: {theme.title_bar_text}; font-size: 11px;")
+        if self._close_btn:
+            self._close_btn.setStyleSheet(f"color: {theme.text_button}; border: none; font-size: 12px;")
+        self.setStyleSheet(f"background: {theme.title_bar_bg};")
 
     def mousePressEvent(self, event):
         if self._on_drag_start:
@@ -84,21 +96,31 @@ class PaneFrame(QWidget):
     """A pane frame with title bar wrapping content."""
 
     def __init__(self, title_bar: PaneTitleBar, content: QWidget,
-                 pane_id: int = 0, on_edge_drag_start=None, parent=None):
+                 pane_id: int = 0, on_edge_drag_start=None, theme=None, parent=None):
         super().__init__(parent)
         self.title_bar = title_bar
         self.content = content
+        self._theme = theme
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(title_bar)
         layout.addWidget(content, stretch=1)
-        self.setStyleSheet("border: 1px solid #555;")
+        self.setObjectName("pane_frame")
+        self.apply_theme(theme)
         # Edge resize handles (children, positioned absolutely)
         self._edge_handles = []
         for edge in ("left", "right", "top", "bottom"):
             h = EdgeHandle(edge, pane_id, on_edge_drag_start, self)
             self._edge_handles.append((edge, h))
+
+    def apply_theme(self, theme=None):
+        if theme is None:
+            theme = self._theme
+        if theme:
+            self._theme = theme
+        border = theme.border if theme else "#555"
+        self.setStyleSheet(f"#pane_frame {{ border: 1px solid {border}; }}")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -131,16 +153,20 @@ class MainWindow(QMainWindow):
         # Dock layout
         from workspace.workspace_layout import WorkspaceLayout, AppConfig
         from workspace.dock_panel import DockPanelWidget
+        from workspace.theme import resolve_appearance
         self.app_config = AppConfig.load()
         self.workspace_layout = WorkspaceLayout.load_or_migrate_workspace(self.app_config)
         self.workspace_layout.ensure_pane_layout(1200, 900)
+        self.theme = resolve_appearance(self.app_config.active_appearance)
+        from workspace.dock_panel import set_theme as set_dock_theme
+        set_dock_theme(self.app_config.active_appearance)
 
         # Menubar
         create_menus(self)
 
         # Pane container (no layout manager — absolute positioning)
         self._pane_container = QWidget()
-        self._pane_container.setStyleSheet("background: #2e2e2e;")
+        self._pane_container.setStyleSheet(f"background: {self.theme.window_bg};")
         self._pane_container.setMouseTracking(True)
         self.setCentralWidget(self._pane_container)
 
@@ -153,35 +179,40 @@ class MainWindow(QMainWindow):
         # Toolbar pane
         self.toolbar = Toolbar()
         self._toolbar_title = PaneTitleBar(
-            "Tools", pane_id=tid,
+            "", pane_id=tid,
             on_close=lambda: self._hide_pane(PaneKind.TOOLBAR),
-            on_drag_start=self._start_pane_drag)
+            on_drag_start=self._start_pane_drag,
+            theme=self.theme)
         self._toolbar_frame = PaneFrame(self._toolbar_title, self.toolbar,
                                         pane_id=tid, on_edge_drag_start=self._start_edge_drag,
-                                        parent=self._pane_container)
+                                        theme=self.theme, parent=self._pane_container)
 
         # Canvas pane
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabsClosable(True)
+        self.tab_widget.tabBar().setExpanding(False)
         self.tab_widget.tabCloseRequested.connect(self._close_tab)
         self._canvas_title = PaneTitleBar(
-            "Canvas", pane_id=cid,
+            "", pane_id=cid,
             on_close=lambda: self._hide_pane(PaneKind.CANVAS),
             on_maximize_toggle=self._toggle_canvas_maximized,
-            on_drag_start=self._start_pane_drag)
+            on_drag_start=self._start_pane_drag,
+            theme=self.theme)
         self._canvas_frame = PaneFrame(self._canvas_title, self.tab_widget,
                                         pane_id=cid, on_edge_drag_start=self._start_edge_drag,
-                                        parent=self._pane_container)
+                                        theme=self.theme, parent=self._pane_container)
 
         # Dock pane
         self.dock_panel = DockPanelWidget(self.workspace_layout)
-        self.dock_panel.setStyleSheet("background: #3c3c3c;")
+        self.dock_panel.setStyleSheet(f"background: {self.theme.pane_bg};")
         self._dock_title = PaneTitleBar(
-            "Panels", pane_id=did,
+            "", pane_id=did,
             on_close=lambda: self._hide_pane(PaneKind.DOCK),
-            on_drag_start=self._start_pane_drag)
+            on_drag_start=self._start_pane_drag,
+            theme=self.theme)
         self._dock_frame = PaneFrame(self._dock_title, self.dock_panel,
                                       pane_id=did, on_edge_drag_start=self._start_edge_drag,
+                                      theme=self.theme,
                                       parent=self._pane_container)
 
         # Border handle widgets
@@ -354,6 +385,23 @@ class MainWindow(QMainWindow):
     def refresh_panes(self):
         """Refresh pane layout and dock panel after a pane mutation."""
         self._refresh_pane_positions()
+        self.dock_panel.rebuild()
+
+    def refresh_theme(self):
+        """Re-apply theme colors to all themed widgets."""
+        from workspace.theme import resolve_appearance
+        from workspace.dock_panel import set_theme as set_dock_theme
+        self.theme = resolve_appearance(self.app_config.active_appearance)
+        set_dock_theme(self.app_config.active_appearance)
+        t = self.theme
+        self._pane_container.setStyleSheet(f"background: {t.window_bg};")
+        self._toolbar_title.apply_theme(t)
+        self._canvas_title.apply_theme(t)
+        self._dock_title.apply_theme(t)
+        self._toolbar_frame.apply_theme(t)
+        self._canvas_frame.apply_theme(t)
+        self._dock_frame.apply_theme(t)
+        self.dock_panel.setStyleSheet(f"background: {t.pane_bg};")
         self.dock_panel.rebuild()
 
     def resizeEvent(self, event):
