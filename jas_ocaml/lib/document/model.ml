@@ -25,6 +25,7 @@ class model ?(document = Document.default_document ()) ?filename () =
     val mutable default_fill : Element.fill option = None
     val mutable default_stroke : Element.stroke option =
       Some (Element.make_stroke Element.black)
+    val mutable recent_colors : string list = []
 
     method document = doc
 
@@ -81,6 +82,8 @@ class model ?(document = Document.default_document ()) ?filename () =
     method set_default_fill (f : Element.fill option) = default_fill <- f
     method default_stroke = default_stroke
     method set_default_stroke (s : Element.stroke option) = default_stroke <- s
+    method recent_colors = recent_colors
+    method set_recent_colors (c : string list) = recent_colors <- c
   end
 
 let create ?document ?filename () = new model ?document ?filename ()

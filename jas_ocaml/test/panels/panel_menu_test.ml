@@ -75,7 +75,7 @@ let menu_tests = [
     (* Color is at group 1, panel index 0 *)
     let addr = pa did 1 0 in
     assert (is_panel_visible l Color);
-    panel_dispatch Color "close_panel" addr l;
+    panel_dispatch Color "close_panel" addr l ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ());
     assert (not (is_panel_visible l Color)));
 
   Alcotest.test_case "is_checked_defaults_false" `Quick (fun () ->

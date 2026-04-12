@@ -18,6 +18,8 @@ class model : ?document:Document.document -> ?filename:string -> unit -> object
   method set_default_fill : Element.fill option -> unit
   method default_stroke : Element.stroke option
   method set_default_stroke : Element.stroke option -> unit
+  method recent_colors : string list
+  method set_recent_colors : string list -> unit
 end
 
 val create : ?document:Document.document -> ?filename:string -> unit -> model

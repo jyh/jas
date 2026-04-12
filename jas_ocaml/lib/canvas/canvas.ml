@@ -185,7 +185,7 @@ let brand_icon_path size =
   ] in
   List.find_opt Sys.file_exists candidates
 
-let create_main_window ~get_model ~on_open () =
+let create_main_window ~get_model ~get_fill_on_top ~on_open () =
   let window = GWindow.window
     ~title:"Jas"
     ~width:1200 ~height:900
@@ -531,7 +531,7 @@ let create_main_window ~get_model ~on_open () =
   rebuild_title_bars ();
 
   (* Initialize dock panel *)
-  let dock_refresh_panel = Dock_panel.create dock_box workspace_layout in
+  let dock_refresh_panel = Dock_panel.create ~get_model ~get_fill_on_top dock_box workspace_layout in
   dock_refresh := (fun () -> refresh_all (); dock_refresh_panel ());
 
   (* Mouse move handler *)
