@@ -40,6 +40,57 @@
   var dialogState = null;         // non-null only while a dialog with state is open
   var dialogParams = null;        // params passed to open_dialog
 
+  // ── Color conversion functions ──────────────────────────────
+
+  function parseColor(c) {
+    if (!c || c === "null" || c === "none") return { r: 0, g: 0, b: 0 };
+    var hex = String(c).replace(/^#/, "");
+    if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+    return {
+      r: parseInt(hex.substring(0, 2), 16) || 0,
+      g: parseInt(hex.substring(2, 4), 16) || 0,
+      b: parseInt(hex.substring(4, 6), 16) || 0
+    };
+  }
+
+  function rgbToHsb(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    var max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    var h = 0, s = max === 0 ? 0 : d / max, v = max;
+    if (d > 0) {
+      if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+      else if (max === g) h = ((b - r) / d + 2) / 6;
+      else h = ((r - g) / d + 4) / 6;
+    }
+    return { h: Math.round(h * 360), s: Math.round(s * 100), b: Math.round(v * 100) };
+  }
+
+  function rgbToCmyk(r, g, b) {
+    if (r === 0 && g === 0 && b === 0) return { c: 0, m: 0, y: 0, k: 100 };
+    var c = 1 - r / 255, m = 1 - g / 255, y = 1 - b / 255;
+    var k = Math.min(c, m, y);
+    return {
+      c: Math.round((c - k) / (1 - k) * 100),
+      m: Math.round((m - k) / (1 - k) * 100),
+      y: Math.round((y - k) / (1 - k) * 100),
+      k: Math.round(k * 100)
+    };
+  }
+
+  var colorFunctions = {
+    hsb_h: function (c) { var rgb = parseColor(c); return rgbToHsb(rgb.r, rgb.g, rgb.b).h; },
+    hsb_s: function (c) { var rgb = parseColor(c); return rgbToHsb(rgb.r, rgb.g, rgb.b).s; },
+    hsb_b: function (c) { var rgb = parseColor(c); return rgbToHsb(rgb.r, rgb.g, rgb.b).b; },
+    rgb_r: function (c) { return parseColor(c).r; },
+    rgb_g: function (c) { return parseColor(c).g; },
+    rgb_b: function (c) { return parseColor(c).b; },
+    cmyk_c: function (c) { var rgb = parseColor(c); return rgbToCmyk(rgb.r, rgb.g, rgb.b).c; },
+    cmyk_m: function (c) { var rgb = parseColor(c); return rgbToCmyk(rgb.r, rgb.g, rgb.b).m; },
+    cmyk_y: function (c) { var rgb = parseColor(c); return rgbToCmyk(rgb.r, rgb.g, rgb.b).y; },
+    cmyk_k: function (c) { var rgb = parseColor(c); return rgbToCmyk(rgb.r, rgb.g, rgb.b).k; },
+    hex: function (c) { var rgb = parseColor(c); return ((1<<24)+(rgb.r<<16)+(rgb.g<<8)+rgb.b).toString(16).slice(1); },
+  };
+
   // ── Interpolation engine ───────────────────────────────────
 
   function resolve(template, ctx) {
@@ -55,6 +106,12 @@
   function evalExpr(expr, ctx) {
     // Simple expression evaluator for interpolation
     ctx = ctx || {};
+    // Check for function call syntax: fn_name(arg)
+    var fnMatch = expr.match(/^(\w+)\((.+)\)$/);
+    if (fnMatch && colorFunctions[fnMatch[1]]) {
+      var arg = resolve(fnMatch[2], ctx);
+      return colorFunctions[fnMatch[1]](arg);
+    }
     var parts = expr.split(".");
     if (parts[0] === "state") return state[parts[1]];
     if (parts[0] === "param" && ctx.params) return ctx.params[parts[1]];
@@ -650,7 +707,7 @@
         var name = nameInput.value.trim();
         if (!name) { console.warn("[save_layout] empty name"); return; }
         var configs = typeof JAS_PANE_CONFIGS !== "undefined" ? JAS_PANE_CONFIGS : {};
-        var layoutData = { panes: {}, state: {} };
+        var layoutData = { panes: {}, state: {}, dock: {}, floating: [] };
         container.querySelectorAll(".jas-pane").forEach(function (p) {
           if (p.id) {
             layoutData.panes[p.id] = {
@@ -666,6 +723,23 @@
             }
           }
         });
+        // Save dock models
+        for (var dockId in dockModels) {
+          if (dockId.indexOf("floating_dock_") === 0) {
+            var paneId = dockId.replace("_view", "");
+            var paneEl = document.getElementById(paneId);
+            layoutData.floating.push({
+              dockViewId: dockId,
+              groups: dockModels[dockId].groups,
+              x: paneEl ? paneEl.offsetLeft : 0,
+              y: paneEl ? paneEl.offsetTop : 0,
+              width: paneEl ? paneEl.offsetWidth : 220,
+              height: paneEl ? paneEl.offsetHeight : 300,
+            });
+          } else {
+            layoutData.dock[dockId] = { groups: dockModels[dockId].groups };
+          }
+        }
         var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
         saved[name] = layoutData;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
@@ -706,6 +780,26 @@
             setState(key, layoutData.state[key]);
           }
         }
+      }
+      // Restore dock models
+      if (layoutData.dock) {
+        for (var dockId in layoutData.dock) {
+          if (dockModels[dockId]) {
+            dockModels[dockId].groups = layoutData.dock[dockId].groups;
+            rerenderDockView(dockId);
+          }
+        }
+      }
+      // Remove existing floating docks
+      document.querySelectorAll("[id^='floating_dock_']").forEach(function (el) { el.remove(); });
+      for (var dk in dockModels) {
+        if (dk.indexOf("floating_dock_") === 0) delete dockModels[dk];
+      }
+      // Restore floating docks
+      if (layoutData.floating) {
+        layoutData.floating.forEach(function (fd) {
+          createFloatingDock(fd.groups, fd.x, fd.y);
+        });
       }
       activeWorkspaceName = name;
       workspaceCtx.has_saved_layout = true;
