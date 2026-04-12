@@ -1,6 +1,6 @@
 # Jas prompts
 
-This document lists the prompts that were used to construct the vector application. 
+This document lists the prompts that were used to construct the vector application.
 
 Claude, do not modify this file.
 
@@ -10,9 +10,9 @@ Claude, do not modify this file.
 
 Read the attached documents. Describe the requirements for an application like Adobe Illustrator. Give extensive detail. There should be enough detail to be able to reimplement an application like Illustrator solely from your requirements without any other instructions. Be specific, and be sure to cover everything.
 
-* Describe the parts of the UI like windows, toolbars, menus, etc.  
-* Describe keyboard shortcuts.  
-* Describe the important concepts, like objects, paths, layers, artboards, selections, masks, etc.  
+* Describe the parts of the UI like windows, toolbars, menus, etc.
+* Describe keyboard shortcuts.
+* Describe the important concepts, like objects, paths, layers, artboards, selections, masks, etc.
 * Describe the objectives of the creative professional.
 
 ## Response
@@ -23,9 +23,9 @@ The software must be built as a vector-based environment where all visual elemen
 
 The primary goal of the professional user is to move a design from initial concept to completion, often involving peer collaboration and client feedback. Key objectives include:
 
-* **Workflow Efficiency:** Utilizing keyboard shortcuts and customized workspaces to accelerate repetitive tasks.  
-* **Organization:** Maintaining logical structures through layers, groups, and artboards to manage complex illustrations efficiently .  
-* **Precision:** Using grids, guides, and snapping tools to ensure mathematical exactness in layouts .  
+* **Workflow Efficiency:** Utilizing keyboard shortcuts and customized workspaces to accelerate repetitive tasks.
+* **Organization:** Maintaining logical structures through layers, groups, and artboards to manage complex illustrations efficiently .
+* **Precision:** Using grids, guides, and snapping tools to ensure mathematical exactness in layouts .
 * **Professional Output:** Delivering high-quality content in various formats suitable for mobile, web, print, film, and video .
 
 ---
@@ -36,17 +36,17 @@ The GUI must be highly customizable, allowing users to reconfigure it for specif
 
 #### **1\. Primary Windows and Navigation**
 
-* **Home Screen:** Upon launch, users are greeted with a welcome screen to create new files, open recent ones, or access tutorials.  
-* **New Document Dialog:** Allows users to choose presets based on intended output (Print, Web, Mobile, Film & Video, Art & Illustration) or use templates .  
-* **Application Bar:** Located at the top right, providing access to the Workspace menu and document sharing options.  
+* **Home Screen:** Upon launch, users are greeted with a welcome screen to create new files, open recent ones, or access tutorials.
+* **New Document Dialog:** Allows users to choose presets based on intended output (Print, Web, Mobile, Film & Video, Art & Illustration) or use templates .
+* **Application Bar:** Located at the top right, providing access to the Workspace menu and document sharing options.
 * **Workspaces:** Predefined or custom layouts of panels. Standard workspaces include Essentials (default), Layout, Typography, Painting, and Web .
 
 #### **2\. Toolbars and Panels**
 
-* **Main Toolbar:** Usually located on the left; contains tools for selection, drawing, and transformation.  
-* **The Dock:** A vertical arrangement on the right where panels and panel groups are collected.  
-* **Properties Panel:** A context-sensitive "one-stop shop" that changes based on what is selected, offering quick access to Transforms, Appearance, Alignments, and Quick Actions .  
-* **Control Panel:** Located below the application bar, it offers extensive visuals and choices for object attributes like Fill, Stroke, and alignment .  
+* **Main Toolbar:** Usually located on the left; contains tools for selection, drawing, and transformation.
+* **The Dock:** A vertical arrangement on the right where panels and panel groups are collected.
+* **Properties Panel:** A context-sensitive "one-stop shop" that changes based on what is selected, offering quick access to Transforms, Appearance, Alignments, and Quick Actions .
+* **Control Panel:** Located below the application bar, it offers extensive visuals and choices for object attributes like Fill, Stroke, and alignment .
 * **Appearance Panel:** Tracks all attributes (fills, strokes, opacity, blending modes) and effects applied to a selected object .
 
 ---
@@ -55,25 +55,25 @@ The GUI must be highly customizable, allowing users to reconfigure it for specif
 
 #### **1\. Structural Elements**
 
-* **Artboards:** The "pages" of the document. A single file can host multiple artboards of different sizes and orientations (Portrait or Landscape).  
-  * **Video Safe Areas:** Optional green guides for video content creation, including Title Safe and Action Safe areas .  
-* **Layers:** A hierarchy used to separate design parts, functioning like a stack of transparent sheets.  
-  * **Template Layers:** Locked and dimmed layers (often 50% opacity by default) used for tracing over sketches or raster images .  
-* **Groups:** Binding two or more objects together to move or scale as one unit.  
-  * **Sublayers/Nested Groups:** Creating groups within groups to manage details of a larger object.  
+* **Artboards:** The "pages" of the document. A single file can host multiple artboards of different sizes and orientations (Portrait or Landscape).
+  * **Video Safe Areas:** Optional green guides for video content creation, including Title Safe and Action Safe areas .
+* **Layers:** A hierarchy used to separate design parts, functioning like a stack of transparent sheets.
+  * **Template Layers:** Locked and dimmed layers (often 50% opacity by default) used for tracing over sketches or raster images .
+* **Groups:** Binding two or more objects together to move or scale as one unit.
+  * **Sublayers/Nested Groups:** Creating groups within groups to manage details of a larger object.
 * **Isolation Mode:** A view that dims everything else to allow for the editing of a specific group or sublayer without interference.
 
 #### **2\. Path Anatomy and Objects**
 
-* **Anchor Points:** The "dots" defining where a line starts, stops, or turns.  
-* **Segments:** The lines or curves connecting anchor points.  
-* **Handles (Direction Lines):** "Pull tabs" on anchor points used to adjust the angle and depth of curved segments.  
+* **Anchor Points:** The "dots" defining where a line starts, stops, or turns.
+* **Segments:** The lines or curves connecting anchor points.
+* **Handles (Direction Lines):** "Pull tabs" on anchor points used to adjust the angle and depth of curved segments.
 * **Open vs. Closed Paths:** Open paths are lines (e.g., "U"), while closed paths form complete shapes (e.g., "O").
 
 #### **3\. Appearance and Styling**
 
-* **Fill:** The color, gradient, or pattern inside a closed path.  
-* **Stroke:** The outline or border. Attributes include weight (thickness), alignment (Center, Inside, Outside), and variable width profiles.  1  
+* **Fill:** The color, gradient, or pattern inside a closed path.
+* **Stroke:** The outline or border. Attributes include weight (thickness), alignment (Center, Inside, Outside), and variable width profiles.  1
 * **Blending Modes and Opacity:** Control how an object’s color interacts with objects underneath (e.g., Multiply, Screen) and its level of transparency.
 
 ---
@@ -82,49 +82,49 @@ The GUI must be highly customizable, allowing users to reconfigure it for specif
 
 #### **1\. Essential Drawing Tools**
 
-* **Pen Tool (P):** Creates paths with straight or curved segments with maximum flexibility .  
-* **Curvature Tool (Shift \+ \~):** A more intuitive path-creation tool that allows users to preview and edit smooth curves as they draw.  
-* **Pencil Tool (N):** Draws freehand vector paths that can be redrawn or smoothed using the Smooth Tool.  
-* **Paintbrush (B) & Blob Brush (Shift \+ B):** The Paintbrush applies stylistic brush profiles to a path, while the Blob Brush creates a filled vector shape around the painted area.  
+* **Pen Tool (P):** Creates paths with straight or curved segments with maximum flexibility .
+* **Curvature Tool (Shift \+ \~):** A more intuitive path-creation tool that allows users to preview and edit smooth curves as they draw.
+* **Pencil Tool (N):** Draws freehand vector paths that can be redrawn or smoothed using the Smooth Tool.
+* **Paintbrush (B) & Blob Brush (Shift \+ B):** The Paintbrush applies stylistic brush profiles to a path, while the Blob Brush creates a filled vector shape around the painted area.
 * **Shape Tools:** Standard tools for Rectangles, Ellipses, Polygons, and Stars .
 
 #### **2\. Path Operations and Manipulation**
 
-* **Pathfinder:** A panel for combining, subtracting, or intersecting multiple shapes. Specific modes include Unite, Minus Front, Intersect, Exclude, and Divide .  
-* **Shape Builder Tool (Shift \+ M):** Allows users to merge or subtract overlapping areas by simply drawing a line across them .  
-* **Clipping Masks:** Using one shape (the mask) to hide parts of underlying objects.  
+* **Pathfinder:** A panel for combining, subtracting, or intersecting multiple shapes. Specific modes include Unite, Minus Front, Intersect, Exclude, and Divide .
+* **Shape Builder Tool (Shift \+ M):** Allows users to merge or subtract overlapping areas by simply drawing a line across them .
+* **Clipping Masks:** Using one shape (the mask) to hide parts of underlying objects.
 * **Compound Paths (Ctrl \+ 8):** Combining objects so that overlapping areas create holes (e.g., a donut shape).
 
 #### **3\. Transformations**
 
 Objects can be manipulated via the Transform menu or bounding box handles.
 
-* **Move:** Precise measurement of movement.  
-* **Rotate:** Tilting an object to a specific angle.  
-* **Reflect:** Mirroring an object horizontally or vertically.  
-* **Scale:** Adjusting size while optionally scaling strokes and effects.  
+* **Move:** Precise measurement of movement.
+* **Rotate:** Tilting an object to a specific angle.
+* **Reflect:** Mirroring an object horizontally or vertically.
+* **Scale:** Adjusting size while optionally scaling strokes and effects.
 * **Shear:** Sliding selected objects at a chosen angle.
 
 ---
 
 ### **Typography and Asset Management**
 
-* **Type Tools:** Support for Point Type (headlines), Area Type (paragraph containers), and Type on a Path.  
-* **Character and Paragraph Panels:** Deep control over fonts, styles, kerning, tracking, leading, and justification .  
-* **Symbols:** Reusable design elements. **Dynamic Symbols** allow editing a master symbol to update all instances or adjusting individual instances independently.  
+* **Type Tools:** Support for Point Type (headlines), Area Type (paragraph containers), and Type on a Path.
+* **Character and Paragraph Panels:** Deep control over fonts, styles, kerning, tracking, leading, and justification .
+* **Symbols:** Reusable design elements. **Dynamic Symbols** allow editing a master symbol to update all instances or adjusting individual instances independently.
 * **Asset Export:** A panel dedicated to saving independent elements or entire artboards for use in other projects or platforms.
 
 # Steps
 
 Let’s define the elements that make up a document. Each of these elements will be immutable. For python, we define an abstract class Element. Do the same for swift. For OCaml we will use a variant type Element. Elements should conform to the svg specification.
 
-The element coordinates can be specified in any of the following units. The canvas bounding box is in px.  
-Unit	Description	Type  
-px	Pixels (Default)	Relative to viewing device  
-pt	Points (1/72 of an inch)	Absolute (this is the common internal unit)  
-pc	Picas (12 points)	Absolute  
-in	Inches	Absolute  
-cm / mm	Centimeters / Millimeters	Absolute  
+The element coordinates can be specified in any of the following units. The canvas bounding box is in px.
+Unit	Description	Type
+px	Pixels (Default)	Relative to viewing device
+pt	Points (1/72 of an inch)	Absolute (this is the common internal unit)
+pc	Picas (12 points)	Absolute
+in	Inches	Absolute
+cm / mm	Centimeters / Millimeters	Absolute
 em / rem	Font-relative units	Relative to the defined text size
 
 # Lines
@@ -147,7 +147,7 @@ Let’s add support for selections. A selection is a set of elements in the docu
 
 When the selection tool is active in the toolbar, and we click the mouse on an element, the element becomes selected. If the element is in a Group (a proper Group, not a Layer), all the elements in the Group are selected. Add a method to the controller to set the selection.
 
-When an element is selected, the control points (the endpoints for a line, or the corners for a rectangle) are highlighted with a small blue square, and the element path is highlighted with a thin bright blue line. The image shows an example.  
+When an element is selected, the control points (the endpoints for a line, or the corners for a rectangle) are highlighted with a small blue square, and the element path is highlighted with a thin bright blue line. The image shows an example.
 ![][image1]
 
 When the selection tool is active in the toolbar, and the mouse drags out a box, every element in the box is selected, replacing any previous selection. During the drag, a light dashed displays the selection box.
@@ -160,7 +160,7 @@ Every element has control points (the points at the end of a line segment, or th
 
 ### Direct selection
 
-The direct selection tool differs from the select tool. When the direct selection tool is used, a mouse click selects only the item directly under the cursor. This can be an object, or one of its control points. A direct selection marquee selects only the elements and control points in the marquee. Groups are ignored. The elements within the group can be individually selected. 
+The direct selection tool differs from the select tool. When the direct selection tool is used, a mouse click selects only the item directly under the cursor. This can be an object, or one of its control points. A direct selection marquee selects only the elements and control points in the marquee. Groups are ignored. The elements within the group can be individually selected.
 
 ### Group Selection
 
@@ -226,13 +226,13 @@ A Bezier path is a sequence of cubic Bezier segments. It has a start point, an e
 
 Here is an example of a sharp control point. The control handles and control point do not form a line.
 
-In svg, Bézier paths are defined within the `d` (data) attribute of a `<path>` element. Cubic Bézier Curves use “C” syntax, like this,  
-**Syntax:** `C x1 y1, x2 y2, x y`  
+In svg, Bézier paths are defined within the `d` (data) attribute of a `<path>` element. Cubic Bézier Curves use “C” syntax, like this,
+**Syntax:** `C x1 y1, x2 y2, x y`
 **Structure:**
 
-* **Start Point:** The current pen position.  
-* **Control Point 1 (`x1, y1`):** Determines the curve's direction leaving the start.  
-* **Control Point 2 (`x2, y2`):** Determines the direction entering the end.  
+* **Start Point:** The current pen position.
+* **Control Point 1 (`x1, y1`):** Determines the curve's direction leaving the start.
+* **Control Point 2 (`x2, y2`):** Determines the direction entering the end.
 * **End Point (`x, y`):** Where the curve finishes.
 
 For the pen tool, each mouse click will define a control point. If the mouse is not dragged at a control point,, it is a sharp control point, and the control handles are identical to the control point. If the mouse is dragged, it defines one control handle, with the opposite control handle equidistant from the endpoint, all in a line. Display the control handles like in this smooth image.
@@ -263,10 +263,10 @@ for ocaml, what happens if we move the various tools into a tools subdirectory?
 
 Good morning, Happy Easter. Let’s organize the code. Consider the following organization and make suggestions.
 
-- Move the element-related code to a “geometry” subdirectory.  
-- Move the toolbar and tools into a “tools” subdirectory.  
-- Move the document, model, and controller to a “document” subdirectory.  
-- Move the canvas to a “canvas” subdirectory.  
+- Move the element-related code to a “geometry” subdirectory.
+- Move the toolbar and tools into a “tools” subdirectory.
+- Move the document, model, and controller to a “document” subdirectory.
+- Move the canvas to a “canvas” subdirectory.
 - Move the menu into a “menu” directory.
 
 # Undo
@@ -391,10 +391,10 @@ Path rendering treats `ArcTo` as a line to endpoint in the Python canvas. OCaml 
 
 **17\. Test coverage gaps**
 
-* No tests for paste/copy/cut operations  
-* No tests for pen tool path construction  
-* No tests for text-on-path offset calculation  
-* No tests for save/revert file I/O (menu\_test.py only checks menu structure)  
+* No tests for paste/copy/cut operations
+* No tests for pen tool path construction
+* No tests for text-on-path offset calculation
+* No tests for save/revert file I/O (menu\_test.py only checks menu structure)
 * No tests for `delete_selection` with nested groups
 
 **18\. Naming inconsistency: `TextPath` element type name**
@@ -403,12 +403,12 @@ Python uses `TextPath` (a dataclass), OCaml uses `Text_path` (variant), Swift us
 
 **19\. Magic numbers scattered across tools**
 
-* `8.0` px hit-test radius (selection, pen close radius)  
-* `10.0` handle draw size  
-* `24.0` pt paste offset  
-* `500` ms long-press timer  
-* `4.0` px drag threshold (text tool)  
-* `20` segments per curve (path flattening)  
+* `8.0` px hit-test radius (selection, pen close radius)
+* `10.0` handle draw size
+* `24.0` pt paste offset
+* `500` ms long-press timer
+* `4.0` px drag threshold (text tool)
+* `20` segments per curve (path flattening)
 * `5` sides for polygon tool
 
 These could be named constants at the module level for clarity (some already are, like `_PEN_CLOSE_RADIUS`).
@@ -560,7 +560,7 @@ When a type tool is active, and the mouse hovers over some unlocked text, the mo
 
 When text is edited, there is an insertion point position within the text. A simple text cursor should be drawn at the insertion point, as a vertical line separating the character before the insertion point and the character after. The text cursor should be aligned with the text so that the two characters are clearly separated, but it should not affect the position of those characters. The text cursor should have the same color attributes as the text being edited. The text cursor should flash. If the mouse is dragged through the text, the region under the drag should be "selected". The insertion point moves to the point before the first character in the text that was selected. Selected text should be highlighted with a color that is in clear contrast to the selected text. Use light blue if possible, but if that does not provide enough contrast with the selected text, choose another color.
 
-When text is inserted, either by typing a key, or by pasting from the clipboard, the text is added after the insertion point. If any text was selected, that text is deleted and replaced by the insertion, and the selection is cleared. The insertion point moves after the text that was inserted. 
+When text is inserted, either by typing a key, or by pasting from the clipboard, the text is added after the insertion point. If any text was selected, that text is deleted and replaced by the insertion, and the selection is cleared. The insertion point moves after the text that was inserted.
 
 Use standard text editing conventions. For example, when the backspace key is pressed, if there is a selection, the selection is deleted. Otherwise, the character before the insertion point is deleted. Arrow keys can be used to move the insertion point, etc.
 
@@ -584,7 +584,7 @@ In a selection, I'm thinking that it might be better to represent the control po
 
 # Visibility
 
-Layers and elements can have 3 visibility mode: preview, outline, or invisible. 
+Layers and elements can have 3 visibility mode: preview, outline, or invisible.
 - preview: the element is fully drawn
 - outline: the element's stroke and fill are ignored. It is drawn as if it had a stroke of size 0, stroke color black, and no fill. Hit detection does not consider the fill or stroke width. Text is an exception. Text in outline mode is drawn the same as preview.
 - invisible: the element is not displayed and it cannot be selected.
@@ -628,21 +628,21 @@ fix it
 > [think for 20 min]
 
 > Found it. Look at event [0]:
-> 
+>
 > [0] Subject (0.0, 0.0)→(5.0, 0.0) type=NonContributing in_out=false other_in_out=true in_result=false
 > The first half of a's bottom edge is marked NonContributing when it should be Normal. Its other_in_out=true is correct (outside b), so if edge_type were Normal it would be in the result. The > handle_collinear function is marking the wrong event as NonContributing.
 >
 > The fix
-> 
+>
 > Make divide_segment return (l_idx, nr_idx) so callers can refer to the new events directly. Then fix the 3 buggy sites.
 
 what happens when we perform a boolean operation like union on two rings that are very very close, but not exactly equal?
 
-> Want me to write a few "fuzz" tests that systematically perturb the minimal repro fixture by decreasing amounts (1e-15, 1e-12, 1e-10, 1e-8, 1e-6) and report what each produces? 
+> Want me to write a few "fuzz" tests that systematically perturb the minimal repro fixture by decreasing amounts (1e-15, 1e-12, 1e-10, 1e-8, 1e-6) and report what each produces?
 
 yes
 
-> Empirical results are significantly worse than I predicted. 
+> Empirical results are significantly worse than I predicted.
 
 I also want to support self-intersection. Does that affect our choices?
 
@@ -664,7 +664,7 @@ go
 
 > adds normalization and fixes tests
 
-> Before we talk ports I want to flag something. We still have the off-line-split bug in handle_collinear Case D2 as a latent issue. 
+> Before we talk ports I want to flag something. We still have the off-line-split bug in handle_collinear Case D2 as a latent issue.
 
 fix it
 
@@ -675,12 +675,12 @@ fix it
 Review the entire codebase and evaluate it for clarity, maintainability, efficiency, complexity, safety, test coverage, pattern consistency, conformity with style conventions, functional equivalence across languages, and anything else of importance. Make suggestions for improvements, ranking them in priority from high to low, and giving each a number. Be ready for a deep dive into any of the suggestions.
 
 # Shape Builder tool
- 
+
 Next' let's develop an algorithm for Planar Graph Extraction. For this, we treat a set of elements as a collection of fragments created by every overlapping path. The idea is to take all path and split them at intersection points. After this,. we have a collection of individual edges that meet at nodes. A "face" can be defined by the left-at-intersection rule: start at an edge, and at every node, always take the leftmost available path. If this path forms a loop, the edged define the boundaries of a shape. Here is an implementation proposal.
 
 The Data Structure: Doubly Connected Edge List (DCEL)
 
-In computational geometry, a DCEL stores: 
+In computational geometry, a DCEL stores:
 Vertices: $(x, y)$ coordinates.
 Edges: Links between vertices, but stored as "half-edges" (one for each direction).
 Faces: A pointer to one of the edges that bounds the empty space.
@@ -738,7 +738,7 @@ We want to implement these. Do you understand the concepts? Please give suggesti
 [...]
 
 The panel groups should be draggable so they can be repositioned. They can also be dragged into another dock.
-When a panel group is dragged out of a dock, it creates a new floating dock. A panel can be dragged into another 
+When a panel group is dragged out of a dock, it creates a new floating dock. A panel can be dragged into another
 panel group. When a panel is dragged into empty space, it creates a new floating panel group and dock.
 
 [...]
@@ -747,7 +747,7 @@ It should be possible to drag tabs within an panel group to reorder them.
 
 [...]
 
-Name the saved dock layouts. Save a separate app config that includes the name of its dock layout. 
+Name the saved dock layouts. Save a separate app config that includes the name of its dock layout.
 
 [...]
 
@@ -813,7 +813,7 @@ Here is a description of the workspace.
 - If a maximized pane is hidden, it is unmaximized first.
 - a Dock pane contains a list of Panel Group elements. It can be collapsed using a small chevron on the titlebar. When a Dock pane is collapsed, it becomes fixed-width at 36px wide.
 - The Workspace logic described here is generic, it should not depend on the Pane kind. Each Pane has a PaneConfig that describes the specific properties of that Pane.
-- The Pane sizes and positions are saved to a Workspace Layout, which is saved to a file and reloaded in JSON format. 
+- The Pane sizes and positions are saved to a Workspace Layout, which is saved to a file and reloaded in JSON format.
 - There is a Tile operation that unmaximizes all Pane elements, and snaps them together horizontally.
 - The default layout at startup has 3 panes: a toolbar pane, a canvas container pane, and a dock, tiled in tile_order.
 - All Dock panes, including floating Dock panes, participate in snapping.
@@ -847,7 +847,7 @@ Here is a description of the workspace.
 - Remove the always_visible flag from the PaneConfig.
 - Remove the closable flag, all panes are closeable. Increment the JSON version number.
 - Remove collapsable from the PaneConfig. A Pane is collapsible if the collapsed_width is not None.
-- If the Panel Group becomes empty, the Panel Group is removed from its Dock. 
+- If the Panel Group becomes empty, the Panel Group is removed from its Dock.
 - When the last Panel Group is removed from a floating Dock, the Dock is deleted. Anchored docks are left empty.
 - Replace maximizable in PaneConfig with double_click_action==maximize.
 
@@ -882,13 +882,30 @@ review the codebase
 
 # Cross-language tests
 
-We have 4 apps in 4 languages. I've been thinking it would be great to show that the behavior is equivalent across implementations. This will help keep the implementations in sync, but it can really help with robustness when multiple implementations are compared. For example, it would be great to show that the document functions the same way across apps, or that the workspace has the same logic. If we use SVG+JSON as a common interchange format, we can imagine several types of tests.
-- Equivalence tests: where we show that a functions are identical across languages, that is, given the same input, they produce the same output.
-- Commutativity (the concept from category theory): let's say we have two functions $f$ and $g$ in languages $A$ and $B$, then $g_A(f_B(x)) = g_B(f_A(x))$ for equivalent inputs $x$.
-- I'm not as fond of breakage tests where we show that all app fail on broken input, that gives less information.
-The difficult part about equivalence testing is that comparing the outputs for equivalence can be difficult because semantically equivalent values can be represented in many different ways, for example there are many possible orderings of control points in a rectangle. If we take SVG or JSON as the output format, we want to test for equivalence, and that might be hard.
+We have 4 apps in 4 languages. I've been thinking it would be great to show that
+the behavior is equivalent across implementations. This will help keep the
+implementations in sync, but it can really help with robustness when multiple
+implementations are compared. For example, it would be great to show that the
+document functions the same way across apps, or that the workspace has the same
+logic. If we use SVG+JSON as a common interchange format, we can imagine several
+types of tests.
+- Equivalence tests: where we show that a functions are identical across
+  languages, that is, given the same input, they produce the same output.
+- Commutativity (the concept from category theory): let's say we have two
+  functions $f$ and $g$ in languages $A$ and $B$, then $g_A(f_B(x)) =
+  g_B(f_A(x))$ for equivalent inputs $x$.
+- I'm not as fond of breakage tests where we show that all app fail on broken
+  input, that gives less information.
 
-Please read and understand these goals. What do you think of this idea? Make suggestions and improvements, ranking them in priority from high to low, and giving each a number. Be ready for a deep dive into any of the suggestions.
+The difficult part about equivalence testing is that comparing the outputs for
+equivalence can be difficult because semantically equivalent values can be
+represented in many different ways, for example there are many possible
+orderings of control points in a rectangle. If we take SVG or JSON as the output
+format, we want to test for equivalence, and that might be hard.
+
+Please read and understand these goals. What do you think of this idea? Make
+suggestions and improvements, ranking them in priority from high to low, and
+giving each a number. Be ready for a deep dive into any of the suggestions.
 
 # Colors
 
@@ -896,19 +913,341 @@ Element colors should support RGB, HSB, and CMYK.
 
 # Fill and Stroke tool
 
-An image of the toolbar is in examples/toolbar.png. Near the bottom of the tool is the Fill and Stroke Tool, which covers 2x2 cells in the toolbar. It contains two overlapping squares that represent the current color attributes of a selected object. The Fill (Solid Square) represents the color, gradient, or pattern that fills the inside of a path. The (Hollow Square) represents the color or gradient applied to the border or outline of a path. 
+Let's implement the Fill and Stroke tool. An image of the toolbar is in
+examples/toolbar.png. Just below the grid of tool slots is Fill and Stroke Tool,
+which fills the entire width of the toolbar. It contains two overlapping squares
+that represent the current color attributes of a selected object. The Fill
+(Solid Square) represents the color, gradient, or pattern that fills the inside
+of a path (gradients and patterns are deferred for later implementation). The
+(Hollow Square) represents the color or gradient applied to the border or
+outline of a path. Setting the color in the fill square sets the fill color of
+all elements in the selection. Setting the color in the stroke square sets the
+stroke color of all elements in the selection.
 
-Swap Arrow (Top-Right): A small, curved double-headed arrow. Clicking this (or Shift + X) flips the colors between the Fill and the Stroke.
-Default Colors (Bottom-Left): A tiny black-and-white version of the Fill/Stroke icons. Clicking this (or pressing D) instantly resets the selection to a White Fill and Black Stroke.
+- If either square contains a question mark, it means that the selection
+  contains multiple objects that differ in fill/stroke.
+- If either square contains a white box with a red diagonal line, it means
+  "None." This is different from the color white; it means the object is
+  completely see-through in that area.
+- If there is no selection, the squares show the "default" fill/stroke that will
+  be applied to the next object created.
+- The current fill/stroke are part of the application state.
+- Editing a selection also updates the default.
+- Stroke width is not handled by this tool.
+- Initial stacking defaults to fill on top.
 
-Double-Click to Edit: Double-clicking either the Fill or Stroke icon opens the Color Picker dialog, allowing to select a precise hue or enter Hex/RGB/CMYK values.
-The "Stacking" Logic: Whichever icon is "on top" is the one currently being edited. If you try to change a color and it’s affecting the outline instead of the center, hit X to bring the Fill to the front.
+The tool also displays a Swap Arrow (Top-Right). This is a small, curved
+double-headed arrow. Clicking this (or Shift + X) flips the colors between the
+Fill and the Stroke, including when either color is none. Default Colors are
+displayed (Bottom-Left). This is displayed as a tiny black-and-white version of
+the Fill/Stroke icons. Clicking this (or pressing D) instantly resets the
+selection to a No Fill and Black Stroke.
 
-An image of the Color Picker dialogue box is shown in "example/color picker.png".
+Note that keyboard shortcuts only fire when no text editing is in progress.
 
-If either square contains a question marfk, it means that the selection contains multiple objects that differ in fill/stroke.
-If either square contains a white box with a red diagonal line, it means "None." This is different from the color white; it means the object is completely see-through in that area.
+Single-Click on the fill or stroke square brings it to the front.
 
-Setting the color in the fill square sets the fill color of all elements in the selection. Setting the color in the stroke square sets the stroke color of all paths in the selection.
+Double-Click to Edit: Double-clicking either the Fill or Stroke icon opens the
+Color Picker dialog, allowing to select a color.  The "Stacking" Logic:
+Whichever icon is "on top" is the one currently being edited. If you try to
+change a color and it’s affecting the outline instead of the center, hit X to
+toggle the stacking of Fill and Stroke. If the current color of the active
+attribute is ? or none, then the initial color in the Color Picker should be
+black.
 
-Please read and understand these requirements. Analyze them for inconsistencies and completeness. Make suggestions for improvements, ranking them in priority from high to low, and giving each a number. Be ready for a deep dive into any of the suggestions.
+An image of the Color Picker dialogue box is shown in "example/color
+picker.png".
+- The color picker is a modal dialogue box.
+- The color picker has HSB/RGB/CMYK and hex with text input next to each. The
+  user can enter values into any of these text fields to update the color value.
+- The values should be kept in sync: as the text values for HSB, RGB, CMYK, and
+  hex input are edited, the other fields are updated to represent the same color
+  (to the degree possible).
+  - Hue: 0 to 359 degrees.
+  - Saturation: 0 to 100%
+  - Brightness: 0 to 100%
+  - Red: 0 to 255
+  - Green: 0 to 255
+  - Blue: 0 to 255
+  - C: 0 to 100%
+  - M: 0 to 100%
+  - Y: 0 to 100%
+  - K: 0 to 100%
+  - hex: rgb-6 (there is no alpha). The "#" symbol should be displayed, but it
+    is not part of the text field.
+- The current color is displayed above the HSB text fields
+- There are radio buttons to the left of the text fields. The initial selected radio button is H.
+- There is a colorbar to the left of the radio buttons, with a slider
+- There is a color gradient to the left of the colorbar
+- When a radio button is selected, the colorbar displays the colors for the full
+  range of values for the color attribute next to the selected radio button. The
+  slider corresponds to the current value. When the slider is moved, the value
+  of the color attribute is changed.
+- The color gradient displays colors as the other color components are varied
+  (for example, if the radio button is on H, then the color gradient displays
+  colors as S and B are varied, similarly for RGB). Note that there are no radio
+  buttons next to CMYK.
+- When Only Web Colors is checked, then the RGB components are constrained to
+  the hex values 00, 33, 66, 99, CC, and FF. The current color is snapped to a web color.
+- The Select Color medicine dropper allows the user to sample a color from
+  anywhere on the screen. cCicking the eyedropper enter a sampling mode. The
+  cursor changes, and the next click anywhere samples a color, replacing the
+  color in the picker. This can come from anywhere in the app window. If it is
+  easy to implement, it is desired that colors can also be sampled outside the
+  app window, but this is not a requirement.
+- The Color Swatches button should be included, but disabled. We will implement
+  that later.
+- When "OK" is clicked, the dialogue is closed, and the current fill or stroke
+  color is set, whichever is active, and the dialogue box is closed.
+- When "Cancel" is clicked, the dialogue box is closed, with no effect on the
+  current colors.
+
+There are three squares below the Fill and Stroke Tool.  Include those in the
+toolbar as well. From left-to-right: Color, Gradient, None.
+- When Color is clicked, it removes any gradient. Since we are not implementing
+  gradients now, clicking this button does nothing.
+- Clicking the Gradient button applies a gradient. We will implement this later,
+  so this button disables.
+- None removes the color from the active attribute, fill or stroke, setting it
+  to none.
+
+The highlight reflects the state of the active (on-top) attribute.  If the
+current color is flat, the Color button should be highlighted.  If the current
+color is a gradient (not implemented), the Gradient button is highighted.  If
+the current color is none, then then None button should be highlighted.
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
+
+[...]
+
+# Review
+
+The app.rs file is getting very big. Can it be factored? Why does this problem
+not happen with the other apps? Think deeply about this. Make suggestions for
+improvements, ranking them in priority from high to low, and giving each a
+number. Be ready for a deep dive into any of the suggestions.
+
+[...]
+
+# Review
+
+review codebase
+
+[...]
+
+do #1, #2, #5, #7 (pick the rust way), #10, #12.
+
+# Panel menus
+
+Let's add support for Panel menus. Each Panel has a menu. Each Panel Group has a
+hamburger to bring up the menu of the currently active Panel. An example of this
+is shown in examples/color-panel-menu.png.
+
+We will be building a lot of panels, and it would be great for the code to be
+fairly modular. Prefer not to code all the menus in the workspace file. How
+about one file per panel, with a panels directory "panels" in the same directory
+as "tools" and "workspace". This creates a circular dependency, but it is
+acceptable.
+
+- The hamburger should go to the right of the chevron.
+- Thhe hamburger should not be visible when the Panel Group is collapsed.
+- If it is efficient to re-use components from the main menu bar, then we can do
+  that. Suggested to extract the common functionality.
+- The state of checked menu items can live in the app state. Suggest typed fields e.g. color_mode: ColorMode.
+- For now, we can initialize the panels with a single item "Close {Panel}".
+- panel_label should move to the panel definition.
+- z-index will need to be specified so the panel is above the floating dock.
+- Ideally, we would support keyboard shortcuts for panel menus, but it is not urgent.
+- close_panel takes a PanelAddr.
+- use an overlay layer for the dropdown menu
+
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
+
+# Formal spec
+
+We want to have a more precise way to specify the design of panels, dialogue
+boxes, the toolbar, menus, and other kinds of UI elements. We want to keep it
+simple. Here are the requirements.
+
+- The specification should fully describe the layout of every UI element. For
+  example, for the toolbar, it contains the position of the tools. For a
+  dialogue box or Panel containing many widgets, it decribes the positions of
+  the widgets within the dialogue/panel.
+- For each UI element, describe the element's function and behavior,
+  programmatically and in English. If it is a container, give an English
+  description of the contents as well.
+- Include visual attributes like color and visual presentation.
+- Include UI logic and behavior.
+
+I propose we develop a YAML specification based on a bootstrap layout
+convention, augmented with our English descriptions. Save the specification in a
+file WORKSPACE.yaml.
+
+Let's develop a fifth app, a web app, say in python_flask, that reads the
+WORKSPACE.yaml and uses it to render the app using bootstrap. The logic is
+implemented in javascript. The python+flask app is generic, it does not have any
+of our app-specific code, all the information it needs is in the WORKSPACE.yaml
+file. The web app should have two rendering modes:
+- Normal mode, where the app presents a UI like in the other apps we have
+  implemented.
+- Wireframe mode, where the app presents the layout skeleton with rectangles
+  that represent the named UI elements and bootstrap layout. A mouse click on
+  any of these elements brings up the specification for that element.
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
+
+[...]
+
+# Comprehensive English
+
+Now we have a schema and yaml files that full describe the workspace. Can we
+make the English descriptions more comprehensive, so that they fully describe
+the behavior?
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
+
+# Uniformity
+
+Now that we have a schema and the yaml files fully specify the workspace, we
+should use them as the source of truth for the UI across all apps. What will it
+take to have all the apps conform?
+
+We don't necessarily have to use the yaml at runtime (although that is also
+acceptable). We just want to ensure that the design conforms to the
+specification.
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
+
+# Renames
+
+Rename the Direct Selection Tool to Partial Selection Tool.
+Rename the Group Selection Tool to Interior Selection Tool.
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
+
+# Theme
+
+Let's move the theme of the UI into CSS. This should include attributes like:
+- colors
+- border sizes
+- highlights
+- icon sizes
+- fonts
+- anything else that make sense
+
+Each app should use this common CSS to stylize the workspace.
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
+
+# Branding
+
+We want to brand the UI, so that our brand is obvious at all times. I propose we
+design a logo and add it in the following places:
+- the favicon
+- at the left of the titlebar in Pane elements
+- within each dialogue box
+- within the body of each panel
+- within the menu bar at an industry standard place (at the left if possible)
+
+For now, let's make the logo a symbol of a trumpet (representing "Jas" aka "Jazz").
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
+
+# Color panel
+
+Let's implement the Color Panel. An image is shown in examples/color-panel-menu.png.
+The Color Panel shows the current color, fill or stroke, depending on which is active.
+
+At the top of the color panel are a set of color swatches that represent recent
+colors that have been clicked. Clicking on one of these swatches set the current
+color for the active attribute, fill or stroke, and set the color of the current
+selection, if there is one.
+
+Below Recent Colors, on the left is the usual fill/stroke squares, with the
+same behavior as in the Fill and Stroke Tool.
+
+The Color Panel has a color mode Grayscale/RGB/HSB/CMYK/Web Safe RGB, as show in
+the menu. The panel displays the following sliders, depending on the mode:
+- Grayscale: display one slider for K
+- HSB: display HSB with 3 sliders
+- RGB: display RGB with 3 sliders
+- CMYK: display CMYK with 4 sliders
+- Web Safe RGB: display RGB sliders, but lock values to hex 00, 33, 66, 99, CC,
+  and FF.
+
+These are the ranges of the values:
+- Hue: 0 to 359 degrees.
+- Saturation: 0 to 100%
+- Brightness: 0 to 100%
+- Red: 0 to 255
+- Green: 0 to 255
+- Blue: 0 to 255
+- C: 0 to 100%
+- M: 0 to 100%
+- Y: 0 to 100%
+- K: 0 to 100%
+- hex: rgb-6 (there is no alpha). The "#" symbol should be displayed, but it
+  is not part of the text field.
+
+Below the sliders are none/black/white swatches. Clicking on any of these sets
+the current color to none/black/white.
+
+The hex field shows the current color in rgb-6.
+
+At the bottom is a colorbar with height 64px. It shows a color gradient at the
+current brightness: hue varies along the x-axis, and saturation along the
+y-axis.  The current color can be changed by selected from this colorbar.
+
+The Color panel menu allows selecting the 5 modes Grayscale/RGB/HSB/CMYK/Web
+Safe RGB. The "Invert" item, flips the color components of the current color in
+RGB space. The "Complement" item rotates Hue by 180 degrees. The "Show Recent
+Items" toggles the display of the Recent Colors. "Create New Swatch..." is
+unimplemented for now, it should be disabled. So the menu items are:
+
+- Grayscape # color mode (there is a checkmark next to the current mode, defaults to RGB)
+- RGB
+- HSB
+- CMYK
+- Web Safe RGB
+- ----
+- Invert # current color becomes (255 - red, 255 - green, 255 - blue), color mode is unchanged
+- Complement # current color becomes (hue + 180, saturation, brightness), color mode is unchanged
+- ----
+- Show Recent Colors # toggled, has a checkmark if the Recent Colors are displayed
+- ----
+- Create New Swatch... # disabled
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
