@@ -82,6 +82,7 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
                     "flex": child.get("flex", False),
                     "min_width": child.get("min_width", 50),
                     "collapsed_width": child.get("collapsed_width"),
+                    "layout_state": child.get("layout_state", []),
                 }
         return configs
 

@@ -669,9 +669,9 @@ def _render_menu_items(items: list, actions: dict) -> str:
             label = escape(item.get("label", "").replace("&", ""))
             sub_items = _render_menu_items(item.get("items", []), actions)
             html += (
-                f'<li class="dropdown-submenu">'
-                f'<a class="dropdown-item dropdown-toggle" href="#">{label}</a>'
-                f'<ul class="dropdown-menu">{sub_items}</ul></li>'
+                f'<li class="dropdown-submenu" style="position:relative">'
+                f'<a class="dropdown-item" href="#" id="{escape(item.get("id", ""))}">{label} &#9656;</a>'
+                f'<ul class="dropdown-menu" style="display:none;position:absolute;left:100%;top:0">{sub_items}</ul></li>'
             )
         else:
             label = escape(item.get("label", "").replace("&", ""))

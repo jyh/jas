@@ -275,4 +275,4 @@ dialogs:
           style: { justify: end, gap: 8 }
           children:
             - { type: button, label: "Cancel", action: dismiss_dialog }
-            - { type: button, label: "Save",   action: save_workspace_as, variant: primary }
+            - { type: button, label: "Save",   action: save_workspace_confirm, variant: primary }

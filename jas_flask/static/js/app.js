@@ -13,6 +13,8 @@
   const actions = typeof JAS_ACTIONS !== "undefined" ? JAS_ACTIONS : {};
   const shortcuts = typeof JAS_SHORTCUTS !== "undefined" ? JAS_SHORTCUTS : [];
   const timers = {};  // named timers for long-press etc.
+  var STORAGE_KEY = "workspace_layouts";  // localStorage key for saved layouts
+  var activeWorkspaceName = null;         // currently active workspace name
 
   // ── Interpolation engine ───────────────────────────────────
 
@@ -461,6 +463,8 @@
           setState(dk, defaults[dk]);
         }
       }
+      activeWorkspaceName = null;
+      rebuildWorkspaceMenu();
       return;
     }
 
@@ -554,6 +558,117 @@
     // cancel_timer: id
     if (effect.cancel_timer) {
       cancelTimer(resolve(effect.cancel_timer, ctx));
+      return;
+    }
+
+    // save_layout: { container, name_input } — save pane positions + layout_state
+    if (effect.save_layout) {
+      var container = document.getElementById(resolve(effect.save_layout.container, ctx));
+      var nameInput = document.getElementById(resolve(effect.save_layout.name_input, ctx));
+      if (container && nameInput) {
+        var name = nameInput.value.trim();
+        if (!name) { console.warn("[save_layout] empty name"); return; }
+        var configs = typeof JAS_PANE_CONFIGS !== "undefined" ? JAS_PANE_CONFIGS : {};
+        var layoutData = { panes: {}, state: {} };
+        container.querySelectorAll(".jas-pane").forEach(function (p) {
+          if (p.id) {
+            layoutData.panes[p.id] = {
+              left: p.offsetLeft, top: p.offsetTop,
+              width: p.offsetWidth, height: p.offsetHeight
+            };
+            // Save layout_state variables declared by this pane
+            var cfg = configs[p.id];
+            if (cfg && cfg.layout_state) {
+              cfg.layout_state.forEach(function (key) {
+                if (state.hasOwnProperty(key)) layoutData.state[key] = state[key];
+              });
+            }
+          }
+        });
+        var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+        saved[name] = layoutData;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+        activeWorkspaceName = name;
+        rebuildWorkspaceMenu();
+      }
+      return;
+    }
+
+    // load_layout: { container, name } — restore pane positions + layout_state
+    if (effect.load_layout) {
+      var name = resolve(effect.load_layout.name, ctx);
+      var container = document.getElementById(resolve(effect.load_layout.container, ctx));
+      if (!name || !container) return;
+      var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      var layoutData = saved[name];
+      if (!layoutData) { console.warn("[load_layout] not found:", name); return; }
+      // Restore pane positions
+      var panes = layoutData.panes || layoutData; // backwards compat
+      for (var paneId in panes) {
+        if (panes.hasOwnProperty(paneId)) {
+          var el = document.getElementById(paneId);
+          if (el) {
+            var pos = panes[paneId];
+            el.style.left = pos.left + "px";
+            el.style.top = pos.top + "px";
+            el.style.width = pos.width + "px";
+            el.style.height = pos.height + "px";
+            el.classList.remove("d-none");
+          }
+        }
+      }
+      // Restore layout_state variables
+      if (layoutData.state) {
+        for (var key in layoutData.state) {
+          if (layoutData.state.hasOwnProperty(key)) {
+            setState(key, layoutData.state[key]);
+          }
+        }
+      }
+      activeWorkspaceName = name;
+      rebuildWorkspaceMenu();
+      return;
+    }
+
+    // revert_layout: { container } — reload the active workspace
+    if (effect.revert_layout) {
+      if (!activeWorkspaceName) return;
+      var container = document.getElementById(resolve(effect.revert_layout.container, ctx));
+      if (!container) return;
+      var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      var layoutData = saved[activeWorkspaceName];
+      if (!layoutData) return;
+      var panes = layoutData.panes || layoutData;
+      for (var paneId in panes) {
+        if (panes.hasOwnProperty(paneId)) {
+          var el = document.getElementById(paneId);
+          if (el) {
+            var pos = panes[paneId];
+            el.style.left = pos.left + "px";
+            el.style.top = pos.top + "px";
+            el.style.width = pos.width + "px";
+            el.style.height = pos.height + "px";
+            el.classList.remove("d-none");
+          }
+        }
+      }
+      if (layoutData.state) {
+        for (var key in layoutData.state) {
+          if (layoutData.state.hasOwnProperty(key)) setState(key, layoutData.state[key]);
+        }
+      }
+      return;
+    }
+
+    // delete_layout: { name } — remove a saved workspace from localStorage
+    if (effect.delete_layout) {
+      var name = resolve(effect.delete_layout.name, ctx);
+      var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      delete saved[name];
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+      if (activeWorkspaceName === name) { activeWorkspaceName = null; }
+      rebuildWorkspaceMenu();
+      console.log("[delete_layout]", name);
       return;
     }
 
@@ -770,6 +885,43 @@
     }
   }
 
+  // ── Dynamic workspace menu ──────────────────────────────────
+
+  function rebuildWorkspaceMenu() {
+    var menu = document.querySelector("#menu_workspace + .dropdown-menu");
+    if (!menu) return;
+    var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    var names = Object.keys(saved).sort();
+    // Remove any previously injected items
+    menu.querySelectorAll(".jas-ws-item").forEach(function (el) { el.remove(); });
+    // Insert saved layout items at the top of the menu
+    var firstItem = menu.firstElementChild;
+    names.forEach(function (name) {
+      var li = document.createElement("li");
+      li.className = "jas-ws-item";
+      var check = (activeWorkspaceName === name) ? "\u2713 " : "    ";
+      var a = document.createElement("a");
+      a.className = "dropdown-item";
+      a.href = "#";
+      a.textContent = check + name;
+      a.setAttribute("data-action", "switch_workspace");
+      a.setAttribute("data-action-params", JSON.stringify({name: name}));
+      li.appendChild(a);
+      menu.insertBefore(li, firstItem);
+    });
+    if (names.length > 0) {
+      var sep = document.createElement("li");
+      sep.className = "jas-ws-item";
+      sep.innerHTML = '<hr class="dropdown-divider">';
+      menu.insertBefore(sep, firstItem);
+    }
+    // Update revert enabled state
+    var revertItem = menu.querySelector("[data-action='revert_workspace']");
+    if (revertItem) {
+      revertItem.classList.toggle("disabled", !activeWorkspaceName);
+    }
+  }
+
   // ── Wire data-action attributes ────────────────────────────
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -850,6 +1002,15 @@
       if (state.hasOwnProperty(key)) {
         updateBindings(key, state[key]);
       }
+    }
+
+    // Build dynamic workspace menu on load and when submenu is shown
+    rebuildWorkspaceMenu();
+    var wsSubmenu = document.getElementById("menu_workspace");
+    if (wsSubmenu) {
+      wsSubmenu.addEventListener("click", function () {
+        setTimeout(rebuildWorkspaceMenu, 0);
+      });
     }
   });
 

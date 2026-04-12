@@ -440,6 +440,7 @@ layout:
       default_position: { x: 72, y: 0, width: 888, height: 900 }
       min_width: 200
       flex: true
+      layout_state: [canvas_maximized]
       style:
         background: "{{theme.colors.window_bg}}"
         border: "1px solid {{theme.colors.border}}"
@@ -531,6 +532,8 @@ layout:
       min_width: 150
       max_width: 500
       collapsed_width: 36
+      layout_state: [dock_collapsed, dock_group0_active, dock_group1_active,
+                     dock_group0_collapsed, dock_group1_collapsed]
       style:
         background: "{{theme.colors.pane_bg}}"
         border: "1px solid {{theme.colors.border}}"
