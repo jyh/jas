@@ -826,6 +826,11 @@ pub fn App() -> Element {
                             onmouseup: on_mouseup,
                             ondoubleclick: on_dblclick,
                         }
+                    } else {
+                        span {
+                            style: "position:absolute; top:10px; right:12px; width:54px; height:24px; opacity:0.25;",
+                            dangerous_inner_html: BRAND_LOGO_SVG,
+                        }
                     }
                 }
 

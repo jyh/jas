@@ -104,7 +104,7 @@ let make_title_bar ~workspace_layout ~refresh_all ~pane_id ~kind ~(config : Pane
   css#load_from_data (Printf.sprintf "box, * { background-color: %s; color: %s; font-size: 11px; margin: 0; }" !(Dock_panel.theme_bg_dark) !(Dock_panel.theme_text_dim));
   title_bar#misc#style_context#add_provider css 600;
 
-  title_bar
+  (title_bar, css)
 
 let edge_handle_size = 6
 
@@ -175,12 +175,29 @@ let position_edge_handles handles ~x ~y ~w ~h =
 (* Main window                                                        *)
 (* ------------------------------------------------------------------ *)
 
+let brand_icon_path size =
+  let candidates = [
+    Printf.sprintf "assets/brand/icons/icon_%d.png" size;
+    Printf.sprintf "../assets/brand/icons/icon_%d.png" size;
+    Filename.concat
+      (Filename.concat (Filename.dirname Sys.executable_name) "..")
+      (Printf.sprintf "assets/brand/icons/icon_%d.png" size);
+  ] in
+  List.find_opt Sys.file_exists candidates
+
 let create_main_window ~get_model ~on_open () =
   let window = GWindow.window
     ~title:"Jas"
     ~width:1200 ~height:900
     () in
   window#connect#destroy ~callback:GMain.quit |> ignore;
+
+  (* App window icon *)
+  (match brand_icon_path 256 with
+   | Some path ->
+     (try window#set_icon (Some (GdkPixbuf.from_file path))
+      with _ -> ())
+   | None -> ());
 
   let vbox = GPack.vbox ~packing:window#add () in
 
@@ -190,9 +207,31 @@ let create_main_window ~get_model ~on_open () =
   Workspace_layout.ensure_pane_layout workspace_layout ~viewport_w:1200.0 ~viewport_h:900.0;
   let dock_refresh = ref (fun () -> ()) in
 
-  (* Menubar *)
+  (* Menubar row: logo + menubar *)
+  let menubar_row = GPack.hbox ~packing:(vbox#pack ~expand:false ~fill:false) () in
+  let menubar_row_css = new GObj.css_provider (GtkData.CssProvider.create ()) in
+  menubar_row_css#load_from_data (Printf.sprintf "box { background-color: %s; }" !(Dock_panel.theme_window_bg));
+  menubar_row#misc#style_context#add_provider menubar_row_css 600;
+  (match brand_icon_path 32 with
+   | Some path ->
+     (try
+       let orig = GdkPixbuf.from_file path in
+       let h = 32 in
+       let w = h * (GdkPixbuf.get_width orig) / (GdkPixbuf.get_height orig) in
+       let pb = GdkPixbuf.create ~width:w ~height:h
+         ~bits:(GdkPixbuf.get_bits_per_sample orig)
+         ~has_alpha:(GdkPixbuf.get_has_alpha orig) () in
+       GdkPixbuf.scale ~dest:pb ~width:w ~height:h
+         ~scale_x:(float_of_int w /. float_of_int (GdkPixbuf.get_width orig))
+         ~scale_y:(float_of_int h /. float_of_int (GdkPixbuf.get_height orig))
+         ~interp:`BILINEAR orig;
+       let img = GMisc.image ~pixbuf:pb ~packing:(menubar_row#pack ~expand:false ~padding:4) () in
+       ignore img
+     with _ -> ())
+   | None -> ());
   Menubar.create get_model window ~on_open
-    ~workspace_layout ~app_config ~refresh_dock:(fun () -> !dock_refresh ()) vbox;
+    ~workspace_layout ~app_config ~refresh_dock:(fun () -> !dock_refresh ())
+    (menubar_row :> GPack.box);
 
   (* Pane container: GtkLayout for absolute positioning.
      Unlike GtkFixed, GtkLayout doesn't expand the window when
@@ -214,6 +253,7 @@ let create_main_window ~get_model ~on_open () =
   tb_border_css#load_from_data (Printf.sprintf "box { background-color: %s; }" !(Dock_panel.theme_bg));
   toolbar_frame#misc#style_context#add_provider tb_border_css 600;
   let toolbar_title = ref (GBin.event_box ()) in
+  let toolbar_title_css = ref (new GObj.css_provider (GtkData.CssProvider.create ())) in
   let toolbar_fixed = GPack.fixed () in
   toolbar_frame#pack !toolbar_title#coerce ~expand:false;
   toolbar_frame#pack toolbar_fixed#coerce ~expand:true ~fill:true;
@@ -224,9 +264,67 @@ let create_main_window ~get_model ~on_open () =
   canvas_css#load_from_data (Printf.sprintf "box { background-color: %s; }" !(Dock_panel.theme_bg));
   canvas_frame#misc#style_context#add_provider canvas_css 600;
   let canvas_title = ref (GBin.event_box ()) in
+  let canvas_title_css = ref (new GObj.css_provider (GtkData.CssProvider.create ())) in
   let notebook = GPack.notebook () in
   canvas_frame#pack !canvas_title#coerce ~expand:false;
   canvas_frame#pack notebook#coerce ~expand:true ~fill:true;
+
+  (* Empty-state logo: draw brand mark in top-right when no tabs are open.
+     Uses manual RGBA→ARGB32 conversion since Gdk.Cairo.set_source_pixbuf
+     is not available in this version of lablgtk3. *)
+  ignore (notebook#misc#connect#draw ~callback:(fun cr ->
+    let no_pages = (try ignore (notebook#get_nth_page 0); false with _ -> true) in
+    if no_pages then begin
+      (match brand_icon_path 48 with
+       | Some path ->
+         (try
+           let orig = GdkPixbuf.from_file path in
+           let dw = 54 and dh = 24 in
+           let pb = GdkPixbuf.create ~width:dw ~height:dh
+             ~bits:(GdkPixbuf.get_bits_per_sample orig)
+             ~has_alpha:(GdkPixbuf.get_has_alpha orig) () in
+           GdkPixbuf.scale ~dest:pb ~width:dw ~height:dh
+             ~scale_x:(float_of_int dw /. float_of_int (GdkPixbuf.get_width orig))
+             ~scale_y:(float_of_int dh /. float_of_int (GdkPixbuf.get_height orig))
+             ~interp:`BILINEAR orig;
+           (* Convert GdkPixbuf RGBA bytes to Cairo ARGB32 surface *)
+           let w = GdkPixbuf.get_width pb in
+           let h = GdkPixbuf.get_height pb in
+           let rowstride = GdkPixbuf.get_rowstride pb in
+           let has_alpha = GdkPixbuf.get_has_alpha pb in
+           let n_ch = GdkPixbuf.get_n_channels pb in
+           let src = Gpointer.bytes_of_region (GdkPixbuf.get_pixels pb) in
+           let stride = Cairo.Image.stride_for_width Cairo.Image.ARGB32 w in
+           let data = Bigarray.Array1.create
+             Bigarray.int8_unsigned Bigarray.c_layout (stride * h) in
+           for y = 0 to h - 1 do
+             for x = 0 to w - 1 do
+               let si = y * rowstride + x * n_ch in
+               let r = Char.code (Bytes.get src (si + 0)) in
+               let g = Char.code (Bytes.get src (si + 1)) in
+               let b = Char.code (Bytes.get src (si + 2)) in
+               let a = if has_alpha then Char.code (Bytes.get src (si + 3)) else 255 in
+               let rp = r * a / 255 in
+               let gp = g * a / 255 in
+               let bp = b * a / 255 in
+               let di = y * stride + x * 4 in
+               data.{di + 0} <- bp;
+               data.{di + 1} <- gp;
+               data.{di + 2} <- rp;
+               data.{di + 3} <- a;
+             done
+           done;
+           let surf = Cairo.Image.create_for_data8 data Cairo.Image.ARGB32 ~w ~h in
+           let alloc = notebook#misc#allocation in
+           let x = float_of_int (alloc.Gtk.width - dw - 10) in
+           let y = 10.0 in
+           Cairo.set_source_surface cr surf ~x ~y;
+           Cairo.paint cr ~alpha:0.25
+         with _ -> ())
+       | None -> ())
+    end;
+    false
+  ));
 
   (* Dock pane *)
   let dock_frame = GPack.vbox () in
@@ -234,6 +332,7 @@ let create_main_window ~get_model ~on_open () =
   dock_css#load_from_data (Printf.sprintf "box { background-color: %s; }" !(Dock_panel.theme_bg));
   dock_frame#misc#style_context#add_provider dock_css 600;
   let dock_title = ref (GBin.event_box ()) in
+  let dock_title_css = ref (new GObj.css_provider (GtkData.CssProvider.create ())) in
   let dock_box = GPack.vbox () in
   dock_frame#pack !dock_title#coerce ~expand:false;
   dock_frame#pack dock_box#coerce ~expand:true ~fill:true;
@@ -268,6 +367,12 @@ let create_main_window ~get_model ~on_open () =
     canvas_css#load_from_data (Printf.sprintf "box { background-color: %s; }" bg);
     dock_css#load_from_data (Printf.sprintf "box { background-color: %s; }" bg);
     (!notebook_css_ref)#load_from_data (Printf.sprintf "notebook, notebook header, notebook stack { background-color: %s; }" bg);
+    menubar_row_css#load_from_data (Printf.sprintf "box { background-color: %s; }" !(Dock_panel.theme_window_bg));
+    let title_css_data = Printf.sprintf "box, * { background-color: %s; color: %s; font-size: 11px; margin: 0; }"
+      !(Dock_panel.theme_bg_dark) !(Dock_panel.theme_text_dim) in
+    (!toolbar_title_css)#load_from_data title_css_data;
+    (!canvas_title_css)#load_from_data title_css_data;
+    (!dock_title_css)#load_from_data title_css_data;
     pane_container#misc#queue_draw ();
     toolbar_fixed#misc#queue_draw ();
     let geos = match Workspace_layout.panes workspace_layout with
@@ -400,23 +505,26 @@ let create_main_window ~get_model ~on_open () =
     let canvas_id = match tpl with Some pl -> (match Pane.pane_by_kind pl Pane.Canvas with Some p -> p.id | None -> 1) | None -> 1 in
     let dock_id = match tpl with Some pl -> (match Pane.pane_by_kind pl Pane.Dock with Some p -> p.id | None -> 2) | None -> 2 in
 
-    let tb = make_title_bar ~workspace_layout ~refresh_all:(fun () -> !dock_refresh ())
+    let (tb, tb_css) = make_title_bar ~workspace_layout ~refresh_all:(fun () -> !dock_refresh ())
       ~pane_id:toolbar_id ~kind:Pane.Toolbar ~config:(Pane.config_for_kind Pane.Toolbar) ~collapsed:false () in
     toolbar_title := tb;
+    toolbar_title_css := tb_css;
     toolbar_frame#pack tb#coerce ~expand:false;
     toolbar_frame#reorder_child tb#coerce ~pos:0;
 
-    let cb = make_title_bar ~workspace_layout ~refresh_all:(fun () -> !dock_refresh ())
+    let (cb, cb_css) = make_title_bar ~workspace_layout ~refresh_all:(fun () -> !dock_refresh ())
       ~pane_id:canvas_id ~kind:Pane.Canvas ~config:(Pane.config_for_kind Pane.Canvas) ~collapsed:false () in
     canvas_title := cb;
+    canvas_title_css := cb_css;
     canvas_frame#pack cb#coerce ~expand:false;
     canvas_frame#reorder_child cb#coerce ~pos:0;
 
     let dock_collapsed = match Workspace_layout.anchored_dock workspace_layout Workspace_layout.Right with
       | Some d -> d.collapsed | None -> false in
-    let db = make_title_bar ~workspace_layout ~refresh_all:(fun () -> !dock_refresh ())
+    let (db, db_css) = make_title_bar ~workspace_layout ~refresh_all:(fun () -> !dock_refresh ())
       ~pane_id:dock_id ~kind:Pane.Dock ~config:(Pane.config_for_kind Pane.Dock) ~collapsed:dock_collapsed () in
     dock_title := db;
+    dock_title_css := db_css;
     dock_frame#pack db#coerce ~expand:false;
     dock_frame#reorder_child db#coerce ~pos:0
   in

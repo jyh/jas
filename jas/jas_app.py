@@ -1,11 +1,22 @@
+import os
 import sys
 
 from PySide6.QtCore import Qt, QRect
-from PySide6.QtGui import QKeySequence, QShortcut, QMouseEvent, QPainter, QColor, QCursor
+from PySide6.QtGui import QIcon, QKeySequence, QPixmap, QShortcut, QMouseEvent, QPainter, QColor, QCursor
 from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
     QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
+
+
+def _brand_icon_path(size: int) -> str | None:
+    """Return path to brand PNG icon of given size, or None if not found."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(here, "..", "assets", "brand", "icons", f"icon_{size}.png"),
+        os.path.join(here, "assets", "brand", "icons", f"icon_{size}.png"),
+    ]
+    return next((p for p in candidates if os.path.exists(p)), None)
 
 from canvas.canvas import CanvasWidget
 from canvas.pane_rendering import compute_pane_geometries, compute_shared_borders, compute_snap_lines
@@ -143,6 +154,13 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Jas")
 
+        # App window icon
+        icon_path = _brand_icon_path(256)
+        if icon_path:
+            self.setWindowIcon(QIcon(icon_path))
+
+        self._canvas_logo_lbl: QLabel | None = None
+
         # Drag state
         self._pane_drag = None      # (pane_id, off_x, off_y)
         self._border_drag = None    # (snap_idx, start_coord, is_vertical)
@@ -163,6 +181,15 @@ class MainWindow(QMainWindow):
 
         # Menubar
         create_menus(self)
+        # Logo to the left of the menu items
+        logo_path = _brand_icon_path(32)
+        if logo_path:
+            logo_pm = QPixmap(logo_path).scaled(
+                45, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            logo_lbl = QLabel()
+            logo_lbl.setPixmap(logo_pm)
+            logo_lbl.setContentsMargins(4, 0, 4, 0)
+            self.menuBar().setCornerWidget(logo_lbl, Qt.TopLeftCorner)
 
         # Pane container (no layout manager — absolute positioning)
         self._pane_container = QWidget()
@@ -201,6 +228,26 @@ class MainWindow(QMainWindow):
         self._canvas_frame = PaneFrame(self._canvas_title, self.tab_widget,
                                         pane_id=cid, on_edge_drag_start=self._start_edge_drag,
                                         theme=self.theme, parent=self._pane_container)
+        # Empty-state logo overlay on the tab widget (top-right, 25% opacity)
+        logo_path = _brand_icon_path(256)
+        if logo_path:
+            src = QPixmap(logo_path).scaled(
+                270, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            # Render at 25% opacity into a new pixmap
+            faded = QPixmap(src.size())
+            faded.fill(Qt.transparent)
+            p = QPainter(faded)
+            p.setOpacity(0.25)
+            p.drawPixmap(0, 0, src)
+            p.end()
+            lbl = QLabel(self.tab_widget)
+            lbl.setPixmap(faded)
+            lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
+            lbl.setStyleSheet("background: transparent;")
+            lbl.setFixedSize(faded.width(), faded.height())
+            self._canvas_logo_lbl = lbl
+            self._update_canvas_logo()
+            self.tab_widget.currentChanged.connect(lambda _: self._update_canvas_logo())
 
         # Dock pane
         self.dock_panel = DockPanelWidget(self.workspace_layout)
@@ -340,6 +387,8 @@ class MainWindow(QMainWindow):
             w.show()
             w.raise_()
             self._snap_widgets.append(w)
+
+        self._update_canvas_logo()
 
     def _frame_for_kind(self, kind):
         if kind == PaneKind.TOOLBAR: return self._toolbar_frame
@@ -528,6 +577,17 @@ class MainWindow(QMainWindow):
             self._edge_snapped_coord = None
             self._refresh_pane_positions()
 
+    def _update_canvas_logo(self) -> None:
+        """Show/hide the empty-state logo based on whether any tabs are open."""
+        if self._canvas_logo_lbl is None:
+            return
+        visible = self.tab_widget.count() == 0
+        self._canvas_logo_lbl.setVisible(visible)
+        if visible:
+            tw = self.tab_widget.width()
+            lw = self._canvas_logo_lbl.width()
+            self._canvas_logo_lbl.move(tw - lw - 10, 10)
+
     def add_canvas(self, model: Model) -> None:
         """Create a new canvas tab for the given model."""
         controller = Controller(model=model)
@@ -547,6 +607,7 @@ class MainWindow(QMainWindow):
         model.on_document_changed(tab_label)
         model.on_filename_changed(tab_label)
         tab_label()
+        self._update_canvas_logo()
 
     def active_model(self) -> Model | None:
         """Return the model of the focused canvas tab."""
@@ -591,6 +652,7 @@ class MainWindow(QMainWindow):
                 if model.is_modified:
                     return  # Save was cancelled (e.g. Save-As dialog dismissed)
         self.tab_widget.removeTab(index)
+        self._update_canvas_logo()
 
     def closeEvent(self, event):
         """Intercept window close to prompt for unsaved changes.

@@ -9,6 +9,7 @@ from loader import resolve_interpolation
 # Module-level registries, set before rendering.
 _icons: dict = {}
 _initial_state: dict = {}
+_brand: dict = {}
 
 
 def set_icons(icons: dict) -> None:
@@ -23,6 +24,12 @@ def set_initial_state(state_defs: dict) -> None:
     _initial_state = {name: defn.get("default") for name, defn in (state_defs or {}).items()}
 
 
+def set_brand(brand: dict) -> None:
+    """Set brand config (logo SVG, color) for use in empty-state renderers."""
+    global _brand
+    _brand = brand or {}
+
+
 def render_element(el: dict, theme: dict, state: dict, mode: str = "normal") -> str:
     """Recursively render an element to HTML."""
     if not isinstance(el, dict):
@@ -34,7 +41,7 @@ def render_element(el: dict, theme: dict, state: dict, mode: str = "normal") -> 
     return renderer(el, theme, state)
 
 
-def render_menubar(menubar: list, actions: dict, theme: dict) -> str:
+def render_menubar(menubar: list, actions: dict, theme: dict, brand: dict | None = None) -> str:
     """Render the menubar as a Bootstrap navbar with dropdown menus."""
     items_html = ""
     for menu in menubar:
@@ -48,8 +55,20 @@ def render_menubar(menubar: list, actions: dict, theme: dict) -> str:
             f'<ul class="dropdown-menu">{dropdown_items}</ul>'
             f'</li>'
         )
+    logo_html = ""
+    if brand:
+        svg = brand.get("logo_small_svg") or brand.get("logo_svg", "")
+        color = brand.get("color", "currentColor")
+        if svg:
+            logo_html = (
+                f'<span class="navbar-brand me-2" style="color:{escape(color)};'
+                f'display:inline-flex;align-items:center;height:20px;width:auto;">'
+                f'<span style="display:inline-block;height:20px;width:45px;color:inherit">{svg}</span>'
+                f'</span>'
+            )
     return Markup(
         f'<nav class="navbar navbar-expand" style="background:var(--jas-pane-bg-dark,#333);padding:0 8px;">'
+        f'{logo_html}'
         f'<ul class="navbar-nav">{items_html}</ul>'
         f'<div class="ms-auto">'
         f'<a class="nav-link small" style="color:var(--jas-text-dim,#999)" href="?mode=wireframe" id="mode-toggle">Wireframe</a>'
@@ -58,25 +77,33 @@ def render_menubar(menubar: list, actions: dict, theme: dict) -> str:
     )
 
 
-def render_dialogs(dialogs: dict, theme: dict, state: dict) -> str:
+def render_dialogs(dialogs: dict, theme: dict, state: dict, brand: dict | None = None) -> str:
     """Render all dialogs as hidden Bootstrap modals."""
+    logo_html = ""
+    if brand:
+        svg = brand.get("logo_small_svg") or brand.get("logo_svg", "")
+        color = brand.get("color", "currentColor")
+        if svg:
+            logo_html = (
+                f'<span style="display:inline-block;width:28px;height:14px;'
+                f'color:{escape(color)};flex-shrink:0;margin-right:6px;">{svg}</span>'
+            )
     html = ""
     for dialog_id, dialog in (dialogs or {}).items():
         summary = escape(dialog.get("summary", dialog_id))
         body_html = render_element(dialog.get("content", {}), theme, state, mode="normal")
-        # Emit dialog-local state and init as data attributes for JS
         data_attrs = ""
         if "state" in dialog:
-            import json
             data_attrs += f' data-dialog-state="{escape(json.dumps(dialog["state"]))}"'
         if "init" in dialog:
-            import json
             data_attrs += f' data-dialog-init="{escape(json.dumps(dialog["init"]))}"'
         html += (
             f'<div class="modal fade" id="dialog-{dialog_id}" tabindex="-1"{data_attrs}>'
             f'<div class="modal-dialog"><div class="modal-content">'
-            f'<div class="modal-header"><h5 class="modal-title">{summary}</h5>'
-            f'<button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>'
+            f'<div class="modal-header" style="display:flex;align-items:center;">'
+            f'{logo_html}'
+            f'<h5 class="modal-title">{summary}</h5>'
+            f'<button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button></div>'
             f'<div class="modal-body">{body_html}</div>'
             f'</div></div></div>'
         )
@@ -119,9 +146,9 @@ def _style_str(el: dict, theme: dict, state: dict, extra: str = "") -> str:
             parts.append(f"margin:{_pad(val)}")
         elif key == "gap":
             parts.append(f"gap:{val}px")
-        elif key == "width" and val != "auto":
+        elif key == "width":
             parts.append(f"width:{_px(val)}")
-        elif key == "height" and val != "auto":
+        elif key == "height":
             parts.append(f"height:{_px(val)}")
         elif key == "min_width":
             parts.append(f"min-width:{_px(val)}")
@@ -139,6 +166,16 @@ def _style_str(el: dict, theme: dict, state: dict, extra: str = "") -> str:
             parts.append(f"overflow:{val}")
         elif key == "z_index":
             parts.append(f"z-index:{val}")
+        elif key == "position":
+            parts.append(f"position:{val}")
+        elif key == "top":
+            parts.append(f"top:{_px(val)}")
+        elif key == "right":
+            parts.append(f"right:{_px(val)}")
+        elif key == "bottom":
+            parts.append(f"bottom:{_px(val)}")
+        elif key == "left":
+            parts.append(f"left:{_px(val)}")
         elif key == "size":
             sz = _resolve(val, theme, state)
             parts.append(f"width:{sz}px;height:{sz}px")
@@ -549,11 +586,21 @@ def _render_select(el, theme, state):
 
 def _render_canvas(el, theme, state):
     summary = escape(el.get("summary", "Canvas"))
+    logo_html = ""
+    if _brand:
+        svg = _brand.get("logo_small_svg") or _brand.get("logo_svg", "")
+        color = _brand.get("color", "#C9900A")
+        if svg:
+            logo_html = (
+                f'<span style="position:absolute;top:10px;right:12px;'
+                f'width:54px;height:24px;color:{escape(color)};opacity:0.35;">{svg}</span>'
+            )
     return Markup(
         f'<div{_id_attr(el)} class="jas-canvas" '
         f'style="flex:1;background:#fff;display:flex;align-items:center;justify-content:center;'
-        f'color:#999;font-size:14px;min-height:200px"'
+        f'color:#999;font-size:14px;min-height:200px;position:relative;"'
         f'{_data_attrs(el)}>'
+        f'{logo_html}'
         f'{summary} (tier 3)</div>'
     )
 
@@ -816,6 +863,23 @@ def _render_dock_view(el, theme, state):
 
 # ── Dispatch table ────────────────────────────────────────────
 
+def _render_brand_logo(el, theme, state):
+    """Render the brand logo SVG inline. Position/size come from style attributes."""
+    if not _brand:
+        return Markup("")
+    svg = _brand.get("logo_small_svg") or _brand.get("logo_svg", "")
+    color = _brand.get("color", "#C9900A")
+    if not svg:
+        return Markup("")
+    # Inject width/height="100%" so the SVG fills its container span rather than
+    # expanding to its natural (viewport-filling) size.
+    svg = svg.replace("<svg ", '<svg width="100%" height="100%" ', 1)
+    base = f"display:block;overflow:hidden;color:{escape(color)};line-height:0"
+    return Markup(
+        f'<span{_id_attr(el)}{_style_str(el, theme, state, base)}{_data_attrs(el)}>{svg}</span>'
+    )
+
+
 _RENDERERS = {
     "pane_system": _render_pane_system,
     "pane": _render_pane,
@@ -842,4 +906,5 @@ _RENDERERS = {
     "separator": _render_separator,
     "spacer": _render_spacer,
     "image": _render_image,
+    "brand_logo": _render_brand_logo,
 }

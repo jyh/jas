@@ -264,9 +264,11 @@ class ColorPickerState:
 # Color picker dialog (Qt)
 # ---------------------------------------------------------------------------
 
+import os
+
 from PySide6.QtCore import Qt, Signal, QPoint, QSize
 from PySide6.QtGui import (
-    QColor, QImage, QMouseEvent, QPainter, QPen, QBrush, QPainterPath,
+    QColor, QImage, QMouseEvent, QPainter, QPen, QBrush, QPainterPath, QPixmap,
 )
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDialogButtonBox, QGridLayout,
@@ -484,6 +486,18 @@ class ColorPickerDialog(QDialog):
         # Left column: title + gradient/colorbar + Only Web Colors
         left = QVBoxLayout()
         top_row = QHBoxLayout()
+        here = os.path.dirname(os.path.abspath(__file__))
+        logo_path = next((p for p in [
+            os.path.join(here, "..", "..", "assets", "brand", "icons", "icon_32.png"),
+            os.path.join(here, "..", "assets", "brand", "icons", "icon_32.png"),
+        ] if os.path.exists(p)), None)
+        if logo_path:
+            logo_pm = QPixmap(logo_path).scaled(
+                32, 14, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            logo_lbl = QLabel()
+            logo_lbl.setPixmap(logo_pm)
+            top_row.addWidget(logo_lbl)
+            top_row.addSpacing(4)
         lbl = QLabel("Select Color:")
         lbl.setStyleSheet("font-weight: bold;")
         top_row.addWidget(lbl)

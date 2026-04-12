@@ -280,7 +280,7 @@ public struct ContentView: View {
                 .background(SwiftUI.Color(nsColor: workspace.theme.paneBgDark))
             }
 
-            ZStack {
+            ZStack(alignment: .topTrailing) {
                 SwiftUI.Color(nsColor: workspace.theme.windowBg)
                 ForEach(workspace.canvases) { entry in
                     if entry.id == workspace.selectedTab {
@@ -289,6 +289,18 @@ public struct ContentView: View {
                             currentTool: $currentTool,
                             onFocus: { workspace.selectedTab = entry.id }
                         )
+                    }
+                }
+                if workspace.canvases.isEmpty {
+                    if let logoURL = URL(string: "file://" + #file)
+                        .flatMap({ URL(string: "../../../assets/brand/icons/icon_256.png", relativeTo: $0.deletingLastPathComponent()) }),
+                       let img = NSImage(contentsOf: logoURL) {
+                        Image(nsImage: img)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 270, height: 120)
+                            .opacity(0.25)
+                            .padding([.top, .trailing], 10)
                     }
                 }
             }
