@@ -179,6 +179,32 @@ def create_menus(window: QMainWindow) -> None:
 
     ws_menu.aboutToShow.connect(_rebuild_workspace_menu)
 
+    # Appearance submenu
+    appearance_menu = window_menu.addMenu("Appearance")
+
+    def _rebuild_appearance_menu():
+        from workspace.theme import PREDEFINED_APPEARANCES, resolve_appearance
+        appearance_menu.clear()
+        if not hasattr(window, 'app_config'):
+            return
+        config = window.app_config
+        for entry in PREDEFINED_APPEARANCES:
+            prefix = "\u2713 " if entry.name == config.active_appearance else "    "
+            action = appearance_menu.addAction(prefix + entry.label)
+            action.triggered.connect(
+                lambda checked=False, n=entry.name: _switch_appearance(window, n))
+
+    def _switch_appearance(window, name):
+        from workspace.theme import resolve_appearance
+        if not hasattr(window, 'app_config'):
+            return
+        window.app_config.active_appearance = name
+        window.app_config.save()
+        if hasattr(window, 'refresh_panes'):
+            window.refresh_panes()
+
+    appearance_menu.aboutToShow.connect(_rebuild_appearance_menu)
+
     window_menu.addSeparator()
 
     # Tile
