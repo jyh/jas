@@ -274,7 +274,7 @@ public struct ContentView: View {
             }
 
             ZStack {
-                SwiftUI.Color.white
+                SwiftUI.Color(nsColor: workspace.theme.windowBg)
                 ForEach(workspace.canvases) { entry in
                     if entry.id == workspace.selectedTab {
                         CanvasTab(
