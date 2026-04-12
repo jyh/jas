@@ -510,6 +510,12 @@ pub fn App() -> Element {
     }).collect();
 
     rsx! {
+        document::Link {
+            rel: "icon",
+            r#type: "image/png",
+            sizes: "32x32",
+            href: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAADLElEQVR4nO2UXWgcVRTH//87k2xmtiSbFDEvPhhEYyz4Yj5ao1jEF7H1xYdSBEXUilE6tqCiQlv8oKBmNxVBQQhIixAfFLUPIpIXQ/ajFRHEVlBBxFjUDX7szqaduX+5001JS5C8qIj7exjuudzzP+eee84AHTp06PB/pDqdG/pqBjm3Nv90cB2AsTTH62mw419JoFIIHiDYS2LU2f5GHedn0RP8Gj5B2i8hSuDIue7mke6VYC+IL8aj+O2/8ncOlWLwMIBHJLsL5AG3v+EK3HIvVmD1s1IsWWgJ0C+TZ/A7gPp5e30+ndl0WWU6vL9aCmsgb6bvT/r51kkQg1kFPnsR+ZYflCG8ds7o/RxxpYX/03j9j1OLvbkh4/tXmBRerQiA9g6ACeXWuLPWlz8l2h1GJl4sBZcbmBxoN0McgnSdyOGzNm2AOC6a+7ZGjc8vPEWJ+SyBpunNeUy2CHjMI7+20t0G/LhaCD8wVBPSaRmk7jBBd+Nb2xrLMnqQ4DKI2wzoCk1Z9IMaJHkNhWcoc1Ke/AE0Tl/0JFA2BXSf2nTPjaP7WgurI2JpFgyxcyyKa2udyqXgqGTe8EwqyewZj5q7K8XwLUv76tao9clas5mOMe9BeAXkdgpjIGa9oHk4aQ0EUFydiOLhrAdWgztSY9x4HLs0eDvtEcIWYLkZ0vWusQCN0Jq+S4+O7Vv5hjAvgLhpImruSq1/g4TBJA7nvSQeJrC07hQYYEXEBcHFUni7kaZEdBO4ykI9khPWt5Ujm66lex2j58qlIGq7nEk8PD75aPyDpB4CLbe5bf9vdQBTlVJwyHo8BuDDdRNI06454yVPlaeDqaQL75hUL4F4GuR3sjpqyILL04IvE93fAzHATHC+LTHiIb26XAxcyQ+aFHet1c8vx883CuE9JMvtC1+My9Rnuh3Etq6ENQiDAmYh7SHRlPAjqDlKb6Zesz9zsqhTKNPqI1rNMDFzIB4S7O7R/XF1rf6WQzhryZ0Nv/Gus7Mm3CjlYrhAg2czQzg4HjUnyqWwAvLJib2N1Qr8fZw43N/n/uWu+U68jjBLamag93wzdujQocN/lD8BvLxVS1Ng/wQAAAAASUVORK5CYII="
+        }
         style { r#"
             html, body {{ margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; }}
             #main {{ height: 100%; }}
