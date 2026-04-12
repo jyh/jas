@@ -221,7 +221,7 @@ class Controller:
             extend=extend,
         )
 
-    def group_select_rect(self, x: float, y: float, width: float, height: float,
+    def interior_select_rect(self, x: float, y: float, width: float, height: float,
                           *, extend: bool = False) -> None:
         """Group selection marquee: selects individual elements with all
         control points.  Groups are traversed (not expanded) so elements
@@ -233,7 +233,7 @@ class Controller:
             return None
         self._select_recursive(_leaf, extend=extend)
 
-    def direct_select_rect(self, x: float, y: float, width: float, height: float,
+    def partial_select_rect(self, x: float, y: float, width: float, height: float,
                            *, extend: bool = False) -> None:
         """Direct selection marquee: select individual elements and only the
         control points that fall within the rectangle.  Groups are not

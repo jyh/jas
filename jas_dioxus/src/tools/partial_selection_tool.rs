@@ -321,7 +321,7 @@ impl CanvasTool for PartialSelectionTool {
                 let rh = (y - start_y).abs();
                 if rw > 1.0 || rh > 1.0 {
                     model.snapshot();
-                    Controller::direct_select_rect(model, rx, ry, rw, rh, shift);
+                    Controller::partial_select_rect(model, rx, ry, rw, rh, shift);
                 } else if !shift {
                     Controller::set_selection(model, Vec::new());
                 }

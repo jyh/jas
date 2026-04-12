@@ -12,7 +12,7 @@ class PartialSelectionTool(SelectionToolBase):
         self._handle_drag: tuple[tuple[int, ...], int, str, float, float] | None = None
 
     def _select_rect(self, ctx, x, y, w, h, extend):
-        ctx.controller.direct_select_rect(x, y, w, h, extend=extend)
+        ctx.controller.partial_select_rect(x, y, w, h, extend=extend)
 
     def _check_handle_hit(self, ctx, x, y):
         hit = ctx.hit_test_handle(x, y)

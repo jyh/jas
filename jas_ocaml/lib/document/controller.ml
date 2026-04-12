@@ -164,7 +164,7 @@ class controller ?(model = Model.create ()) () =
     method select_polygon ?(extend=false) (polygon : (float * float) array) =
       self#select_flat (fun elem -> element_intersects_polygon elem polygon) extend
 
-    method group_select_rect ?(extend=false) x y w h =
+    method interior_select_rect ?(extend=false) x y w h =
       self#select_recursive (fun path elem ->
         if element_intersects_rect elem x y w h then
           Some (Document.element_selection_all path)
@@ -172,7 +172,7 @@ class controller ?(model = Model.create ()) () =
           None
       ) extend
 
-    method direct_select_rect ?(extend=false) x y w h =
+    method partial_select_rect ?(extend=false) x y w h =
       self#select_recursive (fun path elem ->
         let cps = Element.control_points elem in
         let hit_cps =

@@ -7,4 +7,4 @@ from tools.selection_tool import SelectionToolBase
 
 class InteriorSelectionTool(SelectionToolBase):
     def _select_rect(self, ctx, x, y, w, h, extend):
-        ctx.controller.group_select_rect(x, y, w, h, extend=extend)
+        ctx.controller.interior_select_rect(x, y, w, h, extend=extend)

@@ -17,7 +17,7 @@ class partial_selection_tool = object (self)
     | None -> false
 
   method private select_rect (ctx : Canvas_tool.tool_context) x y w h ~extend =
-    ctx.controller#direct_select_rect ~extend x y w h
+    ctx.controller#partial_select_rect ~extend x y w h
 
   method! on_move (ctx : Canvas_tool.tool_context) x y ~shift ~dragging =
     if handle_drag <> None then begin
