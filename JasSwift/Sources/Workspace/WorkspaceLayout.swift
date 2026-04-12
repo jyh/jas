@@ -45,6 +45,44 @@ public enum PanelKind: Hashable, Codable {
     public static let all: [PanelKind] = [.layers, .color, .stroke, .properties]
 }
 
+/// Color panel mode (not persisted).
+public enum ColorPanelMode: String {
+    case grayscale, hsb, rgb, cmyk, webSafeRgb
+
+    public var label: String {
+        switch self {
+        case .grayscale: return "Grayscale"
+        case .hsb: return "HSB"
+        case .rgb: return "RGB"
+        case .cmyk: return "CMYK"
+        case .webSafeRgb: return "Web Safe RGB"
+        }
+    }
+
+    public var command: String {
+        switch self {
+        case .grayscale: return "mode_grayscale"
+        case .hsb: return "mode_hsb"
+        case .rgb: return "mode_rgb"
+        case .cmyk: return "mode_cmyk"
+        case .webSafeRgb: return "mode_web_safe_rgb"
+        }
+    }
+
+    public static func fromCommand(_ cmd: String) -> ColorPanelMode? {
+        switch cmd {
+        case "mode_grayscale": return .grayscale
+        case "mode_hsb": return .hsb
+        case "mode_rgb": return .rgb
+        case "mode_cmyk": return .cmyk
+        case "mode_web_safe_rgb": return .webSafeRgb
+        default: return nil
+        }
+    }
+
+    public static let all: [ColorPanelMode] = [.grayscale, .hsb, .rgb, .cmyk, .webSafeRgb]
+}
+
 public struct PanelGroup: Codable {
     public var panels: [PanelKind]
     public var active: Int
@@ -210,6 +248,8 @@ public struct WorkspaceLayout: Codable {
     public var appearance: String
     public var paneLayout: PaneLayout?
     var nextId: Int
+    /// Color panel mode (transient, not serialized).
+    public var colorPanelMode: ColorPanelMode = .hsb
     // Generation tracking (not serialized)
     private var generation: UInt64 = 0
     private var savedGeneration: UInt64 = 0

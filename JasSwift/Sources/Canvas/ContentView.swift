@@ -167,7 +167,8 @@ public struct ContentView: View {
                     FloatingDockView(
                         workspaceLayout: $workspace.workspaceLayout,
                         floatingDock: fd,
-                        theme: workspace.theme
+                        theme: workspace.theme,
+                        model: workspace.activeModel
                     )
                 }
             }
@@ -316,7 +317,8 @@ public struct ContentView: View {
                 workspaceLayout: $workspace.workspaceLayout,
                 dockId: rightDock.id,
                 edge: .right,
-                theme: workspace.theme
+                theme: workspace.theme,
+                model: workspace.activeModel
             )
         } else {
             SwiftUI.Color.clear

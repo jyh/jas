@@ -21,6 +21,8 @@ public class Model: ObservableObject {
     @Published public var defaultFill: Fill? = nil
     @Published public var defaultStroke: Stroke? = Stroke(color: .black)
     @Published public var fillOnTop: Bool = true
+    /// Per-document list of recently committed colors (hex strings, no #), newest first. Max 10.
+    @Published public var recentColors: [String] = []
     public private(set) var savedDocument: Document
     private var listeners: [(Document) -> Void] = []
     private var undoStack: [Document] = []
