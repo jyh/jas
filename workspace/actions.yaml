@@ -1,0 +1,384 @@
+actions:
+  # ── File ──────────────────────────────────────────────────
+  new_document:
+    description: "Create a new untitled document in a new tab"
+    category: file
+    effects:
+      # Set active tab and increment count first so create_child
+      # deepResolve sees the correct values
+      - set: { active_tab: "{{state.tab_count}}" }
+      # Create the tab button (with close x) in the tab bar
+      - create_child:
+          parent: canvas_tab_bar
+          element:
+            id: "canvas_tab_{{state.tab_count}}"
+            type: container
+            layout: row
+            style: { padding: "2 4 2 8", font_size: 11, gap: 4, alignment: center, background: "#4a4a4a", border: "1px solid #666" }
+            behavior:
+              - event: click
+                effects:
+                  - set: { active_tab: "{{state.tab_count}}" }
+            bind:
+              active: "{{state.active_tab}} == {{state.tab_count}}"
+            children:
+              - type: text
+                content: "Untitled-{{state.tab_count}}"
+              - type: icon_button
+                icon: "close"
+                summary: "Close tab"
+                style: { size: 12 }
+                behavior:
+                  - event: click
+                    stop_propagation: true
+                    effects:
+                      - remove_child: "canvas_tab_{{state.tab_count}}"
+                      - remove_child: "canvas_surface_{{state.tab_count}}"
+      # Create the canvas in the drawing surface
+      - create_child:
+          parent: drawing_surface
+          element:
+            id: "canvas_surface_{{state.tab_count}}"
+            type: canvas
+            summary: "Drawing surface"
+            tier: 3
+            style: { flex: 1, background: "#ffffff" }
+            bind:
+              visible: "{{state.active_tab}} == {{state.tab_count}}"
+      # Increment tab count after creation so the frozen index is correct
+      - increment: { key: tab_count, by: 1 }
+  open_file:
+    description: "Show Open dialog, load an SVG file into a new tab (or focus existing tab)"
+    category: file
+    effects:
+      - log: "open_file: show native file dialog"
+  save:
+    description: "Save active document; if untitled, fall through to save_as"
+    category: file
+    effects:
+      - if:
+          condition: "not model.has_filename"
+          then:
+            - dispatch: save_as
+          else:
+            - log: "save: write to {{model.filename}}"
+  save_as:
+    description: "Show Save As dialog for the active document"
+    category: file
+    effects:
+      - log: "save_as: show native save dialog"
+  revert:
+    description: "Reload the active document from disk, discarding unsaved changes"
+    category: file
+    enabled_when: "model.is_modified and model.has_filename"
+    effects:
+      - log: "revert: reload {{model.filename}}"
+  quit:
+    description: "Close the application; prompt to save any modified documents"
+    category: file
+    effects:
+      - if:
+          condition: "model.any_modified"
+          then:
+            - open_dialog: { id: save_changes_window }
+          else:
+            - log: "quit: close window"
+
+  # ── Edit ──────────────────────────────────────────────────
+  undo:
+    description: "Undo the last editing operation on the active document"
+    category: edit
+    tier: 3
+    effects:
+      - log: "undo"
+  redo:
+    description: "Redo the last undone operation"
+    category: edit
+    tier: 3
+    effects:
+      - log: "redo"
+  cut:
+    description: "Copy selection to clipboard as SVG, then delete it"
+    category: edit
+    tier: 3
+    effects:
+      - dispatch: copy
+      - dispatch: delete_selection
+  copy:
+    description: "Copy selection to clipboard as SVG"
+    category: edit
+    tier: 3
+    effects:
+      - log: "copy: selection to clipboard"
+  paste:
+    description: "Paste from clipboard with a 24pt offset"
+    category: edit
+    tier: 3
+    effects:
+      - log: "paste: offset 24pt"
+  paste_in_place:
+    description: "Paste from clipboard at the original position"
+    category: edit
+    tier: 3
+    effects:
+      - log: "paste_in_place: offset 0"
+  select_all:
+    description: "Select all objects in the active document"
+    category: edit
+    tier: 3
+    effects:
+      - log: "select_all"
+  delete_selection:
+    description: "Delete the selected objects"
+    category: edit
+    tier: 3
+    effects:
+      - log: "delete_selection"
+
+  # ── Object ────────────────────────────────────────────────
+  group:
+    description: "Group selected sibling elements into a single Group"
+    category: object
+    tier: 3
+    effects:
+      - log: "group"
+  ungroup:
+    description: "Ungroup selected Group elements, replacing each with its children"
+    category: object
+    tier: 3
+    effects:
+      - log: "ungroup"
+  ungroup_all:
+    description: "Recursively ungroup all unlocked Group elements"
+    category: object
+    tier: 3
+    effects:
+      - log: "ungroup_all"
+  lock:
+    description: "Lock selected elements to prevent editing"
+    category: object
+    tier: 3
+    effects:
+      - log: "lock"
+  unlock_all:
+    description: "Unlock all locked elements in the document"
+    category: object
+    tier: 3
+    effects:
+      - log: "unlock_all"
+  hide_selection:
+    description: "Hide selected elements from the canvas"
+    category: object
+    tier: 3
+    effects:
+      - log: "hide_selection"
+  show_all:
+    description: "Show all hidden elements"
+    category: object
+    tier: 3
+    effects:
+      - log: "show_all"
+
+  # ── View ──────────────────────────────────────────────────
+  zoom_in:
+    description: "Zoom the canvas in"
+    category: view
+    tier: 3
+    effects:
+      - log: "zoom_in"
+  zoom_out:
+    description: "Zoom the canvas out"
+    category: view
+    tier: 3
+    effects:
+      - log: "zoom_out"
+  fit_in_window:
+    description: "Fit all content within the viewport"
+    category: view
+    tier: 3
+    effects:
+      - log: "fit_in_window"
+
+  # ── Tool ──────────────────────────────────────────────────
+  select_tool:
+    description: "Switch the active drawing tool"
+    category: tool
+    params:
+      tool: { type: state_ref, ref: "active_tool" }
+    effects:
+      - set: { active_tool: "{{param.tool}}" }
+
+  # ── Fill / Stroke ─────────────────────────────────────────
+  swap_fill_stroke:
+    description: "Swap fill and stroke colors"
+    category: fill_stroke
+    effects:
+      - swap: [fill_color, stroke_color]
+  reset_fill_stroke:
+    description: "Reset to default white fill and 1pt black stroke"
+    category: fill_stroke
+    effects:
+      - set: { fill_color: "#ffffff", stroke_color: "#000000", stroke_width: 1.0, fill_on_top: true }
+  toggle_fill_on_top:
+    description: "Toggle whether fill or stroke swatch is in front"
+    category: fill_stroke
+    effects:
+      - toggle: fill_on_top
+  set_fill_none:
+    description: "Set the fill color to none"
+    category: fill_stroke
+    effects:
+      - set: { fill_color: null }
+  set_stroke_none:
+    description: "Set the stroke color to none"
+    category: fill_stroke
+    effects:
+      - set: { stroke_color: null }
+  open_color_picker:
+    description: "Open the color picker dialog for fill or stroke"
+    category: fill_stroke
+    params:
+      target: { type: enum, values: [fill, stroke] }
+    effects:
+      - open_dialog: { id: color_picker, params: { target: "{{param.target}}" } }
+
+  # ── Window / Layout ──────────────────────────────────────
+  toggle_pane:
+    description: "Show or hide a pane"
+    category: window
+    params:
+      pane: { type: enum, values: [toolbar, canvas, dock] }
+    effects:
+      - toggle: "{{param.pane}}_visible"
+  toggle_panel:
+    description: "Show or hide a dock panel"
+    category: window
+    params:
+      panel: { type: enum, values: [layers, color, stroke, properties] }
+    effects:
+      - log: "toggle_panel: {{param.panel}}"
+  toggle_canvas_maximize:
+    description: "Toggle canvas between maximized and normal layout"
+    category: window
+    effects:
+      - toggle: canvas_maximized
+  maximize_canvas:
+    description: "Maximize the canvas to fill the viewport, hide its title bar"
+    category: window
+    effects:
+      - set: { canvas_maximized: true }
+      - maximize: { target: canvas_pane, hide_title: true }
+  restore_canvas:
+    description: "Restore the canvas to its original size, show its title bar"
+    category: window
+    effects:
+      - set: { canvas_maximized: false }
+      - restore: { target: canvas_pane }
+      - reset_layout: { container: main }
+  toggle_dock_collapse:
+    description: "Collapse or expand the dock panel"
+    category: window
+    effects:
+      - toggle: dock_collapsed
+  collapse_dock:
+    description: "Collapse the dock to icon strip"
+    category: window
+    effects:
+      - set: { dock_collapsed: true }
+      - show: dock_collapsed_strip
+      - hide: dock_group_0
+      - hide: dock_group_separator
+      - hide: dock_group_1
+  expand_dock:
+    description: "Expand the dock to full panels"
+    category: window
+    effects:
+      - set: { dock_collapsed: false }
+      - hide: dock_collapsed_strip
+      - show: dock_group_0
+      - show: dock_group_separator
+      - show: dock_group_1
+  tile_panes:
+    description: "Arrange all visible panes in a tiled grid"
+    category: window
+    effects:
+      - tile: { container: main }
+
+  # ── Workspace ─────────────────────────────────────────────
+  save_workspace_as:
+    description: "Save the current pane layout under a new name"
+    category: workspace
+    effects:
+      - open_dialog: { id: workspace_save_as }
+  reset_workspace:
+    description: "Reset pane layout to factory defaults"
+    category: workspace
+    effects:
+      - reset_layout: { container: main }
+  revert_workspace:
+    description: "Revert pane layout to last saved version"
+    category: workspace
+    enabled_when: "workspace.has_saved_layout"
+    effects:
+      - log: "revert_workspace"
+  switch_workspace:
+    description: "Switch to a named workspace layout"
+    category: workspace
+    params:
+      name: { type: string }
+    effects:
+      - log: "switch_workspace: {{param.name}}"
+
+  # ── Tab ───────────────────────────────────────────────────
+  close_tab:
+    description: "Close a document tab (prompt to save if modified)"
+    category: tab
+    params:
+      index: { type: number }
+    effects:
+      - if:
+          condition: "model.is_modified"
+          then:
+            - open_dialog: { id: save_changes_tab, params: { filename: "{{model.filename}}" } }
+          else:
+            - dispatch: { action: remove_tab, params: { index: "{{param.index}}" } }
+  remove_tab:
+    description: "Remove a tab without prompting"
+    category: tab
+    params:
+      index: { type: number }
+    effects:
+      - log: "remove_tab: {{param.index}}"
+
+  # ── Panel ─────────────────────────────────────────────────
+  close_panel:
+    description: "Close the panel that owns this menu"
+    category: panel
+    effects:
+      - log: "close_panel"
+
+  # ── Dialog ────────────────────────────────────────────────
+  dismiss_dialog:
+    description: "Dismiss the current modal dialog"
+    category: dialog
+    effects:
+      - close_dialog: null
+  close_without_saving:
+    description: "Close the tab/window without saving"
+    category: dialog
+    effects:
+      - close_dialog: null
+      - log: "close_without_saving"
+  save_and_close:
+    description: "Save the active document then close the tab"
+    category: dialog
+    effects:
+      - dispatch: save
+      - close_dialog: null
+      - log: "save_and_close"
+  save_all_and_close:
+    description: "Save all modified documents then close the window"
+    category: dialog
+    effects:
+      - log: "save_all_and_close"
+      - close_dialog: null

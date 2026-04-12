@@ -1,0 +1,791 @@
+layout:
+  id: main
+  type: pane_system
+  summary: "Main workspace"
+  description: >
+    Three draggable, resizable panes with edge-snapping. Panes can be
+    reordered in z-order by clicking. The canvas pane can be maximized
+    to fill the viewport, causing toolbar and dock to float on top.
+  style:
+    background: "{{theme.colors.window_bg}}"
+  behavior:
+    # Pane title bar drag protocol
+    - event: drag_start
+      description: "Begin dragging a pane by its title bar"
+      effects:
+        - cursor: grabbing
+        - set: { _drag_pane: "{{event.target_id}}", _drag_offset_x: "{{event.offset_x}}", _drag_offset_y: "{{event.offset_y}}" }
+    - event: drag_move
+      description: "Move pane to follow cursor, snap to edges within snap_distance"
+      effects:
+        - set_style:
+            target: "{{state._drag_pane}}"
+            left: "{{event.client_x - state._drag_offset_x}}"
+            top: "{{event.client_y - state._drag_offset_y}}"
+    - event: drag_end
+      description: "Drop the pane; apply snap alignment if within threshold"
+      effects:
+        - cursor: grab
+        - set: { _drag_pane: null }
+    # Edge resize protocol
+    - event: drag_start
+      condition: "event.target_class == 'jas-edge-handle'"
+      description: "Begin resizing a pane by its edge handle"
+      effects:
+        - cursor: "{{event.resize_cursor}}"
+        - set: { _resize_pane: "{{event.target_id}}", _resize_edge: "{{event.edge}}", _resize_start_x: "{{event.client_x}}", _resize_start_y: "{{event.client_y}}" }
+    - event: drag_move
+      condition: "state._resize_pane != null"
+      description: "Resize the pane edge, respecting min/max constraints"
+    - event: drag_end
+      condition: "state._resize_pane != null"
+      effects:
+        - cursor: default
+        - set: { _resize_pane: null }
+  children:
+
+    # ─── Toolbar pane ───────────────────────────────────────
+    - id: toolbar_pane
+      type: pane
+      summary: "Toolbar"
+      description: >
+        Vertical toolbar containing drawing tool icons in a 2-column
+        grid, followed by a fill/stroke color indicator widget.
+      default_position: { x: 0, y: 0, width: 72, height: 900 }
+      min_width: 72
+      max_width: 72
+      fixed_width: true
+      style:
+        background: "{{theme.colors.pane_bg}}"
+        border: "1px solid {{theme.colors.border}}"
+      bind:
+        visible: "{{state.toolbar_visible}}"
+      title_bar:
+        label: "Tools"
+        draggable: true
+        buttons:
+          - id: toolbar_close_btn
+            type: icon_button
+            summary: "Close toolbar"
+            icon: "close"
+            style: { size: 14 }
+            behavior:
+              - event: click
+                action: toggle_pane
+                params: { pane: toolbar }
+      content:
+        type: container
+        layout: column
+        style:
+          padding: "4 2 4 2"
+        children:
+
+          # Tool button grid
+          - id: tool_grid
+            type: grid
+            summary: "Tool buttons"
+            description: >
+              4-row, 2-column grid of 32x32px tool buttons. Single click
+              selects the tool. Buttons with a small triangle indicator have
+              alternate tools accessible via long-press (250ms hold).
+            cols: 2
+            gap: 2
+            children:
+
+              # Row 0, Col 0: Selection
+              - id: btn_selection
+                type: icon_button
+                summary: "Selection (V)"
+                description: "Black arrow cursor for selecting and moving objects"
+                icon: "selection_arrow"
+                grid: { row: 0, col: 0 }
+                style:
+                  size: "{{theme.sizes.tool_button}}"
+                  checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
+                behavior:
+                  - event: click
+                    action: select_tool
+                    params: { tool: selection }
+                bind:
+                  checked: "{{state.active_tool}} == selection"
+
+              # Row 0, Col 1: Arrow slot (Direct Selection / Group Selection)
+              - id: btn_arrow_slot
+                type: icon_button
+                summary: "Direct Selection (A)"
+                description: "White arrow for selecting individual anchor points and segments"
+                icon: "direct_selection_arrow"
+                grid: { row: 0, col: 1 }
+                style:
+                  size: "{{theme.sizes.tool_button}}"
+                  checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
+                behavior:
+                  - event: mouse_down
+                    effects:
+                      - start_timer:
+                          id: "long_press_btn_arrow_slot"
+                          delay_ms: 250
+                          effects:
+                            - open_dialog: { id: arrow_alternates }
+                  - event: mouse_up
+                    effects:
+                      - cancel_timer: "long_press_btn_arrow_slot"
+                  - event: click
+                    action: select_tool
+                    params: { tool: direct_selection }
+                bind:
+                  checked: "{{state.active_tool}} in [direct_selection, group_selection]"
+                alternates:
+                  menu_id: arrow_alternates
+                  items:
+                    - id: direct_selection
+                      label: "Direct Selection"
+                      icon: "direct_selection_arrow"
+                      description: "Select and move individual anchor points and path segments"
+                    - id: group_selection
+                      label: "Group Selection"
+                      icon: "group_selection_arrow"
+                      description: "Select objects within groups without ungrouping"
+
+              # Row 1, Col 0: Pen slot
+              - id: btn_pen_slot
+                type: icon_button
+                summary: "Pen (P)"
+                description: "Draw precise paths by placing anchor points with bezier handles"
+                icon: "pen"
+                grid: { row: 1, col: 0 }
+                style:
+                  size: "{{theme.sizes.tool_button}}"
+                  checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
+                behavior:
+                  - event: mouse_down
+                    effects:
+                      - start_timer:
+                          id: "long_press_btn_pen_slot"
+                          delay_ms: 250
+                          effects:
+                            - open_dialog: { id: pen_alternates }
+                  - event: mouse_up
+                    effects:
+                      - cancel_timer: "long_press_btn_pen_slot"
+                  - event: click
+                    action: select_tool
+                    params: { tool: pen }
+                bind:
+                  checked: "{{state.active_tool}} in [pen, add_anchor, delete_anchor, anchor_point]"
+                alternates:
+                  menu_id: pen_alternates
+                  items:
+                    - { id: pen,            label: "Pen",                 icon: "pen",
+                        description: "Draw paths by clicking to place anchor points" }
+                    - { id: add_anchor,     label: "Add Anchor Point",    icon: "add_anchor",
+                        description: "Add anchor points to an existing path" }
+                    - { id: delete_anchor,  label: "Delete Anchor Point", icon: "delete_anchor",
+                        description: "Remove anchor points from a path" }
+                    - { id: anchor_point,   label: "Anchor Point",        icon: "anchor_point",
+                        description: "Convert anchor points between smooth and corner" }
+
+              # Row 1, Col 1: Pencil slot
+              - id: btn_pencil_slot
+                type: icon_button
+                summary: "Pencil (N)"
+                description: "Freehand drawing tool"
+                icon: "pencil"
+                grid: { row: 1, col: 1 }
+                style:
+                  size: "{{theme.sizes.tool_button}}"
+                  checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
+                behavior:
+                  - event: mouse_down
+                    effects:
+                      - start_timer:
+                          id: "long_press_btn_pencil_slot"
+                          delay_ms: 250
+                          effects:
+                            - open_dialog: { id: pencil_alternates }
+                  - event: mouse_up
+                    effects:
+                      - cancel_timer: "long_press_btn_pencil_slot"
+                  - event: click
+                    action: select_tool
+                    params: { tool: pencil }
+                bind:
+                  checked: "{{state.active_tool}} in [pencil, path_eraser, smooth]"
+                alternates:
+                  menu_id: pencil_alternates
+                  items:
+                    - { id: pencil,      label: "Pencil",      icon: "pencil",
+                        description: "Draw freehand paths" }
+                    - { id: path_eraser, label: "Path Eraser",  icon: "path_eraser",
+                        description: "Erase portions of paths" }
+                    - { id: smooth,      label: "Smooth",       icon: "smooth",
+                        description: "Smooth rough path segments" }
+
+              # Row 2, Col 0: Text slot
+              - id: btn_text_slot
+                type: icon_button
+                summary: "Type (T)"
+                description: "Create and edit text objects"
+                icon: "type"
+                grid: { row: 2, col: 0 }
+                style:
+                  size: "{{theme.sizes.tool_button}}"
+                  checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
+                behavior:
+                  - event: mouse_down
+                    effects:
+                      - start_timer:
+                          id: "long_press_btn_text_slot"
+                          delay_ms: 250
+                          effects:
+                            - open_dialog: { id: text_alternates }
+                  - event: mouse_up
+                    effects:
+                      - cancel_timer: "long_press_btn_text_slot"
+                  - event: click
+                    action: select_tool
+                    params: { tool: type }
+                bind:
+                  checked: "{{state.active_tool}} in [type, type_on_path]"
+                alternates:
+                  menu_id: text_alternates
+                  items:
+                    - { id: type,         label: "Type",            icon: "type",
+                        description: "Create and edit text" }
+                    - { id: type_on_path, label: "Type on a Path",  icon: "type_on_path",
+                        description: "Place text along a path curve" }
+
+              # Row 2, Col 1: Line
+              - id: btn_line
+                type: icon_button
+                summary: "Line (\\)"
+                description: "Draw straight line segments"
+                icon: "line"
+                grid: { row: 2, col: 1 }
+                style:
+                  size: "{{theme.sizes.tool_button}}"
+                  checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
+                behavior:
+                  - event: click
+                    action: select_tool
+                    params: { tool: line }
+                bind:
+                  checked: "{{state.active_tool}} == line"
+
+              # Row 3, Col 0: Shape slot
+              - id: btn_shape_slot
+                type: icon_button
+                summary: "Rectangle (M)"
+                description: "Draw rectangular shapes"
+                icon: "rect"
+                grid: { row: 3, col: 0 }
+                style:
+                  size: "{{theme.sizes.tool_button}}"
+                  checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
+                behavior:
+                  - event: mouse_down
+                    effects:
+                      - start_timer:
+                          id: "long_press_btn_shape_slot"
+                          delay_ms: 250
+                          effects:
+                            - open_dialog: { id: shape_alternates }
+                  - event: mouse_up
+                    effects:
+                      - cancel_timer: "long_press_btn_shape_slot"
+                  - event: click
+                    action: select_tool
+                    params: { tool: rect }
+                bind:
+                  checked: "{{state.active_tool}} in [rect, rounded_rect, polygon, star]"
+                alternates:
+                  menu_id: shape_alternates
+                  items:
+                    - { id: rect,         label: "Rectangle",         icon: "rect",
+                        description: "Draw rectangles and squares" }
+                    - { id: rounded_rect, label: "Rounded Rectangle", icon: "rounded_rect",
+                        description: "Draw rectangles with rounded corners" }
+                    - { id: polygon,      label: "Polygon",           icon: "polygon",
+                        description: "Draw regular polygons" }
+                    - { id: star,         label: "Star",              icon: "star",
+                        description: "Draw star shapes" }
+
+              # Row 3, Col 1: Lasso
+              - id: btn_lasso
+                type: icon_button
+                summary: "Lasso (Q)"
+                description: "Freehand selection of objects by drawing a lasso boundary"
+                icon: "lasso"
+                grid: { row: 3, col: 1 }
+                style:
+                  size: "{{theme.sizes.tool_button}}"
+                  checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
+                behavior:
+                  - event: click
+                    action: select_tool
+                    params: { tool: lasso }
+                bind:
+                  checked: "{{state.active_tool}} == lasso"
+
+          - type: spacer
+            style: { height: 8 }
+
+          # Fill / Stroke widget
+          - id: fill_stroke_widget
+            type: container
+            summary: "Fill & Stroke"
+            description: >
+              Two overlapping color swatches showing the active fill and stroke
+              colors. Click a swatch to bring it to front. Double-click to open
+              the color picker. Swap arrow (top-right) exchanges colors. Default
+              button (bottom-left, D key) resets to white fill / 1pt black stroke.
+              None button removes color from the front swatch.
+            layout: column
+            style:
+              alignment: center
+              width: 56
+              height: 76
+            children:
+
+              - id: fill_swatch
+                type: color_swatch
+                summary: "Fill color"
+                description: "28x28 filled square showing the active fill color"
+                style: { size: 28, position: { x: 0, y: 0 } }
+                bind:
+                  color: "{{state.fill_color}}"
+                  z_index: "{{state.fill_on_top}} == true ? 2 : 1"
+                behavior:
+                  - event: click
+                    effects:
+                      - set: { fill_on_top: true }
+                    description: "Bring fill swatch to front"
+                  - event: double_click
+                    action: open_color_picker
+                    params: { target: fill }
+
+              - id: stroke_swatch
+                type: color_swatch
+                summary: "Stroke color"
+                description: "28x28 hollow square with 6px colored border and white center"
+                hollow: true
+                style: { size: 28, position: { x: 10, y: 10 } }
+                bind:
+                  color: "{{state.stroke_color}}"
+                  z_index: "{{state.fill_on_top}} == true ? 1 : 2"
+                behavior:
+                  - event: click
+                    effects:
+                      - set: { fill_on_top: false }
+                    description: "Bring stroke swatch to front"
+                  - event: double_click
+                    action: open_color_picker
+                    params: { target: stroke }
+
+              - id: swap_btn
+                type: icon_button
+                summary: "Swap (Shift+X)"
+                description: "Double-headed arrow; swaps fill and stroke colors"
+                icon: "swap_arrows"
+                style: { size: 12, position: { x: 44, y: 0 } }
+                behavior:
+                  - event: click
+                    action: swap_fill_stroke
+
+              - id: default_btn
+                type: icon_button
+                summary: "Default (D)"
+                description: "Resets fill to white and stroke to 1pt black"
+                icon: "default_colors"
+                style: { size: 14, position: { x: 0, y: 42 } }
+                behavior:
+                  - event: click
+                    action: reset_fill_stroke
+
+              - id: none_btn
+                type: icon_button
+                summary: "None"
+                description: >
+                  Sets the front swatch color to none. If fill is on top,
+                  removes fill; otherwise removes stroke.
+                icon: "color_none"
+                style: { size: 14, position: { x: 38, y: 62 } }
+                behavior:
+                  - event: click
+                    action: set_fill_none
+                    condition: "{{state.fill_on_top}}"
+                  - event: click
+                    action: set_stroke_none
+                    condition: "not {{state.fill_on_top}}"
+
+          - type: spacer
+
+    # ─── Canvas pane ────────────────────────────────────────
+    - id: canvas_pane
+      type: pane
+      summary: "Canvas"
+      description: >
+        Central drawing area with a multi-tab bar. Each tab represents
+        an open document. The tab label shows the filename (with * if
+        modified). Supports zoom and scroll. Can be maximized to fill
+        the viewport.
+      default_position: { x: 72, y: 0, width: 888, height: 900 }
+      min_width: 200
+      flex: true
+      style:
+        background: "{{theme.colors.window_bg}}"
+        border: "1px solid {{theme.colors.border}}"
+      bind:
+        visible: "{{state.canvas_visible}}"
+      behavior:
+        - event: double_click
+          condition: "{{state.canvas_maximized}}"
+          action: restore_canvas
+      title_bar:
+        id: canvas_title_bar
+        label: "Canvas"
+        draggable: true
+        behavior:
+          - event: double_click
+            condition: "not {{state.canvas_maximized}}"
+            action: maximize_canvas
+          - event: double_click
+            condition: "{{state.canvas_maximized}}"
+            action: restore_canvas
+        buttons:
+          - id: maximize_btn
+            type: icon_button
+            summary: "Maximize"
+            icon: "maximize"
+            style: { size: 14 }
+            behavior:
+              - event: click
+                condition: "not {{state.canvas_maximized}}"
+                action: maximize_canvas
+              - event: click
+                condition: "{{state.canvas_maximized}}"
+                action: restore_canvas
+          - id: canvas_close_btn
+            type: icon_button
+            summary: "Close canvas"
+            icon: "close"
+            style: { size: 14 }
+            behavior:
+              - event: click
+                action: toggle_pane
+                params: { pane: canvas }
+      content:
+        type: container
+        layout: column
+        style: { flex: 1 }
+        children:
+
+          # Tab bar (populated dynamically by new_document)
+          - id: canvas_tab_bar
+            type: container
+            summary: "Document tabs"
+            description: >
+              Horizontal row of tab buttons. Populated dynamically
+              when documents are opened via new_document/open_file.
+            layout: row
+            style:
+              background: "{{theme.colors.pane_bg_dark}}"
+              min_height: 24
+              gap: 0
+              alignment: center
+            bind:
+              visible: "{{state.tab_count}} != 0"
+            children: []
+
+          # Drawing surface area (canvases added dynamically)
+          - id: drawing_surface
+            type: container
+            summary: "Drawing surface"
+            description: >
+              Container for document canvases. Each open document gets a
+              canvas here. Starts empty; populated by new_document/open_file.
+            layout: column
+            style:
+              flex: 1
+              min_height: 200
+              background: "{{theme.colors.window_bg}}"
+            children: []
+
+    # ─── Dock panel pane ────────────────────────────────────
+    - id: dock_pane
+      type: pane
+      summary: "Panels"
+      description: >
+        Right-side dock containing panel groups. Each group has a tab
+        bar selecting the active panel. The dock can collapse to a 36px
+        chevron strip. Panels and groups can be reordered by drag-and-drop.
+      default_position: { x: 960, y: 0, width: 240, height: 900 }
+      min_width: 150
+      max_width: 500
+      collapsed_width: 36
+      style:
+        background: "{{theme.colors.pane_bg}}"
+        border: "1px solid {{theme.colors.border}}"
+      bind:
+        visible: "{{state.dock_visible}}"
+        collapsed: "{{state.dock_collapsed}}"
+      title_bar:
+        label: "Panels"
+        draggable: true
+        buttons:
+          - id: dock_collapse_btn
+            type: icon_button
+            summary: "Collapse/Expand dock"
+            icon: "chevron_right"
+            style: { size: 20 }
+            behavior:
+              - event: click
+                condition: "not {{state.dock_collapsed}}"
+                action: collapse_dock
+              - event: click
+                condition: "{{state.dock_collapsed}}"
+                action: expand_dock
+            bind:
+              icon: "{{state.dock_collapsed}} == true ? chevron_left : chevron_right"
+          - id: dock_close_btn
+            type: icon_button
+            summary: "Close panels"
+            icon: "close"
+            style: { size: 14 }
+            behavior:
+              - event: click
+                action: toggle_pane
+                params: { pane: dock }
+      behavior:
+        - event: drop
+          description: >
+            Panels can be dragged between groups. Groups can be reordered
+            within the dock via drag-and-drop.
+      content:
+        type: container
+        layout: column
+        children:
+
+          # Collapsed icon strip (visible only when dock is collapsed)
+          - id: dock_collapsed_strip
+            type: container
+            summary: "Collapsed panel icons"
+            description: "Vertically stacked panel icons shown when the dock is collapsed. Click to expand and switch to that panel."
+            layout: column
+            style: { alignment: center, gap: 2, padding: "4 0" }
+            bind:
+              visible: "{{state.dock_collapsed}}"
+            children:
+              # Group 0 icons
+              - id: dock_icon_layers
+                type: icon_button
+                summary: "Layers"
+                icon: "panel_layers"
+                style: { size: 28 }
+                behavior:
+                  - event: click
+                    action: expand_dock
+              # Separator between groups
+              - { type: separator }
+              # Group 1 icons
+              - id: dock_icon_color
+                type: icon_button
+                summary: "Color"
+                icon: "panel_color"
+                style: { size: 28 }
+                behavior:
+                  - event: click
+                    action: expand_dock
+              - id: dock_icon_stroke
+                type: icon_button
+                summary: "Stroke"
+                icon: "panel_stroke"
+                style: { size: 28 }
+                behavior:
+                  - event: click
+                    action: expand_dock
+              - id: dock_icon_properties
+                type: icon_button
+                summary: "Properties"
+                icon: "panel_properties"
+                style: { size: 28 }
+                behavior:
+                  - event: click
+                    action: expand_dock
+
+          # Group 0: Layers (hidden when collapsed)
+          - id: dock_group_0
+            type: container
+            summary: "Layers group"
+            description: "Panel group containing the Layers panel, with collapse chevron and hamburger"
+            layout: column
+            bind:
+              visible: "not {{state.dock_collapsed}}"
+            children:
+              - id: dock_group_0_header
+                type: container
+                layout: row
+                style:
+                  background: "{{theme.colors.pane_bg_dark}}"
+                  padding: "2 4"
+                  gap: 2
+                  alignment: center
+                children:
+                  - id: dock_group_0_tab_layers
+                    type: button
+                    label: "Layers"
+                    summary: "Layers tab"
+                    style: { padding: "1 6", font_size: 11 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - set: { dock_group0_active: 0 }
+                    bind:
+                      active: "{{state.dock_group0_active}} == 0"
+                  - type: spacer
+                  - id: dock_group_0_chevron
+                    type: icon_button
+                    summary: "Collapse/Expand group"
+                    icon: "chevron_right"
+                    style: { size: 14 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - toggle: dock_group0_collapsed
+                    bind:
+                      icon: "{{state.dock_group0_collapsed}} == true ? chevron_left : chevron_right"
+                  - id: dock_group_0_hamburger
+                    type: dropdown
+                    summary: "Panel menu"
+                    icon: "hamburger"
+                    style: { size: 14 }
+                    items:
+                      - { label: "Close Layers", action: close_panel }
+                    bind:
+                      visible: "not {{state.dock_group0_collapsed}}"
+
+              - id: dock_group_0_body
+                type: container
+                summary: "Layers panel body"
+                layout: column
+                bind:
+                  visible: "not {{state.dock_group0_collapsed}}"
+                children:
+                  - type: placeholder
+                    summary: "Layer list"
+                    description: "Will contain the layer hierarchy tree with visibility and lock toggles"
+
+          - id: dock_group_separator
+            type: separator
+            bind:
+              visible: "not {{state.dock_collapsed}}"
+
+          # Group 1: Color, Stroke, Properties
+          - id: dock_group_1
+            type: container
+            summary: "Properties group"
+            description: "Panel group with Color, Stroke, and Properties tabs, with collapse chevron and hamburger"
+            layout: column
+            bind:
+              visible: "not {{state.dock_collapsed}}"
+            children:
+              - id: dock_group_1_header
+                type: container
+                layout: row
+                style:
+                  background: "{{theme.colors.pane_bg_dark}}"
+                  padding: "2 4"
+                  gap: 2
+                  alignment: center
+                children:
+                  - id: dock_group_1_tab_color
+                    type: button
+                    label: "Color"
+                    summary: "Color tab"
+                    style: { padding: "1 6", font_size: 11 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - set: { dock_group1_active: 0 }
+                    bind:
+                      active: "{{state.dock_group1_active}} == 0"
+                  - id: dock_group_1_tab_stroke
+                    type: button
+                    label: "Stroke"
+                    summary: "Stroke tab"
+                    style: { padding: "1 6", font_size: 11 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - set: { dock_group1_active: 1 }
+                    bind:
+                      active: "{{state.dock_group1_active}} == 1"
+                  - id: dock_group_1_tab_properties
+                    type: button
+                    label: "Properties"
+                    summary: "Properties tab"
+                    style: { padding: "1 6", font_size: 11 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - set: { dock_group1_active: 2 }
+                    bind:
+                      active: "{{state.dock_group1_active}} == 2"
+                  - type: spacer
+                  - id: dock_group_1_chevron
+                    type: icon_button
+                    summary: "Collapse/Expand group"
+                    icon: "chevron_right"
+                    style: { size: 14 }
+                    behavior:
+                      - event: click
+                        effects:
+                          - toggle: dock_group1_collapsed
+                    bind:
+                      icon: "{{state.dock_group1_collapsed}} == true ? chevron_left : chevron_right"
+                  - id: dock_group_1_hamburger
+                    type: dropdown
+                    summary: "Panel menu"
+                    icon: "hamburger"
+                    style: { size: 14 }
+                    items:
+                      - { label: "Close Color", action: close_panel }
+                      - { label: "Close Stroke", action: close_panel }
+                      - { label: "Close Properties", action: close_panel }
+                    bind:
+                      visible: "not {{state.dock_group1_collapsed}}"
+
+              - id: dock_group_1_body
+                type: container
+                summary: "Active panel body"
+                layout: column
+                style: { flex: 1 }
+                bind:
+                  visible: "not {{state.dock_group1_collapsed}}"
+                children:
+                  - id: color_panel_content
+                    type: placeholder
+                    summary: "Color picker"
+                    description: "Will contain color wheel, RGB/HSB sliders, and hex input"
+                    bind:
+                      visible: "{{state.dock_group1_active}} == 0"
+                  - id: stroke_panel_content
+                    type: placeholder
+                    summary: "Stroke properties"
+                    description: "Will contain width, cap, join, dash, and arrowhead controls"
+                    bind:
+                      visible: "{{state.dock_group1_active}} == 1"
+                  - id: properties_panel_content
+                    type: placeholder
+                    summary: "Object properties"
+                    description: "Will contain position, size, rotation, opacity, and blend mode fields"
+                    bind:
+                      visible: "{{state.dock_group1_active}} == 2"

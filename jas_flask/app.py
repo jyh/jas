@@ -6,7 +6,7 @@ import os
 from flask import Flask, render_template, request, jsonify
 
 from loader import load_workspace, find_element_by_id
-from renderer import render_element, render_menubar, render_dialogs, set_icons
+from renderer import render_element, render_menubar, render_dialogs, set_icons, set_initial_state
 
 
 def create_app(workspace: dict | None = None, workspace_path: str | None = None) -> Flask:
@@ -25,7 +25,7 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
     if _static_ws is None and workspace_path is None:
         workspace_path = os.environ.get(
             "WORKSPACE_YAML",
-            os.path.join(os.path.dirname(__file__), "..", "WORKSPACE.yaml"),
+            os.path.join(os.path.dirname(__file__), "..", "workspace"),
         )
 
     _cached_ws: dict | None = None
@@ -39,8 +39,16 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
             return _static_ws
 
         try:
-            mtime = os.path.getmtime(workspace_path)
-        except OSError:
+            if os.path.isdir(workspace_path):
+                # Use max mtime of all yaml files in the directory
+                mtime = max(
+                    os.path.getmtime(os.path.join(workspace_path, f))
+                    for f in os.listdir(workspace_path)
+                    if f.endswith((".yaml", ".yml"))
+                )
+            else:
+                mtime = os.path.getmtime(workspace_path)
+        except (OSError, ValueError):
             if _cached_ws is not None:
                 return _cached_ws
             raise
@@ -49,12 +57,14 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
             _cached_ws = load_workspace(workspace_path)
             _cached_mtime = mtime
             set_icons(_cached_ws.get("icons", {}))
+            set_initial_state(_cached_ws.get("state", {}))
 
         return _cached_ws
 
-    # Ensure icons are set on first load
+    # Ensure icons and initial state are set on first load
     ws_init = _get_ws()
     set_icons(ws_init.get("icons", {}))
+    set_initial_state(ws_init.get("state", {}))
 
     def _state_defaults(ws: dict) -> dict:
         """Extract default values from state definitions."""
@@ -131,5 +141,11 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
 
 
 if __name__ == "__main__":
+    import glob
     app = create_app()
-    app.run(debug=True, host='0.0.0.0', port=5050)
+    # Watch workspace YAML files, static JS/CSS, and templates for auto-reload
+    extra = []
+    extra += glob.glob(os.path.join(os.path.dirname(__file__), "..", "workspace", "*.yaml"))
+    extra += glob.glob(os.path.join(os.path.dirname(__file__), "static", "**", "*"), recursive=True)
+    extra += glob.glob(os.path.join(os.path.dirname(__file__), "templates", "*.html"))
+    app.run(debug=True, host='0.0.0.0', port=5051, extra_files=extra)

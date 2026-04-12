@@ -1,0 +1,87 @@
+state:
+  active_tool:
+    type: enum
+    values: [selection, direct_selection, group_selection,
+             pen, add_anchor, delete_anchor, anchor_point,
+             pencil, path_eraser, smooth,
+             type, type_on_path,
+             line, rect, rounded_rect, polygon, star, lasso]
+    default: selection
+    description: "Currently selected drawing tool"
+
+  fill_color:
+    type: color
+    default: "#ffffff"
+    nullable: true
+    description: "Active fill color (null = no fill)"
+
+  stroke_color:
+    type: color
+    default: "#000000"
+    nullable: true
+    description: "Active stroke color (null = no stroke)"
+
+  stroke_width:
+    type: number
+    default: 1.0
+    description: "Active stroke width in points"
+
+  fill_on_top:
+    type: bool
+    default: true
+    description: "Whether the fill swatch renders in front of the stroke swatch"
+
+  toolbar_visible:
+    type: bool
+    default: true
+    description: "Whether the toolbar pane is visible"
+
+  canvas_visible:
+    type: bool
+    default: true
+    description: "Whether the canvas pane is visible"
+
+  dock_visible:
+    type: bool
+    default: true
+    description: "Whether the dock panel pane is visible"
+
+  canvas_maximized:
+    type: bool
+    default: false
+    description: "Whether the canvas fills the viewport"
+
+  dock_collapsed:
+    type: bool
+    default: false
+    description: "Whether the dock is in collapsed (chevron-only) state"
+
+  active_tab:
+    type: number
+    default: -1
+    description: "Index of the active document tab (-1 = none)"
+
+  tab_count:
+    type: number
+    default: 0
+    description: "Number of open document tabs"
+
+  dock_group0_active:
+    type: number
+    default: 0
+    description: "Active panel index in dock group 0"
+
+  dock_group0_collapsed:
+    type: bool
+    default: false
+    description: "Whether dock group 0 (Layers) is collapsed"
+
+  dock_group1_active:
+    type: number
+    default: 0
+    description: "Active panel index in dock group 1"
+
+  dock_group1_collapsed:
+    type: bool
+    default: false
+    description: "Whether dock group 1 (Color/Stroke/Properties) is collapsed"

@@ -1,5 +1,6 @@
 """YAML workspace loader, interpolation resolver, and element tree utilities."""
 
+import os
 import re
 import yaml
 
@@ -11,9 +12,26 @@ _INTERP_RE = re.compile(r"\{\{(.+?)\}\}")
 
 
 def load_workspace(path: str) -> dict:
-    """Load a WORKSPACE.yaml file and validate required top-level keys."""
-    with open(path, "r") as f:
-        data = yaml.safe_load(f)
+    """Load a workspace from a YAML file or a directory of YAML files.
+
+    If path is a directory, each *.yaml file is loaded and its top-level
+    keys are merged into a single dict (filename stem is not used as a key;
+    the file's own top-level keys are merged directly).
+
+    If path is a file, it is loaded as a single YAML document.
+    """
+    if os.path.isdir(path):
+        data = {}
+        for fname in sorted(os.listdir(path)):
+            if fname.endswith(".yaml") or fname.endswith(".yml"):
+                fpath = os.path.join(path, fname)
+                with open(fpath, "r") as f:
+                    part = yaml.safe_load(f)
+                if isinstance(part, dict):
+                    data.update(part)
+    else:
+        with open(path, "r") as f:
+            data = yaml.safe_load(f)
     missing = REQUIRED_KEYS - set(data.keys())
     if missing:
         raise ValueError(f"Missing required top-level keys: {missing}")

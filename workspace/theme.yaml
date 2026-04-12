@@ -1,0 +1,38 @@
+theme:
+  colors:
+    window_bg:        "#2e2e2e"
+    pane_bg:          "#3c3c3c"
+    pane_bg_dark:     "#333333"
+    title_bar_bg:     "#2a2a2a"
+    title_bar_text:   "#d9d9d9"
+    border:           "#555555"
+    text:             "#cccccc"
+    text_dim:         "#999999"
+    text_body:        "#aaaaaa"
+    text_hint:        "#777777"
+    text_button:      "#888888"
+    tab_active:       "#4a4a4a"
+    tab_inactive:     "#353535"
+    button_checked:   "#505050"
+    accent:           "#4a90d9"
+    snap_preview:     "rgba(50,120,220,200)"
+    handle_hover:     "rgba(74,144,217,0.5)"
+
+  fonts:
+    default:  { family: "sans-serif", size: 12 }
+    title:    { family: "sans-serif", size: 11, weight: "bold" }
+    tab:      { family: "sans-serif", size: 11 }
+    small:    { family: "sans-serif", size: 10 }
+
+  sizes:
+    title_bar_height: 20
+    border_handle:    6
+    tool_button:      32
+    tool_icon:        28
+    toolbar_width:    72
+    dock_width:       240
+    dock_min_width:   150
+    dock_max_width:   500
+    dock_collapsed_width: 36
+    snap_distance:    6
+    long_press_ms:    250

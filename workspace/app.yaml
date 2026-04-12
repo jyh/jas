@@ -1,0 +1,9 @@
+version: 1
+app:
+  name: "Jas"
+  description: "Vector graphics editor with multi-language implementations"
+  window:
+    width: 1200
+    height: 900
+    min_width: 800
+    min_height: 600
