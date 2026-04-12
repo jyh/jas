@@ -39,6 +39,7 @@ public struct DockPanelView: View {
     @Binding var workspaceLayout: WorkspaceLayout
     let dockId: DockId
     let edge: DockEdge
+    let theme: Theme
 
     private var dock: Dock? { workspaceLayout.dock(dockId) }
 
@@ -52,7 +53,7 @@ public struct DockPanelView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(SwiftUI.Color(nsColor: NSColor(red: 0.235, green: 0.235, blue: 0.235, alpha: 1.0))) // #3c3c3c
+            .background(SwiftUI.Color(nsColor: theme.paneBg))
         }
     }
 
@@ -80,9 +81,9 @@ public struct DockPanelView: View {
             workspaceLayout.saveIfNeeded()
         }
         .font(.system(size: 12, weight: .bold))
-        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.6, alpha: 1.0))) // #999
+        .foregroundColor(SwiftUI.Color(nsColor: theme.textDim))
         .frame(width: 28, height: 28)
-        .background(SwiftUI.Color(nsColor: NSColor(white: 0.314, alpha: 1.0))) // #505050
+        .background(SwiftUI.Color(nsColor: theme.buttonChecked))
         .cornerRadius(3)
         .buttonStyle(.plain)
         .help(label)
@@ -95,7 +96,8 @@ public struct DockPanelView: View {
                     workspaceLayout: $workspaceLayout,
                     dockId: dockId,
                     groupIdx: gi,
-                    group: group
+                    group: group,
+                    theme: theme
                 )
             }
             Spacer()
@@ -111,6 +113,7 @@ public struct PanelGroupView: View {
     let dockId: DockId
     let groupIdx: Int
     let group: PanelGroup
+    let theme: Theme
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -119,7 +122,7 @@ public struct PanelGroupView: View {
                 // Grip handle (drag to reorder/detach group)
                 SwiftUI.Text(verbatim: "\u{2801}\u{2801}")
                     .font(.system(size: 10))
-                    .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.47, alpha: 1.0))) // #777
+                    .foregroundColor(SwiftUI.Color(nsColor: theme.textHint))
                     .padding(.horizontal, 4)
                     .onDrag {
                         NSItemProvider(object: encodeGroupDrag(GroupAddr(dockId: dockId, groupIdx: groupIdx)) as NSString)
@@ -144,9 +147,9 @@ public struct PanelGroupView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .background(SwiftUI.Color(nsColor: NSColor(white: 0.2, alpha: 1.0))) // #333
+            .background(SwiftUI.Color(nsColor: theme.paneBgDark))
             .overlay(alignment: .bottom) {
-                Rectangle().fill(SwiftUI.Color(nsColor: NSColor(white: 0.33, alpha: 1.0))).frame(height: 1) // #555
+                Rectangle().fill(SwiftUI.Color(nsColor: theme.border)).frame(height: 1)
             }
 
             // Panel body (placeholder)
@@ -154,7 +157,7 @@ public struct PanelGroupView: View {
                 if let kind = group.activePanel() {
                     SwiftUI.Text(verbatim: panelLabel(kind))
                         .font(.system(size: 12))
-                        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.67, alpha: 1.0))) // #aaa
+                        .foregroundColor(SwiftUI.Color(nsColor: theme.textBody))
                         .frame(maxWidth: .infinity, minHeight: 60, alignment: .topLeading)
                         .padding(12)
                 }
@@ -162,7 +165,7 @@ public struct PanelGroupView: View {
         }
         .frame(maxWidth: .infinity)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(SwiftUI.Color(nsColor: NSColor(white: 0.33, alpha: 1.0))).frame(height: 1) // #555
+            Rectangle().fill(SwiftUI.Color(nsColor: theme.border)).frame(height: 1)
         }
         .onDrop(of: [dockDragUTType], isTargeted: nil) { providers in
             handleDrop(providers)
@@ -199,7 +202,7 @@ public struct PanelGroupView: View {
     private func tabButton(pi: Int, kind: PanelKind) -> some View {
         let isActive = pi == group.active
         let label = panelLabel(kind)
-        let bg = isActive ? NSColor(white: 0.29, alpha: 1.0) : NSColor(white: 0.21, alpha: 1.0) // #4a4a4a / #353535
+        let bg = isActive ? theme.tabActive : theme.tabInactive
         return Button(label) {
             workspaceLayout.setActivePanel(PanelAddr(
                 group: GroupAddr(dockId: dockId, groupIdx: groupIdx),
@@ -208,7 +211,7 @@ public struct PanelGroupView: View {
             workspaceLayout.saveIfNeeded()
         }
         .font(.system(size: 11, weight: isActive ? .bold : .regular))
-        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.8, alpha: 1.0))) // #ccc
+        .foregroundColor(SwiftUI.Color(nsColor: theme.text))
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(SwiftUI.Color(nsColor: bg))
@@ -222,7 +225,7 @@ public struct PanelGroupView: View {
             workspaceLayout.saveIfNeeded()
         }
         .font(.system(size: 18))
-        .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.53, alpha: 1.0))) // #888
+        .foregroundColor(SwiftUI.Color(nsColor: theme.textButton))
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
         .buttonStyle(.plain)
@@ -273,7 +276,7 @@ public struct PanelGroupView: View {
         } label: {
             SwiftUI.Text(verbatim: "\u{2261}")
                 .font(.system(size: 18))
-                .foregroundColor(SwiftUI.Color(nsColor: NSColor(white: 0.53, alpha: 1.0))) // #888
+                .foregroundColor(SwiftUI.Color(nsColor: theme.textButton))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
         }
@@ -288,6 +291,7 @@ public struct PanelGroupView: View {
 public struct FloatingDockView: View {
     @Binding var workspaceLayout: WorkspaceLayout
     let floatingDock: FloatingDock
+    let theme: Theme
     @State private var dragOffset: CGSize = .zero
     @State private var isDragging = false
 
@@ -304,7 +308,7 @@ public struct FloatingDockView: View {
                 Spacer()
             }
             .frame(height: 20)
-            .background(SwiftUI.Color(nsColor: NSColor(white: 0.81, alpha: 1.0)))
+            .background(SwiftUI.Color(nsColor: theme.titleBarBg))
             .gesture(
                 DragGesture()
                     .onChanged { value in
@@ -331,12 +335,13 @@ public struct FloatingDockView: View {
                     workspaceLayout: $workspaceLayout,
                     dockId: fid,
                     groupIdx: gi,
-                    group: group
+                    group: group,
+                    theme: theme
                 )
             }
         }
         .frame(width: w)
-        .background(SwiftUI.Color(nsColor: NSColor(white: 0.94, alpha: 1.0)))
+        .background(SwiftUI.Color(nsColor: theme.paneBg))
         .cornerRadius(4)
         .shadow(color: .black.opacity(0.2), radius: 6, x: 2, y: 2)
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(SwiftUI.Color.gray.opacity(0.4), lineWidth: 1))

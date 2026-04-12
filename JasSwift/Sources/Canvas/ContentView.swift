@@ -118,7 +118,7 @@ public struct ContentView: View {
 
             ZStack {
                 // Background
-                SwiftUI.Color(nsColor: NSColor(white: 0.18, alpha: 1.0))
+                SwiftUI.Color(nsColor: workspace.theme.windowBg)
 
                 // Panes
                 ForEach(rs.panes) { geo in
@@ -147,7 +147,7 @@ public struct ContentView: View {
 
                 // Snap preview lines
                 ForEach(snapLines) { line in
-                    SwiftUI.Color(nsColor: snapLineColor)
+                    SwiftUI.Color(nsColor: workspace.theme.snapPreview)
                         .frame(width: line.width, height: line.height)
                         .position(x: line.x + line.width / 2, y: line.y + line.height / 2)
                         .allowsHitTesting(false)
@@ -158,7 +158,8 @@ public struct ContentView: View {
                 ForEach(Array(workspace.workspaceLayout.floating.enumerated()), id: \.offset) { _, fd in
                     FloatingDockView(
                         workspaceLayout: $workspace.workspaceLayout,
-                        floatingDock: fd
+                        floatingDock: fd,
+                        theme: workspace.theme
                     )
                 }
             }
@@ -230,7 +231,7 @@ public struct ContentView: View {
         switch geo.kind {
         case .toolbar:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: true,
-                          content: { ToolbarPanel(currentTool: $currentTool, model: workspace.activeModel, onOpenColorPicker: { forFill in
+                          content: { ToolbarPanel(currentTool: $currentTool, model: workspace.activeModel, theme: workspace.theme, onOpenColorPicker: { forFill in
                               guard let model = workspace.activeModel else { return }
                               let initial: Color = forFill
                                   ? (model.defaultFill?.color ?? .white)
@@ -259,6 +260,7 @@ public struct ContentView: View {
                             CanvasTabLabel(
                                 model: entry.model,
                                 isSelected: workspace.selectedTab == entry.id,
+                                theme: workspace.theme,
                                 onSelect: { workspace.selectedTab = entry.id },
                                 onClose: { closeCanvas(entry.id) }
                             )
@@ -266,11 +268,11 @@ public struct ContentView: View {
                     }
                 }
                 .frame(height: 28)
-                .background(SwiftUI.Color(nsColor: NSColor(white: 0.20, alpha: 1.0)))
+                .background(SwiftUI.Color(nsColor: workspace.theme.paneBgDark))
             }
 
             ZStack {
-                SwiftUI.Color(nsColor: NSColor(white: 0.50, alpha: 1.0))
+                SwiftUI.Color.white
                 ForEach(workspace.canvases) { entry in
                     if entry.id == workspace.selectedTab {
                         CanvasTab(
@@ -292,7 +294,8 @@ public struct ContentView: View {
             DockPanelView(
                 workspaceLayout: $workspace.workspaceLayout,
                 dockId: rightDock.id,
-                edge: .right
+                edge: .right,
+                theme: workspace.theme
             )
         } else {
             SwiftUI.Color.clear
@@ -371,6 +374,7 @@ public struct ContentView: View {
 struct CanvasTabLabel: View {
     @ObservedObject var model: Model
     var isSelected: Bool
+    var theme: Theme
     var onSelect: () -> Void
     var onClose: () -> Void
 
@@ -382,7 +386,7 @@ struct CanvasTabLabel: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundColor(.gray)
+                    .foregroundColor(SwiftUI.Color(nsColor: theme.textButton))
             }
             .buttonStyle(.plain)
             .frame(width: 14, height: 14)
@@ -390,9 +394,9 @@ struct CanvasTabLabel: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
         .background(isSelected
-            ? SwiftUI.Color(nsColor: NSColor(white: 0.35, alpha: 1.0))
-            : SwiftUI.Color(nsColor: NSColor(white: 0.25, alpha: 1.0)))
-        .foregroundColor(.white)
+            ? SwiftUI.Color(nsColor: theme.tabActive)
+            : SwiftUI.Color(nsColor: theme.tabInactive))
+        .foregroundColor(SwiftUI.Color(nsColor: theme.text))
         .onTapGesture { onSelect() }
     }
 }
@@ -434,6 +438,7 @@ struct CanvasTab: View {
 struct ToolbarPanel: View {
     @Binding var currentTool: Tool
     var model: Model?
+    var theme: Theme
     var onOpenColorPicker: ((Bool) -> Void)?
     @State private var arrowSlotTool: Tool = .partialSelection
     @State private var penSlotTool: Tool = .pen
@@ -486,7 +491,7 @@ struct ToolbarPanel: View {
             }
             .padding(4)
             .frame(width: toolbarWidth)
-            .background(SwiftUI.Color(nsColor: NSColor(white: 0.30, alpha: 1.0)))
+            .background(SwiftUI.Color(nsColor: theme.paneBg))
 
             // Fill/Stroke indicator
             if let model = model {
@@ -530,16 +535,16 @@ struct ToolbarPanel: View {
             Spacer()
         }
         .frame(width: toolbarWidth)
-        .background(SwiftUI.Color(nsColor: NSColor(white: 0.25, alpha: 1.0)))
+        .background(SwiftUI.Color(nsColor: theme.paneBgDark))
     }
 
     private func fillModeButton(label: String, tooltip: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             SwiftUI.Text(label)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.white)
+                .foregroundColor(SwiftUI.Color(nsColor: theme.text))
                 .frame(width: 20, height: 16)
-                .background(SwiftUI.Color(nsColor: NSColor(white: 0.35, alpha: 1.0)))
+                .background(SwiftUI.Color(nsColor: theme.buttonChecked))
                 .cornerRadius(2)
         }
         .buttonStyle(.plain)
