@@ -256,6 +256,10 @@ class Controller:
             return None
         self._select_recursive(_leaf, extend=extend)
 
+    def select_all(self) -> None:
+        """Select all unlocked, visible elements."""
+        self._select_flat(lambda _: True)
+
     def set_selection(self, selection: Selection) -> None:
         """Set the document selection directly."""
         self._model.document = replace(self._model.document, selection=selection)
