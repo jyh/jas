@@ -1394,4 +1394,529 @@
     resizeState = null;
   });
 
+  // ── dock_view model + effects engine ────────────────────────
+
+  // Runtime dock model: { dockId: { groups: [...], collapsed: bool } }
+  var dockModels = {};
+  var floatingDockCounter = 0;
+  var hiddenPanels = [];
+
+  // Initialize dock models from rendered dock_view elements
+  function initDockModels() {
+    document.querySelectorAll(".jas-dock-view").forEach(function (el) {
+      var id = el.id;
+      var groupsAttr = el.getAttribute("data-groups");
+      if (groupsAttr) {
+        try { dockModels[id] = { groups: JSON.parse(groupsAttr), collapsed: false }; } catch (ex) {}
+      }
+    });
+  }
+
+  // Re-render a dock_view from its model
+  function rerenderDockView(dockId) {
+    var el = document.getElementById(dockId);
+    var model = dockModels[dockId];
+    if (!el || !model) return;
+    // Update data attribute
+    el.setAttribute("data-groups", JSON.stringify(model.groups));
+    // Fetch fresh HTML from server would be ideal, but for now rebuild client-side
+    rebuildDockViewDOM(el, model);
+  }
+
+  function rebuildDockViewDOM(container, model) {
+    container.innerHTML = "";
+    var collapsed = state.dock_collapsed;
+    var groups = model.groups;
+
+    if (collapsed) {
+      var strip = document.createElement("div");
+      strip.className = "jas-dock-collapsed-strip";
+      strip.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0";
+      groups.forEach(function (group, gi) {
+        (group.panels || []).forEach(function (panelName, pi) {
+          var btn = document.createElement("button");
+          btn.className = "btn btn-sm jas-dock-icon p-0";
+          btn.style.cssText = "width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:#505050;border:none;color:#999";
+          btn.title = panelName.charAt(0).toUpperCase() + panelName.slice(1);
+          btn.setAttribute("data-dock", container.id);
+          btn.setAttribute("data-group", gi);
+          btn.setAttribute("data-panel", pi);
+          var iconDef = (typeof JAS_ICONS !== "undefined") ? JAS_ICONS["panel_" + panelName] : null;
+          if (iconDef) {
+            btn.innerHTML = '<svg viewBox="' + (iconDef.viewbox || "0 0 28 28") + '" width="20" height="20" fill="currentColor">' + (iconDef.svg || "") + '</svg>';
+          } else {
+            btn.textContent = panelName.charAt(0).toUpperCase();
+          }
+          btn.addEventListener("click", function () {
+            setState("dock_collapsed", false);
+            model.groups[gi].active = pi;
+            model.groups[gi].collapsed = false;
+            rerenderDockView(container.id);
+          });
+          strip.appendChild(btn);
+        });
+        if (gi < groups.length - 1) {
+          var sep = document.createElement("hr");
+          sep.style.cssText = "width:80%;border-color:#555;margin:2px 0";
+          strip.appendChild(sep);
+        }
+      });
+      container.appendChild(strip);
+      return;
+    }
+
+    // Expanded rendering
+    groups.forEach(function (group, gi) {
+      var panels = group.panels || [];
+      var active = group.active || 0;
+      var groupCollapsed = group.collapsed || false;
+
+      var groupDiv = document.createElement("div");
+      groupDiv.className = "jas-dock-group";
+      groupDiv.setAttribute("data-dock", container.id);
+      groupDiv.setAttribute("data-group-index", gi);
+
+      // Header
+      var header = document.createElement("div");
+      header.className = "jas-dock-group-header";
+      header.style.cssText = "display:flex;align-items:center;background:#333;padding:2px 4px;gap:2px";
+
+      // Grip
+      var grip = document.createElement("span");
+      grip.className = "jas-dock-grip";
+      grip.style.cssText = "cursor:grab;color:#777;font-size:10px;padding:0 2px";
+      grip.textContent = "⠁⠁";
+      grip.setAttribute("data-dock", container.id);
+      grip.setAttribute("data-group", gi);
+      header.appendChild(grip);
+
+      // Tab buttons
+      panels.forEach(function (panelName, pi) {
+        var label = panelName.charAt(0).toUpperCase() + panelName.slice(1);
+        var btn = document.createElement("button");
+        btn.className = "btn btn-sm jas-dock-tab" + (pi === active ? " active" : "");
+        btn.style.cssText = "padding:1px 6px;font-size:11px;color:#ccc;background:" + (pi === active ? "#4a4a4a" : "#353535") + ";border:none;cursor:grab";
+        btn.textContent = label;
+        btn.setAttribute("data-dock", container.id);
+        btn.setAttribute("data-group", gi);
+        btn.setAttribute("data-panel-index", pi);
+        btn.setAttribute("data-panel-name", panelName);
+        btn.addEventListener("click", function () {
+          model.groups[gi].active = pi;
+          rerenderDockView(container.id);
+        });
+        header.appendChild(btn);
+      });
+
+      // Spacer
+      var spacer = document.createElement("span");
+      spacer.style.flex = "1";
+      header.appendChild(spacer);
+
+      // Chevron
+      var chevron = document.createElement("button");
+      chevron.className = "btn btn-sm jas-dock-chevron p-0";
+      chevron.style.cssText = "color:#888;background:transparent;border:none;font-size:18px;line-height:1";
+      chevron.textContent = groupCollapsed ? "\u00bb" : "\u00ab";
+      chevron.addEventListener("click", function () {
+        model.groups[gi].collapsed = !model.groups[gi].collapsed;
+        rerenderDockView(container.id);
+      });
+      header.appendChild(chevron);
+
+      // Hamburger (visible when not collapsed)
+      if (!groupCollapsed) {
+        var hbDiv = document.createElement("div");
+        hbDiv.className = "dropdown d-inline-block";
+        var hbBtn = document.createElement("button");
+        hbBtn.className = "btn btn-sm p-0 dropdown-toggle";
+        hbBtn.setAttribute("data-bs-toggle", "dropdown");
+        hbBtn.style.cssText = "color:#888;background:transparent;border:none;font-size:14px";
+        hbBtn.textContent = "\u2261";
+        var hbMenu = document.createElement("ul");
+        hbMenu.className = "dropdown-menu";
+        panels.forEach(function (panelName) {
+          var li = document.createElement("li");
+          var a = document.createElement("a");
+          a.className = "dropdown-item";
+          a.href = "#";
+          a.textContent = "Close " + panelName.charAt(0).toUpperCase() + panelName.slice(1);
+          a.addEventListener("click", function (ev) {
+            ev.preventDefault();
+            dockClosePanel(container.id, panelName);
+          });
+          li.appendChild(a);
+          hbMenu.appendChild(li);
+        });
+        hbDiv.appendChild(hbBtn);
+        hbDiv.appendChild(hbMenu);
+        header.appendChild(hbDiv);
+      }
+
+      groupDiv.appendChild(header);
+
+      // Body
+      if (!groupCollapsed && panels.length > 0) {
+        var body = document.createElement("div");
+        body.className = "jas-dock-group-body";
+        body.style.cssText = "flex:1";
+        var activeName = panels[Math.min(active, panels.length - 1)];
+        var label = activeName.charAt(0).toUpperCase() + activeName.slice(1);
+        body.innerHTML = '<div class="jas-dock-panel-body" style="padding:12px;color:#aaa;font-size:12px" data-panel-name="' + activeName + '">' + label + '</div>';
+        groupDiv.appendChild(body);
+      }
+
+      container.appendChild(groupDiv);
+
+      // Separator
+      if (gi < groups.length - 1) {
+        var sep = document.createElement("hr");
+        sep.style.cssText = "border-color:#555;margin:0";
+        container.appendChild(sep);
+      }
+    });
+  }
+
+  // ── Dock effects ──────────────────────────────────────────
+
+  function dockClosePanel(dockId, panelName) {
+    var model = dockModels[dockId];
+    if (!model) return;
+    for (var gi = 0; gi < model.groups.length; gi++) {
+      var panels = model.groups[gi].panels;
+      var idx = panels.indexOf(panelName);
+      if (idx >= 0) {
+        panels.splice(idx, 1);
+        if (model.groups[gi].active >= panels.length) {
+          model.groups[gi].active = Math.max(0, panels.length - 1);
+        }
+        // Remove empty groups
+        if (panels.length === 0) {
+          model.groups.splice(gi, 1);
+        }
+        hiddenPanels.push(panelName);
+        rerenderDockView(dockId);
+        return;
+      }
+    }
+  }
+
+  function dockShowPanel(dockId, panelName) {
+    var model = dockModels[dockId];
+    if (!model) return;
+    // Remove from hidden list
+    var hi = hiddenPanels.indexOf(panelName);
+    if (hi >= 0) hiddenPanels.splice(hi, 1);
+    // Add to last group (or create a new group)
+    if (model.groups.length === 0) {
+      model.groups.push({ panels: [panelName], active: 0, collapsed: false });
+    } else {
+      var lastGroup = model.groups[model.groups.length - 1];
+      lastGroup.panels.push(panelName);
+      lastGroup.active = lastGroup.panels.length - 1;
+    }
+    rerenderDockView(dockId);
+  }
+
+  function dockDetachGroup(dockId, groupIdx, x, y) {
+    var model = dockModels[dockId];
+    if (!model || groupIdx >= model.groups.length) return;
+    var group = model.groups.splice(groupIdx, 1)[0];
+    rerenderDockView(dockId);
+    // Create floating dock pane
+    createFloatingDock([group], x, y);
+  }
+
+  function createFloatingDock(groups, x, y) {
+    floatingDockCounter++;
+    var floatId = "floating_dock_" + floatingDockCounter;
+    var dockViewId = floatId + "_view";
+
+    // Register dock model
+    dockModels[dockViewId] = { groups: groups, collapsed: false };
+
+    // Create pane element
+    var pane = document.createElement("div");
+    pane.id = floatId;
+    pane.className = "jas-pane";
+    pane.style.cssText = "position:absolute;left:" + x + "px;top:" + y + "px;width:220px;height:300px;" +
+      "background:#3c3c3c;border:1px solid #555;display:flex;flex-direction:column;overflow:hidden;" +
+      "box-shadow:4px 4px 12px rgba(0,0,0,0.4);z-index:200";
+
+    // Title bar
+    var title = document.createElement("div");
+    title.className = "jas-pane-title";
+    title.style.cssText = "height:20px;background:#2a2a2a;display:flex;align-items:center;padding:0 6px;cursor:grab;font-size:11px;color:#d9d9d9;user-select:none;flex-shrink:0";
+    title.innerHTML = '<span style="flex:1">Panels</span>';
+
+    // Redock on double-click
+    title.addEventListener("dblclick", function () {
+      dockRedock(dockViewId, "dock_main");
+    });
+    pane.appendChild(title);
+
+    // Content: dock_view
+    var content = document.createElement("div");
+    content.className = "jas-pane-content";
+    content.style.cssText = "flex:1;overflow:auto;display:flex;flex-direction:column";
+    var dockView = document.createElement("div");
+    dockView.id = dockViewId;
+    dockView.className = "jas-dock-view";
+    dockView.style.cssText = "display:flex;flex-direction:column;flex:1";
+    content.appendChild(dockView);
+    pane.appendChild(content);
+
+    // Edge handles
+    ["left", "right", "top", "bottom"].forEach(function (side) {
+      var handle = document.createElement("div");
+      handle.className = "jas-edge-handle " + side;
+      pane.appendChild(handle);
+    });
+
+    // Add to pane system
+    var paneSystem = document.querySelector(".jas-pane-system");
+    if (paneSystem) paneSystem.appendChild(pane);
+
+    // Render the dock view
+    rebuildDockViewDOM(dockView, dockModels[dockViewId]);
+  }
+
+  function dockRedock(sourceDockViewId, targetDockViewId) {
+    var sourceModel = dockModels[sourceDockViewId];
+    var targetModel = dockModels[targetDockViewId];
+    if (!sourceModel || !targetModel) return;
+
+    // Move all groups from source to target
+    sourceModel.groups.forEach(function (group) {
+      targetModel.groups.push(group);
+    });
+    sourceModel.groups = [];
+
+    // Remove the floating pane
+    var pane = document.getElementById(sourceDockViewId.replace("_view", ""));
+    if (pane) pane.remove();
+    delete dockModels[sourceDockViewId];
+
+    rerenderDockView(targetDockViewId);
+  }
+
+  // ── Panel/group drag-and-drop ─────────────────────────────
+
+  var panelDrag = null;
+  var dropIndicator = null;
+
+  function getOrCreateDropIndicator() {
+    if (!dropIndicator) {
+      dropIndicator = document.createElement("div");
+      dropIndicator.className = "jas-panel-drop-indicator";
+      dropIndicator.style.cssText = "position:fixed;z-index:300;pointer-events:none;background:rgba(50,120,220,0.8);display:none";
+      document.body.appendChild(dropIndicator);
+    }
+    return dropIndicator;
+  }
+
+  function showIndicator(left, top, width, height) {
+    var ind = getOrCreateDropIndicator();
+    ind.style.left = left + "px";
+    ind.style.top = top + "px";
+    ind.style.width = width + "px";
+    ind.style.height = height + "px";
+    ind.style.display = "block";
+  }
+
+  function hideIndicator() {
+    if (dropIndicator) dropIndicator.style.display = "none";
+  }
+
+  // Find the dock_view and group for a tab/grip element
+  function findDockContext(el) {
+    var dockId = el.getAttribute("data-dock");
+    var groupIdx = parseInt(el.getAttribute("data-group") || el.getAttribute("data-group-index") || "0");
+    return { dockId: dockId, groupIdx: groupIdx };
+  }
+
+  // Find drop target: which dock_view header is the cursor over?
+  function findDropTarget(clientX, clientY) {
+    var headers = document.querySelectorAll(".jas-dock-group-header");
+    for (var i = 0; i < headers.length; i++) {
+      var rect = headers[i].getBoundingClientRect();
+      if (clientX >= rect.left && clientX <= rect.right &&
+          clientY >= rect.top - 8 && clientY <= rect.bottom + 8) {
+        var group = headers[i].closest(".jas-dock-group");
+        var dockId = group ? group.getAttribute("data-dock") : null;
+        var groupIdx = group ? parseInt(group.getAttribute("data-group-index") || "0") : 0;
+        // Find tab insertion point
+        var tabs = headers[i].querySelectorAll(".jas-dock-tab");
+        var insertIdx = tabs.length;
+        for (var j = 0; j < tabs.length; j++) {
+          var tr = tabs[j].getBoundingClientRect();
+          if (clientX < tr.left + tr.width / 2) { insertIdx = j; break; }
+        }
+        return { dockId: dockId, groupIdx: groupIdx, tabIdx: insertIdx, header: headers[i] };
+      }
+    }
+    return null;
+  }
+
+  // Mousedown on tab buttons or grip handles
+  document.addEventListener("mousedown", function (e) {
+    var tab = e.target.closest(".jas-dock-tab");
+    var grip = e.target.closest(".jas-dock-grip");
+    if (!tab && !grip) return;
+    var el = tab || grip;
+    panelDrag = {
+      type: tab ? "panel" : "group",
+      el: el,
+      panelName: tab ? tab.getAttribute("data-panel-name") : null,
+      context: findDockContext(el),
+      ghost: null,
+      startX: e.clientX,
+      startY: e.clientY,
+      started: false
+    };
+  });
+
+  document.addEventListener("mousemove", function (e) {
+    if (!panelDrag) return;
+    if (!panelDrag.started && Math.abs(e.clientX - panelDrag.startX) + Math.abs(e.clientY - panelDrag.startY) < 5) return;
+
+    if (!panelDrag.started) {
+      panelDrag.started = true;
+      var ghost = panelDrag.el.cloneNode(true);
+      ghost.style.cssText = "position:fixed;z-index:400;opacity:0.7;pointer-events:none;background:#4a4a4a;color:#ccc;padding:2px 8px;font-size:11px;border:1px solid #666";
+      document.body.appendChild(ghost);
+      panelDrag.ghost = ghost;
+      panelDrag.el.style.opacity = "0.3";
+      document.body.style.cursor = "grabbing";
+    }
+
+    panelDrag.ghost.style.left = (e.clientX + 8) + "px";
+    panelDrag.ghost.style.top = (e.clientY - 10) + "px";
+
+    var target = findDropTarget(e.clientX, e.clientY);
+    if (target && target.header) {
+      var tabs = target.header.querySelectorAll(".jas-dock-tab");
+      if (target.tabIdx < tabs.length) {
+        var r = tabs[target.tabIdx].getBoundingClientRect();
+        showIndicator(r.left - 2, r.top, 3, r.height);
+      } else if (tabs.length > 0) {
+        var r = tabs[tabs.length - 1].getBoundingClientRect();
+        showIndicator(r.right + 1, r.top, 3, r.height);
+      }
+    } else {
+      hideIndicator();
+    }
+  });
+
+  document.addEventListener("mouseup", function (e) {
+    if (!panelDrag) return;
+    var pd = panelDrag;
+    panelDrag = null;
+    hideIndicator();
+    document.body.style.cursor = "";
+    if (pd.ghost) { pd.ghost.remove(); pd.el.style.opacity = ""; }
+    if (!pd.started) return;
+
+    var target = findDropTarget(e.clientX, e.clientY);
+
+    if (!target) {
+      // Dropped on empty space → create floating dock
+      if (pd.type === "panel" && pd.panelName) {
+        var srcModel = dockModels[pd.context.dockId];
+        if (srcModel) {
+          var srcGroup = srcModel.groups[pd.context.groupIdx];
+          if (srcGroup) {
+            var idx = srcGroup.panels.indexOf(pd.panelName);
+            if (idx >= 0) {
+              srcGroup.panels.splice(idx, 1);
+              if (srcGroup.active >= srcGroup.panels.length) srcGroup.active = Math.max(0, srcGroup.panels.length - 1);
+              if (srcGroup.panels.length === 0) srcModel.groups.splice(pd.context.groupIdx, 1);
+              rerenderDockView(pd.context.dockId);
+              createFloatingDock([{ panels: [pd.panelName], active: 0, collapsed: false }], e.clientX - 110, e.clientY - 10);
+            }
+          }
+        }
+      } else if (pd.type === "group") {
+        dockDetachGroup(pd.context.dockId, pd.context.groupIdx, e.clientX - 110, e.clientY - 10);
+      }
+      return;
+    }
+
+    // Dropped on a dock group
+    if (pd.type === "panel" && pd.panelName) {
+      var srcModel = dockModels[pd.context.dockId];
+      var tgtModel = dockModels[target.dockId];
+      if (!srcModel || !tgtModel) return;
+
+      // Remove from source
+      var srcGroup = srcModel.groups[pd.context.groupIdx];
+      if (srcGroup) {
+        var idx = srcGroup.panels.indexOf(pd.panelName);
+        if (idx >= 0) {
+          srcGroup.panels.splice(idx, 1);
+          if (srcGroup.active >= srcGroup.panels.length) srcGroup.active = Math.max(0, srcGroup.panels.length - 1);
+          if (srcGroup.panels.length === 0) srcModel.groups.splice(pd.context.groupIdx, 1);
+        }
+      }
+
+      // Insert into target
+      var tgtGroup = tgtModel.groups[target.groupIdx];
+      if (tgtGroup) {
+        tgtGroup.panels.splice(target.tabIdx, 0, pd.panelName);
+        tgtGroup.active = target.tabIdx;
+      }
+
+      rerenderDockView(pd.context.dockId);
+      if (target.dockId !== pd.context.dockId) rerenderDockView(target.dockId);
+    }
+  });
+
+  // ── Wire dock effects into the effects engine ─────────────
+
+  // Patch runEffect to handle dock-specific effects
+  var _origRunEffect = runEffect;
+  runEffect = function (effect, ctx) {
+    if (effect.close_panel) {
+      var panel = resolve(effect.close_panel.panel, ctx);
+      // Find which dock contains this panel
+      for (var dockId in dockModels) {
+        var m = dockModels[dockId];
+        for (var gi = 0; gi < m.groups.length; gi++) {
+          if (m.groups[gi].panels.indexOf(panel) >= 0) {
+            dockClosePanel(dockId, panel);
+            return;
+          }
+        }
+      }
+      return;
+    }
+    if (effect.show_panel) {
+      var panel = resolve(effect.show_panel.panel, ctx);
+      var target = resolve(effect.show_panel.target, ctx);
+      dockShowPanel(target, panel);
+      return;
+    }
+    if (effect.detach_group) {
+      var source = resolve(effect.detach_group.source, ctx);
+      var group = parseInt(resolve(effect.detach_group.group, ctx));
+      var x = parseFloat(resolve(effect.detach_group.x, ctx));
+      var y = parseFloat(resolve(effect.detach_group.y, ctx));
+      dockDetachGroup(source, group, x, y);
+      return;
+    }
+    if (effect.redock) {
+      var source = resolve(effect.redock.source, ctx);
+      var target = resolve(effect.redock.target, ctx);
+      dockRedock(source, target);
+      return;
+    }
+    _origRunEffect(effect, ctx);
+  };
+
+  // Initialize on DOM ready
+  var _origDOMReady = null;
+  document.addEventListener("DOMContentLoaded", function () {
+    initDockModels();
+  });
+
 })();

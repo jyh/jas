@@ -694,6 +694,113 @@ def _render_menu_items(items: list, actions: dict) -> str:
     return html
 
 
+# ── dock_view renderer ────────────────────────────────────────
+
+# Panel name -> display label
+_PANEL_LABELS = {
+    "layers": "Layers", "color": "Color",
+    "stroke": "Stroke", "properties": "Properties",
+}
+
+
+def _render_dock_view(el, theme, state):
+    """Render a dock_view element: panel groups with tab bars, bodies, and collapsed strip."""
+    eid = el.get("id", "")
+    groups = el.get("groups", [])
+    collapsed_width = el.get("collapsed_width", 36)
+    dock_collapsed = state.get("dock_collapsed", False)
+
+    html = f'<div id="{escape(eid)}" class="jas-dock-view" data-element-type="dock_view"'
+    html += f' data-collapsed-width="{collapsed_width}"'
+    html += f' data-groups=\'{escape(json.dumps(groups))}\''
+    html += ' style="display:flex;flex-direction:column;flex:1">'
+
+    if dock_collapsed:
+        # Collapsed icon strip
+        html += '<div class="jas-dock-collapsed-strip" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0">'
+        for gi, group in enumerate(groups):
+            for pi, panel_name in enumerate(group.get("panels", [])):
+                icon_name = f"panel_{panel_name}"
+                icon_def = _icons.get(icon_name, {})
+                viewbox = icon_def.get("viewbox", "0 0 28 28")
+                svg = icon_def.get("svg", "")
+                html += (
+                    f'<button class="btn btn-sm jas-dock-icon p-0" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:#505050;border:none;color:#999"'
+                    f' data-dock="{escape(eid)}" data-group="{gi}" data-panel="{pi}"'
+                    f' title="{escape(_PANEL_LABELS.get(panel_name, panel_name))}">'
+                    f'<svg viewBox="{viewbox}" width="20" height="20" fill="currentColor">{svg}</svg></button>'
+                )
+            if gi < len(groups) - 1:
+                html += '<hr style="width:80%;border-color:#555;margin:2px 0">'
+        html += '</div>'
+    else:
+        # Expanded: render each group
+        for gi, group in enumerate(groups):
+            panels = group.get("panels", [])
+            active = group.get("active", 0)
+            collapsed = group.get("collapsed", False)
+
+            html += f'<div class="jas-dock-group" data-dock="{escape(eid)}" data-group-index="{gi}">'
+
+            # Group header: grip + tab buttons + spacer + chevron + hamburger
+            html += '<div class="jas-dock-group-header" style="display:flex;align-items:center;background:#333;padding:2px 4px;gap:2px">'
+
+            # Grip handle for group drag
+            html += f'<span class="jas-dock-grip" draggable="true" style="cursor:grab;color:#777;font-size:10px;padding:0 2px" data-dock="{escape(eid)}" data-group="{gi}">⠁⠁</span>'
+
+            # Tab buttons
+            for pi, panel_name in enumerate(panels):
+                label = _PANEL_LABELS.get(panel_name, panel_name.title())
+                active_cls = " active" if pi == active else ""
+                tab_bg = "#4a4a4a" if pi == active else "#353535"
+                html += (
+                    f'<button class="btn btn-sm jas-dock-tab{active_cls}" style="padding:1px 6px;font-size:11px;color:#ccc;background:{tab_bg};border:none"'
+                    f' draggable="true" data-dock="{escape(eid)}" data-group="{gi}" data-panel-index="{pi}" data-panel-name="{escape(panel_name)}">'
+                    f'{escape(label)}</button>'
+                )
+
+            # Spacer
+            html += '<span style="flex:1"></span>'
+
+            # Collapse chevron
+            chevron = "\u00bb" if collapsed else "\u00ab"
+            html += (
+                f'<button class="btn btn-sm jas-dock-chevron p-0" style="color:#888;background:transparent;border:none;font-size:18px;line-height:1"'
+                f' data-dock="{escape(eid)}" data-group="{gi}">{chevron}</button>'
+            )
+
+            # Hamburger menu (hidden when collapsed)
+            if not collapsed:
+                html += '<div class="dropdown d-inline-block">'
+                html += '<button class="btn btn-sm p-0 dropdown-toggle" data-bs-toggle="dropdown" style="color:#888;background:transparent;border:none;font-size:14px">≡</button>'
+                html += '<ul class="dropdown-menu">'
+                for panel_name in panels:
+                    label = _PANEL_LABELS.get(panel_name, panel_name.title())
+                    html += f'<li><a class="dropdown-item" href="#" data-action="close_panel" data-action-params=\'{{"panel":"{escape(panel_name)}"}}\'>{escape("Close " + label)}</a></li>'
+                html += '</ul></div>'
+
+            html += '</div>'  # header
+
+            # Group body (hidden when collapsed)
+            if not collapsed:
+                html += '<div class="jas-dock-group-body" style="flex:1">'
+                if 0 <= active < len(panels):
+                    active_panel = panels[active]
+                    # Render panel content placeholder
+                    label = _PANEL_LABELS.get(active_panel, active_panel.title())
+                    html += f'<div class="jas-dock-panel-body" style="padding:12px;color:#aaa;font-size:12px" data-panel-name="{escape(active_panel)}">{escape(label)}</div>'
+                html += '</div>'
+
+            html += '</div>'  # group
+
+            # Separator between groups
+            if gi < len(groups) - 1:
+                html += '<hr style="border-color:#555;margin:0">'
+
+    html += '</div>'  # dock_view
+    return Markup(html)
+
+
 # ── Dispatch table ────────────────────────────────────────────
 
 _RENDERERS = {
@@ -704,6 +811,7 @@ _RENDERERS = {
     "col": _render_col,
     "grid": _render_grid,
     "tabs": _render_tabs,
+    "dock_view": _render_dock_view,
     "panel": _render_panel,
     "button": _render_button,
     "icon_button": _render_icon_button,

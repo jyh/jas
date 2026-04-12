@@ -601,29 +601,22 @@ layout:
       type: pane
       summary: "Panels"
       description: >
-        Right-side dock containing panel groups (Layers; Color/Stroke/
-        Properties). Each group has a tab bar for switching between its
-        panels, a collapse chevron to minimize the group, and a hamburger
-        menu for closing individual panels. The dock can collapse to a
-        36px icon strip showing one icon per visible panel; clicking an
-        icon expands the dock and activates that panel. The dock is
-        resizable between min_width (150px) and max_width (500px). Panels
-        can be reordered between groups via drag-and-drop (tier 2).
-        Panel visibility and group state are saved with workspace layouts.
+        Right-side anchored dock pane containing a dock_view element.
+        The dock_view renders panel groups with tab bars, collapse/expand
+        chevrons, and hamburger menus automatically from its groups list.
+        When collapsed, shows a narrow icon strip. Panel groups can be
+        dragged out to create floating dock panes, or dragged between
+        docks. The dock is resizable between 150px and 500px. Panel
+        group state is saved with workspace layouts.
       default_position: { x: 960, y: 0, width: 240, height: 900 }
       min_width: 150
       max_width: 500
       collapsed_width: 36
-      layout_state: [dock_collapsed, dock_group0_active, dock_group1_active,
-                     dock_group0_collapsed, dock_group1_collapsed,
-                     layers_visible, color_visible, stroke_visible,
-                     properties_visible]
       style:
         background: "{{theme.colors.pane_bg}}"
         border: "1px solid {{theme.colors.border}}"
       bind:
         visible: "{{state.dock_visible}}"
-        collapsed: "{{state.dock_collapsed}}"
       title_bar:
         label: "Panels"
         draggable: true
@@ -651,278 +644,26 @@ layout:
               - event: click
                 action: toggle_pane
                 params: { pane: dock }
-      tier: 2
-      behavior:
-        - event: drag_start
-          description: >
-            Drag a panel tab to reorder it within its group or move it to
-            another group. A translucent ghost of the tab follows the cursor.
-            Visual drop indicators (horizontal line between groups, highlight
-            on a group header) show where the panel will land.
-        - event: drag_move
-          description: >
-            Update the drop indicator position as the cursor moves over
-            group headers and between-group gaps.
-        - event: drag_end
-          description: >
-            Drop the panel tab. If dropped on a different group header,
-            remove the panel from its source group and append it to the
-            target group, updating the active tab indices. If dropped
-            between groups, create a new group containing just that panel.
-            If the source group is now empty, remove it.
-        - event: drop
-          description: >
-            Accept a panel tab dragged from another group. Insert it at
-            the indicated position and make it the active tab.
       content:
-        type: container
-        layout: column
-        children:
-
-          # Collapsed icon strip (visible only when dock is collapsed)
-          - id: dock_collapsed_strip
-            type: container
-            summary: "Collapsed panel icons"
-            description: >
-              Vertically stacked panel icons shown when the dock is collapsed
-              to its narrow strip. Each icon represents one panel; only icons
-              for visible panels are shown. A separator divides group 0 icons
-              from group 1 icons. Clicking any icon expands the dock to full
-              width, activates the clicked panel's tab, and un-collapses its
-              group.
-            layout: column
-            style: { alignment: center, gap: 2, padding: "4 0" }
-            bind:
-              visible: "{{state.dock_collapsed}}"
-            children:
-              # Group 0 icons
-              - id: dock_icon_layers
-                type: icon_button
-                summary: "Layers"
-                icon: "panel_layers"
-                style: { size: 28 }
-                bind:
-                  visible: "{{state.layers_visible}}"
-                behavior:
-                  - event: click
-                    effects:
-                      - dispatch: expand_dock
-                      - set: { dock_group0_active: 0, dock_group0_collapsed: false }
-              # Separator between groups
-              - { type: separator }
-              # Group 1 icons
-              - id: dock_icon_color
-                type: icon_button
-                summary: "Color"
-                icon: "panel_color"
-                style: { size: 28 }
-                bind:
-                  visible: "{{state.color_visible}}"
-                behavior:
-                  - event: click
-                    effects:
-                      - dispatch: expand_dock
-                      - set: { dock_group1_active: 0, dock_group1_collapsed: false }
-              - id: dock_icon_stroke
-                type: icon_button
-                summary: "Stroke"
-                icon: "panel_stroke"
-                style: { size: 28 }
-                bind:
-                  visible: "{{state.stroke_visible}}"
-                behavior:
-                  - event: click
-                    effects:
-                      - dispatch: expand_dock
-                      - set: { dock_group1_active: 1, dock_group1_collapsed: false }
-              - id: dock_icon_properties
-                type: icon_button
-                summary: "Properties"
-                icon: "panel_properties"
-                style: { size: 28 }
-                bind:
-                  visible: "{{state.properties_visible}}"
-                behavior:
-                  - event: click
-                    effects:
-                      - dispatch: expand_dock
-                      - set: { dock_group1_active: 2, dock_group1_collapsed: false }
-
-          # Group 0: Layers (hidden when collapsed)
-          - id: dock_group_0
-            type: container
-            summary: "Layers group"
-            description: >
-              Panel group containing the Layers panel. Has a header bar with
-              the Layers tab button, a collapse/expand chevron, and a
-              hamburger menu (with Close Layers). The group body shows the
-              layers panel content. Hidden when the dock is collapsed or
-              when layers_visible is false. The chevron toggles
-              dock_group0_collapsed, which hides the body and hamburger
-              while keeping the header visible.
-            layout: column
-            bind:
-              visible: "not {{state.dock_collapsed}} and {{state.layers_visible}}"
-            children:
-              - id: dock_group_0_header
-                type: container
-                layout: row
-                style:
-                  background: "{{theme.colors.pane_bg_dark}}"
-                  padding: "2 4"
-                  gap: 2
-                  alignment: center
-                children:
-                  - id: dock_group_0_tab_layers
-                    type: button
-                    label: "Layers"
-                    summary: "Layers tab"
-                    style: { padding: "1 6", font_size: 11 }
-                    behavior:
-                      - event: click
-                        effects:
-                          - set: { dock_group0_active: 0 }
-                    bind:
-                      active: "{{state.dock_group0_active}} == 0"
-                  - type: spacer
-                  - id: dock_group_0_chevron
-                    type: icon_button
-                    summary: "Collapse/Expand group"
-                    icon: "chevron_right"
-                    style: { size: 14 }
-                    behavior:
-                      - event: click
-                        effects:
-                          - toggle: dock_group0_collapsed
-                    bind:
-                      icon: "{{state.dock_group0_collapsed}} == true ? chevron_left : chevron_right"
-                  - id: dock_group_0_hamburger
-                    type: dropdown
-                    summary: "Panel menu"
-                    icon: "hamburger"
-                    style: { size: 14 }
-                    items:
-                      - { label: "Close Layers", action: close_panel, params: { panel: layers } }
-                    bind:
-                      visible: "not {{state.dock_group0_collapsed}}"
-
-              - id: dock_group_0_body
-                type: container
-                summary: "Layers panel body"
-                layout: column
-                bind:
-                  visible: "not {{state.dock_group0_collapsed}}"
-                children:
-                  # Content defined in workspace/panels/layers.yaml
-                  - include: "panels/layers.yaml"
-
-          - id: dock_group_separator
-            type: separator
-            bind:
-              visible: "not {{state.dock_collapsed}} and {{state.layers_visible}} and ({{state.color_visible}} or {{state.stroke_visible}} or {{state.properties_visible}})"
-
-          # Group 1: Color, Stroke, Properties
-          # Visible when dock is expanded and at least one panel is visible
-          - id: dock_group_1
-            type: container
-            summary: "Properties group"
-            description: >
-              Panel group with Color, Stroke, and Properties tabs. The
-              header bar shows one tab button per visible panel, a collapse
-              chevron, and a hamburger menu listing close options for each
-              panel. Only one panel body is visible at a time, determined by
-              dock_group1_active. Tab buttons for hidden panels are not
-              shown. The group is hidden when the dock is collapsed or when
-              all three panels are hidden. The chevron toggles
-              dock_group1_collapsed.
-            layout: column
-            bind:
-              visible: "not {{state.dock_collapsed}} and ({{state.color_visible}} or {{state.stroke_visible}} or {{state.properties_visible}})"
-            children:
-              - id: dock_group_1_header
-                type: container
-                layout: row
-                style:
-                  background: "{{theme.colors.pane_bg_dark}}"
-                  padding: "2 4"
-                  gap: 2
-                  alignment: center
-                children:
-                  - id: dock_group_1_tab_color
-                    type: button
-                    label: "Color"
-                    summary: "Color tab"
-                    style: { padding: "1 6", font_size: 11 }
-                    behavior:
-                      - event: click
-                        effects:
-                          - set: { dock_group1_active: 0 }
-                    bind:
-                      visible: "{{state.color_visible}}"
-                      active: "{{state.dock_group1_active}} == 0"
-                  - id: dock_group_1_tab_stroke
-                    type: button
-                    label: "Stroke"
-                    summary: "Stroke tab"
-                    style: { padding: "1 6", font_size: 11 }
-                    behavior:
-                      - event: click
-                        effects:
-                          - set: { dock_group1_active: 1 }
-                    bind:
-                      visible: "{{state.stroke_visible}}"
-                      active: "{{state.dock_group1_active}} == 1"
-                  - id: dock_group_1_tab_properties
-                    type: button
-                    label: "Properties"
-                    summary: "Properties tab"
-                    style: { padding: "1 6", font_size: 11 }
-                    behavior:
-                      - event: click
-                        effects:
-                          - set: { dock_group1_active: 2 }
-                    bind:
-                      visible: "{{state.properties_visible}}"
-                      active: "{{state.dock_group1_active}} == 2"
-                  - type: spacer
-                  - id: dock_group_1_chevron
-                    type: icon_button
-                    summary: "Collapse/Expand group"
-                    icon: "chevron_right"
-                    style: { size: 14 }
-                    behavior:
-                      - event: click
-                        effects:
-                          - toggle: dock_group1_collapsed
-                    bind:
-                      icon: "{{state.dock_group1_collapsed}} == true ? chevron_left : chevron_right"
-                  - id: dock_group_1_hamburger
-                    type: dropdown
-                    summary: "Panel menu"
-                    icon: "hamburger"
-                    style: { size: 14 }
-                    items:
-                      - { label: "Close Color",      action: close_panel, params: { panel: color } }
-                      - { label: "Close Stroke",     action: close_panel, params: { panel: stroke } }
-                      - { label: "Close Properties", action: close_panel, params: { panel: properties } }
-                    bind:
-                      visible: "not {{state.dock_group1_collapsed}}"
-
-              - id: dock_group_1_body
-                type: container
-                summary: "Active panel body"
-                layout: column
-                style: { flex: 1 }
-                bind:
-                  visible: "not {{state.dock_group1_collapsed}}"
-                children:
-                  # Content defined in workspace/panels/*.yaml
-                  - include: "panels/color.yaml"
-                    bind:
-                      visible: "{{state.dock_group1_active}} == 0 and {{state.color_visible}}"
-                  - include: "panels/stroke.yaml"
-                    bind:
-                      visible: "{{state.dock_group1_active}} == 1 and {{state.stroke_visible}}"
-                  - include: "panels/properties.yaml"
-                    bind:
-                      visible: "{{state.dock_group1_active}} == 2 and {{state.properties_visible}}"
+        id: dock_main
+        type: dock_view
+        summary: "Main dock"
+        description: >
+          The primary anchored dock containing all panel groups. The
+          dock_view element renders the group headers (tab bars with
+          panel tabs, collapse chevrons, hamburger menus), group bodies
+          (active panel content from workspace/panels/*.yaml), group
+          separators, and the collapsed icon strip. Panel tabs can be
+          dragged to reorder within a group, move to another group, or
+          detach to create a floating dock pane. Groups can be dragged
+          by their grip handle to reorder within the dock or detach as
+          floating dock panes. Double-clicking a floating dock's title
+          bar redocks its groups back into this dock.
+        collapsed_width: 36
+        groups:
+          - panels: [layers]
+            active: 0
+            collapsed: false
+          - panels: [color, stroke, properties]
+            active: 0
+            collapsed: false

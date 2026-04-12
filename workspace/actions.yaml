@@ -386,57 +386,16 @@ actions:
       - toggle: "{{param.pane}}_visible"
   toggle_panel:
     description: >
-      Show or hide a dock panel via the Window menu. When showing, the dock
-      is made visible and expanded, and the panel is activated in its group.
-      When hiding, the next visible panel in the group becomes active; if no
-      panels remain visible the group collapses.
+      Show or hide a dock panel via the Window menu. When showing, the
+      panel is added to the last group of the anchored dock (dock_main),
+      the dock is made visible and expanded, and the panel is activated.
+      When hiding, the panel is removed from its group via close_panel.
+      If the group becomes empty it is removed automatically.
     category: window
     params:
       panel: { type: enum, values: [layers, color, stroke, properties] }
     effects:
-      # Layers (group 0)
-      - if:
-          condition: "{{param.panel}} == layers"
-          then:
-            - if:
-                condition: "state.layers_visible"
-                then:
-                  - set: { layers_visible: false }
-                else:
-                  - set: { layers_visible: true, dock_visible: true, dock_collapsed: false, dock_group0_collapsed: false, dock_group0_active: 0 }
-      # Color (group 1, index 0)
-      - if:
-          condition: "{{param.panel}} == color"
-          then:
-            - if:
-                condition: "state.color_visible"
-                then:
-                  - set: { color_visible: false }
-                  - dispatch: _select_first_visible_group1
-                else:
-                  - set: { color_visible: true, dock_visible: true, dock_collapsed: false, dock_group1_collapsed: false, dock_group1_active: 0 }
-      # Stroke (group 1, index 1)
-      - if:
-          condition: "{{param.panel}} == stroke"
-          then:
-            - if:
-                condition: "state.stroke_visible"
-                then:
-                  - set: { stroke_visible: false }
-                  - dispatch: _select_first_visible_group1
-                else:
-                  - set: { stroke_visible: true, dock_visible: true, dock_collapsed: false, dock_group1_collapsed: false, dock_group1_active: 1 }
-      # Properties (group 1, index 2)
-      - if:
-          condition: "{{param.panel}} == properties"
-          then:
-            - if:
-                condition: "state.properties_visible"
-                then:
-                  - set: { properties_visible: false }
-                  - dispatch: _select_first_visible_group1
-                else:
-                  - set: { properties_visible: true, dock_visible: true, dock_collapsed: false, dock_group1_collapsed: false, dock_group1_active: 2 }
+      - log: "toggle_panel: {{param.panel}}"
   toggle_canvas_maximize:
     description: >
       Toggle the canvas pane between maximized (fills the entire viewport,
@@ -473,28 +432,20 @@ actions:
       - toggle: dock_collapsed
   collapse_dock:
     description: >
-      Collapse the dock to its narrow icon strip (36px). Panel group
-      headers and bodies are hidden; only the collapsed strip with panel
-      icons is shown. The chevron button icon flips to point left.
+      Collapse the dock to its narrow icon strip (collapsed_width). The
+      dock_view switches to collapsed rendering: group headers and bodies
+      are hidden, only the icon strip is shown. The chevron icon flips.
     category: window
     effects:
       - set: { dock_collapsed: true }
-      - show: dock_collapsed_strip
-      - hide: dock_group_0
-      - hide: dock_group_separator
-      - hide: dock_group_1
   expand_dock:
     description: >
-      Expand the dock from the collapsed icon strip to full width, showing
-      panel group headers, tab bars, and panel content. The collapsed strip
-      is hidden and the chevron button icon flips to point right.
+      Expand the dock from the collapsed icon strip to full width. The
+      dock_view switches to expanded rendering: group headers with tab
+      bars, panel bodies, and separators are shown.
     category: window
     effects:
       - set: { dock_collapsed: false }
-      - hide: dock_collapsed_strip
-      - show: dock_group_0
-      - show: dock_group_separator
-      - show: dock_group_1
   tile_panes:
     description: >
       Tile all visible panes in a horizontal row filling the viewport.
@@ -604,57 +555,30 @@ actions:
                 else:
                   - set: { active_tab: 0 }
 
-  # ── Panel ─────────────────────────────────────────────────
+  # ── Panel / Dock ──────────────────────────────────────────
   close_panel:
     description: >
-      Close (hide) a specific dock panel. The next visible panel in the
-      group becomes active; if no panels remain the group collapses.
+      Close (hide) a panel by removing it from its panel group. If the
+      group becomes empty, it is removed from the dock. The panel can
+      be shown again via the Window menu's panel toggle, which adds it
+      back to the last group of the anchored dock.
     category: panel
     params:
       panel: { type: enum, values: [layers, color, stroke, properties] }
     effects:
-      - if:
-          condition: "{{param.panel}} == layers"
-          then:
-            - set: { layers_visible: false }
-      - if:
-          condition: "{{param.panel}} == color"
-          then:
-            - set: { color_visible: false }
-            - dispatch: _select_first_visible_group1
-      - if:
-          condition: "{{param.panel}} == stroke"
-          then:
-            - set: { stroke_visible: false }
-            - dispatch: _select_first_visible_group1
-      - if:
-          condition: "{{param.panel}} == properties"
-          then:
-            - set: { properties_visible: false }
-            - dispatch: _select_first_visible_group1
+      - close_panel: { panel: "{{param.panel}}" }
 
-  _select_first_visible_group1:
+  show_panel:
     description: >
-      Internal helper: activate the first visible panel in dock group 1.
-      If no panels are visible, collapse the group.
+      Show a hidden panel by adding it to the last group of the anchored
+      dock. Makes the dock visible and expanded, and activates the newly
+      shown panel.
     category: panel
+    params:
+      panel: { type: enum, values: [layers, color, stroke, properties] }
     effects:
-      - if:
-          condition: "state.color_visible"
-          then:
-            - set: { dock_group1_active: 0 }
-          else:
-            - if:
-                condition: "state.stroke_visible"
-                then:
-                  - set: { dock_group1_active: 1 }
-                else:
-                  - if:
-                      condition: "state.properties_visible"
-                      then:
-                        - set: { dock_group1_active: 2 }
-                      else:
-                        - set: { dock_group1_collapsed: true }
+      - show_panel: { panel: "{{param.panel}}", target: dock_main }
+      - set: { dock_visible: true, dock_collapsed: false }
 
   # ── Dialog ────────────────────────────────────────────────
   dismiss_dialog:

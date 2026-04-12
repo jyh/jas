@@ -133,3 +133,16 @@
     border-color: var(--jas-border, #555);
     border-bottom-color: var(--jas-tab-active, #4a4a4a);
 }
+
+/* Panel drag-and-drop */
+.jas-panel-drop-indicator {
+    border-radius: 1px;
+    transition: left 0.05s, top 0.05s;
+}
+button[id^="dock_group_"][id*="_tab_"] {
+    cursor: grab;
+    user-select: none;
+}
+button[id^="dock_group_"][id*="_tab_"]:active {
+    cursor: grabbing;
+}

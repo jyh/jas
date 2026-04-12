@@ -381,6 +381,60 @@ behavior:
 - restore: { target: <element_id> }
 ```
 
+### Dock Operations
+
+```yaml
+# Detach a panel group from a dock_view, creating a new floating pane
+# containing a dock_view with that group. The new pane is positioned at
+# (x, y) and participates in the pane system (drag, resize, snap).
+- detach_group:
+    source: <dock_view_id>         # dock_view element to detach from
+    group: <integer>               # index of the group to detach
+    x: <number>                    # x position for the new floating pane
+    y: <number>                    # y position for the new floating pane
+
+# Merge all groups from a floating dock pane back into an anchored dock.
+# The groups are appended to the target dock_view. The floating pane is
+# removed from the pane system.
+- redock:
+    source: <dock_view_id>         # floating dock's dock_view
+    target: <dock_view_id>         # anchored dock's dock_view
+
+# Move a panel from its current group to a different group. If the source
+# group becomes empty, it is removed. If the target group index equals
+# the number of groups, a new group is created.
+- move_panel:
+    panel: <panel_name>            # panel to move (e.g. "color")
+    target: <dock_view_id>         # target dock_view
+    group: <integer>               # target group index
+    index: <integer>               # position within the target group
+
+# Reorder a panel within its group (swap positions).
+- reorder_panel:
+    dock: <dock_view_id>           # dock_view containing the group
+    group: <integer>               # group index
+    from: <integer>                # current panel position
+    to: <integer>                  # new panel position
+
+# Move an entire group from one dock to another.
+- move_group:
+    source: <dock_view_id>         # source dock_view
+    group: <integer>               # group index in source
+    target: <dock_view_id>         # target dock_view
+    position: <integer>            # insertion index in target
+
+# Close (hide) a panel. Removes it from its group. If the group becomes
+# empty, the group is removed. The panel can be shown again via the
+# Window menu's panel toggle.
+- close_panel:
+    panel: <panel_name>            # panel to close
+
+# Show a hidden panel. Adds it to the last group of the anchored dock.
+- show_panel:
+    panel: <panel_name>            # panel to show
+    target: <dock_view_id>         # dock_view to add it to
+```
+
 ### Dialog Control
 
 ```yaml
@@ -578,6 +632,7 @@ recommended for every element.
 |---|---|---|
 | `pane_system` | Absolute-positioned draggable pane container | — |
 | `pane` | Draggable, resizable pane | `default_position`, `title_bar`, `content`, `min_width`, `max_width`, `min_height` |
+| `dock_view` | Panel group container with tab bars and collapse | `groups`, `collapsed_width` |
 | `container` | Bootstrap container | `layout`: `column` or `row` |
 | `row` | Bootstrap row | — |
 | `col` | Bootstrap column | `col`: 1–12 or `auto` |
@@ -664,20 +719,62 @@ Each child should have a `summary` (used as the tab label).
 
 ---
 
-## `panel` — Dock Panel
+## `panel_group` — Panel Group
+
+A panel group is an ordered collection of panels displayed as a tabbed
+container. One panel is active (visible) at a time. The group can be
+collapsed to hide its body. Panel groups are the children of a `dock_view`.
 
 ```yaml
-type: panel
-panel_kind: <string>             # unique panel identifier
-menu: <list of panel_menu_item>
-content: <element>
+panel_group:
+  panels: [<panel_name>, ...]    # ordered list of panel names
+  active: <integer>              # index of the visible panel (default 0)
+  collapsed: <bool>              # whether the group body is hidden (default false)
 ```
+
+Panel names reference content defined in `workspace/panels/*.yaml`. The
+renderer builds the tab bar, collapse chevron, and hamburger menu
+automatically from the group definition.
+
+---
+
+## `dock_view` — Dock Container
+
+A `dock_view` element renders a vertical stack of panel groups with tab
+bars, collapse/expand chevrons, hamburger menus, and panel content bodies.
+It also handles the collapsed icon strip when the dock is collapsed.
+
+```yaml
+type: dock_view
+collapsed_width: <number>        # width when collapsed (default 36)
+groups:
+  - panels: [layers]
+    active: 0
+  - panels: [color, stroke, properties]
+    active: 0
+```
+
+The `dock_view` renders automatically based on its `groups` list:
+
+- **Expanded**: For each group, a header row with tab buttons (one per
+  panel), a collapse chevron, and a hamburger menu. Below the header,
+  the active panel's content (from `workspace/panels/*.yaml`). Groups
+  are separated by horizontal dividers.
+- **Collapsed**: A vertical icon strip showing one icon per panel. Click
+  an icon to expand the dock and activate that panel.
+
+Panel groups can be dragged within a dock (reorder), between docks
+(move), or to empty space (creating a floating dock pane). Individual
+panel tabs can be dragged to reorder within their group or move to a
+different group in any dock.
 
 ### `panel_menu_item`
 
+Each panel's hamburger menu contains items for closing the panel.
+
 ```yaml
 - label: <string>
-  action: <action_id>            # or inline command string
+  action: <action_id>
   type: action | toggle | radio  # default: action
   group: <string>                # for radio items
   shortcut: <string>             # optional

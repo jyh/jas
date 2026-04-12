@@ -66,45 +66,13 @@ state:
     default: 0
     description: "Number of open document tabs"
 
-  layers_visible:
-    type: bool
-    default: true
-    description: "Whether the Layers panel is shown in the dock"
-
-  color_visible:
-    type: bool
-    default: true
-    description: "Whether the Color panel is shown in the dock"
-
-  stroke_visible:
-    type: bool
-    default: true
-    description: "Whether the Stroke panel is shown in the dock"
-
-  properties_visible:
-    type: bool
-    default: true
-    description: "Whether the Properties panel is shown in the dock"
-
-  dock_group0_active:
-    type: number
-    default: 0
-    description: "Active panel index in dock group 0"
-
-  dock_group0_collapsed:
-    type: bool
-    default: false
-    description: "Whether dock group 0 (Layers) is collapsed"
-
-  dock_group1_active:
-    type: number
-    default: 0
-    description: "Active panel index in dock group 1"
-
-  dock_group1_collapsed:
-    type: bool
-    default: false
-    description: "Whether dock group 1 (Color/Stroke/Properties) is collapsed"
+  # Panel visibility and group state are now managed by the dock_view
+  # element's groups list. The following variables were removed:
+  # layers_visible, color_visible, stroke_visible, properties_visible,
+  # dock_group0_active, dock_group0_collapsed, dock_group1_active,
+  # dock_group1_collapsed
+  # These are now intrinsic to the dock model (panel_group.active,
+  # panel_group.collapsed, panel presence in any group).
 
   # ── Internal (managed by the renderer, not user-facing) ──
 
