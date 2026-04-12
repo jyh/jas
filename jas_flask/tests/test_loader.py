@@ -112,6 +112,70 @@ class TestFindElementById:
         assert result is None
 
 
+class TestLoadSubdirectories:
+    def test_load_includes_dialogs(self, workspace_path):
+        from loader import load_workspace
+        data = load_workspace(workspace_path)
+        assert "dialogs" in data
+        assert "color_picker" in data["dialogs"]
+        assert "save_changes_tab" in data["dialogs"]
+        assert "save_changes_window" in data["dialogs"]
+        assert "workspace_save_as" in data["dialogs"]
+
+    def test_load_includes_panels(self, workspace_path):
+        from loader import load_workspace
+        data = load_workspace(workspace_path)
+        assert "panels" in data
+        # Panel files are keyed by their id field
+        assert "layers_panel_content" in data["panels"]
+        assert "color_panel_content" in data["panels"]
+        assert "stroke_panel_content" in data["panels"]
+        assert "properties_panel_content" in data["panels"]
+
+    def test_load_includes_default_layouts(self, workspace_path):
+        from loader import load_workspace
+        data = load_workspace(workspace_path)
+        assert "default_layouts" in data
+        assert "Default" in data["default_layouts"]
+
+    def test_load_includes_runtime_contexts(self, workspace_path):
+        from loader import load_workspace
+        data = load_workspace(workspace_path)
+        assert "runtime_contexts" in data
+        assert "active_document" in data["runtime_contexts"]
+        assert "workspace" in data["runtime_contexts"]
+
+
+class TestResolveIncludes:
+    def test_include_replaces_node(self, workspace_path):
+        from loader import load_workspace
+        data = load_workspace(workspace_path)
+        layout = data["layout"]
+        # After include resolution, there should be no 'include' keys
+        # remaining in the layout tree
+        def _has_include(node):
+            if not isinstance(node, dict):
+                return False
+            if "include" in node:
+                return True
+            for child in node.get("children", []):
+                if _has_include(child):
+                    return True
+            content = node.get("content")
+            if isinstance(content, dict) and _has_include(content):
+                return True
+            return False
+        assert not _has_include(layout), "Layout tree still contains unresolved include directives"
+
+    def test_include_preserves_bind(self, workspace_path):
+        from loader import load_workspace, find_element_by_id
+        data = load_workspace(workspace_path)
+        # The color panel is included with a bind override
+        color_panel = find_element_by_id(data["layout"], "color_panel_content")
+        assert color_panel is not None
+        assert "bind" in color_panel or "visible" in str(color_panel.get("bind", {}))
+
+
 class TestValidateActionRefs:
     def test_all_shortcut_actions_exist(self, workspace_path):
         from loader import load_workspace

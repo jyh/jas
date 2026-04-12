@@ -260,6 +260,19 @@ pub(crate) fn make_keydown_handler(
                     }));
                 }
             }
+            // --- View shortcuts (Ctrl+=/-, Ctrl+0) ---
+            Key::Character(ref c) if (c == "=" || c == "+") && cmd => {
+                evt.prevent_default();
+                log::info!("[action] zoom_in (tier 3 stub)");
+            }
+            Key::Character(ref c) if (c == "-" || c == "_") && cmd => {
+                evt.prevent_default();
+                log::info!("[action] zoom_out (tier 3 stub)");
+            }
+            Key::Character(ref c) if c == "0" && cmd => {
+                evt.prevent_default();
+                log::info!("[action] fit_in_window (tier 3 stub)");
+            }
             // --- Tool shortcuts (bare keys, no modifier) ---
             Key::Character(ref c) if c == "v" || c == "V" => {
                 (act.borrow_mut())(Box::new(|st: &mut AppState| {

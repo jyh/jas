@@ -24,8 +24,8 @@ pub(crate) const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (3, 1, &[ToolKind::Lasso]),
 ];
 
-/// Long-press threshold in milliseconds.
-const LONG_PRESS_MS: i32 = 500;
+/// Long-press threshold in milliseconds (matches theme.sizes.long_press_ms).
+const LONG_PRESS_MS: i32 = 250;
 
 /// Icon color for toolbar alternate indicator triangles.
 const IC: &str = "rgb(204,204,204)";

@@ -90,9 +90,13 @@ def create_menus(window: QMainWindow) -> None:
 
     edit_menu.addSeparator()
 
+    delete_action = edit_menu.addAction("&Delete")
+    delete_action.setShortcut(QKeySequence.Delete)
+    delete_action.triggered.connect(lambda: _with_model(lambda m: _delete_selection(m)))
+
     select_all_action = edit_menu.addAction("Select &All")
     select_all_action.setShortcut(QKeySequence.SelectAll)
-    select_all_action.triggered.connect(lambda: print("Select all"))
+    select_all_action.triggered.connect(lambda: _with_model(lambda m: _select_all(m)))
 
     # Object menu
     object_menu = menubar.addMenu("&Object")
@@ -431,6 +435,23 @@ def _show_all(model: Model) -> None:
     controller = Controller(model=model)
     model.snapshot()
     controller.show_all()
+
+
+def _delete_selection(model: Model) -> None:
+    """Delete all selected elements."""
+    doc = model.document
+    if not doc.selection:
+        return
+    from document.document import Document
+    model.snapshot()
+    model.document = doc.delete_selection()
+
+
+def _select_all(model: Model) -> None:
+    """Select all unlocked, visible elements."""
+    from document.controller import Controller
+    controller = Controller(model=model)
+    controller.select_all()
 
 
 def _group_selection(model: Model) -> None:

@@ -27,6 +27,7 @@ from workspace.pane import (
 from workspace.workspace_test_json import (
     workspace_to_test_json, test_json_to_workspace,
     toolbar_structure_json, menu_structure_json,
+    state_defaults_json, shortcut_structure_json,
 )
 
 # Path to the shared test fixtures directory.
@@ -284,6 +285,14 @@ class CrossLanguageTest(absltest.TestCase):
     def test_menu_structure(self):
         actual = menu_structure_json()
         self._assert_workspace_fixture("menu_structure", actual)
+
+    def test_state_defaults(self):
+        actual = state_defaults_json()
+        self._assert_workspace_fixture("state_defaults", actual)
+
+    def test_shortcut_structure(self):
+        actual = shortcut_structure_json()
+        self._assert_workspace_fixture("shortcut_structure", actual)
 
     # ---------------------------------------------------------------
     # Workspace operation equivalence tests

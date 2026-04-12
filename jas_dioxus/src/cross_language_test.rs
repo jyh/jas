@@ -381,6 +381,7 @@ mod tests {
     use crate::workspace::test_json::{
         workspace_to_test_json, test_json_to_workspace,
         toolbar_structure_json, menu_structure_json,
+        state_defaults_json, shortcut_structure_json,
     };
     use crate::workspace::workspace::WorkspaceLayout;
 
@@ -693,5 +694,17 @@ mod tests {
     fn menu_structure() {
         let json = menu_structure_json();
         assert_workspace_fixture("menu_structure", &json);
+    }
+
+    #[test]
+    fn state_defaults() {
+        let json = state_defaults_json();
+        assert_workspace_fixture("state_defaults", &json);
+    }
+
+    #[test]
+    fn shortcut_structure() {
+        let json = shortcut_structure_json();
+        assert_workspace_fixture("shortcut_structure", &json);
     }
 }

@@ -16,6 +16,30 @@
   var STORAGE_KEY = "workspace_layouts";  // localStorage key for saved layouts
   var activeWorkspaceName = null;         // currently active workspace name
 
+  // ── Runtime contexts ──────────────────────────────────────
+  // active_document.* — properties of the active tab's document
+  var activeDocumentCtx = {
+    is_modified: false, has_filename: false, filename: "",
+    any_modified: false, has_selection: false, selection_count: 0,
+    can_undo: false, can_redo: false, zoom_level: 1.0
+  };
+  // workspace.* — properties of the workspace layout system
+  var workspaceCtx = { has_saved_layout: false, active_layout_name: "" };
+  // Initialize from runtime_contexts defaults if provided
+  (function () {
+    var rc = typeof JAS_RUNTIME_CONTEXTS !== "undefined" ? JAS_RUNTIME_CONTEXTS : {};
+    if (rc.active_document && rc.active_document.defaults) {
+      Object.assign(activeDocumentCtx, rc.active_document.defaults);
+    }
+    if (rc.workspace && rc.workspace.defaults) {
+      Object.assign(workspaceCtx, rc.workspace.defaults);
+    }
+  })();
+
+  // ── Dialog-local state ──────────────────────────────────���─
+  var dialogState = null;         // non-null only while a dialog with state is open
+  var dialogParams = null;        // params passed to open_dialog
+
   // ── Interpolation engine ───────────────────────────────────
 
   function resolve(template, ctx) {
@@ -34,8 +58,12 @@
     var parts = expr.split(".");
     if (parts[0] === "state") return state[parts[1]];
     if (parts[0] === "param" && ctx.params) return ctx.params[parts[1]];
+    if (parts[0] === "prop" && ctx.props) return ctx.props[parts[1]];
+    if (parts[0] === "dialog" && dialogState) return dialogState[parts[1]];
     if (parts[0] === "event" && ctx.event) return ctx.event[parts[1]];
     if (parts[0] === "self" && ctx.self) return ctx.self[parts[1]];
+    if (parts[0] === "active_document") return activeDocumentCtx[parts[1]];
+    if (parts[0] === "workspace") return workspaceCtx[parts[1]];
     if (parts[0] === "theme") {
       var themeData = typeof JAS_THEME !== "undefined" ? JAS_THEME : {};
       var obj = themeData;
@@ -292,13 +320,24 @@
       return;
     }
 
-    // create_child: { parent, element }
+    // create_child: { parent, props, element }
     if (effect.create_child) {
       var parentId = resolve(effect.create_child.parent, ctx);
       var parentEl = document.getElementById(parentId);
       if (parentEl && effect.create_child.element) {
+        // Resolve props from current state, then make them available as prop.*
+        var childCtx = Object.assign({}, ctx);
+        if (effect.create_child.props) {
+          var resolvedProps = {};
+          for (var pk in effect.create_child.props) {
+            if (effect.create_child.props.hasOwnProperty(pk)) {
+              resolvedProps[pk] = resolve(effect.create_child.props[pk], ctx);
+            }
+          }
+          childCtx.props = resolvedProps;
+        }
         var spec = effect.create_child.element;
-        var child = createElementFromSpec(spec, ctx);
+        var child = createElementFromSpec(spec, childCtx);
         parentEl.appendChild(child);
       }
       return;
@@ -464,6 +503,8 @@
         }
       }
       activeWorkspaceName = null;
+      workspaceCtx.has_saved_layout = false;
+      workspaceCtx.active_layout_name = "";
       rebuildWorkspaceMenu();
       return;
     }
@@ -472,10 +513,48 @@
     if (effect.open_dialog) {
       var dlgSpec = effect.open_dialog;
       var dlgId = typeof dlgSpec === "string" ? dlgSpec : resolve(dlgSpec.id, ctx);
+      var dlgParams = (typeof dlgSpec === "object" && dlgSpec.params) ? {} : {};
+      if (typeof dlgSpec === "object" && dlgSpec.params) {
+        for (var dpk in dlgSpec.params) {
+          if (dlgSpec.params.hasOwnProperty(dpk)) {
+            dlgParams[dpk] = resolve(dlgSpec.params[dpk], ctx);
+          }
+        }
+      }
+      dialogParams = dlgParams;
+      // Initialize dialog-local state if the dialog defines a state section
+      var dlgDef = typeof JAS_ACTIONS !== "undefined" ? null : null;
+      // Look up dialog definition in the rendered page's data
       var modalEl = document.getElementById("dialog-" + dlgId);
-      if (modalEl && typeof bootstrap !== "undefined") {
-        var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-        modal.show();
+      if (modalEl) {
+        var dlgStateDef = modalEl.getAttribute("data-dialog-state");
+        if (dlgStateDef) {
+          try {
+            var dsDef = JSON.parse(dlgStateDef);
+            dialogState = {};
+            // Phase 1: set defaults
+            for (var dsKey in dsDef) {
+              if (dsDef.hasOwnProperty(dsKey)) {
+                dialogState[dsKey] = dsDef[dsKey].default !== undefined ? dsDef[dsKey].default : null;
+              }
+            }
+            // Phase 2: run init expressions
+            var dlgInit = modalEl.getAttribute("data-dialog-init");
+            if (dlgInit) {
+              var initMap = JSON.parse(dlgInit);
+              var initCtx = { params: dlgParams };
+              for (var ik in initMap) {
+                if (initMap.hasOwnProperty(ik)) {
+                  dialogState[ik] = resolve(initMap[ik], initCtx);
+                }
+              }
+            }
+          } catch (ex) { console.warn("[open_dialog] state init error:", ex); }
+        }
+        if (typeof bootstrap !== "undefined") {
+          var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+          modal.show();
+        }
       }
       return;
     }
@@ -493,6 +572,8 @@
         var bsModal = bootstrap.Modal.getInstance(modalToClose);
         if (bsModal) bsModal.hide();
       }
+      dialogState = null;
+      dialogParams = null;
       return;
     }
 
@@ -589,6 +670,8 @@
         saved[name] = layoutData;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
         activeWorkspaceName = name;
+        workspaceCtx.has_saved_layout = true;
+        workspaceCtx.active_layout_name = name;
         rebuildWorkspaceMenu();
       }
       return;
@@ -599,8 +682,7 @@
       var name = resolve(effect.load_layout.name, ctx);
       var container = document.getElementById(resolve(effect.load_layout.container, ctx));
       if (!name || !container) return;
-      var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-      var layoutData = saved[name];
+      var layoutData = getLayoutData(name);
       if (!layoutData) { console.warn("[load_layout] not found:", name); return; }
       // Restore pane positions
       var panes = layoutData.panes || layoutData; // backwards compat
@@ -626,6 +708,8 @@
         }
       }
       activeWorkspaceName = name;
+      workspaceCtx.has_saved_layout = true;
+      workspaceCtx.active_layout_name = name;
       rebuildWorkspaceMenu();
       return;
     }
@@ -635,8 +719,7 @@
       if (!activeWorkspaceName) return;
       var container = document.getElementById(resolve(effect.revert_layout.container, ctx));
       if (!container) return;
-      var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-      var layoutData = saved[activeWorkspaceName];
+      var layoutData = getLayoutData(activeWorkspaceName);
       if (!layoutData) return;
       var panes = layoutData.panes || layoutData;
       for (var paneId in panes) {
@@ -666,7 +749,11 @@
       var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
       delete saved[name];
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
-      if (activeWorkspaceName === name) { activeWorkspaceName = null; }
+      if (activeWorkspaceName === name) {
+        activeWorkspaceName = null;
+        workspaceCtx.has_saved_layout = false;
+        workspaceCtx.active_layout_name = "";
+      }
       rebuildWorkspaceMenu();
       console.log("[delete_layout]", name);
       return;
@@ -775,23 +862,27 @@
       el.textContent = label || spec.summary || type;
     }
 
-    // Deep-resolve all {{}} in an object tree (freezes state refs at creation time)
-    function deepResolve(obj) {
-      if (typeof obj === "string") return resolve(obj, ctx);
-      if (Array.isArray(obj)) return obj.map(deepResolve);
+    // Resolve only prop.* references in an object tree (leaves state.* reactive)
+    function resolveProps(obj) {
+      if (typeof obj === "string") {
+        return obj.replace(/\{\{prop\.(\w+)\}\}/g, function (_, name) {
+          return ctx.props ? ctx.props[name] : "";
+        });
+      }
+      if (Array.isArray(obj)) return obj.map(resolveProps);
       if (obj && typeof obj === "object") {
         var out = {};
         for (var k in obj) {
-          if (obj.hasOwnProperty(k)) out[k] = deepResolve(obj[k]);
+          if (obj.hasOwnProperty(k)) out[k] = resolveProps(obj[k]);
         }
         return out;
       }
       return obj;
     }
 
-    // Apply bind attributes (resolved to freeze tab indices)
+    // Apply bind attributes — resolve prop.* only, keep state.* reactive
     if (spec.bind) {
-      var resolvedBind = deepResolve(spec.bind);
+      var resolvedBind = resolveProps(spec.bind);
       for (var prop in resolvedBind) {
         if (resolvedBind.hasOwnProperty(prop)) {
           el.setAttribute("data-bind-" + prop, resolvedBind[prop]);
@@ -799,9 +890,9 @@
       }
     }
 
-    // Wire behaviors (resolved to freeze tab indices in effects)
+    // Wire behaviors — resolve prop.* only, keep state.* reactive
     if (spec.behavior) {
-      var resolvedBehavior = deepResolve(spec.behavior);
+      var resolvedBehavior = resolveProps(spec.behavior);
       el.setAttribute("data-behaviors", JSON.stringify(resolvedBehavior));
       wireBehaviors(el);
     }
@@ -890,13 +981,16 @@
   function rebuildWorkspaceMenu() {
     var menu = document.querySelector("#menu_workspace + .dropdown-menu");
     if (!menu) return;
+    var defaults = typeof JAS_DEFAULT_LAYOUTS !== "undefined" ? JAS_DEFAULT_LAYOUTS : {};
     var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    var names = Object.keys(saved).sort();
+    // Combine default + user layouts, defaults first
+    var defaultNames = Object.keys(defaults).sort();
+    var userNames = Object.keys(saved).sort();
     // Remove any previously injected items
     menu.querySelectorAll(".jas-ws-item").forEach(function (el) { el.remove(); });
-    // Insert saved layout items at the top of the menu
     var firstItem = menu.firstElementChild;
-    names.forEach(function (name) {
+    // Insert default layouts (non-deletable)
+    defaultNames.forEach(function (name) {
       var li = document.createElement("li");
       li.className = "jas-ws-item";
       var check = (activeWorkspaceName === name) ? "\u2713 " : "    ";
@@ -909,17 +1003,46 @@
       li.appendChild(a);
       menu.insertBefore(li, firstItem);
     });
-    if (names.length > 0) {
-      var sep = document.createElement("li");
-      sep.className = "jas-ws-item";
-      sep.innerHTML = '<hr class="dropdown-divider">';
-      menu.insertBefore(sep, firstItem);
+    // Separator between defaults and user layouts
+    if (defaultNames.length > 0 && userNames.length > 0) {
+      var sep1 = document.createElement("li");
+      sep1.className = "jas-ws-item";
+      sep1.innerHTML = '<hr class="dropdown-divider">';
+      menu.insertBefore(sep1, firstItem);
+    }
+    // Insert user-saved layouts
+    userNames.forEach(function (name) {
+      var li = document.createElement("li");
+      li.className = "jas-ws-item";
+      var check = (activeWorkspaceName === name) ? "\u2713 " : "    ";
+      var a = document.createElement("a");
+      a.className = "dropdown-item";
+      a.href = "#";
+      a.textContent = check + name;
+      a.setAttribute("data-action", "switch_workspace");
+      a.setAttribute("data-action-params", JSON.stringify({name: name}));
+      li.appendChild(a);
+      menu.insertBefore(li, firstItem);
+    });
+    if (defaultNames.length + userNames.length > 0) {
+      var sep2 = document.createElement("li");
+      sep2.className = "jas-ws-item";
+      sep2.innerHTML = '<hr class="dropdown-divider">';
+      menu.insertBefore(sep2, firstItem);
     }
     // Update revert enabled state
     var revertItem = menu.querySelector("[data-action='revert_workspace']");
     if (revertItem) {
       revertItem.classList.toggle("disabled", !activeWorkspaceName);
     }
+  }
+
+  // Make default layouts available for load_layout
+  function getLayoutData(name) {
+    var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    if (saved[name]) return saved[name];
+    var defaults = typeof JAS_DEFAULT_LAYOUTS !== "undefined" ? JAS_DEFAULT_LAYOUTS : {};
+    return defaults[name] || null;
   }
 
   // ── Wire data-action attributes ────────────────────────────

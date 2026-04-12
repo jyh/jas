@@ -40,12 +40,13 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
 
         try:
             if os.path.isdir(workspace_path):
-                # Use max mtime of all yaml files in the directory
-                mtime = max(
-                    os.path.getmtime(os.path.join(workspace_path, f))
-                    for f in os.listdir(workspace_path)
-                    if f.endswith((".yaml", ".yml"))
-                )
+                # Use max mtime of all yaml files in the directory and subdirectories
+                mtimes = []
+                for dirpath, _dirnames, filenames in os.walk(workspace_path):
+                    for f in filenames:
+                        if f.endswith((".yaml", ".yml")):
+                            mtimes.append(os.path.getmtime(os.path.join(dirpath, f)))
+                mtime = max(mtimes) if mtimes else 0.0
             else:
                 mtime = os.path.getmtime(workspace_path)
         except (OSError, ValueError):
@@ -110,6 +111,8 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
         positions_json = json.dumps(_pane_configs(ws))
         icons_json = json.dumps(ws.get("icons", {}))
         theme_json = json.dumps(ws.get("theme", {}))
+        default_layouts_json = json.dumps(ws.get("default_layouts", {}))
+        runtime_contexts_json = json.dumps(ws.get("runtime_contexts", {}))
 
         template = "wireframe.html" if mode == "wireframe" else "normal.html"
         return render_template(template, ws=ws, menubar_html=menubar_html,
@@ -118,7 +121,9 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
                                shortcuts_json=shortcuts_json,
                                positions_json=positions_json,
                                icons_json=icons_json,
-                               theme_json=theme_json)
+                               theme_json=theme_json,
+                               default_layouts_json=default_layouts_json,
+                               runtime_contexts_json=runtime_contexts_json)
 
     @app.route("/api/spec/<element_id>")
     def element_spec(element_id):
@@ -146,7 +151,7 @@ if __name__ == "__main__":
     app = create_app()
     # Watch workspace YAML files, static JS/CSS, and templates for auto-reload
     extra = []
-    extra += glob.glob(os.path.join(os.path.dirname(__file__), "..", "workspace", "*.yaml"))
+    extra += glob.glob(os.path.join(os.path.dirname(__file__), "..", "workspace", "**", "*.yaml"), recursive=True)
     extra += glob.glob(os.path.join(os.path.dirname(__file__), "static", "**", "*"), recursive=True)
     extra += glob.glob(os.path.join(os.path.dirname(__file__), "templates", "*.html"))
     app.run(debug=True, host='0.0.0.0', port=5051, extra_files=extra)
