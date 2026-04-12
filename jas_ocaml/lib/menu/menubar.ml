@@ -380,6 +380,14 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   let m () = get_model () in
   (* Menubar *)
   let menubar = GMenu.menu_bar ~packing:(fun w -> vbox#pack w) () in
+  let menubar_css = new GObj.css_provider (GtkData.CssProvider.create ()) in
+  let apply_menubar_css () =
+    menubar_css#load_from_data (Printf.sprintf
+      "menubar, menubar > menuitem, menu, menu > menuitem { background-color: %s; color: %s; }"
+      !(Dock_panel.theme_bg_dark) !(Dock_panel.theme_text))
+  in
+  apply_menubar_css ();
+  menubar#misc#style_context#add_provider menubar_css 600;
   let factory = new GMenu.factory menubar in
 
   (* File menu *)
@@ -532,20 +540,26 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
      ignore (ws_factory#add_separator ())
    | _ -> ());
 
-  (* Appearance submenu *)
+  (* Appearance submenu — rebuilt on each show to update checkmarks *)
   (match app_config, refresh_dock with
    | Some config, Some refresh ->
-     let _app_menu = window_factory#add_submenu "Appearance" in
-     let app_factory = new GMenu.factory _app_menu in
-     List.iter (fun (entry : Theme.appearance_entry) ->
-       let prefix = if entry.name = config.Workspace_layout.active_appearance then "\xE2\x9C\x93 " else "    " in
-       ignore (app_factory#add_item (prefix ^ entry.label) ~callback:(fun () ->
-         config.Workspace_layout.active_appearance <- entry.name;
-         Dock_panel.set_theme entry.name;
-         Workspace_layout.save_app_config config;
-         refresh ()
-       ))
-     ) Theme.predefined_appearances
+     let app_menu = window_factory#add_submenu "Appearance" in
+     let rec rebuild_appearance_menu () =
+       List.iter (fun c -> c#destroy ()) app_menu#children;
+       let app_factory = new GMenu.factory app_menu in
+       List.iter (fun (entry : Theme.appearance_entry) ->
+         let prefix = if entry.name = config.Workspace_layout.active_appearance then "\xE2\x9C\x93 " else "    " in
+         ignore (app_factory#add_item (prefix ^ entry.label) ~callback:(fun () ->
+           config.Workspace_layout.active_appearance <- entry.name;
+           Dock_panel.set_theme entry.name;
+           Workspace_layout.save_app_config config;
+           apply_menubar_css ();
+           refresh ();
+           rebuild_appearance_menu ()
+         ))
+       ) Theme.predefined_appearances
+     in
+     rebuild_appearance_menu ()
    | _ -> ());
 
   (* Pane toggles *)

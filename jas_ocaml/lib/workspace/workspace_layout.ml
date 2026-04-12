@@ -971,13 +971,11 @@ let ensure_pane_layout l ~viewport_w ~viewport_h =
    | None ->
      l.pane_layout <- Some (Pane.default_three_pane ~viewport_w ~viewport_h);
      bump l);
-  (* Sync PaneConfig for panes deserialized from old format *)
+  (* Always sync PaneConfig to canonical values for each kind *)
   match l.pane_layout with
   | Some pl ->
     Array.iter (fun (p : Pane.pane) ->
-      let expected = Pane.config_for_kind p.kind in
-      if p.config.label <> expected.label then
-        p.config <- expected
+      p.config <- Pane.config_for_kind p.kind
     ) pl.panes
   | None -> ()
 

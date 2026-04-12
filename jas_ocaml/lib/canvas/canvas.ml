@@ -199,6 +199,14 @@ let create_main_window ~get_model ~on_open () =
      children extend beyond its allocation. *)
   let pane_container = GPack.layout ~packing:(vbox#pack ~expand:true ~fill:true) () in
   pane_container#event#add [`POINTER_MOTION; `BUTTON_RELEASE];
+  ignore (pane_container#misc#connect#draw ~callback:(fun cr ->
+    let (r, g, b) = Theme.hex_to_rgb !(Dock_panel.theme_window_bg) in
+    Cairo.set_source_rgb cr r g b;
+    Cairo.paint cr;
+    false  (* propagate to children *)
+  ));
+  let notebook_css_ref = ref (new GObj.css_provider (GtkData.CssProvider.create ())) in
+  (* container_css_ref removed — viewport bg is painted via Cairo draw callback *)
 
   (* Toolbar pane *)
   let toolbar_frame = GPack.vbox () in
@@ -212,6 +220,9 @@ let create_main_window ~get_model ~on_open () =
 
   (* Canvas pane *)
   let canvas_frame = GPack.vbox () in
+  let canvas_css = new GObj.css_provider (GtkData.CssProvider.create ()) in
+  canvas_css#load_from_data (Printf.sprintf "box { background-color: %s; }" !(Dock_panel.theme_bg));
+  canvas_frame#misc#style_context#add_provider canvas_css 600;
   let canvas_title = ref (GBin.event_box ()) in
   let notebook = GPack.notebook () in
   canvas_frame#pack !canvas_title#coerce ~expand:false;
@@ -219,6 +230,9 @@ let create_main_window ~get_model ~on_open () =
 
   (* Dock pane *)
   let dock_frame = GPack.vbox () in
+  let dock_css = new GObj.css_provider (GtkData.CssProvider.create ()) in
+  dock_css#load_from_data (Printf.sprintf "box { background-color: %s; }" !(Dock_panel.theme_bg));
+  dock_frame#misc#style_context#add_provider dock_css 600;
   let dock_title = ref (GBin.event_box ()) in
   let dock_box = GPack.vbox () in
   dock_frame#pack !dock_title#coerce ~expand:false;
@@ -248,6 +262,14 @@ let create_main_window ~get_model ~on_open () =
   let configure_guard = ref false in
   let refresh_all () =
     configure_guard := true;
+    (* Re-apply theme CSS to all pane frames, notebook, container, and queue toolbar redraw *)
+    let bg = !(Dock_panel.theme_bg) in
+    tb_border_css#load_from_data (Printf.sprintf "box { background-color: %s; }" bg);
+    canvas_css#load_from_data (Printf.sprintf "box { background-color: %s; }" bg);
+    dock_css#load_from_data (Printf.sprintf "box { background-color: %s; }" bg);
+    (!notebook_css_ref)#load_from_data (Printf.sprintf "notebook, notebook header, notebook stack { background-color: %s; }" bg);
+    pane_container#misc#queue_draw ();
+    toolbar_fixed#misc#queue_draw ();
     let geos = match Workspace_layout.panes workspace_layout with
       | None -> [] | Some pl -> Pane_rendering.pane_geometries pl
     in
@@ -506,9 +528,9 @@ let create_main_window ~get_model ~on_open () =
     false
   ));
 
-  let css = new GObj.css_provider (GtkData.CssProvider.create ()) in
-  css#load_from_data "notebook, notebook header, notebook stack { background-color: #a0a0a0; }";
-  notebook#misc#style_context#add_provider css 600;
+  let nb_css = !notebook_css_ref in
+  nb_css#load_from_data (Printf.sprintf "notebook, notebook header, notebook stack { background-color: %s; }" !(Dock_panel.theme_bg));
+  notebook#misc#style_context#add_provider nb_css 600;
 
   (* Initial layout — deferred until the window is mapped and has a
      valid size. Tile panes to fit the actual container and establish

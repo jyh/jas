@@ -821,13 +821,10 @@ public struct WorkspaceLayout: Codable {
             paneLayout = PaneLayout.defaultThreePane(viewportW: viewportW, viewportH: viewportH)
             bump()
         }
-        // Sync PaneConfig for panes deserialized from old format
+        // Always sync PaneConfig to canonical values for each kind
         if paneLayout != nil {
             for i in paneLayout!.panes.indices {
-                let expected = PaneConfig.forKind(paneLayout!.panes[i].kind)
-                if paneLayout!.panes[i].config.label != expected.label {
-                    paneLayout!.panes[i].config = expected
-                }
+                paneLayout!.panes[i].config = PaneConfig.forKind(paneLayout!.panes[i].kind)
             }
         }
     }

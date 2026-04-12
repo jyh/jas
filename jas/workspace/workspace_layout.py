@@ -795,13 +795,11 @@ class WorkspaceLayout:
             from workspace.pane import PaneLayout
             self.pane_layout = PaneLayout.default_three_pane(viewport_w, viewport_h)
             self._bump()
-        # Sync PaneConfig for panes deserialized from old format
+        # Always sync PaneConfig to canonical values for each kind
         if self.pane_layout is not None:
             from workspace.pane import PaneConfig
             for p in self.pane_layout.panes:
-                expected = PaneConfig.for_kind(p.kind)
-                if p.config.label != expected.label:
-                    p.config = expected
+                p.config = PaneConfig.for_kind(p.kind)
 
     def panes(self):
         return self.pane_layout
