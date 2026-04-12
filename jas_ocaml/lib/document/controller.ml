@@ -155,6 +155,9 @@ class controller ?(model = Model.create ()) () =
       let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
       model#set_document { doc with Document.selection = new_sel }
 
+    method select_all =
+      self#select_flat (fun _ -> true) false
+
     method select_rect ?(extend=false) x y w h =
       self#select_flat (fun elem -> element_intersects_rect elem x y w h) extend
 

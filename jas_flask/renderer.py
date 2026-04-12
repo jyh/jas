@@ -63,8 +63,16 @@ def render_dialogs(dialogs: dict, theme: dict, state: dict) -> str:
     for dialog_id, dialog in (dialogs or {}).items():
         summary = escape(dialog.get("summary", dialog_id))
         body_html = render_element(dialog.get("content", {}), theme, state, mode="normal")
+        # Emit dialog-local state and init as data attributes for JS
+        data_attrs = ""
+        if "state" in dialog:
+            import json
+            data_attrs += f' data-dialog-state="{escape(json.dumps(dialog["state"]))}"'
+        if "init" in dialog:
+            import json
+            data_attrs += f' data-dialog-init="{escape(json.dumps(dialog["init"]))}"'
         html += (
-            f'<div class="modal fade" id="dialog-{dialog_id}" tabindex="-1">'
+            f'<div class="modal fade" id="dialog-{dialog_id}" tabindex="-1"{data_attrs}>'
             f'<div class="modal-dialog"><div class="modal-content">'
             f'<div class="modal-header"><h5 class="modal-title">{summary}</h5>'
             f'<button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>'

@@ -353,6 +353,130 @@ def menu_structure_json() -> str:
 
 
 # ------------------------------------------------------------------ #
+# State defaults (from workspace YAML state.yaml)                     #
+# ------------------------------------------------------------------ #
+
+# Canonical state variable defaults — must match workspace/state.yaml.
+# Only user-facing state; internal _-prefixed variables are excluded.
+STATE_DEFAULTS = [
+    ("active_tab", "number", -1),
+    ("active_tool", "enum", "selection"),
+    ("canvas_maximized", "bool", False),
+    ("canvas_visible", "bool", True),
+    ("color_visible", "bool", True),
+    ("dock_collapsed", "bool", False),
+    ("dock_group0_active", "number", 0),
+    ("dock_group0_collapsed", "bool", False),
+    ("dock_group1_active", "number", 0),
+    ("dock_group1_collapsed", "bool", False),
+    ("dock_visible", "bool", True),
+    ("fill_color", "color", "#ffffff"),
+    ("fill_on_top", "bool", True),
+    ("layers_visible", "bool", True),
+    ("properties_visible", "bool", True),
+    ("stroke_color", "color", "#000000"),
+    ("stroke_visible", "bool", True),
+    ("stroke_width", "number", 1.0),
+    ("tab_count", "number", 0),
+    ("toolbar_visible", "bool", True),
+]
+
+
+def state_defaults_json() -> str:
+    """Return canonical JSON for all user-facing state variable defaults."""
+    var_jsons = []
+    for name, stype, default in STATE_DEFAULTS:
+        o = _JsonObj()
+        if isinstance(default, bool):
+            o.bool_("default", default)
+        elif isinstance(default, (int, float)) and not isinstance(default, bool):
+            if isinstance(default, int) or default == int(default):
+                o.int_("default", int(default))
+            else:
+                o.num("default", default)
+        elif default is None:
+            o.null("default")
+        else:
+            o.str("default", str(default))
+        o.str("name", name)
+        o.str("type", stype)
+        var_jsons.append(o.build())
+
+    o = _JsonObj()
+    o.int_("count", len(STATE_DEFAULTS))
+    o.raw("variables", _json_array(var_jsons))
+    return o.build()
+
+
+# ------------------------------------------------------------------ #
+# Shortcut structure (from workspace YAML shortcuts.yaml)             #
+# ------------------------------------------------------------------ #
+
+# Canonical shortcuts — must match workspace/shortcuts.yaml.
+SHORTCUTS = [
+    ("Ctrl+N", "new_document", None),
+    ("Ctrl+O", "open_file", None),
+    ("Ctrl+S", "save", None),
+    ("Ctrl+Shift+S", "save_as", None),
+    ("Ctrl+Q", "quit", None),
+    ("Ctrl+Z", "undo", None),
+    ("Ctrl+Shift+Z", "redo", None),
+    ("Ctrl+X", "cut", None),
+    ("Ctrl+C", "copy", None),
+    ("Ctrl+V", "paste", None),
+    ("Ctrl+Shift+V", "paste_in_place", None),
+    ("Ctrl+A", "select_all", None),
+    ("Delete", "delete_selection", None),
+    ("Backspace", "delete_selection", None),
+    ("Ctrl+G", "group", None),
+    ("Ctrl+Shift+G", "ungroup", None),
+    ("Ctrl+2", "lock", None),
+    ("Ctrl+Alt+2", "unlock_all", None),
+    ("Ctrl+3", "hide_selection", None),
+    ("Ctrl+Alt+3", "show_all", None),
+    ("Ctrl+=", "zoom_in", None),
+    ("Ctrl+-", "zoom_out", None),
+    ("Ctrl+0", "fit_in_window", None),
+    ("V", "select_tool", {"tool": "selection"}),
+    ("A", "select_tool", {"tool": "direct_selection"}),
+    ("P", "select_tool", {"tool": "pen"}),
+    ("=", "select_tool", {"tool": "add_anchor"}),
+    ("-", "select_tool", {"tool": "delete_anchor"}),
+    ("T", "select_tool", {"tool": "type"}),
+    ("\\", "select_tool", {"tool": "line"}),
+    ("M", "select_tool", {"tool": "rect"}),
+    ("N", "select_tool", {"tool": "pencil"}),
+    ("Shift+E", "select_tool", {"tool": "path_eraser"}),
+    ("Q", "select_tool", {"tool": "lasso"}),
+    ("D", "reset_fill_stroke", None),
+    ("X", "toggle_fill_on_top", None),
+    ("Shift+X", "swap_fill_stroke", None),
+]
+
+
+def shortcut_structure_json() -> str:
+    """Return canonical JSON for all keyboard shortcuts."""
+    shortcut_jsons = []
+    for key, action, params in SHORTCUTS:
+        o = _JsonObj()
+        o.str("action", action)
+        o.str("key", key)
+        if params:
+            po = _JsonObj()
+            for pk in sorted(params.keys()):
+                po.str(pk, params[pk])
+            o.raw("params", po.build())
+        else:
+            o.null("params")
+        shortcut_jsons.append(o.build())
+
+    o = _JsonObj()
+    o.int_("count", len(SHORTCUTS))
+    o.raw("shortcuts", _json_array(shortcut_jsons))
+    return o.build()
+
+
+# ------------------------------------------------------------------ #
 # Public API: workspace -> test JSON                                  #
 # ------------------------------------------------------------------ #
 

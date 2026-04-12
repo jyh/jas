@@ -90,6 +90,8 @@ let () =
       toolbar#select_tool Jas.Toolbar.Rect; true
     end else if key = GdkKeysyms._q || key = GdkKeysyms._Q then begin
       toolbar#select_tool Jas.Toolbar.Lasso; true
+    end else if key = GdkKeysyms._n then begin
+      toolbar#select_tool Jas.Toolbar.Pencil; true
     end else if key = GdkKeysyms._E then begin
       toolbar#select_tool Jas.Toolbar.Path_eraser; true
     end else if key = GdkKeysyms._Escape

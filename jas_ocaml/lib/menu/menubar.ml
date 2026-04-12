@@ -397,14 +397,16 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   let _edit_menu = factory#add_submenu "Edit" in
   let edit_factory = new GMenu.factory _edit_menu in
   ignore (edit_factory#add_item "Undo" ~key:GdkKeysyms._z ~callback:(fun () -> (m ())#undo));
-  ignore (edit_factory#add_item "Redo" ~key:GdkKeysyms._y ~callback:(fun () -> (m ())#redo));
+  ignore (edit_factory#add_item "Redo" ~callback:(fun () -> (m ())#redo));
   ignore (edit_factory#add_separator ());
   ignore (edit_factory#add_item "Cut" ~key:GdkKeysyms._x ~callback:(fun () -> cut_selection (m ()) ()));
   ignore (edit_factory#add_item "Copy" ~key:GdkKeysyms._c ~callback:(fun () -> copy_selection (m ()) ()));
   ignore (edit_factory#add_item "Paste" ~key:GdkKeysyms._v ~callback:(fun () -> paste_clipboard (m ()) Canvas_tool.paste_offset ()));
   ignore (edit_factory#add_item "Paste in Place" ~callback:(fun () -> paste_clipboard (m ()) 0.0 ()));
   ignore (edit_factory#add_separator ());
-  ignore (edit_factory#add_item "Select All" ~key:GdkKeysyms._a ~callback:(fun () -> print_endline "Select All"));
+  ignore (edit_factory#add_item "Select All" ~key:GdkKeysyms._a ~callback:(fun () ->
+    let model = m () in
+    (new Controller.controller ~model ())#select_all));
 
   (* Object menu *)
   let _object_menu = factory#add_submenu "Object" in
