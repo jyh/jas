@@ -147,17 +147,20 @@ public enum DropTarget: Equatable {
 public struct AppConfig: Codable {
     public var activeLayout: String
     public var savedLayouts: [String]
+    public var activeAppearance: String
 
     public static let storageKey = "jas_app_config"
 
     public init() {
         self.activeLayout = defaultLayoutName
         self.savedLayouts = [defaultLayoutName]
+        self.activeAppearance = defaultAppearanceName
     }
 
-    public init(activeLayout: String, savedLayouts: [String]) {
+    public init(activeLayout: String, savedLayouts: [String], activeAppearance: String = defaultAppearanceName) {
         self.activeLayout = activeLayout
         self.savedLayouts = savedLayouts
+        self.activeAppearance = activeAppearance
     }
 
     public func toJson() -> String? {

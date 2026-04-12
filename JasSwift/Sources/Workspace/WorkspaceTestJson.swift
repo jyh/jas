@@ -300,6 +300,7 @@ public let menuBar: [(String, [MenuItem])] = [
     ]),
     ("Window", [
         ("Workspace \u{25B6}", "workspace_submenu", ""),
+        ("Appearance \u{25B6}", "appearance_submenu", ""),
         ("---", "", ""),
         ("Tile", "tile_panes", ""),
         ("---", "", ""),

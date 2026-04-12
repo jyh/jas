@@ -39,11 +39,19 @@ public class WorkspaceState: ObservableObject {
     @Published public var selectedTab: UUID?
     @Published public var workspaceLayout: WorkspaceLayout
     @Published public var appConfig: AppConfig
+    @Published public var theme: Theme
 
     public init() {
         let config = AppConfig.load()
         self.appConfig = config
         self.workspaceLayout = WorkspaceLayout.loadOrMigrateWorkspace(config: config)
+        self.theme = resolveAppearance(config.activeAppearance)
+    }
+
+    public func switchAppearance(_ name: String) {
+        theme = resolveAppearance(name)
+        appConfig.activeAppearance = name
+        appConfig.save()
     }
 
     public func switchLayout(_ name: String) {

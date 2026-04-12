@@ -276,6 +276,16 @@ public struct JasCommands: Commands {
                     .disabled(ws.appConfig.activeLayout == workspaceLayoutName)
                 }
 
+                Menu("Appearance \u{25B6}") {
+                    ForEach(predefinedAppearances, id: \.name) { entry in
+                        let isActive = entry.name == ws.appConfig.activeAppearance
+                        let prefix = isActive ? "\u{2713} " : "    "
+                        Button(prefix + entry.label) {
+                            ws.switchAppearance(entry.name)
+                        }
+                    }
+                }
+
                 Divider()
             }
 
