@@ -532,6 +532,22 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
      ignore (ws_factory#add_separator ())
    | _ -> ());
 
+  (* Appearance submenu *)
+  (match app_config, refresh_dock with
+   | Some config, Some refresh ->
+     let _app_menu = window_factory#add_submenu "Appearance" in
+     let app_factory = new GMenu.factory _app_menu in
+     List.iter (fun (entry : Theme.appearance_entry) ->
+       let prefix = if entry.name = config.Workspace_layout.active_appearance then "\xE2\x9C\x93 " else "    " in
+       ignore (app_factory#add_item (prefix ^ entry.label) ~callback:(fun () ->
+         config.Workspace_layout.active_appearance <- entry.name;
+         Dock_panel.set_theme entry.name;
+         Workspace_layout.save_app_config config;
+         refresh ()
+       ))
+     ) Theme.predefined_appearances
+   | _ -> ());
+
   (* Pane toggles *)
   (match workspace_layout, refresh_dock with
    | Some layout, Some refresh ->
