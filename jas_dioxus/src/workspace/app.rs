@@ -700,9 +700,7 @@ pub fn App() -> Element {
                         let coords = evt.data().page_coordinates();
                         pane_drag.set(Some((toolbar_pane_id, coords.x - tx, coords.y - ty)));
                     },
-                    { let lbl = toolbar_config.label.clone(); rsx! {
-                        div { style: "flex:1; font-size:10px; color:{THEME_TEXT_DIM}; overflow:hidden; white-space:nowrap;", "{lbl}" }
-                    }}
+                    div { style: "flex:1;" }
                     {
                         let act = act.clone();
                         rsx! {
@@ -785,9 +783,7 @@ pub fn App() -> Element {
                                 }));
                             }
                         },
-                        { let lbl = canvas_config.label.clone(); rsx! {
-                            div { style: "flex:1; font-size:10px; color:{THEME_TEXT}; overflow:hidden; white-space:nowrap;", "{lbl}" }
-                        }}
+                        div { style: "flex:1;" }
                     }
                 }
 
@@ -878,9 +874,7 @@ pub fn App() -> Element {
                         let coords = evt.data().page_coordinates();
                         pane_drag.set(Some((dock_pane_id, coords.x - dx, coords.y - dy)));
                     },
-                    { let lbl = dock_config.label.clone(); rsx! {
-                        div { style: "flex:1; font-size:10px; color:{THEME_TEXT_DIM}; overflow:hidden; white-space:nowrap;", "{lbl}" }
-                    }}
+                    div { style: "flex:1;" }
                     // Collapse chevron (if collapsed_width is set)
                     if dock_config.collapsed_width.is_some() {
                         {
