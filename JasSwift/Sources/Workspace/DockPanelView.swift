@@ -40,6 +40,7 @@ public struct DockPanelView: View {
     let dockId: DockId
     let edge: DockEdge
     let theme: Theme
+    var model: Model?
 
     private var dock: Dock? { workspaceLayout.dock(dockId) }
 
@@ -97,7 +98,8 @@ public struct DockPanelView: View {
                     dockId: dockId,
                     groupIdx: gi,
                     group: group,
-                    theme: theme
+                    theme: theme,
+                    model: model
                 )
             }
             Spacer()
@@ -114,6 +116,7 @@ public struct PanelGroupView: View {
     let groupIdx: Int
     let group: PanelGroup
     let theme: Theme
+    var model: Model?
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -152,14 +155,22 @@ public struct PanelGroupView: View {
                 Rectangle().fill(SwiftUI.Color(nsColor: theme.border)).frame(height: 1)
             }
 
-            // Panel body (placeholder)
+            // Panel body
             if !group.collapsed {
                 if let kind = group.activePanel() {
-                    SwiftUI.Text(verbatim: panelLabel(kind))
-                        .font(.system(size: 12))
-                        .foregroundColor(SwiftUI.Color(nsColor: theme.textBody))
-                        .frame(maxWidth: .infinity, minHeight: 60, alignment: .topLeading)
-                        .padding(12)
+                    if kind == .color, let model = model {
+                        ColorPanelView(
+                            workspaceLayout: $workspaceLayout,
+                            model: model,
+                            theme: theme
+                        )
+                    } else {
+                        SwiftUI.Text(verbatim: panelLabel(kind))
+                            .font(.system(size: 12))
+                            .foregroundColor(SwiftUI.Color(nsColor: theme.textBody))
+                            .frame(maxWidth: .infinity, minHeight: 60, alignment: .topLeading)
+                            .padding(12)
+                    }
                 }
             }
         }
@@ -242,13 +253,13 @@ public struct PanelGroupView: View {
                 switch item {
                 case .action(let label, let command, _):
                     Button(label) {
-                        panelDispatch(activeKind, cmd: command, addr: addr, layout: &workspaceLayout)
+                        panelDispatch(activeKind, cmd: command, addr: addr, layout: &workspaceLayout, model: model)
                         workspaceLayout.saveIfNeeded()
                     }
                 case .toggle(let label, let command):
                     let checked = panelIsChecked(activeKind, cmd: command, layout: workspaceLayout)
                     Button {
-                        panelDispatch(activeKind, cmd: command, addr: addr, layout: &workspaceLayout)
+                        panelDispatch(activeKind, cmd: command, addr: addr, layout: &workspaceLayout, model: model)
                         workspaceLayout.saveIfNeeded()
                     } label: {
                         if checked {
@@ -260,7 +271,7 @@ public struct PanelGroupView: View {
                 case .radio(let label, let command, _):
                     let selected = panelIsChecked(activeKind, cmd: command, layout: workspaceLayout)
                     Button {
-                        panelDispatch(activeKind, cmd: command, addr: addr, layout: &workspaceLayout)
+                        panelDispatch(activeKind, cmd: command, addr: addr, layout: &workspaceLayout, model: model)
                         workspaceLayout.saveIfNeeded()
                     } label: {
                         if selected {
@@ -292,6 +303,7 @@ public struct FloatingDockView: View {
     @Binding var workspaceLayout: WorkspaceLayout
     let floatingDock: FloatingDock
     let theme: Theme
+    var model: Model?
     @State private var dragOffset: CGSize = .zero
     @State private var isDragging = false
 
@@ -336,7 +348,8 @@ public struct FloatingDockView: View {
                     dockId: fid,
                     groupIdx: gi,
                     group: group,
-                    theme: theme
+                    theme: theme,
+                    model: model
                 )
             }
         }
