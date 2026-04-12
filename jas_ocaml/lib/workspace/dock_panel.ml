@@ -14,6 +14,7 @@ type drag_state =
   | Dragging_panel of panel_addr
 
 (* Theme colors — mutable refs resolved from the active appearance *)
+let theme_window_bg = ref "#2e2e2e"
 let theme_bg = ref "#3c3c3c"
 let theme_bg_dark = ref "#333333"
 let theme_bg_tab = ref "#4a4a4a"
@@ -27,6 +28,7 @@ let theme_text_button = ref "#888888"
 
 let set_theme name =
   let t = Theme.resolve name in
+  theme_window_bg := t.window_bg;
   theme_bg := t.pane_bg;
   theme_bg_dark := t.pane_bg_dark;
   theme_bg_tab := t.tab_active;

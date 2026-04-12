@@ -979,14 +979,10 @@ impl WorkspaceLayout {
             self.pane_layout = Some(PaneLayout::default_three_pane(viewport_w, viewport_h));
             self.bump();
         }
-        // Ensure each pane's config matches its kind (fixes layouts
-        // deserialized from old JSON without config fields).
+        // Always sync PaneConfig to canonical values for each kind.
         if let Some(ref mut pl) = self.pane_layout {
             for p in &mut pl.panes {
-                let expected = PaneConfig::for_kind(p.kind);
-                if p.config.label != expected.label {
-                    p.config = expected;
-                }
+                p.config = PaneConfig::for_kind(p.kind);
             }
         }
     }
