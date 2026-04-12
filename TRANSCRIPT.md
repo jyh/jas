@@ -1157,9 +1157,18 @@ Let's move the theme of the UI into CSS. This should include attributes like:
 - highlights
 - icon sizes
 - fonts
-- anything else that make sense
+- anything else that significantly affects the appearance
 
-Each app should use this common CSS to stylize the workspace.
+Each app should use this common CSS to stylize the appearance of the workspace.
+
+Add an Appearance submenu to the Windows menu that allows the loading of any of
+several predefined appearances (for example, Dark Gray, Medium Gray, Light
+Gray). Themes are meant to be extensible. These three appearances are starting
+points, but the user may add more. For simplicity, the user may want to just
+specify overrides, but when we save an appearance it should be fully
+self-contained.
+
+Save the current appearance as part of the workspace layout.
 
 Please read and understand these requirements. Analyze them for inconsistencies
 and completeness. Make suggestions for improvements, ranking them in priority
@@ -1172,8 +1181,8 @@ We want to brand the UI, so that our brand is obvious at all times. I propose we
 design a logo and add it in the following places:
 - the favicon
 - at the left of the titlebar in Pane elements
-- within each dialogue box
-- within the body of each panel
+- within each dialogue box (preferring top right)
+- within the body of each panel (preferring top right)
 - within the menu bar at an industry standard place (at the left if possible)
 
 For now, let's make the logo a symbol of a trumpet (representing "Jas" aka "Jazz").
@@ -1185,56 +1194,42 @@ the suggestions.
 
 # Color panel
 
-Let's implement the Color Panel. An image is shown in examples/color-panel-menu.png.
+Let's implement the Color Panel. An image is shown in examples/color-panel.png.
 The Color Panel shows the current color, fill or stroke, depending on which is active.
 
-At the top of the color panel are a set of color swatches that represent recent
-colors that have been clicked. Clicking on one of these swatches set the current
+At the top of the panel there are 3 color swatched, none/black/white
+swatches. Clicking on any of these sets the current color to none/black/white.
+
+To the right of that, filling the rest of the panel, there is a list of swatches that
+represent recent colors.
+
+Clicking on any of the swatches sets the current
 color for the active attribute, fill or stroke, and set the color of the current
 selection, if there is one.
 
-Below Recent Colors, on the left is the usual fill/stroke squares, with the
-same behavior as in the Fill and Stroke Tool.
+In the next row, on the left is the usual fill/stroke squares, with the same
+behavior as in the Fill and Stroke Tool.
 
-The Color Panel has a color mode Grayscale/RGB/HSB/CMYK/Web Safe RGB, as show in
-the menu. The panel displays the following sliders, depending on the mode:
+To the right of the fill/stroke widget, are sliders that allow setting the
+current color. The panel has a color mode (Grayscale, RGB, HSB, CMYK, Web Safe RGB).
+
 - Grayscale: display one slider for K
 - HSB: display HSB with 3 sliders
 - RGB: display RGB with 3 sliders
 - CMYK: display CMYK with 4 sliders
-- Web Safe RGB: display RGB sliders, but lock values to hex 00, 33, 66, 99, CC,
-  and FF.
-
-These are the ranges of the values:
-- Hue: 0 to 359 degrees.
-- Saturation: 0 to 100%
-- Brightness: 0 to 100%
-- Red: 0 to 255
-- Green: 0 to 255
-- Blue: 0 to 255
-- C: 0 to 100%
-- M: 0 to 100%
-- Y: 0 to 100%
-- K: 0 to 100%
-- hex: rgb-6 (there is no alpha). The "#" symbol should be displayed, but it
-  is not part of the text field.
-
-Below the sliders are none/black/white swatches. Clicking on any of these sets
-the current color to none/black/white.
-
-The hex field shows the current color in rgb-6.
+- Web Safe RGB: display RGB sliders, but lock component values to hex 00, 33,
+  66, 99, CC, and FF.
+  
+Below the fill/stroke widget is an entry for hex color in hex-6.
 
 At the bottom is a colorbar with height 64px. It shows a color gradient at the
 current brightness: hue varies along the x-axis, and saturation along the
 y-axis.  The current color can be changed by selected from this colorbar.
 
-The Color panel menu allows selecting the 5 modes Grayscale/RGB/HSB/CMYK/Web
-Safe RGB. The "Invert" item, flips the color components of the current color in
-RGB space. The "Complement" item rotates Hue by 180 degrees. The "Show Recent
-Items" toggles the display of the Recent Colors. "Create New Swatch..." is
-unimplemented for now, it should be disabled. So the menu items are:
+The panel menu has the following entries. The first 5 specify the color mode,
+with a checkmark next to the current mode.
 
-- Grayscape # color mode (there is a checkmark next to the current mode, defaults to RGB)
+- Grayscale
 - RGB
 - HSB
 - CMYK
@@ -1242,8 +1237,6 @@ unimplemented for now, it should be disabled. So the menu items are:
 - ----
 - Invert # current color becomes (255 - red, 255 - green, 255 - blue), color mode is unchanged
 - Complement # current color becomes (hue + 180, saturation, brightness), color mode is unchanged
-- ----
-- Show Recent Colors # toggled, has a checkmark if the Recent Colors are displayed
 - ----
 - Create New Swatch... # disabled
 
