@@ -245,11 +245,6 @@ struct PaneFrameView<Content: View>: View {
 
     private var titleBar: some View {
         HStack(spacing: 0) {
-            SwiftUI.Text(geo.config.label)
-                .font(.system(size: 11))
-                .foregroundColor(SwiftUI.Color(nsColor: workspace.theme.titleBarText))
-                .padding(.leading, 6)
-
             Spacer()
 
             if geo.config.collapsedWidth != nil {
