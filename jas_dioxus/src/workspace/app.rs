@@ -789,6 +789,25 @@ pub fn App() -> Element {
                     }
                 }
 
+                // Restore button (visible only when maximized)
+                if canvas_maximized {
+                    button {
+                        style: "position:absolute; top:4px; right:4px; z-index:200; background:{THEME_BG_DARK}; border:1px solid {THEME_BORDER}; color:{THEME_TEXT}; cursor:pointer; padding:2px 8px; font-size:10px; border-radius:3px;",
+                        title: "Restore canvas (double-click tab bar)",
+                        onclick: {
+                            let act = act.clone();
+                            move |_| {
+                                (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                    if let Some(ref mut pl) = st.workspace_layout.pane_layout {
+                                        pl.toggle_canvas_maximized();
+                                    }
+                                }));
+                            }
+                        },
+                        "⬜ Restore"
+                    }
+                }
+
                 // Tab bar
                 div {
                     style: "display:flex; background:{THEME_BG_DARK}; border-bottom:1px solid {THEME_BORDER}; padding:2px 4px 0; min-height:28px; align-items:flex-end; flex-shrink:0;",
