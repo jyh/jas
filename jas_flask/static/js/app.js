@@ -42,6 +42,47 @@
   var dialogState = null;         // non-null only while a dialog with state is open
   var dialogParams = null;        // params passed to open_dialog
 
+  // ── Panel-local state ──────────────────────────────────────
+  var panelState = {};            // keyed by field name for the active panel
+
+  var panelColorSyncLocked = false;   // prevents circular update during slider drag
+
+  function panelStateToColor() {
+    var mode = panelState.mode || "hsb";
+    var rgb;
+    if (mode === "hsb") {
+      rgb = hsbToRgb(Number(panelState.h) || 0, Number(panelState.s) || 0, Number(panelState.b) || 100);
+    } else if (mode === "rgb" || mode === "web_safe_rgb") {
+      rgb = { r: Number(panelState.r) || 0, g: Number(panelState.g) || 0, b: Number(panelState.bl) || 0 };
+    } else if (mode === "grayscale") {
+      var v = Math.round(255 * (1 - (Number(panelState.k) || 0) / 100));
+      rgb = { r: v, g: v, b: v };
+    } else if (mode === "cmyk") {
+      rgb = cmykToRgb(Number(panelState.c) || 0, Number(panelState.m) || 0,
+                      Number(panelState.y) || 0, Number(panelState.k) || 0);
+    } else {
+      rgb = { r: 0, g: 0, b: 0 };
+    }
+    return "#" + rgbToHexStr(rgb.r, rgb.g, rgb.b);
+  }
+
+  function syncPanelColorState() {
+    if (panelColorSyncLocked) return;
+    var activeColor = state.fill_on_top ? state.fill_color : state.stroke_color;
+    if (!activeColor || activeColor === "null" || activeColor === "none") return;
+    panelState.h  = colorFunctions.hsb_h(activeColor);
+    panelState.s  = colorFunctions.hsb_s(activeColor);
+    panelState.b  = colorFunctions.hsb_b(activeColor);
+    panelState.r  = colorFunctions.rgb_r(activeColor);
+    panelState.g  = colorFunctions.rgb_g(activeColor);
+    panelState.bl = colorFunctions.rgb_b(activeColor);
+    panelState.c  = colorFunctions.cmyk_c(activeColor);
+    panelState.m  = colorFunctions.cmyk_m(activeColor);
+    panelState.y  = colorFunctions.cmyk_y(activeColor);
+    panelState.k  = colorFunctions.cmyk_k(activeColor);
+    panelState.hex = colorFunctions.hex(activeColor);
+  }
+
   // ── Color conversion functions ──────────────────────────────
 
   function parseColor(c) {
@@ -65,6 +106,32 @@
       else h = ((r - g) / d + 4) / 6;
     }
     return { h: Math.round(h * 360), s: Math.round(s * 100), b: Math.round(v * 100) };
+  }
+
+  function hsbToRgb(h, s, b) {
+    s /= 100; b /= 100;
+    var c = b * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = b - c;
+    var r, g, bl;
+    if      (h < 60)  { r = c; g = x; bl = 0; }
+    else if (h < 120) { r = x; g = c; bl = 0; }
+    else if (h < 180) { r = 0; g = c; bl = x; }
+    else if (h < 240) { r = 0; g = x; bl = c; }
+    else if (h < 300) { r = x; g = 0; bl = c; }
+    else              { r = c; g = 0; bl = x; }
+    return { r: Math.round((r + m) * 255), g: Math.round((g + m) * 255), b: Math.round((bl + m) * 255) };
+  }
+
+  function cmykToRgb(c, m, y, k) {
+    c /= 100; m /= 100; y /= 100; k /= 100;
+    return {
+      r: Math.round(255 * (1 - c) * (1 - k)),
+      g: Math.round(255 * (1 - m) * (1 - k)),
+      b: Math.round(255 * (1 - y) * (1 - k))
+    };
+  }
+
+  function rgbToHexStr(r, g, b) {
+    return ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
   }
 
   function rgbToCmyk(r, g, b) {
@@ -118,10 +185,17 @@
     if (parts[0] === "state") return state[parts[1]];
     if (parts[0] === "param" && ctx.params) return ctx.params[parts[1]];
     if (parts[0] === "prop" && ctx.props) return ctx.props[parts[1]];
+    if (parts[0] === "panel") {
+      if (parts.length === 3 && parts[1] === "recent_colors") {
+        var rcArr = panelState.recent_colors || [];
+        return rcArr[parseInt(parts[2])] || null;
+      }
+      return panelState[parts[1]];
+    }
     if (parts[0] === "dialog" && dialogState) return dialogState[parts[1]];
     if (parts[0] === "event" && ctx.event) return ctx.event[parts[1]];
     if (parts[0] === "self" && ctx.self) return ctx.self[parts[1]];
-    if (parts[0] === "active_document") return activeDocumentCtx[parts[1]];
+    if (parts[0] === "active_document" || parts[0] === "document") return activeDocumentCtx[parts[1]];
     if (parts[0] === "workspace") return workspaceCtx[parts[1]];
     if (parts[0] === "theme") {
       var themeData = typeof JAS_THEME !== "undefined" ? JAS_THEME : {};
@@ -145,6 +219,14 @@
     // Simple boolean evaluation
     if (resolved === "true" || resolved === true) return true;
     if (resolved === "false" || resolved === false || resolved === "" || resolved === "null" || resolved === null) return false;
+    // Handle ternary: "cond ? true_branch : false_branch"
+    var ternaryMatch = typeof resolved === "string"
+      ? resolved.match(/^(.+?)\s*\?\s*(.+)\s*:\s*(.+)$/) : null;
+    if (ternaryMatch) {
+      return evalCondition(ternaryMatch[1].trim(), ctx)
+        ? evalCondition(ternaryMatch[2].trim(), ctx)
+        : evalCondition(ternaryMatch[3].trim(), ctx);
+    }
     // Handle "not X"
     if (typeof resolved === "string" && resolved.startsWith("not ")) {
       return !evalCondition(resolved.substring(4), ctx);
@@ -169,6 +251,21 @@
   }
 
   function updateBindings(key, value) {
+    // Recompute panel color state when active color or focus changes
+    if (key === "fill_color" || key === "stroke_color" || key === "fill_on_top") {
+      syncPanelColorState();
+    }
+    // Generic data-bind-value: set input value
+    document.querySelectorAll("[data-bind-value]").forEach(function (el) {
+      var expr = el.getAttribute("data-bind-value");
+      var val = resolve(expr, {});
+      if (val !== null && val !== undefined) el.value = val;
+    });
+    // Generic data-bind-disabled: enable/disable input
+    document.querySelectorAll("[data-bind-disabled]").forEach(function (el) {
+      var expr = el.getAttribute("data-bind-disabled");
+      el.disabled = evalCondition(resolve(expr, {}), {});
+    });
     // Generic data-bind-visible: show/hide using d-none class (overrides Bootstrap !important)
     document.querySelectorAll("[data-bind-visible]").forEach(function (el) {
       var expr = el.getAttribute("data-bind-visible");
@@ -191,14 +288,24 @@
       var result = evalCondition(resolve(expr, {}), {});
       el.classList.toggle("active", result);
     });
-    // Generic data-bind-color: set background color
+    // Generic data-bind-color: set background (fill swatch) or border (hollow/stroke swatch)
     document.querySelectorAll("[data-bind-color]").forEach(function (el) {
       var ref = el.getAttribute("data-bind-color");
       var color = resolve(ref, {});
-      if (color && color !== "null") {
+      var hasColor = color && color !== "null" && color !== "undefined";
+      var isHollow = el.getAttribute("data-hollow") === "true";
+      if (isHollow) {
+        el.style.borderColor = hasColor ? color : "transparent";
+      } else if (hasColor) {
+        el.classList.remove("jas-color-swatch-empty");
         el.style.background = color;
+        el.style.border = "1px solid #666";
+        el.style.cursor = "pointer";
       } else {
-        el.style.background = "#fff";
+        el.classList.add("jas-color-swatch-empty");
+        el.style.background = "transparent";
+        el.style.border = "";
+        el.style.cursor = "default";
       }
     });
     // Generic data-bind-icon: swap SVG content via ternary expression
@@ -242,6 +349,44 @@
       } else if (!result && cw) {
         el.style.width = "";
       }
+    });
+    // Redraw color bar canvases
+    drawColorBars();
+  }
+
+  function drawColorBars() {
+    document.querySelectorAll("canvas[data-type='color-bar']").forEach(function (canvas) {
+      var w = canvas.clientWidth || 300;
+      var h = canvas.clientHeight || 64;
+      if (canvas.width !== w)  canvas.width  = w;
+      if (canvas.height !== h) canvas.height = h;
+      var ctx = canvas.getContext("2d");
+      var midY = h / 2;
+      var imageData = ctx.createImageData(w, h);
+      for (var y = 0; y < h; y++) {
+        var s, b;
+        if (y <= midY) {
+          // Top half: s 0→100, b 100→80  (top=white, middle=full-sat)
+          var t = y / midY;
+          s = t * 100;
+          b = 100 - t * 20;
+        } else {
+          // Bottom half: s=100, b 80→0  (middle=full-sat, bottom=black)
+          var t = (y - midY) / (h - midY);
+          s = 100;
+          b = 80 * (1 - t);
+        }
+        for (var x = 0; x < w; x++) {
+          var hue = 360 * x / (w - 1);
+          var rgb = hsbToRgb(hue, s, b);
+          var idx = (y * w + x) * 4;
+          imageData.data[idx]     = rgb.r;
+          imageData.data[idx + 1] = rgb.g;
+          imageData.data[idx + 2] = rgb.b;
+          imageData.data[idx + 3] = 255;
+        }
+      }
+      ctx.putImageData(imageData, 0, 0);
     });
   }
 
@@ -310,6 +455,29 @@
       effect.reset.forEach(function (rk) {
         setState(rk, defaults[rk]);
       });
+      return;
+    }
+
+    // set_panel_state: { panel, key, value }
+    if (effect.set_panel_state) {
+      var psKey = resolve(effect.set_panel_state.key, ctx);
+      var psVal = resolve(effect.set_panel_state.value, ctx);
+      panelState[psKey] = psVal;
+      updateBindings(null, null);
+      return;
+    }
+
+    // push_recent_color: { color } — prepend to recent_colors, dedup, cap 10
+    if (effect.push_recent_color) {
+      var rcColor = resolve(effect.push_recent_color.color, ctx);
+      if (!rcColor || rcColor === "null") return;
+      var rcList = panelState.recent_colors || [];
+      var rcIdx = rcList.indexOf(rcColor);
+      if (rcIdx >= 0) rcList.splice(rcIdx, 1);
+      rcList.unshift(rcColor);
+      if (rcList.length > 10) rcList.length = 10;
+      panelState.recent_colors = rcList;
+      updateBindings(null, null);
       return;
     }
 
@@ -1368,6 +1536,126 @@
     // Apply server-side initial hidden state before first binding update
     document.querySelectorAll("[data-initial-hidden]").forEach(function (el) {
       el.classList.add("d-none");
+    });
+
+    // Initialize panel-local state from data-panel-state (defaults) and
+    // data-panel-init (expressions evaluated against current global state)
+    document.querySelectorAll("[data-panel-state]").forEach(function (panelEl) {
+      try {
+        var defaults = JSON.parse(panelEl.getAttribute("data-panel-state") || "{}");
+        Object.assign(panelState, defaults);
+      } catch (e) {}
+      try {
+        var inits = JSON.parse(panelEl.getAttribute("data-panel-init") || "{}");
+        for (var pik in inits) {
+          if (inits.hasOwnProperty(pik)) {
+            // First pass: substitute {{state.*}} etc. to get e.g. "hsb_h(true ? #ff6600 : #000)"
+            var resolved = resolve(inits[pik], {});
+            // Second pass: if result is a color function call, evaluate it.
+            // The arg may contain a ternary left over from state substitution.
+            if (typeof resolved === "string") {
+              var pikFnMatch = resolved.match(/^(\w+)\((.+)\)$/);
+              if (pikFnMatch && colorFunctions[pikFnMatch[1]]) {
+                var pikArg = pikFnMatch[2].trim();
+                var pikTm = pikArg.match(/^(.+?)\s*\?\s*(.+?)\s*:\s*(.+)$/);
+                if (pikTm) {
+                  pikArg = evalCondition(pikTm[1].trim(), {}) ? pikTm[2].trim() : pikTm[3].trim();
+                }
+                resolved = colorFunctions[pikFnMatch[1]](pikArg);
+              }
+            }
+            if (resolved !== null && resolved !== undefined) panelState[pik] = resolved;
+          }
+        }
+      } catch (e) {}
+    });
+
+    // Wire panel slider/input → live color update and commit
+    document.addEventListener("input", function (e) {
+      var el = e.target;
+      var bindVal = el.getAttribute && el.getAttribute("data-bind-value");
+      if (!bindVal) return;
+      var pm = bindVal.match(/^\{\{panel\.(\w+)\}\}$/);
+      if (!pm) return;
+      var field = pm[1];
+      panelColorSyncLocked = true;
+      panelState[field] = parseFloat(el.value);
+      var newColor = panelStateToColor();
+      panelState.hex = colorFunctions.hex(newColor);
+      setState(state.fill_on_top ? "fill_color" : "stroke_color", newColor);
+      panelColorSyncLocked = false;
+      updateBindings(null, null);
+    });
+
+    document.addEventListener("change", function (e) {
+      var el = e.target;
+      var bindVal = el.getAttribute && el.getAttribute("data-bind-value");
+      if (!bindVal || !bindVal.match(/^\{\{panel\.\w+\}\}$/)) return;
+      dispatch("set_active_color", { color: panelStateToColor() });
+    });
+
+    // Hex input commit on Enter
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") return;
+      var el = e.target;
+      if (!el.getAttribute) return;
+      if (el.getAttribute("data-bind-value") !== "{{panel.hex}}") return;
+      var raw = el.value.replace(/^#/, "").trim();
+      if (/^[0-9a-fA-F]{6}$/.test(raw)) {
+        var newColor = "#" + raw.toLowerCase();
+        panelColorSyncLocked = true;
+        setState(state.fill_on_top ? "fill_color" : "stroke_color", newColor);
+        panelColorSyncLocked = false;
+        syncPanelColorState();
+        updateBindings(null, null);
+        dispatch("set_active_color", { color: newColor });
+        el.blur();
+      }
+    });
+
+    // Color bar click/drag
+    var colorBarDragging = false;
+    function applyColorBarPoint(canvas, clientX, clientY, commit) {
+      var rect = canvas.getBoundingClientRect();
+      var x = Math.max(0, Math.min(clientX - rect.left,  rect.width  - 1));
+      var y = Math.max(0, Math.min(clientY - rect.top,   rect.height - 1));
+      var midY = rect.height / 2;
+      panelColorSyncLocked = true;
+      panelState.h = Math.round(360 * x / rect.width);
+      if (y <= midY) {
+        var t = y / midY;
+        panelState.s = Math.round(t * 100);
+        panelState.b = Math.round(100 - t * 20);
+      } else {
+        var t = (y - midY) / (rect.height - midY);
+        panelState.s = 100;
+        panelState.b = Math.round(80 * (1 - t));
+      }
+      var newColor = panelStateToColor();
+      panelState.hex = colorFunctions.hex(newColor);
+      setState(state.fill_on_top ? "fill_color" : "stroke_color", newColor);
+      panelColorSyncLocked = false;
+      updateBindings(null, null);
+      if (commit) dispatch("set_active_color", { color: newColor });
+    }
+    document.addEventListener("pointerdown", function (e) {
+      var canvas = e.target.closest("canvas[data-type='color-bar']");
+      if (!canvas) return;
+      colorBarDragging = true;
+      canvas.setPointerCapture(e.pointerId);
+      applyColorBarPoint(canvas, e.clientX, e.clientY, false);
+    });
+    document.addEventListener("pointermove", function (e) {
+      if (!colorBarDragging) return;
+      var canvas = e.target.closest("canvas[data-type='color-bar']");
+      if (!canvas) return;
+      applyColorBarPoint(canvas, e.clientX, e.clientY, false);
+    });
+    document.addEventListener("pointerup", function (e) {
+      if (!colorBarDragging) return;
+      colorBarDragging = false;
+      var canvas = e.target.closest("canvas[data-type='color-bar']");
+      if (canvas) applyColorBarPoint(canvas, e.clientX, e.clientY, true);
     });
 
     // Initialize bindings

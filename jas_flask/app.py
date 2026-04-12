@@ -6,7 +6,7 @@ import os
 from flask import Flask, render_template, request, jsonify
 
 from loader import load_workspace, find_element_by_id, resolve_appearance, list_appearances
-from renderer import render_element, render_menubar, render_dialogs, set_icons, set_initial_state, set_brand
+from renderer import render_element, render_menubar, render_dialogs, set_icons, set_initial_state, set_brand, set_panels
 
 
 def _resolve_brand(ws: dict, workspace_path: str | None) -> None:
@@ -76,15 +76,17 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
             _cached_mtime = mtime
             set_icons(_cached_ws.get("icons", {}))
             set_initial_state(_cached_ws.get("state", {}))
+            set_panels(_cached_ws.get("panels", {}))
             _resolve_brand(_cached_ws, workspace_path)
             set_brand(_cached_ws.get("app", {}).get("brand", {}))
 
         return _cached_ws
 
-    # Ensure icons, initial state, and brand are set on first load
+    # Ensure icons, initial state, panels, and brand are set on first load
     ws_init = _get_ws()
     set_icons(ws_init.get("icons", {}))
     set_initial_state(ws_init.get("state", {}))
+    set_panels(ws_init.get("panels", {}))
     _resolve_brand(ws_init, workspace_path)
     set_brand(ws_init.get("app", {}).get("brand", {}))
 
