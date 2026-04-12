@@ -1,0 +1,24 @@
+appearance_save_as:
+  summary: "Save Appearance As"
+  description: >
+    Text input dialog for naming a custom appearance. The current
+    resolved appearance (all colors, fonts, and sizes) is saved to
+    browser storage under the given name.
+  modal: true
+  state:
+    name: { type: string, default: "", description: "User-entered appearance name" }
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16 }
+    children:
+      - { type: text, content: "Appearance name:" }
+      - id: appearance_name_input
+        type: text_input
+        placeholder: "My Theme"
+        bind: "dialog.name"
+      - type: row
+        style: { justify: end, gap: 8 }
+        children:
+          - { type: button, label: "Cancel", action: dismiss_dialog }
+          - { type: button, label: "Save",   action: save_appearance_confirm, variant: primary }

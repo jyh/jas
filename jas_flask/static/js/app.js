@@ -14,7 +14,9 @@
   const shortcuts = typeof JAS_SHORTCUTS !== "undefined" ? JAS_SHORTCUTS : [];
   const timers = {};  // named timers for long-press etc.
   var STORAGE_KEY = "workspace_layouts";  // localStorage key for saved layouts
+  var APPEARANCE_STORAGE_KEY = "jas_appearances";  // localStorage key for user appearances
   var activeWorkspaceName = null;         // currently active workspace name
+  var activeAppearanceName = typeof JAS_ACTIVE_APPEARANCE !== "undefined" ? JAS_ACTIVE_APPEARANCE : "dark_gray";
 
   // ── Runtime contexts ──────────────────────────────────────
   // active_document.* — properties of the active tab's document
@@ -559,6 +561,8 @@
           setState(dk, defaults[dk]);
         }
       }
+      // Reset appearance to YAML default
+      applyAppearance(typeof JAS_ACTIVE_APPEARANCE !== "undefined" ? JAS_ACTIVE_APPEARANCE : "dark_gray");
       activeWorkspaceName = null;
       workspaceCtx.has_saved_layout = false;
       workspaceCtx.active_layout_name = "";
@@ -707,7 +711,7 @@
         var name = nameInput.value.trim();
         if (!name) { console.warn("[save_layout] empty name"); return; }
         var configs = typeof JAS_PANE_CONFIGS !== "undefined" ? JAS_PANE_CONFIGS : {};
-        var layoutData = { panes: {}, state: {}, dock: {}, floating: [] };
+        var layoutData = { panes: {}, state: {}, dock: {}, floating: [], appearance: activeAppearanceName };
         container.querySelectorAll(".jas-pane").forEach(function (p) {
           if (p.id) {
             layoutData.panes[p.id] = {
@@ -801,6 +805,10 @@
           createFloatingDock(fd.groups, fd.x, fd.y);
         });
       }
+      // Restore appearance if saved
+      if (layoutData.appearance) {
+        applyAppearance(layoutData.appearance);
+      }
       activeWorkspaceName = name;
       workspaceCtx.has_saved_layout = true;
       workspaceCtx.active_layout_name = name;
@@ -850,6 +858,35 @@
       }
       rebuildWorkspaceMenu();
       console.log("[delete_layout]", name);
+      return;
+    }
+
+    // switch_appearance: { name } — switch to a named appearance
+    if (effect.switch_appearance) {
+      var name = resolve(effect.switch_appearance.name, ctx);
+      applyAppearance(name);
+      return;
+    }
+
+    // save_appearance: { name_input } — save current appearance to localStorage
+    if (effect.save_appearance) {
+      var nameInput = document.getElementById(resolve(effect.save_appearance.name_input, ctx));
+      if (nameInput) {
+        var name = nameInput.value.trim();
+        if (!name) { console.warn("[save_appearance] empty name"); return; }
+        // Save the fully resolved current theme as a self-contained appearance
+        var saved = JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) || "{}");
+        saved[name] = {
+          label: name,
+          colors: JAS_THEME.colors || {},
+          fonts: JAS_THEME.fonts || {},
+          sizes: JAS_THEME.sizes || {}
+        };
+        localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(saved));
+        activeAppearanceName = name;
+        rebuildAppearanceMenu();
+        console.log("[save_appearance]", name);
+      }
       return;
     }
 
@@ -1139,6 +1176,125 @@
     return defaults[name] || null;
   }
 
+  // ── Appearance switching ─────────────────────────────────────
+
+  function applyAppearance(name) {
+    var base = typeof JAS_BASE_THEME !== "undefined" ? JAS_BASE_THEME : {};
+    var allApps = typeof JAS_ALL_APPEARANCES !== "undefined" ? JAS_ALL_APPEARANCES : {};
+    // Also check user-saved appearances in localStorage
+    var userApps = JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) || "{}");
+    var overrides = allApps[name] || userApps[name] || {};
+
+    // Deep merge: base + overrides for colors, fonts, sizes
+    var resolved = {};
+    ["colors", "fonts", "sizes"].forEach(function (section) {
+      resolved[section] = Object.assign({}, base[section] || {});
+      if (overrides[section]) {
+        if (section === "fonts") {
+          for (var fk in overrides[section]) {
+            resolved[section][fk] = Object.assign({}, resolved[section][fk] || {}, overrides[section][fk]);
+          }
+        } else {
+          Object.assign(resolved[section], overrides[section]);
+        }
+      }
+    });
+
+    // Update CSS variables on :root
+    var root = document.documentElement;
+    for (var k in resolved.colors) {
+      if (resolved.colors.hasOwnProperty(k)) {
+        root.style.setProperty("--jas-" + k.replace(/_/g, "-"), resolved.colors[k]);
+      }
+    }
+    for (var fk in resolved.fonts) {
+      if (resolved.fonts.hasOwnProperty(fk)) {
+        var font = resolved.fonts[fk];
+        var prefix = "--jas-font-" + fk.replace(/_/g, "-");
+        if (font.family) root.style.setProperty(prefix + "-family", font.family);
+        if (font.size) root.style.setProperty(prefix + "-size", font.size + "px");
+        if (font.weight) root.style.setProperty(prefix + "-weight", font.weight);
+      }
+    }
+    for (var sk in resolved.sizes) {
+      if (resolved.sizes.hasOwnProperty(sk)) {
+        root.style.setProperty("--jas-size-" + sk.replace(/_/g, "-"), resolved.sizes[sk] + "px");
+      }
+    }
+
+    // Toggle Bootstrap dark/light based on background luminance
+    var bg = resolved.colors.window_bg || "#2e2e2e";
+    var lum = hexLuminance(bg);
+    root.setAttribute("data-bs-theme", lum > 0.5 ? "light" : "dark");
+
+    // Update JAS_THEME for interpolation resolution
+    JAS_THEME = resolved;
+    activeAppearanceName = name;
+    rebuildAppearanceMenu();
+  }
+
+  function hexLuminance(hex) {
+    // Parse #rrggbb to relative luminance (0-1)
+    hex = hex.replace("#", "");
+    if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+    var r = parseInt(hex.substring(0, 2), 16) / 255;
+    var g = parseInt(hex.substring(2, 4), 16) / 255;
+    var b = parseInt(hex.substring(4, 6), 16) / 255;
+    return 0.299 * r + 0.587 * g + 0.114 * b;
+  }
+
+  function rebuildAppearanceMenu() {
+    var menu = document.querySelector("#menu_appearance + .dropdown-menu");
+    if (!menu) return;
+    var appearances = typeof JAS_APPEARANCES !== "undefined" ? JAS_APPEARANCES : [];
+    var userApps = JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) || "{}");
+    // Remove previously injected items
+    menu.querySelectorAll(".jas-appearance-item").forEach(function (el) { el.remove(); });
+    var firstItem = menu.firstElementChild;
+    // Insert predefined appearances
+    appearances.forEach(function (app) {
+      var li = document.createElement("li");
+      li.className = "jas-appearance-item";
+      var check = (activeAppearanceName === app.name) ? "\u2713 " : "    ";
+      var a = document.createElement("a");
+      a.className = "dropdown-item";
+      a.href = "#";
+      a.textContent = check + app.label;
+      a.setAttribute("data-action", "switch_appearance");
+      a.setAttribute("data-action-params", JSON.stringify({name: app.name}));
+      li.appendChild(a);
+      menu.insertBefore(li, firstItem);
+    });
+    // Insert user-saved appearances
+    var userNames = Object.keys(userApps).sort();
+    if (userNames.length > 0 && appearances.length > 0) {
+      var sep1 = document.createElement("li");
+      sep1.className = "jas-appearance-item";
+      sep1.innerHTML = '<hr class="dropdown-divider">';
+      menu.insertBefore(sep1, firstItem);
+    }
+    userNames.forEach(function (name) {
+      var li = document.createElement("li");
+      li.className = "jas-appearance-item";
+      var check = (activeAppearanceName === name) ? "\u2713 " : "    ";
+      var label = userApps[name].label || name;
+      var a = document.createElement("a");
+      a.className = "dropdown-item";
+      a.href = "#";
+      a.textContent = check + label;
+      a.setAttribute("data-action", "switch_appearance");
+      a.setAttribute("data-action-params", JSON.stringify({name: name}));
+      li.appendChild(a);
+      menu.insertBefore(li, firstItem);
+    });
+    if (appearances.length + userNames.length > 0) {
+      var sep2 = document.createElement("li");
+      sep2.className = "jas-appearance-item";
+      sep2.innerHTML = '<hr class="dropdown-divider">';
+      menu.insertBefore(sep2, firstItem);
+    }
+  }
+
   // ── Wire data-action attributes ────────────────────────────
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -1227,6 +1383,15 @@
     if (wsSubmenu) {
       wsSubmenu.addEventListener("click", function () {
         setTimeout(rebuildWorkspaceMenu, 0);
+      });
+    }
+
+    // Build dynamic appearance menu on load and when submenu is shown
+    rebuildAppearanceMenu();
+    var appSubmenu = document.getElementById("menu_appearance");
+    if (appSubmenu) {
+      appSubmenu.addEventListener("click", function () {
+        setTimeout(rebuildAppearanceMenu, 0);
       });
     }
   });

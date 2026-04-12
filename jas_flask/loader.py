@@ -1,5 +1,7 @@
 """YAML workspace loader, interpolation resolver, and element tree utilities."""
 
+import copy
+import json
 import os
 import re
 import yaml
@@ -61,6 +63,22 @@ def load_workspace(path: str) -> dict:
                     merged.update(part)
             if merged:
                 data[subdir] = merged
+        # Load appearance overrides from appearances/ directory
+        appearances_dir = os.path.join(path, "appearances")
+        if os.path.isdir(appearances_dir):
+            theme = data.get("theme", {})
+            appearances = theme.get("appearances", {})
+            for fname in sorted(os.listdir(appearances_dir)):
+                if not fname.endswith(".json"):
+                    continue
+                appearance_name = os.path.splitext(fname)[0]
+                fpath = os.path.join(appearances_dir, fname)
+                with open(fpath, "r") as f:
+                    appearance_data = json.load(f)
+                if isinstance(appearance_data, dict):
+                    appearances[appearance_name] = appearance_data
+            theme["appearances"] = appearances
+            data["theme"] = theme
     else:
         with open(path, "r") as f:
             data = yaml.safe_load(f)
@@ -139,6 +157,60 @@ def resolve_interpolation(text: str, theme: dict, state: dict, params: dict | No
         return ""
 
     return _INTERP_RE.sub(_lookup, text)
+
+
+def resolve_appearance(theme_config: dict, name: str | None = None) -> dict:
+    """Resolve a named appearance by deep-merging base with overrides.
+
+    Args:
+        theme_config: The full theme config with ``active``, ``base``, and
+            ``appearances`` keys.
+        name: Appearance name to resolve.  If *None*, uses
+            ``theme_config["active"]``.
+
+    Returns:
+        A flat dict with ``colors``, ``fonts``, ``sizes`` keys — the same
+        shape that templates and renderers expect.
+
+    Raises:
+        ValueError: If the named appearance is not found.
+    """
+    if name is None:
+        name = theme_config.get("active", "dark_gray")
+    appearances = theme_config.get("appearances", {})
+    if name not in appearances:
+        raise ValueError(f"Unknown appearance: {name!r}")
+    overrides = appearances[name]
+
+    # Deep-copy the base so we never mutate it
+    result = copy.deepcopy(theme_config.get("base", {}))
+
+    # Merge overrides per section
+    for section in ("colors", "sizes"):
+        if section in overrides:
+            result.setdefault(section, {}).update(overrides[section])
+
+    # Fonts need two-level merge (per font-name, then per property)
+    if "fonts" in overrides:
+        base_fonts = result.setdefault("fonts", {})
+        for font_name, font_overrides in overrides["fonts"].items():
+            if font_name in base_fonts and isinstance(base_fonts[font_name], dict):
+                base_fonts[font_name] = dict(base_fonts[font_name], **font_overrides)
+            else:
+                base_fonts[font_name] = font_overrides
+
+    return result
+
+
+def list_appearances(theme_config: dict) -> list[dict]:
+    """Return available appearances as a list of ``{"name": ..., "label": ...}`` dicts.
+
+    Preserves insertion order from *theme_config["appearances"]*.
+    """
+    return [
+        {"name": k, "label": v.get("label", k)}
+        for k, v in theme_config.get("appearances", {}).items()
+    ]
 
 
 def find_element_by_id(element: dict, target_id: str) -> dict | None:

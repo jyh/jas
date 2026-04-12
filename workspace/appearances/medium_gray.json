@@ -1,0 +1,23 @@
+{
+  "label": "Medium Gray",
+  "colors": {
+    "window_bg":      "#484848",
+    "pane_bg":        "#565656",
+    "pane_bg_dark":   "#4d4d4d",
+    "title_bar_bg":   "#404040",
+    "title_bar_text": "#e0e0e0",
+    "border":         "#6a6a6a",
+    "text":           "#dddddd",
+    "text_dim":       "#aaaaaa",
+    "text_body":      "#bbbbbb",
+    "text_hint":      "#888888",
+    "text_button":    "#999999",
+    "tab_active":     "#606060",
+    "tab_inactive":   "#505050",
+    "button_checked": "#686868",
+    "accent":         "#5a9ee6",
+    "snap_preview":   "rgba(90,158,230,200)",
+    "handle_hover":   "rgba(90,158,230,0.5)",
+    "pane_shadow":    "rgba(0,0,0,0.25)"
+  }
+}

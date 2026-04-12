@@ -13,6 +13,14 @@
       {% for name, val in ws.theme.colors.items() %}
       --jas-{{ name | replace('_', '-') }}: {{ val }};
       {% endfor %}
+      {% for name, font in ws.theme.fonts.items() %}
+      --jas-font-{{ name }}-family: {{ font.family }};
+      --jas-font-{{ name }}-size: {{ font.size }}px;
+      {% if font.weight is defined %}--jas-font-{{ name }}-weight: {{ font.weight }};{% endif %}
+      {% endfor %}
+      {% for name, val in ws.theme.sizes.items() %}
+      --jas-size-{{ name | replace('_', '-') }}: {{ val }}px;
+      {% endfor %}
     }
     html, body {
       margin: 0;
@@ -21,15 +29,16 @@
       height: 100vh;
       background: var(--jas-window-bg, #2e2e2e);
       color: var(--jas-text, #cccccc);
-      font-family: {{ ws.theme.fonts.default.family }};
-      font-size: {{ ws.theme.fonts.default.size }}px;
+      font-family: var(--jas-font-default-family, sans-serif);
+      font-size: var(--jas-font-default-size, 12px);
     }
     .navbar { min-height: 28px; }
-    .navbar .nav-link { font-size: 12px; padding: 2px 10px; }
-    .dropdown-menu { font-size: 12px; background: #444; border-color: #555; }
-    .dropdown-item { color: #ccc; }
-    .dropdown-item:hover { background: #555; color: #fff; }
-    .dropdown-divider { border-color: #555; }
+    .navbar .nav-link { font-size: 12px; padding: 2px 10px; color: var(--jas-text, #ccc); }
+    .navbar .nav-link:hover { color: var(--jas-title-bar-text, #fff); }
+    .dropdown-menu { font-size: 12px; background: var(--jas-pane-bg, #444); border-color: var(--jas-border, #555); }
+    .dropdown-item { color: var(--jas-text, #ccc); }
+    .dropdown-item:hover { background: var(--jas-button-checked, #555); color: var(--jas-title-bar-text, #fff); }
+    .dropdown-divider { border-color: var(--jas-border, #555); }
   </style>
   {% block head %}{% endblock %}
 </head>

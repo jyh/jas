@@ -513,6 +513,35 @@ actions:
     effects:
       - delete_layout: { name: "{{param.name}}" }
 
+  # ── Appearance ────────────────────────────────────────────
+  switch_appearance:
+    description: >
+      Switch to a named appearance, updating all CSS variables to the
+      new colors, fonts, and sizes. The appearance name is shown with
+      a checkmark in the Appearance menu.
+    category: appearance
+    params:
+      name: { type: string }
+    effects:
+      - switch_appearance: { name: "{{param.name}}" }
+  save_appearance_as:
+    description: >
+      Open the appearance_save_as dialog prompting the user for an
+      appearance name. The current resolved appearance is saved to
+      browser storage as a user-defined appearance.
+    category: appearance
+    effects:
+      - open_dialog: { id: appearance_save_as }
+  save_appearance_confirm:
+    description: >
+      Confirm the appearance save. Reads the name from the dialog,
+      saves the current resolved appearance to browser storage, and
+      closes the dialog.
+    category: appearance
+    effects:
+      - save_appearance: { name_input: appearance_name_input }
+      - close_dialog: null
+
   # ── Tab ───────────────────────────────────────────────────
   close_tab:
     description: >

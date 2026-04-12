@@ -26,9 +26,18 @@ def sample_workspace():
             "window": {"width": 800, "height": 600},
         },
         "theme": {
-            "colors": {"bg": "#000000", "text": "#ffffff"},
-            "fonts": {"default": {"family": "sans-serif", "size": 12}},
-            "sizes": {"button": 32},
+            "active": "dark_gray",
+            "base": {
+                "colors": {"bg": "#000000", "text": "#ffffff", "pane_shadow": "rgba(0,0,0,0.3)"},
+                "fonts": {"default": {"family": "sans-serif", "size": 12}},
+                "sizes": {"button": 32},
+            },
+            "metrics": {
+                "snap_distance": 6,
+            },
+            "appearances": {
+                "dark_gray": {"label": "Dark Gray"},
+            },
         },
         "state": {
             "active_tool": {

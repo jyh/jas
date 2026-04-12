@@ -18,9 +18,14 @@
   const JAS_SHORTCUTS = {{ shortcuts_json | safe }};
   const JAS_PANE_CONFIGS = {{ positions_json | safe }};
   const JAS_ICONS = {{ icons_json | safe }};
-  const JAS_THEME = {{ theme_json | safe }};
+  var JAS_THEME = {{ theme_json | safe }};
   const JAS_DEFAULT_LAYOUTS = {{ default_layouts_json | safe }};
   const JAS_RUNTIME_CONTEXTS = {{ runtime_contexts_json | safe }};
+  const JAS_APPEARANCES = {{ appearances_json | safe }};
+  const JAS_ACTIVE_APPEARANCE = {{ active_appearance_json | safe }};
+  const JAS_ALL_APPEARANCES = {{ all_appearances_json | safe }};
+  const JAS_BASE_THEME = {{ base_theme_json | safe }};
+  const JAS_METRICS = {{ metrics_json | safe }};
 </script>
 <script src="{{ url_for('static', filename='js/app.js') }}?v={{ range(99999) | random }}"></script>
 {% endblock %}
