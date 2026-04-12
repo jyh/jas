@@ -372,6 +372,114 @@ actions:
     effects:
       - open_dialog: { id: color_picker, params: { target: "{{param.target}}" } }
 
+  set_active_color:
+    description: >
+      Set the active color (fill or stroke, determined by fill_on_top) to
+      the given hex color value. Adds the color to the front of the
+      per-document recent_colors list (max 10). If the color is already
+      present, it moves to front rather than duplicating. This action is
+      the commit point for all color changes from the Color Panel: swatch
+      clicks (fixed and recent), slider release, hex field Enter/Tab, and
+      color bar pointer-up.
+    category: fill_stroke
+    params:
+      color: { type: color }
+    effects:
+      - if:
+          condition: "{{state.fill_on_top}}"
+          then:
+            - set: { fill_color: "{{param.color}}" }
+          else:
+            - set: { stroke_color: "{{param.color}}" }
+      - push_recent_color: { color: "{{param.color}}" }
+
+  set_active_color_none:
+    description: >
+      Set the active attribute (fill or stroke, determined by fill_on_top)
+      to none (null). Equivalent to set_fill_none when fill_on_top is true
+      and set_stroke_none when false. The active attribute's swatch shows
+      the none indicator (white square with red diagonal slash). Sliders
+      and hex field in the Color Panel become disabled.
+    category: fill_stroke
+    effects:
+      - if:
+          condition: "{{state.fill_on_top}}"
+          then:
+            - set: { fill_color: null }
+          else:
+            - set: { stroke_color: null }
+
+  set_fill_type_solid:
+    description: >
+      Sets the active attribute (fill or stroke, per fill_on_top) to solid
+      color mode. If the active color is currently null, restores it to black
+      (#000000). If it already has a solid color this is a no-op — the fill
+      type is already solid.
+    category: fill_stroke
+    effects:
+      - if:
+          condition: "{{state.fill_on_top}}"
+          then:
+            - if:
+                condition: "{{state.fill_color}} == null"
+                then:
+                  - set: { fill_color: "#000000" }
+          else:
+            - if:
+                condition: "{{state.stroke_color}} == null"
+                then:
+                  - set: { stroke_color: "#000000" }
+
+  set_fill_type_gradient:
+    description: >
+      Sets the active attribute (fill or stroke, per fill_on_top) to gradient
+      fill mode. Currently a placeholder — gradient editing is not yet
+      implemented.
+    category: fill_stroke
+    effects: []
+
+  invert_active_color:
+    description: >
+      Invert the active color (fill or stroke, per fill_on_top) by computing
+      (255 − R, 255 − G, 255 − B) in RGB. The result is committed via
+      set_active_color, which adds it to recent colors. The current color
+      mode is unchanged. Disabled when the active attribute is none.
+      Enabled only when the active color is non-null.
+    category: fill_stroke
+    enabled_when: "{{state.fill_on_top}} ? {{state.fill_color}} != null : {{state.stroke_color}} != null"
+    effects:
+      - invert_color:
+          target: "{{state.fill_on_top}} ? fill_color : stroke_color"
+
+  complement_active_color:
+    description: >
+      Compute the complementary color of the active color (fill or stroke,
+      per fill_on_top) by rotating the hue by 180° in HSB: result is
+      ((H + 180) mod 360, S, B). The result is committed via
+      set_active_color, which adds it to recent colors. The current color
+      mode is unchanged. When saturation is 0 (achromatic gray), hue is
+      undefined and the operation is a silent no-op — the color is
+      unchanged. Disabled when the active attribute is none.
+    category: fill_stroke
+    enabled_when: "{{state.fill_on_top}} ? {{state.fill_color}} != null : {{state.stroke_color}} != null"
+    effects:
+      - complement_color:
+          target: "{{state.fill_on_top}} ? fill_color : stroke_color"
+
+  set_color_panel_mode:
+    description: >
+      Set the Color Panel's color mode (panel-local state). The mode
+      determines which slider group is displayed: Grayscale (K only),
+      RGB (R/G/B 0–255), HSB (H 0–360, S/B 0–100), CMYK (C/M/Y/K 0–100),
+      or Web Safe RGB (R/G/B 0–255 snapping to steps of 51). Changing the
+      mode does not change the current color — only the view changes.
+      The panel checkmark in the Color Panel menu moves to the new mode.
+    category: fill_stroke
+    params:
+      mode: { type: enum, values: [grayscale, rgb, hsb, cmyk, web_safe_rgb] }
+    effects:
+      - set_panel_state: { panel: color, key: mode, value: "{{param.mode}}" }
+
   # ── Window / Layout ──────────────────────────────────────
   toggle_pane:
     description: >

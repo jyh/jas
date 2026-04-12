@@ -216,3 +216,14 @@ icons:
     svg: >
       <rect x="1" y="1" width="14" height="14" fill="#fff" stroke="#888" stroke-width="1"/>
       <line x1="1" y1="15" x2="15" y2="1" stroke="red" stroke-width="1.5"/>
+
+  fill_solid:
+    viewbox: "0 0 16 16"
+    svg: >
+      <rect x="2" y="2" width="12" height="12" fill="currentColor"/>
+
+  fill_gradient:
+    viewbox: "0 0 16 16"
+    svg: >
+      <rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1"/>
+      <rect x="2" y="2" width="6" height="12" fill="currentColor"/>

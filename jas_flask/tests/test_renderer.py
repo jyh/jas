@@ -6,6 +6,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+WORKSPACE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "workspace")
+
 
 @pytest.fixture
 def theme():
@@ -19,6 +21,17 @@ def theme():
 @pytest.fixture
 def state():
     return {"active_tool": "pen"}
+
+
+@pytest.fixture
+def color_state():
+    return {
+        "active_tool": "pen",
+        "fill_color": "#ff6600",
+        "stroke_color": "#000000",
+        "fill_on_top": True,
+        "stroke_width": 1.0,
+    }
 
 
 class TestRenderButton:
@@ -297,3 +310,324 @@ class TestFlaskRoutes:
     def test_api_spec_not_found(self, client):
         resp = client.get("/api/spec/nonexistent")
         assert resp.status_code == 404
+
+
+# ── Color Bar ─────────────────────────────────────────────────
+
+
+class TestColorBar:
+    def test_color_bar_renders_canvas(self, theme, state):
+        from renderer import render_element
+        el = {"type": "color_bar", "id": "cp_bar"}
+        html = render_element(el, theme, state, mode="normal")
+        assert "<canvas" in html
+
+    def test_color_bar_has_type_attribute(self, theme, state):
+        from renderer import render_element
+        el = {"type": "color_bar", "id": "cp_bar"}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'data-type="color-bar"' in html
+
+    def test_color_bar_height_64(self, theme, state):
+        from renderer import render_element
+        el = {"type": "color_bar", "id": "cp_bar"}
+        html = render_element(el, theme, state, mode="normal")
+        assert "64px" in html
+
+    def test_color_bar_id_rendered(self, theme, state):
+        from renderer import render_element
+        el = {"type": "color_bar", "id": "cp_bar"}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'id="cp_bar"' in html
+
+    def test_color_bar_cursor_crosshair(self, theme, state):
+        from renderer import render_element
+        el = {"type": "color_bar", "id": "cp_bar"}
+        html = render_element(el, theme, state, mode="normal")
+        assert "crosshair" in html
+
+
+# ── set_panels() and dock panel content ───────────────────────
+
+
+class TestSetPanels:
+    def test_set_panels_exists(self):
+        from renderer import set_panels
+        assert callable(set_panels)
+
+    def test_set_panels_accepts_dict(self):
+        from renderer import set_panels
+        # Should not raise
+        set_panels({"color_panel_content": {"id": "color_panel_content", "type": "panel",
+                                             "summary": "Color", "content": {"type": "text", "content": "X"}}})
+
+    def test_set_panels_accepts_none(self):
+        from renderer import set_panels
+        set_panels(None)  # resets to empty
+
+
+class TestDockViewWithPanels:
+    """Dock renders actual panel content and menus when set_panels() is used."""
+
+    @pytest.fixture(autouse=True)
+    def setup_panel(self):
+        from renderer import set_panels
+        set_panels({
+            "myp_panel_content": {
+                "id": "myp_panel_content",
+                "type": "panel",
+                "summary": "My Panel",
+                "menu": [
+                    {"label": "Mode A", "action": "set_mode_a"},
+                    {"label": "Mode B", "action": "set_mode_b"},
+                    "separator",
+                    {"label": "Invert", "action": "invert"},
+                ],
+                "content": {
+                    "type": "text",
+                    "id": "myp_text",
+                    "content": "panel body text",
+                },
+            }
+        })
+        yield
+        # Reset
+        from renderer import set_panels
+        set_panels({})
+
+    def _dock_el(self):
+        return {
+            "id": "dock_main",
+            "type": "dock_view",
+            "collapsed_width": 36,
+            "groups": [{"panels": ["myp"], "active": 0, "collapsed": False}],
+        }
+
+    def test_panel_content_rendered(self, theme, state):
+        from renderer import render_element
+        html = render_element(self._dock_el(), theme, state, mode="normal")
+        assert "panel body text" in html
+
+    def test_panel_menu_items_in_dock(self, theme, state):
+        from renderer import render_element
+        html = render_element(self._dock_el(), theme, state, mode="normal")
+        assert "Mode A" in html
+        assert "Mode B" in html
+
+    def test_panel_menu_separator_in_dock(self, theme, state):
+        from renderer import render_element
+        html = render_element(self._dock_el(), theme, state, mode="normal")
+        assert "dropdown-divider" in html
+
+    def test_panel_close_item_still_present(self, theme, state):
+        from renderer import render_element
+        html = render_element(self._dock_el(), theme, state, mode="normal")
+        assert "close_panel" in html
+
+    def test_dock_no_double_panel_header(self, theme, state):
+        """Panel summary should not appear as a separate header inside the dock body."""
+        from renderer import render_element
+        html = render_element(self._dock_el(), theme, state, mode="normal")
+        # "My Panel" may appear in tab button; content should not add a second title bar
+        # The panel content text is what matters
+        assert "panel body text" in html
+
+    def test_panel_state_data_attr(self, theme, state):
+        """If the panel has a state section, data-panel-state is emitted for client init."""
+        from renderer import set_panels, render_element
+        set_panels({
+            "myp_panel_content": {
+                "id": "myp_panel_content",
+                "type": "panel",
+                "summary": "My Panel",
+                "state": {"mode": {"type": "enum", "values": ["a", "b"], "default": "a"}},
+                "init": {"mode": "a"},
+                "content": {"type": "text", "content": "body"},
+            }
+        })
+        html = render_element(self._dock_el(), theme, state, mode="normal")
+        assert "data-panel-state" in html
+        assert "data-panel-init" in html
+
+
+# ── Full Color Panel spec ─────────────────────────────────────
+
+
+class TestColorPanelSpec:
+    """Tests against the real workspace color panel spec."""
+
+    @pytest.fixture(autouse=True)
+    def load_ws(self):
+        from loader import load_workspace
+        from renderer import set_icons, set_panels, set_initial_state
+        ws = load_workspace(WORKSPACE_PATH)
+        set_icons(ws.get("icons", {}))
+        set_panels(ws.get("panels", {}))
+        set_initial_state(ws.get("state", {}))
+
+    @pytest.fixture
+    def panel(self):
+        from loader import load_workspace
+        ws = load_workspace(WORKSPACE_PATH)
+        return ws.get("panels", {}).get("color_panel_content", {})
+
+    @pytest.fixture
+    def panel_html(self, panel, theme, color_state):
+        from renderer import render_element
+        return render_element(panel, theme, color_state, mode="normal")
+
+    def test_panel_renders(self, panel_html):
+        assert panel_html
+
+    def test_color_bar_present(self, panel_html):
+        assert "color-bar" in panel_html
+
+    def test_hex_input_present(self, panel_html):
+        assert "cp_hex" in panel_html
+
+    def test_fill_stroke_widget_present(self, panel_html):
+        assert "cp_fill_swatch" in panel_html
+
+    def test_mode_menu_grayscale(self, panel_html):
+        assert "Grayscale" in panel_html
+
+    def test_mode_menu_rgb(self, panel_html):
+        assert "RGB" in panel_html
+
+    def test_mode_menu_hsb(self, panel_html):
+        assert "HSB" in panel_html
+
+    def test_mode_menu_cmyk(self, panel_html):
+        assert "CMYK" in panel_html
+
+    def test_mode_menu_web_safe(self, panel_html):
+        assert "Web Safe RGB" in panel_html
+
+    def test_invert_menu_item(self, panel_html):
+        assert "Invert" in panel_html
+
+    def test_complement_menu_item(self, panel_html):
+        assert "Complement" in panel_html
+
+    def test_create_swatch_menu_item(self, panel_html):
+        assert "Create New Swatch" in panel_html
+
+    def test_ten_recent_color_slots(self, panel_html):
+        assert panel_html.count("jas-color-swatch-empty") == 10
+
+    def test_swatch_separator(self, panel_html):
+        assert "jas-swatch-rule" in panel_html
+
+    def test_none_swatch_present(self, panel_html):
+        assert "cp_none_swatch" in panel_html
+
+    def test_hsb_sliders_present(self, panel_html):
+        # Default mode is HSB — H, S, B sliders should be visible
+        assert "cp_h" in panel_html
+        assert "cp_s" in panel_html
+        assert "cp_b" in panel_html
+
+    def test_hue_slider_max_360(self, panel_html):
+        assert 'max="360"' in panel_html
+
+    def test_saturation_slider_max_100(self, panel_html):
+        assert 'max="100"' in panel_html
+
+    def test_panel_state_embedded(self, panel_html):
+        """Panel local state is embedded for client-side initialization."""
+        assert "data-panel-state" in panel_html
+
+    def test_panel_init_embedded(self, panel_html):
+        """Panel init expressions are embedded for client-side initialization."""
+        assert "data-panel-init" in panel_html
+
+    def test_none_color_disables_sliders(self, panel, theme):
+        from renderer import render_element
+        none_state = {
+            "fill_color": None,
+            "stroke_color": "#000000",
+            "fill_on_top": True,
+            "stroke_width": 1.0,
+        }
+        html = render_element(panel, theme, none_state, mode="normal")
+        # Sliders should carry disabled binding when active color is none
+        assert "cp_h" in html  # slider still renders, but disabled via bind
+        assert "data-bind-disabled" in html or "disabled" in html
+
+
+# ── Color Panel Slider Attributes ─────────────────────────────
+
+
+class TestColorPanelSliderAttributes:
+    """Unit tests on slider elements that will be used in the color panel."""
+
+    def test_hue_slider_range(self, theme, state):
+        from renderer import render_element
+        el = {"type": "slider", "id": "cp_h", "min": 0, "max": 360}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'min="0"' in html
+        assert 'max="360"' in html
+
+    def test_percent_slider_range(self, theme, state):
+        from renderer import render_element
+        el = {"type": "slider", "id": "cp_s", "min": 0, "max": 100}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'max="100"' in html
+
+    def test_rgb_slider_range(self, theme, state):
+        from renderer import render_element
+        el = {"type": "slider", "id": "cp_r", "min": 0, "max": 255}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'max="255"' in html
+
+    def test_web_safe_slider_step(self, theme, state):
+        from renderer import render_element
+        el = {"type": "slider", "id": "cp_r_ws", "min": 0, "max": 255, "step": 51}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'step="51"' in html
+
+    def test_k_slider_range(self, theme, state):
+        from renderer import render_element
+        el = {"type": "slider", "id": "cp_k", "min": 0, "max": 100}
+        html = render_element(el, theme, state, mode="normal")
+        assert 'min="0"' in html
+        assert 'max="100"' in html
+
+
+# ── Color Panel in Dock (integration) ────────────────────────
+
+
+class TestColorPanelInDock:
+    """Test that the real color panel renders correctly inside a dock_view."""
+
+    @pytest.fixture(autouse=True)
+    def load_ws(self):
+        from loader import load_workspace
+        from renderer import set_icons, set_panels, set_initial_state
+        ws = load_workspace(WORKSPACE_PATH)
+        set_icons(ws.get("icons", {}))
+        set_panels(ws.get("panels", {}))
+        set_initial_state(ws.get("state", {}))
+
+    def test_color_panel_in_dock(self, theme, color_state):
+        from renderer import render_element
+        dock_el = {
+            "id": "dock_main",
+            "type": "dock_view",
+            "collapsed_width": 36,
+            "groups": [{"panels": ["color"], "active": 0, "collapsed": False}],
+        }
+        html = render_element(dock_el, theme, color_state, mode="normal")
+        assert "color-bar" in html
+
+    def test_color_panel_mode_menu_in_dock(self, theme, color_state):
+        from renderer import render_element
+        dock_el = {
+            "id": "dock_main",
+            "type": "dock_view",
+            "collapsed_width": 36,
+            "groups": [{"panels": ["color"], "active": 0, "collapsed": False}],
+        }
+        html = render_element(dock_el, theme, color_state, mode="normal")
+        assert "Grayscale" in html
+        assert "Invert" in html

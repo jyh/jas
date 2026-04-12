@@ -1,9 +1,877 @@
 id: color_panel_content
-type: placeholder
-summary: "Color picker"
+type: panel
+summary: "Color"
 description: >
-  Inline color panel with color wheel or spectrum bar, RGB/HSB
-  sliders, and hex input. Changes apply immediately to the active
-  fill or stroke (determined by which swatch is in front in the
-  toolbar fill/stroke widget). Distinct from the modal color picker
-  dialog, which is opened via double-click on a swatch.
+  Inline color panel for editing the active fill or stroke color (whichever
+  swatch is in front, per fill_on_top). The panel has five color modes
+  (Grayscale, RGB, HSB, CMYK, Web Safe RGB) stored as panel-local state.
+  Changing the mode shows the appropriate slider set without changing the
+  current color. The mode is re-initialized from the active color when the
+  panel first opens.
+
+  Layout (top to bottom):
+
+  Row 1 — Swatches. Three fixed shortcuts (None, Black, White) followed by a
+  thin vertical rule and ten recent-color slots. Recent colors are
+  per-document and shared between fill and stroke. Colors are added to the
+  front of the list on commit (slider release, hex Enter, or swatch click).
+  Duplicates move to front rather than duplicating. Empty slots render as
+  hollow squares with a solid border.
+
+  Row 2 — Controls (two columns). Left column: the standard fill/stroke
+  widget (overlapping swatches + swap + reset buttons), same visual behavior
+  as the toolbar widget except single-click only (no double-click to open
+  the modal picker). Right column: sliders for the active color mode.
+
+  Row 3 — Hex field. A six-character hex input (RRGGBB, displayed with a
+  leading # label). Committing updates the active color and adds it to recent
+  colors. In Web Safe RGB mode, the value snaps to the nearest web-safe color.
+
+  Bottom: a 64 px tall color gradient (color bar). Hue varies along the
+  x-axis (0–360°) and saturation varies along the y-axis (high saturation
+  at top). The gradient is rendered at the current brightness value. Clicking
+  or dragging sets the active color, committing to the recent-colors list on
+  pointer-up.
+
+  Sliders and the hex field are disabled (non-interactive) when the active
+  attribute is none. Clicking any swatch (fixed or recent) implicitly
+  un-nones the attribute and commits the swatch color.
+
+  Panel menu: five color-mode entries (with a checkmark on the active mode),
+  Invert (255−R, 255−G, 255−B), Complement ((H+180) mod 360, S, B — no-op
+  if S=0), and a permanently disabled Create New Swatch… entry.
+
+state:
+  mode:
+    type: enum
+    values: [grayscale, rgb, hsb, cmyk, web_safe_rgb]
+    default: hsb
+    description: "Active color mode; panel-local (not persisted)"
+  h:
+    type: number
+    default: 0
+    description: "Working hue (0–360)"
+  s:
+    type: number
+    default: 0
+    description: "Working saturation (0–100)"
+  b:
+    type: number
+    default: 100
+    description: "Working brightness (0–100)"
+  r:
+    type: number
+    default: 255
+    description: "Working red (0–255)"
+  g:
+    type: number
+    default: 255
+    description: "Working green (0–255)"
+  bl:
+    type: number
+    default: 255
+    description: "Working blue (0–255)"
+  c:
+    type: number
+    default: 0
+    description: "Working cyan (0–100)"
+  m:
+    type: number
+    default: 0
+    description: "Working magenta (0–100)"
+  y:
+    type: number
+    default: 0
+    description: "Working yellow (0–100)"
+  k:
+    type: number
+    default: 0
+    description: "Working key/black (0–100)"
+  hex:
+    type: string
+    default: "ffffff"
+    description: "Working hex string (6 chars, no # prefix)"
+  recent_colors:
+    type: list
+    item_type: color
+    max_length: 10
+    default: []
+    per_document: true
+    description: >
+      Per-document list of recently committed colors, newest first.
+      Max 10 entries. A duplicate color moves to front rather than
+      duplicating. Added on commit: slider release, hex field Enter,
+      swatch click (including none/black/white). Not added for Invert
+      or Complement — those dispatch set_active_color which adds there.
+      Empty slots render as hollow squares with a solid border.
+
+init:
+  h:   "hsb_h({{state.fill_on_top}} ? {{state.fill_color}} : {{state.stroke_color}})"
+  s:   "hsb_s({{state.fill_on_top}} ? {{state.fill_color}} : {{state.stroke_color}})"
+  b:   "hsb_b({{state.fill_on_top}} ? {{state.fill_color}} : {{state.stroke_color}})"
+  r:   "rgb_r({{state.fill_on_top}} ? {{state.fill_color}} : {{state.stroke_color}})"
+  g:   "rgb_g({{state.fill_on_top}} ? {{state.fill_color}} : {{state.stroke_color}})"
+  bl:  "rgb_b({{state.fill_on_top}} ? {{state.fill_color}} : {{state.stroke_color}})"
+  c:   "cmyk_c({{state.fill_on_top}} ? {{state.fill_color}} : {{state.stroke_color}})"
+  m:   "cmyk_m({{state.fill_on_top}} ? {{state.fill_color}} : {{state.stroke_color}})"
+  y:   "cmyk_y({{state.fill_on_top}} ? {{state.fill_color}} : {{state.stroke_color}})"
+  k:   "cmyk_k({{state.fill_on_top}} ? {{state.fill_color}} : {{state.stroke_color}})"
+  hex: "hex({{state.fill_on_top}} ? {{state.fill_color}} : {{state.stroke_color}})"
+  recent_colors: "document.recent_colors"
+
+menu:
+  - label: "Grayscale"
+    action: set_color_panel_mode
+    params: { mode: grayscale }
+    checked_when: "{{panel.mode}} == grayscale"
+  - label: "RGB"
+    action: set_color_panel_mode
+    params: { mode: rgb }
+    checked_when: "{{panel.mode}} == rgb"
+  - label: "HSB"
+    action: set_color_panel_mode
+    params: { mode: hsb }
+    checked_when: "{{panel.mode}} == hsb"
+  - label: "CMYK"
+    action: set_color_panel_mode
+    params: { mode: cmyk }
+    checked_when: "{{panel.mode}} == cmyk"
+  - label: "Web Safe RGB"
+    action: set_color_panel_mode
+    params: { mode: web_safe_rgb }
+    checked_when: "{{panel.mode}} == web_safe_rgb"
+  - separator
+  - label: "Invert"
+    action: invert_active_color
+    enabled_when: "{{state.fill_on_top}} ? {{state.fill_color}} != null : {{state.stroke_color}} != null"
+  - label: "Complement"
+    action: complement_active_color
+    enabled_when: "{{state.fill_on_top}} ? {{state.fill_color}} != null : {{state.stroke_color}} != null"
+  - separator
+  - label: "Create New Swatch..."
+    disabled: true
+    description: "Disabled; will be enabled when the Swatches panel is implemented."
+
+content:
+  type: container
+  id: cp_content
+  layout: column
+  style: { padding: 4, gap: 6 }
+  children:
+
+    # ── Row 1: Fixed swatches | rule | Recent colors ───────────
+    - type: container
+      id: cp_swatches_row
+      layout: row
+      style: { gap: 2, alignment: center }
+      children:
+
+        # None shortcut
+        - id: cp_none_swatch
+          type: icon_button
+          icon: color_none
+          summary: "None"
+          description: >
+            Sets the active attribute (fill or stroke, per fill_on_top) to
+            none. Enables the none swatch indicator on the fill/stroke widget.
+          style: { size: 16 }
+          behavior:
+            - event: click
+              action: set_active_color_none
+
+        # Black shortcut
+        - id: cp_black_swatch
+          type: color_swatch
+          summary: "Black"
+          description: "Sets the active color to black (#000000) and commits."
+          style: { size: 16 }
+          bind:
+            color: "#000000"
+          behavior:
+            - event: click
+              action: set_active_color
+              params: { color: "#000000" }
+
+        # White shortcut
+        - id: cp_white_swatch
+          type: color_swatch
+          summary: "White"
+          description: "Sets the active color to white (#ffffff) and commits."
+          style: { size: 16 }
+          bind:
+            color: "#ffffff"
+          behavior:
+            - event: click
+              action: set_active_color
+              params: { color: "#ffffff" }
+
+        # Thin vertical rule separating fixed swatches from recent colors
+        - id: cp_swatch_rule
+          type: separator
+          orientation: vertical
+          class: jas-swatch-rule
+          style: { height: 16 }
+          description: "1px vertical rule visually separating fixed swatches from recent-color history."
+
+        # 10 recent-color slots (empty = hollow dashed square via jas-color-swatch-empty)
+        - id: cp_recent_0
+          type: color_swatch
+          summary: "Recent color 1"
+          description: "Most recent committed color. Empty slot shows a hollow square with a solid border."
+          style: { size: 16 }
+          bind:
+            color: "{{panel.recent_colors.0}}"
+          behavior:
+            - event: click
+              condition: "{{panel.recent_colors.0}} != null"
+              action: set_active_color
+              params: { color: "{{panel.recent_colors.0}}" }
+
+        - id: cp_recent_1
+          type: color_swatch
+          summary: "Recent color 2"
+          style: { size: 16 }
+          bind:
+            color: "{{panel.recent_colors.1}}"
+          behavior:
+            - event: click
+              condition: "{{panel.recent_colors.1}} != null"
+              action: set_active_color
+              params: { color: "{{panel.recent_colors.1}}" }
+
+        - id: cp_recent_2
+          type: color_swatch
+          summary: "Recent color 3"
+          style: { size: 16 }
+          bind:
+            color: "{{panel.recent_colors.2}}"
+          behavior:
+            - event: click
+              condition: "{{panel.recent_colors.2}} != null"
+              action: set_active_color
+              params: { color: "{{panel.recent_colors.2}}" }
+
+        - id: cp_recent_3
+          type: color_swatch
+          summary: "Recent color 4"
+          style: { size: 16 }
+          bind:
+            color: "{{panel.recent_colors.3}}"
+          behavior:
+            - event: click
+              condition: "{{panel.recent_colors.3}} != null"
+              action: set_active_color
+              params: { color: "{{panel.recent_colors.3}}" }
+
+        - id: cp_recent_4
+          type: color_swatch
+          summary: "Recent color 5"
+          style: { size: 16 }
+          bind:
+            color: "{{panel.recent_colors.4}}"
+          behavior:
+            - event: click
+              condition: "{{panel.recent_colors.4}} != null"
+              action: set_active_color
+              params: { color: "{{panel.recent_colors.4}}" }
+
+        - id: cp_recent_5
+          type: color_swatch
+          summary: "Recent color 6"
+          style: { size: 16 }
+          bind:
+            color: "{{panel.recent_colors.5}}"
+          behavior:
+            - event: click
+              condition: "{{panel.recent_colors.5}} != null"
+              action: set_active_color
+              params: { color: "{{panel.recent_colors.5}}" }
+
+        - id: cp_recent_6
+          type: color_swatch
+          summary: "Recent color 7"
+          style: { size: 16 }
+          bind:
+            color: "{{panel.recent_colors.6}}"
+          behavior:
+            - event: click
+              condition: "{{panel.recent_colors.6}} != null"
+              action: set_active_color
+              params: { color: "{{panel.recent_colors.6}}" }
+
+        - id: cp_recent_7
+          type: color_swatch
+          summary: "Recent color 8"
+          style: { size: 16 }
+          bind:
+            color: "{{panel.recent_colors.7}}"
+          behavior:
+            - event: click
+              condition: "{{panel.recent_colors.7}} != null"
+              action: set_active_color
+              params: { color: "{{panel.recent_colors.7}}" }
+
+        - id: cp_recent_8
+          type: color_swatch
+          summary: "Recent color 9"
+          style: { size: 16 }
+          bind:
+            color: "{{panel.recent_colors.8}}"
+          behavior:
+            - event: click
+              condition: "{{panel.recent_colors.8}} != null"
+              action: set_active_color
+              params: { color: "{{panel.recent_colors.8}}" }
+
+        - id: cp_recent_9
+          type: color_swatch
+          summary: "Recent color 10"
+          description: "Oldest of the ten recent colors."
+          style: { size: 16 }
+          bind:
+            color: "{{panel.recent_colors.9}}"
+          behavior:
+            - event: click
+              condition: "{{panel.recent_colors.9}} != null"
+              action: set_active_color
+              params: { color: "{{panel.recent_colors.9}}" }
+
+    # ── Row 2: Fill/stroke widget | Sliders ────────────────────
+    - type: container
+      id: cp_controls_row
+      layout: row
+      style: { gap: 6, alignment: center }
+      children:
+
+        # Fill/stroke widget (overlapping swatches + swap + reset)
+        # Same visual behavior as the toolbar widget; single-click only
+        # (no double-click to open modal picker from within the panel).
+        - id: cp_fill_stroke_widget
+          type: container
+          summary: "Fill & Stroke"
+          description: >
+            Overlapping fill and stroke swatches. Single-click a swatch to
+            bring it to front (making it the active attribute). Swap button
+            exchanges fill and stroke colors. Reset button restores defaults
+            (white fill, black stroke). No double-click behavior in panel.
+          layout: column
+          style: { width: 52, height: 56, position: relative }
+          children:
+
+            - id: cp_fill_swatch
+              type: color_swatch
+              summary: "Fill color"
+              description: >
+                Filled square showing the current fill color. Positioned
+                at top-left, z-index swaps based on fill_on_top. When fill
+                is null, shows the none indicator.
+              style: { size: 24, position: { x: 0, y: 0 } }
+              bind:
+                color: "{{state.fill_color}}"
+                z_index: "{{state.fill_on_top}} == true ? 2 : 1"
+              behavior:
+                - event: click
+                  effects:
+                    - set: { fill_on_top: true }
+
+            - id: cp_stroke_swatch
+              type: color_swatch
+              summary: "Stroke color"
+              description: >
+                Hollow square (6px border) showing the current stroke color,
+                offset 8px right and 8px down from the fill swatch. When
+                stroke is null, shows the none indicator.
+              hollow: true
+              style: { size: 24, position: { x: 8, y: 8 } }
+              bind:
+                color: "{{state.stroke_color}}"
+                z_index: "{{state.fill_on_top}} == true ? 1 : 2"
+              behavior:
+                - event: click
+                  effects:
+                    - set: { fill_on_top: false }
+
+            - id: cp_swap_btn
+              type: icon_button
+              summary: "Swap"
+              description: "Swaps fill and stroke colors (Shift+X)."
+              icon: swap_arrows
+              style: { size: 10, position: { x: 40, y: 0 } }
+              behavior:
+                - event: click
+                  action: swap_fill_stroke
+
+            - id: cp_reset_btn
+              type: icon_button
+              summary: "Default"
+              description: "Resets fill to white and stroke to 1pt black (D)."
+              icon: default_colors
+              style: { size: 12, position: { x: 0, y: 38 } }
+              behavior:
+                - event: click
+                  action: reset_fill_stroke
+
+        # Mode-specific slider groups
+        - type: container
+          id: cp_sliders_col
+          layout: column
+          style: { flex: 1, gap: 2 }
+          children:
+
+            # Grayscale: single K slider (0–100, % of black ink)
+            - id: cp_sliders_grayscale
+              type: container
+              layout: column
+              style: { gap: 2 }
+              bind:
+                visible: "{{panel.mode}} == grayscale"
+              children:
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "K"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_k
+                      type: slider
+                      summary: "K (black)"
+                      min: 0
+                      max: 100
+                      step: 1
+                      bind:
+                        value: "{{panel.k}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_k_val
+                      type: number_input
+                      min: 0
+                      max: 100
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.k}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - type: text
+                      content: "%"
+                      style: { font_size: 10 }
+
+            # HSB: H (0–360 °), S (0–100 %), B (0–100 %)
+            - id: cp_sliders_hsb
+              type: container
+              layout: column
+              style: { gap: 2 }
+              bind:
+                visible: "{{panel.mode}} == hsb"
+              children:
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "H"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_h
+                      type: slider
+                      summary: "Hue"
+                      min: 0
+                      max: 360
+                      step: 1
+                      bind:
+                        value: "{{panel.h}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_h_val
+                      type: number_input
+                      min: 0
+                      max: 360
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.h}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - type: text
+                      content: "°"
+                      style: { font_size: 10 }
+
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "S"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_s
+                      type: slider
+                      summary: "Saturation"
+                      min: 0
+                      max: 100
+                      step: 1
+                      bind:
+                        value: "{{panel.s}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_s_val
+                      type: number_input
+                      min: 0
+                      max: 100
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.s}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - type: text
+                      content: "%"
+                      style: { font_size: 10 }
+
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "B"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_b
+                      type: slider
+                      summary: "Brightness"
+                      min: 0
+                      max: 100
+                      step: 1
+                      bind:
+                        value: "{{panel.b}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_b_val
+                      type: number_input
+                      min: 0
+                      max: 100
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.b}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - type: text
+                      content: "%"
+                      style: { font_size: 10 }
+
+            # RGB: R, G, B (0–255)
+            - id: cp_sliders_rgb
+              type: container
+              layout: column
+              style: { gap: 2 }
+              bind:
+                visible: "{{panel.mode}} == rgb"
+              children:
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "R"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_r
+                      type: slider
+                      summary: "Red"
+                      min: 0
+                      max: 255
+                      step: 1
+                      bind:
+                        value: "{{panel.r}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_r_val
+                      type: number_input
+                      min: 0
+                      max: 255
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.r}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "G"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_g
+                      type: slider
+                      summary: "Green"
+                      min: 0
+                      max: 255
+                      step: 1
+                      bind:
+                        value: "{{panel.g}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_g_val
+                      type: number_input
+                      min: 0
+                      max: 255
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.g}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "B"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_bl
+                      type: slider
+                      summary: "Blue"
+                      min: 0
+                      max: 255
+                      step: 1
+                      bind:
+                        value: "{{panel.bl}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_bl_val
+                      type: number_input
+                      min: 0
+                      max: 255
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.bl}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+
+            # CMYK: C, M, Y, K (0–100 %)
+            - id: cp_sliders_cmyk
+              type: container
+              layout: column
+              style: { gap: 2 }
+              bind:
+                visible: "{{panel.mode}} == cmyk"
+              children:
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "C"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_c
+                      type: slider
+                      summary: "Cyan"
+                      min: 0
+                      max: 100
+                      step: 1
+                      bind:
+                        value: "{{panel.c}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_c_val
+                      type: number_input
+                      min: 0
+                      max: 100
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.c}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - type: text
+                      content: "%"
+                      style: { font_size: 10 }
+
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "M"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_m
+                      type: slider
+                      summary: "Magenta"
+                      min: 0
+                      max: 100
+                      step: 1
+                      bind:
+                        value: "{{panel.m}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_m_val
+                      type: number_input
+                      min: 0
+                      max: 100
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.m}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - type: text
+                      content: "%"
+                      style: { font_size: 10 }
+
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "Y"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_y
+                      type: slider
+                      summary: "Yellow"
+                      min: 0
+                      max: 100
+                      step: 1
+                      bind:
+                        value: "{{panel.y}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_y_val
+                      type: number_input
+                      min: 0
+                      max: 100
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.y}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - type: text
+                      content: "%"
+                      style: { font_size: 10 }
+
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "K"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_k_cmyk
+                      type: slider
+                      summary: "Key (black)"
+                      min: 0
+                      max: 100
+                      step: 1
+                      bind:
+                        value: "{{panel.k}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_k_cmyk_val
+                      type: number_input
+                      min: 0
+                      max: 100
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.k}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - type: text
+                      content: "%"
+                      style: { font_size: 10 }
+
+            # Web Safe RGB: R, G, B (step=51, snaps to 0/51/102/153/204/255)
+            - id: cp_sliders_web_safe
+              type: container
+              layout: column
+              style: { gap: 2 }
+              bind:
+                visible: "{{panel.mode}} == web_safe_rgb"
+              description: >
+                RGB sliders restricted to six web-safe steps per channel:
+                0, 51, 102, 153, 204, 255 (hex 00, 33, 66, 99, CC, FF).
+                Sliders snap continuously as dragged (step=51). Hex input
+                snaps silently to the nearest web-safe color on commit.
+              children:
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "R"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_r_ws
+                      type: slider
+                      summary: "Red (web safe)"
+                      min: 0
+                      max: 255
+                      step: 51
+                      bind:
+                        value: "{{panel.r}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_r_ws_val
+                      type: number_input
+                      min: 0
+                      max: 255
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.r}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "G"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_g_ws
+                      type: slider
+                      summary: "Green (web safe)"
+                      min: 0
+                      max: 255
+                      step: 51
+                      bind:
+                        value: "{{panel.g}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_g_ws_val
+                      type: number_input
+                      min: 0
+                      max: 255
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.g}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+
+                - type: container
+                  layout: row
+                  style: { gap: 4, alignment: center }
+                  children:
+                    - type: text
+                      content: "B"
+                      style: { width: 10, font_size: 10 }
+                    - id: cp_bl_ws
+                      type: slider
+                      summary: "Blue (web safe)"
+                      min: 0
+                      max: 255
+                      step: 51
+                      bind:
+                        value: "{{panel.bl}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+                    - id: cp_bl_ws_val
+                      type: number_input
+                      min: 0
+                      max: 255
+                      style: { width: 36 }
+                      bind:
+                        value: "{{panel.bl}}"
+                        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+
+    # ── Row 3: Hex field ─────────────────────────────────────────
+    - type: container
+      id: cp_hex_row
+      layout: row
+      style: { gap: 2, alignment: center }
+      children:
+        - type: text
+          content: "#"
+          style: { color: "{{theme.colors.text}}", font_size: 10 }
+        - id: cp_hex
+          type: text_input
+          summary: "Hex color"
+          description: >
+            Six-character hex string (RRGGBB, no # prefix). Editing and
+            pressing Enter or Tab commits the value, updates the active
+            color, and adds it to recent colors. Non-hex characters are
+            rejected. In Web Safe RGB mode, the entered value is snapped
+            to the nearest web-safe color on commit.
+          placeholder: "000000"
+          style: { width: 52 }
+          bind:
+            value: "{{panel.hex}}"
+            disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
+
+    # ── Color bar ───────────────────────────────────────────────
+    - id: cp_color_bar
+      type: color_bar
+      summary: "Color gradient"
+      description: >
+        64px tall 2D color gradient. Hue varies along the x-axis (0–360°
+        left to right). Saturation varies along the y-axis (100% at top,
+        0% at bottom). The gradient is rendered at the current brightness
+        (panel.b). Clicking or dragging updates hue and saturation of the
+        active color in real time; the color is committed (added to recent
+        colors) on pointer-up. Disabled when the active attribute is none.
+      bind:
+        brightness: "{{panel.b}}"
+        disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"

@@ -10,6 +10,7 @@ from loader import resolve_interpolation
 _icons: dict = {}
 _initial_state: dict = {}
 _brand: dict = {}
+_panels: dict = {}
 
 
 def set_icons(icons: dict) -> None:
@@ -28,6 +29,12 @@ def set_brand(brand: dict) -> None:
     """Set brand config (logo SVG, color) for use in empty-state renderers."""
     global _brand
     _brand = brand or {}
+
+
+def set_panels(panels: dict) -> None:
+    """Set the panel specs keyed by panel content id (e.g. 'color_panel_content')."""
+    global _panels
+    _panels = panels or {}
 
 
 def render_element(el: dict, theme: dict, state: dict, mode: str = "normal") -> str:
@@ -261,11 +268,14 @@ def _data_attrs(el: dict) -> str:
 
     # Emit bind attributes
     bind = el.get("bind", {})
+    if not isinstance(bind, dict):
+        bind = {}
     for prop, expr in bind.items():
         parts.append(f'data-bind-{prop}="{escape(str(expr))}"')
-    # If bind.visible evaluates to false at render time, set initial display:none
+    # If bind.visible evaluates to false at render time, set initial display:none.
+    # Skip server-side evaluation when the expression references panel.* (client-only).
     vis_expr = bind.get("visible")
-    if vis_expr and isinstance(vis_expr, str):
+    if vis_expr and isinstance(vis_expr, str) and "{{panel." not in vis_expr:
         from loader import resolve_interpolation as _ri
         resolved = _ri(vis_expr, {}, _initial_state or {})
         hidden = False
@@ -421,26 +431,45 @@ def _render_panel(el, theme, state):
     menu = el.get("menu", [])
     content = el.get("content")
     content_html = render_element(content, theme, state, mode="normal") if isinstance(content, dict) else ""
+    # Embed panel-local state/init as data attributes for client-side initialization.
+    # data-panel-state emits only default values (not full specs) so JS can use directly.
+    panel_data = ""
+    if el.get("state"):
+        defaults = {k: v.get("default") if isinstance(v, dict) else v
+                    for k, v in el["state"].items()}
+        panel_data += f' data-panel-state="{escape(json.dumps(defaults))}"'
+    if el.get("init"):
+        panel_data += f' data-panel-init="{escape(json.dumps(el["init"]))}"'
 
     menu_html = ""
     if menu:
         menu_items = ""
         for item in menu:
+            if isinstance(item, str) and item == "separator":
+                menu_items += '<li><hr class="dropdown-divider"></li>'
+                continue
+            if not isinstance(item, dict):
+                continue
             label = escape(item.get("label", ""))
             action = item.get("action", "")
+            ip = item.get("params")
+            disabled = item.get("disabled", False)
+            data = f' data-action="{escape(action)}"' if action and not disabled else ""
+            if ip and not disabled:
+                data += f" data-action-params='{escape(json.dumps(ip))}'"
+            dis_attr = ' aria-disabled="true" style="opacity:0.5;pointer-events:none"' if disabled else ""
             menu_items += (
-                f'<li><a class="dropdown-item" href="#"'
-                f' data-action="{escape(action)}">{label}</a></li>'
+                f'<li><a class="dropdown-item" href="#"{data}{dis_attr}>{label}</a></li>'
             )
         menu_html = (
             f'<div class="dropdown float-end">'
             f'<button class="btn btn-sm p-0" data-bs-toggle="dropdown"'
-            f' style="color:var(--jas-text-button,#888);font-size:14px">&#8942;</button>'
+            f' style="color:var(--jas-text-button,#888);font-size:16px;display:inline-flex;align-items:center">&#8942;</button>'
             f'<ul class="dropdown-menu">{menu_items}</ul></div>'
         )
 
     return Markup(
-        f'<div{_id_attr(el)} class="jas-panel">'
+        f'<div{_id_attr(el)} class="jas-panel"{panel_data}>'
         f'<div class="d-flex align-items-center p-1" style="background:var(--jas-title-bar-bg,#2a2a2a);font-size:11px;color:var(--jas-text,#ccc)">'
         f'{summary}{menu_html}</div>'
         f'<div class="p-2">{content_html}</div>'
@@ -460,9 +489,12 @@ def _render_button(el, theme, state):
 def _render_icon_button(el, theme, state):
     summary = escape(el.get("summary", el.get("icon", "?")))
     icon_name = el.get("icon", "")
-    sz = el.get("style", {}).get("size", 32)
+    style = el.get("style", {})
+    sz = style.get("size", 32)
     if isinstance(sz, str) and "{{" in sz:
         sz = _resolve(sz, theme, state)
+    pos = style.get("position", {})
+    pos_css = f"position:absolute;left:{pos['x']}px;top:{pos['y']}px;" if pos else ""
     icon_html = ""
     icon_def = _icons.get(icon_name)
     if icon_def:
@@ -479,7 +511,7 @@ def _render_icon_button(el, theme, state):
         icon_html = f'<span style="font-size:{int(float(sz)*0.5)}px;font-weight:bold;color:var(--jas-text,#ccc)">{escape(str(fallback))}</span>'
     return Markup(
         f'<button{_id_attr(el)} class="btn btn-sm btn-outline-secondary jas-tool-btn p-0"'
-        f' style="width:{sz}px;height:{sz}px;display:flex;align-items:center;justify-content:center"'
+        f' style="{pos_css}width:{sz}px;height:{sz}px;display:flex;align-items:center;justify-content:center"'
         f' title="{summary}"{_data_attrs(el)}>'
         f'{icon_html}</button>'
     )
@@ -528,7 +560,7 @@ def _render_text_input(el, theme, state):
     placeholder = escape(el.get("placeholder", ""))
     return Markup(
         f'<input{_id_attr(el)} type="text" class="form-control form-control-sm"'
-        f' placeholder="{placeholder}">'
+        f' placeholder="{placeholder}"{_data_attrs(el)}>'
     )
 
 
@@ -538,7 +570,7 @@ def _render_number_input(el, theme, state):
         if key in el:
             attrs += f' {key}="{el[key]}"'
     return Markup(
-        f'<input{_id_attr(el)} type="number" class="form-control form-control-sm"{attrs}>'
+        f'<input{_id_attr(el)} type="number" class="form-control form-control-sm"{attrs}{_data_attrs(el)}>'
     )
 
 
@@ -551,10 +583,18 @@ def _render_color_swatch(el, theme, state):
     hollow = el.get("hollow", False)
     pos = style.get("position", {})
     pos_css = f"position:absolute;left:{pos['x']}px;top:{pos['y']}px;" if pos else ""
+    # Empty swatch: color is unresolvable (panel namespace) or explicitly empty
+    is_empty = not color or color.startswith("{{") or color in ("none", "null", "")
+    if is_empty:
+        return Markup(
+            f'<div{_id_attr(el)} class="jas-color-swatch jas-color-swatch-empty"'
+            f' style="{pos_css}width:{sz}px;height:{sz}px;box-sizing:border-box"'
+            f'{_data_attrs(el)}></div>'
+        )
     if hollow:
         return Markup(
-            f'<div{_id_attr(el)} class="jas-color-swatch"'
-            f' style="{pos_css}width:{sz}px;height:{sz}px;border:6px solid {color};background:#fff;box-sizing:border-box"'
+            f'<div{_id_attr(el)} class="jas-color-swatch" data-hollow="true"'
+            f' style="{pos_css}width:{sz}px;height:{sz}px;border:6px solid {color};background:transparent;box-sizing:border-box"'
             f'{_data_attrs(el)}></div>'
         )
     return Markup(
@@ -569,7 +609,7 @@ def _render_slider(el, theme, state):
     for key in ("min", "max", "step"):
         if key in el:
             attrs += f' {key}="{el[key]}"'
-    return Markup(f'<input{_id_attr(el)} type="range" class="form-range"{attrs}>')
+    return Markup(f'<input{_id_attr(el)} type="range" class="form-range"{attrs}{_data_attrs(el)}>')
 
 
 def _render_select(el, theme, state):
@@ -618,9 +658,10 @@ def _render_placeholder(el, theme, state):
 
 def _render_separator(el, theme, state):
     orientation = el.get("orientation", "horizontal")
+    extra_class = f' {escape(el["class"])}' if el.get("class") else ""
     if orientation == "vertical":
-        return Markup(f'<div{_id_attr(el)} style="width:1px;background:var(--jas-border,#555);margin:0 4px"{_data_attrs(el)}></div>')
-    return Markup(f'<hr{_id_attr(el)} style="border-color:var(--jas-border,#555);margin:4px 0"{_data_attrs(el)}>')
+        return Markup(f'<div{_id_attr(el)} class="jas-separator-v{extra_class}" style="width:1px;background:var(--jas-border,#555);margin:0 4px;align-self:stretch"{_data_attrs(el)}></div>')
+    return Markup(f'<hr{_id_attr(el)} class="jas-separator{extra_class}" style="border-color:var(--jas-border,#555);margin:4px 0"{_data_attrs(el)}>')
 
 
 def _render_spacer(el, theme, state):
@@ -633,6 +674,19 @@ def _render_spacer(el, theme, state):
 def _render_image(el, theme, state):
     src = escape(el.get("src", ""))
     return Markup(f'<img{_id_attr(el)} src="{src}" class="img-fluid">')
+
+
+def _render_color_bar(el, theme, state):
+    """Render the 2D color gradient bar: hue × saturation at current brightness."""
+    bind_attrs = _data_attrs(el)
+    brightness = el.get("bind", {}).get("brightness", "100")
+    return Markup(
+        f'<canvas{_id_attr(el)} class="jas-color-bar"'
+        f' data-type="color-bar"'
+        f' data-brightness="{escape(str(brightness))}"'
+        f' style="width:100%;height:64px;display:block;cursor:crosshair"'
+        f'{bind_attrs}></canvas>'
+    )
 
 
 def _render_dropdown(el, theme, state):
@@ -803,7 +857,7 @@ def _render_dock_view(el, theme, state):
             html += f'<div class="jas-dock-group" data-dock="{escape(eid)}" data-group-index="{gi}">'
 
             # Group header: grip + tab buttons + spacer + chevron + hamburger
-            html += '<div class="jas-dock-group-header" style="display:flex;align-items:center;background:var(--jas-pane-bg-dark,#333);padding:2px 4px;gap:2px">'
+            html += '<div class="jas-dock-group-header" style="display:flex;align-items:center;background:var(--jas-pane-bg-dark,#333);padding:2px 4px;gap:2px;height:22px">'
 
             # Grip handle for group drag
             html += f'<span class="jas-dock-grip" draggable="true" style="cursor:grab;color:var(--jas-text-hint,#777);font-size:10px;padding:0 2px" data-dock="{escape(eid)}" data-group="{gi}">⠁⠁</span>'
@@ -825,30 +879,81 @@ def _render_dock_view(el, theme, state):
             # Collapse chevron
             chevron = "\u00bb" if collapsed else "\u00ab"
             html += (
-                f'<button class="btn btn-sm jas-dock-chevron p-0" style="color:var(--jas-text-button,#888);background:transparent;border:none;font-size:18px;line-height:1"'
+                f'<button class="btn btn-sm jas-dock-chevron p-0" style="color:var(--jas-text-button,#888);background:transparent;border:none;font-size:16px;line-height:1;display:inline-flex;align-items:center"'
                 f' data-dock="{escape(eid)}" data-group="{gi}">{chevron}</button>'
             )
 
             # Hamburger menu (hidden when collapsed)
+            # Merges active panel's own menu items (above) with Close items (below).
             if not collapsed:
+                active_panel_spec = None
+                if 0 <= active < len(panels):
+                    active_key = f"{panels[active]}_panel_content"
+                    active_panel_spec = _panels.get(active_key)
+
                 html += '<div class="dropdown d-inline-block">'
-                html += '<button class="btn btn-sm p-0 dropdown-toggle" data-bs-toggle="dropdown" style="color:var(--jas-text-button,#888);background:transparent;border:none;font-size:14px">≡</button>'
+                html += '<button class="btn btn-sm p-0" data-bs-toggle="dropdown" style="color:var(--jas-text-button,#888);background:transparent;border:none;font-size:16px;display:inline-flex;align-items:center">≡</button>'
                 html += '<ul class="dropdown-menu">'
+                # Panel-specific menu items first
+                if active_panel_spec and active_panel_spec.get("menu"):
+                    for item in active_panel_spec["menu"]:
+                        if isinstance(item, str) and item == "separator":
+                            html += '<li><hr class="dropdown-divider"></li>'
+                            continue
+                        if not isinstance(item, dict):
+                            continue
+                        il = escape(item.get("label", ""))
+                        ia = item.get("action", "")
+                        ip = item.get("params")
+                        disabled = item.get("disabled", False)
+                        data = f' data-action="{escape(ia)}"' if ia and not disabled else ""
+                        if ip and not disabled:
+                            data += f" data-action-params='{escape(json.dumps(ip))}'"
+                        dis_attr = ' aria-disabled="true" style="opacity:0.5;pointer-events:none"' if disabled else ""
+                        html += f'<li><a class="dropdown-item" href="#"{data}{dis_attr}>{il}</a></li>'
+                    html += '<li><hr class="dropdown-divider"></li>'
+                # Close panel items
                 for panel_name in panels:
                     label = _PANEL_LABELS.get(panel_name, panel_name.title())
                     html += f'<li><a class="dropdown-item" href="#" data-action="close_panel" data-action-params=\'{{"panel":"{escape(panel_name)}"}}\'>{escape("Close " + label)}</a></li>'
                 html += '</ul></div>'
 
+                # Close button (×) for active panel
+                if 0 <= active < len(panels):
+                    active_panel_close = panels[active]
+                    close_params = escape(json.dumps({"panel": active_panel_close}))
+                    html += (
+                        f'<button class="btn btn-sm jas-dock-close p-0"'
+                        f' style="color:var(--jas-text-button,#888);background:transparent;border:none;font-size:12px;line-height:1;display:inline-flex;align-items:center;width:20px"'
+                        f' data-action="close_panel" data-action-params=\'{close_params}\''
+                        f' title="Close">&#x2715;</button>'
+                    )
+
             html += '</div>'  # header
 
             # Group body (hidden when collapsed)
             if not collapsed:
-                html += '<div class="jas-dock-group-body" style="flex:1">'
+                html += '<div class="jas-dock-group-body" style="flex:1;overflow:auto">'
                 if 0 <= active < len(panels):
                     active_panel = panels[active]
-                    # Render panel content placeholder
-                    label = _PANEL_LABELS.get(active_panel, active_panel.title())
-                    html += f'<div class="jas-dock-panel-body" style="padding:12px;color:var(--jas-text-body,#aaa);font-size:12px" data-panel-name="{escape(active_panel)}">{escape(label)}</div>'
+                    active_key = f"{active_panel}_panel_content"
+                    panel_spec = _panels.get(active_key)
+                    if panel_spec is not None:
+                        # Emit panel state/init as data attributes for client-side init
+                        body_attrs = f' data-panel-name="{escape(active_panel)}"'
+                        if panel_spec.get("state"):
+                            defaults = {k: v.get("default") if isinstance(v, dict) else v
+                                        for k, v in panel_spec["state"].items()}
+                            body_attrs += f' data-panel-state="{escape(json.dumps(defaults))}"'
+                        if panel_spec.get("init"):
+                            body_attrs += f' data-panel-init="{escape(json.dumps(panel_spec["init"]))}"'
+                        content_el = panel_spec.get("content")
+                        content_html = render_element(content_el, theme, state, mode="normal") if isinstance(content_el, dict) else ""
+                        html += f'<div class="jas-dock-panel-body"{body_attrs}>{content_html}</div>'
+                    else:
+                        # Fallback: label only (panel spec not loaded)
+                        label = _PANEL_LABELS.get(active_panel, active_panel.title())
+                        html += f'<div class="jas-dock-panel-body" style="padding:12px;color:var(--jas-text-body,#aaa);font-size:18px" data-panel-name="{escape(active_panel)}">{escape(label)}</div>'
                 html += '</div>'
 
             html += '</div>'  # group
@@ -906,5 +1011,6 @@ _RENDERERS = {
     "separator": _render_separator,
     "spacer": _render_spacer,
     "image": _render_image,
+    "color_bar": _render_color_bar,
     "brand_logo": _render_brand_logo,
 }
