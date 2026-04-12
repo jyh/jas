@@ -5,14 +5,21 @@ from markupsafe import Markup, escape
 
 from loader import resolve_interpolation
 
-# Module-level icon registry, set via set_icons() before rendering.
+# Module-level registries, set before rendering.
 _icons: dict = {}
+_initial_state: dict = {}
 
 
 def set_icons(icons: dict) -> None:
     """Set the icon definitions for the renderer."""
     global _icons
     _icons = icons or {}
+
+
+def set_initial_state(state_defs: dict) -> None:
+    """Set initial state defaults for server-side visibility evaluation."""
+    global _initial_state
+    _initial_state = {name: defn.get("default") for name, defn in (state_defs or {}).items()}
 
 
 def render_element(el: dict, theme: dict, state: dict, mode: str = "normal") -> str:
@@ -170,7 +177,7 @@ def _data_attrs(el: dict) -> str:
     parts = []
     behaviors = el.get("behavior", [])
 
-    # Find the first click behavior with a named action for data-action (simple dispatch)
+    # Find the first simple click action for data-action
     click_action = None
     click_params = None
     if not behaviors:
@@ -178,7 +185,7 @@ def _data_attrs(el: dict) -> str:
         click_params = el.get("params")
     else:
         for b in behaviors:
-            if b.get("event") == "click" and b.get("action"):
+            if b.get("event") == "click" and b.get("action") and not b.get("condition"):
                 click_action = b["action"]
                 click_params = b.get("params")
                 break
@@ -188,9 +195,9 @@ def _data_attrs(el: dict) -> str:
         if click_params:
             parts.append(f"data-action-params='{escape(json.dumps(click_params))}'")
 
-    # Emit all behaviors that need JS wiring: non-click events, or click with inline effects
-    wired = [b for b in behaviors
-             if b.get("event") != "click" or (b.get("effects") and not b.get("action"))]
+    # Emit all behaviors that need JS wiring
+    wired = [b for b in behaviors if b.get("event") != "click"
+             or b.get("condition") or (b.get("effects") and not b.get("action"))]
     if wired:
         parts.append(f"data-behaviors='{escape(json.dumps(wired))}'")
 
@@ -198,6 +205,28 @@ def _data_attrs(el: dict) -> str:
     bind = el.get("bind", {})
     for prop, expr in bind.items():
         parts.append(f'data-bind-{prop}="{escape(str(expr))}"')
+    # If bind.visible evaluates to false at render time, set initial display:none
+    vis_expr = bind.get("visible")
+    if vis_expr and isinstance(vis_expr, str):
+        from loader import resolve_interpolation as _ri
+        resolved = _ri(vis_expr, {}, _initial_state or {})
+        hidden = False
+        if resolved in ("false", "False", "0"):
+            hidden = True
+        elif resolved.startswith("not "):
+            inner = resolved[4:].strip()
+            if inner in ("false", "False", "0", ""):
+                hidden = False
+            else:
+                hidden = True
+        elif " != " in resolved:
+            left, right = resolved.split(" != ", 1)
+            hidden = left.strip() == right.strip()
+        elif " == " in resolved:
+            left, right = resolved.split(" == ", 1)
+            hidden = left.strip() != right.strip()
+        if hidden:
+            parts.append('data-initial-hidden="true"')
 
     if not parts:
         return ""
@@ -251,8 +280,9 @@ def _render_pane(el, theme, state):
         f' style="position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;'
         f'background:{bg};border:{border};display:flex;flex-direction:column;overflow:hidden"'
         f'{extra_data}>'
-        f'<div class="jas-pane-title" style="height:20px;background:#2a2a2a;display:flex;'
-        f'align-items:center;padding:0 6px;cursor:grab;font-size:11px;color:#d9d9d9">'
+        f'<div{_id_attr(title_bar)} class="jas-pane-title" style="height:20px;background:#2a2a2a;display:flex;'
+        f'align-items:center;padding:0 6px;cursor:grab;font-size:11px;color:#d9d9d9"'
+        f'{_data_attrs(title_bar)}>'
         f'<span class="ms-auto d-flex gap-1">{title_btns}</span></div>'
         f'<div class="jas-pane-content" style="flex:1;overflow:auto;display:flex;flex-direction:column">{content_html}</div>'
         f'<div class="jas-edge-handle left"></div>'
@@ -383,10 +413,12 @@ def _render_icon_button(el, theme, state):
         icon_sz = int(float(sz) * 0.75)
         icon_html = (
             f'<svg viewBox="{viewbox}" width="{icon_sz}" height="{icon_sz}"'
-            f' fill="currentColor" style="color:#cccccc">{svg_content}</svg>'
+            f' style="color:#cccccc;fill:currentColor;stroke:currentColor">{svg_content}</svg>'
         )
     else:
-        icon_html = escape(icon_name)
+        # Fallback: show first letter of summary or icon name
+        fallback = summary[0] if summary else (icon_name[0] if icon_name else "?")
+        icon_html = f'<span style="font-size:{int(float(sz)*0.5)}px;font-weight:bold;color:#ccc">{escape(str(fallback))}</span>'
     return Markup(
         f'<button{_id_attr(el)} class="btn btn-sm btn-outline-secondary jas-tool-btn p-0"'
         f' style="width:{sz}px;height:{sz}px;display:flex;align-items:center;justify-content:center"'
@@ -519,8 +551,8 @@ def _render_placeholder(el, theme, state):
 def _render_separator(el, theme, state):
     orientation = el.get("orientation", "horizontal")
     if orientation == "vertical":
-        return Markup(f'<div{_id_attr(el)} style="width:1px;background:#555;margin:0 4px"></div>')
-    return Markup(f'<hr{_id_attr(el)} style="border-color:#555;margin:4px 0">')
+        return Markup(f'<div{_id_attr(el)} style="width:1px;background:#555;margin:0 4px"{_data_attrs(el)}></div>')
+    return Markup(f'<hr{_id_attr(el)} style="border-color:#555;margin:4px 0"{_data_attrs(el)}>')
 
 
 def _render_spacer(el, theme, state):

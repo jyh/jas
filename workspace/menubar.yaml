@@ -1,0 +1,72 @@
+menubar:
+  - id: file_menu
+    label: "&File"
+    items:
+      - { id: menu_new,      label: "&New",         action: new_document,  shortcut: "Ctrl+N" }
+      - { id: menu_open,     label: "&Open...",     action: open_file,     shortcut: "Ctrl+O" }
+      - { id: menu_save,     label: "&Save",        action: save,          shortcut: "Ctrl+S" }
+      - { id: menu_save_as,  label: "Save &As...",  action: save_as,       shortcut: "Ctrl+Shift+S" }
+      - { id: menu_revert,   label: "&Revert",      action: revert,
+          enabled_when: "model.is_modified and model.has_filename" }
+      - separator
+      - { id: menu_quit,     label: "&Quit",        action: quit,          shortcut: "Ctrl+Q" }
+
+  - id: edit_menu
+    label: "&Edit"
+    items:
+      - { id: menu_undo,           label: "&Undo",           action: undo,           shortcut: "Ctrl+Z" }
+      - { id: menu_redo,           label: "&Redo",           action: redo,           shortcut: "Ctrl+Shift+Z" }
+      - separator
+      - { id: menu_cut,            label: "Cu&t",            action: cut,            shortcut: "Ctrl+X" }
+      - { id: menu_copy,           label: "&Copy",           action: copy,           shortcut: "Ctrl+C" }
+      - { id: menu_paste,          label: "&Paste",          action: paste,          shortcut: "Ctrl+V" }
+      - { id: menu_paste_in_place, label: "Paste in &Place", action: paste_in_place, shortcut: "Ctrl+Shift+V" }
+      - separator
+      - { id: menu_select_all,     label: "Select &All",     action: select_all,     shortcut: "Ctrl+A" }
+
+  - id: object_menu
+    label: "&Object"
+    items:
+      - { id: menu_group,       label: "&Group",       action: group,       shortcut: "Ctrl+G" }
+      - { id: menu_ungroup,     label: "&Ungroup",     action: ungroup,     shortcut: "Ctrl+Shift+G" }
+      - { id: menu_ungroup_all, label: "Ungroup A&ll", action: ungroup_all }
+      - separator
+      - { id: menu_lock,        label: "&Lock",        action: lock,        shortcut: "Ctrl+2" }
+      - { id: menu_unlock_all,  label: "Unlock &All",  action: unlock_all,  shortcut: "Ctrl+Alt+2" }
+      - separator
+      - { id: menu_hide,        label: "&Hide",        action: hide_selection,  shortcut: "Ctrl+3" }
+      - { id: menu_show_all,    label: "&Show All",    action: show_all,        shortcut: "Ctrl+Alt+3" }
+
+  - id: view_menu
+    label: "&View"
+    items:
+      - { id: menu_zoom_in,  label: "Zoom &In",       action: zoom_in,       shortcut: "Ctrl+=" }
+      - { id: menu_zoom_out, label: "Zoom &Out",      action: zoom_out,      shortcut: "Ctrl+-" }
+      - { id: menu_fit,      label: "&Fit in Window",  action: fit_in_window, shortcut: "Ctrl+0" }
+
+  - id: window_menu
+    label: "&Window"
+    items:
+      - id: menu_workspace
+        label: "Workspace"
+        type: submenu
+        dynamic: true
+        description: >
+          Lists saved workspace layouts with a checkmark on the active one.
+          Includes Save As, Reset to Default, and Revert to Saved commands.
+        items:
+          - { id: menu_ws_save_as,  label: "Save As...",       action: save_workspace_as }
+          - separator
+          - { id: menu_ws_reset,    label: "Reset to Default", action: reset_workspace }
+          - { id: menu_ws_revert,   label: "Revert to Saved",  action: revert_workspace,
+              enabled_when: "workspace.has_saved_layout" }
+      - separator
+      - { id: menu_tile,       label: "Tile",        action: tile_panes }
+      - separator
+      - { id: menu_toolbar,    label: "Toolbar",     action: toggle_pane,  params: { pane: toolbar } }
+      - { id: menu_panels,     label: "Panels",      action: toggle_pane,  params: { pane: dock } }
+      - separator
+      - { id: menu_layers,     label: "&Layers",     action: toggle_panel, params: { panel: layers } }
+      - { id: menu_color,      label: "&Color",      action: toggle_panel, params: { panel: color } }
+      - { id: menu_stroke,     label: "&Stroke",     action: toggle_panel, params: { panel: stroke } }
+      - { id: menu_properties, label: "&Properties",  action: toggle_panel, params: { panel: properties } }

@@ -5,7 +5,7 @@ import pytest
 
 
 WORKSPACE_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "WORKSPACE.yaml"
+    os.path.dirname(__file__), "..", "..", "workspace"
 )
 
 

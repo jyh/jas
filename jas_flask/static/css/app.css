@@ -27,6 +27,8 @@
     color: var(--jas-title-bar-text, #d9d9d9);
     user-select: none;
     flex-shrink: 0;
+    position: relative;
+    z-index: 20;
 }
 
 .jas-pane-title:active {

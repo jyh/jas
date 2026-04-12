@@ -80,20 +80,14 @@
   }
 
   function updateBindings(key, value) {
-    // Generic data-bind-visible: show/hide based on boolean expression
+    // Generic data-bind-visible: show/hide using d-none class (overrides Bootstrap !important)
     document.querySelectorAll("[data-bind-visible]").forEach(function (el) {
       var expr = el.getAttribute("data-bind-visible");
       var result = evalCondition(resolve(expr, {}), {});
       if (result) {
-        // Restore original display (saved on first hide)
-        var saved = el.getAttribute("data-original-display");
-        el.style.display = saved || "";
+        el.classList.remove("d-none");
       } else {
-        // Save current display before hiding
-        if (el.style.display !== "none") {
-          el.setAttribute("data-original-display", el.style.display);
-        }
-        el.style.display = "none";
+        el.classList.add("d-none");
       }
     });
     // Generic data-bind-checked: toggle "active" class
@@ -148,19 +142,16 @@
         el.style.zIndex = resolved;
       }
     });
-    // Generic data-bind-collapsed: collapse pane to collapsed_width, hide content
+    // Generic data-bind-collapsed: set pane to collapsed_width, content visibility
+    // is handled by data-bind-visible on individual children
     document.querySelectorAll("[data-bind-collapsed]").forEach(function (el) {
       var expr = el.getAttribute("data-bind-collapsed");
       var result = evalCondition(resolve(expr, {}), {});
       var cw = el.getAttribute("data-collapsed-width");
       if (result && cw) {
         el.style.width = cw + "px";
-        var content = el.querySelector(".jas-pane-content");
-        if (content) content.style.display = "none";
       } else if (!result && cw) {
         el.style.width = "";
-        var content = el.querySelector(".jas-pane-content");
-        if (content) content.style.display = "";
       }
     });
   }
@@ -244,17 +235,58 @@
       return;
     }
 
-    // show: element_id
+    // maximize: { target } — fill viewport, hide title bar, remove border, z-index 0
+    if (effect.maximize) {
+      var maxTarget = resolve(effect.maximize.target, ctx);
+      var maxEl = document.getElementById(maxTarget);
+      console.log("[maximize]", maxTarget, maxEl ? "found" : "MISSING");
+      if (maxEl) {
+        var parent = maxEl.parentElement;
+        var pw = parent ? parent.clientWidth : window.innerWidth;
+        var ph = parent ? parent.clientHeight : window.innerHeight;
+        console.log("[maximize] size:", pw, "x", ph);
+        maxEl.setAttribute("data-saved-style", maxEl.getAttribute("style") || "");
+        maxEl.style.left = "0px";
+        maxEl.style.top = "0px";
+        maxEl.style.width = pw + "px";
+        maxEl.style.height = ph + "px";
+        maxEl.style.zIndex = "1";
+        maxEl.style.border = "none";
+        var title = maxEl.querySelector(".jas-pane-title");
+        if (title) title.classList.add("d-none");
+        // Ensure other panes float above the maximized one
+        var siblings = maxEl.parentElement ? maxEl.parentElement.querySelectorAll(".jas-pane") : [];
+        siblings.forEach(function (p) {
+          if (p !== maxEl) p.style.zIndex = "10";
+        });
+      }
+      return;
+    }
+
+    // restore: { target } — restore saved style, show title bar
+    if (effect.restore) {
+      var restEl = document.getElementById(resolve(effect.restore.target, ctx));
+      if (restEl) {
+        var saved = restEl.getAttribute("data-saved-style");
+        if (saved) restEl.setAttribute("style", saved);
+        restEl.removeAttribute("data-saved-style");
+        var title = restEl.querySelector(".jas-pane-title");
+        if (title) title.classList.remove("d-none");
+      }
+      return;
+    }
+
+    // show: element_id (use d-none class to override Bootstrap's !important)
     if (effect.show) {
       var showEl = document.getElementById(resolve(effect.show, ctx));
-      if (showEl) showEl.style.display = "";
+      if (showEl) showEl.classList.remove("d-none");
       return;
     }
 
     // hide: element_id
     if (effect.hide) {
       var hideEl = document.getElementById(resolve(effect.hide, ctx));
-      if (hideEl) hideEl.style.display = "none";
+      if (hideEl) hideEl.classList.add("d-none");
       return;
     }
 
@@ -299,7 +331,12 @@
       if (ssEl) {
         for (var prop in effect.set_style) {
           if (prop !== "target" && effect.set_style.hasOwnProperty(prop)) {
-            ssEl.style[prop] = resolve(effect.set_style[prop], ctx) + "px";
+            var val = resolve(effect.set_style[prop], ctx);
+            // Only append px if the value is a plain number
+            if (/^\d+(\.\d+)?$/.test(val)) val += "px";
+            // Map snake_case to camelCase for CSS
+            var cssProp = prop.replace(/_([a-z])/g, function(_, c) { return c.toUpperCase(); });
+            ssEl.style[cssProp] = val;
           }
         }
       }
@@ -750,43 +787,62 @@
       dispatch(action, params);
     });
 
-    // Wire behavior data attributes (mouse_down, mouse_up, hover)
+    // Wire behavior data attributes — group by event, first matching condition wins
     document.querySelectorAll("[data-behaviors]").forEach(function (el) {
       var behaviors;
       try { behaviors = JSON.parse(el.getAttribute("data-behaviors")); } catch (ex) { return; }
+      // Group behaviors by event type
+      var byEvent = {};
       behaviors.forEach(function (b) {
         var domEvent = eventMap[b.event];
         if (!domEvent) return;
-        el.addEventListener(domEvent, function (e) {
-          var ctx = {
-            params: {},
-            event: {
-              client_x: e.clientX, client_y: e.clientY,
-              offset_x: e.offsetX, offset_y: e.offsetY,
-              target_id: el.id,
-              key: e.key, ctrl: e.ctrlKey || e.metaKey,
-              shift: e.shiftKey, alt: e.altKey,
-              value: e.target.value
-            },
-            self: { id: el.id, type: el.getAttribute("data-element-type") || "" }
-          };
-          if (b.condition && !evalCondition(resolve(b.condition, ctx), ctx)) return;
-          if (b.prevent_default) e.preventDefault();
-          if (b.stop_propagation) e.stopPropagation();
-          if (b.effects) runEffects(b.effects, ctx);
-          if (b.action) {
-            var params = {};
-            if (b.params) {
-              for (var pk in b.params) {
-                if (b.params.hasOwnProperty(pk)) {
-                  params[pk] = resolve(b.params[pk], ctx);
-                }
-              }
-            }
-            dispatch(b.action, params);
-          }
-        });
+        if (!byEvent[domEvent]) byEvent[domEvent] = [];
+        byEvent[domEvent].push(b);
       });
+      // Wire one listener per event type
+      for (var domEvent in byEvent) {
+        (function (evBehaviors) {
+          el.addEventListener(domEvent, function (e) {
+            var ctx = {
+              params: {},
+              event: {
+                client_x: e.clientX, client_y: e.clientY,
+                offset_x: e.offsetX, offset_y: e.offsetY,
+                target_id: el.id,
+                key: e.key, ctrl: e.ctrlKey || e.metaKey,
+                shift: e.shiftKey, alt: e.altKey,
+                value: e.target.value
+              },
+              self: { id: el.id, type: el.getAttribute("data-element-type") || "" }
+            };
+            // Try each behavior in order, stop at first matching condition
+            for (var i = 0; i < evBehaviors.length; i++) {
+              var b = evBehaviors[i];
+              if (b.condition && !evalCondition(resolve(b.condition, ctx), ctx)) continue;
+              e.stopPropagation(); // prevent bubbling to parent elements
+              if (b.prevent_default) e.preventDefault();
+              if (b.effects) runEffects(b.effects, ctx);
+              if (b.action) {
+                var params = {};
+                if (b.params) {
+                  for (var pk in b.params) {
+                    if (b.params.hasOwnProperty(pk)) {
+                      params[pk] = resolve(b.params[pk], ctx);
+                    }
+                  }
+                }
+                dispatch(b.action, params);
+              }
+              return; // stop after first match
+            }
+          });
+        })(byEvent[domEvent]);
+      }
+    });
+
+    // Apply server-side initial hidden state before first binding update
+    document.querySelectorAll("[data-initial-hidden]").forEach(function (el) {
+      el.classList.add("d-none");
     });
 
     // Initialize bindings
@@ -857,31 +913,98 @@
   document.addEventListener("mousedown", function (e) {
     var title = e.target.closest(".jas-pane-title");
     if (!title) return;
+    // Don't initiate drag if clicking an interactive element within the title bar
+    var t = e.target;
+    while (t && t !== title) {
+      if (t.tagName === "BUTTON" || t.tagName === "A" || t.tagName === "INPUT" || t.tagName === "SELECT"
+          || t.hasAttribute("data-action") || t.hasAttribute("data-bs-toggle")) return;
+      t = t.parentElement;
+    }
     var pane = title.closest(".jas-pane");
     if (!pane) return;
-    e.preventDefault();
+    // Don't preventDefault — it suppresses dblclick events on the title bar
     dragState = {
       pane: pane,
       offsetX: e.clientX - pane.offsetLeft,
       offsetY: e.clientY - pane.offsetTop
     };
     document.body.style.cursor = "grabbing";
-    // Bring to front
     document.querySelectorAll(".jas-pane").forEach(function (p) {
       p.style.zIndex = p === pane ? "100" : "";
     });
   });
 
+  var SNAP_DISTANCE = 8;
+
+  function getSnapEdges(pane, parent) {
+    // Collect snap targets: viewport edges + other pane edges
+    var edges = { x: [0], y: [0] };
+    if (parent) {
+      edges.x.push(parent.clientWidth);
+      edges.y.push(parent.clientHeight);
+    }
+    var panes = parent ? parent.querySelectorAll(".jas-pane") : [];
+    panes.forEach(function (p) {
+      if (p === pane || p.classList.contains("d-none") || p.style.display === "none") return;
+      edges.x.push(p.offsetLeft);
+      edges.x.push(p.offsetLeft + p.offsetWidth);
+      edges.y.push(p.offsetTop);
+      edges.y.push(p.offsetTop + p.offsetHeight);
+    });
+    return edges;
+  }
+
+  function snap(val, targets) {
+    for (var i = 0; i < targets.length; i++) {
+      if (Math.abs(val - targets[i]) < SNAP_DISTANCE) return targets[i];
+    }
+    return val;
+  }
+
+  // Snap preview lines
+  var snapLines = [];
+  function showSnapLine(orient, pos, parent) {
+    var line = document.createElement("div");
+    line.className = "jas-snap-line";
+    if (orient === "x") {
+      line.style.cssText = "position:absolute;left:" + pos + "px;top:0;width:1px;height:100%;background:rgba(50,120,220,0.8);z-index:200;pointer-events:none";
+    } else {
+      line.style.cssText = "position:absolute;left:0;top:" + pos + "px;width:100%;height:1px;background:rgba(50,120,220,0.8);z-index:200;pointer-events:none";
+    }
+    parent.appendChild(line);
+    snapLines.push(line);
+  }
+  function clearSnapLines() {
+    snapLines.forEach(function (l) { l.remove(); });
+    snapLines = [];
+  }
+
   document.addEventListener("mousemove", function (e) {
     if (!dragState) return;
-    dragState.pane.style.left = (e.clientX - dragState.offsetX) + "px";
-    dragState.pane.style.top = (e.clientY - dragState.offsetY) + "px";
+    var pane = dragState.pane;
+    var rawX = e.clientX - dragState.offsetX;
+    var rawY = e.clientY - dragState.offsetY;
+    var parent = pane.parentElement;
+    var edges = getSnapEdges(pane, parent);
+    var w = pane.offsetWidth, h = pane.offsetHeight;
+    clearSnapLines();
+    // Snap left edge, then right edge
+    var sx = snap(rawX, edges.x);
+    if (sx !== rawX) { showSnapLine("x", sx, parent); }
+    else { sx = snap(rawX + w, edges.x) - w; if (sx + w !== rawX + w) showSnapLine("x", sx + w, parent); }
+    // Snap top edge, then bottom edge
+    var sy = snap(rawY, edges.y);
+    if (sy !== rawY) { showSnapLine("y", sy, parent); }
+    else { sy = snap(rawY + h, edges.y) - h; if (sy + h !== rawY + h) showSnapLine("y", sy + h, parent); }
+    pane.style.left = sx + "px";
+    pane.style.top = sy + "px";
   });
 
   document.addEventListener("mouseup", function () {
     if (dragState) {
       document.body.style.cursor = "";
       dragState = null;
+      clearSnapLines();
     }
   });
 
@@ -889,20 +1012,64 @@
 
   var resizeState = null;
 
+  function isFixedWidth(pane) {
+    var configs = typeof JAS_PANE_CONFIGS !== "undefined" ? JAS_PANE_CONFIGS : {};
+    var cfg = configs[pane.id];
+    return cfg && cfg.fixed_width;
+  }
+
+  function findAdjacentPane(pane, edge) {
+    // Find the pane whose opposite edge is closest to this pane's edge
+    var parent = pane.parentElement;
+    if (!parent) return null;
+    var panes = parent.querySelectorAll(".jas-pane");
+    var best = null, bestDist = SNAP_DISTANCE * 2;
+    var px = pane.offsetLeft, pw = pane.offsetWidth, py = pane.offsetTop, ph = pane.offsetHeight;
+    panes.forEach(function (p) {
+      if (p === pane || p.classList.contains("d-none")) return;
+      var dist;
+      if (edge === "right") dist = Math.abs(p.offsetLeft - (px + pw));
+      else if (edge === "left") dist = Math.abs((p.offsetLeft + p.offsetWidth) - px);
+      else return;
+      if (dist < bestDist) { bestDist = dist; best = p; }
+    });
+    return best;
+  }
+
   document.addEventListener("mousedown", function (e) {
     var handle = e.target.closest(".jas-edge-handle");
     if (!handle) return;
     var pane = handle.closest(".jas-pane");
     if (!pane) return;
+    var handleIsLeft = handle.classList.contains("left");
+    var handleIsRight = handle.classList.contains("right");
+    var isHoriz = handleIsLeft || handleIsRight;
+    var targetPane = pane;
+    var resizeLeft = handleIsLeft;
+    var resizeRight = handleIsRight;
+
+    // If this pane is fixed-width, redirect horizontal resize to neighbor
+    if (isHoriz && isFixedWidth(pane)) {
+      var edge = handleIsRight ? "right" : "left";
+      var adj = findAdjacentPane(pane, edge);
+      if (adj && !isFixedWidth(adj)) {
+        targetPane = adj;
+        // Flip direction: dragging fixed pane's right handle = resizing neighbor's left edge
+        resizeLeft = handleIsRight;
+        resizeRight = handleIsLeft;
+      } else {
+        return;
+      }
+    }
     e.preventDefault();
     e.stopPropagation();
     resizeState = {
-      pane: pane,
+      pane: targetPane,
       startX: e.clientX, startY: e.clientY,
-      startLeft: pane.offsetLeft, startTop: pane.offsetTop,
-      startW: pane.offsetWidth, startH: pane.offsetHeight,
-      isLeft: handle.classList.contains("left"),
-      isRight: handle.classList.contains("right"),
+      startLeft: targetPane.offsetLeft, startTop: targetPane.offsetTop,
+      startW: targetPane.offsetWidth, startH: targetPane.offsetHeight,
+      isLeft: resizeLeft,
+      isRight: resizeRight,
       isTop: handle.classList.contains("top"),
       isBottom: handle.classList.contains("bottom")
     };
@@ -911,23 +1078,35 @@
   document.addEventListener("mousemove", function (e) {
     if (!resizeState) return;
     var r = resizeState, dx = e.clientX - r.startX, dy = e.clientY - r.startY;
+    var parent = r.pane.parentElement;
+    var edges = getSnapEdges(r.pane, parent);
+    clearSnapLines();
     if (r.isRight) {
-      r.pane.style.width = Math.max(50, r.startW + dx) + "px";
+      var right = snap(r.startLeft + r.startW + dx, edges.x);
+      if (right !== r.startLeft + r.startW + dx) showSnapLine("x", right, parent);
+      r.pane.style.width = Math.max(50, right - r.startLeft) + "px";
     } else if (r.isLeft) {
-      var newW = Math.max(50, r.startW - dx);
+      var left = snap(r.startLeft + dx, edges.x);
+      if (left !== r.startLeft + dx) showSnapLine("x", left, parent);
+      var newW = Math.max(50, r.startLeft + r.startW - left);
       r.pane.style.width = newW + "px";
       r.pane.style.left = (r.startLeft + r.startW - newW) + "px";
     }
     if (r.isBottom) {
-      r.pane.style.height = Math.max(50, r.startH + dy) + "px";
+      var bottom = snap(r.startTop + r.startH + dy, edges.y);
+      if (bottom !== r.startTop + r.startH + dy) showSnapLine("y", bottom, parent);
+      r.pane.style.height = Math.max(50, bottom - r.startTop) + "px";
     } else if (r.isTop) {
-      var newH = Math.max(50, r.startH - dy);
+      var top = snap(r.startTop + dy, edges.y);
+      if (top !== r.startTop + dy) showSnapLine("y", top, parent);
+      var newH = Math.max(50, r.startTop + r.startH - top);
       r.pane.style.height = newH + "px";
       r.pane.style.top = (r.startTop + r.startH - newH) + "px";
     }
   });
 
   document.addEventListener("mouseup", function () {
+    if (resizeState) clearSnapLines();
     resizeState = null;
   });
 

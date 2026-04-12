@@ -1,0 +1,43 @@
+shortcuts:
+  # File
+  - { key: "Ctrl+N",       action: new_document }
+  - { key: "Ctrl+O",       action: open_file }
+  - { key: "Ctrl+S",       action: save }
+  - { key: "Ctrl+Shift+S", action: save_as }
+  - { key: "Ctrl+Q",       action: quit }
+  # Edit
+  - { key: "Ctrl+Z",       action: undo }
+  - { key: "Ctrl+Shift+Z", action: redo }
+  - { key: "Ctrl+X",       action: cut }
+  - { key: "Ctrl+C",       action: copy }
+  - { key: "Ctrl+V",       action: paste }
+  - { key: "Ctrl+Shift+V", action: paste_in_place }
+  - { key: "Ctrl+A",       action: select_all }
+  - { key: "Delete",       action: delete_selection }
+  - { key: "Backspace",    action: delete_selection }
+  # Object
+  - { key: "Ctrl+G",       action: group }
+  - { key: "Ctrl+Shift+G", action: ungroup }
+  - { key: "Ctrl+2",       action: lock }
+  - { key: "Ctrl+Alt+2",   action: unlock_all }
+  - { key: "Ctrl+3",       action: hide_selection }
+  - { key: "Ctrl+Alt+3",   action: show_all }
+  # View
+  - { key: "Ctrl+=",       action: zoom_in }
+  - { key: "Ctrl+-",       action: zoom_out }
+  - { key: "Ctrl+0",       action: fit_in_window }
+  # Tools
+  - { key: "V",            action: select_tool,      params: { tool: selection } }
+  - { key: "A",            action: select_tool,      params: { tool: direct_selection } }
+  - { key: "P",            action: select_tool,      params: { tool: pen } }
+  - { key: "=",            action: select_tool,      params: { tool: add_anchor } }
+  - { key: "-",            action: select_tool,      params: { tool: delete_anchor } }
+  - { key: "T",            action: select_tool,      params: { tool: type } }
+  - { key: "\\",           action: select_tool,      params: { tool: line } }
+  - { key: "M",            action: select_tool,      params: { tool: rect } }
+  - { key: "Shift+E",      action: select_tool,      params: { tool: path_eraser } }
+  - { key: "Q",            action: select_tool,      params: { tool: lasso } }
+  # Fill / Stroke
+  - { key: "D",            action: reset_fill_stroke }
+  - { key: "X",            action: toggle_fill_on_top }
+  - { key: "Shift+X",      action: swap_fill_stroke }
