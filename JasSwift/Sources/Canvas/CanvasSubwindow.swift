@@ -845,10 +845,10 @@ class CanvasNSView: NSView {
         switch tool {
         case .selection:
             return NSCursor.arrow
-        case .directSelection:
+        case .partialSelection:
             return makeArrowCursor(fill: .white, stroke: .black)
-        case .groupSelection:
-            return makeGroupSelectionCursor()
+        case .interiorSelection:
+            return makeInteriorSelectionCursor()
         case .pen:
             return makePenCursor()
         case .addAnchorPoint:
@@ -890,7 +890,7 @@ class CanvasNSView: NSView {
         return NSCursor(image: image, hotSpot: NSPoint(x: 4, y: 1))
     }
 
-    private func makeGroupSelectionCursor() -> NSCursor {
+    private func makeInteriorSelectionCursor() -> NSCursor {
         let size = NSSize(width: 24, height: 24)
         let image = NSImage(size: size, flipped: true) { rect in
             let path = NSBezierPath()
@@ -1218,7 +1218,7 @@ class CanvasNSView: NSView {
             default:
                 switch chars.lowercased() {
                 case "v": onToolChange?(.selection)
-                case "a": onToolChange?(.directSelection)
+                case "a": onToolChange?(.partialSelection)
                 case "p": onToolChange?(.pen)
                 case "t": onToolChange?(.typeTool)
                 case "\\": onToolChange?(.line)

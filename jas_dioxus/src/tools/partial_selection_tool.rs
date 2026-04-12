@@ -1,4 +1,4 @@
-//! Direct Selection tool — select individual control points and drag Bezier handles.
+//! Partial Selection tool — select individual control points and drag Bezier handles.
 //!
 //! State machine:
 //!   IDLE     — waiting for input
@@ -60,11 +60,11 @@ enum State {
     },
 }
 
-pub struct DirectSelectionTool {
+pub struct PartialSelectionTool {
     state: State,
 }
 
-impl DirectSelectionTool {
+impl PartialSelectionTool {
     pub fn new() -> Self {
         Self { state: State::Idle }
     }
@@ -164,7 +164,7 @@ fn hit_test_cp_recursive(
     None
 }
 
-impl CanvasTool for DirectSelectionTool {
+impl CanvasTool for PartialSelectionTool {
     fn on_press(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, _alt: bool) {
         // 1. Check handle hit first
         if let Some((path, anchor_idx, handle_type)) = Self::hit_test_handle(model, x, y) {
@@ -182,7 +182,7 @@ impl CanvasTool for DirectSelectionTool {
         }
 
         // 2. Check if clicking on any element's control point. The
-        // Direct Selection tool treats a CP hit as "directly on a
+        // Partial Selection tool treats a CP hit as "directly on a
         // selectable object"; everything else (empty space, element
         // body/fill without a CP hit) starts a new marquee.
         if let Some((path, cp_idx)) = Self::hit_test_control_point(model, x, y) {
@@ -237,7 +237,7 @@ impl CanvasTool for DirectSelectionTool {
 
         // 3. No CP hit — start a new marquee. We deliberately do NOT
         // fall back to a "hit inside the bbox of a selected element"
-        // check: with the Direct Selection tool, a drag that begins on
+        // check: with the Partial Selection tool, a drag that begins on
         // empty space or on a body/fill without a CP hit must marquee,
         // never move the existing selection.
         self.state = State::Marquee {
@@ -425,7 +425,7 @@ mod tests {
         // "click on selected element bounds" branch and drag the
         // existing partial selection. The new behavior is to switch
         // the selection to the clicked CP and drag *that*.
-        let mut tool = DirectSelectionTool::new();
+        let mut tool = PartialSelectionTool::new();
         let mut model = make_model_with_rect();
 
         // Pre-select only CP 0 (top-left at 0,0).
@@ -471,7 +471,7 @@ mod tests {
         // already in the selection drags the whole existing selection,
         // not just that CP. This is the "click an already-selected CP
         // and move all selected CPs together" gesture.
-        let mut tool = DirectSelectionTool::new();
+        let mut tool = PartialSelectionTool::new();
         let mut model = make_model_with_rect();
 
         // Select CPs 0 and 1 (both top corners).
@@ -533,11 +533,11 @@ mod tests {
 
     #[test]
     fn press_inside_body_without_cp_hit_starts_marquee_not_move() {
-        // With the Direct Selection tool, a press in empty space OR
+        // With the Partial Selection tool, a press in empty space OR
         // inside the body/fill of a selected element (but not on a
         // CP) must start a new marquee selection, not drag the
         // existing selection.
-        let mut tool = DirectSelectionTool::new();
+        let mut tool = PartialSelectionTool::new();
         let mut model = make_model_with_big_rect();
 
         // Pre-select the whole rect (Partial with all CPs). The
@@ -584,7 +584,7 @@ mod tests {
         // element from the selection. Instead the element stays
         // selected with `Partial(empty)` — "selected, no CPs
         // individually highlighted".
-        let mut tool = DirectSelectionTool::new();
+        let mut tool = PartialSelectionTool::new();
         let mut model = make_model_with_rect();
 
         // Pre-select only CP 0.

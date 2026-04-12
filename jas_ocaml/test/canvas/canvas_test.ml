@@ -20,9 +20,9 @@ let tests = [
     assert (toolbar#current_tool = Jas.Toolbar.Selection)
   );
 
-  Alcotest.test_case "toolbar select Direct_selection" `Quick (fun () ->
-    toolbar#select_tool Jas.Toolbar.Direct_selection;
-    assert (toolbar#current_tool = Jas.Toolbar.Direct_selection)
+  Alcotest.test_case "toolbar select Partial_selection" `Quick (fun () ->
+    toolbar#select_tool Jas.Toolbar.Partial_selection;
+    assert (toolbar#current_tool = Jas.Toolbar.Partial_selection)
   );
 
   Alcotest.test_case "canvas subwindow default title starts with Untitled-" `Quick (fun () ->
@@ -57,9 +57,9 @@ let tests = [
     assert (toolbar#current_tool = Jas.Toolbar.Selection)
   );
 
-  Alcotest.test_case "keyboard shortcuts: select Direct_selection tool" `Quick (fun () ->
-    toolbar#select_tool Jas.Toolbar.Direct_selection;
-    assert (toolbar#current_tool = Jas.Toolbar.Direct_selection)
+  Alcotest.test_case "keyboard shortcuts: select Partial_selection tool" `Quick (fun () ->
+    toolbar#select_tool Jas.Toolbar.Partial_selection;
+    assert (toolbar#current_tool = Jas.Toolbar.Partial_selection)
   );
 
   Alcotest.test_case "keyboard shortcuts: select Line tool" `Quick (fun () ->

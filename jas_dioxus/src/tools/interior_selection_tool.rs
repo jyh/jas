@@ -1,4 +1,4 @@
-//! Group Selection tool — selects individual elements inside groups.
+//! Interior Selection tool — selects individual elements inside groups.
 //!
 //! Like the Selection tool but traverses into groups, so elements
 //! inside groups can be individually selected and moved.
@@ -17,7 +17,7 @@ enum State {
     Idle,
     PendingDrag { start_x: f64, start_y: f64 },
     Marquee { start_x: f64, start_y: f64, cur_x: f64, cur_y: f64 },
-    /// Live-edit drag (matches Selection / DirectSelection): the
+    /// Live-edit drag (matches Selection / PartialSelection): the
     /// document mutates on every move, no dashed ghost.
     Moving {
         last_x: f64,
@@ -27,11 +27,11 @@ enum State {
     },
 }
 
-pub struct GroupSelectionTool {
+pub struct InteriorSelectionTool {
     state: State,
 }
 
-impl GroupSelectionTool {
+impl InteriorSelectionTool {
     pub fn new() -> Self {
         Self { state: State::Idle }
     }
@@ -114,7 +114,7 @@ fn hit_recursive(
     }
 }
 
-impl CanvasTool for GroupSelectionTool {
+impl CanvasTool for InteriorSelectionTool {
     fn on_press(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, _alt: bool) {
         // Clicking on selected element -> prepare to drag
         if Self::hit_test_selection(model, x, y) {

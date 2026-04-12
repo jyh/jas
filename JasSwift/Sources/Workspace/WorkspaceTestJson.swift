@@ -235,7 +235,7 @@ private func panelAddrJson(_ a: PanelAddr) -> String {
 public func toolbarStructureJson() -> String {
     let slots: [(Int, Int, [String])] = [
         (0, 0, ["selection"]),
-        (0, 1, ["direct_selection", "group_selection"]),
+        (0, 1, ["partial_selection", "interior_selection"]),
         (1, 0, ["pen", "add_anchor_point", "delete_anchor_point", "anchor_point"]),
         (1, 1, ["pencil", "path_eraser", "smooth"]),
         (2, 0, ["type", "type_on_path"]),
@@ -408,7 +408,7 @@ public func shortcutStructureJson() -> String {
         ("Ctrl+-", "zoom_out", nil),
         ("Ctrl+0", "fit_in_window", nil),
         ("V", "select_tool", ("tool", "selection")),
-        ("A", "select_tool", ("tool", "direct_selection")),
+        ("A", "select_tool", ("tool", "partial_selection")),
         ("P", "select_tool", ("tool", "pen")),
         ("=", "select_tool", ("tool", "add_anchor")),
         ("-", "select_tool", ("tool", "delete_anchor")),

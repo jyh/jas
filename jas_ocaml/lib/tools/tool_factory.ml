@@ -3,8 +3,8 @@
 let create_tool (tool : Toolbar.tool) : Canvas_tool.canvas_tool =
   match tool with
   | Toolbar.Selection -> (new Selection_tool.selection_tool :> Canvas_tool.canvas_tool)
-  | Toolbar.Direct_selection -> (new Direct_selection_tool.direct_selection_tool :> Canvas_tool.canvas_tool)
-  | Toolbar.Group_selection -> (new Group_selection_tool.group_selection_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Partial_selection -> (new Partial_selection_tool.partial_selection_tool :> Canvas_tool.canvas_tool)
+  | Toolbar.Interior_selection -> (new Interior_selection_tool.interior_selection_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Line -> (new Line_tool.line_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Rect -> (new Rect_tool.rect_tool :> Canvas_tool.canvas_tool)
   | Toolbar.Rounded_rect -> (new Rounded_rect_tool.rounded_rect_tool :> Canvas_tool.canvas_tool)

@@ -132,8 +132,8 @@ func regularPolygonPoints(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double
 func createTools() -> [Tool: CanvasTool] {
     [
         .selection: SelectionTool(),
-        .directSelection: DirectSelectionTool(),
-        .groupSelection: GroupSelectionTool(),
+        .partialSelection: PartialSelectionTool(),
+        .interiorSelection: InteriorSelectionTool(),
         .pen: PenTool(),
         .addAnchorPoint: AddAnchorPointTool(),
         .deleteAnchorPoint: DeleteAnchorPointTool(),

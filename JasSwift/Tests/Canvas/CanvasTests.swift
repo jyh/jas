@@ -11,8 +11,8 @@ import AppKit
     let tools = Tool.allCases
     #expect(tools.count == 18)
     #expect(tools.contains(.selection))
-    #expect(tools.contains(.directSelection))
-    #expect(tools.contains(.groupSelection))
+    #expect(tools.contains(.partialSelection))
+    #expect(tools.contains(.interiorSelection))
     #expect(tools.contains(.pen))
     #expect(tools.contains(.addAnchorPoint))
     #expect(tools.contains(.deleteAnchorPoint))

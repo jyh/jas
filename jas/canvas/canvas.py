@@ -28,7 +28,7 @@ from tools import create_tools
 
 
 def _make_white_arrow_cursor() -> QCursor:
-    """Create a white (hollow) arrow cursor for the Direct Selection tool."""
+    """Create a white (hollow) arrow cursor for the Partial Selection tool."""
     pixmap = QPixmap(24, 24)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -49,8 +49,8 @@ def _make_white_arrow_cursor() -> QCursor:
     return QCursor(pixmap, 4, 1)
 
 
-def _make_group_selection_cursor() -> QCursor:
-    """Create a white arrow + plus cursor for the Group Selection tool."""
+def _make_interior_selection_cursor() -> QCursor:
+    """Create a white arrow + plus cursor for the Interior Selection tool."""
     pixmap = QPixmap(24, 24)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -809,10 +809,10 @@ class CanvasWidget(QWidget):
     def _cursor_for_tool(tool: Tool) -> QCursor:
         if tool == Tool.SELECTION:
             return QCursor(Qt.CursorShape.ArrowCursor)
-        elif tool == Tool.DIRECT_SELECTION:
+        elif tool == Tool.PARTIAL_SELECTION:
             return _make_white_arrow_cursor()
-        elif tool == Tool.GROUP_SELECTION:
-            return _make_group_selection_cursor()
+        elif tool == Tool.INTERIOR_SELECTION:
+            return _make_interior_selection_cursor()
         elif tool == Tool.PEN:
             return _make_pen_cursor()
         elif tool == Tool.ADD_ANCHOR_POINT:

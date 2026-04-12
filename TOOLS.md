@@ -14,7 +14,7 @@ via long-press menus.
 ### Grid layout
 
 ```
- Row 0:  [ Selection (V)    ] [ Direct Selection (A)  ]
+ Row 0:  [ Selection (V)    ] [ Partial Selection (A)  ]
  Row 1:  [ Pen (P)          ] [ Pencil (N)            ]
  Row 2:  [ Text (T)         ] [ Line (L)              ]
  Row 3:  [ Rect (M)         ]
@@ -27,7 +27,7 @@ the button (500 ms) opens a popup menu to switch:
 
 | Slot | Default | Alternates | Position |
 |------|---------|------------|----------|
-| Arrow slot | Direct Selection | Group Selection | Row 0, Col 1 |
+| Arrow slot | Partial Selection | Interior Selection | Row 0, Col 1 |
 | Pen slot | Pen | Add Anchor Point, Delete Anchor Point, Anchor Point | Row 1, Col 0 |
 | Pencil slot | Pencil | Path Eraser, Smooth | Row 1, Col 1 |
 | Text slot | Type | Type on a Path | Row 2, Col 0 |
@@ -42,7 +42,7 @@ alternates are available.
 | Key | Tool |
 |-----|------|
 | V | Selection |
-| A | Direct Selection |
+| A | Partial Selection |
 | P | Pen |
 | + / = | Add Anchor Point |
 | - | Delete Anchor Point |
@@ -53,7 +53,7 @@ alternates are available.
 | M | Rect |
 | Shift+E | Path Eraser |
 
-Group Selection, Type on a Path, and Polygon have no keyboard shortcuts --
+Interior Selection, Type on a Path, and Polygon have no keyboard shortcuts --
 they are accessed through the long-press menus.
 
 ---
@@ -153,21 +153,21 @@ MARQUEE ──release──> IDLE (calls select_rect)
 
 ---
 
-## Group Selection Tool
+## Interior Selection Tool
 
-**Shortcut:** none (long-press on Direct Selection slot)
+**Shortcut:** none (long-press on Partial Selection slot)
 
 Like the Selection Tool but traverses **into** groups. Selects individual
 elements within groups rather than selecting the group as a whole. Each
 selected element gets all its control points.
 
 Same states and interaction model as the Selection Tool. The only difference
-is the Controller method called: `group_select_rect` instead of
+is the Controller method called: `interior_select_rect` instead of
 `select_rect`.
 
 ---
 
-## Direct Selection Tool
+## Partial Selection Tool
 
 **Shortcut:** A
 
@@ -551,11 +551,11 @@ Dragging an existing control handle moves **only that handle** without
 reflecting the opposite handle. This breaks the smooth (G1) continuity,
 creating a cusp point where the curve changes direction abruptly.
 
-This differs from the Direct Selection tool, which maintains smooth
+This differs from the Partial Selection tool, which maintains smooth
 continuity by rotating the opposite handle when one handle is dragged.
 
 ```
-Direct Selection:  move handle → opposite handle rotates to stay collinear
+Partial Selection:  move handle → opposite handle rotates to stay collinear
 Anchor Point tool: move handle → opposite handle stays fixed (independent)
 ```
 
@@ -571,7 +571,7 @@ The tool checks handles before anchors, so dragging a handle that overlaps
 its anchor triggers cusp behavior rather than corner-to-smooth conversion.
 
 Handles are tested on **all** path elements in the document (not just
-selected ones), unlike the Direct Selection tool which only shows handles
+selected ones), unlike the Partial Selection tool which only shows handles
 on selected elements.
 
 ### States
@@ -1454,13 +1454,13 @@ Subclasses override:
 
 ## Selection Tool Base
 
-Selection, Group Selection, and Direct Selection share a common base class
+Selection, Interior Selection, and Partial Selection share a common base class
 with the Idle/Marquee/Moving state machine. Subclasses override:
 
 - `select_rect(ctx, x, y, w, h, extend)` -- call the appropriate
   Controller selection method.
 - `check_handle_hit(ctx, x, y)` -- return True if a handle was hit
-  (Direct Selection only).
+  (Partial Selection only).
 
 ---
 

@@ -219,8 +219,8 @@ Three selection modes correspond to the three selection tools:
 | Operation | Tool | Behavior |
 |-----------|------|----------|
 | `select_rect` | Selection | Select elements whose bounds intersect rect. Groups selected as a whole. |
-| `group_select_rect` | Group Selection | Traverse into groups; select individual elements with all CPs. |
-| `direct_select_rect` | Direct Selection | Select only the control points that fall within rect. |
+| `interior_select_rect` | Interior Selection | Traverse into groups; select individual elements with all CPs. |
+| `partial_select_rect` | Partial Selection | Select only the control points that fall within rect. |
 
 All three accept an `extend` flag (Shift key) that toggles selection at the
 control-point level using symmetric difference.
@@ -314,8 +314,8 @@ POLYGON_SIDES       = 5         default sides for polygon tool
 | Tool | Description |
 |------|-------------|
 | **Selection** | Marquee select (bounds intersection), drag-to-move, Alt+drag to copy. Groups selected as a unit. |
-| **Group Selection** | Like Selection but traverses into groups to select individual children. |
-| **Direct Selection** | Select individual control points within a marquee. Drag Bezier handles directly. |
+| **Interior Selection** | Like Selection but traverses into groups to select individual children. |
+| **Partial Selection** | Select individual control points within a marquee. Drag Bezier handles directly. |
 | **Pen** | Click to place anchor points, drag to create Bezier handles. Builds a Path element. Double-click or Escape to finish. |
 | **Pencil** | Freehand drawing: samples mouse points during drag, fits Bezier curves to the stroke. |
 | **Path Eraser** | Drag through paths to split them, preserving curve shape on either side. |
@@ -406,7 +406,7 @@ geometry/
   fit_curve         # Bezier curve fitting (used by Pencil)
 tools/
   tool              # CanvasTool interface, ToolContext, constants
-  selection         # Selection, Group Selection, Direct Selection tools
+  selection         # Selection, Interior Selection, Partial Selection tools
   drawing           # Line, Rect, Polygon, Star, Rounded-Rect, Ellipse
   pen               # Pen tool (Bezier path creation)
   pencil            # Pencil tool (freehand with curve fitting)

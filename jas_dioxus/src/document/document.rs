@@ -101,7 +101,7 @@ impl SortedCps {
 
 /// Per-element selection state: either the element is fully selected
 /// (bounding-box selection) or only a subset of its control points are
-/// selected (Direct Selection).
+/// selected (Partial Selection).
 ///
 /// Collapsing "fully selected" into an explicit `All` variant removes
 /// the old convention where an empty or full CP set meant "selected
@@ -111,7 +111,7 @@ pub enum SelectionKind {
     /// The element as a whole is selected. Drag-move translates the
     /// element; its bounding-box handles are shown.
     All,
-    /// Only the listed CPs are selected (Direct Selection). Drag-move
+    /// Only the listed CPs are selected (Partial Selection). Drag-move
     /// moves just those CPs and may convert the element to a polygon.
     Partial(SortedCps),
 }

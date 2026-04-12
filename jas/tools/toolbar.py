@@ -12,8 +12,8 @@ from PySide6.QtWidgets import (
 
 class Tool(Enum):
     SELECTION = auto()
-    DIRECT_SELECTION = auto()
-    GROUP_SELECTION = auto()
+    PARTIAL_SELECTION = auto()
+    INTERIOR_SELECTION = auto()
     PEN = auto()
     ADD_ANCHOR_POINT = auto()
     DELETE_ANCHOR_POINT = auto()
@@ -76,10 +76,10 @@ class ToolButton(QToolButton):
 
         if self.tool == Tool.SELECTION:
             self._draw_selection_arrow(painter)
-        elif self.tool == Tool.DIRECT_SELECTION:
-            self._draw_direct_selection_arrow(painter)
-        elif self.tool == Tool.GROUP_SELECTION:
-            self._draw_group_selection_arrow(painter)
+        elif self.tool == Tool.PARTIAL_SELECTION:
+            self._draw_partial_selection_arrow(painter)
+        elif self.tool == Tool.INTERIOR_SELECTION:
+            self._draw_interior_selection_arrow(painter)
         elif self.tool == Tool.LINE:
             self._draw_line_tool(painter)
         elif self.tool == Tool.RECT:
@@ -121,14 +121,14 @@ class ToolButton(QToolButton):
         painter.setBrush(QColor("#000000"))
         painter.drawPath(path)
 
-    def _draw_direct_selection_arrow(self, painter):
+    def _draw_partial_selection_arrow(self, painter):
         """White arrow with black border."""
         path = _draw_arrow_path()
         painter.setPen(QPen(QColor("#000000"), 1.0))
         painter.setBrush(QColor("#ffffff"))
         painter.drawPath(path)
 
-    def _draw_group_selection_arrow(self, painter):
+    def _draw_interior_selection_arrow(self, painter):
         """White arrow with black border and '+' badge."""
         path = _draw_arrow_path()
         painter.setPen(QPen(QColor("#000000"), 1.0))
@@ -773,8 +773,8 @@ class ToolButton(QToolButton):
         painter.drawPath(tri)
 
 
-# Tools that share the direct/group selection slot
-_ARROW_SLOT_TOOLS = {Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION}
+# Tools that share the partial/interior selection slot
+_ARROW_SLOT_TOOLS = {Tool.PARTIAL_SELECTION, Tool.INTERIOR_SELECTION}
 # Tools that share the pen/add-anchor-point slot
 _PEN_SLOT_TOOLS = {Tool.PEN, Tool.ADD_ANCHOR_POINT, Tool.DELETE_ANCHOR_POINT, Tool.ANCHOR_POINT}
 # Tools that share the pencil/path-eraser slot
@@ -994,7 +994,7 @@ class Toolbar(QWidget):
         super().__init__(parent)
         self.current_tool = Tool.SELECTION
         # Which tool is visible in the shared arrow slot
-        self._arrow_slot_tool = Tool.DIRECT_SELECTION
+        self._arrow_slot_tool = Tool.PARTIAL_SELECTION
         # Which tool is visible in the shared pen slot
         self._pen_slot_tool = Tool.PEN
         # Which tool is visible in the shared text slot
@@ -1023,11 +1023,11 @@ class Toolbar(QWidget):
         self.button_group.setExclusive(True)
 
         self.buttons = {}
-        # The arrow slot button starts as direct selection
+        # The arrow slot button starts as partial selection
         # The shape slot button starts as rect
         tools = [
             (Tool.SELECTION, 0, 0),
-            (Tool.DIRECT_SELECTION, 0, 1),
+            (Tool.PARTIAL_SELECTION, 0, 1),
             (Tool.PEN, 1, 0),
             (Tool.PENCIL, 1, 1),
             (Tool.TYPE, 2, 0),
@@ -1043,8 +1043,8 @@ class Toolbar(QWidget):
             grid.addWidget(btn, row, col)
 
         # Create hidden alternate buttons (not in grid, share slots)
-        self.buttons[Tool.GROUP_SELECTION] = ToolButton(Tool.GROUP_SELECTION, has_alternates=True)
-        self.button_group.addButton(self.buttons[Tool.GROUP_SELECTION])
+        self.buttons[Tool.INTERIOR_SELECTION] = ToolButton(Tool.INTERIOR_SELECTION, has_alternates=True)
+        self.button_group.addButton(self.buttons[Tool.INTERIOR_SELECTION])
         self.buttons[Tool.ADD_ANCHOR_POINT] = ToolButton(Tool.ADD_ANCHOR_POINT, has_alternates=True)
         self.button_group.addButton(self.buttons[Tool.ADD_ANCHOR_POINT])
         self.buttons[Tool.DELETE_ANCHOR_POINT] = ToolButton(Tool.DELETE_ANCHOR_POINT, has_alternates=True)
@@ -1092,7 +1092,7 @@ class Toolbar(QWidget):
         self._shape_long_press_timer.timeout.connect(self._show_shape_slot_menu)
 
         # Install press/release handling on the arrow slot button
-        arrow_btn = self.buttons[Tool.DIRECT_SELECTION]
+        arrow_btn = self.buttons[Tool.PARTIAL_SELECTION]
         arrow_btn.pressed.connect(self._on_arrow_slot_pressed)
         arrow_btn.released.connect(self._on_arrow_slot_released)
 
@@ -1163,8 +1163,8 @@ class Toolbar(QWidget):
 
     def _show_arrow_slot_menu(self):
         menu = QMenu(self)
-        for tool in (Tool.DIRECT_SELECTION, Tool.GROUP_SELECTION):
-            label = "Direct Selection" if tool == Tool.DIRECT_SELECTION else "Group Selection"
+        for tool in (Tool.PARTIAL_SELECTION, Tool.INTERIOR_SELECTION):
+            label = "Partial Selection" if tool == Tool.PARTIAL_SELECTION else "Interior Selection"
             action = menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(tool == self._arrow_slot_tool)
@@ -1227,7 +1227,7 @@ class Toolbar(QWidget):
         if tool == self._arrow_slot_tool:
             return
         self._arrow_slot_tool = tool
-        arrow_btn = self.buttons[Tool.DIRECT_SELECTION]
+        arrow_btn = self.buttons[Tool.PARTIAL_SELECTION]
         arrow_btn.tool = tool
         arrow_btn.update()
         self.select_tool(tool)
@@ -1274,7 +1274,7 @@ class Toolbar(QWidget):
 
     def select_tool(self, tool):
         if tool in _ARROW_SLOT_TOOLS:
-            arrow_btn = self.buttons[Tool.DIRECT_SELECTION]
+            arrow_btn = self.buttons[Tool.PARTIAL_SELECTION]
             arrow_btn.tool = tool
             arrow_btn.setChecked(True)
             arrow_btn.update()

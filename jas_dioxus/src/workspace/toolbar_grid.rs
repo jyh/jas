@@ -15,7 +15,7 @@ use crate::tools::tool::ToolKind;
 /// Slots with alternates show the current alternate and support long-press to switch.
 pub(crate) const TOOLBAR_SLOTS: &[(usize, usize, &[ToolKind])] = &[
     (0, 0, &[ToolKind::Selection]),
-    (0, 1, &[ToolKind::DirectSelection, ToolKind::GroupSelection]),
+    (0, 1, &[ToolKind::PartialSelection, ToolKind::InteriorSelection]),
     (1, 0, &[ToolKind::Pen, ToolKind::AddAnchorPoint, ToolKind::DeleteAnchorPoint, ToolKind::AnchorPoint]),
     (1, 1, &[ToolKind::Pencil, ToolKind::PathEraser, ToolKind::Smooth]),
     (2, 0, &[ToolKind::Type, ToolKind::TypeOnPath]),

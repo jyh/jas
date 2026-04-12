@@ -41,13 +41,13 @@ public struct ToolbarView {
                 context.fill(p, with: .color(.black))
                 context.stroke(p, with: .color(.white), lineWidth: 1.0)
 
-            case .directSelection:
+            case .partialSelection:
                 // White arrow with black border
                 let p = arrowPath(ox: ox, oy: oy)
                 context.fill(p, with: .color(.white))
                 context.stroke(p, with: .color(.black), lineWidth: 1.0)
 
-            case .groupSelection:
+            case .interiorSelection:
                 // White arrow with black border
                 let p = arrowPath(ox: ox, oy: oy)
                 context.fill(p, with: .color(.white))
@@ -830,8 +830,8 @@ private struct ArrowSlotButton: View {
 
     private func toolDisplayName(_ tool: Tool) -> String {
         switch tool {
-        case .directSelection: return "Direct Selection"
-        case .groupSelection: return "Group Selection"
+        case .partialSelection: return "Partial Selection"
+        case .interiorSelection: return "Interior Selection"
         case .pen: return "Pen"
         case .addAnchorPoint: return "Add Anchor Point"
         case .deleteAnchorPoint: return "Delete Anchor Point"

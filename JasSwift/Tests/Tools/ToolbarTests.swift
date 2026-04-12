@@ -10,8 +10,8 @@ import Testing
 @Test func toolEnumContainsAllExpected() {
     let tools = Tool.allCases
     #expect(tools.contains(.selection))
-    #expect(tools.contains(.directSelection))
-    #expect(tools.contains(.groupSelection))
+    #expect(tools.contains(.partialSelection))
+    #expect(tools.contains(.interiorSelection))
     #expect(tools.contains(.pen))
     #expect(tools.contains(.addAnchorPoint))
     #expect(tools.contains(.deleteAnchorPoint))
@@ -69,10 +69,10 @@ import Testing
 // MARK: - Shared slot groups
 
 @Test func arrowSlotAlternates() {
-    let alternates: [Tool] = [.directSelection, .groupSelection]
+    let alternates: [Tool] = [.partialSelection, .interiorSelection]
     #expect(alternates.count == 2)
-    #expect(alternates.contains(.directSelection))
-    #expect(alternates.contains(.groupSelection))
+    #expect(alternates.contains(.partialSelection))
+    #expect(alternates.contains(.interiorSelection))
 }
 
 @Test func textSlotAlternates() {
@@ -92,7 +92,7 @@ import Testing
 // MARK: - Toolbar grid layout
 
 @Test func toolbarGridHasFourRows() {
-    // Row 0: Selection, Direct/Group Selection
+    // Row 0: Selection, Partial/Interior Selection
     // Row 1: Pen, Pencil
     // Row 2: Text/TextPath, Line
     // Row 3: Rect/Polygon
@@ -106,13 +106,13 @@ import Testing
 }
 
 @Test func toolbarGridHasSevenSlots() {
-    // 7 visible slots: selection, direct, pen, pencil, text, line, rect/polygon
+    // 7 visible slots: selection, partial, pen, pencil, text, line, rect/polygon
     let slots = 7
     #expect(slots == 7)
 }
 
 @Test func toolbarGridThreeSharedSlots() {
-    // Arrow slot (direct/group), Text slot (text/textPath), Shape slot (rect/polygon)
+    // Arrow slot (partial/interior), Text slot (text/textPath), Shape slot (rect/polygon)
     let sharedSlots = 3
     #expect(sharedSlots == 3)
 }
@@ -135,10 +135,10 @@ import Testing
 
 @Test func toolbarPanelDefaultSlots() {
     // Default visible tools in shared slots
-    let defaultArrow: Tool = .directSelection
+    let defaultArrow: Tool = .partialSelection
     let defaultText: Tool = .typeTool
     let defaultShape: Tool = .rect
-    #expect(defaultArrow == .directSelection)
+    #expect(defaultArrow == .partialSelection)
     #expect(defaultText == .typeTool)
     #expect(defaultShape == .rect)
 }

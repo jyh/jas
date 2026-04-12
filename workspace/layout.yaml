@@ -133,18 +133,18 @@ layout:
                 bind:
                   checked: "{{state.active_tool}} == selection"
 
-              # Row 0, Col 1: Arrow slot (Direct Selection / Group Selection)
+              # Row 0, Col 1: Arrow slot (Partial Selection / Interior Selection)
               - id: btn_arrow_slot
                 type: icon_button
-                summary: "Direct Selection (A)"
+                summary: "Partial Selection (A)"
                 description: >
                   White arrow for selecting individual anchor points and
                   path segments. Click an anchor to select it; drag to move
                   it; drag control handles to adjust curves. Long-press
-                  (250ms) opens a menu to switch between Direct Selection
-                  and Group Selection tools. The button shows checked state
+                  (250ms) opens a menu to switch between Partial Selection
+                  and Interior Selection tools. The button shows checked state
                   when any tool in this slot is active.
-                icon: "direct_selection_arrow"
+                icon: "partial_selection_arrow"
                 grid: { row: 0, col: 1 }
                 style:
                   size: "{{theme.sizes.tool_button}}"
@@ -163,19 +163,19 @@ layout:
                       - cancel_timer: "long_press_btn_arrow_slot"
                   - event: click
                     action: select_tool
-                    params: { tool: direct_selection }
+                    params: { tool: partial_selection }
                 bind:
-                  checked: "{{state.active_tool}} in [direct_selection, group_selection]"
+                  checked: "{{state.active_tool}} in [partial_selection, interior_selection]"
                 alternates:
                   menu_id: arrow_alternates
                   items:
-                    - id: direct_selection
-                      label: "Direct Selection"
-                      icon: "direct_selection_arrow"
+                    - id: partial_selection
+                      label: "Partial Selection"
+                      icon: "partial_selection_arrow"
                       description: "Select and move individual anchor points and path segments"
-                    - id: group_selection
-                      label: "Group Selection"
-                      icon: "group_selection_arrow"
+                    - id: interior_selection
+                      label: "Interior Selection"
+                      icon: "interior_selection_arrow"
                       description: "Select objects within groups without ungrouping"
 
               # Row 1, Col 0: Pen slot

@@ -1,7 +1,7 @@
 """Selection tool: marquee select elements, drag-to-move, Alt+drag copies.
 
 This file also defines `SelectionToolBase`, the shared base class for
-the three selection variants. `DirectSelectionTool` and `GroupSelectionTool`
+the three selection variants. `PartialSelectionTool` and `InteriorSelectionTool`
 live in their own files and import `SelectionToolBase` from here.
 """
 
@@ -57,7 +57,7 @@ class SelectionToolBase(CanvasTool):
         raise NotImplementedError
 
     def _check_handle_hit(self, ctx: ToolContext, x: float, y: float) -> bool:
-        """Override in DirectSelectionTool to check handle hits. Returns True if handled."""
+        """Override in PartialSelectionTool to check handle hits. Returns True if handled."""
         return False
 
     def on_press(self, ctx: ToolContext, x: float, y: float,

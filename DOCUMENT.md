@@ -76,15 +76,15 @@ The two `SelectionKind` cases capture two distinct user intents:
 
 - **`All`** — the element is selected as a whole. Drag-move translates
   the primitive in place; Rect stays a Rect, Circle stays a Circle.
-  This is what the Selection and Group Selection tools produce.
+  This is what the Selection and Interior Selection tools produce.
 - **`Partial(SortedCps)`** — only the listed control points are
-  selected (Direct Selection). Drag-move drags only those CPs and may
+  selected (Partial Selection). Drag-move drags only those CPs and may
   convert Rect/Circle/Ellipse to a Polygon when the resulting shape is
   no longer axis-aligned. `SortedCps` is sorted, de-duplicated, and
   small (`u16`-wide indices).
 
 `Partial(empty)` is a legal, retained state — "element selected,
-zero CPs individually highlighted". The Direct Selection marquee
+zero CPs individually highlighted". The Partial Selection marquee
 produces it when it crosses an element's body without catching any
 CPs, and shift-click produces it when the last selected CP is
 toggled off. Move/drag on `Partial(empty)` is a no-op. `All` XOR
@@ -95,8 +95,8 @@ toggled off. Move/drag on `Partial(empty)` is a no-op. `All` XOR
 | Mode | Behavior |
 |------|----------|
 | **Selection** | Marquee selects elements whose bounding box intersects. Groups are selected as a whole. Result: `kind = All`. |
-| **Group Selection** | Traverses into groups; selects individual elements. Result: `kind = All`. |
-| **Direct Selection** | Selects individual control points that fall within the marquee. Result: `kind = Partial(...)`, or `kind = All` when the marquee crosses the body but no CPs. |
+| **Interior Selection** | Traverses into groups; selects individual elements. Result: `kind = All`. |
+| **Partial Selection** | Selects individual control points that fall within the marquee. Result: `kind = Partial(...)`, or `kind = All` when the marquee crosses the body but no CPs. |
 
 Shift-click or Shift-marquee XORs the new selection against the
 existing selection per element: two `All`s cancel out; two `Partial`s
@@ -379,8 +379,8 @@ Group
 ```
 
 Groups allow elements to be transformed, selected, and manipulated as a
-unit. The Selection tool selects entire groups; the Group Selection and
-Direct Selection tools reach inside groups.
+unit. The Selection tool selects entire groups; the Interior Selection and
+Partial Selection tools reach inside groups.
 
 **Control points:** 4 -- bounding box corners of the combined children.
 

@@ -42,9 +42,9 @@ py_library(
     name = "tools",
     srcs = [
         "tools/__init__.py",
-        "tools/direct_selection_tool.py",
+        "tools/partial_selection_tool.py",
         "tools/drawing_tool.py",
-        "tools/group_selection_tool.py",
+        "tools/interior_selection_tool.py",
         "tools/line_tool.py",
         "tools/pen_tool.py",
         "tools/pencil_tool.py",

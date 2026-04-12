@@ -4,7 +4,7 @@ import Foundation
 // Selection tool — marquee select elements, drag-to-move, Alt+drag copies.
 //
 // This file also defines `SelectionToolBase`, the shared base class for
-// the three selection variants. `DirectSelectionTool` and `GroupSelectionTool`
+// the three selection variants. `PartialSelectionTool` and `InteriorSelectionTool`
 // live in their own files and inherit from `SelectionToolBase` here.
 
 // MARK: - Selection state

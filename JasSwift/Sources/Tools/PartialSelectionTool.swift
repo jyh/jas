@@ -1,9 +1,9 @@
 import AppKit
 import Foundation
 
-// Direct Selection tool — select control points and drag Bezier handles.
+// Partial Selection tool — select control points and drag Bezier handles.
 
-class DirectSelectionTool: SelectionToolBase {
+class PartialSelectionTool: SelectionToolBase {
     /// Live Bezier-handle drag. Snapshotted once on press; mutated
     /// per move (no dashed ghost).
     private struct HandleDrag {

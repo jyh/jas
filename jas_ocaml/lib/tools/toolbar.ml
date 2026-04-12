@@ -1,6 +1,6 @@
 (** A floating toolbar subwindow embedded inside the workspace. *)
 
-type tool = Selection | Direct_selection | Group_selection | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star | Lasso
+type tool = Selection | Partial_selection | Interior_selection | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Polygon | Star | Lasso
 
 let tool_button_size = 32
 let _title_bar_height = 24
@@ -54,7 +54,7 @@ class toolbar ~title:(_title : string) ~x ~y
     val mutable pos_x = x
     val mutable pos_y = y
     val mutable current_tool = Selection
-    val mutable arrow_slot_tool = Direct_selection
+    val mutable arrow_slot_tool = Partial_selection
     val mutable pen_slot_tool = Pen
     val mutable pencil_slot_tool = Pencil
     val mutable text_slot_tool = Type_tool
@@ -117,7 +117,7 @@ class toolbar ~title:(_title : string) ~x ~y
     method select_tool t =
       current_tool <- t;
       (match t with
-       | Direct_selection | Group_selection ->
+       | Partial_selection | Interior_selection ->
          arrow_slot_tool <- t
        | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point ->
          pen_slot_tool <- t
@@ -355,8 +355,8 @@ class toolbar ~title:(_title : string) ~x ~y
           Cairo.fill cr
         end;
         (match arrow_slot_tool with
-        | Direct_selection -> draw_direct_arrow cr ~alloc
-        | Group_selection -> draw_arrow_plus cr ~alloc
+        | Partial_selection -> draw_direct_arrow cr ~alloc
+        | Interior_selection -> draw_arrow_plus cr ~alloc
         | _ -> ());
         (* Small triangle in lower-right indicating alternates *)
         let ox = (bw -. 28.0) /. 2.0 in
@@ -1483,8 +1483,8 @@ class toolbar ~title:(_title : string) ~x ~y
           self#redraw_all
         ) |> ignore
       in
-      add_item "Direct Selection" Direct_selection;
-      add_item "Group Selection" Group_selection;
+      add_item "Partial Selection" Partial_selection;
+      add_item "Interior Selection" Interior_selection;
       menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())
 
     method private show_pencil_slot_menu =

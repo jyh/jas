@@ -3,7 +3,7 @@
 let () = ignore (GMain.init ())
 
 let all_tools : Jas.Toolbar.tool list = [
-  Selection; Direct_selection; Group_selection;
+  Selection; Partial_selection; Interior_selection;
   Pen; Add_anchor_point; Pencil; Type_tool; Type_on_path;
   Line; Rect; Rounded_rect; Polygon; Star;
 ]
@@ -20,7 +20,7 @@ let () =
 
       Alcotest.test_case "tool equality" `Quick (fun () ->
         assert (Jas.Toolbar.Selection = Jas.Toolbar.Selection);
-        assert (Jas.Toolbar.Direct_selection <> Jas.Toolbar.Selection);
+        assert (Jas.Toolbar.Partial_selection <> Jas.Toolbar.Selection);
         assert (Jas.Toolbar.Type_on_path <> Jas.Toolbar.Type_tool);
         assert (Jas.Toolbar.Polygon <> Jas.Toolbar.Rect)
       );
@@ -62,14 +62,14 @@ let () =
     ];
 
     "tool alternates", [
-      Alcotest.test_case "arrow slot alternate: direct selection" `Quick (fun () ->
-        tb#select_tool Jas.Toolbar.Direct_selection;
-        assert (tb#current_tool = Jas.Toolbar.Direct_selection)
+      Alcotest.test_case "arrow slot alternate: partial selection" `Quick (fun () ->
+        tb#select_tool Jas.Toolbar.Partial_selection;
+        assert (tb#current_tool = Jas.Toolbar.Partial_selection)
       );
 
-      Alcotest.test_case "arrow slot alternate: group selection" `Quick (fun () ->
-        tb#select_tool Jas.Toolbar.Group_selection;
-        assert (tb#current_tool = Jas.Toolbar.Group_selection)
+      Alcotest.test_case "arrow slot alternate: interior selection" `Quick (fun () ->
+        tb#select_tool Jas.Toolbar.Interior_selection;
+        assert (tb#current_tool = Jas.Toolbar.Interior_selection)
       );
 
       Alcotest.test_case "pen slot alternate: add anchor point" `Quick (fun () ->
