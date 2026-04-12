@@ -13,7 +13,7 @@ from panels.panel_menu import panel_label, panel_menu, panel_dispatch, panel_is_
 
 DOCK_DRAG_MIME = "application/x-jas-dock-drag"
 
-# Dark theme colors matching Rust
+# Theme colors — mutable, updated by set_theme()
 THEME_BG = "#3c3c3c"
 THEME_BG_DARK = "#333"
 THEME_BG_TAB = "#4a4a4a"
@@ -24,6 +24,25 @@ THEME_TEXT_DIM = "#999"
 THEME_TEXT_BODY = "#aaa"
 THEME_TEXT_HINT = "#777"
 THEME_TEXT_BUTTON = "#888"
+
+
+def set_theme(name: str):
+    """Update module-level theme colors from the named appearance."""
+    global THEME_BG, THEME_BG_DARK, THEME_BG_TAB, THEME_BG_TAB_INACTIVE
+    global THEME_BORDER, THEME_TEXT, THEME_TEXT_DIM, THEME_TEXT_BODY
+    global THEME_TEXT_HINT, THEME_TEXT_BUTTON
+    from workspace.theme import resolve_appearance
+    t = resolve_appearance(name)
+    THEME_BG = t.pane_bg
+    THEME_BG_DARK = t.pane_bg_dark
+    THEME_BG_TAB = t.tab_active
+    THEME_BG_TAB_INACTIVE = t.tab_inactive
+    THEME_BORDER = t.border
+    THEME_TEXT = t.text
+    THEME_TEXT_DIM = t.text_dim
+    THEME_TEXT_BODY = t.text_body
+    THEME_TEXT_HINT = t.text_hint
+    THEME_TEXT_BUTTON = t.text_button
 
 
 class DraggableGrip(QLabel):
@@ -186,7 +205,7 @@ class DockPanelWidget(QWidget):
             is_active = pi == group.active
             weight = "bold" if is_active else "normal"
             bg = THEME_BG_TAB if is_active else THEME_BG_TAB_INACTIVE
-            btn.setStyleSheet(f"font-size: 11px; font-weight: {weight}; color: {THEME_TEXT}; background: {bg}; padding: 3px 8px;")
+            btn.setStyleSheet(f"font-size: 11px; font-weight: {weight}; color: {THEME_TEXT}; background: {bg}; border: none; padding: 3px 8px;")
             btn.clicked.connect(lambda _, d=dock_id, g=gi, p=pi: self._set_active(d, g, p))
             hbox.addWidget(btn)
 
@@ -195,7 +214,7 @@ class DockPanelWidget(QWidget):
         # Chevron
         chevron = QPushButton("\u00BB" if group.collapsed else "\u00AB")
         chevron.setFlat(True)
-        chevron.setStyleSheet(f"font-size: 18px; color: {THEME_TEXT_BUTTON}; padding: 3px 6px;")
+        chevron.setStyleSheet(f"font-size: 18px; color: {THEME_TEXT_BUTTON}; border: none; padding: 3px 6px;")
         chevron.clicked.connect(lambda _, d=dock_id, g=gi: self._toggle_group(d, g))
         hbox.addWidget(chevron)
 
@@ -205,7 +224,7 @@ class DockPanelWidget(QWidget):
             if active_kind is not None:
                 hamburger = QPushButton("\u2261")
                 hamburger.setFlat(True)
-                hamburger.setStyleSheet(f"font-size: 18px; color: {THEME_TEXT_BUTTON}; padding: 3px 6px;")
+                hamburger.setStyleSheet(f"font-size: 18px; color: {THEME_TEXT_BUTTON}; border: none; padding: 3px 6px;")
                 hamburger.clicked.connect(
                     lambda _, d=dock_id, g=gi, k=active_kind, a=group.active:
                         self._show_panel_menu(d, g, k, a)
@@ -361,7 +380,7 @@ class FloatingDockWindow(QWidget):
             is_active = pi == group.active
             weight = "bold" if is_active else "normal"
             bg = THEME_BG_TAB if is_active else THEME_BG_TAB_INACTIVE
-            btn.setStyleSheet(f"font-size: 11px; font-weight: {weight}; color: {THEME_TEXT}; background: {bg}; padding: 3px 8px;")
+            btn.setStyleSheet(f"font-size: 11px; font-weight: {weight}; color: {THEME_TEXT}; background: {bg}; border: none; padding: 3px 8px;")
             btn.clicked.connect(lambda _, d=dock_id, g=gi, p=pi: self._set_active(d, g, p))
             hbox.addWidget(btn)
 
