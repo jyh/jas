@@ -462,7 +462,8 @@ class PaneLayout:
         for p in self.panes:
             p.x *= sx
             p.y *= sy
-            p.width = max(p.width * sx, p.config.min_width)
+            if not p.config.fixed_width:
+                p.width = max(p.width * sx, p.config.min_width)
             p.height = max(p.height * sy, p.config.min_height)
         self.viewport_width, self.viewport_height = new_w, new_h
         self.clamp_panes(new_w, new_h)

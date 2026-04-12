@@ -818,7 +818,9 @@ impl PaneLayout {
             let (min_w, min_h) = (p.config.min_width, p.config.min_height);
             p.x *= sx;
             p.y *= sy;
-            p.width = (p.width * sx).max(min_w);
+            if !p.config.fixed_width {
+                p.width = (p.width * sx).max(min_w);
+            }
             p.height = (p.height * sy).max(min_h);
         }
         self.viewport_width = new_w;
