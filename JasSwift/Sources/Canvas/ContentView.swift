@@ -51,6 +51,8 @@ public class WorkspaceState: ObservableObject {
     public func switchAppearance(_ name: String) {
         objectWillChange.send()
         theme = resolveAppearance(name)
+        toolbarCheckedBg = theme.buttonChecked
+        toolbarIconColor = theme.text
         appConfig.activeAppearance = name
         appConfig.save()
     }
@@ -62,6 +64,7 @@ public class WorkspaceState: ObservableObject {
         appConfig.activeLayout = name
         appConfig.save()
         workspaceLayout.save()
+        switchAppearance(workspaceLayout.appearance)
     }
 
     public func revertToSaved() {
@@ -82,6 +85,7 @@ public class WorkspaceState: ObservableObject {
     }
 
     public func saveLayoutAs(_ name: String) {
+        workspaceLayout.appearance = appConfig.activeAppearance
         workspaceLayout.saveAs(name)
         appConfig.registerLayout(name)
         appConfig.activeLayout = name

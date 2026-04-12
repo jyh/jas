@@ -179,7 +179,8 @@ class WorkspaceLayout:
     def __init__(self, name: str, anchored: list[tuple[DockEdge, Dock]],
                  floating: list[FloatingDock], hidden_panels: list[PanelKind],
                  z_order: list[int], focused_panel: PanelAddr | None,
-                 next_id: int, pane_layout=None, version: int = LAYOUT_VERSION):
+                 next_id: int, pane_layout=None, version: int = LAYOUT_VERSION,
+                 appearance: str = "dark_gray"):
         self.version = version
         self.name = name
         self.anchored = anchored
@@ -187,6 +188,7 @@ class WorkspaceLayout:
         self.hidden_panels = hidden_panels
         self.z_order = z_order
         self.focused_panel = focused_panel
+        self.appearance = appearance
         self.pane_layout = pane_layout
         self._next_id = next_id
         self._generation = 0
@@ -593,6 +595,7 @@ class WorkspaceLayout:
             "version": self.version,
             "name": self.name,
             "anchored": [{"edge": _edge(e), "dock": _dock(d)} for e, d in self.anchored],
+            "appearance": self.appearance,
             "floating": [{"dock": _dock(fd.dock), "x": fd.x, "y": fd.y} for fd in self.floating],
             "hidden_panels": [_panel(k) for k in self.hidden_panels],
             "z_order": self.z_order,
@@ -640,6 +643,7 @@ class WorkspaceLayout:
                 next_id=d.get("next_id", 1),
                 pane_layout=pl,
                 version=ver,
+                appearance=d.get("appearance", "dark_gray"),
             )
         except (KeyError, TypeError, ValueError):
             return WorkspaceLayout.default_layout()

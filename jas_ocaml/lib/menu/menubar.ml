@@ -463,9 +463,12 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
          layout.Workspace_layout.hidden_panels <- loaded.Workspace_layout.hidden_panels;
          layout.Workspace_layout.z_order <- loaded.Workspace_layout.z_order;
          layout.Workspace_layout.focused_panel <- loaded.Workspace_layout.focused_panel;
+         layout.Workspace_layout.appearance <- loaded.Workspace_layout.appearance;
          layout.Workspace_layout.pane_layout <- loaded.Workspace_layout.pane_layout;
          layout.Workspace_layout.next_id <- loaded.Workspace_layout.next_id;
          config.Workspace_layout.active_layout <- name;
+         config.Workspace_layout.active_appearance <- loaded.Workspace_layout.appearance;
+         Dock_panel.set_theme loaded.Workspace_layout.appearance;
          Workspace_layout.save_app_config config;
          Workspace_layout.save_layout layout;
          refresh ()
@@ -497,12 +500,14 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
            let resp = confirm#run () in
            confirm#destroy ();
            if resp = `OK then begin
+             layout.Workspace_layout.appearance <- config.Workspace_layout.active_appearance;
              Workspace_layout.save_layout_as layout name;
              Workspace_layout.register_layout config name;
              config.Workspace_layout.active_layout <- name;
              Workspace_layout.save_app_config config
            end
          end else begin
+           layout.Workspace_layout.appearance <- config.Workspace_layout.active_appearance;
            Workspace_layout.save_layout_as layout name;
            Workspace_layout.register_layout config name;
            config.Workspace_layout.active_layout <- name;

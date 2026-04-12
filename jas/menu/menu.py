@@ -281,8 +281,11 @@ def _switch_layout(window, name: str):
     loaded.name = WORKSPACE_LAYOUT_NAME
     window.workspace_layout = loaded
     window.app_config.active_layout = name
+    window.app_config.active_appearance = loaded.appearance
     window.app_config.save()
     window.workspace_layout.save_to_file()
+    if hasattr(window, 'refresh_theme'):
+        window.refresh_theme(loaded.appearance)
     _refresh(window)
 
 
@@ -307,6 +310,7 @@ def _save_as(window):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply != QMessageBox.Yes:
             return
+    window.workspace_layout.appearance = config.active_appearance
     window.workspace_layout.save_as(name)
     config.register_layout(name)
     config.active_layout = name

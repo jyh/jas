@@ -1,6 +1,10 @@
 import SwiftUI
 import AppKit
 
+/// Current theme colors for toolbar rendering — updated by switchAppearance().
+public var toolbarCheckedBg = NSColor(white: 0.38, alpha: 1.0)
+public var toolbarIconColor = NSColor(white: 0.8, alpha: 1.0)
+
 /// Tool button and icon drawing utilities for the toolbar.
 public struct ToolbarView {
     static func toolButton(currentTool: Binding<Tool>, tool: Tool) -> some View {
@@ -8,7 +12,7 @@ public struct ToolbarView {
             toolIcon(tool)
                 .frame(width: 32, height: 32)
                 .background(currentTool.wrappedValue == tool
-                    ? SwiftUI.Color(nsColor: NSColor(white: 0.38, alpha: 1.0))
+                    ? SwiftUI.Color(nsColor: toolbarCheckedBg)
                     : SwiftUI.Color.clear)
                 .cornerRadius(3)
         }
@@ -32,7 +36,7 @@ public struct ToolbarView {
         Canvas { context, size in
             let ox = (size.width - 28) / 2
             let oy = (size.height - 28) / 2
-            let color = SwiftUI.Color(nsColor: NSColor(white: 0.8, alpha: 1.0))
+            let color = SwiftUI.Color(nsColor: toolbarIconColor)
 
             switch tool {
             case .selection:

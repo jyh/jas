@@ -462,6 +462,9 @@ public func workspaceToTestJson(_ layout: WorkspaceLayout) -> String {
     }
     o.raw("anchored", jsonArray(anchored))
 
+    // appearance
+    o.str("appearance", layout.appearance)
+
     // floating
     let floating = layout.floating.map { floatingDockJson($0) }
     o.raw("floating", jsonArray(floating))
@@ -722,6 +725,7 @@ public func testJsonToWorkspace(_ json: String) -> WorkspaceLayout {
     let name = v["name"] as? String ?? "Default"
     let version = parseInt(v["version"])
     let nextId = parseInt(v["next_id"])
+    let appearance = v["appearance"] as? String ?? "dark_gray"
 
     return WorkspaceLayout.fromParts(
         version: version == 0 ? layoutVersion : version,
@@ -731,6 +735,7 @@ public func testJsonToWorkspace(_ json: String) -> WorkspaceLayout {
         hiddenPanels: hiddenPanels,
         zOrder: zOrder,
         focusedPanel: focusedPanel,
+        appearance: appearance,
         paneLayout: paneLayout,
         nextId: nextId
     )

@@ -668,7 +668,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.Path.close cr;
         Cairo.fill cr;
         (* Gray facets *)
-        Cairo.set_source_rgb cr 0.235 0.235 0.235;
+        let (ir, ig, ib) = inactive_bg_rgb () in Cairo.set_source_rgb cr ir ig ib;
         Cairo.move_to cr 208.57 55.33;
         Cairo.curve_to cr 212.62 47.93 207.38 40.51 202.08 36.15;
         Cairo.line_to cr 177.08 15.57;
@@ -746,7 +746,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.Path.close cr;
         Cairo.fill cr;
         (* Gray facets *)
-        Cairo.set_source_rgb cr 0.235 0.235 0.235;
+        let (ir, ig, ib) = inactive_bg_rgb () in Cairo.set_source_rgb cr ir ig ib;
         Cairo.move_to cr 184.63 65.93;
         Cairo.curve_to cr 189.51 66.39 194.59 66.2 198.13 68.25;
         Cairo.curve_to cr 201.04 69.93 203.57 78.45 201.14 81.28;
@@ -832,7 +832,7 @@ class toolbar ~title:(_title : string) ~x ~y
         Cairo.Path.close cr;
         Cairo.fill cr;
         (* Gray facets *)
-        Cairo.set_source_rgb cr 0.235 0.235 0.235;
+        let (ir, ig, ib) = inactive_bg_rgb () in Cairo.set_source_rgb cr ir ig ib;
         Cairo.move_to cr 66.39 191.49;
         Cairo.curve_to cr 63.13 195.37 55.31 192.23 52.22 192.25;
         Cairo.curve_to cr 50.62 187.3 49.74 184.33 49.59 179.38;
