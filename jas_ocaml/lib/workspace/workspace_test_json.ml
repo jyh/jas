@@ -424,6 +424,9 @@ let workspace_to_test_json (layout : workspace_layout) =
   ) layout.anchored in
   json_raw o "anchored" (json_array anchored);
 
+  (* appearance *)
+  json_str o "appearance" layout.appearance;
+
   (* floating *)
   let floating = List.map floating_dock_json layout.floating in
   json_raw o "floating" (json_array floating);
@@ -616,6 +619,7 @@ let test_json_to_workspace json_str =
   let name = j |> member "name" |> to_string in
   let version = j |> member "version" |> to_int in
   let next_id = j |> member "next_id" |> to_int in
+  let appearance = (try j |> member "appearance" |> to_string with _ -> Theme.default_appearance_name) in
 
   { version;
     name;
@@ -624,6 +628,7 @@ let test_json_to_workspace json_str =
     hidden_panels;
     z_order;
     focused_panel;
+    appearance;
     pane_layout;
     next_id;
     generation = 0;

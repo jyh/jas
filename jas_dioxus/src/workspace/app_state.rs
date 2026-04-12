@@ -209,6 +209,13 @@ impl AppState {
     pub(crate) fn save_layout_as(&mut self, name: &str) {
         #[cfg(target_arch = "wasm32")]
         {
+            // Capture the active appearance from JS before serializing.
+            let active_appearance = js_sys::eval("getActiveAppearance()")
+                .ok()
+                .and_then(|v| v.as_string())
+                .unwrap_or_else(|| "dark_gray".to_string());
+            self.workspace_layout.appearance = active_appearance;
+
             let key = super::workspace::WorkspaceLayout::storage_key_for(name);
             // Temporarily set name for serialization
             let saved_name = self.workspace_layout.name.clone();
@@ -238,6 +245,12 @@ impl AppState {
         self.save_app_config();
         // Persist as "Workspace"
         self.save_workspace_layout();
+        // Restore the saved appearance for this layout.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let appearance = self.workspace_layout.appearance.clone();
+            let _ = js_sys::eval(&format!("applyAppearance('{}')", appearance));
+        }
     }
 
     /// Revert to the currently selected saved layout.

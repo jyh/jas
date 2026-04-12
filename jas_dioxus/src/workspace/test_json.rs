@@ -450,6 +450,9 @@ pub fn workspace_to_test_json(layout: &WorkspaceLayout) -> String {
     }).collect();
     o.raw("anchored", json_array(&anchored));
 
+    // appearance
+    o.str_val("appearance", &layout.appearance);
+
     // floating
     let floating: Vec<String> = layout.floating.iter().map(floating_dock_json).collect();
     o.raw("floating", json_array(&floating));
@@ -693,6 +696,7 @@ pub fn test_json_to_workspace(json: &str) -> WorkspaceLayout {
     let name = v["name"].as_str().unwrap_or("Default").to_string();
     let version = v["version"].as_u64().unwrap_or(LAYOUT_VERSION as u64) as u32;
     let next_id = parse_usize(&v["next_id"]);
+    let appearance = v["appearance"].as_str().unwrap_or("dark_gray").to_string();
 
     WorkspaceLayout::from_parts(
         version,
@@ -702,6 +706,7 @@ pub fn test_json_to_workspace(json: &str) -> WorkspaceLayout {
         hidden_panels,
         z_order,
         focused_panel,
+        appearance,
         pane_layout,
         next_id,
     )

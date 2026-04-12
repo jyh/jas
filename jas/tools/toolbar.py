@@ -10,6 +10,26 @@ from PySide6.QtWidgets import (
 )
 
 
+def _theme_qcolor(hex_str: str) -> QColor:
+    """Convert a hex color string like '#cccccc' to a QColor."""
+    return QColor(hex_str)
+
+
+def _icon_color() -> QColor:
+    from workspace.dock_panel import THEME_TEXT
+    return _theme_qcolor(THEME_TEXT)
+
+
+def _checked_bg() -> QColor:
+    from workspace.dock_panel import THEME_BG_TAB
+    return _theme_qcolor(THEME_BG_TAB)
+
+
+def _inactive_bg() -> QColor:
+    from workspace.dock_panel import THEME_BG_DARK
+    return _theme_qcolor(THEME_BG_DARK)
+
+
 class Tool(Enum):
     SELECTION = auto()
     PARTIAL_SELECTION = auto()
@@ -64,14 +84,14 @@ class ToolButton(QToolButton):
 
         # Background on checked
         if self.isChecked():
-            painter.fillRect(self.rect(), QColor("#505050"))
+            painter.fillRect(self.rect(), _checked_bg())
 
         # Center the icon
         ox = (self.width() - self.ICON_SIZE) / 2.0
         oy = (self.height() - self.ICON_SIZE) / 2.0
         painter.translate(ox, oy)
 
-        pen = QPen(QColor("#cccccc"), 1.5)
+        pen = QPen(_icon_color(), 1.5)
         painter.setPen(pen)
 
         if self.tool == Tool.SELECTION:
@@ -135,7 +155,7 @@ class ToolButton(QToolButton):
         painter.setBrush(QColor("#ffffff"))
         painter.drawPath(path)
         # Draw '+' in the lower-right
-        painter.setPen(QPen(QColor("#cccccc"), 1.5))
+        painter.setPen(QPen(_icon_color(), 1.5))
         painter.drawLine(20, 20, 27, 20)
         painter.drawLine(23.5, 16.5, 23.5, 23.5)
 
@@ -147,12 +167,12 @@ class ToolButton(QToolButton):
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
-        painter.setPen(QPen(QColor("#cccccc"), 8))
+        painter.setPen(QPen(_icon_color(), 8))
         painter.drawLine(30.79, 232.04, 231.78, 31.05)
         painter.restore()
 
     def _draw_rect_tool(self, painter):
-        painter.setPen(QPen(QColor("#cccccc"), 1.5))
+        painter.setPen(QPen(_icon_color(), 1.5))
         painter.drawRect(4, 4, self.ICON_SIZE - 8, self.ICON_SIZE - 8)
 
     def _draw_rounded_rect_tool(self, painter):
@@ -164,7 +184,7 @@ class ToolButton(QToolButton):
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
-        painter.setPen(QPen(QColor("#cccccc"), 8))
+        painter.setPen(QPen(_icon_color(), 8))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(QRectF(23.33, 58.26, 212.06, 139.47), 30.0, 30.0)
         painter.restore()
@@ -209,7 +229,7 @@ class ToolButton(QToolButton):
         outer.closeSubpath()
         outer.setFillRule(Qt.FillRule.OddEvenFill)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#cccccc"))
+        painter.setBrush(_icon_color())
         painter.drawPath(outer)
         painter.restore()
 
@@ -253,7 +273,7 @@ class ToolButton(QToolButton):
         outer.closeSubpath()
         outer.setFillRule(Qt.FillRule.OddEvenFill)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#cccccc"))
+        painter.setBrush(_icon_color())
         painter.drawPath(outer)
         # Plus sign path
         plus = QPainterPath()
@@ -310,7 +330,7 @@ class ToolButton(QToolButton):
         outer.closeSubpath()
         outer.setFillRule(Qt.FillRule.OddEvenFill)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#cccccc"))
+        painter.setBrush(_icon_color())
         painter.drawPath(outer)
         # Minus sign (rotated rectangle from SVG)
         painter.save()
@@ -326,12 +346,12 @@ class ToolButton(QToolButton):
         cx = self.ICON_SIZE / 2.0
         cy = self.ICON_SIZE / 2.0
         painter.save()
-        painter.setPen(QPen(QColor("#cccccc"), 1.5))
+        painter.setPen(QPen(_icon_color(), 1.5))
         # Diagonal handle line
         painter.drawLine(int(cx - 10), int(cy - 10), int(cx + 10), int(cy + 10))
         # Handle endpoint circles (filled)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#cccccc"))
+        painter.setBrush(_icon_color())
         r = 2.5
         for hx, hy in ((cx - 10, cy - 10), (cx + 10, cy + 10)):
             painter.drawEllipse(QPoint(int(hx), int(hy)), int(r), int(r))
@@ -369,10 +389,10 @@ class ToolButton(QToolButton):
         outer.closeSubpath()
         outer.setFillRule(Qt.FillRule.OddEvenFill)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#cccccc"))
+        painter.setBrush(_icon_color())
         painter.drawPath(outer)
         # Gray facets
-        painter.setBrush(QColor("#3c3c3c"))
+        painter.setBrush(_inactive_bg())
         f1 = QPainterPath()
         f1.moveTo(208.57, 55.33)
         f1.cubicTo(212.62, 47.93, 207.38, 40.51, 202.08, 36.15)
@@ -453,10 +473,10 @@ class ToolButton(QToolButton):
         outer.closeSubpath()
         outer.setFillRule(Qt.FillRule.OddEvenFill)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#cccccc"))
+        painter.setBrush(_icon_color())
         painter.drawPath(outer)
         # Gray facets
-        painter.setBrush(QColor("#3c3c3c"))
+        painter.setBrush(_inactive_bg())
         f1 = QPainterPath()
         f1.moveTo(184.63, 65.93)
         f1.cubicTo(189.51, 66.39, 194.59, 66.2, 198.13, 68.25)
@@ -545,10 +565,10 @@ class ToolButton(QToolButton):
         outer.cubicTo(81.53, 222.03, 77.91, 224.78, 70.89, 227.68)
         outer.closeSubpath()
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#cccccc"))
+        painter.setBrush(_icon_color())
         painter.drawPath(outer)
         # Gray facets
-        painter.setBrush(QColor("#3c3c3c"))
+        painter.setBrush(_inactive_bg())
         f1 = QPainterPath()
         f1.moveTo(66.39, 191.49)
         f1.cubicTo(63.13, 195.37, 55.31, 192.23, 52.22, 192.25)
@@ -604,7 +624,7 @@ class ToolButton(QToolButton):
         tip.closeSubpath()
         painter.drawPath(tip)
         # "S" lettering (right side)
-        painter.setBrush(QColor("#cccccc"))
+        painter.setBrush(_icon_color())
         s_path = QPainterPath()
         s_path.moveTo(210.2, 175.94)
         s_path.cubicTo(221.68, 185.28, 259.83, 188.72, 255.69, 222.01)
@@ -652,8 +672,8 @@ class ToolButton(QToolButton):
         path.lineTo(156.82, 178.76)
         path.cubicTo(158.02, 184.54, 158.40, 189.25, 156.78, 197.67)
         path.closeSubpath()
-        painter.setPen(QPen(QColor("#cccccc"), 0))
-        painter.setBrush(QColor("#cccccc"))
+        painter.setPen(QPen(_icon_color(), 0))
+        painter.setBrush(_icon_color())
         painter.drawPath(path)
         painter.restore()
 
@@ -666,8 +686,8 @@ class ToolButton(QToolButton):
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
-        painter.setPen(QPen(QColor("#cccccc"), 0))
-        painter.setBrush(QColor("#cccccc"))
+        painter.setPen(QPen(_icon_color(), 0))
+        painter.setBrush(_icon_color())
         # Caret/insertion-point glyph (top stroke).
         path1 = QPainterPath()
         path1.moveTo(146.65, 143.92)
@@ -708,7 +728,7 @@ class ToolButton(QToolButton):
 
     def _draw_polygon_tool(self, painter):
         import math
-        painter.setPen(QPen(QColor("#cccccc"), 1.5))
+        painter.setPen(QPen(_icon_color(), 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         cx, cy, r = self.ICON_SIZE / 2, self.ICON_SIZE / 2, self.ICON_SIZE / 2 - 3
         n = 6
@@ -733,7 +753,7 @@ class ToolButton(QToolButton):
         painter.save()
         painter.translate(ox, oy)
         painter.scale(s, s)
-        painter.setPen(QPen(QColor("#cccccc"), 8))
+        painter.setPen(QPen(_icon_color(), 8))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         pts = [
             (128, 50.18), (145.47, 103.95), (202.01, 103.95),
@@ -747,7 +767,7 @@ class ToolButton(QToolButton):
     def _draw_lasso_tool(self, painter):
         """Lasso icon — freehand loop placeholder."""
         from PySide6.QtCore import QPointF
-        pen = QPen(QColor("#cccccc"), 1.5)
+        pen = QPen(_icon_color(), 1.5)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -769,7 +789,7 @@ class ToolButton(QToolButton):
         tri.lineTo(self.ICON_SIZE, self.ICON_SIZE - s)
         tri.closeSubpath()
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#cccccc"))
+        painter.setBrush(_icon_color())
         painter.drawPath(tri)
 
 
@@ -847,7 +867,7 @@ class FillStrokeWidget(QWidget):
             self._draw_stroke_square(painter, stroke_x, stroke_y, sq_size)
 
         # Swap arrow (top-right)
-        painter.setPen(QPen(QColor("#cccccc"), 1))
+        painter.setPen(QPen(_icon_color(), 1))
         ax, ay = 44, 4
         # Curved arrow hint
         painter.drawLine(ax, ay, ax + 8, ay)

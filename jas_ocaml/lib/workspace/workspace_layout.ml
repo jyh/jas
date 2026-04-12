@@ -139,6 +139,7 @@ type workspace_layout = {
   mutable hidden_panels : panel_kind list;
   mutable z_order : dock_id list;
   mutable focused_panel : panel_addr option;
+  mutable appearance : string;
   mutable pane_layout : Pane.pane_layout option;
   mutable next_id : int;
   mutable generation : int;
@@ -157,6 +158,7 @@ let named name = {
   hidden_panels = [];
   z_order = [];
   focused_panel = None;
+  appearance = Theme.default_appearance_name;
   pane_layout = None;
   next_id = 1;
   generation = 0;
@@ -767,6 +769,7 @@ let layout_to_json l : Yojson.Safe.t =
     "name", `String l.name;
     "anchored", `List (List.map (fun (e, d) ->
       `Assoc ["edge", `String (edge_to_json e); "dock", dock_to_json d]) l.anchored);
+    "appearance", `String l.appearance;
     "floating", `List (List.map (fun fd ->
       `Assoc ["dock", dock_to_json fd.dock; "x", `Float fd.x; "y", `Float fd.y]) l.floating);
     "hidden_panels", `List (List.map (fun k -> `String (kind_to_json k)) l.hidden_panels);
@@ -793,6 +796,7 @@ let layout_of_json (j : Yojson.Safe.t) =
     hidden_panels = j |> member "hidden_panels" |> to_list |> List.map (fun s -> kind_of_json (to_string s));
     z_order = j |> member "z_order" |> to_list |> List.map to_int;
     focused_panel = None;
+    appearance = (try j |> member "appearance" |> to_string with _ -> Theme.default_appearance_name);
     pane_layout = (try Some (pane_layout_of_json (j |> member "pane_layout")) with _ -> None);
     next_id = j |> member "next_id" |> to_int;
     generation = 0;

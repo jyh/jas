@@ -80,7 +80,7 @@ layout:
       bind:
         visible: "{{state.toolbar_visible}}"
       title_bar:
-        label: "Tools"
+        label: ""
         draggable: true
         buttons:
           - id: toolbar_close_btn
@@ -521,7 +521,7 @@ layout:
         visible: "{{state.canvas_visible}}"
       title_bar:
         id: canvas_title_bar
-        label: "Canvas"
+        label: ""
         draggable: true
         behavior:
           - event: double_click
@@ -618,7 +618,7 @@ layout:
       bind:
         visible: "{{state.dock_visible}}"
       title_bar:
-        label: "Panels"
+        label: ""
         draggable: true
         buttons:
           - id: dock_collapse_btn

@@ -185,6 +185,9 @@ pub struct WorkspaceLayout {
     pub hidden_panels: Vec<PanelKind>,
     pub z_order: Vec<DockId>,
     pub focused_panel: Option<PanelAddr>,
+    /// Active appearance name (e.g. "dark_gray", "light_gray").
+    #[serde(default = "default_appearance")]
+    pub appearance: String,
     /// Floating pane positions for toolbar/canvas/dock. `None` for legacy layouts.
     #[serde(default)]
     pub pane_layout: Option<PaneLayout>,
@@ -237,6 +240,9 @@ impl AppConfig {
 /// Default layout name.
 pub const DEFAULT_LAYOUT_NAME: &str = "Default";
 
+/// Default appearance name (serde default function).
+fn default_appearance() -> String { "dark_gray".into() }
+
 /// System workspace name — the always-active working copy.
 pub const WORKSPACE_LAYOUT_NAME: &str = "Workspace";
 
@@ -274,6 +280,7 @@ impl WorkspaceLayout {
             hidden_panels: vec![],
             z_order: vec![],
             focused_panel: None,
+            appearance: default_appearance(),
             pane_layout: None,
             next_id: 1,
             generation: 0,
@@ -295,12 +302,13 @@ impl WorkspaceLayout {
         hidden_panels: Vec<PanelKind>,
         z_order: Vec<DockId>,
         focused_panel: Option<PanelAddr>,
+        appearance: String,
         pane_layout: Option<PaneLayout>,
         next_id: usize,
     ) -> Self {
         Self {
             version, name, anchored, floating, hidden_panels, z_order,
-            focused_panel, pane_layout, next_id,
+            focused_panel, appearance, pane_layout, next_id,
             generation: 0, saved_generation: 0,
         }
     }

@@ -206,6 +206,8 @@ public struct WorkspaceLayout: Codable {
     public var hiddenPanels: [PanelKind]
     public var zOrder: [DockId]
     public var focusedPanel: PanelAddr?
+    /// Active appearance name (e.g. "dark_gray", "light_gray").
+    public var appearance: String
     public var paneLayout: PaneLayout?
     var nextId: Int
     // Generation tracking (not serialized)
@@ -213,7 +215,7 @@ public struct WorkspaceLayout: Codable {
     private var savedGeneration: UInt64 = 0
 
     private enum CodingKeys: String, CodingKey {
-        case version, name, anchored, floating, hiddenPanels, zOrder, focusedPanel, paneLayout, nextId
+        case version, name, anchored, floating, hiddenPanels, zOrder, focusedPanel, appearance, paneLayout, nextId
     }
 
     // Custom Codable for tuple array
@@ -227,6 +229,7 @@ public struct WorkspaceLayout: Codable {
         hiddenPanels = try container.decode([PanelKind].self, forKey: .hiddenPanels)
         zOrder = try container.decode([DockId].self, forKey: .zOrder)
         focusedPanel = try container.decodeIfPresent(PanelAddr.self, forKey: .focusedPanel)
+        appearance = try container.decodeIfPresent(String.self, forKey: .appearance) ?? "dark_gray"
         paneLayout = try container.decodeIfPresent(PaneLayout.self, forKey: .paneLayout)
         nextId = try container.decode(Int.self, forKey: .nextId)
         generation = 0
@@ -243,6 +246,7 @@ public struct WorkspaceLayout: Codable {
         try container.encode(hiddenPanels, forKey: .hiddenPanels)
         try container.encode(zOrder, forKey: .zOrder)
         try container.encodeIfPresent(focusedPanel, forKey: .focusedPanel)
+        try container.encode(appearance, forKey: .appearance)
         try container.encodeIfPresent(paneLayout, forKey: .paneLayout)
         try container.encode(nextId, forKey: .nextId)
     }
@@ -270,6 +274,7 @@ public struct WorkspaceLayout: Codable {
             hiddenPanels: [],
             zOrder: [],
             focusedPanel: nil,
+            appearance: "dark_gray",
             paneLayout: nil,
             nextId: 1,
             generation: 0,
@@ -279,7 +284,8 @@ public struct WorkspaceLayout: Codable {
 
     private init(version: Int, name: String, anchored: [(DockEdge, Dock)], floating: [FloatingDock],
                  hiddenPanels: [PanelKind], zOrder: [DockId], focusedPanel: PanelAddr?,
-                 paneLayout: PaneLayout?, nextId: Int, generation: UInt64, savedGeneration: UInt64) {
+                 appearance: String, paneLayout: PaneLayout?, nextId: Int,
+                 generation: UInt64, savedGeneration: UInt64) {
         self.version = version
         self.name = name
         self.anchored = anchored
@@ -287,6 +293,7 @@ public struct WorkspaceLayout: Codable {
         self.hiddenPanels = hiddenPanels
         self.zOrder = zOrder
         self.focusedPanel = focusedPanel
+        self.appearance = appearance
         self.paneLayout = paneLayout
         self.nextId = nextId
         self.generation = generation
@@ -305,6 +312,7 @@ public struct WorkspaceLayout: Codable {
         hiddenPanels: [PanelKind],
         zOrder: [DockId],
         focusedPanel: PanelAddr?,
+        appearance: String,
         paneLayout: PaneLayout?,
         nextId: Int
     ) -> WorkspaceLayout {
@@ -316,6 +324,7 @@ public struct WorkspaceLayout: Codable {
             hiddenPanels: hiddenPanels,
             zOrder: zOrder,
             focusedPanel: focusedPanel,
+            appearance: appearance,
             paneLayout: paneLayout,
             nextId: nextId,
             generation: 0,

@@ -490,6 +490,9 @@ def workspace_to_test_json(layout: WorkspaceLayout) -> str:
         anchored.append(ao.build())
     o.raw("anchored", _json_array(anchored))
 
+    # appearance
+    o.str("appearance", layout.appearance)
+
     # floating
     floating = [_floating_dock_json(fd) for fd in layout.floating]
     o.raw("floating", _json_array(floating))
@@ -714,6 +717,7 @@ def test_json_to_workspace(json_str: str) -> WorkspaceLayout:
     name = d.get("name", "Default")
     version = d.get("version", LAYOUT_VERSION)
     next_id = _parse_int(d.get("next_id", 1))
+    appearance = d.get("appearance", "dark_gray")
 
     return WorkspaceLayout(
         name=name,
@@ -725,6 +729,7 @@ def test_json_to_workspace(json_str: str) -> WorkspaceLayout:
         next_id=next_id,
         pane_layout=pane_layout,
         version=version,
+        appearance=appearance,
     )
 
 
