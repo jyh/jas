@@ -368,6 +368,7 @@ pub fn App() -> Element {
     // --- Menu bar signals ---
     let mut open_menu = use_signal(|| Option::<String>::None);
     let workspace_submenu_open = use_signal(|| false);
+    let appearance_submenu_open = use_signal(|| false);
     let save_as_dialog = use_signal(|| Option::<SaveAsDialog>::None);
     let color_picker_state = use_signal(|| Option::<super::color_picker::ColorPickerState>::None);
 
@@ -666,6 +667,7 @@ pub fn App() -> Element {
             // ===== Menu bar (full width, top of window) =====
             MenuBarView {
                 workspace_submenu_open,
+                appearance_submenu_open,
                 save_as_dialog,
             }
 

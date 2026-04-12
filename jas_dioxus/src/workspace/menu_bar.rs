@@ -20,6 +20,7 @@ use crate::tools::tool::PASTE_OFFSET;
 #[component]
 pub(crate) fn MenuBarView(
     workspace_submenu_open: Signal<bool>,
+    appearance_submenu_open: Signal<bool>,
     save_as_dialog: Signal<Option<SaveAsDialog>>,
 ) -> Element {
     let act = use_context::<Act>();
@@ -274,7 +275,7 @@ pub(crate) fn MenuBarView(
                         }
                     }));
                 }
-                "workspace_submenu" => {
+                "workspace_submenu" | "appearance_submenu" => {
                     // Handled by dynamic submenu rendering, not dispatch
                 }
                 _ => {}
@@ -439,6 +440,76 @@ pub(crate) fn MenuBarView(
                                                         }
                                                     },
                                                     "Revert to Saved"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    items
+                } else if cmd == "appearance_submenu" {
+                    // Dynamic appearance submenu
+                    let mut open_menu_ap = open_menu_sig;
+
+                    // Read available appearances and active name from JS
+                    let appearances: Vec<(String, String)> = {
+                        let json = js_sys::eval("getAppearanceList()")
+                            .ok()
+                            .and_then(|v| v.as_string())
+                            .unwrap_or_else(|| "[]".to_string());
+                        #[derive(serde::Deserialize)]
+                        struct AppEntry { name: String, label: String }
+                        serde_json::from_str::<Vec<AppEntry>>(&json)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|e| (e.name, e.label))
+                            .collect()
+                    };
+                    let active_appearance = js_sys::eval("getActiveAppearance()")
+                        .ok()
+                        .and_then(|v| v.as_string())
+                        .unwrap_or_else(|| "dark_gray".to_string());
+
+                    let mut items: Vec<Result<VNode, RenderError>> = Vec::new();
+                    items.push({
+                        let sub_open = appearance_submenu_open();
+                        rsx! {
+                            div {
+                                style: "position:relative;",
+                                onmouseenter: move |_| { appearance_submenu_open.set(true); },
+                                onmouseleave: move |_| { appearance_submenu_open.set(false); },
+
+                                div {
+                                    class: "jas-menu-item",
+                                    style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                                    span { "{label}" }
+                                }
+
+                                if sub_open {
+                                    div {
+                                        style: "position:absolute; left:100%; top:0; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
+                                        onmouseenter: move |_| { appearance_submenu_open.set(true); },
+
+                                        for (name, app_label) in appearances.clone() {
+                                            {
+                                                let is_active = name == active_appearance;
+                                                let check = if is_active { "\u{2713} " } else { "    " };
+                                                let display = format!("{check}{app_label}");
+                                                let name_clone = name.clone();
+                                                rsx! {
+                                                    div {
+                                                        class: "jas-menu-item",
+                                                        style: "padding:4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                                                        onmousedown: move |evt: Event<MouseData>| {
+                                                            evt.stop_propagation();
+                                                            let _ = js_sys::eval(&format!("applyAppearance('{}')", name_clone));
+                                                            open_menu_ap.set(None);
+                                                            appearance_submenu_open.set(false);
+                                                        },
+                                                        "{display}"
+                                                    }
                                                 }
                                             }
                                         }

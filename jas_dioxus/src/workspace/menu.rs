@@ -48,6 +48,7 @@ pub const MENU_BAR: &[(&str, &[MenuItem])] = &[
     ]),
     ("Window", &[
         ("Workspace \u{25B6}", "workspace_submenu", ""),
+        ("Appearance \u{25B6}", "appearance_submenu", ""),
         SEP,
         ("Tile", "tile_panes", ""),
         SEP,
@@ -71,6 +72,7 @@ pub const DISPATCH_COMMANDS: &[&str] = &[
     "lock", "unlock_all",
     "hide", "show_all",
     "workspace_submenu",
+    "appearance_submenu",
     "tile_panes",
     "toggle_pane_toolbar", "toggle_pane_dock",
     "toggle_panel_layers", "toggle_panel_color",
@@ -225,7 +227,7 @@ mod tests {
     #[test]
     fn total_menu_item_count() {
         let total: usize = MENU_BAR.iter().map(|(_, items)| items.len()).sum();
-        assert_eq!(total, 35); // 5 + 10 + 9 + 11
+        assert_eq!(total, 36); // 5 + 10 + 9 + 12
     }
 
     #[test]
