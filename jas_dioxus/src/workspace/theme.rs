@@ -33,19 +33,27 @@ pub(crate) fn fs_display_label(d: &FsDisplay) -> Option<&'static str> {
 }
 
 // ---------------------------------------------------------------------------
-// Theme colors
+// Theme colors — CSS variable references for dynamic appearance switching.
+// Each constant maps to a --jas-* CSS custom property with a fallback value
+// matching the Dark Gray appearance (the default).
 // ---------------------------------------------------------------------------
 
-pub(crate) const THEME_BG: &str = "#3c3c3c";
-pub(crate) const THEME_BG_DARK: &str = "#333";
-pub(crate) const THEME_BG_ACTIVE: &str = "#505050";
-pub(crate) const THEME_BG_TAB: &str = "#4a4a4a";
-pub(crate) const THEME_BG_TAB_INACTIVE: &str = "#353535";
-pub(crate) const THEME_BG_TOOLBAR_BTN: &str = "#505050";
-pub(crate) const THEME_BORDER: &str = "#555";
-pub(crate) const THEME_TEXT: &str = "#ccc";
-pub(crate) const THEME_TEXT_DIM: &str = "#999";
-pub(crate) const THEME_TEXT_BODY: &str = "#aaa";
-pub(crate) const THEME_TEXT_HINT: &str = "#777";
-pub(crate) const THEME_TEXT_BUTTON: &str = "#888";
-pub(crate) const THEME_ACCENT: &str = "#4a90d9";
+pub(crate) const THEME_BG: &str = "var(--jas-pane-bg,#3c3c3c)";
+pub(crate) const THEME_BG_DARK: &str = "var(--jas-pane-bg-dark,#333)";
+pub(crate) const THEME_BG_ACTIVE: &str = "var(--jas-button-checked,#505050)";
+pub(crate) const THEME_BG_TAB: &str = "var(--jas-tab-active,#4a4a4a)";
+pub(crate) const THEME_BG_TAB_INACTIVE: &str = "var(--jas-tab-inactive,#353535)";
+pub(crate) const THEME_BG_TOOLBAR_BTN: &str = "var(--jas-button-checked,#505050)";
+pub(crate) const THEME_BORDER: &str = "var(--jas-border,#555)";
+pub(crate) const THEME_TEXT: &str = "var(--jas-text,#ccc)";
+pub(crate) const THEME_TEXT_DIM: &str = "var(--jas-text-dim,#999)";
+pub(crate) const THEME_TEXT_BODY: &str = "var(--jas-text-body,#aaa)";
+pub(crate) const THEME_TEXT_HINT: &str = "var(--jas-text-hint,#777)";
+pub(crate) const THEME_TEXT_BUTTON: &str = "var(--jas-text-button,#888)";
+pub(crate) const THEME_ACCENT: &str = "var(--jas-accent,#4a90d9)";
+
+// Additional CSS variable constants for elements not previously in theme.rs.
+pub(crate) const THEME_WINDOW_BG: &str = "var(--jas-window-bg,#2e2e2e)";
+pub(crate) const THEME_TITLE_BAR_BG: &str = "var(--jas-title-bar-bg,#2a2a2a)";
+pub(crate) const THEME_TITLE_BAR_TEXT: &str = "var(--jas-title-bar-text,#d9d9d9)";
+pub(crate) const THEME_PANE_SHADOW: &str = "var(--jas-pane-shadow,rgba(0,0,0,0.3))";
