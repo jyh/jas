@@ -392,7 +392,7 @@
 
 **Note**
 
-*To change the increment value for type shortcuts, choose **Edit** \> **Preferences** \>**Type** (Windows) or **Illustrator** \> **Preferences** \>**Type** (macOS). Enter the values you want in the **Size/Leading**, **Baseline Shift**, and **Tracking** text boxes, and click **OK**.*
+*To change the increment value for type shortcuts, choose **Edit** \> **Preferences** \> **Type** (Windows) or **Application** \> **Preferences** \> **Type** (macOS). Enter the values you want in the **Size/Leading**, **Baseline Shift**, and **Tracking** text boxes, and click **OK**.*
 
 ## Use panels
 

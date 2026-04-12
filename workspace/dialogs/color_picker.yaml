@@ -1,0 +1,268 @@
+color_picker:
+  summary: "Select Color"
+  description: >
+    Modal color picker dialog matching the standard vector illustration application layout.
+    Left column: saturation/brightness gradient + hue colorbar + web-safe
+    checkbox. Center column: HSB fields with radio selectors + color
+    preview swatch, RGB fields, CMYK fields, hex field. Right column:
+    OK, Cancel, Color Swatches buttons. The radio buttons select which
+    color channel the 2D gradient and colorbar visualize — e.g. selecting
+    H maps hue to the colorbar and S/B to the gradient axes; selecting R
+    maps red to the colorbar and G/B to the gradient axes.
+  modal: true
+  params:
+    target: { type: enum, values: [fill, stroke] }
+  state:
+    radio_channel:
+      type: enum
+      values: [h, s, b, r, g, bl]
+      default: h
+      description: "Which color channel the gradient/colorbar visualize"
+    h:   { type: number, default: 0,   description: "Hue (0-360)" }
+    s:   { type: number, default: 0,   description: "Saturation (0-100)" }
+    b:   { type: number, default: 100, description: "Brightness (0-100)" }
+    r:   { type: number, default: 255, description: "Red (0-255)" }
+    g:   { type: number, default: 255, description: "Green (0-255)" }
+    bl:  { type: number, default: 255, description: "Blue (0-255)" }
+    c:   { type: number, default: 0,   description: "Cyan (0-100)" }
+    m:   { type: number, default: 0,   description: "Magenta (0-100)" }
+    y:   { type: number, default: 0,   description: "Yellow (0-100)" }
+    k:   { type: number, default: 0,   description: "Key/black (0-100)" }
+    hex: { type: string, default: "ffffff", description: "Hex color string" }
+    web_only:
+      type: bool
+      default: false
+      description: "Snap to web-safe palette"
+    color:
+      type: color
+      default: "#ffffff"
+      description: "The working color being edited"
+  init:
+    color: "{{param.target}} == fill ? {{state.fill_color}} : {{state.stroke_color}}"
+    h:   "hsb_h({{dialog.color}})"
+    s:   "hsb_s({{dialog.color}})"
+    b:   "hsb_b({{dialog.color}})"
+    r:   "rgb_r({{dialog.color}})"
+    g:   "rgb_g({{dialog.color}})"
+    bl:  "rgb_b({{dialog.color}})"
+    c:   "cmyk_c({{dialog.color}})"
+    m:   "cmyk_m({{dialog.color}})"
+    y:   "cmyk_y({{dialog.color}})"
+    k:   "cmyk_k({{dialog.color}})"
+    hex: "hex({{dialog.color}})"
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16, min_width: 480 }
+    children:
+
+      # Title row
+      - type: container
+        layout: row
+        style: { gap: 8, alignment: center }
+        children:
+          - { type: text, content: "Select Color:" }
+          - id: cp_eyedropper
+            type: icon_button
+            summary: "Eyedropper"
+            description: "Click to sample a color from the canvas"
+            icon: "eyedropper"
+            style: { size: 18 }
+            behavior:
+              - event: click
+                effects:
+                  - log: "eyedropper: activate color sampling"
+
+      # Main layout: left (gradient) + center (fields) + right (buttons)
+      - type: container
+        layout: row
+        style: { gap: 12 }
+        children:
+
+          # Left column: gradient + colorbar + web-safe
+          # Stretches to match the full height of the fields column
+          - type: container
+            layout: column
+            style: { gap: 4 }
+            children:
+              # Gradient + colorbar row (fills available height)
+              - type: container
+                layout: row
+                style: { gap: 4, flex: 1 }
+                children:
+                  # 2D saturation/brightness gradient (square, fills height)
+                  - id: cp_gradient
+                    type: placeholder
+                    summary: "Color gradient"
+                    description: >
+                      Square 2D gradient filling the available height.
+                      The two axes represent the two channels NOT selected
+                      by dialog.radio_channel. When H is selected: horizontal
+                      = saturation, vertical = brightness. When R is selected:
+                      horizontal = green, vertical = blue. Circle indicator
+                      shows current position. Drag to change both axis values.
+                    style: { aspect_ratio: 1, min_width: 180, min_height: 180 }
+                  # Vertical hue colorbar (fills height)
+                  - id: cp_colorbar
+                    type: placeholder
+                    summary: "Hue bar"
+                    description: >
+                      64px wide vertical bar. The gradient displayed depends
+                      on dialog.radio_channel: when H is selected, shows a
+                      rainbow hue gradient; when S, B, R, G, or B is selected,
+                      shows that channel's range. Triangle sliders on left and
+                      right indicate current position. Drag to change the value
+                      of the selected channel.
+                    style: { width: 64, flex: 1, min_height: 100 }
+              # Web-safe checkbox (below both gradient and colorbar)
+              - id: cp_web_only
+                type: toggle
+                label: "Only Web Colors"
+                summary: "Web-safe color snap"
+                description: "Snap all color values to the web-safe palette (0, 51, 102, 153, 204, 255)"
+                bind: "dialog.web_only"
+
+          # Fields + buttons column
+          - type: container
+            layout: column
+            style: { gap: 4 }
+            children:
+
+              # Top section: swatch + HSB | OK/Cancel/Swatches
+              - type: container
+                layout: row
+                style: { gap: 12 }
+                children:
+                  # Swatch + HSB
+                  - type: container
+                    layout: column
+                    style: { gap: 4 }
+                    children:
+                      - id: cp_preview
+                        type: color_swatch
+                        summary: "Preview"
+                        description: "50x50px swatch showing the working color in real time"
+                        style: { size: 50 }
+                        bind:
+                          color: "{{dialog.color}}"
+                      - type: container
+                        layout: row
+                        style: { gap: 4, alignment: center }
+                        children:
+                          - { type: radio_group, id: cp_radio_h, options: [{id: h, label: ""}], bind: "dialog.radio_channel" }
+                          - { type: text, content: "H:" }
+                          - { type: number_input, id: cp_h, style: { width: 45 }, min: 0, max: 360, bind: "dialog.h" }
+                          - { type: text, content: "\u00b0" }
+                      - type: container
+                        layout: row
+                        style: { gap: 4, alignment: center }
+                        children:
+                          - { type: radio_group, id: cp_radio_s, options: [{id: s, label: ""}], bind: "dialog.radio_channel" }
+                          - { type: text, content: "S:" }
+                          - { type: number_input, id: cp_s, style: { width: 45 }, min: 0, max: 100, bind: "dialog.s" }
+                          - { type: text, content: "%" }
+                      - type: container
+                        layout: row
+                        style: { gap: 4, alignment: center }
+                        children:
+                          - { type: radio_group, id: cp_radio_b, options: [{id: b, label: ""}], bind: "dialog.radio_channel" }
+                          - { type: text, content: "B:" }
+                          - { type: number_input, id: cp_b, style: { width: 45 }, min: 0, max: 100, bind: "dialog.b" }
+                          - { type: text, content: "%" }
+                  # OK / Cancel / Swatches
+                  - type: container
+                    layout: column
+                    style: { gap: 6 }
+                    children:
+                      - type: button
+                        label: "OK"
+                        variant: primary
+                        style: { padding: "6 20" }
+                        behavior:
+                          - event: click
+                            effects:
+                              - if:
+                                  condition: "{{param.target}} == fill"
+                                  then:
+                                    - set: { fill_color: "{{dialog.color}}" }
+                                  else:
+                                    - set: { stroke_color: "{{dialog.color}}" }
+                              - close_dialog: null
+                      - { type: button, label: "Cancel", action: dismiss_dialog,
+                          style: { padding: "6 20" } }
+                      - { type: button, label: "Color Swatches",
+                          style: { padding: "6 20", opacity: 0.5 } }
+
+              # Separator
+              - { type: separator }
+
+              # Bottom section: RGB + hex | CMYK
+              - type: container
+                layout: row
+                style: { gap: 16 }
+                children:
+                  # RGB + hex
+                  - type: container
+                    layout: column
+                    style: { gap: 4 }
+                    children:
+                      - type: container
+                        layout: row
+                        style: { gap: 4, alignment: center }
+                        children:
+                          - { type: radio_group, id: cp_radio_r, options: [{id: r, label: ""}], bind: "dialog.radio_channel" }
+                          - { type: text, content: "R:" }
+                          - { type: number_input, id: cp_r, style: { width: 45 }, min: 0, max: 255, bind: "dialog.r" }
+                      - type: container
+                        layout: row
+                        style: { gap: 4, alignment: center }
+                        children:
+                          - { type: radio_group, id: cp_radio_g, options: [{id: g, label: ""}], bind: "dialog.radio_channel" }
+                          - { type: text, content: "G:" }
+                          - { type: number_input, id: cp_g, style: { width: 45 }, min: 0, max: 255, bind: "dialog.g" }
+                      - type: container
+                        layout: row
+                        style: { gap: 4, alignment: center }
+                        children:
+                          - { type: radio_group, id: cp_radio_bl, options: [{id: bl, label: ""}], bind: "dialog.radio_channel" }
+                          - { type: text, content: "B:" }
+                          - { type: number_input, id: cp_bl, style: { width: 45 }, min: 0, max: 255, bind: "dialog.bl" }
+                      - type: container
+                        layout: row
+                        style: { gap: 4, alignment: center, margin: "4 0 0 0" }
+                        children:
+                          - { type: text, content: "#" }
+                          - { type: text_input, id: cp_hex, placeholder: "000000", style: { width: 60 }, bind: "dialog.hex" }
+                  # CMYK
+                  - type: container
+                    layout: column
+                    style: { gap: 4 }
+                    children:
+                      - type: container
+                        layout: row
+                        style: { gap: 2, alignment: center }
+                        children:
+                          - { type: text, content: "C:" }
+                          - { type: number_input, id: cp_c, style: { width: 40 }, min: 0, max: 100, bind: "dialog.c" }
+                          - { type: text, content: "%" }
+                      - type: container
+                        layout: row
+                        style: { gap: 2, alignment: center }
+                        children:
+                          - { type: text, content: "M:" }
+                          - { type: number_input, id: cp_m, style: { width: 40 }, min: 0, max: 100, bind: "dialog.m" }
+                          - { type: text, content: "%" }
+                      - type: container
+                        layout: row
+                        style: { gap: 2, alignment: center }
+                        children:
+                          - { type: text, content: "Y:" }
+                          - { type: number_input, id: cp_y, style: { width: 40 }, min: 0, max: 100, bind: "dialog.y" }
+                          - { type: text, content: "%" }
+                      - type: container
+                        layout: row
+                        style: { gap: 2, alignment: center }
+                        children:
+                          - { type: text, content: "K:" }
+                          - { type: number_input, id: cp_k, style: { width: 40 }, min: 0, max: 100, bind: "dialog.k" }
+                          - { type: text, content: "%" }

@@ -1,0 +1,9 @@
+id: color_panel_content
+type: placeholder
+summary: "Color picker"
+description: >
+  Inline color panel with color wheel or spectrum bar, RGB/HSB
+  sliders, and hex input. Changes apply immediately to the active
+  fill or stroke (determined by which swatch is in front in the
+  toolbar fill/stroke widget). Distinct from the modal color picker
+  dialog, which is opened via double-click on a swatch.

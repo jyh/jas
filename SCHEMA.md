@@ -27,18 +27,21 @@ app using Bootstrap for layout and JavaScript for interaction.
 ```yaml
 version: <integer>
 
-app:       <app_spec>
-theme:     <theme_spec>
-icons:     <map: name → icon_def>
-state:     <map: name → state_var>
-actions:   <map: name → action_def>
-shortcuts: <list of shortcut>
-menubar:   <list of menu>
-layout:    <element>
-dialogs:   <map: name → dialog>
+app:              <app_spec>
+theme:            <theme_spec>
+icons:            <map: name → icon_def>
+state:            <map: name → state_var>
+runtime_contexts: <map: name → context_def>
+actions:          <map: name → action_def>
+shortcuts:        <list of shortcut>
+menubar:          <list of menu>
+layout:           <element>
+dialogs:          <map: name → dialog>
+default_layouts:  <map: name → layout_data>
 ```
 
-All top-level keys are required except `icons` and `dialogs` (optional).
+All top-level keys are required except `icons`, `runtime_contexts`,
+`dialogs`, and `default_layouts` (optional).
 
 ---
 
@@ -297,10 +300,51 @@ is a single-key map where the key is the operation type.
 # Create a new child element inside a container
 - create_child:
     parent: <element_id>            # container to append to
+    props:                           # optional; template variables
+      <name>: <interpolated>         #   resolved once at creation time
     element: <element>              # full element spec to create
     
 # Remove a child element by id
 - remove_child: <element_id>
+```
+
+**Template resolution in `create_child`:** The `props` map is evaluated once
+from the current state at creation time, producing literal values. Then every
+`{{prop.<name>}}` reference in the element tree (including nested children) is
+replaced with the corresponding literal. After prop substitution, the element
+is instantiated normally — `id` becomes a fixed string, `bind` expressions
+remain reactive, and `behavior` effects are evaluated at event time.
+
+This separation allows dynamic elements to capture values at creation time
+(via `{{prop.*}}`) while keeping state bindings reactive (via `{{state.*}}`).
+
+Example — creating a tab that remembers its index:
+
+```yaml
+- create_child:
+    parent: tab_bar
+    props:
+      index: "{{state.tab_count}}"
+    element:
+      id: "tab_{{prop.index}}"
+      bind:
+        active: "{{state.active_tab}} == {{prop.index}}"
+      behavior:
+        - event: click
+          effects:
+            - set: { active_tab: "{{prop.index}}" }
+```
+
+After creation with `tab_count == 2`, the element becomes:
+
+```yaml
+id: "tab_2"                          # fixed string
+bind:
+  active: "{{state.active_tab}} == 2" # reactive — updates when active_tab changes
+behavior:
+  - event: click
+    effects:
+      - set: { active_tab: 2 }       # always sets to 2
 ```
 
 ### Layout Operations
@@ -430,9 +474,9 @@ Example:
 
 ```yaml
 shortcuts:
-  - key: "Ctrl+N"    action: new_document
-  - key: "V"         action: select_tool    params: { tool: selection }
-  - key: "Shift+X"   action: swap_fill_stroke
+  - { key: "Ctrl+N",   action: new_document }
+  - { key: "V",        action: select_tool,       params: { tool: selection } }
+  - { key: "Shift+X",  action: swap_fill_stroke }
 ```
 
 ---
@@ -507,6 +551,22 @@ behavior: <list of behavior>     # optional event handlers
 bind: <map: prop → interpolated> # optional state bindings
 children: <list of element>      # optional nested elements
 tier: <integer>                  # optional implementation tier
+```
+
+### `include` — External Element Files
+
+Anywhere an element appears in `children`, an `include` directive may be used
+instead of an inline element definition. The included file contains a single
+element spec (with `id`, `type`, etc.) and is loaded relative to the workspace
+directory. Additional properties (`bind`, `style`, etc.) on the include entry
+are merged onto the loaded element.
+
+```yaml
+children:
+  - include: "panels/layers.yaml"
+  - include: "panels/color.yaml"
+    bind:
+      visible: "{{state.color_visible}}"
 ```
 
 All fields except `type` are optional, though `id` and `summary` are
@@ -655,7 +715,9 @@ style:
   max_width: <number>
   max_height: <number>
   size: <number>                     # shorthand for equal width + height
+  aspect_ratio: <number>             # width / height ratio (e.g. 1 = square)
   flex: <number>                     # flex grow factor
+  font_size: <number>                # font size in pixels (overrides theme font)
 
   # Layout
   alignment: start | center | end | stretch
@@ -855,12 +917,28 @@ bind:
   <property>: <interpolated>
 ```
 
+### Standard Bindable Properties
+
+| Property | Type | Meaning |
+|---|---|---|
+| `visible` | bool | Whether the element is rendered (default true) |
+| `checked` | bool | Whether the element is in checked/active state (applies `style.checked` overrides) |
+| `active` | bool | Whether a tab button or similar element is the active/selected one (applies active styling) |
+| `collapsed` | bool | Whether a pane uses its `collapsed_width` instead of its current width |
+| `color` | color | The displayed color (for `color_swatch` elements) |
+| `icon` | string | The icon name (for `icon_button` elements; switches icon dynamically) |
+| `z_index` | number | The stacking order of the element |
+
+Any style property may also appear in `bind` to make it reactive.
+
 Example:
 
 ```yaml
 bind:
-  color: "{{state.fill_color}}"
   visible: "{{state.dock_collapsed}}"
+  active: "{{state.dock_group1_active}} == 0"
+  icon: "{{state.dock_collapsed}} == true ? chevron_left : chevron_right"
+  color: "{{state.fill_color}}"
 ```
 
 ---
@@ -880,10 +958,66 @@ dialogs:
       <name>:
         type: enum | string | number | bool
         values: [...]                # when type=enum
+    state:                           # optional dialog-local state
+      <name>:
+        type: enum | color | number | bool | string
+        values: [...]                # when type=enum
+        default: <value>
+        description: <string>
+    init:                            # optional; initialize dialog state on open
+      <state_name>: <interpolated>   # expression evaluated at open time
     content: <element>               # layout tree for dialog body
 ```
 
-Example:
+### Dialog-Local State
+
+Dialogs may declare their own `state` section. These variables:
+
+- Are created when the dialog opens and destroyed when it closes.
+- Are referenced within the dialog's content tree via `{{dialog.<name>}}`.
+- Are initialized in two phases: first to `default` values, then overridden
+  by the `init` section (if present). Init expressions are evaluated once at
+  open time in the context of the dialog's `params` and the current global
+  `state`.
+- Are reactive within the dialog — changes propagate to bound elements.
+- Are not visible to global state or other dialogs.
+- Cannot be mutated by global actions. Only effects within the dialog's own
+  behaviors (or actions dispatched from them) can modify dialog state via
+  `set: { dialog.<name>: <value> }`.
+
+To commit dialog values back to global state, the dialog's OK/confirm action
+should use `set` effects targeting global state variables:
+
+```yaml
+effects:
+  - set: { fill_color: "{{dialog.color}}" }
+  - close_dialog: null
+```
+
+### Color Conversion Functions
+
+Init expressions may use built-in color conversion functions to decompose a
+color value into its components:
+
+| Function | Returns |
+|---|---|
+| `hsb_h(<color>)` | Hue component (0–360) |
+| `hsb_s(<color>)` | Saturation component (0–100) |
+| `hsb_b(<color>)` | Brightness component (0–100) |
+| `rgb_r(<color>)` | Red component (0–255) |
+| `rgb_g(<color>)` | Green component (0–255) |
+| `rgb_b(<color>)` | Blue component (0–255) |
+| `cmyk_c(<color>)` | Cyan component (0–100) |
+| `cmyk_m(<color>)` | Magenta component (0–100) |
+| `cmyk_y(<color>)` | Yellow component (0–100) |
+| `cmyk_k(<color>)` | Key/black component (0–100) |
+| `hex(<color>)` | Hex string without `#` prefix |
+| `rgb(<r>, <g>, <b>)` | Compose color from RGB components |
+| `hsb(<h>, <s>, <b>)` | Compose color from HSB components |
+
+### Examples
+
+Simple confirmation dialog (no local state):
 
 ```yaml
 dialogs:
@@ -917,23 +1051,93 @@ dialogs:
 | `{{theme.sizes.<name>}}` | Numeric size from theme |
 | `{{state.<name>}}` | Current value of a state variable |
 | `{{param.<name>}}` | Parameter passed to an action or dialog |
+| `{{prop.<name>}}` | Template variable from `create_child` (resolved once at creation) |
+| `{{dialog.<name>}}` | Dialog-local state variable (see Dialogs) |
+| `{{active_document.<name>}}` | Property of the active document (see Runtime Contexts) |
+| `{{workspace.<name>}}` | Property of the workspace (see Runtime Contexts) |
 
-### Boolean Expressions
+### Expressions
 
-`enabled_when` and `condition` fields accept simple boolean expressions:
+Interpolated strings, `enabled_when`, `condition`, and `bind` values may
+contain expressions. The expression language supports:
 
-- Comparisons: `==`, `!=`, `<`, `>`, `<=`, `>=`
-- Logical operators: `and`, `or`, `not`
-- Membership: `<value> in [<list>]`
-- Dot access: `model.is_modified`, `state.active_tool`
-- Parentheses for grouping
+- **Comparisons:** `==`, `!=`, `<`, `>`, `<=`, `>=`
+- **Logical operators:** `and`, `or`, `not`
+- **Membership:** `<value> in [<list>]`
+- **Ternary:** `<condition> ? <if_true> : <if_false>`
+- **Dot access:** `active_document.is_modified`, `state.active_tool`
+- **Parentheses** for grouping
 
-Example:
+`enabled_when` and `condition` fields must evaluate to a boolean. Bind
+values and style properties may evaluate to any type (string, number, bool)
+via ternary expressions.
+
+Examples:
 
 ```yaml
-enabled_when: "model.is_modified and model.has_filename"
+# Boolean (for enabled_when / condition)
+enabled_when: "active_document.is_modified and active_document.has_filename"
 condition: "not state.fill_on_top"
+
+# Ternary — selects a value based on a condition
+bind:
+  icon: "{{state.dock_collapsed}} == true ? chevron_left : chevron_right"
+  z_index: "{{state.fill_on_top}} == true ? 2 : 1"
 ```
+
+---
+
+## Runtime Contexts
+
+In addition to `state` (declared reactive variables), `theme` (visual tokens),
+and `param` (action/dialog parameters), two runtime contexts provide read-only
+properties computed by the renderer engine.
+
+Runtime contexts are declared in a `runtime_contexts` workspace file so the
+renderer can validate interpolation expressions at load time.
+
+```yaml
+runtime_contexts:
+  <namespace>:
+    description: <string>
+    defaults:                        # values when context is unavailable
+      <property>: <value>
+    properties:
+      <property>:
+        type: bool | string | number
+        description: <string>
+```
+
+### `active_document` — Active Document
+
+Properties of the currently active document tab. When no tab is open
+(`active_tab == -1`), all properties resolve to their declared defaults.
+
+| Property | Type | Default | Meaning |
+|---|---|---|---|
+| `is_modified` | bool | `false` | The active document has unsaved changes |
+| `has_filename` | bool | `false` | The active document has been saved to a file at least once |
+| `filename` | string | `""` | The active document's filename (empty string if untitled) |
+| `any_modified` | bool | `false` | Any open document has unsaved changes |
+| `has_selection` | bool | `false` | One or more objects are selected |
+| `selection_count` | number | `0` | Number of selected objects |
+| `can_undo` | bool | `false` | The undo stack is non-empty |
+| `can_redo` | bool | `false` | The redo stack is non-empty |
+| `zoom_level` | number | `1.0` | Current zoom factor (1.0 = 100%) |
+
+These properties are not assignable via `set` effects. They are updated
+automatically by the renderer when documents are opened, edited, saved,
+or closed.
+
+### `workspace` — Workspace State
+
+Properties of the workspace layout system. These are managed by the layout
+save/load engine, not by `state` variables.
+
+| Property | Type | Default | Meaning |
+|---|---|---|---|
+| `has_saved_layout` | bool | `false` | A named layout is currently active (was loaded or saved) |
+| `active_layout_name` | string | `""` | Name of the currently active layout (empty if none) |
 
 ---
 

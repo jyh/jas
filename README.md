@@ -1,7 +1,7 @@
 # Jas
 
-Jas is a vector graphics editor — a small, inspectable cousin of Adobe
-Illustrator — that exists as **four parallel implementations** of the
+Jas is a vector graphics editor — a small, inspectable vector illustration
+application — that exists as **four parallel implementations** of the
 same application, one per language, each tracking the same
 architecture, the same document model, the same tool set, and the
 same tests.
@@ -68,7 +68,7 @@ supports:
 - **SVG I/O** — each app can export its current document to SVG and
   reopen SVGs it wrote. Text y-coordinates are converted between the
   SVG baseline and the layout-box top so files round-trip stably.
-- **Menu and keyboard** — an Illustrator-style menu bar plus keyboard
+- **Menu and keyboard** — a standard menu bar plus keyboard
   shortcuts for tools and common edit commands.
 
 ## Design
@@ -91,7 +91,7 @@ short:
 - [MENU.md](MENU.md) — the menu bar structure, commands, and the
   keyboard shortcuts they expose.
 - [KEYBOARD_SHORTCUTS.md](KEYBOARD_SHORTCUTS.md) — the target
-  Illustrator shortcut set used as a reference.
+  shortcut set used as a reference.
 - [REQUIREMENTS.md](REQUIREMENTS.md) — the high-level product
   requirements the project started from.
 - [TRANSCRIPT.md](TRANSCRIPT.md) — the original prompts used to

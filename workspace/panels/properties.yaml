@@ -1,0 +1,9 @@
+id: properties_panel_content
+type: placeholder
+summary: "Object properties"
+description: >
+  Transform and appearance properties for the selected object(s):
+  position (X, Y), size (W, H) with constrain-proportions lock,
+  rotation angle, shear, opacity slider, and blend mode dropdown.
+  When multiple objects are selected, shows shared values or blank
+  for mixed values. All fields are editable and apply immediately.

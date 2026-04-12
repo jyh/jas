@@ -16,14 +16,20 @@ layout:
         - cursor: grabbing
         - set: { _drag_pane: "{{event.target_id}}", _drag_offset_x: "{{event.offset_x}}", _drag_offset_y: "{{event.offset_y}}" }
     - event: drag_move
-      description: "Move pane to follow cursor, snap to edges within snap_distance"
+      description: >
+        Move pane to follow cursor. If any pane edge is within
+        theme.sizes.snap_distance pixels of another pane's edge or
+        the viewport boundary, snap to that edge and show a
+        snap_preview colored guide line.
       effects:
         - set_style:
             target: "{{state._drag_pane}}"
             left: "{{event.client_x - state._drag_offset_x}}"
             top: "{{event.client_y - state._drag_offset_y}}"
     - event: drag_end
-      description: "Drop the pane; apply snap alignment if within threshold"
+      description: >
+        Drop the pane at its current position. Remove any snap
+        preview guide lines.
       effects:
         - cursor: grab
         - set: { _drag_pane: null }
@@ -36,7 +42,17 @@ layout:
         - set: { _resize_pane: "{{event.target_id}}", _resize_edge: "{{event.edge}}", _resize_start_x: "{{event.client_x}}", _resize_start_y: "{{event.client_y}}" }
     - event: drag_move
       condition: "state._resize_pane != null"
-      description: "Resize the pane edge, respecting min/max constraints"
+      description: >
+        Resize the pane by moving the dragged edge. Compute the delta from
+        _resize_start to the current cursor position. For left/right edges,
+        adjust the pane's left and/or width. For top/bottom edges, adjust
+        top and/or height. Clamp to the pane's min_width/max_width and
+        min_height constraints. Snap the edge to nearby pane edges within
+        theme.sizes.snap_distance pixels.
+      effects:
+        - set_style:
+            target: "{{state._resize_pane}}"
+            "{{state._resize_edge}}": "{{event.client_x}}"
     - event: drag_end
       condition: "state._resize_pane != null"
       effects:
@@ -49,8 +65,11 @@ layout:
       type: pane
       summary: "Toolbar"
       description: >
-        Vertical toolbar containing drawing tool icons in a 2-column
-        grid, followed by a fill/stroke color indicator widget.
+        Fixed-width (72px) vertical toolbar on the left side of the
+        workspace. Contains a 2-column grid of 32x32px tool buttons
+        followed by the fill/stroke color indicator widget. The pane can
+        be dragged by its title bar, closed via the X button, and
+        shown/hidden via the Window menu. Cannot be resized horizontally.
       default_position: { x: 0, y: 0, width: 72, height: 900 }
       min_width: 72
       max_width: 72
@@ -96,7 +115,11 @@ layout:
               - id: btn_selection
                 type: icon_button
                 summary: "Selection (V)"
-                description: "Black arrow cursor for selecting and moving objects"
+                description: >
+                  Black arrow cursor for selecting, moving, and resizing
+                  objects. Click to select; Shift+click to add to selection;
+                  drag to move; drag handles to resize. No long-press
+                  alternates.
                 icon: "selection_arrow"
                 grid: { row: 0, col: 0 }
                 style:
@@ -114,7 +137,13 @@ layout:
               - id: btn_arrow_slot
                 type: icon_button
                 summary: "Direct Selection (A)"
-                description: "White arrow for selecting individual anchor points and segments"
+                description: >
+                  White arrow for selecting individual anchor points and
+                  path segments. Click an anchor to select it; drag to move
+                  it; drag control handles to adjust curves. Long-press
+                  (250ms) opens a menu to switch between Direct Selection
+                  and Group Selection tools. The button shows checked state
+                  when any tool in this slot is active.
                 icon: "direct_selection_arrow"
                 grid: { row: 0, col: 1 }
                 style:
@@ -153,7 +182,12 @@ layout:
               - id: btn_pen_slot
                 type: icon_button
                 summary: "Pen (P)"
-                description: "Draw precise paths by placing anchor points with bezier handles"
+                description: >
+                  Draw precise paths by clicking to place anchor points.
+                  Click-and-drag to create smooth bezier curves with control
+                  handles. Long-press (250ms) opens a menu to switch between
+                  Pen, Add Anchor Point, Delete Anchor Point, and Anchor
+                  Point tools.
                 icon: "pen"
                 grid: { row: 1, col: 0 }
                 style:
@@ -192,7 +226,11 @@ layout:
               - id: btn_pencil_slot
                 type: icon_button
                 summary: "Pencil (N)"
-                description: "Freehand drawing tool"
+                description: >
+                  Freehand drawing tool that creates paths by tracking mouse
+                  movement. The path is smoothed after drawing. Long-press
+                  (250ms) opens a menu to switch between Pencil, Path Eraser,
+                  and Smooth tools.
                 icon: "pencil"
                 grid: { row: 1, col: 1 }
                 style:
@@ -229,7 +267,11 @@ layout:
               - id: btn_text_slot
                 type: icon_button
                 summary: "Type (T)"
-                description: "Create and edit text objects"
+                description: >
+                  Create and edit text objects. Click on the canvas to place
+                  a text insertion point; click-drag to create a text area
+                  box. Long-press (250ms) opens a menu to switch between
+                  Type and Type on a Path tools.
                 icon: "type"
                 grid: { row: 2, col: 0 }
                 style:
@@ -264,7 +306,11 @@ layout:
               - id: btn_line
                 type: icon_button
                 summary: "Line (\\)"
-                description: "Draw straight line segments"
+                description: >
+                  Draw straight line segments. Click to place the start
+                  point, drag to the end point, and release. Hold Shift to
+                  constrain to 45-degree increments. No long-press
+                  alternates.
                 icon: "line"
                 grid: { row: 2, col: 1 }
                 style:
@@ -282,7 +328,12 @@ layout:
               - id: btn_shape_slot
                 type: icon_button
                 summary: "Rectangle (M)"
-                description: "Draw rectangular shapes"
+                description: >
+                  Draw rectangular shapes. Click-drag to define the
+                  bounding box. Hold Shift to constrain to a square; hold
+                  Alt/Option to draw from center. Long-press (250ms) opens
+                  a menu to switch between Rectangle, Rounded Rectangle,
+                  Polygon, and Star tools.
                 icon: "rect"
                 grid: { row: 3, col: 0 }
                 style:
@@ -321,7 +372,11 @@ layout:
               - id: btn_lasso
                 type: icon_button
                 summary: "Lasso (Q)"
-                description: "Freehand selection of objects by drawing a lasso boundary"
+                description: >
+                  Freehand selection tool. Draw a closed lasso boundary
+                  around objects to select them. Any object whose bounds
+                  intersect the lasso path is included in the selection.
+                  No long-press alternates.
                 icon: "lasso"
                 grid: { row: 3, col: 1 }
                 style:
@@ -358,7 +413,13 @@ layout:
               - id: fill_swatch
                 type: color_swatch
                 summary: "Fill color"
-                description: "28x28 filled square showing the active fill color"
+                description: >
+                  28x28 filled square showing the active fill color. Positioned
+                  at the top-left of the fill/stroke widget, overlapping with
+                  the stroke swatch. Click to bring fill to front (fill_on_top
+                  = true); double-click to open the color picker for fill.
+                  When fill is null, shows a white square with a red diagonal
+                  line. Z-index swaps based on fill_on_top state.
                 style: { size: 28, position: { x: 0, y: 0 } }
                 bind:
                   color: "{{state.fill_color}}"
@@ -375,7 +436,14 @@ layout:
               - id: stroke_swatch
                 type: color_swatch
                 summary: "Stroke color"
-                description: "28x28 hollow square with 6px colored border and white center"
+                description: >
+                  28x28 hollow square representing the stroke color — a
+                  colored border (6px) with a white center, offset 10px
+                  down-right from the fill swatch so both are partially
+                  visible. Click to bring stroke to front (fill_on_top =
+                  false); double-click to open the color picker for stroke.
+                  When stroke is null, shows a white square with a red
+                  diagonal line.
                 hollow: true
                 style: { size: 28, position: { x: 10, y: 10 } }
                 bind:
@@ -433,10 +501,15 @@ layout:
       type: pane
       summary: "Canvas"
       description: >
-        Central drawing area with a multi-tab bar. Each tab represents
-        an open document. The tab label shows the filename (with * if
-        modified). Supports zoom and scroll. Can be maximized to fill
-        the viewport.
+        Central drawing area with a multi-tab document bar at the top.
+        Each open document gets a tab labeled with its filename (or
+        "Untitled-N" for new documents); a * prefix indicates unsaved
+        changes. Clicking a tab switches the visible canvas. The drawing
+        surface supports zoom (Ctrl+=/-, scroll wheel) and pan (scroll
+        bars, Space+drag). The pane is a flex pane that expands to fill
+        space between the toolbar and dock. Double-clicking the title bar
+        maximizes the canvas to fill the viewport; double-click again or
+        click the maximize button to restore.
       default_position: { x: 72, y: 0, width: 888, height: 900 }
       min_width: 200
       flex: true
@@ -446,10 +519,6 @@ layout:
         border: "1px solid {{theme.colors.border}}"
       bind:
         visible: "{{state.canvas_visible}}"
-      behavior:
-        - event: double_click
-          condition: "{{state.canvas_maximized}}"
-          action: restore_canvas
       title_bar:
         id: canvas_title_bar
         label: "Canvas"
@@ -494,8 +563,12 @@ layout:
             type: container
             summary: "Document tabs"
             description: >
-              Horizontal row of tab buttons. Populated dynamically
-              when documents are opened via new_document/open_file.
+              Horizontal row of tab buttons at the top of the canvas pane.
+              Starts empty; tabs are added dynamically by new_document and
+              open_file actions via create_child. Each tab shows the document
+              name and a close (X) button. Clicking a tab sets active_tab to
+              that tab's index; the active tab gets highlighted styling. The
+              tab bar is hidden when no documents are open (tab_count == 0).
             layout: row
             style:
               background: "{{theme.colors.pane_bg_dark}}"
@@ -511,8 +584,11 @@ layout:
             type: container
             summary: "Drawing surface"
             description: >
-              Container for document canvases. Each open document gets a
-              canvas here. Starts empty; populated by new_document/open_file.
+              Container for document canvases, filling the space below the
+              tab bar. Each open document gets a canvas element here via
+              create_child. Only the canvas matching active_tab is visible;
+              the rest are hidden. Starts empty. The visible canvas is the
+              interactive drawing surface where tools operate.
             layout: column
             style:
               flex: 1
@@ -525,15 +601,23 @@ layout:
       type: pane
       summary: "Panels"
       description: >
-        Right-side dock containing panel groups. Each group has a tab
-        bar selecting the active panel. The dock can collapse to a 36px
-        chevron strip. Panels and groups can be reordered by drag-and-drop.
+        Right-side dock containing panel groups (Layers; Color/Stroke/
+        Properties). Each group has a tab bar for switching between its
+        panels, a collapse chevron to minimize the group, and a hamburger
+        menu for closing individual panels. The dock can collapse to a
+        36px icon strip showing one icon per visible panel; clicking an
+        icon expands the dock and activates that panel. The dock is
+        resizable between min_width (150px) and max_width (500px). Panels
+        can be reordered between groups via drag-and-drop (tier 2).
+        Panel visibility and group state are saved with workspace layouts.
       default_position: { x: 960, y: 0, width: 240, height: 900 }
       min_width: 150
       max_width: 500
       collapsed_width: 36
       layout_state: [dock_collapsed, dock_group0_active, dock_group1_active,
-                     dock_group0_collapsed, dock_group1_collapsed]
+                     dock_group0_collapsed, dock_group1_collapsed,
+                     layers_visible, color_visible, stroke_visible,
+                     properties_visible]
       style:
         background: "{{theme.colors.pane_bg}}"
         border: "1px solid {{theme.colors.border}}"
@@ -567,11 +651,29 @@ layout:
               - event: click
                 action: toggle_pane
                 params: { pane: dock }
+      tier: 2
       behavior:
+        - event: drag_start
+          description: >
+            Drag a panel tab to reorder it within its group or move it to
+            another group. A translucent ghost of the tab follows the cursor.
+            Visual drop indicators (horizontal line between groups, highlight
+            on a group header) show where the panel will land.
+        - event: drag_move
+          description: >
+            Update the drop indicator position as the cursor moves over
+            group headers and between-group gaps.
+        - event: drag_end
+          description: >
+            Drop the panel tab. If dropped on a different group header,
+            remove the panel from its source group and append it to the
+            target group, updating the active tab indices. If dropped
+            between groups, create a new group containing just that panel.
+            If the source group is now empty, remove it.
         - event: drop
           description: >
-            Panels can be dragged between groups. Groups can be reordered
-            within the dock via drag-and-drop.
+            Accept a panel tab dragged from another group. Insert it at
+            the indicated position and make it the active tab.
       content:
         type: container
         layout: column
@@ -581,7 +683,13 @@ layout:
           - id: dock_collapsed_strip
             type: container
             summary: "Collapsed panel icons"
-            description: "Vertically stacked panel icons shown when the dock is collapsed. Click to expand and switch to that panel."
+            description: >
+              Vertically stacked panel icons shown when the dock is collapsed
+              to its narrow strip. Each icon represents one panel; only icons
+              for visible panels are shown. A separator divides group 0 icons
+              from group 1 icons. Clicking any icon expands the dock to full
+              width, activates the clicked panel's tab, and un-collapses its
+              group.
             layout: column
             style: { alignment: center, gap: 2, padding: "4 0" }
             bind:
@@ -593,9 +701,13 @@ layout:
                 summary: "Layers"
                 icon: "panel_layers"
                 style: { size: 28 }
+                bind:
+                  visible: "{{state.layers_visible}}"
                 behavior:
                   - event: click
-                    action: expand_dock
+                    effects:
+                      - dispatch: expand_dock
+                      - set: { dock_group0_active: 0, dock_group0_collapsed: false }
               # Separator between groups
               - { type: separator }
               # Group 1 icons
@@ -604,34 +716,53 @@ layout:
                 summary: "Color"
                 icon: "panel_color"
                 style: { size: 28 }
+                bind:
+                  visible: "{{state.color_visible}}"
                 behavior:
                   - event: click
-                    action: expand_dock
+                    effects:
+                      - dispatch: expand_dock
+                      - set: { dock_group1_active: 0, dock_group1_collapsed: false }
               - id: dock_icon_stroke
                 type: icon_button
                 summary: "Stroke"
                 icon: "panel_stroke"
                 style: { size: 28 }
+                bind:
+                  visible: "{{state.stroke_visible}}"
                 behavior:
                   - event: click
-                    action: expand_dock
+                    effects:
+                      - dispatch: expand_dock
+                      - set: { dock_group1_active: 1, dock_group1_collapsed: false }
               - id: dock_icon_properties
                 type: icon_button
                 summary: "Properties"
                 icon: "panel_properties"
                 style: { size: 28 }
+                bind:
+                  visible: "{{state.properties_visible}}"
                 behavior:
                   - event: click
-                    action: expand_dock
+                    effects:
+                      - dispatch: expand_dock
+                      - set: { dock_group1_active: 2, dock_group1_collapsed: false }
 
           # Group 0: Layers (hidden when collapsed)
           - id: dock_group_0
             type: container
             summary: "Layers group"
-            description: "Panel group containing the Layers panel, with collapse chevron and hamburger"
+            description: >
+              Panel group containing the Layers panel. Has a header bar with
+              the Layers tab button, a collapse/expand chevron, and a
+              hamburger menu (with Close Layers). The group body shows the
+              layers panel content. Hidden when the dock is collapsed or
+              when layers_visible is false. The chevron toggles
+              dock_group0_collapsed, which hides the body and hamburger
+              while keeping the header visible.
             layout: column
             bind:
-              visible: "not {{state.dock_collapsed}}"
+              visible: "not {{state.dock_collapsed}} and {{state.layers_visible}}"
             children:
               - id: dock_group_0_header
                 type: container
@@ -671,7 +802,7 @@ layout:
                     icon: "hamburger"
                     style: { size: 14 }
                     items:
-                      - { label: "Close Layers", action: close_panel }
+                      - { label: "Close Layers", action: close_panel, params: { panel: layers } }
                     bind:
                       visible: "not {{state.dock_group0_collapsed}}"
 
@@ -682,23 +813,31 @@ layout:
                 bind:
                   visible: "not {{state.dock_group0_collapsed}}"
                 children:
-                  - type: placeholder
-                    summary: "Layer list"
-                    description: "Will contain the layer hierarchy tree with visibility and lock toggles"
+                  # Content defined in workspace/panels/layers.yaml
+                  - include: "panels/layers.yaml"
 
           - id: dock_group_separator
             type: separator
             bind:
-              visible: "not {{state.dock_collapsed}}"
+              visible: "not {{state.dock_collapsed}} and {{state.layers_visible}} and ({{state.color_visible}} or {{state.stroke_visible}} or {{state.properties_visible}})"
 
           # Group 1: Color, Stroke, Properties
+          # Visible when dock is expanded and at least one panel is visible
           - id: dock_group_1
             type: container
             summary: "Properties group"
-            description: "Panel group with Color, Stroke, and Properties tabs, with collapse chevron and hamburger"
+            description: >
+              Panel group with Color, Stroke, and Properties tabs. The
+              header bar shows one tab button per visible panel, a collapse
+              chevron, and a hamburger menu listing close options for each
+              panel. Only one panel body is visible at a time, determined by
+              dock_group1_active. Tab buttons for hidden panels are not
+              shown. The group is hidden when the dock is collapsed or when
+              all three panels are hidden. The chevron toggles
+              dock_group1_collapsed.
             layout: column
             bind:
-              visible: "not {{state.dock_collapsed}}"
+              visible: "not {{state.dock_collapsed}} and ({{state.color_visible}} or {{state.stroke_visible}} or {{state.properties_visible}})"
             children:
               - id: dock_group_1_header
                 type: container
@@ -719,6 +858,7 @@ layout:
                         effects:
                           - set: { dock_group1_active: 0 }
                     bind:
+                      visible: "{{state.color_visible}}"
                       active: "{{state.dock_group1_active}} == 0"
                   - id: dock_group_1_tab_stroke
                     type: button
@@ -730,6 +870,7 @@ layout:
                         effects:
                           - set: { dock_group1_active: 1 }
                     bind:
+                      visible: "{{state.stroke_visible}}"
                       active: "{{state.dock_group1_active}} == 1"
                   - id: dock_group_1_tab_properties
                     type: button
@@ -741,6 +882,7 @@ layout:
                         effects:
                           - set: { dock_group1_active: 2 }
                     bind:
+                      visible: "{{state.properties_visible}}"
                       active: "{{state.dock_group1_active}} == 2"
                   - type: spacer
                   - id: dock_group_1_chevron
@@ -760,9 +902,9 @@ layout:
                     icon: "hamburger"
                     style: { size: 14 }
                     items:
-                      - { label: "Close Color", action: close_panel }
-                      - { label: "Close Stroke", action: close_panel }
-                      - { label: "Close Properties", action: close_panel }
+                      - { label: "Close Color",      action: close_panel, params: { panel: color } }
+                      - { label: "Close Stroke",     action: close_panel, params: { panel: stroke } }
+                      - { label: "Close Properties", action: close_panel, params: { panel: properties } }
                     bind:
                       visible: "not {{state.dock_group1_collapsed}}"
 
@@ -774,21 +916,13 @@ layout:
                 bind:
                   visible: "not {{state.dock_group1_collapsed}}"
                 children:
-                  - id: color_panel_content
-                    type: placeholder
-                    summary: "Color picker"
-                    description: "Will contain color wheel, RGB/HSB sliders, and hex input"
+                  # Content defined in workspace/panels/*.yaml
+                  - include: "panels/color.yaml"
                     bind:
-                      visible: "{{state.dock_group1_active}} == 0"
-                  - id: stroke_panel_content
-                    type: placeholder
-                    summary: "Stroke properties"
-                    description: "Will contain width, cap, join, dash, and arrowhead controls"
+                      visible: "{{state.dock_group1_active}} == 0 and {{state.color_visible}}"
+                  - include: "panels/stroke.yaml"
                     bind:
-                      visible: "{{state.dock_group1_active}} == 1"
-                  - id: properties_panel_content
-                    type: placeholder
-                    summary: "Object properties"
-                    description: "Will contain position, size, rotation, opacity, and blend mode fields"
+                      visible: "{{state.dock_group1_active}} == 1 and {{state.stroke_visible}}"
+                  - include: "panels/properties.yaml"
                     bind:
-                      visible: "{{state.dock_group1_active}} == 2"
+                      visible: "{{state.dock_group1_active}} == 2 and {{state.properties_visible}}"

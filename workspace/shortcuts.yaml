@@ -35,6 +35,7 @@ shortcuts:
   - { key: "T",            action: select_tool,      params: { tool: type } }
   - { key: "\\",           action: select_tool,      params: { tool: line } }
   - { key: "M",            action: select_tool,      params: { tool: rect } }
+  - { key: "N",            action: select_tool,      params: { tool: pencil } }
   - { key: "Shift+E",      action: select_tool,      params: { tool: path_eraser } }
   - { key: "Q",            action: select_tool,      params: { tool: lasso } }
   # Fill / Stroke

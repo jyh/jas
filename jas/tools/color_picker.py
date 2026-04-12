@@ -466,7 +466,7 @@ class SwatchWidget(QWidget):
 
 
 class ColorPickerDialog(QDialog):
-    """Full color picker dialog matching the Illustrator-style layout."""
+    """Full color picker dialog matching the standard vector illustration application layout."""
 
     def __init__(self, initial_color: Color, for_fill: bool = True,
                  parent=None):
