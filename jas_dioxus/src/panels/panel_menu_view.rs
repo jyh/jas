@@ -5,7 +5,7 @@
 
 use dioxus::prelude::*;
 
-use crate::workspace::app_state::{Act, AppState};
+use crate::workspace::app_state::{Act, AppHandle, AppState};
 use crate::workspace::theme::*;
 use super::panel_menu::PanelMenuItem;
 use super::panel_menu_state::PanelMenuState;
@@ -18,12 +18,14 @@ use super::panel_menu_state::PanelMenuState;
 pub fn PanelMenuOverlay() -> Element {
     let mut panel_menu = use_context::<PanelMenuState>();
     let act = use_context::<Act>();
+    let app = use_context::<AppHandle>();
 
     let Some(open) = (panel_menu.open)() else {
         return rsx! {};
     };
 
     let items = super::panel_menu(open.kind);
+    let st = app.borrow();
     // Position menu to the left of click point so it doesn't go off-screen.
     let menu_width = 180.0_f64;
     let x = (open.x - menu_width).max(0.0);
@@ -81,8 +83,8 @@ pub fn PanelMenuOverlay() -> Element {
             PanelMenuItem::Radio { label, command, .. } => {
                 let act = act.clone();
                 let cmd = command;
-                // TODO: query selected state from AppState when radio items are used
-                let prefix = "    ";
+                let checked = super::panel_is_checked(kind, cmd, &st);
+                let prefix = if checked { "\u{2713} " } else { "    " };
                 let display = format!("{prefix}{label}");
                 rsx! {
                     div {
@@ -108,6 +110,8 @@ pub fn PanelMenuOverlay() -> Element {
             }
         }
     }).collect();
+
+    drop(st);
 
     rsx! {
         // Invisible backdrop — click to dismiss

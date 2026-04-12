@@ -10,8 +10,9 @@ use dioxus::prelude::*;
 
 use super::app_state::{Act, AppState};
 use super::theme::*;
+use super::color_panel_view::ColorPanelView;
 use super::workspace::{
-    DockEdge, DockId, DragPayload, DropTarget, GroupAddr, PanelAddr, PanelGroup,
+    DockEdge, DockId, DragPayload, DropTarget, GroupAddr, PanelAddr, PanelGroup, PanelKind,
 };
 use crate::panels::panel_menu_state::{PanelMenuOpen, PanelMenuState, MenuBarState};
 
@@ -372,9 +373,16 @@ pub(crate) fn build_dock_groups(
                 } } } // close tab bar div, rsx!, let
 
                 if !group_collapsed {
-                    div {
-                        style: "padding:12px; min-height:60px; color:{THEME_TEXT_BODY}; font-size:12px;",
-                        "{body_label}"
+                    match group.active_panel() {
+                        Some(PanelKind::Color) => rsx! {
+                            ColorPanelView {}
+                        },
+                        _ => rsx! {
+                            div {
+                                style: "padding:12px; min-height:60px; color:{THEME_TEXT_BODY}; font-size:12px;",
+                                "{body_label}"
+                            }
+                        },
                     }
                 }
 

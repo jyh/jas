@@ -28,10 +28,13 @@ description: >
   colors. In Web Safe RGB mode, the value snaps to the nearest web-safe color.
 
   Bottom: a 64 px tall color gradient (color bar). Hue varies along the
-  x-axis (0–360°) and saturation varies along the y-axis (high saturation
-  at top). The gradient is rendered at the current brightness value. Clicking
-  or dragging sets the active color, committing to the recent-colors list on
-  pointer-up.
+  x-axis (0–360°). The y-axis is split into two halves: in the top half,
+  saturation increases from 0% to 100% while brightness decreases from 100%
+  to 80%; in the bottom half, saturation stays at 100% while brightness
+  decreases from 80% to 0%. This produces a gradient that transitions from
+  white/pastel at the top through fully saturated colors in the middle to
+  black at the bottom. Clicking or dragging sets the active color, committing
+  to the recent-colors list on pointer-up.
 
   Sliders and the hex field are disabled (non-interactive) when the active
   attribute is none. Clicking any swatch (fixed or recent) implicitly
@@ -867,11 +870,14 @@ content:
       summary: "Color gradient"
       description: >
         64px tall 2D color gradient. Hue varies along the x-axis (0–360°
-        left to right). Saturation varies along the y-axis (100% at top,
-        0% at bottom). The gradient is rendered at the current brightness
-        (panel.b). Clicking or dragging updates hue and saturation of the
-        active color in real time; the color is committed (added to recent
-        colors) on pointer-up. Disabled when the active attribute is none.
+        left to right). The y-axis is split into two halves: top half
+        ramps saturation from 0% to 100% while brightness goes from 100%
+        to 80%; bottom half holds saturation at 100% while brightness goes
+        from 80% to 0%. This gives white/pastel at top, full-saturation
+        colors in the middle, and black at the bottom. Clicking or dragging
+        updates hue and saturation/brightness of the active color in real
+        time; the color is committed (added to recent colors) on pointer-up.
+        Disabled when the active attribute is none.
       bind:
         brightness: "{{panel.b}}"
         disabled: "{{state.fill_on_top}} ? {{state.fill_color}} == null : {{state.stroke_color}} == null"
