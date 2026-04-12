@@ -276,6 +276,7 @@ let menu_bar = [
   ]);
   ("Window", [
     ("Workspace \xE2\x96\xB6", "workspace_submenu", "");
+    ("Appearance \xE2\x96\xB6", "appearance_submenu", "");
     ("---", "", "");
     ("Tile", "tile_panes", "");
     ("---", "", "");

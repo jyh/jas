@@ -88,11 +88,13 @@ type drop_target =
 type app_config = {
   mutable active_layout : string;
   mutable saved_layouts : string list;
+  mutable active_appearance : string;
 }
 
 let default_app_config () = {
   active_layout = default_layout_name;
   saved_layouts = [default_layout_name];
+  active_appearance = Theme.default_appearance_name;
 }
 
 let register_layout config name =
@@ -864,6 +866,7 @@ let save_app_config config =
     let json : Yojson.Safe.t = `Assoc [
       "active_layout", `String config.active_layout;
       "saved_layouts", `List (List.map (fun s -> `String s) config.saved_layouts);
+      "active_appearance", `String config.active_appearance;
     ] in
     Yojson.Safe.to_file (config_file ()) json
   with _ -> ()
@@ -873,7 +876,8 @@ let load_app_config () =
     let json = Yojson.Safe.from_file (config_file ()) in
     let open Yojson.Safe.Util in
     { active_layout = json |> member "active_layout" |> to_string;
-      saved_layouts = json |> member "saved_layouts" |> to_list |> List.map to_string }
+      saved_layouts = json |> member "saved_layouts" |> to_list |> List.map to_string;
+      active_appearance = (try json |> member "active_appearance" |> to_string with _ -> Theme.default_appearance_name) }
   with _ -> default_app_config ()
 
 (* ------------------------------------------------------------------ *)
