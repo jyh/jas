@@ -178,6 +178,239 @@ class TestResolveIncludes:
         assert len(dock_main["groups"]) == 2
 
 
+class TestResolveAppearance:
+    def test_returns_base_when_no_override(self):
+        from loader import resolve_appearance
+        theme_config = {
+            "active": "dark_gray",
+            "base": {
+                "colors": {"window_bg": "#2e2e2e", "text": "#cccccc"},
+                "fonts": {"default": {"family": "sans-serif", "size": 12}},
+                "sizes": {"tool_button": 32},
+            },
+            "appearances": {
+                "dark_gray": {"label": "Dark Gray"},
+            },
+        }
+        result = resolve_appearance(theme_config, "dark_gray")
+        assert result["colors"]["window_bg"] == "#2e2e2e"
+        assert result["colors"]["text"] == "#cccccc"
+        assert result["fonts"]["default"]["family"] == "sans-serif"
+        assert result["sizes"]["tool_button"] == 32
+
+    def test_overrides_merge_on_top_of_base(self):
+        from loader import resolve_appearance
+        theme_config = {
+            "active": "dark_gray",
+            "base": {
+                "colors": {"window_bg": "#2e2e2e", "text": "#cccccc"},
+                "fonts": {"default": {"family": "sans-serif", "size": 12}},
+                "sizes": {"tool_button": 32},
+            },
+            "appearances": {
+                "dark_gray": {"label": "Dark Gray"},
+                "light_gray": {
+                    "label": "Light Gray",
+                    "colors": {"window_bg": "#d0d0d0", "text": "#333333"},
+                },
+            },
+        }
+        result = resolve_appearance(theme_config, "light_gray")
+        assert result["colors"]["window_bg"] == "#d0d0d0"
+        assert result["colors"]["text"] == "#333333"
+        # fonts and sizes unchanged from base
+        assert result["fonts"]["default"]["size"] == 12
+        assert result["sizes"]["tool_button"] == 32
+
+    def test_partial_color_override_preserves_other_colors(self):
+        from loader import resolve_appearance
+        theme_config = {
+            "active": "dark_gray",
+            "base": {
+                "colors": {"window_bg": "#2e2e2e", "text": "#cccccc", "accent": "#4a90d9"},
+                "fonts": {"default": {"family": "sans-serif", "size": 12}},
+                "sizes": {},
+            },
+            "appearances": {
+                "custom": {
+                    "label": "Custom",
+                    "colors": {"window_bg": "#ffffff"},
+                },
+            },
+        }
+        result = resolve_appearance(theme_config, "custom")
+        assert result["colors"]["window_bg"] == "#ffffff"
+        assert result["colors"]["text"] == "#cccccc"
+        assert result["colors"]["accent"] == "#4a90d9"
+
+    def test_font_override(self):
+        from loader import resolve_appearance
+        theme_config = {
+            "active": "dark_gray",
+            "base": {
+                "colors": {},
+                "fonts": {"default": {"family": "sans-serif", "size": 12}},
+                "sizes": {},
+            },
+            "appearances": {
+                "big_font": {
+                    "label": "Big Font",
+                    "fonts": {"default": {"size": 16}},
+                },
+            },
+        }
+        result = resolve_appearance(theme_config, "big_font")
+        assert result["fonts"]["default"]["size"] == 16
+        assert result["fonts"]["default"]["family"] == "sans-serif"
+
+    def test_uses_active_when_name_is_none(self):
+        from loader import resolve_appearance
+        theme_config = {
+            "active": "medium_gray",
+            "base": {
+                "colors": {"window_bg": "#2e2e2e"},
+                "fonts": {},
+                "sizes": {},
+            },
+            "appearances": {
+                "medium_gray": {
+                    "label": "Medium Gray",
+                    "colors": {"window_bg": "#505050"},
+                },
+            },
+        }
+        result = resolve_appearance(theme_config)
+        assert result["colors"]["window_bg"] == "#505050"
+
+    def test_unknown_appearance_raises(self):
+        from loader import resolve_appearance
+        theme_config = {
+            "active": "dark_gray",
+            "base": {"colors": {}, "fonts": {}, "sizes": {}},
+            "appearances": {"dark_gray": {"label": "Dark Gray"}},
+        }
+        with pytest.raises(ValueError, match="Unknown appearance"):
+            resolve_appearance(theme_config, "nonexistent")
+
+    def test_does_not_mutate_base(self):
+        from loader import resolve_appearance
+        base_colors = {"window_bg": "#2e2e2e", "text": "#cccccc"}
+        theme_config = {
+            "active": "dark_gray",
+            "base": {"colors": base_colors.copy(), "fonts": {}, "sizes": {}},
+            "appearances": {
+                "light": {
+                    "label": "Light",
+                    "colors": {"window_bg": "#ffffff"},
+                },
+            },
+        }
+        resolve_appearance(theme_config, "light")
+        assert theme_config["base"]["colors"]["window_bg"] == "#2e2e2e"
+
+    def test_result_has_no_metadata_keys(self):
+        from loader import resolve_appearance
+        theme_config = {
+            "active": "dark_gray",
+            "base": {"colors": {"bg": "#000"}, "fonts": {}, "sizes": {}},
+            "appearances": {"dark_gray": {"label": "Dark Gray"}},
+        }
+        result = resolve_appearance(theme_config, "dark_gray")
+        assert "active" not in result
+        assert "base" not in result
+        assert "appearances" not in result
+        assert "label" not in result
+
+    def test_real_workspace_theme(self, workspace_path):
+        from loader import load_workspace, resolve_appearance
+        data = load_workspace(workspace_path)
+        theme_config = data["theme"]
+        # Should have the new structure
+        assert "base" in theme_config
+        assert "appearances" in theme_config
+        assert "active" in theme_config
+        # Resolve each appearance
+        for name in theme_config["appearances"]:
+            result = resolve_appearance(theme_config, name)
+            assert "colors" in result
+            assert "fonts" in result
+            assert "sizes" in result
+
+
+class TestListAppearances:
+    def test_returns_names_and_labels(self):
+        from loader import list_appearances
+        theme_config = {
+            "active": "dark_gray",
+            "base": {"colors": {}, "fonts": {}, "sizes": {}},
+            "appearances": {
+                "dark_gray": {"label": "Dark Gray"},
+                "light_gray": {"label": "Light Gray"},
+            },
+        }
+        result = list_appearances(theme_config)
+        assert result == [
+            {"name": "dark_gray", "label": "Dark Gray"},
+            {"name": "light_gray", "label": "Light Gray"},
+        ]
+
+    def test_preserves_yaml_order(self):
+        from loader import list_appearances
+        theme_config = {
+            "active": "a",
+            "base": {"colors": {}, "fonts": {}, "sizes": {}},
+            "appearances": {
+                "c_theme": {"label": "C"},
+                "a_theme": {"label": "A"},
+                "b_theme": {"label": "B"},
+            },
+        }
+        names = [a["name"] for a in list_appearances(theme_config)]
+        assert names == ["c_theme", "a_theme", "b_theme"]
+
+
+class TestAppearanceLoading:
+    def test_appearances_loaded_from_directory(self, workspace_path):
+        from loader import load_workspace
+        data = load_workspace(workspace_path)
+        theme = data["theme"]
+        assert "appearances" in theme
+        assert "dark_gray" in theme["appearances"]
+        assert "medium_gray" in theme["appearances"]
+        assert "light_gray" in theme["appearances"]
+
+    def test_appearance_has_label(self, workspace_path):
+        from loader import load_workspace
+        data = load_workspace(workspace_path)
+        for name, app in data["theme"]["appearances"].items():
+            assert "label" in app, f"Appearance {name} missing label"
+
+    def test_metrics_separate_from_sizes(self, workspace_path):
+        from loader import load_workspace, resolve_appearance
+        data = load_workspace(workspace_path)
+        theme = data["theme"]
+        assert "metrics" in theme
+        assert "snap_distance" in theme["metrics"]
+        assert "long_press_ms" in theme["metrics"]
+        # Resolved appearance should NOT contain metric keys
+        resolved = resolve_appearance(theme)
+        for metric_key in theme["metrics"]:
+            assert metric_key not in resolved.get("sizes", {})
+
+    def test_pane_shadow_in_resolved_colors(self, workspace_path):
+        from loader import load_workspace, resolve_appearance
+        data = load_workspace(workspace_path)
+        resolved = resolve_appearance(data["theme"])
+        assert "pane_shadow" in resolved["colors"]
+
+    def test_resolved_shape_matches_old_format(self, workspace_path):
+        """Resolved appearance has same top-level keys as old flat theme."""
+        from loader import load_workspace, resolve_appearance
+        data = load_workspace(workspace_path)
+        resolved = resolve_appearance(data["theme"])
+        assert set(resolved.keys()) == {"colors", "fonts", "sizes"}
+
+
 class TestValidateActionRefs:
     def test_all_shortcut_actions_exist(self, workspace_path):
         from loader import load_workspace

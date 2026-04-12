@@ -1,6 +1,7 @@
 """Element tree to HTML renderer for normal and wireframe modes."""
 
 import json
+import re
 from markupsafe import Markup, escape
 
 from loader import resolve_interpolation
@@ -48,10 +49,10 @@ def render_menubar(menubar: list, actions: dict, theme: dict) -> str:
             f'</li>'
         )
     return Markup(
-        f'<nav class="navbar navbar-expand navbar-dark" style="background:#333;padding:0 8px;">'
+        f'<nav class="navbar navbar-expand" style="background:var(--jas-pane-bg-dark,#333);padding:0 8px;">'
         f'<ul class="navbar-nav">{items_html}</ul>'
         f'<div class="ms-auto">'
-        f'<a class="nav-link text-light small" href="?mode=wireframe" id="mode-toggle">Wireframe</a>'
+        f'<a class="nav-link small" style="color:var(--jas-text-dim,#999)" href="?mode=wireframe" id="mode-toggle">Wireframe</a>'
         f'</div>'
         f'</nav>'
     )
@@ -150,9 +151,21 @@ def _style_str(el: dict, theme: dict, state: dict, extra: str = "") -> str:
     return f' style="{";".join(parts)}"' if parts else ""
 
 
+_THEME_CSS_RE = re.compile(r"\{\{\s*theme\.colors\.(\w+)\s*\}\}")
+
+
 def _resolve(val, theme, state):
+    """Resolve a value, emitting CSS var() references for theme.colors.*."""
     if isinstance(val, str) and "{{" in val:
-        return resolve_interpolation(val, theme, state)
+        # Replace theme.colors.* with var(--jas-*) so appearance switching works
+        css_val = _THEME_CSS_RE.sub(
+            lambda m: "var(--jas-" + m.group(1).replace("_", "-") + ")",
+            val,
+        )
+        # If there are remaining non-color interpolations, resolve them normally
+        if "{{" in css_val:
+            return resolve_interpolation(css_val, theme, state)
+        return css_val
     return str(val)
 
 
@@ -254,7 +267,7 @@ def _render_pane_system(el, theme, state):
     return Markup(
         f'<div{_id_attr(el)} class="jas-pane-system"'
         f' style="position:relative;width:100%;height:100vh;overflow:hidden;'
-        f'background:{_resolve(el.get("style", {}).get("background", "#2e2e2e"), theme, state)}">'
+        f'background:{_resolve(el.get("style", {}).get("background", "{{theme.colors.window_bg}}"), theme, state)}">'
         f'{children}</div>'
     )
 
@@ -274,8 +287,8 @@ def _render_pane(el, theme, state):
     if isinstance(content, dict):
         content_html = render_element(content, theme, state, mode="normal")
 
-    bg = _resolve(el.get("style", {}).get("background", "#3c3c3c"), theme, state)
-    border = _resolve(el.get("style", {}).get("border", "1px solid #555"), theme, state)
+    bg = _resolve(el.get("style", {}).get("background", "{{theme.colors.pane_bg}}"), theme, state)
+    border = _resolve(el.get("style", {}).get("border", "1px solid {{theme.colors.border}}"), theme, state)
 
     # Extra data attributes for generic bindings
     extra_data = _data_attrs(el)
@@ -288,8 +301,8 @@ def _render_pane(el, theme, state):
         f' style="position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;'
         f'background:{bg};border:{border};display:flex;flex-direction:column;overflow:hidden"'
         f'{extra_data}>'
-        f'<div{_id_attr(title_bar)} class="jas-pane-title" style="height:20px;background:#2a2a2a;display:flex;'
-        f'align-items:center;padding:0 6px;cursor:grab;font-size:11px;color:#d9d9d9"'
+        f'<div{_id_attr(title_bar)} class="jas-pane-title" style="height:var(--jas-size-title-bar-height,20px);background:var(--jas-title-bar-bg,#2a2a2a);display:flex;'
+        f'align-items:center;padding:0 6px;cursor:grab;font-size:11px;color:var(--jas-title-bar-text,#d9d9d9)"'
         f'{_data_attrs(title_bar)}>'
         f'<span class="ms-auto d-flex gap-1">{title_btns}</span></div>'
         f'<div class="jas-pane-content" style="flex:1;overflow:auto;display:flex;flex-direction:column">{content_html}</div>'
@@ -385,13 +398,13 @@ def _render_panel(el, theme, state):
         menu_html = (
             f'<div class="dropdown float-end">'
             f'<button class="btn btn-sm p-0" data-bs-toggle="dropdown"'
-            f' style="color:#888;font-size:14px">&#8942;</button>'
+            f' style="color:var(--jas-text-button,#888);font-size:14px">&#8942;</button>'
             f'<ul class="dropdown-menu">{menu_items}</ul></div>'
         )
 
     return Markup(
         f'<div{_id_attr(el)} class="jas-panel">'
-        f'<div class="d-flex align-items-center p-1" style="background:#2a2a2a;font-size:11px;color:#ccc">'
+        f'<div class="d-flex align-items-center p-1" style="background:var(--jas-title-bar-bg,#2a2a2a);font-size:11px;color:var(--jas-text,#ccc)">'
         f'{summary}{menu_html}</div>'
         f'<div class="p-2">{content_html}</div>'
         f'</div>'
@@ -421,12 +434,12 @@ def _render_icon_button(el, theme, state):
         icon_sz = int(float(sz) * 0.75)
         icon_html = (
             f'<svg viewBox="{viewbox}" width="{icon_sz}" height="{icon_sz}"'
-            f' style="color:#cccccc;fill:currentColor;stroke:currentColor">{svg_content}</svg>'
+            f' style="color:var(--jas-text,#cccccc);fill:currentColor;stroke:currentColor">{svg_content}</svg>'
         )
     else:
         # Fallback: show first letter of summary or icon name
         fallback = summary[0] if summary else (icon_name[0] if icon_name else "?")
-        icon_html = f'<span style="font-size:{int(float(sz)*0.5)}px;font-weight:bold;color:#ccc">{escape(str(fallback))}</span>'
+        icon_html = f'<span style="font-size:{int(float(sz)*0.5)}px;font-weight:bold;color:var(--jas-text,#ccc)">{escape(str(fallback))}</span>'
     return Markup(
         f'<button{_id_attr(el)} class="btn btn-sm btn-outline-secondary jas-tool-btn p-0"'
         f' style="width:{sz}px;height:{sz}px;display:flex;align-items:center;justify-content:center"'
@@ -548,7 +561,7 @@ def _render_canvas(el, theme, state):
 def _render_placeholder(el, theme, state):
     summary = escape(el.get("summary", "Placeholder"))
     desc = escape(el.get("description", ""))
-    base = "border:1px dashed #666;padding:12px;color:#888;text-align:center;font-size:11px;min-height:40px"
+    base = "border:1px dashed var(--jas-border,#666);padding:12px;color:var(--jas-text-button,#888);text-align:center;font-size:11px;min-height:40px"
     return Markup(
         f'<div{_id_attr(el)} class="jas-placeholder"'
         f'{_style_str(el, theme, state, base)}'
@@ -559,8 +572,8 @@ def _render_placeholder(el, theme, state):
 def _render_separator(el, theme, state):
     orientation = el.get("orientation", "horizontal")
     if orientation == "vertical":
-        return Markup(f'<div{_id_attr(el)} style="width:1px;background:#555;margin:0 4px"{_data_attrs(el)}></div>')
-    return Markup(f'<hr{_id_attr(el)} style="border-color:#555;margin:4px 0"{_data_attrs(el)}>')
+        return Markup(f'<div{_id_attr(el)} style="width:1px;background:var(--jas-border,#555);margin:0 4px"{_data_attrs(el)}></div>')
+    return Markup(f'<hr{_id_attr(el)} style="border-color:var(--jas-border,#555);margin:4px 0"{_data_attrs(el)}>')
 
 
 def _render_spacer(el, theme, state):
@@ -591,7 +604,7 @@ def _render_dropdown(el, theme, state):
         icon_sz = int(float(sz) * 0.75)
         btn_content = (
             f'<svg viewBox="{viewbox}" width="{icon_sz}" height="{icon_sz}"'
-            f' fill="currentColor" style="color:#cccccc">{svg_content}</svg>'
+            f' fill="currentColor" style="color:var(--jas-text,#cccccc)">{svg_content}</svg>'
         )
     elif label_text:
         btn_content = escape(label_text)
@@ -618,7 +631,7 @@ def _render_dropdown(el, theme, state):
         f'<div{_id_attr(el)} class="dropdown" style="display:inline-block"{_data_attrs(el)}>'
         f'<button class="btn btn-sm p-0" data-bs-toggle="dropdown"'
         f' style="width:{sz}px;height:{sz}px;display:flex;align-items:center;'
-        f'justify-content:center;color:#999;border:none;background:transparent">'
+        f'justify-content:center;color:var(--jas-text-dim,#999);border:none;background:transparent">'
         f'{btn_content}</button>'
         f'<ul class="dropdown-menu">{menu_html}</ul></div>'
     )
@@ -725,13 +738,13 @@ def _render_dock_view(el, theme, state):
                 viewbox = icon_def.get("viewbox", "0 0 28 28")
                 svg = icon_def.get("svg", "")
                 html += (
-                    f'<button class="btn btn-sm jas-dock-icon p-0" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:#505050;border:none;color:#999"'
+                    f'<button class="btn btn-sm jas-dock-icon p-0" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:var(--jas-button-checked,#505050);border:none;color:var(--jas-text-dim,#999)"'
                     f' data-dock="{escape(eid)}" data-group="{gi}" data-panel="{pi}"'
                     f' title="{escape(_PANEL_LABELS.get(panel_name, panel_name))}">'
                     f'<svg viewBox="{viewbox}" width="20" height="20" fill="currentColor">{svg}</svg></button>'
                 )
             if gi < len(groups) - 1:
-                html += '<hr style="width:80%;border-color:#555;margin:2px 0">'
+                html += '<hr style="width:80%;border-color:var(--jas-border,#555);margin:2px 0">'
         html += '</div>'
     else:
         # Expanded: render each group
@@ -743,18 +756,18 @@ def _render_dock_view(el, theme, state):
             html += f'<div class="jas-dock-group" data-dock="{escape(eid)}" data-group-index="{gi}">'
 
             # Group header: grip + tab buttons + spacer + chevron + hamburger
-            html += '<div class="jas-dock-group-header" style="display:flex;align-items:center;background:#333;padding:2px 4px;gap:2px">'
+            html += '<div class="jas-dock-group-header" style="display:flex;align-items:center;background:var(--jas-pane-bg-dark,#333);padding:2px 4px;gap:2px">'
 
             # Grip handle for group drag
-            html += f'<span class="jas-dock-grip" draggable="true" style="cursor:grab;color:#777;font-size:10px;padding:0 2px" data-dock="{escape(eid)}" data-group="{gi}">⠁⠁</span>'
+            html += f'<span class="jas-dock-grip" draggable="true" style="cursor:grab;color:var(--jas-text-hint,#777);font-size:10px;padding:0 2px" data-dock="{escape(eid)}" data-group="{gi}">⠁⠁</span>'
 
             # Tab buttons
             for pi, panel_name in enumerate(panels):
                 label = _PANEL_LABELS.get(panel_name, panel_name.title())
                 active_cls = " active" if pi == active else ""
-                tab_bg = "#4a4a4a" if pi == active else "#353535"
+                tab_bg = "var(--jas-tab-active,#4a4a4a)" if pi == active else "var(--jas-tab-inactive,#353535)"
                 html += (
-                    f'<button class="btn btn-sm jas-dock-tab{active_cls}" style="padding:1px 6px;font-size:11px;color:#ccc;background:{tab_bg};border:none"'
+                    f'<button class="btn btn-sm jas-dock-tab{active_cls}" style="padding:1px 6px;font-size:11px;color:var(--jas-text,#ccc);background:{tab_bg};border:none"'
                     f' draggable="true" data-dock="{escape(eid)}" data-group="{gi}" data-panel-index="{pi}" data-panel-name="{escape(panel_name)}">'
                     f'{escape(label)}</button>'
                 )
@@ -765,14 +778,14 @@ def _render_dock_view(el, theme, state):
             # Collapse chevron
             chevron = "\u00bb" if collapsed else "\u00ab"
             html += (
-                f'<button class="btn btn-sm jas-dock-chevron p-0" style="color:#888;background:transparent;border:none;font-size:18px;line-height:1"'
+                f'<button class="btn btn-sm jas-dock-chevron p-0" style="color:var(--jas-text-button,#888);background:transparent;border:none;font-size:18px;line-height:1"'
                 f' data-dock="{escape(eid)}" data-group="{gi}">{chevron}</button>'
             )
 
             # Hamburger menu (hidden when collapsed)
             if not collapsed:
                 html += '<div class="dropdown d-inline-block">'
-                html += '<button class="btn btn-sm p-0 dropdown-toggle" data-bs-toggle="dropdown" style="color:#888;background:transparent;border:none;font-size:14px">≡</button>'
+                html += '<button class="btn btn-sm p-0 dropdown-toggle" data-bs-toggle="dropdown" style="color:var(--jas-text-button,#888);background:transparent;border:none;font-size:14px">≡</button>'
                 html += '<ul class="dropdown-menu">'
                 for panel_name in panels:
                     label = _PANEL_LABELS.get(panel_name, panel_name.title())
@@ -788,14 +801,14 @@ def _render_dock_view(el, theme, state):
                     active_panel = panels[active]
                     # Render panel content placeholder
                     label = _PANEL_LABELS.get(active_panel, active_panel.title())
-                    html += f'<div class="jas-dock-panel-body" style="padding:12px;color:#aaa;font-size:12px" data-panel-name="{escape(active_panel)}">{escape(label)}</div>'
+                    html += f'<div class="jas-dock-panel-body" style="padding:12px;color:var(--jas-text-body,#aaa);font-size:12px" data-panel-name="{escape(active_panel)}">{escape(label)}</div>'
                 html += '</div>'
 
             html += '</div>'  # group
 
             # Separator between groups
             if gi < len(groups) - 1:
-                html += '<hr style="border-color:#555;margin:0">'
+                html += '<hr style="border-color:var(--jas-border,#555);margin:0">'
 
     html += '</div>'  # dock_view
     return Markup(html)

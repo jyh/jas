@@ -79,6 +79,17 @@ menubar:
           - { id: menu_ws_reset,    label: "Reset to Default", action: reset_workspace }
           - { id: menu_ws_revert,   label: "Revert to Saved",  action: revert_workspace,
               enabled_when: "workspace.has_saved_layout" }
+      - id: menu_appearance
+        label: "Appearance"
+        type: submenu
+        dynamic: true
+        description: >
+          Lists available UI appearances (color themes) with a checkmark
+          on the active one. Predefined appearances are loaded from
+          workspace/appearances/*.json. Users can save custom appearances
+          via Save As.
+        items:
+          - { id: menu_app_save_as, label: "Save As...", action: save_appearance_as }
       - separator
       - { id: menu_tile,       label: "Tile",        action: tile_panes }
       - separator

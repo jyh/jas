@@ -5,7 +5,7 @@ import os
 
 from flask import Flask, render_template, request, jsonify
 
-from loader import load_workspace, find_element_by_id
+from loader import load_workspace, find_element_by_id, resolve_appearance, list_appearances
 from renderer import render_element, render_menubar, render_dialogs, set_icons, set_initial_state
 
 
@@ -44,7 +44,7 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
                 mtimes = []
                 for dirpath, _dirnames, filenames in os.walk(workspace_path):
                     for f in filenames:
-                        if f.endswith((".yaml", ".yml")):
+                        if f.endswith((".yaml", ".yml", ".json")):
                             mtimes.append(os.path.getmtime(os.path.join(dirpath, f)))
                 mtime = max(mtimes) if mtimes else 0.0
             else:
@@ -91,11 +91,16 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
     def index():
         ws = _get_ws()
         mode = request.args.get("mode", "normal")
-        theme = ws.get("theme", {})
+        theme_config = ws.get("theme", {})
+        resolved = resolve_appearance(theme_config)
         state = _state_defaults(ws)
 
+        # Template sees resolved appearance (flat: colors/fonts/sizes)
+        ws_for_template = dict(ws)
+        ws_for_template["theme"] = resolved
+
         # Render menubar (swap mode toggle link based on current mode)
-        menubar_html = render_menubar(ws.get("menubar", []), ws.get("actions", {}), theme)
+        menubar_html = render_menubar(ws.get("menubar", []), ws.get("actions", {}), resolved)
         if mode == "wireframe":
             menubar_html = menubar_html.replace(
                 'href="?mode=wireframe" id="mode-toggle">Wireframe',
@@ -103,19 +108,25 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
             )
 
         # Both modes render the same layout in normal mode
-        layout_html = render_element(ws.get("layout", {}), theme, state, mode="normal")
-        dialogs_html = render_dialogs(ws.get("dialogs", {}), theme, state)
+        layout_html = render_element(ws.get("layout", {}), resolved, state, mode="normal")
+        dialogs_html = render_dialogs(ws.get("dialogs", {}), resolved, state)
         state_json = json.dumps(_state_defaults(ws))
         actions_json = json.dumps(ws.get("actions", {}))
         shortcuts_json = json.dumps(ws.get("shortcuts", []))
         positions_json = json.dumps(_pane_configs(ws))
         icons_json = json.dumps(ws.get("icons", {}))
-        theme_json = json.dumps(ws.get("theme", {}))
+        theme_json = json.dumps(resolved)
         default_layouts_json = json.dumps(ws.get("default_layouts", {}))
         runtime_contexts_json = json.dumps(ws.get("runtime_contexts", {}))
+        appearances_json = json.dumps(list_appearances(theme_config))
+        active_appearance_json = json.dumps(theme_config.get("active", "dark_gray"))
+        all_appearances_json = json.dumps(theme_config.get("appearances", {}))
+        base_theme_json = json.dumps(theme_config.get("base", {}))
+        metrics_json = json.dumps(theme_config.get("metrics", {}))
 
         template = "wireframe.html" if mode == "wireframe" else "normal.html"
-        return render_template(template, ws=ws, menubar_html=menubar_html,
+        return render_template(template, ws=ws_for_template,
+                               menubar_html=menubar_html,
                                layout_html=layout_html, dialogs_html=dialogs_html,
                                state_json=state_json, actions_json=actions_json,
                                shortcuts_json=shortcuts_json,
@@ -123,7 +134,12 @@ def create_app(workspace: dict | None = None, workspace_path: str | None = None)
                                icons_json=icons_json,
                                theme_json=theme_json,
                                default_layouts_json=default_layouts_json,
-                               runtime_contexts_json=runtime_contexts_json)
+                               runtime_contexts_json=runtime_contexts_json,
+                               appearances_json=appearances_json,
+                               active_appearance_json=active_appearance_json,
+                               all_appearances_json=all_appearances_json,
+                               base_theme_json=base_theme_json,
+                               metrics_json=metrics_json)
 
     @app.route("/api/spec/<element_id>")
     def element_spec(element_id):
@@ -152,6 +168,7 @@ if __name__ == "__main__":
     # Watch workspace YAML files, static JS/CSS, and templates for auto-reload
     extra = []
     extra += glob.glob(os.path.join(os.path.dirname(__file__), "..", "workspace", "**", "*.yaml"), recursive=True)
+    extra += glob.glob(os.path.join(os.path.dirname(__file__), "..", "workspace", "**", "*.json"), recursive=True)
     extra += glob.glob(os.path.join(os.path.dirname(__file__), "static", "**", "*"), recursive=True)
     extra += glob.glob(os.path.join(os.path.dirname(__file__), "templates", "*.html"))
     app.run(debug=True, host='0.0.0.0', port=5051, extra_files=extra)
