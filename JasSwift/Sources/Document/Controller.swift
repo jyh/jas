@@ -192,6 +192,11 @@ public class Controller {
         }, extend: extend)
     }
 
+    /// Select all unlocked, visible elements in the active layer.
+    public func selectAll() {
+        selectFlat(model, predicate: { _ in true }, extend: false)
+    }
+
     public func setSelection(_ selection: Selection) {
         let doc = model.document
         model.document = Document(layers: doc.layers,

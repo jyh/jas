@@ -134,6 +134,19 @@ public struct JasCommands: Commands {
                 pasteClipboard(offset: 0.0)
             }
             .keyboardShortcut("v", modifiers: [.command, .shift])
+
+            Divider()
+
+            Button("Delete") {
+                deleteSelection()
+            }
+            .keyboardShortcut(.delete, modifiers: [])
+            .disabled(!(hasSelection ?? false))
+
+            Button("Select All") {
+                selectAll()
+            }
+            .keyboardShortcut("a", modifiers: .command)
         }
 
         CommandMenu("Object") {
@@ -600,6 +613,20 @@ public struct JasCommands: Commands {
         model.snapshot()
         let controller = Controller(model: model)
         controller.showAll()
+    }
+
+    private func deleteSelection() {
+        guard let model = model else { return }
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        model.snapshot()
+        model.document = doc.deleteSelection()
+    }
+
+    private func selectAll() {
+        guard let model = model else { return }
+        let controller = Controller(model: model)
+        controller.selectAll()
     }
 
     private func cutSelection() {
