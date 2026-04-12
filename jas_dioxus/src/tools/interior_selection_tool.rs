@@ -191,9 +191,9 @@ impl CanvasTool for InteriorSelectionTool {
                 let rh = (y - start_y).abs();
                 if rw > 1.0 || rh > 1.0 {
                     model.snapshot();
-                    // Use group_select_rect which traverses into groups
-                    // For now reuse direct_select_rect with all CPs
-                    Controller::direct_select_rect(model, rx, ry, rw, rh, shift);
+                    // Use interior_select_rect which traverses into groups
+                    // For now reuse partial_select_rect with all CPs
+                    Controller::partial_select_rect(model, rx, ry, rw, rh, shift);
                 } else if !shift {
                     Controller::set_selection(model, Vec::new());
                 }

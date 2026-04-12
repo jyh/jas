@@ -232,39 +232,39 @@ let () =
     ];
 
     "direct selection", [
-      Alcotest.test_case "direct_select_rect: no group expansion" `Quick (fun () ->
+      Alcotest.test_case "partial_select_rect: no group expansion" `Quick (fun () ->
         let ds_line1 = make_line 0.0 0.0 5.0 5.0 in
         let ds_line2 = make_line 50.0 50.0 55.0 55.0 in
         let ds_group = make_group [|ds_line1; ds_line2|] in
         let ds_layer = make_layer ~name:"L0" [|ds_group|] in
         let ds_doc = Jas.Document.make_document [|ds_layer|] in
         let ds_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:ds_doc ()) () in
-        ds_ctrl#direct_select_rect (-1.0) (-1.0) 7.0 7.0;
+        ds_ctrl#partial_select_rect (-1.0) (-1.0) 7.0 7.0;
         assert (Jas.Document.PathMap.mem [0; 0; 0] ds_ctrl#document.Jas.Document.selection);
         assert (not (Jas.Document.PathMap.mem [0; 0; 1] ds_ctrl#document.Jas.Document.selection)));
 
-      Alcotest.test_case "direct_select_rect: selects only hit control points" `Quick (fun () ->
+      Alcotest.test_case "partial_select_rect: selects only hit control points" `Quick (fun () ->
         let ds_rect = make_rect 0.0 0.0 100.0 100.0 in
         let ds_rlayer = make_layer ~name:"L0" [|ds_rect|] in
         let ds_rdoc = Jas.Document.make_document [|ds_rlayer|] in
         let ds_rctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:ds_rdoc ()) () in
-        ds_rctrl#direct_select_rect (-5.0) (-5.0) 10.0 10.0;
+        ds_rctrl#partial_select_rect (-5.0) (-5.0) 10.0 10.0;
         let ds_res = Jas.Document.PathMap.find [0; 0] ds_rctrl#document.Jas.Document.selection in
         match ds_res.Jas.Document.es_kind with
         | Jas.Document.SelKindPartial s ->
           assert (Jas.Document.SortedCps.to_list s = [0])
         | _ -> assert false);
 
-      Alcotest.test_case "direct_select_rect: body hit without CPs yields SelKindPartial []" `Quick (fun () ->
-        ds_dctrl#direct_select_rect 40.0 40.0 20.0 20.0;
+      Alcotest.test_case "partial_select_rect: body hit without CPs yields SelKindPartial []" `Quick (fun () ->
+        ds_dctrl#partial_select_rect 40.0 40.0 20.0 20.0;
         let ds_dres = Jas.Document.PathMap.find [0; 0] ds_dctrl#document.Jas.Document.selection in
         match ds_dres.Jas.Document.es_kind with
         | Jas.Document.SelKindPartial s ->
           assert (Jas.Document.SortedCps.to_list s = [])
         | _ -> assert false);
 
-      Alcotest.test_case "direct_select_rect: misses element" `Quick (fun () ->
-        ds_dctrl#direct_select_rect 200.0 200.0 10.0 10.0;
+      Alcotest.test_case "partial_select_rect: misses element" `Quick (fun () ->
+        ds_dctrl#partial_select_rect 200.0 200.0 10.0 10.0;
         assert (Jas.Document.PathMap.is_empty ds_dctrl#document.Jas.Document.selection));
 
       Alcotest.test_case "move_control_points: Partial [] is a noop" `Quick (fun () ->
@@ -361,24 +361,24 @@ let () =
     ];
 
     "group selection", [
-      Alcotest.test_case "group_select_rect: no group expansion" `Quick (fun () ->
+      Alcotest.test_case "interior_select_rect: no group expansion" `Quick (fun () ->
         let gs_line1 = make_line 0.0 0.0 5.0 5.0 in
         let gs_line2 = make_line 50.0 50.0 55.0 55.0 in
         let gs_group = make_group [|gs_line1; gs_line2|] in
         let gs_layer = make_layer ~name:"L0" [|gs_group|] in
         let gs_doc = Jas.Document.make_document [|gs_layer|] in
         let gs_ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:gs_doc ()) () in
-        gs_ctrl#group_select_rect (-1.0) (-1.0) 7.0 7.0;
+        gs_ctrl#interior_select_rect (-1.0) (-1.0) 7.0 7.0;
         assert (Jas.Document.PathMap.mem [0; 0; 0] gs_ctrl#document.Jas.Document.selection);
         assert (not (Jas.Document.PathMap.mem [0; 0; 1] gs_ctrl#document.Jas.Document.selection)));
 
-      Alcotest.test_case "group_select_rect: selects element as a whole" `Quick (fun () ->
-        gs_rctrl#group_select_rect (-5.0) (-5.0) 10.0 10.0;
+      Alcotest.test_case "interior_select_rect: selects element as a whole" `Quick (fun () ->
+        gs_rctrl#interior_select_rect (-5.0) (-5.0) 10.0 10.0;
         let gs_res = Jas.Document.PathMap.find [0; 0] gs_rctrl#document.Jas.Document.selection in
         assert (gs_res.Jas.Document.es_kind = Jas.Document.SelKindAll));
 
-      Alcotest.test_case "group_select_rect: misses element" `Quick (fun () ->
-        gs_rctrl#group_select_rect 200.0 200.0 10.0 10.0;
+      Alcotest.test_case "interior_select_rect: misses element" `Quick (fun () ->
+        gs_rctrl#interior_select_rect 200.0 200.0 10.0 10.0;
         assert (Jas.Document.PathMap.is_empty gs_rctrl#document.Jas.Document.selection));
     ];
 
@@ -407,15 +407,15 @@ let () =
         let cp_doc2 = Jas.Document.make_document [|cp_layer2|] in
         let cp_ctrl2 = Jas.Controller.create ~model:(Jas.Model.create ~document:cp_doc2 ()) () in
         (* Direct select top-left corner CP 0 at (0,0) *)
-        cp_ctrl2#direct_select_rect (-1.0) (-1.0) 2.0 2.0;
+        cp_ctrl2#partial_select_rect (-1.0) (-1.0) 2.0 2.0;
         let es0 = Jas.Document.PathMap.find [0; 0] cp_ctrl2#document.Jas.Document.selection in
         assert (kind_to_cps es0.Jas.Document.es_kind = [0]);
         (* Shift-direct-select top-right corner CP 1 at (10,0) — should add CP *)
-        cp_ctrl2#direct_select_rect ~extend:true 9.0 (-1.0) 2.0 2.0;
+        cp_ctrl2#partial_select_rect ~extend:true 9.0 (-1.0) 2.0 2.0;
         let es1 = Jas.Document.PathMap.find [0; 0] cp_ctrl2#document.Jas.Document.selection in
         assert (kind_to_cps es1.Jas.Document.es_kind = [0; 1]);
         (* Shift-direct-select top-left again — should remove CP 0, keep CP 1 *)
-        cp_ctrl2#direct_select_rect ~extend:true (-1.0) (-1.0) 2.0 2.0;
+        cp_ctrl2#partial_select_rect ~extend:true (-1.0) (-1.0) 2.0 2.0;
         let es2 = Jas.Document.PathMap.find [0; 0] cp_ctrl2#document.Jas.Document.selection in
         assert (kind_to_cps es2.Jas.Document.es_kind = [1]));
     ];

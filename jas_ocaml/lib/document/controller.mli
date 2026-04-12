@@ -13,8 +13,8 @@ class controller : ?model:Model.model -> unit -> object
   method select_all : unit
   method select_rect : ?extend:bool -> float -> float -> float -> float -> unit
   method select_polygon : ?extend:bool -> (float * float) array -> unit
-  method group_select_rect : ?extend:bool -> float -> float -> float -> float -> unit
-  method direct_select_rect : ?extend:bool -> float -> float -> float -> float -> unit
+  method interior_select_rect : ?extend:bool -> float -> float -> float -> float -> unit
+  method partial_select_rect : ?extend:bool -> float -> float -> float -> float -> unit
   method set_selection : Document.selection -> unit
   method select_element : Document.element_path -> unit
   method select_control_point : Document.element_path -> int -> unit

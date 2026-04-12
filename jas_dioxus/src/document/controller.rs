@@ -64,7 +64,7 @@ impl Controller {
     }
 
     /// Direct selection marquee: select individual control points within the rect.
-    pub fn direct_select_rect(
+    pub fn partial_select_rect(
         model: &mut Model,
         x: f64,
         y: f64,
@@ -1136,7 +1136,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_select_rect_body_only_yields_partial_empty() {
+    fn partial_select_rect_body_only_yields_partial_empty() {
         // Partial selection marquee over an element's body but missing
         // every control point must yield `Partial(empty)` — the
         // element is selected but no CPs are highlighted. The old
@@ -1148,7 +1148,7 @@ mod tests {
         // Rect is at (0,0) 10x10; a marquee strictly inside the body
         // (e.g. 3..7 x 3..7) misses all four corners but intersects
         // the rect's interior.
-        Controller::direct_select_rect(&mut model, 3.0, 3.0, 4.0, 4.0, false);
+        Controller::partial_select_rect(&mut model, 3.0, 3.0, 4.0, 4.0, false);
         let sel = &model.document().selection;
         let rect_entry = sel.iter().find(|es| es.path == vec![0, 0])
             .expect("rect should be in selection");
@@ -1405,12 +1405,12 @@ mod tests {
     // ----------------------------------------------------------------------
 
     #[test]
-    fn direct_select_rect_no_group_expansion() {
-        // direct_select_rect should NOT expand to the parent group.
+    fn partial_select_rect_no_group_expansion() {
+        // partial_select_rect should NOT expand to the parent group.
         let mut model = setup_model();
         // Group at [0, 1] contains lines at [0, 1, 0] and [0, 1, 1] in
         // setup_model. Marquee around the line inside the group.
-        Controller::direct_select_rect(&mut model, 0.5, 0.5, 1.5, 1.5, false);
+        Controller::partial_select_rect(&mut model, 0.5, 0.5, 1.5, 1.5, false);
         let paths = sel_paths(&model);
         // Should NOT contain the parent group path [0, 1].
         assert!(!paths.contains(&vec![0, 1]));

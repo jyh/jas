@@ -252,19 +252,19 @@ class SelectionControllerTest(absltest.TestCase):
 
 class PartialSelectionControllerTest(absltest.TestCase):
 
-    def test_direct_select_rect_no_group_expansion(self):
+    def test_partial_select_rect_no_group_expansion(self):
         """Partial selection does NOT expand groups — only the hit child is selected."""
         line1 = Line(x1=0, y1=0, x2=5, y2=5)
         line2 = Line(x1=50, y1=50, x2=55, y2=55)
         group = Group(children=(line1, line2))
         layer = Layer(children=(group,), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))
-        ctrl.direct_select_rect(-1, -1, 7, 7)
+        ctrl.partial_select_rect(-1, -1, 7, 7)
         paths = _sel_paths(ctrl.document.selection)
         self.assertIn((0, 0, 0), paths)
         self.assertNotIn((0, 0, 1), paths)
 
-    def test_direct_select_rect_selects_only_hit_cps(self):
+    def test_partial_select_rect_selects_only_hit_cps(self):
         """Only control points inside the marquee are selected."""
         from document.document import _SelectionPartial, SortedCps
         # Rect at (0,0) 100x100 — CPs are corners: (0,0), (100,0), (100,100), (0,100)
@@ -272,7 +272,7 @@ class PartialSelectionControllerTest(absltest.TestCase):
         layer = Layer(children=(rect,), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))
         # Marquee covers only the top-left corner
-        ctrl.direct_select_rect(-5, -5, 10, 10)
+        ctrl.partial_select_rect(-5, -5, 10, 10)
         sel = ctrl.document.selection
         self.assertEqual(len(sel), 1)
         es = next(iter(sel))
@@ -280,7 +280,7 @@ class PartialSelectionControllerTest(absltest.TestCase):
         # Only CP 0 (top-left at 0,0) should be selected
         self.assertEqual(es.kind, _SelectionPartial(SortedCps.from_iter([0])))
 
-    def test_direct_select_rect_body_only_yields_partial_empty(self):
+    def test_partial_select_rect_body_only_yields_partial_empty(self):
         """If the marquee crosses the body but hits no CPs, the element is
         selected with ``_SelectionPartial(empty)`` — not ``.all``. The
         Partial Selection tool must not promote "body intersects" to
@@ -292,22 +292,22 @@ class PartialSelectionControllerTest(absltest.TestCase):
         layer = Layer(children=(line,), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))
         # Marquee in the middle of the line — no endpoints inside
-        ctrl.direct_select_rect(40, 40, 20, 20)
+        ctrl.partial_select_rect(40, 40, 20, 20)
         sel = ctrl.document.selection
         self.assertEqual(len(sel), 1)
         es = next(iter(sel))
         self.assertIsInstance(es.kind, _SelectionPartial)
         self.assertEqual(len(es.kind.cps), 0)
 
-    def test_direct_select_rect_misses_element(self):
+    def test_partial_select_rect_misses_element(self):
         """Direct selection marquee outside all elements selects nothing."""
         rect = Rect(x=0, y=0, width=10, height=10)
         layer = Layer(children=(rect,), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))
-        ctrl.direct_select_rect(200, 200, 10, 10)
+        ctrl.partial_select_rect(200, 200, 10, 10)
         self.assertEqual(ctrl.document.selection, frozenset())
 
-    def test_direct_select_rect_individual_in_group(self):
+    def test_partial_select_rect_individual_in_group(self):
         """Direct selection can select individual elements inside a group."""
         rect1 = Rect(x=0, y=0, width=10, height=10)
         rect2 = Rect(x=50, y=50, width=10, height=10)
@@ -315,7 +315,7 @@ class PartialSelectionControllerTest(absltest.TestCase):
         layer = Layer(children=(group,), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))
         # Marquee covers both group items
-        ctrl.direct_select_rect(-5, -5, 70, 70)
+        ctrl.partial_select_rect(-5, -5, 70, 70)
         paths = _sel_paths(ctrl.document.selection)
         self.assertIn((0, 0, 0), paths)
         self.assertIn((0, 0, 1), paths)
@@ -455,46 +455,46 @@ class VisibilityControllerTest(absltest.TestCase):
 
 class InteriorSelectionControllerTest(absltest.TestCase):
 
-    def test_group_select_rect_no_group_expansion(self):
+    def test_interior_select_rect_no_group_expansion(self):
         """Interior selection does NOT expand groups — only the hit child is selected."""
         line1 = Line(x1=0, y1=0, x2=5, y2=5)
         line2 = Line(x1=50, y1=50, x2=55, y2=55)
         group = Group(children=(line1, line2))
         layer = Layer(children=(group,), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))
-        ctrl.group_select_rect(-1, -1, 7, 7)
+        ctrl.interior_select_rect(-1, -1, 7, 7)
         paths = _sel_paths(ctrl.document.selection)
         self.assertIn((0, 0, 0), paths)
         self.assertNotIn((0, 0, 1), paths)
 
-    def test_group_select_rect_selects_all_cps(self):
+    def test_interior_select_rect_selects_all_cps(self):
         """Interior selection always selects elements as a whole."""
         from document.document import _SelectionAll
         rect = Rect(x=0, y=0, width=100, height=100)
         layer = Layer(children=(rect,), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))
-        ctrl.group_select_rect(-5, -5, 10, 10)
+        ctrl.interior_select_rect(-5, -5, 10, 10)
         sel = ctrl.document.selection
         self.assertEqual(len(sel), 1)
         es = next(iter(sel))
         self.assertIsInstance(es.kind, _SelectionAll)
 
-    def test_group_select_rect_misses_element(self):
+    def test_interior_select_rect_misses_element(self):
         """Interior selection marquee outside all elements selects nothing."""
         rect = Rect(x=0, y=0, width=10, height=10)
         layer = Layer(children=(rect,), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))
-        ctrl.group_select_rect(200, 200, 10, 10)
+        ctrl.interior_select_rect(200, 200, 10, 10)
         self.assertEqual(ctrl.document.selection, frozenset())
 
-    def test_group_select_rect_individual_in_group(self):
+    def test_interior_select_rect_individual_in_group(self):
         """Group selection can select individual elements inside a group."""
         rect1 = Rect(x=0, y=0, width=10, height=10)
         rect2 = Rect(x=50, y=50, width=10, height=10)
         group = Group(children=(rect1, rect2))
         layer = Layer(children=(group,), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))
-        ctrl.group_select_rect(-5, -5, 70, 70)
+        ctrl.interior_select_rect(-5, -5, 70, 70)
         paths = _sel_paths(ctrl.document.selection)
         self.assertIn((0, 0, 0), paths)
         self.assertIn((0, 0, 1), paths)
@@ -529,14 +529,14 @@ class ExtendSelectionTest(absltest.TestCase):
         self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 1)}))
 
     def test_extend_direct_select(self):
-        """Shift works with direct_select_rect too."""
+        """Shift works with partial_select_rect too."""
         line1 = Line(x1=0, y1=0, x2=5, y2=5)
         line2 = Line(x1=50, y1=50, x2=55, y2=55)
         layer = Layer(children=(line1, line2), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))
-        ctrl.direct_select_rect(-1, -1, 7, 7)
+        ctrl.partial_select_rect(-1, -1, 7, 7)
         self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 0)}))
-        ctrl.direct_select_rect(49, 49, 7, 7, extend=True)
+        ctrl.partial_select_rect(49, 49, 7, 7, extend=True)
         self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 0), (0, 1)}))
 
     def test_extend_direct_select_toggles_cps(self):
@@ -547,30 +547,30 @@ class ExtendSelectionTest(absltest.TestCase):
         layer = Layer(children=(rect,), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))
         # Direct select top-left corner CP 0 at (0,0)
-        ctrl.direct_select_rect(-1, -1, 2, 2)
+        ctrl.partial_select_rect(-1, -1, 2, 2)
         sel = list(ctrl.document.selection)
         self.assertEqual(len(sel), 1)
         self.assertEqual(sel[0].kind, _SelectionPartial(SortedCps.from_iter([0])))
         # Shift-direct-select top-right corner CP 1 at (10,0) — should add CP
-        ctrl.direct_select_rect(9, -1, 2, 2, extend=True)
+        ctrl.partial_select_rect(9, -1, 2, 2, extend=True)
         sel = list(ctrl.document.selection)
         self.assertEqual(len(sel), 1)
         self.assertEqual(sel[0].kind, _SelectionPartial(SortedCps.from_iter([0, 1])))
         # Shift-direct-select top-left again — should remove CP 0, keep CP 1
-        ctrl.direct_select_rect(-1, -1, 2, 2, extend=True)
+        ctrl.partial_select_rect(-1, -1, 2, 2, extend=True)
         sel = list(ctrl.document.selection)
         self.assertEqual(len(sel), 1)
         self.assertEqual(sel[0].kind, _SelectionPartial(SortedCps.from_iter([1])))
 
     def test_extend_group_select(self):
-        """Shift works with group_select_rect too."""
+        """Shift works with interior_select_rect too."""
         rect1 = Rect(x=0, y=0, width=10, height=10)
         rect2 = Rect(x=50, y=50, width=10, height=10)
         layer = Layer(children=(rect1, rect2), name="L0")
         ctrl = Controller(model=Model(document=Document(layers=(layer,))))
-        ctrl.group_select_rect(-1, -1, 12, 12)
+        ctrl.interior_select_rect(-1, -1, 12, 12)
         self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 0)}))
-        ctrl.group_select_rect(49, 49, 12, 12, extend=True)
+        ctrl.interior_select_rect(49, 49, 12, 12, extend=True)
         self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 0), (0, 1)}))
 
 
