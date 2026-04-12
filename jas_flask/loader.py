@@ -15,13 +15,20 @@ def load_workspace(path: str) -> dict:
     """Load a workspace from a YAML file or a directory of YAML files.
 
     If path is a directory, each *.yaml file is loaded and its top-level
-    keys are merged into a single dict (filename stem is not used as a key;
-    the file's own top-level keys are merged directly).
+    keys are merged into a single dict.  Recognized subdirectories are
+    merged into their corresponding top-level key:
+
+    - ``dialogs/`` — each file's top-level keys merge into ``data["dialogs"]``
+    - ``panels/`` — each file's top-level keys merge into ``data["panels"]``
+
+    After loading, ``include:`` directives in the layout tree are resolved
+    (see :func:`resolve_includes`).
 
     If path is a file, it is loaded as a single YAML document.
     """
     if os.path.isdir(path):
-        data = {}
+        data: dict = {}
+        # Load top-level YAML files
         for fname in sorted(os.listdir(path)):
             if fname.endswith(".yaml") or fname.endswith(".yml"):
                 fpath = os.path.join(path, fname)
@@ -29,13 +36,73 @@ def load_workspace(path: str) -> dict:
                     part = yaml.safe_load(f)
                 if isinstance(part, dict):
                     data.update(part)
+        # Load recognized subdirectories
+        # dialogs: each file contains one or more named dialog entries (keyed dicts)
+        # panels: each file is a single element spec, keyed by its "id" field
+        for subdir in ("dialogs", "panels"):
+            subdir_path = os.path.join(path, subdir)
+            if not os.path.isdir(subdir_path):
+                continue
+            merged = data.get(subdir, {}) or {}
+            for fname in sorted(os.listdir(subdir_path)):
+                if not (fname.endswith(".yaml") or fname.endswith(".yml")):
+                    continue
+                fpath = os.path.join(subdir_path, fname)
+                with open(fpath, "r") as f:
+                    part = yaml.safe_load(f)
+                if not isinstance(part, dict):
+                    continue
+                if subdir == "panels":
+                    # Panel files are single elements — key by id
+                    panel_id = part.get("id", os.path.splitext(fname)[0])
+                    merged[panel_id] = part
+                else:
+                    # Dialog files contain named entries
+                    merged.update(part)
+            if merged:
+                data[subdir] = merged
     else:
         with open(path, "r") as f:
             data = yaml.safe_load(f)
     missing = REQUIRED_KEYS - set(data.keys())
     if missing:
         raise ValueError(f"Missing required top-level keys: {missing}")
+    # Resolve include directives in the layout tree
+    if "layout" in data:
+        resolve_includes(data["layout"], path if os.path.isdir(path) else os.path.dirname(path))
     return data
+
+
+def resolve_includes(element: dict, workspace_dir: str) -> None:
+    """Walk the element tree and expand ``include:`` directives in-place.
+
+    An include node like ``{include: "panels/layers.yaml", bind: {...}}``
+    is replaced by the contents of the referenced file, with any sibling
+    keys (e.g. ``bind``) merged on top.  The file path is resolved relative
+    to *workspace_dir*.
+    """
+    children = element.get("children")
+    if isinstance(children, list):
+        for i, child in enumerate(children):
+            if not isinstance(child, dict):
+                continue
+            if "include" in child:
+                rel_path = child.pop("include")
+                fpath = os.path.join(workspace_dir, rel_path)
+                with open(fpath, "r") as f:
+                    included = yaml.safe_load(f)
+                if isinstance(included, dict):
+                    # Merge sibling keys (e.g. bind) onto the included element
+                    for k, v in child.items():
+                        included[k] = v
+                    children[i] = included
+                    # Recurse into the newly included element
+                    resolve_includes(included, workspace_dir)
+            else:
+                resolve_includes(child, workspace_dir)
+    content = element.get("content")
+    if isinstance(content, dict):
+        resolve_includes(content, workspace_dir)
 
 
 def resolve_interpolation(text: str, theme: dict, state: dict, params: dict | None = None) -> str:
