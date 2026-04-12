@@ -34,7 +34,7 @@ let make_title_bar ~workspace_layout ~refresh_all ~pane_id ~kind ~(config : Pane
     let eb = GBin.event_box ~packing () in
     let lbl = GMisc.label ~text ~packing:eb#add () in
     let lbl_css = new GObj.css_provider (GtkData.CssProvider.create ()) in
-    lbl_css#load_from_data "* { color: #a5a5a5; font-size: 11px; padding: 0 2px; background: transparent; }";
+    lbl_css#load_from_data (Printf.sprintf "* { color: %s; font-size: 11px; padding: 0 2px; background: transparent; }" !(Dock_panel.theme_text_button));
     lbl#misc#style_context#add_provider lbl_css 600;
     eb#event#add [`BUTTON_PRESS];
     ignore (eb#event#connect#button_press ~callback:(fun _ -> callback (); true))
@@ -101,7 +101,7 @@ let make_title_bar ~workspace_layout ~refresh_all ~pane_id ~kind ~(config : Pane
   ));
 
   let css = new GObj.css_provider (GtkData.CssProvider.create ()) in
-  css#load_from_data "box, * { background-color: #383838; color: #d9d9d9; font-size: 11px; margin: 0; }";
+  css#load_from_data (Printf.sprintf "box, * { background-color: %s; color: %s; font-size: 11px; margin: 0; }" !(Dock_panel.theme_bg_dark) !(Dock_panel.theme_text_dim));
   title_bar#misc#style_context#add_provider css 600;
 
   title_bar
@@ -203,7 +203,7 @@ let create_main_window ~get_model ~on_open () =
   (* Toolbar pane *)
   let toolbar_frame = GPack.vbox () in
   let tb_border_css = new GObj.css_provider (GtkData.CssProvider.create ()) in
-  tb_border_css#load_from_data "box { background-color: #3c3c3c; }";
+  tb_border_css#load_from_data (Printf.sprintf "box { background-color: %s; }" !(Dock_panel.theme_bg));
   toolbar_frame#misc#style_context#add_provider tb_border_css 600;
   let toolbar_title = ref (GBin.event_box ()) in
   let toolbar_fixed = GPack.fixed () in

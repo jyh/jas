@@ -85,6 +85,15 @@ let light_gray = {
   accent = "#007aff";
 }
 
+(** Parse "#rrggbb" to (r, g, b) floats in [0,1]. *)
+let hex_to_rgb hex =
+  let h = if String.length hex > 0 && hex.[0] = '#' then String.sub hex 1 (String.length hex - 1) else hex in
+  let v = int_of_string ("0x" ^ h) in
+  let r = float_of_int ((v lsr 16) land 0xFF) /. 255.0 in
+  let g = float_of_int ((v lsr 8) land 0xFF) /. 255.0 in
+  let b = float_of_int (v land 0xFF) /. 255.0 in
+  (r, g, b)
+
 let resolve name =
   match name with
   | "medium_gray" -> medium_gray
