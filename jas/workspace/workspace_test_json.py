@@ -309,6 +309,7 @@ MENU_BAR = [
     ]),
     ("Window", [
         ("Workspace \u25b6", "workspace_submenu", ""),
+        ("Appearance \u25b6", "appearance_submenu", ""),
         ("---", "", ""),
         ("Tile", "tile_panes", ""),
         ("---", "", ""),

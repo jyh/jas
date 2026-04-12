@@ -122,6 +122,7 @@ class DropEdge:
 class AppConfig:
     active_layout: str = DEFAULT_LAYOUT_NAME
     saved_layouts: list[str] = field(default_factory=lambda: [DEFAULT_LAYOUT_NAME])
+    active_appearance: str = "dark_gray"
 
     STORAGE_KEY = "jas_app_config"
 
@@ -129,6 +130,7 @@ class AppConfig:
         return json.dumps({
             "active_layout": self.active_layout,
             "saved_layouts": self.saved_layouts,
+            "active_appearance": self.active_appearance,
         })
 
     @staticmethod
@@ -138,6 +140,7 @@ class AppConfig:
             return AppConfig(
                 active_layout=d.get("active_layout", DEFAULT_LAYOUT_NAME),
                 saved_layouts=d.get("saved_layouts", [DEFAULT_LAYOUT_NAME]),
+                active_appearance=d.get("active_appearance", "dark_gray"),
             )
         except (json.JSONDecodeError, KeyError, TypeError):
             return AppConfig()
