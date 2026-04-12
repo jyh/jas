@@ -88,6 +88,8 @@ pub(crate) struct AppState {
     pub(crate) workspace_layout: super::workspace::WorkspaceLayout,
     /// Which fill/stroke square is on top (active). true = fill, false = stroke.
     pub(crate) fill_on_top: bool,
+    /// Color panel mode (panel-local, not persisted).
+    pub(crate) color_panel_mode: super::color_panel_view::ColorMode,
 }
 
 impl AppState {
@@ -101,6 +103,7 @@ impl AppState {
             app_config,
             workspace_layout,
             fill_on_top: true,
+            color_panel_mode: super::color_panel_view::ColorMode::Hsb,
         }
     }
 
@@ -373,6 +376,64 @@ impl AppState {
                 }
             }
         }
+    }
+
+    /// Set the active color (fill or stroke, per fill_on_top) and push to recent colors.
+    pub(crate) fn set_active_color(&mut self, color: Color) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            if self.fill_on_top {
+                tab.model.default_fill = Some(Fill::new(color));
+                if !tab.model.document().selection.is_empty() {
+                    tab.model.snapshot();
+                    Controller::set_selection_fill(&mut tab.model, Some(Fill::new(color)));
+                }
+            } else {
+                let width = tab.model.default_stroke.map(|s| s.width).unwrap_or(1.0);
+                tab.model.default_stroke = Some(Stroke::new(color, width));
+                if !tab.model.document().selection.is_empty() {
+                    tab.model.snapshot();
+                    Controller::set_selection_stroke(&mut tab.model, Some(Stroke::new(color, width)));
+                }
+            }
+            // Push to recent colors (move-to-front dedup, max 10)
+            let hex = color.to_hex();
+            if let Some(pos) = tab.model.recent_colors.iter().position(|c| c == &hex) {
+                tab.model.recent_colors.remove(pos);
+            }
+            tab.model.recent_colors.insert(0, hex);
+            tab.model.recent_colors.truncate(10);
+        }
+    }
+
+    /// Set the active color (fill or stroke, per fill_on_top) without pushing to recent colors.
+    /// Used for live slider drag updates.
+    pub(crate) fn set_active_color_live(&mut self, color: Color) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            if self.fill_on_top {
+                tab.model.default_fill = Some(Fill::new(color));
+            } else {
+                let width = tab.model.default_stroke.map(|s| s.width).unwrap_or(1.0);
+                tab.model.default_stroke = Some(Stroke::new(color, width));
+            }
+        }
+    }
+
+    /// Get the active color (fill or stroke, per fill_on_top).
+    pub(crate) fn active_color(&self) -> Option<Color> {
+        self.tab().and_then(|tab| {
+            if self.fill_on_top {
+                tab.model.default_fill.map(|f| f.color)
+            } else {
+                tab.model.default_stroke.map(|s| s.color)
+            }
+        })
+    }
+
+    /// Get recent colors for the active tab.
+    pub(crate) fn recent_colors(&self) -> &[String] {
+        self.tab()
+            .map(|tab| tab.model.recent_colors.as_slice())
+            .unwrap_or(&[])
     }
 
     pub(crate) fn repaint(&self) {

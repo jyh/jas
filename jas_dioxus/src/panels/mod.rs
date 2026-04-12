@@ -148,6 +148,7 @@ mod tests {
             app_config: crate::workspace::workspace::AppConfig::default(),
             workspace_layout: layout,
             fill_on_top: true,
+            color_panel_mode: crate::workspace::color_panel_view::ColorMode::Hsb,
         }
     }
 }

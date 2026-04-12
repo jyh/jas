@@ -2,6 +2,7 @@
 pub mod app;
 pub(crate) mod app_state;
 pub(crate) mod clipboard;
+pub mod color_panel_view;
 pub mod color_picker;
 pub mod color_picker_dialog;
 pub(crate) mod dock_panel;

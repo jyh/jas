@@ -33,6 +33,9 @@ pub struct Model {
     pub default_fill: Option<Fill>,
     /// Default stroke for newly created elements.
     pub default_stroke: Option<Stroke>,
+    /// Per-document list of recently committed colors (hex strings, no #),
+    /// newest first. Max 10 entries.
+    pub recent_colors: Vec<String>,
 }
 
 impl Default for Model {
@@ -48,6 +51,7 @@ impl Default for Model {
             saved_generation: 0,
             default_fill: None,
             default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            recent_colors: Vec::new(),
         }
     }
 }
@@ -68,6 +72,7 @@ impl Model {
             saved_generation: 0,
             default_fill: None,
             default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            recent_colors: Vec::new(),
         }
     }
 
