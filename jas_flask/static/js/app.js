@@ -1673,6 +1673,17 @@
 
   // ── Dock effects ──────────────────────────────────────────
 
+  // Remove a floating dock pane if its model has no groups left
+  function removeIfEmptyFloating(dockId) {
+    var model = dockModels[dockId];
+    if (!model || model.groups.length > 0) return;
+    if (dockId.indexOf("floating_dock_") !== 0) return;
+    var paneId = dockId.replace("_view", "");
+    var pane = document.getElementById(paneId);
+    if (pane) pane.remove();
+    delete dockModels[dockId];
+  }
+
   function dockClosePanel(dockId, panelName) {
     var model = dockModels[dockId];
     if (!model) return;
@@ -1690,6 +1701,7 @@
         }
         hiddenPanels.push(panelName);
         rerenderDockView(dockId);
+        removeIfEmptyFloating(dockId);
         return;
       }
     }
@@ -1717,6 +1729,7 @@
     if (!model || groupIdx >= model.groups.length) return;
     var group = model.groups.splice(groupIdx, 1)[0];
     rerenderDockView(dockId);
+    removeIfEmptyFloating(dockId);
     // Create floating dock pane
     createFloatingDock([group], x, y);
   }
@@ -1926,6 +1939,7 @@
               if (srcGroup.active >= srcGroup.panels.length) srcGroup.active = Math.max(0, srcGroup.panels.length - 1);
               if (srcGroup.panels.length === 0) srcModel.groups.splice(pd.context.groupIdx, 1);
               rerenderDockView(pd.context.dockId);
+              removeIfEmptyFloating(pd.context.dockId);
               createFloatingDock([{ panels: [pd.panelName], active: 0, collapsed: false }], e.clientX - 110, e.clientY - 10);
             }
           }
@@ -1961,6 +1975,7 @@
       }
 
       rerenderDockView(pd.context.dockId);
+      removeIfEmptyFloating(pd.context.dockId);
       if (target.dockId !== pd.context.dockId) rerenderDockView(target.dockId);
     }
   });
