@@ -127,7 +127,7 @@ case "apply":
     let json = readFile(args[2])
     var layout = testJsonToWorkspace(json)
     var stdinData = Data()
-    while let chunk = try? FileHandle.standardInput.availableData, !chunk.isEmpty {
+    while let chunk = Optional(FileHandle.standardInput.availableData), !chunk.isEmpty {
         stdinData.append(chunk)
     }
     let opsStr = String(data: stdinData, encoding: .utf8) ?? "[]"
