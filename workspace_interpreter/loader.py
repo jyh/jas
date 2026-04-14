@@ -219,8 +219,14 @@ def resolve_templates(element: dict, templates: dict, _depth: int = 0) -> None:
                 content = copy.deepcopy(template_def.get("content", {}))
                 content = substitute_params(content, resolved)
                 # Merge sibling keys from invocation onto expanded content
+                # For dict values (like style), deep-merge instead of replacing
                 for k, v in child.items():
-                    content[k] = v
+                    if k in content and isinstance(content[k], dict) and isinstance(v, dict):
+                        merged = dict(content[k])
+                        merged.update(v)
+                        content[k] = merged
+                    else:
+                        content[k] = v
                 children[i] = content
                 # Recurse into expanded element (handles nested templates)
                 resolve_templates(content, templates, _depth + 1)
