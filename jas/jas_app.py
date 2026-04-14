@@ -249,8 +249,22 @@ class MainWindow(QMainWindow):
             self._update_canvas_logo()
             self.tab_widget.currentChanged.connect(lambda _: self._update_canvas_logo())
 
+        # YAML interpreter state store
+        from workspace_interpreter.state_store import StateStore
+        from workspace_interpreter.loader import load_workspace, state_defaults
+        from panels.color_bar_widget import register_color_bar
+        try:
+            import os
+            ws_path = os.path.join(os.path.dirname(__file__), "..", "workspace")
+            ws = load_workspace(ws_path)
+            self._yaml_state = StateStore(state_defaults(ws.get("state", {})))
+        except Exception:
+            self._yaml_state = StateStore()
+        register_color_bar()
+
         # Dock pane
-        self.dock_panel = DockPanelWidget(self.workspace_layout, get_model=self.active_model)
+        self.dock_panel = DockPanelWidget(self.workspace_layout, get_model=self.active_model,
+                                          state_store=self._yaml_state)
         self.dock_panel.setStyleSheet(f"background: {self.theme.pane_bg};")
         self._dock_title = PaneTitleBar(
             "", pane_id=did,
