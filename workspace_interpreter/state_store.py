@@ -19,6 +19,7 @@ class StateStore:
         self._dialog: dict = {}
         self._dialog_id: str | None = None
         self._dialog_params: dict | None = None
+        self._dialog_props: dict = {}  # {key: {"get": expr, "set": expr}}
         self._subscribers: list[tuple[set | None, Callable]] = []
         self._panel_subscribers: dict[str, list[Callable]] = {}
 
@@ -82,20 +83,60 @@ class StateStore:
     # ── Dialog state ───────────────────────────────────────────
 
     def init_dialog(self, dialog_id: str, defaults: dict,
-                    params: dict | None = None):
-        """Initialize dialog-local state. Replaces any previous dialog."""
+                    params: dict | None = None,
+                    props: dict | None = None):
+        """Initialize dialog-local state. Replaces any previous dialog.
+
+        Args:
+            defaults: Initial stored values for plain variables.
+            params: Parameters passed when opening the dialog.
+            props: Property definitions {key: {"get": expr, "set": expr}}.
+                   Variables with "get" are computed on read from sibling state.
+                   Variables with "set" run a lambda on write to update targets.
+        """
         self._dialog_id = dialog_id
         self._dialog = dict(defaults)
         self._dialog_params = dict(params) if params else None
+        self._dialog_props = dict(props) if props else {}
 
     def get_dialog(self, key: str):
         if self._dialog_id is None:
             return None
+        prop = self._dialog_props.get(key)
+        if prop and "get" in prop:
+            from workspace_interpreter.expr import evaluate
+            # Build local scope: all sibling state vars by bare name
+            local = dict(self._dialog)
+            result = evaluate(prop["get"], local)
+            return result.value
         return self._dialog.get(key)
 
     def set_dialog(self, key: str, value):
         if self._dialog_id is None:
             return
+        prop = self._dialog_props.get(key)
+        if prop and "set" in prop:
+            from workspace_interpreter.expr import evaluate
+            from workspace_interpreter.expr_types import Value, ValueType
+            # Parse the setter as a lambda and apply with the value
+            local = dict(self._dialog)
+            # Store callback: assignments in the setter write to dialog state
+            def store_cb(target, val):
+                self._dialog[target] = val.value
+            local["__store_cb__"] = store_cb
+            # Evaluate the setter lambda
+            setter_val = evaluate(prop["set"], local)
+            if setter_val.type == ValueType.CLOSURE:
+                params, body, captured = setter_val.value
+                if len(params) == 1:
+                    from workspace_interpreter.expr_eval import eval_node
+                    call_ctx = dict(captured)
+                    call_ctx.update(local)
+                    call_ctx[params[0]] = value
+                    eval_node(body, call_ctx)
+            return
+        if prop and "get" in prop and "set" not in prop:
+            return  # read-only — ignore writes
         self._dialog[key] = value
 
     def get_dialog_state(self) -> dict:
@@ -111,6 +152,7 @@ class StateStore:
         self._dialog_id = None
         self._dialog = {}
         self._dialog_params = None
+        self._dialog_props = {}
 
     # ── List operations ──────────────────────────────────────
 

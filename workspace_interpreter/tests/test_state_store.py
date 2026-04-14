@@ -241,3 +241,89 @@ class TestDialogState:
         assert store.get_dialog_id() == "second"
         assert store.get_dialog("x") is None
         assert store.get_dialog("y") == 2
+
+
+class TestDialogProperties:
+    """Tests for get/set reactive properties on dialog state."""
+
+    def test_get_property(self):
+        """Variable with get expr computes value from sibling state."""
+        store = StateStore()
+        store.init_dialog("test", {"x": 10}, props={
+            "doubled": {"get": "x * 2"},
+        })
+        assert store.get_dialog("x") == 10
+        assert store.get_dialog("doubled") == 20
+
+    def test_get_uses_current_state(self):
+        """Getter re-evaluates when underlying state changes."""
+        store = StateStore()
+        store.init_dialog("test", {"x": 5}, props={
+            "doubled": {"get": "x * 2"},
+        })
+        assert store.get_dialog("doubled") == 10
+        store.set_dialog("x", 20)
+        assert store.get_dialog("doubled") == 40
+
+    def test_set_property(self):
+        """Variable with set expr runs lambda and updates targets."""
+        store = StateStore()
+        store.init_dialog("test", {"color": "#ff0000"}, props={
+            "r": {
+                "get": "rgb_r(color)",
+                "set": "fun v -> color <- rgb(v, rgb_g(color), rgb_b(color))",
+            },
+        })
+        assert store.get_dialog("r") == 255
+        store.set_dialog("r", 0)
+        assert store.get_dialog("color") == "#000000"  # was #ff0000 (r=255,g=0,b=0), set r=0
+        assert store.get_dialog("r") == 0
+
+    def test_derived_chain(self):
+        """Set h → updates color → reading r recomputes from new color."""
+        store = StateStore()
+        store.init_dialog("test", {"color": "#ff0000"}, props={
+            "h": {
+                "get": "hsb_h(color)",
+                "set": "fun v -> color <- hsb(v, hsb_s(color), hsb_b(color))",
+            },
+            "r": {"get": "rgb_r(color)"},
+            "c": {"get": "cmyk_c(color)"},
+        })
+        assert store.get_dialog("h") == 0  # red = hue 0
+        store.set_dialog("h", 120)  # green
+        color = store.get_dialog("color")
+        assert color == "#00ff00"
+        assert store.get_dialog("r") == 0
+        assert store.get_dialog("c") == 100  # CMYK cyan for green
+
+    def test_plain_var_no_props(self):
+        """Variables without get/set behave as before."""
+        store = StateStore()
+        store.init_dialog("test", {"x": 5}, props={})
+        assert store.get_dialog("x") == 5
+        store.set_dialog("x", 10)
+        assert store.get_dialog("x") == 10
+
+    def test_get_only_readonly(self):
+        """Variable with get but no set ignores writes."""
+        store = StateStore()
+        store.init_dialog("test", {"color": "#ff0000"}, props={
+            "r": {"get": "rgb_r(color)"},
+        })
+        assert store.get_dialog("r") == 255
+        store.set_dialog("r", 0)  # should be ignored
+        assert store.get_dialog("r") == 255  # unchanged
+
+    def test_set_with_let(self):
+        """Setter using let for local bindings."""
+        store = StateStore()
+        store.init_dialog("test", {"color": "#ff0000"}, props={
+            "bl": {
+                "get": "rgb_b(color)",
+                "set": "fun v -> let r = rgb_r(color) in let g = rgb_g(color) in color <- rgb(r, g, v)",
+            },
+        })
+        store.set_dialog("bl", 128)
+        # Original was #ff0000 (r=255, g=0, b=0), set bl=128
+        assert store.get_dialog("color") == "#ff0080"
