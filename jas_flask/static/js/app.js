@@ -41,6 +41,133 @@
   // ── Dialog-local state ──────────────────────────────────���─
   var dialogState = null;         // non-null only while a dialog with state is open
   var dialogParams = null;        // params passed to open_dialog
+  var dialogProps = null;         // {key: {get: expr, set: expr}} from YAML state defs
+
+  // ── Dialog property evaluation ─────────────────────────────
+  // Evaluates get expressions against dialogState using colorFunctions.
+  function dialogEvalExpr(expr, localScope) {
+    if (!expr || typeof expr !== "string") return null;
+    // Simple expression evaluator for property get/set expressions.
+    // Handles: functionName(arg), functionName(arg1, arg2, arg3),
+    // variable references, string concat with +, string literals
+    var trimmed = expr.trim();
+
+    // String literal
+    if (trimmed.charAt(0) === '"' && trimmed.charAt(trimmed.length - 1) === '"') {
+      return trimmed.slice(1, -1);
+    }
+
+    // String concat: expr + expr
+    var plusIdx = findTopLevelPlus(trimmed);
+    if (plusIdx > 0) {
+      var left = dialogEvalExpr(trimmed.substring(0, plusIdx), localScope);
+      var right = dialogEvalExpr(trimmed.substring(plusIdx + 1), localScope);
+      return String(left != null ? left : "") + String(right != null ? right : "");
+    }
+
+    // Function call: name(args)
+    var funcMatch = trimmed.match(/^(\w+)\((.+)\)$/);
+    if (funcMatch) {
+      var fname = funcMatch[1];
+      var argsStr = funcMatch[2];
+      var args = splitArgs(argsStr);
+      var evalArgs = args.map(function (a) { return dialogEvalExpr(a.trim(), localScope); });
+      // Built-in color functions
+      if (colorFunctions[fname] && evalArgs.length === 1) {
+        return colorFunctions[fname](evalArgs[0]);
+      }
+      // Multi-arg: hsb(h,s,b), rgb(r,g,b)
+      if (fname === "hsb" && evalArgs.length === 3) {
+        var rgb = hsbToRgb(Number(evalArgs[0]), Number(evalArgs[1]), Number(evalArgs[2]));
+        return "#" + rgbToHexStr(rgb.r, rgb.g, rgb.b);
+      }
+      if (fname === "rgb" && evalArgs.length === 3) {
+        return "#" + rgbToHexStr(Number(evalArgs[0]), Number(evalArgs[1]), Number(evalArgs[2]));
+      }
+      return null;
+    }
+
+    // Number literal
+    if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+      return Number(trimmed);
+    }
+
+    // Variable reference (bare name from local scope)
+    if (/^\w+$/.test(trimmed) && localScope && trimmed in localScope) {
+      return localScope[trimmed];
+    }
+
+    return null;
+  }
+
+  function findTopLevelPlus(s) {
+    var depth = 0;
+    for (var i = 0; i < s.length; i++) {
+      if (s[i] === '(') depth++;
+      else if (s[i] === ')') depth--;
+      else if (s[i] === '+' && depth === 0 && i > 0) return i;
+    }
+    return -1;
+  }
+
+  function splitArgs(s) {
+    var args = [], depth = 0, start = 0;
+    for (var i = 0; i < s.length; i++) {
+      if (s[i] === '(') depth++;
+      else if (s[i] === ')') depth--;
+      else if (s[i] === ',' && depth === 0) { args.push(s.substring(start, i)); start = i + 1; }
+    }
+    args.push(s.substring(start));
+    return args;
+  }
+
+  // Get a dialog value, evaluating getter if the variable has one.
+  function dialogGetValue(key) {
+    if (!dialogState) return null;
+    if (dialogProps && dialogProps[key] && dialogProps[key].get) {
+      return dialogEvalExpr(dialogProps[key].get, dialogState);
+    }
+    return dialogState[key];
+  }
+
+  // Set a dialog value, running setter if the variable has one.
+  function dialogSetValue(key, value) {
+    if (!dialogState) return;
+    if (dialogProps && dialogProps[key] && dialogProps[key].set) {
+      var setExpr = dialogProps[key].set;
+      // Parse: "fun PARAM -> BODY" where BODY is "TARGET <- EXPR"
+      var m = setExpr.match(/^fun\s+(\w+)\s*->\s*(.+)$/);
+      if (!m) { m = setExpr.match(/^fun\s*\((\w+)\)\s*->\s*(.+)$/); }
+      if (m) {
+        var param = m[1], body = m[2].trim();
+        // Build local scope with param bound
+        var local = {};
+        for (var k in dialogState) { if (dialogState.hasOwnProperty(k)) local[k] = dialogState[k]; }
+        local[param] = value;
+        // Handle sequenced assignments: body1; body2
+        var parts = body.split(";");
+        for (var i = 0; i < parts.length; i++) {
+          var part = parts[i].trim();
+          var assignMatch = part.match(/^(\w+)\s*<-\s*(.+)$/);
+          if (assignMatch) {
+            var target = assignMatch[1];
+            var valExpr = assignMatch[2].trim();
+            var result = dialogEvalExpr(valExpr, local);
+            if (result != null) {
+              dialogState[target] = result;
+              local[target] = result;
+            }
+          }
+        }
+      }
+      return;
+    }
+    // Read-only check
+    if (dialogProps && dialogProps[key] && dialogProps[key].get && !dialogProps[key].set) {
+      return; // ignore writes to read-only
+    }
+    dialogState[key] = value;
+  }
 
   // ── Panel-local state ──────────────────────────────────────
   var panelState = {};            // keyed by field name for the active panel
@@ -238,7 +365,7 @@
       }
       return panelState[parts[1]];
     }
-    if (parts[0] === "dialog" && dialogState) return dialogState[parts[1]];
+    if (parts[0] === "dialog" && dialogState) return dialogGetValue(parts[1]);
     if (parts[0] === "event" && ctx.event) return ctx.event[parts[1]];
     if (parts[0] === "self" && ctx.self) return ctx.self[parts[1]];
     if (parts[0] === "active_document" || parts[0] === "document") return activeDocumentCtx[parts[1]];
@@ -850,14 +977,23 @@
       var modalEl = document.getElementById("dialog-" + dlgId);
       if (modalEl) {
         var dlgStateDef = modalEl.getAttribute("data-dialog-state");
+        // Read property definitions (get/set)
+        var dlgPropsStr = modalEl.getAttribute("data-dialog-props");
+        dialogProps = null;
+        if (dlgPropsStr) {
+          try { dialogProps = JSON.parse(dlgPropsStr); } catch (e) {}
+        }
         if (dlgStateDef) {
           try {
             var dsDef = JSON.parse(dlgStateDef);
             dialogState = {};
-            // Phase 1: set defaults
+            // Phase 1: set defaults for plain variables (skip get-only)
             for (var dsKey in dsDef) {
               if (dsDef.hasOwnProperty(dsKey)) {
-                dialogState[dsKey] = dsDef[dsKey].default !== undefined ? dsDef[dsKey].default : null;
+                var hasGet = dialogProps && dialogProps[dsKey] && dialogProps[dsKey].get;
+                if (!hasGet) {
+                  dialogState[dsKey] = dsDef[dsKey].default !== undefined ? dsDef[dsKey].default : null;
+                }
               }
             }
             // Phase 2: run init expressions
@@ -896,6 +1032,7 @@
       }
       dialogState = null;
       dialogParams = null;
+      dialogProps = null;
       return;
     }
 
@@ -1748,14 +1885,8 @@
       var sat = Math.round(x / rect.width * 100);
       var bri = Math.round((1 - y / rect.height) * 100);
       if (dialogState) {
-        dialogState.s = sat;
-        dialogState.b = bri;
-        // Recompute color from HSB
-        var h = Number(dialogState.h) || 0;
-        var rgb = hsbToRgb(h, sat, bri);
-        dialogState.color = "#" + rgbToHexStr(rgb.r, rgb.g, rgb.b);
-        dialogState.hex = rgbToHexStr(rgb.r, rgb.g, rgb.b);
-        dialogState.r = rgb.r; dialogState.g = rgb.g; dialogState.bl = rgb.b;
+        dialogSetValue("s", sat);
+        dialogSetValue("b", bri);
         updateBindings(null, null);
       }
       // Update cursor position
@@ -1792,19 +1923,14 @@
       var hue = Math.round(y / rect.height * 360);
       if (hue >= 360) hue = 359;
       if (dialogState) {
-        dialogState.h = hue;
-        // Recompute color from HSB
-        var s = Number(dialogState.s) || 100;
-        var b = Number(dialogState.b) || 100;
-        var rgb = hsbToRgb(hue, s, b);
-        dialogState.color = "#" + rgbToHexStr(rgb.r, rgb.g, rgb.b);
-        dialogState.hex = rgbToHexStr(rgb.r, rgb.g, rgb.b);
-        dialogState.r = rgb.r; dialogState.g = rgb.g; dialogState.bl = rgb.b;
+        dialogSetValue("h", hue);
         updateBindings(null, null);
         // Update gradient background for new hue
+        var newColor = dialogState.color || "#ff0000";
+        var hVal = dialogGetValue("h") || 0;
         var gradEl = document.querySelector("[data-type='color-gradient']");
         if (gradEl) {
-          var hRgb = hsbToRgb(hue, 100, 100);
+          var hRgb = hsbToRgb(Number(hVal), 100, 100);
           gradEl.style.background =
             "linear-gradient(to bottom,transparent,#000)," +
             "linear-gradient(to right,#fff,rgb(" + hRgb.r + "," + hRgb.g + "," + hRgb.b + "))";

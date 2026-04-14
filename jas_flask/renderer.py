@@ -107,6 +107,18 @@ def render_dialogs(dialogs: dict, theme: dict, state: dict, brand: dict | None =
             data_attrs += f' data-dialog-state="{escape(json.dumps(dialog["state"]))}"'
         if "init" in dialog:
             data_attrs += f' data-dialog-init="{escape(json.dumps(dialog["init"]))}"'
+        # Extract get/set property definitions for JS
+        props = {}
+        for sk, sv in dialog.get("state", {}).items():
+            if isinstance(sv, dict) and ("get" in sv or "set" in sv):
+                p = {}
+                if "get" in sv:
+                    p["get"] = sv["get"]
+                if "set" in sv:
+                    p["set"] = sv["set"]
+                props[sk] = p
+        if props:
+            data_attrs += f' data-dialog-props="{escape(json.dumps(props))}"'
         html += (
             f'<div class="modal fade" id="dialog-{dialog_id}" tabindex="-1"{data_attrs}>'
             f'<div class="modal-dialog"><div class="modal-content">'
