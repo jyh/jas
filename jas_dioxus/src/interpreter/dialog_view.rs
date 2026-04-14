@@ -22,6 +22,8 @@ pub struct DialogState {
     pub state: HashMap<String, serde_json::Value>,
     /// Parameters passed when the dialog was opened.
     pub params: HashMap<String, serde_json::Value>,
+    /// Anchor position (page coords) for non-modal popover dialogs.
+    pub anchor: Option<(f64, f64)>,
 }
 
 /// Signal wrapper for providing dialog state via context.
@@ -97,7 +99,24 @@ pub fn open_dialog(
         id: dialog_id.to_string(),
         state: dialog_state,
         params: resolved_params,
+        anchor: None,
     }));
+}
+
+/// Open a dialog with an anchor position for popover placement.
+pub fn open_dialog_at(
+    dialog_signal: &mut Signal<Option<DialogState>>,
+    dialog_id: &str,
+    raw_params: &serde_json::Map<String, serde_json::Value>,
+    live_state: &serde_json::Map<String, serde_json::Value>,
+    anchor: (f64, f64),
+) {
+    open_dialog(dialog_signal, dialog_id, raw_params, live_state);
+    // Set anchor on the dialog state
+    if let Some(mut ds) = dialog_signal() {
+        ds.anchor = Some(anchor);
+        dialog_signal.set(Some(ds));
+    }
 }
 
 /// Close the currently open dialog.
@@ -164,6 +183,10 @@ pub fn YamlDialogView(dialog_ctx: Signal<Option<DialogState>>) -> Element {
 
     let content = dlg_def.get("content").cloned().unwrap_or(serde_json::json!({}));
 
+    // Check if this is a modal or popover dialog
+    let is_modal = dlg_def.get("modal").and_then(|m| m.as_bool()).unwrap_or(true);
+    let anchor = ds.anchor;
+
     // Optional width from dialog spec
     let width_style = if let Some(w) = dlg_def.get("width").and_then(|w| w.as_f64()) {
         format!("width:{w}px;")
@@ -171,10 +194,36 @@ pub fn YamlDialogView(dialog_ctx: Signal<Option<DialogState>>) -> Element {
         String::new()
     };
 
+    // Backdrop and container styles differ for modal vs popover
+    let (backdrop_style, container_pos_style) = if !is_modal {
+        if let Some((ax, ay)) = anchor {
+            // Popover: transparent backdrop, positioned near anchor
+            (
+                "position:fixed; inset:0; z-index:2000;".to_string(),
+                format!("position:absolute; left:{ax}px; top:{ay}px;"),
+            )
+        } else {
+            // Non-modal without anchor: light backdrop, centered
+            (
+                "position:fixed; inset:0; z-index:2000; display:flex; align-items:center; justify-content:center;".to_string(),
+                String::new(),
+            )
+        }
+    } else {
+        // Modal: dimmed backdrop, centered
+        (
+            "position:fixed; inset:0; background:rgba(0,0,0,0.15); z-index:2000; display:flex; align-items:center; justify-content:center;".to_string(),
+            String::new(),
+        )
+    };
+
+    // Popover dialogs: compact style, no title bar
+    let show_title_bar = is_modal;
+
     rsx! {
-        // Modal backdrop
+        // Backdrop (clicks outside dismiss)
         div {
-            style: "position:fixed; inset:0; background:rgba(0,0,0,0.15); z-index:2000; display:flex; align-items:center; justify-content:center;",
+            style: "{backdrop_style}",
             onmousedown: move |evt: Event<MouseData>| {
                 evt.stop_propagation();
                 dialog_ctx.set(None);
@@ -182,34 +231,36 @@ pub fn YamlDialogView(dialog_ctx: Signal<Option<DialogState>>) -> Element {
 
             // Dialog container
             div {
-                style: "background:{THEME_BG}; border:1px solid {THEME_BORDER}; border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.25); {width_style}",
+                style: "background:{THEME_BG}; border:1px solid {THEME_BORDER}; border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.25); {width_style} {container_pos_style}",
                 onmousedown: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
                 },
 
-                // Title bar
-                div {
-                    style: "display:flex; align-items:center; padding:8px 12px; border-bottom:1px solid {THEME_BORDER}; background:{THEME_TITLE_BAR_BG}; border-radius:8px 8px 0 0;",
+                // Title bar (modal dialogs only)
+                if show_title_bar {
+                    div {
+                        style: "display:flex; align-items:center; padding:8px 12px; border-bottom:1px solid {THEME_BORDER}; background:{THEME_TITLE_BAR_BG}; border-radius:8px 8px 0 0;",
 
-                    // Brand logo
-                    span {
-                        style: "display:inline-block; width:28px; height:14px; color:{BRAND_COLOR}; flex-shrink:0; margin-right:6px;",
-                        dangerous_inner_html: BRAND_LOGO_SVG,
-                    }
+                        // Brand logo
+                        span {
+                            style: "display:inline-block; width:28px; height:14px; color:{BRAND_COLOR}; flex-shrink:0; margin-right:6px;",
+                            dangerous_inner_html: BRAND_LOGO_SVG,
+                        }
 
-                    // Title
-                    span {
-                        style: "color:{THEME_TITLE_BAR_TEXT}; font-size:13px; font-weight:500; flex:1;",
-                        "{summary}"
-                    }
+                        // Title
+                        span {
+                            style: "color:{THEME_TITLE_BAR_TEXT}; font-size:13px; font-weight:500; flex:1;",
+                            "{summary}"
+                        }
 
-                    // Close button
-                    button {
-                        style: "background:none; border:none; color:{THEME_TEXT_DIM}; font-size:16px; cursor:pointer; padding:2px 6px; line-height:1;",
-                        onclick: move |_| {
-                            dialog_ctx.set(None);
-                        },
-                        "\u{00d7}"
+                        // Close button
+                        button {
+                            style: "background:none; border:none; color:{THEME_TEXT_DIM}; font-size:16px; cursor:pointer; padding:2px 6px; line-height:1;",
+                            onclick: move |_| {
+                                dialog_ctx.set(None);
+                            },
+                            "\u{00d7}"
+                        }
                     }
                 }
 

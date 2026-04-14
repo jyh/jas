@@ -351,11 +351,15 @@ fn build_mousedown_handler(
     let dialog_signal = rctx.dialog_ctx.0;
     let revision = rctx.revision;
 
-    Some(EventHandler::new(move |_evt: Event<MouseData>| {
+    Some(EventHandler::new(move |evt: Event<MouseData>| {
+        // Capture mouse position for popover anchoring
+        let coords = evt.data().page_coordinates();
+        let anchor = (coords.x, coords.y);
         for (id, delay, effects) in &timer_specs {
             super::timer::start_timer(
                 &timer_ctx, id, *delay, effects.clone(),
                 app.clone(), dialog_signal, revision,
+                Some(anchor),
             );
         }
     }))

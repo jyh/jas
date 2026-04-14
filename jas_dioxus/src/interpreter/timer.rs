@@ -27,6 +27,7 @@ pub fn start_timer(
     app: crate::workspace::app_state::AppHandle,
     mut dialog_signal: Signal<Option<super::dialog_view::DialogState>>,
     mut revision: Signal<u64>,
+    anchor: Option<(f64, f64)>,
 ) {
     // Cancel existing timer with same id
     cancel_timer(timer_ctx, timer_id);
@@ -75,9 +76,15 @@ pub fn start_timer(
                     let st = app.borrow();
                     crate::workspace::dock_panel::build_live_state_map(&st)
                 };
-                super::dialog_view::open_dialog(
-                    &mut dialog_signal, dlg_id, &raw_params, &live_state,
-                );
+                if let Some(anc) = anchor {
+                    super::dialog_view::open_dialog_at(
+                        &mut dialog_signal, dlg_id, &raw_params, &live_state, anc,
+                    );
+                } else {
+                    super::dialog_view::open_dialog(
+                        &mut dialog_signal, dlg_id, &raw_params, &live_state,
+                    );
+                }
             }
         }
         revision += 1;
