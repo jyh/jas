@@ -1,11 +1,11 @@
 /// Value types for the expression language.
 ///
-/// The six value types: null, bool, number, string, color, list.
-/// Matches the Rust `Value` enum semantics exactly.
+/// The seven value types: null, bool, number, string, color, list, closure.
+/// Matches the Python reference implementation semantics.
 
 import Foundation
 
-/// The six value types in the expression language.
+/// The seven value types in the expression language.
 enum Value: Equatable {
     case null
     case bool(Bool)
@@ -13,6 +13,7 @@ enum Value: Equatable {
     case string(String)
     case color(String)  // normalized #rrggbb
     case list([AnyJSON])
+    case closure(params: [String], body: Expr, capturedCtx: [String: Any])
 
     /// Normalize a color string: 3-digit -> 6-digit, lowercase.
     static func colorValue(_ s: String) -> Value {
@@ -80,6 +81,7 @@ enum Value: Equatable {
         case .string(let s): return !s.isEmpty
         case .color: return true
         case .list(let l): return !l.isEmpty
+        case .closure: return true
         }
     }
 
@@ -96,6 +98,7 @@ enum Value: Equatable {
         case .string(let s): return s
         case .color(let c): return c
         case .list: return "[list]"
+        case .closure: return "[closure]"
         }
     }
 
@@ -103,6 +106,21 @@ enum Value: Equatable {
     var isNull: Bool {
         if case .null = self { return true }
         return false
+    }
+
+    /// Convert to Any for context injection. Returns nil for .null.
+    func toAny() -> Any? {
+        switch self {
+        case .null: return nil
+        case .bool(let b): return b
+        case .number(let n):
+            if n == Double(Int(n)) { return Int(n) }
+            return n
+        case .string(let s): return s
+        case .color(let c): return c
+        case .list(let l): return l.map { $0.value }
+        case .closure: return self  // keep as Value for closure dispatch
+        }
     }
 
     /// Strict typed equality.
@@ -118,6 +136,8 @@ enum Value: Equatable {
             return a == b
         case (.color(let a), .color(let b)):
             return normalizeColor(a) == normalizeColor(b)
+        case (.closure, _), (_, .closure):
+            return false  // closures are never equal
         default:
             return false  // different types -> false
         }

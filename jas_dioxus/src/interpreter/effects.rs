@@ -50,6 +50,7 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         Value::Str(s) => serde_json::json!(s),
         Value::Color(c) => serde_json::json!(c),
         Value::List(l) => serde_json::Value::Array(l.clone()),
+        Value::Closure { .. } => serde_json::Value::Null,
     }
 }
 

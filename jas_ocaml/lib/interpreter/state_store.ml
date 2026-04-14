@@ -3,6 +3,11 @@
     Manages global state, panel-scoped state, and dialog-scoped state.
     Port of workspace_interpreter/state_store.py. *)
 
+type prop_def = {
+  prop_get : string option;   (** getter expression *)
+  prop_set : string option;   (** setter expression (should evaluate to a lambda) *)
+}
+
 type t = {
   mutable state : (string * Yojson.Safe.t) list;
   mutable panels : (string * (string * Yojson.Safe.t) list) list;
@@ -10,6 +15,7 @@ type t = {
   mutable dialog : (string * Yojson.Safe.t) list;
   mutable dialog_id : string option;
   mutable dialog_params : (string * Yojson.Safe.t) list option;
+  mutable dialog_props : (string * prop_def) list;
 }
 
 let create ?(defaults = []) () : t =
@@ -18,7 +24,8 @@ let create ?(defaults = []) () : t =
     active_panel = None;
     dialog = [];
     dialog_id = None;
-    dialog_params = None }
+    dialog_params = None;
+    dialog_props = [] }
 
 (* ── Global state ─────────────────────────────────────── *)
 
@@ -69,21 +76,52 @@ let destroy_panel (store : t) (panel_id : string) : unit =
 
 let init_dialog (store : t) (dialog_id : string)
     (defaults : (string * Yojson.Safe.t) list)
-    ?params () : unit =
+    ?params ?(props = []) () : unit =
   store.dialog_id <- Some dialog_id;
   store.dialog <- defaults;
-  store.dialog_params <- params
+  store.dialog_params <- params;
+  store.dialog_props <- props
 
 let get_dialog (store : t) (key : string) : Yojson.Safe.t option =
   match store.dialog_id with
   | None -> None
-  | Some _ -> List.assoc_opt key store.dialog
+  | Some _ ->
+    (match List.assoc_opt key store.dialog_props with
+     | Some prop when prop.prop_get <> None ->
+       (* Evaluate getter expression against sibling dialog state as bare names *)
+       let get_expr = match prop.prop_get with Some e -> e | None -> "" in
+       let local_ctx = `Assoc store.dialog in
+       let result = Expr_eval.evaluate get_expr local_ctx in
+       Some (Expr_eval.value_to_json result)
+     | _ -> List.assoc_opt key store.dialog)
 
 let set_dialog (store : t) (key : string) (value : Yojson.Safe.t) : unit =
   match store.dialog_id with
   | None -> ()
   | Some _ ->
-    store.dialog <- (key, value) :: List.filter (fun (k, _) -> k <> key) store.dialog
+    (match List.assoc_opt key store.dialog_props with
+     | Some prop when prop.prop_set <> None ->
+       (* Evaluate setter as a lambda expression, then apply with the value *)
+       let set_expr = match prop.prop_set with Some e -> e | None -> "" in
+       let local_ctx = `Assoc store.dialog in
+       let store_cb target v =
+         store.dialog <- (target, Expr_eval.value_to_json v)
+           :: List.filter (fun (k, _) -> k <> target) store.dialog
+       in
+       let setter_val = Expr_eval.evaluate ~store_cb set_expr local_ctx in
+       (match setter_val with
+        | Expr_eval.Closure (params, body, captured_env) ->
+          if List.length params = 1 then begin
+            let param_name = List.hd params in
+            let arg_val = Expr_eval.value_of_json value in
+            let call_env = (param_name, arg_val) :: captured_env in
+            ignore (Expr_eval.eval_node ~local_env:call_env ~store_cb body local_ctx)
+          end
+        | _ -> ())
+     | Some prop when prop.prop_get <> None ->
+       ()  (* read-only — ignore writes *)
+     | _ ->
+       store.dialog <- (key, value) :: List.filter (fun (k, _) -> k <> key) store.dialog)
 
 let get_dialog_state (store : t) : (string * Yojson.Safe.t) list =
   store.dialog
@@ -97,7 +135,8 @@ let get_dialog_params (store : t) : (string * Yojson.Safe.t) list option =
 let close_dialog (store : t) : unit =
   store.dialog_id <- None;
   store.dialog <- [];
-  store.dialog_params <- None
+  store.dialog_params <- None;
+  store.dialog_props <- []
 
 (* ── Context for expression evaluation ────────────────── *)
 

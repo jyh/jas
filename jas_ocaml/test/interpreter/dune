@@ -7,3 +7,8 @@
  (name effects_test)
  (modules effects_test)
  (libraries jas alcotest))
+
+(test
+ (name expr_eval_test)
+ (modules expr_eval_test)
+ (libraries jas alcotest))

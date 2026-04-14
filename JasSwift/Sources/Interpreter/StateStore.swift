@@ -20,6 +20,7 @@ class StateStore {
     private var dialog: [String: Any] = [:]
     private var dialogId: String?
     private var dialogParams: [String: Any]?
+    private var dialogProps: [String: [String: Any]] = [:]  // {key: {"get": expr, "set": expr}}
 
     // MARK: - Init
 
@@ -81,19 +82,51 @@ class StateStore {
 
     // MARK: - Dialog state
 
-    func initDialog(_ dialogId: String, defaults: [String: Any], params: [String: Any]? = nil) {
+    func initDialog(_ dialogId: String, defaults: [String: Any],
+                    params: [String: Any]? = nil,
+                    props: [String: [String: Any]]? = nil) {
         self.dialogId = dialogId
         self.dialog = defaults
         self.dialogParams = params
+        self.dialogProps = props ?? [:]
     }
 
     func getDialog(_ key: String) -> Any? {
         guard dialogId != nil else { return nil }
+        if let prop = dialogProps[key], let getExpr = prop["get"] as? String {
+            // Evaluate getter against sibling dialog state as bare names
+            let local = dialog
+            let result = evaluate(getExpr, context: local)
+            return result.toAny()
+        }
         return dialog[key]
     }
 
     func setDialog(_ key: String, _ value: Any?) {
         guard dialogId != nil else { return }
+        if let prop = dialogProps[key] {
+            if let setExpr = prop["set"] as? String {
+                // Parse the setter as a lambda and apply with the value
+                var local = dialog
+                let storeCb: (String, Value) -> Void = { [weak self] target, val in
+                    self?.dialog[target] = val.toAny()
+                }
+                local["__store_cb__"] = storeCb
+                let setterVal = evaluate(setExpr, context: local)
+                if case .closure(let params, let body, let captured) = setterVal {
+                    if params.count == 1 {
+                        var callCtx = captured
+                        for (k, v) in local { callCtx[k] = v }
+                        callCtx[params[0]] = value
+                        let _ = evalNode(body, callCtx)
+                    }
+                }
+                return
+            }
+            if prop["get"] != nil {
+                return  // read-only prop — ignore writes
+            }
+        }
         dialog[key] = value
     }
 
@@ -113,6 +146,7 @@ class StateStore {
         dialogId = nil
         dialog = [:]
         dialogParams = nil
+        dialogProps = [:]
     }
 
     // MARK: - List operations

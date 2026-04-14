@@ -164,6 +164,7 @@ fn eval_to_json(source: &str, ctx: &serde_json::Value) -> serde_json::Value {
         Value::List(ref items) => {
             serde_json::Value::Array(items.clone())
         }
+        Value::Closure { .. } => serde_json::Value::Null,
     }
 }
 
@@ -251,6 +252,7 @@ fn build_click_handler(
                     Value::Bool(b) => { resolved_params.insert(k.clone(), serde_json::json!(b)); }
                     Value::Null => { resolved_params.insert(k.clone(), serde_json::Value::Null); }
                     Value::List(l) => { resolved_params.insert(k.clone(), serde_json::Value::Array(l)); }
+                    Value::Closure { .. } => { resolved_params.insert(k.clone(), serde_json::Value::Null); }
                 };
             } else {
                 resolved_params.insert(k.clone(), v.clone());
