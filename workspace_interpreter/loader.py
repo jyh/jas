@@ -43,7 +43,7 @@ def load_workspace(path: str) -> dict:
                 if isinstance(part, dict):
                     data.update(part)
         # Load recognized subdirectories
-        for subdir in ("dialogs", "panels"):
+        for subdir in ("dialogs", "panels", "templates"):
             subdir_path = os.path.join(path, subdir)
             if not os.path.isdir(subdir_path):
                 continue
@@ -100,8 +100,22 @@ def load_workspace(path: str) -> dict:
     if missing:
         raise ValueError(f"Missing required top-level keys: {missing}")
     # Resolve include directives in the layout tree
+    workspace_dir = path if os.path.isdir(path) else os.path.dirname(path)
     if "layout" in data:
-        resolve_includes(data["layout"], path if os.path.isdir(path) else os.path.dirname(path))
+        resolve_includes(data["layout"], workspace_dir)
+    # Resolve templates in layout, dialogs, and panels
+    templates = data.get("templates", {})
+    if templates:
+        if "layout" in data:
+            resolve_templates(data["layout"], templates)
+        for section in ("dialogs", "panels"):
+            section_data = data.get(section, {})
+            if isinstance(section_data, dict):
+                for key, item in section_data.items():
+                    if isinstance(item, dict):
+                        content = item.get("content")
+                        if isinstance(content, dict):
+                            resolve_templates(content, templates)
     return data
 
 
@@ -132,6 +146,89 @@ def resolve_includes(element: dict, workspace_dir: str) -> None:
     content = element.get("content")
     if isinstance(content, dict):
         resolve_includes(content, workspace_dir)
+
+
+def substitute_params(value, params: dict):
+    """Substitute ``${name}`` tokens in a value tree.
+
+    Two modes:
+    - Whole-value: if value is exactly ``"${name}"``, replaced with typed param.
+    - String interpolation: ``${name}`` inside a larger string is interpolated.
+
+    Recursively processes dicts and lists. Unknown ``${name}`` are left unchanged.
+    """
+    if isinstance(value, str):
+        import re
+        # Whole-value substitution: string is exactly "${name}"
+        m = re.fullmatch(r'\$\{(\w+)\}', value)
+        if m:
+            name = m.group(1)
+            if name in params:
+                return params[name]
+            return value
+        # String interpolation: replace all ${name} occurrences
+        def _repl(m):
+            name = m.group(1)
+            if name in params:
+                return str(params[name])
+            return m.group(0)
+        return re.sub(r'\$\{(\w+)\}', _repl, value)
+    if isinstance(value, dict):
+        return {k: substitute_params(v, params) for k, v in value.items()}
+    if isinstance(value, list):
+        return [substitute_params(item, params) for item in value]
+    return value
+
+
+def resolve_templates(element: dict, templates: dict, _depth: int = 0) -> None:
+    """Walk an element tree and expand ``template:`` directives in-place.
+
+    A template node like ``{template: "slider_row", params: {label: "H"}}``
+    is replaced by the template's content with ``${name}`` tokens substituted.
+    Sibling keys (e.g. ``id``, ``style``) merge onto the expanded element.
+
+    Recursion depth is limited to prevent infinite loops from circular templates.
+    """
+    if _depth > 20:
+        return
+    children = element.get("children")
+    if isinstance(children, list):
+        for i, child in enumerate(children):
+            if not isinstance(child, dict):
+                continue
+            if "template" in child and "repeat" not in child:
+                template_name = child.pop("template")
+                provided_params = child.pop("params", {})
+                template_def = templates.get(template_name)
+                if template_def is None:
+                    continue
+                # Resolve params: apply defaults from template definition
+                param_defs = template_def.get("params", {})
+                resolved = {}
+                for pname, pdef in param_defs.items():
+                    if pname in provided_params:
+                        resolved[pname] = provided_params[pname]
+                    elif isinstance(pdef, dict) and "default" in pdef:
+                        resolved[pname] = pdef["default"]
+                # Also pass through any extra params not in the definition
+                for pname, pval in provided_params.items():
+                    if pname not in resolved:
+                        resolved[pname] = pval
+                # Deep-clone and substitute
+                import copy
+                content = copy.deepcopy(template_def.get("content", {}))
+                content = substitute_params(content, resolved)
+                # Merge sibling keys from invocation onto expanded content
+                for k, v in child.items():
+                    content[k] = v
+                children[i] = content
+                # Recurse into expanded element (handles nested templates)
+                resolve_templates(content, templates, _depth + 1)
+            else:
+                resolve_templates(child, templates, _depth)
+    content = element.get("content")
+    if isinstance(content, dict):
+        resolve_templates(content, templates, _depth)
 
 
 def resolve_appearance(theme_config: dict, name: str | None = None) -> dict:

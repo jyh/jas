@@ -6,6 +6,7 @@ from workspace_interpreter.loader import (
     load_workspace, resolve_appearance, list_appearances,
     find_element_by_id, collect_element_ids,
     state_defaults, panel_state_defaults,
+    resolve_templates, substitute_params,
 )
 
 
@@ -334,6 +335,212 @@ class TestPanelStateDefaults:
     def test_panel_with_no_state(self):
         panel_spec = {"id": "layers_panel_content", "type": "panel"}
         assert panel_state_defaults(panel_spec) == {}
+
+
+class TestSubstituteParams:
+    def test_whole_value_string(self):
+        assert substitute_params("${name}", {"name": "hello"}) == "hello"
+
+    def test_whole_value_number(self):
+        assert substitute_params("${min}", {"min": 360}) == 360
+
+    def test_whole_value_bool(self):
+        assert substitute_params("${flag}", {"flag": True}) is True
+
+    def test_whole_value_dict(self):
+        result = substitute_params("${style}", {"style": {"flex": 1}})
+        assert result == {"flex": 1}
+
+    def test_whole_value_list(self):
+        result = substitute_params("${items}", {"items": [1, 2, 3]})
+        assert result == [1, 2, 3]
+
+    def test_string_interpolation(self):
+        assert substitute_params("${label}:", {"label": "H"}) == "H:"
+
+    def test_multiple_interpolations(self):
+        result = substitute_params("${a} and ${b}", {"a": "x", "b": "y"})
+        assert result == "x and y"
+
+    def test_no_substitution(self):
+        assert substitute_params("plain text", {"x": 1}) == "plain text"
+
+    def test_dict_recursion(self):
+        result = substitute_params(
+            {"gap": "${gap}", "alignment": "center"},
+            {"gap": 4},
+        )
+        assert result == {"gap": 4, "alignment": "center"}
+
+    def test_list_recursion(self):
+        result = substitute_params(
+            [{"min": "${min}"}, {"max": "${max}"}],
+            {"min": 0, "max": 100},
+        )
+        assert result == [{"min": 0}, {"max": 100}]
+
+    def test_missing_param_unchanged(self):
+        assert substitute_params("${missing}", {}) == "${missing}"
+
+    def test_nested_dict_in_list(self):
+        result = substitute_params(
+            [{"bind": {"value": "${bind}"}}],
+            {"bind": "dialog.h"},
+        )
+        assert result == [{"bind": {"value": "dialog.h"}}]
+
+
+class TestResolveTemplates:
+    def test_simple_expansion(self):
+        templates = {
+            "greeting": {
+                "params": {"name": {"type": "string"}},
+                "content": {"type": "text", "content": "Hello ${name}"},
+            }
+        }
+        element = {
+            "type": "container",
+            "children": [
+                {"template": "greeting", "params": {"name": "World"}},
+            ],
+        }
+        resolve_templates(element, templates)
+        assert element["children"][0] == {"type": "text", "content": "Hello World"}
+
+    def test_typed_number_substitution(self):
+        templates = {
+            "slider": {
+                "params": {"min": {"type": "number"}, "max": {"type": "number"}},
+                "content": {"type": "slider", "min": "${min}", "max": "${max}"},
+            }
+        }
+        element = {
+            "type": "container",
+            "children": [
+                {"template": "slider", "params": {"min": 0, "max": 360}},
+            ],
+        }
+        resolve_templates(element, templates)
+        child = element["children"][0]
+        assert child["min"] == 0
+        assert child["max"] == 360
+        assert isinstance(child["min"], int)
+
+    def test_default_params(self):
+        templates = {
+            "box": {
+                "params": {
+                    "color": {"type": "string", "default": "red"},
+                    "size": {"type": "number", "default": 10},
+                },
+                "content": {"type": "box", "color": "${color}", "size": "${size}"},
+            }
+        }
+        element = {
+            "type": "container",
+            "children": [
+                {"template": "box", "params": {}},
+            ],
+        }
+        resolve_templates(element, templates)
+        child = element["children"][0]
+        assert child["color"] == "red"
+        assert child["size"] == 10
+
+    def test_sibling_merge(self):
+        templates = {
+            "label": {
+                "params": {"text": {"type": "string"}},
+                "content": {"type": "text", "content": "${text}"},
+            }
+        }
+        element = {
+            "type": "container",
+            "children": [
+                {"template": "label", "params": {"text": "hi"}, "id": "my_label", "style": {"color": "red"}},
+            ],
+        }
+        resolve_templates(element, templates)
+        child = element["children"][0]
+        assert child["type"] == "text"
+        assert child["content"] == "hi"
+        assert child["id"] == "my_label"
+        assert child["style"] == {"color": "red"}
+
+    def test_nested_templates(self):
+        templates = {
+            "inner": {
+                "params": {"val": {"type": "string"}},
+                "content": {"type": "text", "content": "${val}"},
+            },
+            "outer": {
+                "params": {"msg": {"type": "string"}},
+                "content": {
+                    "type": "container",
+                    "children": [
+                        {"template": "inner", "params": {"val": "${msg}"}},
+                    ],
+                },
+            },
+        }
+        element = {
+            "type": "container",
+            "children": [
+                {"template": "outer", "params": {"msg": "hello"}},
+            ],
+        }
+        resolve_templates(element, templates)
+        inner = element["children"][0]["children"][0]
+        assert inner == {"type": "text", "content": "hello"}
+
+    def test_no_template_key_remains(self):
+        templates = {
+            "simple": {
+                "params": {},
+                "content": {"type": "spacer"},
+            }
+        }
+        element = {
+            "type": "container",
+            "children": [{"template": "simple", "params": {}}],
+        }
+        resolve_templates(element, templates)
+        child = element["children"][0]
+        assert "template" not in child
+        assert "params" not in child
+
+    def test_content_with_children(self):
+        """Template content that has children should expand correctly."""
+        templates = {
+            "row": {
+                "params": {"label": {"type": "string"}},
+                "content": {
+                    "type": "container",
+                    "layout": "row",
+                    "children": [
+                        {"type": "text", "content": "${label}"},
+                        {"type": "spacer"},
+                    ],
+                },
+            }
+        }
+        element = {
+            "type": "container",
+            "children": [
+                {"template": "row", "params": {"label": "Name"}},
+            ],
+        }
+        resolve_templates(element, templates)
+        child = element["children"][0]
+        assert child["type"] == "container"
+        assert child["layout"] == "row"
+        assert len(child["children"]) == 2
+        assert child["children"][0]["content"] == "Name"
+
+    def test_full_workspace_loads(self, workspace_path):
+        """Real workspace loads without errors after template support."""
+        data = load_workspace(workspace_path)
+        assert data["version"] == 1
 
 
 class TestCompile:
