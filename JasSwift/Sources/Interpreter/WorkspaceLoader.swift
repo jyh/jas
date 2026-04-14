@@ -106,6 +106,33 @@ class WorkspaceData {
         return defaults
     }
 
+    /// Get the dialogs map.
+    func dialogs() -> [String: Any] {
+        data["dialogs"] as? [String: Any] ?? [:]
+    }
+
+    /// Get a specific dialog spec by id.
+    func dialog(_ dialogId: String) -> [String: Any]? {
+        (data["dialogs"] as? [String: Any])?[dialogId] as? [String: Any]
+    }
+
+    /// Extract default values from a dialog's state section.
+    func dialogStateDefaults(_ dialogId: String) -> [String: Any] {
+        guard let dlg = dialog(dialogId),
+              let state = dlg["state"] as? [String: Any] else {
+            return [:]
+        }
+        var defaults: [String: Any] = [:]
+        for (key, defn) in state {
+            if let d = defn as? [String: Any] {
+                defaults[key] = d["default"] ?? NSNull()
+            } else {
+                defaults[key] = defn
+            }
+        }
+        return defaults
+    }
+
     /// Get the swatch libraries data map.
     func swatchLibraries() -> [String: Any] {
         data["swatch_libraries"] as? [String: Any] ?? [:]

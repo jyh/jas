@@ -112,6 +112,7 @@ public struct ContentView: View {
     @State private var paneState = PaneInteractionState()
     @State private var colorPickerState: ColorPickerState?
     @State private var showColorPicker = false
+    @State private var yamlDialogState: YamlDialogState?
 
     public init(workspace: WorkspaceState) {
         self.workspace = workspace
@@ -232,6 +233,12 @@ public struct ContentView: View {
                         originalColor: originalColor
                     )
                 }
+            }
+            .overlay {
+                YamlDialogOverlay(
+                    dialogState: $yamlDialogState,
+                    theme: workspace.theme
+                )
             }
         }
     }
