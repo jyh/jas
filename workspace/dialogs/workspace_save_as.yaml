@@ -1,9 +1,9 @@
 workspace_save_as:
   summary: "Save Workspace As"
   description: >
-    Text input dialog for naming a workspace layout. Warns if the name
-    "Workspace" is used (reserved system name) or if overwriting an
-    existing layout.
+    Text input dialog for naming a workspace layout. The Save button is
+    disabled when the name is empty or matches the reserved name
+    "Workspace". A warning message appears for the reserved name.
   modal: true
   state:
     name: { type: string, default: "", description: "User-entered workspace name" }
@@ -17,8 +17,19 @@ workspace_save_as:
         type: text_input
         placeholder: "My Layout"
         bind: "dialog.name"
+      - id: ws_name_warning
+        type: text
+        content: "\u201cWorkspace\u201d is reserved and cannot be used."
+        style: { color: "#cc4444", font_size: 11 }
+        bind:
+          visible: 'dialog.name == "Workspace"'
       - type: row
         style: { justify: end, gap: 8 }
         children:
           - { type: button, label: "Cancel", action: dismiss_dialog }
-          - { type: button, label: "Save",   action: save_workspace_confirm, variant: primary }
+          - type: button
+            label: "Save"
+            action: save_workspace_confirm
+            variant: primary
+            bind:
+              disabled: 'dialog.name == "" or dialog.name == "Workspace"'

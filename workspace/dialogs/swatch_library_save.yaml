@@ -7,14 +7,7 @@ swatch_library_save:
     library's complete data (name, description, and all swatches with
     their name, color, color_mode, color_type, and global fields) is
     serialized to JSON and written to workspace/swatches/<name>.json.
-
-    The selected library is determined by panel.selected_library in the
-    Swatches panel state (the library containing the most recently
-    selected swatch). Cancel dismisses the dialog without saving.
-
-    Layout follows the appearance_save_as dialog pattern: a label, a
-    text input bound to dialog.name, and a right-justified row with
-    Cancel and Save buttons.
+    Save is disabled when the name field is empty.
   modal: true
   state:
     name: { type: string, default: "", description: "User-entered library name" }
@@ -32,4 +25,9 @@ swatch_library_save:
         style: { justify: end, gap: 8 }
         children:
           - { type: button, label: "Cancel", action: dismiss_dialog }
-          - { type: button, label: "Save",   action: save_swatch_library_confirm, variant: primary }
+          - type: button
+            label: "Save"
+            action: save_swatch_library_confirm
+            variant: primary
+            bind:
+              disabled: 'dialog.name == ""'

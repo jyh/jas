@@ -3,7 +3,8 @@ appearance_save_as:
   description: >
     Text input dialog for naming a custom appearance. The current
     resolved appearance (all colors, fonts, and sizes) is saved to
-    browser storage under the given name.
+    browser storage under the given name. Save is disabled when the
+    name field is empty.
   modal: true
   state:
     name: { type: string, default: "", description: "User-entered appearance name" }
@@ -21,4 +22,9 @@ appearance_save_as:
         style: { justify: end, gap: 8 }
         children:
           - { type: button, label: "Cancel", action: dismiss_dialog }
-          - { type: button, label: "Save",   action: save_appearance_confirm, variant: primary }
+          - type: button
+            label: "Save"
+            action: save_appearance_confirm
+            variant: primary
+            bind:
+              disabled: 'dialog.name == ""'
