@@ -51,7 +51,8 @@ All top-level keys are required except `icons`, `runtime_contexts`,
 |---|---|
 | `color_value` | `"#rrggbb"`, `"#rrggbbaa"`, `"rgba(r,g,b,a)"`, or `"transparent"` |
 | `font_spec` | `{ family: <string>, size: <number>, weight?: <string> }` |
-| `interpolated` | String with `{{theme.*}}`, `{{state.*}}`, or `{{param.*}}` references |
+| `expression` | Expression string evaluated per the Expression Language (see below) |
+| `text` | String with embedded `{{expr}}` regions (see Expression Language, Text Context) |
 
 ---
 
@@ -190,7 +191,7 @@ actions:
         type: enum | string | number | bool | state_ref
         values: [...]            # when type=enum
         ref: <string>            # when type=state_ref
-    enabled_when: <interpolated> # optional boolean expression
+    enabled_when: <expression> # optional boolean expression
     effects: <list of effect>    # optional; what the action does (see Effects)
 ```
 
@@ -268,7 +269,7 @@ is a single-key map where the key is the operation type.
 ```yaml
 # Execute effects conditionally
 - if:
-    condition: <interpolated>      # boolean expression
+    condition: <expression>      # boolean expression
     then: <list of effect>         # executed when true
     else: <list of effect>         # optional; executed when false
 ```
@@ -301,7 +302,7 @@ is a single-key map where the key is the operation type.
 - create_child:
     parent: <element_id>            # container to append to
     props:                           # optional; template variables
-      <name>: <interpolated>         #   resolved once at creation time
+      <name>: <expression>         #   resolved once at creation time
     element: <element>              # full element spec to create
     
 # Remove a child element by id
@@ -556,7 +557,7 @@ menubar:
   action: <action_id>
   params: { ... }                # optional
   shortcut: <string>             # optional display string
-  enabled_when: <interpolated>   # optional
+  enabled_when: <expression>   # optional
 ```
 
 **Submenu:**
@@ -602,7 +603,7 @@ summary: <string>                # short label (wireframe display)
 description: <string>            # full English (inspection popup)
 style: <style>                   # optional visual properties
 behavior: <list of behavior>     # optional event handlers
-bind: <map: prop → interpolated> # optional state bindings
+bind: <map: prop → expression> # optional state bindings
 children: <list of element>      # optional nested elements
 tier: <integer>                  # optional implementation tier
 ```
@@ -644,7 +645,7 @@ recommended for every element.
 | `dropdown` | Button that opens a menu of items | `icon`, `label`, `items`: list of `{label, action, params}` |
 | `toggle` | Toggle / checkbox | `label`, `bind` |
 | `radio_group` | Mutually exclusive options | `options`: `[{id, label}]`, `bind` |
-| `text` | Static or interpolated text | `content`: interpolated string |
+| `text` | Static or interpolated text | `content`: text string (with `{{expr}}`) |
 | `text_input` | Text entry field | `placeholder`, `bind` |
 | `number_input` | Numeric entry | `min`, `max`, `step`, `bind` |
 | `color_swatch` | Color display square | `bind.color`, `hollow`: bool |
@@ -710,7 +711,7 @@ grid:
 
 ```yaml
 type: tabs
-active: <integer | interpolated> # index of the active tab, or bind expression
+active: <integer | expression> # index of the active tab, or bind expression
 children:
   - <element>                    # each child is one tab's content
 ```
@@ -902,7 +903,7 @@ behavior:
     action: <action_id>              # dispatch a named action (simple form)
     params: { ... }                  # optional, passed to action
     effects: <list of effect>        # inline effects (alternative to action)
-    condition: <interpolated>        # optional boolean guard
+    condition: <expression>        # optional boolean guard
     delay_ms: <number>               # optional (e.g. for long_press)
     menu: <string>                   # optional menu id to open
     dialog: <string>                 # optional dialog id to open
@@ -1056,7 +1057,7 @@ in sync when bound values change.
 
 ```yaml
 bind:
-  <property>: <interpolated>
+  <property>: <expression>
 ```
 
 ### Standard Bindable Properties
@@ -1107,7 +1108,7 @@ dialogs:
         default: <value>
         description: <string>
     init:                            # optional; initialize dialog state on open
-      <state_name>: <interpolated>   # expression evaluated at open time
+      <state_name>: <expression>   # expression evaluated at open time
     content: <element>               # layout tree for dialog body
 ```
 
@@ -1138,24 +1139,9 @@ effects:
 
 ### Color Conversion Functions
 
-Init expressions may use built-in color conversion functions to decompose a
-color value into its components:
-
-| Function | Returns |
-|---|---|
-| `hsb_h(<color>)` | Hue component (0–360) |
-| `hsb_s(<color>)` | Saturation component (0–100) |
-| `hsb_b(<color>)` | Brightness component (0–100) |
-| `rgb_r(<color>)` | Red component (0–255) |
-| `rgb_g(<color>)` | Green component (0–255) |
-| `rgb_b(<color>)` | Blue component (0–255) |
-| `cmyk_c(<color>)` | Cyan component (0–100) |
-| `cmyk_m(<color>)` | Magenta component (0–100) |
-| `cmyk_y(<color>)` | Yellow component (0–100) |
-| `cmyk_k(<color>)` | Key/black component (0–100) |
-| `hex(<color>)` | Hex string without `#` prefix |
-| `rgb(<r>, <g>, <b>)` | Compose color from RGB components |
-| `hsb(<h>, <s>, <b>)` | Compose color from HSB components |
+See the Expression Language section for the full list of color
+decomposition, construction, and transformation functions (`hsb_h`,
+`rgb_r`, `cmyk_c`, `hex`, `rgb`, `hsb`, `invert`, `complement`).
 
 ### Examples
 
@@ -1182,50 +1168,478 @@ dialogs:
 
 ---
 
-## Interpolation
+## Expression Language
 
-`{{...}}` expressions may appear in any string-valued property.
+A typed expression language for the workspace YAML schema. All `bind`,
+`condition`, `enabled_when`, `checked_when`, `init`, effect parameters,
+and `repeat.source` values are parsed using this grammar. The language
+is intentionally small — no assignment, no loops, no side effects.
 
-| Pattern | Resolves To |
-|---|---|
-| `{{theme.colors.<name>}}` | Color value from theme |
-| `{{theme.fonts.<name>}}` | Font spec from theme |
-| `{{theme.sizes.<name>}}` | Numeric size from theme |
-| `{{state.<name>}}` | Current value of a state variable |
-| `{{param.<name>}}` | Parameter passed to an action or dialog |
-| `{{prop.<name>}}` | Template variable from `create_child` (resolved once at creation) |
-| `{{dialog.<name>}}` | Dialog-local state variable (see Dialogs) |
-| `{{active_document.<name>}}` | Property of the active document (see Runtime Contexts) |
-| `{{workspace.<name>}}` | Property of the workspace (see Runtime Contexts) |
+### Type System
 
-### Expressions
+Six value types. Every expression evaluates to exactly one of these.
 
-Interpolated strings, `enabled_when`, `condition`, and `bind` values may
-contain expressions. The expression language supports:
+| Type     | Description                        | Examples                          |
+|----------|------------------------------------|-----------------------------------|
+| `bool`   | Boolean                            | `true`, `false`                   |
+| `number` | IEEE 754 double                    | `0`, `255`, `1.5`, `-3`          |
+| `string` | Unicode text, double-quoted        | `"hsb"`, `"hello world"`         |
+| `color`  | RGB hex color                      | `#ff0000`, `#fff`                |
+| `null`   | Absence of a value                 | `null`                           |
+| `list`   | Ordered sequence (no literal form) | `panel.selected_swatches`        |
 
-- **Comparisons:** `==`, `!=`, `<`, `>`, `<=`, `>=`
-- **Logical operators:** `and`, `or`, `not`
-- **Membership:** `<value> in [<list>]`
-- **Ternary:** `<condition> ? <if_true> : <if_false>`
-- **Dot access:** `active_document.is_modified`, `state.active_tool`
-- **Parentheses** for grouping
+Lists have no literal syntax. They arise from state variables, data
+paths, and function return values.
 
-`enabled_when` and `condition` fields must evaluate to a boolean. Bind
-values and style properties may evaluate to any type (string, number, bool)
-via ternary expressions.
+### Grammar
 
-Examples:
+```
+expr          = ternary
+
+ternary       = or_expr ( '?' expr ':' expr )?
+
+or_expr       = and_expr ( 'or' and_expr )*
+
+and_expr      = not_expr ( 'and' not_expr )*
+
+not_expr      = 'not' not_expr
+              | comparison
+
+comparison    = primary ( comp_op primary )?
+
+comp_op       = '==' | '!=' | '<' | '>' | '<=' | '>=' | 'in'
+
+primary       = atom accessor*
+
+accessor      = '.' IDENT
+              | '.' INT_LITERAL
+              | '[' expr ']'
+
+atom          = IDENT '(' args? ')'          -- function call
+              | IDENT                         -- identifier (start of path)
+              | STRING
+              | COLOR
+              | NUMBER
+              | 'null' | 'true' | 'false'
+              | '(' expr ')'
+
+args          = expr ( ',' expr )*
+```
+
+#### Lexical Rules
+
+```
+IDENT         = [a-zA-Z_][a-zA-Z0-9_]*
+INT_LITERAL   = [0-9]+
+NUMBER        = '-'? [0-9]+ ( '.' [0-9]+ )?
+STRING        = '"' ( [^"\\] | '\\' . )* '"'
+COLOR         = '#' [0-9a-fA-F]{6}
+              | '#' [0-9a-fA-F]{3}
+```
+
+Whitespace (spaces, tabs) is ignored between tokens. There are no
+comments, no newlines (expressions are always single-line strings in
+YAML).
+
+#### Reserved Words
+
+`true`, `false`, `null`, `not`, `and`, `or`, `in`
+
+### Operator Precedence
+
+From lowest (evaluated last) to highest (evaluated first):
+
+| Precedence | Operator              | Associativity | Description            |
+|------------|-----------------------|---------------|------------------------|
+| 1 (lowest) | `? :`                 | right         | Ternary conditional    |
+| 2          | `or`                  | left          | Logical OR             |
+| 3          | `and`                 | left          | Logical AND            |
+| 4          | `not`                 | unary (right) | Logical NOT            |
+| 5          | `==` `!=` `<` `>` `<=` `>=` `in` | none | Comparison (no chaining) |
+| 6          | `.` `[]`              | left          | Property/index access  |
+| 7 (highest)| `f()`                 | —             | Function call          |
+
+Parentheses `( expr )` override precedence.
+
+### Evaluation Rules
+
+#### Path Resolution
+
+A path like `state.fill_color` is resolved by:
+1. Look up the first identifier (`state`) in the namespace table.
+2. For each subsequent accessor (`.fill_color`), look up the key in
+   the resolved object.
+3. If any step fails (key not found, indexing a non-object), return
+   `null`.
+
+**Namespaces** (the set of valid first identifiers in a path):
+
+| Namespace            | Source                               | Depth   |
+|----------------------|--------------------------------------|---------|
+| `state`              | Global reactive state store          | 1 level |
+| `panel`              | Active panel's local state           | N level |
+| `dialog`             | Open dialog's local state            | 1 level |
+| `param`              | Action/dialog parameters             | 1 level |
+| `prop`               | `create_child` template properties   | 1 level |
+| `event`              | Current event context                | 1 level |
+| `self`               | Element that triggered the event     | 1 level |
+| `theme`              | Resolved appearance (colors, fonts, sizes) | N level |
+| `data`               | Workspace data (swatch libraries, etc.)    | N level |
+| `active_document`    | Active document context              | 1 level |
+| `workspace`          | Workspace layout context             | 1 level |
+
+"1 level" means `namespace.key`. "N level" means arbitrary nesting:
+`theme.colors.window_bg`, `data.swatch_libraries.web_colors.swatches`.
+
+Numeric path components (e.g., `panel.recent_colors.0`) index into
+lists by position (zero-based). Out-of-bounds returns `null`.
+
+#### Dynamic Indexing
+
+`path[expr]` evaluates `expr`, converts the result to a string, and
+uses it as a key lookup on the resolved object. This enables
+patterns like:
+
+```
+data.swatch_libraries[lib.id].swatches
+```
+
+where `lib.id` is a variable from an enclosing `repeat` that resolves
+to a library name at runtime.
+
+#### Method Calls
+
+Methods are invoked on the result of a primary expression using dot
+syntax. They are syntactically identical to property access but
+dispatch to built-in methods based on the receiver's type.
+
+A `.` accessor is resolved as a method if:
+1. The receiver is a `list` and the accessor is a known list method, OR
+2. The receiver is a `string` and the accessor is a known string method.
+
+Otherwise it is a property lookup (which returns `null` on non-objects).
+
+**List methods:**
+
+| Method    | Returns  | Description                     |
+|-----------|----------|---------------------------------|
+| `.length` | `number` | Number of elements in the list  |
+
+**String methods:**
+
+| Method    | Returns  | Description                     |
+|-----------|----------|---------------------------------|
+| `.length` | `number` | Number of characters            |
+
+#### Function Calls
+
+Functions are called by name with parenthesized arguments. Unknown
+function names are an evaluation error (return `null`).
+
+**Color decomposition functions** — take a single `color` argument:
+
+| Function  | Returns  | Description                     |
+|-----------|----------|---------------------------------|
+| `hsb_h`   | `number` | Hue (0–359)                     |
+| `hsb_s`   | `number` | Saturation (0–100)              |
+| `hsb_b`   | `number` | Brightness (0–100)              |
+| `rgb_r`   | `number` | Red channel (0–255)             |
+| `rgb_g`   | `number` | Green channel (0–255)           |
+| `rgb_b`   | `number` | Blue channel (0–255)            |
+| `cmyk_c`  | `number` | Cyan (0–100)                    |
+| `cmyk_m`  | `number` | Magenta (0–100)                 |
+| `cmyk_y`  | `number` | Yellow (0–100)                  |
+| `cmyk_k`  | `number` | Key/black (0–100)               |
+| `hex`     | `string` | Six-character hex (no `#`)      |
+
+**Color construction functions** — return `color`:
+
+| Function  | Arguments           | Description                        |
+|-----------|---------------------|------------------------------------|
+| `rgb`     | `r, g, b`  (0–255)  | Construct color from RGB           |
+| `hsb`     | `h, s, b`           | Construct from HSB (h:0–359, s/b:0–100) |
+
+**Color transformation functions** — take a single `color` argument,
+return `color`:
+
+| Function     | Description                                            |
+|--------------|--------------------------------------------------------|
+| `invert`     | RGB inversion: `rgb(255 - r, 255 - g, 255 - b)`.      |
+| `complement` | HSB hue rotation by 180°: `hsb((h + 180) % 360, s, b)`. Returns the input unchanged when saturation is 0 (achromatic). |
+
+These functions exist so that color transformations can be expressed
+as pure expressions inside `set` effects, keeping the effects
+interpreter free of domain-specific logic:
 
 ```yaml
-# Boolean (for enabled_when / condition)
-enabled_when: "active_document.is_modified and active_document.has_filename"
-condition: "not state.fill_on_top"
-
-# Ternary — selects a value based on a condition
-bind:
-  icon: "{{state.dock_collapsed}} == true ? chevron_left : chevron_right"
-  z_index: "{{state.fill_on_top}} == true ? 2 : 1"
+# Invert the active color:
+- if:
+    condition: "state.fill_on_top"
+    then:
+      - set: { fill_color: "invert(state.fill_color)" }
+    else:
+      - set: { stroke_color: "invert(state.stroke_color)" }
 ```
+
+If a color function receives `null`, it treats it as `#000000`.
+If it receives a non-color, non-null value, it is an evaluation error
+(return `null` or `0` as appropriate for the return type).
+
+#### Comparison Operators
+
+**`==` and `!=`** — strict typed equality.
+- Both operands must be the same type; otherwise `==` is `false` and
+  `!=` is `true`.
+- `null == null` is `true`.
+- Colors are compared as normalized six-digit lowercase hex.
+- Numbers are compared by IEEE 754 equality.
+- Strings are compared by Unicode codepoint sequence.
+- Lists are compared by reference identity (not deep equality).
+- Bools: `true == true`, `false == false`.
+
+**`<`, `>`, `<=`, `>=`** — numeric ordering.
+- Both operands must be `number`. If either is not, the result is `false`.
+
+**`in`** — list membership.
+- `value in list_expr` returns `true` if `list_expr` evaluates to a
+  `list` and any element is `== value` (strict typed).
+- If the right side is not a `list`, returns `false`.
+
+#### Logical Operators
+
+**`and`** — short-circuit. If the left operand is falsy (see Bool
+Coercion below), return it without evaluating the right operand.
+Otherwise return the right operand.
+
+**`or`** — short-circuit. If the left operand is truthy, return it
+without evaluating the right operand. Otherwise return the right
+operand.
+
+**`not`** — coerce to bool, negate.
+
+#### Ternary
+
+`condition ? true_expr : false_expr`
+
+Evaluate `condition`, coerce to bool. If true, evaluate and return
+`true_expr`. Otherwise evaluate and return `false_expr`.
+Short-circuit: only one branch is evaluated.
+
+#### Bool Coercion
+
+Used by `not`, `and`, `or`, ternary conditions, `bind.visible`,
+`bind.disabled`, and `bind.checked`.
+
+| Value                | Coerces to |
+|----------------------|------------|
+| `null`               | `false`    |
+| `false`              | `false`    |
+| `0` (number zero)    | `false`    |
+| `""` (empty string)  | `false`    |
+| empty list           | `false`    |
+| Everything else      | `true`     |
+
+Note: the string `"false"` is truthy (it is a non-empty string). The
+string `"0"` is truthy. Only the actual `false` bool and numeric `0`
+are falsy.
+
+### Expression Context vs. Text Context
+
+#### Expression Context
+
+The YAML value is parsed directly as an `expr`. No `{{}}` wrapper.
+
+Properties evaluated as expressions:
+- `bind.*` — all binding properties
+- `condition` — in behavior entries
+- `enabled_when` — in actions and menu items
+- `checked_when` — in menu items
+- `init.*` — panel and dialog initialization
+- `repeat.source` — data source for repeat directives
+- Effect parameters — values inside `set:`, `if.condition:`,
+  `select.target:`, etc.
+
+Example:
+```yaml
+bind:
+  visible: "state.fill_on_top ? state.fill_color != null : state.stroke_color != null"
+  disabled: "state.fill_color == null"
+
+init:
+  h: "hsb_h(state.fill_on_top ? state.fill_color : state.stroke_color)"
+
+checked_when: 'panel.mode == "hsb"'
+
+enabled_when: "panel.selected_swatches.length > 0"
+```
+
+#### Text Context
+
+The YAML value is a plain string with embedded `{{expr}}` regions.
+Text outside `{{}}` is literal. Each `{{expr}}` is evaluated and its
+result is coerced to a string for interpolation.
+
+Properties evaluated as text:
+- `label` / `summary` — human-readable display text
+- `description` — documentation text
+- `style.*` — CSS-like style values
+- `content` — text element content
+
+Example:
+```yaml
+label: "Library: {{data.swatch_libraries[lib.id].name}}"
+style:
+  background: "{{theme.colors.window_bg}}"
+  border: "1px solid {{theme.colors.border}}"
+```
+
+**String coercion for interpolation:**
+
+| Type     | String form          |
+|----------|----------------------|
+| `bool`   | `"true"` or `"false"`|
+| `number` | Decimal notation     |
+| `string` | The string itself    |
+| `color`  | `"#rrggbb"`          |
+| `null`   | `""`  (empty string) |
+| `list`   | `"[list]"` (debug)   |
+
+### Expression Error Handling
+
+Expressions must never throw exceptions or crash the application.
+All evaluation errors resolve to a default value silently.
+
+| Error condition                        | Result   |
+|----------------------------------------|----------|
+| Unknown namespace (first path segment) | `null`   |
+| Key not found in object                | `null`   |
+| Index out of bounds in list            | `null`   |
+| Unknown function name                  | `null`   |
+| Wrong argument type for function       | `null` or `0` (per function return type) |
+| Wrong type for `<`/`>`/`<=`/`>=`      | `false`  |
+| Syntax error in expression             | `null`   |
+
+Implementations SHOULD log a warning to the console/debug output for
+syntax errors and type mismatches, to aid debugging. They MUST NOT
+halt or throw.
+
+### Panel State Lifecycle
+
+Panel-local state (`panel.*`) has scoping and lifecycle rules that
+differ from global state (`state.*`).
+
+#### State Scoping
+
+Each panel has its own state scope, keyed by the panel's `id` field
+(e.g., `color_panel_content`, `swatches_panel_content`). Panel state
+scopes are independent — fields in one panel's state do not collide
+with fields in another panel's state, even if they share the same
+field names.
+
+When an expression references `panel.x`, the interpreter resolves
+`x` from the **active panel's** state scope. The active panel is the
+one currently visible in the focused dock group.
+
+#### State Defaults
+
+When a panel is first instantiated (workspace load, or dynamically
+added to a dock), its `state` section defaults are written to its
+scope. Defaults are applied **once** at creation time, not on every
+tab switch.
+
+#### Init Expressions — Reactive
+
+The `init` section defines expressions that are **reactively
+evaluated** whenever their dependencies change. They behave like
+computed properties, not one-shot assignments.
+
+```yaml
+init:
+  h: "hsb_h(state.fill_on_top ? state.fill_color : state.stroke_color)"
+  s: "hsb_s(state.fill_on_top ? state.fill_color : state.stroke_color)"
+```
+
+**Dependency tracking:** When the interpreter evaluates an init
+expression, it records every `state.*` path accessed during
+evaluation. It subscribes to changes on those paths and
+re-evaluates the init expression when any dependency changes.
+
+**Re-evaluation on panel activation:** Init expressions also
+re-run when the panel becomes the active tab in its dock group.
+
+**Init does not override explicit state mutations:** If a
+`set_panel_state` effect writes to a field that is also defined
+in `init`, the explicit mutation takes precedence until the next
+dependency change or panel activation triggers re-evaluation.
+This allows sliders to override computed values during drag
+without the init expression fighting back.
+
+Example flow for the Color panel:
+1. User switches to Color tab — init runs, h/s/b computed from
+   active color.
+2. User drags the H slider — `set_panel_state` writes `h: 180`.
+   Init does NOT re-run (no dependency changed).
+3. User clicks a swatch — `state.fill_color` changes — init
+   re-runs, h/s/b recomputed from the new color.
+
+#### State Persistence Across Tab Switches
+
+Non-init state fields persist when the user switches to a
+different panel tab and back. The `mode` field (set by the panel
+menu) is state, not init — it survives tab switches.
+
+#### Per-Document State
+
+State fields declared with `per_document: true` are keyed by the
+active document ID. When `panel.recent_colors` is accessed, the
+interpreter reads from the sub-scope matching the active document.
+When the user switches documents, `panel.recent_colors`
+automatically reflects the new document's list. If no document is
+active, per-document fields resolve to their default value.
+
+#### State Destruction
+
+Panel state is destroyed when the panel is removed from the
+workspace (e.g., `close_panel` effect). If the panel is later
+re-added (e.g., `show_panel`), it starts fresh with defaults and
+init expressions.
+
+#### Lifecycle Summary
+
+| Event                          | Defaults applied? | Init runs? | Non-init state preserved? |
+|--------------------------------|-------------------|------------|---------------------------|
+| Workspace loads (panel exists) | Yes               | Yes        | N/A (fresh)               |
+| Tab switch to this panel       | No                | Yes        | Yes                       |
+| Tab switch away from panel     | No                | No         | Yes                       |
+| Global state dependency changes | No               | Yes (reactive) | Yes                   |
+| Document switch                | No                | Yes        | Yes (per-doc fields swap)  |
+| Panel closed                   | N/A               | N/A        | State destroyed            |
+| Panel re-opened                | Yes               | Yes        | N/A (fresh)               |
+
+### `list_push` Effect
+
+A generic list manipulation effect replacing domain-specific
+effects like `push_recent_color`:
+
+```yaml
+list_push:
+  target: <state_path>          # list to modify (panel.* or state.*)
+  value: <expr>                 # value to prepend
+  unique: <bool>                # if true, remove existing equal value first (default false)
+  max_length: <integer>         # cap list length after push (optional)
+```
+
+Semantics: prepend `value` to the front of the list at `target`.
+If `unique` is true and the value already exists in the list (by
+strict `==`), remove the existing occurrence before prepending.
+If `max_length` is set, truncate the list to that length after
+the push.
+
+### Expression Conformance Tests
+
+Every interpreter MUST pass a shared test suite. Each test case
+specifies an expression string, an input state, and the expected
+result value and type. See `workspace/tests/expressions.yaml`.
 
 ---
 
