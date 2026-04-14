@@ -433,7 +433,7 @@ def _render_repeat(el, theme, state):
     layout = el.get("layout", "column")
     style = _style_str(el, theme, state)
     dir_class = "flex-row flex-wrap" if layout == "wrap" else ("flex-row" if layout == "row" else "flex-column")
-    html = f'<div class="d-flex {dir_class}"{style}>'
+    parts = [f'<div{_id_attr(el)} class="d-flex {dir_class}"{style}>']
     for i, item in enumerate(items):
         # Build item state with loop variable injected
         item_state = dict(state) if state else {}
@@ -447,9 +447,9 @@ def _render_repeat(el, theme, state):
         for k in ("panel", "data"):
             if k in ctx and k not in item_state:
                 item_state[k] = ctx[k]
-        html += render_element(template, theme, item_state, mode="normal")
-    html += '</div>'
-    return Markup(html)
+        parts.append(render_element(template, theme, item_state, mode="normal"))
+    parts.append('</div>')
+    return Markup(''.join(str(p) for p in parts))
 
 
 def _render_container(el, theme, state):
