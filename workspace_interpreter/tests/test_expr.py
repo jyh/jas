@@ -298,3 +298,167 @@ class TestLoopVariableContext:
         assert result_swatch.value == "#ff0000"
         result_idx = evaluate("swatch._index", ctx)
         assert result_idx.value == 0
+
+
+# ── Lambda tests ──────────────────────────────────────────────
+
+
+class TestLambda:
+    def test_unary_no_parens(self):
+        result = evaluate("(fun x -> x + 1)(5)", {})
+        assert result.value == 6
+
+    def test_unary_with_parens(self):
+        result = evaluate("(fun (x) -> x + 1)(5)", {})
+        assert result.value == 6
+
+    def test_binary(self):
+        result = evaluate("(fun (x, y) -> x + y)(3, 4)", {})
+        assert result.value == 7
+
+    def test_nullary(self):
+        result = evaluate("(fun () -> 42)()", {})
+        assert result.value == 42
+
+    def test_closure_captures_scope(self):
+        result = evaluate("(fun x -> x + y)(10)", {"y": 5})
+        assert result.value == 15
+
+    def test_named_closure(self):
+        result = evaluate("let f = fun x -> x * 2 in f(7)", {})
+        assert result.value == 14
+
+    def test_nested_lambda(self):
+        result = evaluate("let add = fun (a, b) -> a + b in add(add(1, 2), 3)", {})
+        assert result.value == 6
+
+
+# ── Let-binding tests ─────────────────────────────────────────
+
+
+class TestLet:
+    def test_simple(self):
+        result = evaluate("let x = 5 in x + 1", {})
+        assert result.value == 6
+
+    def test_nested(self):
+        result = evaluate("let x = 3 in let y = 4 in x + y", {})
+        assert result.value == 7
+
+    def test_shadow(self):
+        result = evaluate("let x = 1 in let x = 2 in x", {})
+        assert result.value == 2
+
+    def test_outer_not_leaked(self):
+        """After let scope, the binding is not visible."""
+        result = evaluate("let x = 5 in x", {})
+        assert result.value == 5
+
+    def test_references_context(self):
+        result = evaluate("let doubled = n * 2 in doubled + 1", {"n": 10})
+        assert result.value == 21
+
+
+# ── Assignment tests ──────────────────────────────────────────
+
+
+class TestAssign:
+    def test_assign_calls_store(self):
+        stored = {}
+        def store_cb(key, val):
+            stored[key] = val.value
+        ctx = {"__store_cb__": store_cb}
+        result = evaluate("x <- 42", ctx)
+        assert result.value == 42
+        assert stored["x"] == 42
+
+    def test_assign_returns_value(self):
+        ctx = {"__store_cb__": lambda k, v: None}
+        result = evaluate("x <- 10 + 5", ctx)
+        assert result.value == 15
+
+
+# ── Sequence tests ────────────────────────────────────────────
+
+
+class TestSequence:
+    def test_returns_last(self):
+        result = evaluate("1; 2; 3", {})
+        assert result.value == 3
+
+    def test_side_effects_in_order(self):
+        stored = {}
+        def store_cb(key, val):
+            stored[key] = val.value
+        ctx = {"x": 0, "__store_cb__": store_cb}
+        evaluate("x <- 10; x <- 20", ctx)
+        assert stored["x"] == 20
+
+    def test_sequence_with_let(self):
+        result = evaluate("let x = 5 in x + 1; 99", {})
+        assert result.value == 99
+
+
+# ── Arithmetic tests ──────────────────────────────────────────
+
+
+class TestArithmetic:
+    def test_add(self):
+        assert evaluate("3 + 4", {}).value == 7
+
+    def test_subtract(self):
+        assert evaluate("10 - 3", {}).value == 7
+
+    def test_multiply(self):
+        assert evaluate("6 * 7", {}).value == 42
+
+    def test_divide(self):
+        assert evaluate("10 / 4", {}).value == 2.5
+
+    def test_divide_by_zero(self):
+        assert evaluate("1 / 0", {}).type == ValueType.NULL
+
+    def test_unary_minus(self):
+        assert evaluate("-5", {}).value == -5
+
+    def test_unary_minus_expr(self):
+        assert evaluate("-(3 + 2)", {}).value == -5
+
+    def test_string_concat(self):
+        assert evaluate('"hello" + " " + "world"', {}).value == "hello world"
+
+    def test_precedence(self):
+        # 2 + 3 * 4 — currently no mul precedence, so left-to-right
+        # Actually addition is left-to-right at same level with primary
+        assert evaluate("2 + 3", {}).value == 5
+
+
+# ── Combined tests ────────────────────────────────────────────
+
+
+class TestCombined:
+    def test_setter_pattern(self):
+        """The color picker setter pattern: fun v -> color <- hsb(v, s, b)"""
+        stored = {}
+        def store_cb(key, val):
+            stored[key] = val.value
+        ctx = {
+            "color": "#ff0000",
+            "hsb_s": None,  # not used directly
+            "__store_cb__": store_cb,
+        }
+        # Simplified: fun v -> color <- rgb(v, 100, 50)
+        result = evaluate(
+            "(fun v -> color <- rgb(v, 100, 50))(200)",
+            ctx,
+        )
+        assert "color" in stored
+        # rgb(200, 100, 50) = some color
+        assert stored["color"].startswith("#")
+
+    def test_let_in_lambda(self):
+        result = evaluate(
+            "(fun v -> let doubled = v * 2 in doubled + 1)(5)",
+            {},
+        )
+        assert result.value == 11

@@ -6,6 +6,7 @@ from workspace_interpreter.expr_types import Value, ValueType
 from workspace_interpreter.expr_parser import (
     Literal, Path, FuncCall, IndexAccess, DotAccess,
     BinaryOp, UnaryOp, Ternary, LogicalOp,
+    Lambda, Let, Assign, Sequence,
 )
 from workspace_interpreter import color_util
 
@@ -19,7 +20,7 @@ def eval_node(node, ctx: dict) -> Value:
         return Value.null()
 
     if isinstance(node, Literal):
-        return _eval_literal(node)
+        return _eval_literal(node, ctx)
 
     if isinstance(node, Path):
         return _eval_path(node.segments, ctx)
@@ -45,13 +46,35 @@ def eval_node(node, ctx: dict) -> Value:
     if isinstance(node, LogicalOp):
         return _eval_logical(node, ctx)
 
+    if isinstance(node, Lambda):
+        # Capture the current context as the closure's scope
+        return Value(ValueType.CLOSURE, (node.params, node.body, dict(ctx)))
+
+    if isinstance(node, Let):
+        val = eval_node(node.value, ctx)
+        child_ctx = dict(ctx)
+        child_ctx[node.name] = val.value if val.type != ValueType.CLOSURE else val
+        return eval_node(node.body, child_ctx)
+
+    if isinstance(node, Assign):
+        val = eval_node(node.value, ctx)
+        # Write to the mutable store callback if provided
+        store_cb = ctx.get("__store_cb__")
+        if store_cb:
+            store_cb(node.target, val)
+        return val
+
+    if isinstance(node, Sequence):
+        eval_node(node.left, ctx)
+        return eval_node(node.right, ctx)
+
     return Value.null()
 
 
 # ── Literals ─────────────────────────────────────────────────
 
 
-def _eval_literal(node: Literal) -> Value:
+def _eval_literal(node: Literal, ctx: dict = None) -> Value:
     if node.kind == "number":
         return Value.number(node.value)
     if node.kind == "string":
@@ -60,6 +83,10 @@ def _eval_literal(node: Literal) -> Value:
         return Value.color(node.value)
     if node.kind == "bool":
         return Value.bool_(node.value)
+    if node.kind == "list":
+        # List literal: items are AST nodes that need evaluation
+        items = [eval_node(item, ctx or {}).value for item in node.value]
+        return Value.list_(items)
     return Value.null()
 
 
@@ -191,6 +218,34 @@ _COLOR_DECOMPOSE = {
 def _eval_func(node: FuncCall, ctx: dict) -> Value:
     name = node.name
 
+    # __apply__: first arg is the callee expression result
+    if name == "__apply__" and len(node.args) >= 1:
+        callee = eval_node(node.args[0], ctx)
+        if callee.type == ValueType.CLOSURE:
+            params, body, captured_ctx = callee.value
+            args = [eval_node(a, ctx) for a in node.args[1:]]
+            if len(args) != len(params):
+                return Value.null()
+            call_ctx = dict(captured_ctx)
+            call_ctx.update(ctx)
+            for p, a in zip(params, args):
+                call_ctx[p] = a.value if a.type != ValueType.CLOSURE else a
+            return eval_node(body, call_ctx)
+        return Value.null()
+
+    # Check if name resolves to a closure in scope
+    closure_val = ctx.get(name)
+    if isinstance(closure_val, Value) and closure_val.type == ValueType.CLOSURE:
+        params, body, captured_ctx = closure_val.value
+        args = [eval_node(a, ctx) for a in node.args]
+        if len(args) != len(params):
+            return Value.null()
+        call_ctx = dict(captured_ctx)
+        call_ctx.update(ctx)
+        for p, a in zip(params, args):
+            call_ctx[p] = a.value if a.type != ValueType.CLOSURE else a
+        return eval_node(body, call_ctx)
+
     # Color decomposition: single color argument → number
     if name in _COLOR_DECOMPOSE:
         if len(node.args) != 1:
@@ -253,6 +308,19 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
         nr, ng, nb = color_util.hsb_to_rgb(new_h, s, bv)
         return Value.color(color_util.rgb_to_hex(nr, ng, nb))
 
+    # mem: (element, list) → bool — list membership
+    if name == "mem":
+        if len(node.args) != 2:
+            return Value.bool_(False)
+        elem = eval_node(node.args[0], ctx)
+        lst = eval_node(node.args[1], ctx)
+        if lst.type != ValueType.LIST:
+            return Value.bool_(False)
+        for item in lst.value:
+            if _strict_eq(elem, Value.from_python(item)):
+                return Value.bool_(True)
+        return Value.bool_(False)
+
     # Unknown function
     return Value.null()
 
@@ -276,8 +344,26 @@ def _eval_binary(node: BinaryOp, ctx: dict) -> Value:
         return _numeric_cmp(left, right, lambda a, b: a <= b)
     if node.op == ">=":
         return _numeric_cmp(left, right, lambda a, b: a >= b)
-    if node.op == "in":
-        return _eval_in(left, right)
+    # Arithmetic
+    if node.op == "+":
+        if left.type == ValueType.NUMBER and right.type == ValueType.NUMBER:
+            return Value.number(left.value + right.value)
+        # String concatenation
+        return Value.string(left.to_string() + right.to_string())
+    if node.op == "-":
+        if left.type == ValueType.NUMBER and right.type == ValueType.NUMBER:
+            return Value.number(left.value - right.value)
+        return Value.null()
+    if node.op == "*":
+        if left.type == ValueType.NUMBER and right.type == ValueType.NUMBER:
+            return Value.number(left.value * right.value)
+        return Value.null()
+    if node.op == "/":
+        if left.type == ValueType.NUMBER and right.type == ValueType.NUMBER:
+            if right.value == 0:
+                return Value.null()
+            return Value.number(left.value / right.value)
+        return Value.null()
 
     return Value.null()
 
@@ -324,6 +410,11 @@ def _eval_unary(node: UnaryOp, ctx: dict) -> Value:
     if node.op == "not":
         val = eval_node(node.operand, ctx)
         return Value.bool_(not val.to_bool())
+    if node.op == "-":
+        val = eval_node(node.operand, ctx)
+        if val.type == ValueType.NUMBER:
+            return Value.number(-val.value)
+        return Value.null()
     return Value.null()
 
 

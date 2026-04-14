@@ -78,6 +78,35 @@ class LogicalOp:
     right: Any
 
 
+@dataclass(slots=True)
+class Lambda:
+    """Lambda: fun x -> body  |  fun (x, y) -> body  |  fun () -> body"""
+    params: list[str]
+    body: Any
+
+
+@dataclass(slots=True)
+class Let:
+    """Let binding: let x = e1 in e2"""
+    name: str
+    value: Any
+    body: Any
+
+
+@dataclass(slots=True)
+class Assign:
+    """Assignment: x <- expr (mutates state variable)"""
+    target: str
+    value: Any
+
+
+@dataclass(slots=True)
+class Sequence:
+    """Sequencing: e1; e2 (evaluate left for side effects, return right)"""
+    left: Any
+    right: Any
+
+
 # ── Parser ───────────────────────────────────────────────────
 
 
@@ -111,13 +140,46 @@ class Parser:
         """Parse the full expression. Returns an AST node or None."""
         if self._peek().kind == TokenKind.EOF:
             return None
-        node = self._parse_ternary()
+        node = self._parse_sequence()
         if self._peek().kind != TokenKind.EOF:
             raise ParseError(f"Unexpected token after expression: {self._peek().kind.name}")
         return node
 
+    def _parse_sequence(self):
+        """sequence = let_expr (';' let_expr)*"""
+        node = self._parse_let()
+        while self._at(TokenKind.SEMICOLON):
+            self._advance()
+            right = self._parse_let()
+            node = Sequence(node, right)
+        return node
+
+    def _parse_let(self):
+        """let_expr = 'let' IDENT '=' sequence 'in' let_expr | assign"""
+        if self._at(TokenKind.LET):
+            self._advance()
+            name_tok = self._expect(TokenKind.IDENT)
+            self._expect(TokenKind.EQUALS)
+            value = self._parse_sequence()
+            self._expect(TokenKind.IN)
+            body = self._parse_let()
+            return Let(name_tok.value, value, body)
+        return self._parse_assign()
+
+    def _parse_assign(self):
+        """assign = ternary '<-' assign | ternary"""
+        node = self._parse_ternary()
+        if self._at(TokenKind.LARROW):
+            self._advance()
+            # The left side must be an identifier (Path with one segment)
+            if isinstance(node, Path) and len(node.segments) == 1:
+                value = self._parse_assign()
+                return Assign(node.segments[0], value)
+            raise ParseError("Assignment target must be an identifier")
+        return node
+
     def _parse_ternary(self):
-        """ternary = or_expr ( '?' expr ':' expr )?"""
+        """ternary = or_expr ( '?' ternary ':' ternary )?"""
         node = self._parse_or()
         if self._at(TokenKind.QUESTION):
             self._advance()
@@ -146,16 +208,20 @@ class Parser:
         return node
 
     def _parse_not(self):
-        """not_expr = 'not' not_expr | comparison"""
+        """not_expr = 'not' not_expr | '-' not_expr | comparison"""
         if self._at(TokenKind.NOT):
             self._advance()
             operand = self._parse_not()
             return UnaryOp("not", operand)
+        if self._at(TokenKind.MINUS):
+            self._advance()
+            operand = self._parse_not()
+            return UnaryOp("-", operand)
         return self._parse_comparison()
 
     def _parse_comparison(self):
-        """comparison = primary ( comp_op primary )?"""
-        node = self._parse_primary()
+        """comparison = addition ( comp_op addition )?"""
+        node = self._parse_addition()
         op_map = {
             TokenKind.EQ: "==",
             TokenKind.NEQ: "!=",
@@ -163,12 +229,31 @@ class Parser:
             TokenKind.GT: ">",
             TokenKind.LTE: "<=",
             TokenKind.GTE: ">=",
-            TokenKind.IN: "in",
         }
         if self._peek().kind in op_map:
             op_tok = self._advance()
-            right = self._parse_primary()
+            right = self._parse_addition()
             return BinaryOp(op_map[op_tok.kind], node, right)
+        return node
+
+    def _parse_addition(self):
+        """addition = multiplication (('+' | '-') multiplication)*"""
+        node = self._parse_multiplication()
+        while self._at(TokenKind.PLUS, TokenKind.MINUS):
+            op_tok = self._advance()
+            op = "+" if op_tok.kind == TokenKind.PLUS else "-"
+            right = self._parse_multiplication()
+            node = BinaryOp(op, node, right)
+        return node
+
+    def _parse_multiplication(self):
+        """multiplication = primary (('*' | '/') primary)*"""
+        node = self._parse_primary()
+        while self._at(TokenKind.STAR, TokenKind.SLASH):
+            op_tok = self._advance()
+            op = "*" if op_tok.kind == TokenKind.STAR else "/"
+            right = self._parse_primary()
+            node = BinaryOp(op, node, right)
         return node
 
     def _parse_primary(self):
@@ -200,16 +285,51 @@ class Parser:
                     raise ParseError(f"Expected identifier after '.', got {tok.kind.name}")
             elif self._at(TokenKind.LBRACKET):
                 self._advance()
-                index_expr = self._parse_ternary()
+                index_expr = self._parse_sequence()
                 self._expect(TokenKind.RBRACKET)
                 node = IndexAccess(node, index_expr)
+            elif self._at(TokenKind.LPAREN):
+                # Function application: expr(args)
+                self._advance()
+                args = []
+                if not self._at(TokenKind.RPAREN):
+                    args.append(self._parse_sequence())
+                    while self._at(TokenKind.COMMA):
+                        self._advance()
+                        args.append(self._parse_sequence())
+                self._expect(TokenKind.RPAREN)
+                # If node is a Path with one segment, use FuncCall for compat
+                if isinstance(node, Path) and len(node.segments) == 1:
+                    node = FuncCall(node.segments[0], args)
+                else:
+                    node = FuncCall("__apply__", [node] + args)
             else:
                 break
         return node
 
     def _parse_atom(self):
-        """atom = IDENT '(' args? ')' | IDENT | STRING | COLOR | NUMBER | null | true | false | '(' expr ')'"""
+        """atom = 'fun' ... | IDENT '(' args? ')' | IDENT | literals | '(' expr ')'"""
         tok = self._peek()
+
+        # Lambda: fun x -> body | fun (params) -> body | fun () -> body
+        if tok.kind == TokenKind.FUN:
+            self._advance()
+            params = []
+            if self._at(TokenKind.LPAREN):
+                self._advance()
+                if not self._at(TokenKind.RPAREN):
+                    params.append(self._expect(TokenKind.IDENT).value)
+                    while self._at(TokenKind.COMMA):
+                        self._advance()
+                        params.append(self._expect(TokenKind.IDENT).value)
+                self._expect(TokenKind.RPAREN)
+            elif self._at(TokenKind.IDENT):
+                # Unary lambda without parens: fun x -> body
+                params.append(self._advance().value)
+            # else: fun -> is an error (caught by _expect below)
+            self._expect(TokenKind.ARROW)
+            body = self._parse_sequence()
+            return Lambda(params, body)
 
         if tok.kind == TokenKind.IDENT:
             self._advance()
@@ -219,10 +339,10 @@ class Parser:
                 self._advance()
                 args = []
                 if not self._at(TokenKind.RPAREN):
-                    args.append(self._parse_ternary())
+                    args.append(self._parse_sequence())
                     while self._at(TokenKind.COMMA):
                         self._advance()
-                        args.append(self._parse_ternary())
+                        args.append(self._parse_sequence())
                 self._expect(TokenKind.RPAREN)
                 return FuncCall(name, args)
             return Path([name])
@@ -253,9 +373,21 @@ class Parser:
 
         if tok.kind == TokenKind.LPAREN:
             self._advance()
-            node = self._parse_ternary()
+            node = self._parse_sequence()
             self._expect(TokenKind.RPAREN)
             return node
+
+        # List literal: [expr, expr, ...]
+        if tok.kind == TokenKind.LBRACKET:
+            self._advance()
+            items = []
+            if not self._at(TokenKind.RBRACKET):
+                items.append(self._parse_sequence())
+                while self._at(TokenKind.COMMA):
+                    self._advance()
+                    items.append(self._parse_sequence())
+            self._expect(TokenKind.RBRACKET)
+            return Literal(items, "list")
 
         raise ParseError(f"Unexpected token: {tok.kind.name} ({tok.value!r})")
 

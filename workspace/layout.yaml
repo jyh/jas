@@ -165,7 +165,7 @@ layout:
                     action: select_tool
                     params: { tool: partial_selection }
                 bind:
-                  checked: 'state.active_tool in ["partial_selection", "interior_selection"]'
+                  checked: 'mem(state.active_tool, ["partial_selection", "interior_selection"])'
                 alternates:
                   menu_id: arrow_alternates
                   items:
@@ -209,7 +209,7 @@ layout:
                     action: select_tool
                     params: { tool: pen }
                 bind:
-                  checked: 'state.active_tool in ["pen", "add_anchor", "delete_anchor", "anchor_point"]'
+                  checked: 'mem(state.active_tool, ["pen", "add_anchor", "delete_anchor", "anchor_point"])'
                 alternates:
                   menu_id: pen_alternates
                   items:
@@ -252,7 +252,7 @@ layout:
                     action: select_tool
                     params: { tool: pencil }
                 bind:
-                  checked: 'state.active_tool in ["pencil", "path_eraser", "smooth"]'
+                  checked: 'mem(state.active_tool, ["pencil", "path_eraser", "smooth"])'
                 alternates:
                   menu_id: pencil_alternates
                   items:
@@ -293,7 +293,7 @@ layout:
                     action: select_tool
                     params: { tool: type }
                 bind:
-                  checked: 'state.active_tool in ["type", "type_on_path"]'
+                  checked: 'mem(state.active_tool, ["type", "type_on_path"])'
                 alternates:
                   menu_id: text_alternates
                   items:
@@ -355,7 +355,7 @@ layout:
                     action: select_tool
                     params: { tool: rect }
                 bind:
-                  checked: 'state.active_tool in ["rect", "rounded_rect", "polygon", "star"]'
+                  checked: 'mem(state.active_tool, ["rect", "rounded_rect", "polygon", "star"])'
                 alternates:
                   menu_id: shape_alternates
                   items:

@@ -19,21 +19,31 @@ class TokenKind(Enum):
     AND = auto()
     OR = auto()
     IN = auto()
+    FUN = auto()
+    LET = auto()
     # Operators
-    EQ = auto()       # ==
-    NEQ = auto()      # !=
-    LT = auto()       # <
-    GT = auto()       # >
-    LTE = auto()      # <=
-    GTE = auto()      # >=
-    QUESTION = auto() # ?
-    COLON = auto()    # :
-    DOT = auto()      # .
-    COMMA = auto()    # ,
-    LPAREN = auto()   # (
-    RPAREN = auto()   # )
-    LBRACKET = auto() # [
-    RBRACKET = auto() # ]
+    EQ = auto()        # ==
+    NEQ = auto()       # !=
+    LT = auto()        # <
+    GT = auto()        # >
+    LTE = auto()       # <=
+    GTE = auto()       # >=
+    QUESTION = auto()  # ?
+    COLON = auto()     # :
+    DOT = auto()       # .
+    COMMA = auto()     # ,
+    LPAREN = auto()    # (
+    RPAREN = auto()    # )
+    LBRACKET = auto()  # [
+    RBRACKET = auto()  # ]
+    PLUS = auto()      # +
+    MINUS = auto()     # -
+    STAR = auto()      # *
+    SLASH = auto()     # /
+    ARROW = auto()     # ->
+    LARROW = auto()    # <-
+    SEMICOLON = auto() # ;
+    EQUALS = auto()    # =
     # Control
     EOF = auto()
     ERROR = auto()
@@ -47,6 +57,8 @@ _KEYWORDS = {
     "and": TokenKind.AND,
     "or": TokenKind.OR,
     "in": TokenKind.IN,
+    "fun": TokenKind.FUN,
+    "let": TokenKind.LET,
 }
 
 
@@ -101,9 +113,9 @@ def tokenize(source: str) -> list[Token]:
             i = j
             continue
 
-        # Number (including negative)
-        if c.isdigit() or (c == "-" and i + 1 < n and source[i + 1].isdigit()):
-            j = i + 1 if c == "-" else i
+        # Number (digits only — unary minus is handled as an operator)
+        if c.isdigit():
+            j = i
             while j < n and source[j].isdigit():
                 j += 1
             if j < n and source[j] == ".":
@@ -127,31 +139,41 @@ def tokenize(source: str) -> list[Token]:
             i = j
             continue
 
-        # Two-character operators
-        if i + 1 < n:
-            two = source[i:i+2]
-            if two == "==":
-                tokens.append(Token(TokenKind.EQ))
-                i += 2
-                continue
-            if two == "!=":
-                tokens.append(Token(TokenKind.NEQ))
-                i += 2
-                continue
-            if two == "<=":
-                tokens.append(Token(TokenKind.LTE))
-                i += 2
-                continue
-            if two == ">=":
-                tokens.append(Token(TokenKind.GTE))
-                i += 2
-                continue
+        # Multi-character operators (order matters)
+        if c == "=" and i + 1 < n and source[i + 1] == "=":
+            tokens.append(Token(TokenKind.EQ))
+            i += 2
+            continue
+        if c == "!" and i + 1 < n and source[i + 1] == "=":
+            tokens.append(Token(TokenKind.NEQ))
+            i += 2
+            continue
+        # <- : no space between < and -
+        if c == "<" and i + 1 < n and source[i + 1] == "-":
+            tokens.append(Token(TokenKind.LARROW))
+            i += 2
+            continue
+        if c == "<" and i + 1 < n and source[i + 1] == "=":
+            tokens.append(Token(TokenKind.LTE))
+            i += 2
+            continue
+        if c == ">" and i + 1 < n and source[i + 1] == "=":
+            tokens.append(Token(TokenKind.GTE))
+            i += 2
+            continue
+        # -> : no space between - and >
+        if c == "-" and i + 1 < n and source[i + 1] == ">":
+            tokens.append(Token(TokenKind.ARROW))
+            i += 2
+            continue
 
         # Single-character operators
         if c == "<":
             tokens.append(Token(TokenKind.LT))
         elif c == ">":
             tokens.append(Token(TokenKind.GT))
+        elif c == "=":
+            tokens.append(Token(TokenKind.EQUALS))
         elif c == "?":
             tokens.append(Token(TokenKind.QUESTION))
         elif c == ":":
@@ -160,6 +182,8 @@ def tokenize(source: str) -> list[Token]:
             tokens.append(Token(TokenKind.DOT))
         elif c == ",":
             tokens.append(Token(TokenKind.COMMA))
+        elif c == ";":
+            tokens.append(Token(TokenKind.SEMICOLON))
         elif c == "(":
             tokens.append(Token(TokenKind.LPAREN))
         elif c == ")":
@@ -168,6 +192,14 @@ def tokenize(source: str) -> list[Token]:
             tokens.append(Token(TokenKind.LBRACKET))
         elif c == "]":
             tokens.append(Token(TokenKind.RBRACKET))
+        elif c == "+":
+            tokens.append(Token(TokenKind.PLUS))
+        elif c == "-":
+            tokens.append(Token(TokenKind.MINUS))
+        elif c == "*":
+            tokens.append(Token(TokenKind.STAR))
+        elif c == "/":
+            tokens.append(Token(TokenKind.SLASH))
         else:
             tokens.append(Token(TokenKind.ERROR, c))
         i += 1

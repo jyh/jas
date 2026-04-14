@@ -135,24 +135,24 @@ tests:
     expected: false
     type: bool
 
-  # In operator
-  - expr: '"pen" in state.tools'
+  # Membership function
+  - expr: 'mem("pen", state.tools)'
     state: { tools: ["pen", "rect", "ellipse"] }
     expected: true
     type: bool
 
-  - expr: '"brush" in state.tools'
+  - expr: 'mem("brush", state.tools)'
     state: { tools: ["pen", "rect", "ellipse"] }
     expected: false
     type: bool
 
-  - expr: "3 in state.ids"
+  - expr: "mem(3, state.ids)"
     state: { ids: [1, 2, 3] }
     expected: true
     type: bool
 
-  # In with non-list RHS
-  - expr: '"x" in state.name'
+  # mem with non-list RHS
+  - expr: 'mem("x", state.name)'
     state: { name: "hello" }
     expected: false
     type: bool
