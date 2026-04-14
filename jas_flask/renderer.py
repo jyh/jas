@@ -43,6 +43,9 @@ def render_element(el: dict, theme: dict, state: dict, mode: str = "normal") -> 
         return ""
     if mode == "wireframe":
         return _render_wireframe(el, theme, state, depth=0)
+    # Handle repeat directive: expand template for each item in source
+    if "repeat" in el and "template" in el:
+        return _render_repeat(el, theme, state)
     etype = el.get("type", "placeholder")
     renderer = _RENDERERS.get(etype, _render_unknown)
     return renderer(el, theme, state)
@@ -363,6 +366,92 @@ def _render_pane(el, theme, state):
     )
 
 
+def _render_repeat(el, theme, state):
+    """Render a repeat directive: evaluate source, render template per item."""
+    from workspace_interpreter.expr import evaluate as _eval
+    repeat_spec = el.get("repeat", {})
+    source_expr = repeat_spec.get("source", "")
+    var_name = repeat_spec.get("as", "item")
+    template = el.get("template", {})
+
+    # Build nested context for expression evaluation
+    # state param may contain loop variables (lib, swatch) and context keys
+    # (data, panel) injected by outer repeats — preserve them
+    ctx = {"state": state or {}}
+    # Propagate existing context keys from state (injected by outer repeats)
+    for k in ("data", "panel"):
+        if isinstance(state, dict) and k in state:
+            ctx[k] = state[k]
+    # Propagate loop variables from outer repeats
+    if isinstance(state, dict):
+        for k, v in state.items():
+            if k not in ctx and isinstance(v, dict) and "_index" not in str(v):
+                ctx[k] = v
+
+    # Add panel defaults — find the panel whose state contains the source field
+    if _panels:
+        from workspace_interpreter.loader import panel_state_defaults
+        source_root = source_expr.split(".")[0] if "." in source_expr else ""
+        source_field = source_expr.split(".")[1] if source_root == "panel" and "." in source_expr else ""
+        best_panel = None
+        for pid, pspec in _panels.items():
+            defaults = panel_state_defaults(pspec)
+            if source_field and source_field in defaults:
+                best_panel = defaults
+                break
+            if best_panel is None and defaults:
+                best_panel = defaults
+        if best_panel:
+            ctx["panel"] = best_panel
+
+    # Add data context (swatch_libraries etc)
+    try:
+        from workspace_interpreter.loader import load_workspace
+        for ws_path in ("workspace", "../workspace"):
+            try:
+                ws = load_workspace(ws_path)
+                if ws and "swatch_libraries" in ws:
+                    ctx["data"] = {"swatch_libraries": ws["swatch_libraries"]}
+                    break
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # Also copy loop variables from state (e.g., 'lib' from outer repeat)
+    if isinstance(state, dict):
+        for k, v in state.items():
+            if k not in ctx and isinstance(v, dict):
+                ctx[k] = v
+
+    result = _eval(source_expr, ctx)
+    items = result.value if hasattr(result, 'value') else result
+    if not isinstance(items, list):
+        return ""
+
+    # Render template for each item
+    layout = el.get("layout", "column")
+    style = _style_str(el, theme, state)
+    dir_class = "flex-row flex-wrap" if layout == "wrap" else ("flex-row" if layout == "row" else "flex-column")
+    html = f'<div class="d-flex {dir_class}"{style}>'
+    for i, item in enumerate(items):
+        # Build item state with loop variable injected
+        item_state = dict(state) if state else {}
+        if isinstance(item, dict):
+            item_data = dict(item)
+        else:
+            item_data = {"_value": item}
+        item_data["_index"] = i
+        item_state[var_name] = item_data
+        # Also inject the structured context keys so nested expressions work
+        for k in ("panel", "data"):
+            if k in ctx and k not in item_state:
+                item_state[k] = ctx[k]
+        html += render_element(template, theme, item_state, mode="normal")
+    html += '</div>'
+    return Markup(html)
+
+
 def _render_container(el, theme, state):
     layout = el.get("layout", "column")
     direction = "flex-column" if layout == "column" else "flex-row"
@@ -628,6 +717,30 @@ def _render_slider(el, theme, state):
         if key in el:
             attrs += f' {key}="{el[key]}"'
     return Markup(f'<input{_id_attr(el)} type="range" class="form-range"{attrs}{_data_attrs(el)}>')
+
+
+def _render_disclosure(el, theme, state):
+    """Render a collapsible disclosure section using HTML <details>."""
+    from workspace_interpreter.expr import evaluate_text as _eval_text
+    label = el.get("label", "")
+    if "{{" in label:
+        label = _eval_text(label, state if isinstance(state, dict) else {})
+    collapsed = False
+    bind = el.get("bind", {})
+    if isinstance(bind, dict) and "collapsed" in bind:
+        from workspace_interpreter.expr import evaluate as _eval
+        ctx = {"state": state} if state else {}
+        result = _eval(bind["collapsed"], ctx)
+        collapsed = result.value if hasattr(result, 'value') and isinstance(result.value, bool) else False
+    children = _render_children(el, theme, state)
+    open_attr = "" if collapsed else " open"
+    return Markup(
+        f'<details{_id_attr(el)}{open_attr}{_style_str(el, theme, state)}{_data_attrs(el)}>'
+        f'<summary style="cursor:pointer;font-size:12px;padding:2px 4px;color:var(--jas-text,#ccc)">'
+        f'{escape(label)}</summary>'
+        f'<div>{children}</div>'
+        f'</details>'
+    )
 
 
 def _render_select(el, theme, state):
@@ -1077,6 +1190,7 @@ _RENDERERS = {
     "separator": _render_separator,
     "spacer": _render_spacer,
     "image": _render_image,
+    "disclosure": _render_disclosure,
     "color_bar": _render_color_bar,
     "color_gradient": _render_color_gradient,
     "color_hue_bar": _render_color_hue_bar,
