@@ -707,6 +707,53 @@ def _render_color_bar(el, theme, state):
     )
 
 
+def _render_color_gradient(el, theme, state):
+    """Render a 2D saturation/brightness gradient for the color picker dialog.
+
+    Uses CSS linear-gradient overlays. Click updates dialog.s and dialog.b.
+    The gradient is colored by the current hue (from bind.hue expression).
+    """
+    style = _style_str(el, theme, state)
+    data = _data_attrs(el)
+    # The gradient background is set dynamically by JS based on dialog.h,
+    # so emit a data attribute for the hue binding
+    hue_bind = el.get("bind", {}).get("hue", "")
+    return Markup(
+        f'<div{_id_attr(el)} data-type="color-gradient"'
+        f' data-bind-hue="{escape(str(hue_bind))}"'
+        f' style="width:180px;height:180px;cursor:crosshair;position:relative;'
+        f'border:1px solid var(--jas-border,#555);box-sizing:border-box;'
+        f'background:linear-gradient(to bottom,transparent,#000),'
+        f'linear-gradient(to right,#fff,hsl(0,100%,50%))"{style}{data}>'
+        f'<div style="position:absolute;width:10px;height:10px;border:2px solid #fff;'
+        f'border-radius:50%;pointer-events:none;box-shadow:0 0 2px rgba(0,0,0,0.5);'
+        f'left:0;top:0;box-sizing:border-box" data-role="gradient-cursor"></div>'
+        f'</div>'
+    )
+
+
+def _render_color_hue_bar(el, theme, state):
+    """Render a vertical hue rainbow bar for the color picker dialog.
+
+    Click updates dialog.h. Arrow indicator shows current position.
+    """
+    style = _style_str(el, theme, state)
+    data = _data_attrs(el)
+    value_bind = el.get("bind", {}).get("value", "")
+    return Markup(
+        f'<div{_id_attr(el)} data-type="color-hue-bar"'
+        f' data-bind-value="{escape(str(value_bind))}"'
+        f' style="width:32px;height:180px;cursor:crosshair;position:relative;'
+        f'border:1px solid var(--jas-border,#555);box-sizing:border-box;'
+        f'background:linear-gradient(to bottom,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)"'
+        f'{style}{data}>'
+        f'<div style="position:absolute;left:-2px;right:-2px;top:0;height:3px;'
+        f'background:#fff;border:1px solid #000;pointer-events:none;box-sizing:border-box"'
+        f' data-role="hue-indicator"></div>'
+        f'</div>'
+    )
+
+
 def _render_dropdown(el, theme, state):
     """Render a dropdown button with a menu of items."""
     icon_name = el.get("icon", "")
@@ -1029,6 +1076,8 @@ _RENDERERS = {
     "spacer": _render_spacer,
     "image": _render_image,
     "color_bar": _render_color_bar,
+    "color_gradient": _render_color_gradient,
+    "color_hue_bar": _render_color_hue_bar,
     "brand_logo": _render_brand_logo,
     "fill_stroke_widget": _render_col,
 }

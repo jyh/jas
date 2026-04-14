@@ -1738,6 +1738,102 @@
       if (canvas) applyColorBarPoint(canvas, e.clientX, e.clientY, true);
     });
 
+    // --- Color picker gradient click handler ---
+    var gradientDragging = false;
+    function applyGradientPoint(el, clientX, clientY) {
+      var rect = el.getBoundingClientRect();
+      var x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+      var y = Math.max(0, Math.min(clientY - rect.top, rect.height));
+      var sat = Math.round(x / rect.width * 100);
+      var bri = Math.round((1 - y / rect.height) * 100);
+      if (dialogState) {
+        dialogState.s = sat;
+        dialogState.b = bri;
+        // Recompute color from HSB
+        var h = Number(dialogState.h) || 0;
+        var rgb = hsbToRgb(h, sat, bri);
+        dialogState.color = "#" + rgbToHexStr(rgb.r, rgb.g, rgb.b);
+        dialogState.hex = rgbToHexStr(rgb.r, rgb.g, rgb.b);
+        dialogState.r = rgb.r; dialogState.g = rgb.g; dialogState.bl = rgb.b;
+        updateBindings(null, null);
+      }
+      // Update cursor position
+      var cursor = el.querySelector("[data-role='gradient-cursor']");
+      if (cursor) {
+        cursor.style.left = (x - 5) + "px";
+        cursor.style.top = (y - 5) + "px";
+      }
+    }
+    document.addEventListener("pointerdown", function (e) {
+      var el = e.target.closest("[data-type='color-gradient']");
+      if (!el) return;
+      gradientDragging = true;
+      el.setPointerCapture(e.pointerId);
+      applyGradientPoint(el, e.clientX, e.clientY);
+    });
+    document.addEventListener("pointermove", function (e) {
+      if (!gradientDragging) return;
+      var el = e.target.closest("[data-type='color-gradient']");
+      if (el) applyGradientPoint(el, e.clientX, e.clientY);
+    });
+    document.addEventListener("pointerup", function (e) {
+      if (!gradientDragging) return;
+      gradientDragging = false;
+      var el = e.target.closest("[data-type='color-gradient']");
+      if (el) applyGradientPoint(el, e.clientX, e.clientY);
+    });
+
+    // --- Color picker hue bar click handler ---
+    var hueDragging = false;
+    function applyHuePoint(el, clientX, clientY) {
+      var rect = el.getBoundingClientRect();
+      var y = Math.max(0, Math.min(clientY - rect.top, rect.height));
+      var hue = Math.round(y / rect.height * 360);
+      if (hue >= 360) hue = 359;
+      if (dialogState) {
+        dialogState.h = hue;
+        // Recompute color from HSB
+        var s = Number(dialogState.s) || 100;
+        var b = Number(dialogState.b) || 100;
+        var rgb = hsbToRgb(hue, s, b);
+        dialogState.color = "#" + rgbToHexStr(rgb.r, rgb.g, rgb.b);
+        dialogState.hex = rgbToHexStr(rgb.r, rgb.g, rgb.b);
+        dialogState.r = rgb.r; dialogState.g = rgb.g; dialogState.bl = rgb.b;
+        updateBindings(null, null);
+        // Update gradient background for new hue
+        var gradEl = document.querySelector("[data-type='color-gradient']");
+        if (gradEl) {
+          var hRgb = hsbToRgb(hue, 100, 100);
+          gradEl.style.background =
+            "linear-gradient(to bottom,transparent,#000)," +
+            "linear-gradient(to right,#fff,rgb(" + hRgb.r + "," + hRgb.g + "," + hRgb.b + "))";
+        }
+      }
+      // Update indicator position
+      var indicator = el.querySelector("[data-role='hue-indicator']");
+      if (indicator) {
+        indicator.style.top = (y - 1) + "px";
+      }
+    }
+    document.addEventListener("pointerdown", function (e) {
+      var el = e.target.closest("[data-type='color-hue-bar']");
+      if (!el) return;
+      hueDragging = true;
+      el.setPointerCapture(e.pointerId);
+      applyHuePoint(el, e.clientX, e.clientY);
+    });
+    document.addEventListener("pointermove", function (e) {
+      if (!hueDragging) return;
+      var el = e.target.closest("[data-type='color-hue-bar']");
+      if (el) applyHuePoint(el, e.clientX, e.clientY);
+    });
+    document.addEventListener("pointerup", function (e) {
+      if (!hueDragging) return;
+      hueDragging = false;
+      var el = e.target.closest("[data-type='color-hue-bar']");
+      if (el) applyHuePoint(el, e.clientX, e.clientY);
+    });
+
     // Initialize bindings
     for (var key in state) {
       if (state.hasOwnProperty(key)) {
