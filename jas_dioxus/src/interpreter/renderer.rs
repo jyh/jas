@@ -68,6 +68,8 @@ fn render_el(
         "color_swatch" => render_color_swatch(el, ctx, rctx),
         "fill_stroke_widget" => render_fill_stroke_widget(el, ctx, rctx),
         "color_bar" => render_color_bar(el, ctx, rctx),
+        "color_gradient" => render_color_gradient(el, ctx, rctx),
+        "color_hue_bar" => render_color_hue_bar(el, ctx, rctx),
         "separator" => render_separator(el, ctx),
         "spacer" => render_spacer(el, ctx),
         "disclosure" => render_disclosure(el, ctx, rctx),
@@ -901,6 +903,145 @@ fn render_color_bar(_el: &serde_json::Value, _ctx: &serde_json::Value, rctx: &Re
             src: "{data_uri}",
             style: "width:100%;height:64px;cursor:crosshair;border:1px solid var(--jas-border,#555);border-radius:1px;",
             onclick: on_click,
+        }
+    }
+}
+
+/// Render a 2D color gradient for the color picker dialog.
+/// Shows saturation (X) x brightness (Y) gradient colored by the current hue.
+fn render_color_gradient(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let style = build_style(el, ctx);
+
+    // Get hue from bind expression
+    let hue = el.get("bind")
+        .and_then(|b| b.get("hue"))
+        .and_then(|v| v.as_str())
+        .map(|e| match expr::eval(e, ctx) { Value::Number(n) => n, _ => 0.0 })
+        .unwrap_or(0.0);
+
+    // Build CSS for the SB gradient at this hue
+    let (r, g, b) = crate::interpreter::color_util::hsb_to_rgb(hue, 100.0, 100.0);
+    let hue_css = format!("rgb({r},{g},{b})");
+
+    // The gradient: white->hue on X, transparent->black on Y
+    let bg = format!(
+        "linear-gradient(to bottom, transparent, #000), linear-gradient(to right, #fff, {hue_css})"
+    );
+
+    let app = rctx.app.clone();
+    let mut dialog_signal = rctx.dialog_ctx.0;
+    let mut revision = rctx.revision;
+
+    let on_click = move |evt: Event<MouseData>| {
+        let coords = evt.data().element_coordinates();
+        let x = coords.x;
+        let y = coords.y;
+        // Assume 180x180 element size
+        let width = 180.0_f64;
+        let height = 180.0_f64;
+        let sat = (x / width * 100.0).clamp(0.0, 100.0);
+        let bri = ((1.0 - y / height) * 100.0).clamp(0.0, 100.0);
+
+        if let Some(mut ds) = dialog_signal() {
+            ds.state.insert("s".to_string(), serde_json::json!(sat.round() as i64));
+            ds.state.insert("b".to_string(), serde_json::json!(bri.round() as i64));
+            // Recompute color from HSB
+            let h = ds.state.get("h").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let (cr, cg, cb) = crate::interpreter::color_util::hsb_to_rgb(h, sat, bri);
+            let hex = format!("#{:02x}{:02x}{:02x}", cr, cg, cb);
+            ds.state.insert("color".to_string(), serde_json::json!(hex));
+            ds.state.insert("hex".to_string(), serde_json::json!(&hex[1..]));
+            ds.state.insert("r".to_string(), serde_json::json!(cr as i64));
+            ds.state.insert("g".to_string(), serde_json::json!(cg as i64));
+            ds.state.insert("bl".to_string(), serde_json::json!(cb as i64));
+            dialog_signal.set(Some(ds));
+            revision += 1;
+        }
+    };
+
+    // Cursor position from current S and B
+    let sat = el.get("bind")
+        .and_then(|b| b.get("saturation"))
+        .and_then(|v| v.as_str())
+        .map(|e| match expr::eval(e, ctx) { Value::Number(n) => n, _ => 0.0 })
+        .unwrap_or(0.0);
+    let bri = el.get("bind")
+        .and_then(|b| b.get("brightness"))
+        .and_then(|v| v.as_str())
+        .map(|e| match expr::eval(e, ctx) { Value::Number(n) => n, _ => 100.0 })
+        .unwrap_or(100.0);
+    let cursor_x = sat / 100.0 * 180.0;
+    let cursor_y = (1.0 - bri / 100.0) * 180.0;
+
+    rsx! {
+        div {
+            id: "{id}",
+            style: "width:180px;height:180px;background:{bg};border:1px solid var(--jas-border,#555);cursor:crosshair;position:relative;{style}",
+            onclick: on_click,
+            // Position indicator circle
+            div {
+                style: "position:absolute;left:{cursor_x - 5.0}px;top:{cursor_y - 5.0}px;width:10px;height:10px;border:2px solid #fff;border-radius:50%;pointer-events:none;box-sizing:border-box;box-shadow:0 0 2px rgba(0,0,0,0.5);",
+            }
+        }
+    }
+}
+
+/// Render a vertical hue bar for the color picker dialog.
+/// Shows a rainbow gradient; click to select hue (0-360).
+fn render_color_hue_bar(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let style = build_style(el, ctx);
+
+    // Rainbow hue gradient
+    let bg = "linear-gradient(to bottom, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)";
+
+    // Current hue for position indicator
+    let hue = el.get("bind")
+        .and_then(|b| b.get("value"))
+        .and_then(|v| v.as_str())
+        .map(|e| match expr::eval(e, ctx) { Value::Number(n) => n, _ => 0.0 })
+        .unwrap_or(0.0);
+
+    let mut dialog_signal = rctx.dialog_ctx.0;
+    let mut revision = rctx.revision;
+
+    let on_click = move |evt: Event<MouseData>| {
+        let coords = evt.data().element_coordinates();
+        let y = coords.y;
+        // Bar height from style or default 180
+        let height = 180.0_f64;
+        let new_hue = (y / height * 360.0).clamp(0.0, 359.0);
+
+        if let Some(mut ds) = dialog_signal() {
+            ds.state.insert("h".to_string(), serde_json::json!(new_hue.round() as i64));
+            // Recompute color from HSB
+            let s = ds.state.get("s").and_then(|v| v.as_f64()).unwrap_or(100.0);
+            let b = ds.state.get("b").and_then(|v| v.as_f64()).unwrap_or(100.0);
+            let (cr, cg, cb) = crate::interpreter::color_util::hsb_to_rgb(new_hue, s, b);
+            let hex = format!("#{:02x}{:02x}{:02x}", cr, cg, cb);
+            ds.state.insert("color".to_string(), serde_json::json!(hex));
+            ds.state.insert("hex".to_string(), serde_json::json!(&hex[1..]));
+            ds.state.insert("r".to_string(), serde_json::json!(cr as i64));
+            ds.state.insert("g".to_string(), serde_json::json!(cg as i64));
+            ds.state.insert("bl".to_string(), serde_json::json!(cb as i64));
+            dialog_signal.set(Some(ds));
+            revision += 1;
+        }
+    };
+
+    // Position indicator
+    let indicator_y = hue / 360.0 * 180.0;
+
+    rsx! {
+        div {
+            id: "{id}",
+            style: "width:32px;height:180px;background:{bg};border:1px solid var(--jas-border,#555);cursor:crosshair;position:relative;{style}",
+            onclick: on_click,
+            // Position indicator arrow
+            div {
+                style: "position:absolute;left:-2px;right:-2px;top:{indicator_y - 1.0}px;height:3px;background:#fff;border:1px solid #000;pointer-events:none;box-sizing:border-box;",
+            }
         }
     }
 }
