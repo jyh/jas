@@ -18,7 +18,4 @@
  (modules anchor_point_tool_test)
  (libraries jas alcotest))
 
-(test
- (name color_picker_test)
- (modules color_picker_test)
- (libraries jas alcotest))
+; color_picker_test removed — color picker now uses YAML dialog system
