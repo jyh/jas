@@ -158,12 +158,12 @@ public struct PanelGroupView: View {
             // Panel body
             if !group.collapsed {
                 if let kind = group.activePanel() {
-                    if kind == .color, let model = model {
-                        ColorPanelView(
-                            workspaceLayout: $workspaceLayout,
-                            model: model,
-                            theme: theme
-                        )
+                    let contentId = panelKindToContentId(kind)
+                    if let ws = WorkspaceData.load(),
+                       let content = ws.panelContent(contentId) {
+                        let stateMap = ws.stateDefaults()
+                        let ctx: [String: Any] = ["state": stateMap, "panel": [:] as [String: Any]]
+                        YamlPanelBodyView(contentSpec: content, context: ctx)
                     } else {
                         SwiftUI.Text(verbatim: panelLabel(kind))
                             .font(.system(size: 12))
