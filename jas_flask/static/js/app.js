@@ -1655,7 +1655,7 @@
       var el = e.target;
       var bindVal = el.getAttribute && el.getAttribute("data-bind-value");
       if (!bindVal) return;
-      var pm = bindVal.match(/^\{\{panel\.(\w+)\}\}$/);
+      var pm = bindVal.match(/^\{\{panel\.(\w+)\}\}$/) || bindVal.match(/^panel\.(\w+)$/);
       if (!pm) return;
       var field = pm[1];
       panelColorSyncLocked = true;
@@ -1670,7 +1670,7 @@
     document.addEventListener("change", function (e) {
       var el = e.target;
       var bindVal = el.getAttribute && el.getAttribute("data-bind-value");
-      if (!bindVal || !bindVal.match(/^\{\{panel\.\w+\}\}$/)) return;
+      if (!bindVal || !(bindVal.match(/^\{\{panel\.\w+\}\}$/) || bindVal.match(/^panel\.\w+$/))) return;
       dispatch("set_active_color", { color: panelStateToColor() });
     });
 
@@ -1679,7 +1679,8 @@
       if (e.key !== "Enter") return;
       var el = e.target;
       if (!el.getAttribute) return;
-      if (el.getAttribute("data-bind-value") !== "{{panel.hex}}") return;
+      var hexBind = el.getAttribute("data-bind-value");
+      if (hexBind !== "{{panel.hex}}" && hexBind !== "panel.hex") return;
       var raw = el.value.replace(/^#/, "").trim();
       if (/^[0-9a-fA-F]{6}$/.test(raw)) {
         var newColor = "#" + raw.toLowerCase();

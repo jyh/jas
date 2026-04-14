@@ -268,7 +268,9 @@ def _data_attrs(el: dict) -> str:
 
     # Emit bind attributes
     bind = el.get("bind", {})
-    if not isinstance(bind, dict):
+    if isinstance(bind, str):
+        bind = {"value": bind}
+    elif not isinstance(bind, dict):
         bind = {}
     for prop, expr in bind.items():
         parts.append(f'data-bind-{prop}="{escape(str(expr))}"')
