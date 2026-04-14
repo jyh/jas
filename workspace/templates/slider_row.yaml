@@ -7,6 +7,7 @@ slider_row:
     max: { type: number, default: 100 }
     step: { type: number, default: 1 }
     bind: { type: string }
+    disabled: { type: string, default: "" }
     unit: { type: string, default: "" }
     gap: { type: number, default: 4 }
     label_width: { type: number, default: 14 }
@@ -23,10 +24,11 @@ slider_row:
         max: "${max}"
         step: "${step}"
         style: { flex: 1 }
-        bind: { value: "${bind}" }
+        bind: { value: "${bind}", disabled: "${disabled}" }
       - id: "${id_prefix}_val"
         type: number_input
         min: "${min}"
         max: "${max}"
         style: { width: "${input_width}" }
-        bind: { value: "${bind}" }
+        bind: { value: "${bind}", disabled: "${disabled}" }
+      - { type: text, content: "${unit}", style: { font_size: 10 } }
