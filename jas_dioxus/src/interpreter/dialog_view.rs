@@ -18,12 +18,98 @@ use crate::workspace::theme::*;
 pub struct DialogState {
     /// Dialog ID (matches a key in workspace dialogs).
     pub id: String,
-    /// Dialog-local state values.
+    /// Dialog-local state values (only plain/canonical variables).
     pub state: HashMap<String, serde_json::Value>,
     /// Parameters passed when the dialog was opened.
     pub params: HashMap<String, serde_json::Value>,
     /// Anchor position (page coords) for non-modal popover dialogs.
     pub anchor: Option<(f64, f64)>,
+    /// Property definitions from the dialog's state section.
+    /// Each entry maps a variable name to its JSON definition
+    /// (which may contain "get" and/or "set" expression strings).
+    pub props: HashMap<String, serde_json::Value>,
+}
+
+impl DialogState {
+    /// Get a dialog value, evaluating the getter if present.
+    pub fn get_value(&self, key: &str) -> serde_json::Value {
+        if let Some(prop) = self.props.get(key) {
+            if let Some(get_expr) = prop.get("get").and_then(|v| v.as_str()) {
+                let local: serde_json::Map<String, serde_json::Value> =
+                    self.state.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                let ctx = serde_json::Value::Object(local);
+                let result = super::expr::eval(get_expr, &ctx);
+                return super::effects::value_to_json(&result);
+            }
+        }
+        self.state.get(key).cloned().unwrap_or(serde_json::Value::Null)
+    }
+
+    /// Set a dialog value, running the setter lambda if present.
+    pub fn set_value(&mut self, key: &str, value: serde_json::Value) {
+        if let Some(prop) = self.props.get(key).cloned() {
+            if let Some(set_expr) = prop.get("set").and_then(|v| v.as_str()) {
+                self._run_setter_pragmatic(set_expr, &value);
+                return;
+            }
+            if prop.get("get").is_some() {
+                return; // read-only — has get but no set
+            }
+        }
+        self.state.insert(key.to_string(), value);
+    }
+
+    /// Pragmatic setter: parse "fun param -> body", eval body with param bound,
+    /// and intercept Assign nodes to write back to state.
+    fn _run_setter_pragmatic(&mut self, set_expr: &str, value: &serde_json::Value) {
+        // Parse the set expression to extract param name and body
+        let expr_str = set_expr.trim();
+        if !expr_str.starts_with("fun ") {
+            return;
+        }
+        let arrow_pos = match expr_str.find("->") {
+            Some(p) => p,
+            None => return,
+        };
+        let param_part = expr_str[4..arrow_pos].trim();
+        let param = param_part.trim_matches(|c: char| c == '(' || c == ')').trim();
+        let body_str = expr_str[arrow_pos + 2..].trim();
+
+        // Build context: all stored state + param bound to incoming value
+        let mut local = serde_json::Map::new();
+        for (k, v) in &self.state {
+            local.insert(k.clone(), v.clone());
+        }
+        local.insert(param.to_string(), value.clone());
+
+        // Evaluate the body expression. For <- assignments, we use the
+        // eval_with_store function that collects assignments.
+        let assignments = super::expr::eval_with_store(
+            body_str,
+            &serde_json::Value::Object(local),
+        );
+
+        // Apply assignments to state
+        for (target, val) in assignments {
+            self.state.insert(target, super::effects::value_to_json(&val));
+        }
+    }
+
+    /// Build an eval context with computed getters for all properties.
+    pub fn eval_context(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut result = serde_json::Map::new();
+        // Start with stored values
+        for (k, v) in &self.state {
+            result.insert(k.clone(), v.clone());
+        }
+        // Override with computed getters
+        for (k, prop) in &self.props {
+            if prop.get("get").and_then(|v| v.as_str()).is_some() {
+                result.insert(k.clone(), self.get_value(k));
+            }
+        }
+        result
+    }
 }
 
 /// Signal wrapper for providing dialog state via context.
@@ -49,16 +135,24 @@ pub fn open_dialog(
         None => return,
     };
 
-    // Extract state defaults
+    // Extract state defaults and property definitions (get/set)
     let mut defaults = HashMap::new();
+    let mut props = HashMap::new();
     if let Some(serde_json::Value::Object(state_defs)) = dlg_def.get("state") {
         for (key, defn) in state_defs {
-            let default_val = if let serde_json::Value::Object(d) = defn {
-                d.get("default").cloned().unwrap_or(serde_json::Value::Null)
+            if let serde_json::Value::Object(d) = defn {
+                let has_get = d.contains_key("get");
+                let has_set = d.contains_key("set");
+                if has_get || has_set {
+                    props.insert(key.clone(), defn.clone());
+                }
+                // Only store default for plain vars (no get)
+                if !has_get {
+                    defaults.insert(key.clone(), d.get("default").cloned().unwrap_or(serde_json::Value::Null));
+                }
             } else {
-                defn.clone()
-            };
-            defaults.insert(key.clone(), default_val);
+                defaults.insert(key.clone(), defn.clone());
+            }
         }
     }
 
@@ -100,6 +194,7 @@ pub fn open_dialog(
         state: dialog_state,
         params: resolved_params,
         anchor: None,
+        props,
     }));
 }
 
@@ -161,9 +256,8 @@ pub fn YamlDialogView(dialog_ctx: Signal<Option<DialogState>>) -> Element {
         .and_then(|s| s.as_str())
         .unwrap_or(&ds.id);
 
-    // Build eval context with dialog and param namespaces
-    let dialog_map: serde_json::Map<String, serde_json::Value> =
-        ds.state.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    // Build eval context — dialog map includes computed getters
+    let dialog_map: serde_json::Map<String, serde_json::Value> = ds.eval_context();
     let param_map: serde_json::Map<String, serde_json::Value> =
         ds.params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 

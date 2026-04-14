@@ -36,7 +36,7 @@ fn eval_expr(expr: &str, store: &StateStore, ctx: &serde_json::Value) -> Value {
     eval(&expr, &eval_ctx)
 }
 
-fn value_to_json(v: &Value) -> serde_json::Value {
+pub fn value_to_json(v: &Value) -> serde_json::Value {
     match v {
         Value::Null => serde_json::Value::Null,
         Value::Bool(b) => serde_json::json!(*b),
