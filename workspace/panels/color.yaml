@@ -366,33 +366,9 @@ content:
               bind:
                 visible: 'panel.mode == "grayscale"'
               children:
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "K"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_k
-                      type: slider
-                      summary: "K (black)"
-                      min: 0
-                      max: 100
-                      step: 1
-                      bind:
-                        value: "panel.k"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_k_val
-                      type: number_input
-                      min: 0
-                      max: 100
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.k"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - type: text
-                      content: "%"
-                      style: { font_size: 10 }
+                - template: slider_row
+                  params: { label: "K", id_prefix: cp_k, max: 100, bind: "panel.k", unit: "%", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
 
             # HSB: H (0–360 °), S (0–100 %), B (0–100 %)
             - id: cp_sliders_hsb
@@ -402,89 +378,15 @@ content:
               bind:
                 visible: 'panel.mode == "hsb"'
               children:
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "H"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_h
-                      type: slider
-                      summary: "Hue"
-                      min: 0
-                      max: 359
-                      step: 1
-                      bind:
-                        value: "panel.h"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_h_val
-                      type: number_input
-                      min: 0
-                      max: 359
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.h"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - type: text
-                      content: "°"
-                      style: { font_size: 10 }
-
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "S"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_s
-                      type: slider
-                      summary: "Saturation"
-                      min: 0
-                      max: 100
-                      step: 1
-                      bind:
-                        value: "panel.s"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_s_val
-                      type: number_input
-                      min: 0
-                      max: 100
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.s"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - type: text
-                      content: "%"
-                      style: { font_size: 10 }
-
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "B"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_b
-                      type: slider
-                      summary: "Brightness"
-                      min: 0
-                      max: 100
-                      step: 1
-                      bind:
-                        value: "panel.b"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_b_val
-                      type: number_input
-                      min: 0
-                      max: 100
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.b"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - type: text
-                      content: "%"
-                      style: { font_size: 10 }
+                - template: slider_row
+                  params: { label: "H", id_prefix: cp_h, max: 359, bind: "panel.h", unit: "\u00b0", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                - template: slider_row
+                  params: { label: "S", id_prefix: cp_s, max: 100, bind: "panel.s", unit: "%", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                - template: slider_row
+                  params: { label: "B", id_prefix: cp_b, max: 100, bind: "panel.b", unit: "%", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
 
             # RGB: R, G, B (0–255)
             - id: cp_sliders_rgb
@@ -494,80 +396,15 @@ content:
               bind:
                 visible: 'panel.mode == "rgb"'
               children:
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "R"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_r
-                      type: slider
-                      summary: "Red"
-                      min: 0
-                      max: 255
-                      step: 1
-                      bind:
-                        value: "panel.r"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_r_val
-                      type: number_input
-                      min: 0
-                      max: 255
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.r"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "G"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_g
-                      type: slider
-                      summary: "Green"
-                      min: 0
-                      max: 255
-                      step: 1
-                      bind:
-                        value: "panel.g"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_g_val
-                      type: number_input
-                      min: 0
-                      max: 255
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.g"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "B"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_bl
-                      type: slider
-                      summary: "Blue"
-                      min: 0
-                      max: 255
-                      step: 1
-                      bind:
-                        value: "panel.bl"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_bl_val
-                      type: number_input
-                      min: 0
-                      max: 255
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.bl"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
+                - template: slider_row
+                  params: { label: "R", id_prefix: cp_r, max: 255, bind: "panel.r", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                - template: slider_row
+                  params: { label: "G", id_prefix: cp_g, max: 255, bind: "panel.g", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                - template: slider_row
+                  params: { label: "B", id_prefix: cp_bl, max: 255, bind: "panel.bl", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
 
             # CMYK: C, M, Y, K (0–100 %)
             - id: cp_sliders_cmyk
@@ -577,117 +414,18 @@ content:
               bind:
                 visible: 'panel.mode == "cmyk"'
               children:
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "C"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_c
-                      type: slider
-                      summary: "Cyan"
-                      min: 0
-                      max: 100
-                      step: 1
-                      bind:
-                        value: "panel.c"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_c_val
-                      type: number_input
-                      min: 0
-                      max: 100
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.c"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - type: text
-                      content: "%"
-                      style: { font_size: 10 }
-
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "M"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_m
-                      type: slider
-                      summary: "Magenta"
-                      min: 0
-                      max: 100
-                      step: 1
-                      bind:
-                        value: "panel.m"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_m_val
-                      type: number_input
-                      min: 0
-                      max: 100
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.m"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - type: text
-                      content: "%"
-                      style: { font_size: 10 }
-
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "Y"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_y
-                      type: slider
-                      summary: "Yellow"
-                      min: 0
-                      max: 100
-                      step: 1
-                      bind:
-                        value: "panel.y"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_y_val
-                      type: number_input
-                      min: 0
-                      max: 100
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.y"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - type: text
-                      content: "%"
-                      style: { font_size: 10 }
-
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "K"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_k_cmyk
-                      type: slider
-                      summary: "Key (black)"
-                      min: 0
-                      max: 100
-                      step: 1
-                      bind:
-                        value: "panel.k"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_k_cmyk_val
-                      type: number_input
-                      min: 0
-                      max: 100
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.k"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - type: text
-                      content: "%"
-                      style: { font_size: 10 }
+                - template: slider_row
+                  params: { label: "C", id_prefix: cp_c, max: 100, bind: "panel.c", unit: "%", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                - template: slider_row
+                  params: { label: "M", id_prefix: cp_m, max: 100, bind: "panel.m", unit: "%", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                - template: slider_row
+                  params: { label: "Y", id_prefix: cp_y, max: 100, bind: "panel.y", unit: "%", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                - template: slider_row
+                  params: { label: "K", id_prefix: cp_k_cmyk, max: 100, bind: "panel.k", unit: "%", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
 
             # Web Safe RGB: R, G, B (step=51, snaps to 0/51/102/153/204/255)
             - id: cp_sliders_web_safe
@@ -696,86 +434,16 @@ content:
               style: { gap: 2 }
               bind:
                 visible: 'panel.mode == "web_safe_rgb"'
-              description: >
-                RGB sliders restricted to six web-safe steps per channel:
-                0, 51, 102, 153, 204, 255 (hex 00, 33, 66, 99, CC, FF).
-                Sliders snap continuously as dragged (step=51). Hex input
-                snaps silently to the nearest web-safe color on commit.
               children:
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "R"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_r_ws
-                      type: slider
-                      summary: "Red (web safe)"
-                      min: 0
-                      max: 255
-                      step: 51
-                      bind:
-                        value: "panel.r"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_r_ws_val
-                      type: number_input
-                      min: 0
-                      max: 255
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.r"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "G"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_g_ws
-                      type: slider
-                      summary: "Green (web safe)"
-                      min: 0
-                      max: 255
-                      step: 51
-                      bind:
-                        value: "panel.g"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_g_ws_val
-                      type: number_input
-                      min: 0
-                      max: 255
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.g"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-
-                - type: container
-                  layout: row
-                  style: { gap: 4, alignment: center }
-                  children:
-                    - type: text
-                      content: "B"
-                      style: { width: 10, font_size: 10 }
-                    - id: cp_bl_ws
-                      type: slider
-                      summary: "Blue (web safe)"
-                      min: 0
-                      max: 255
-                      step: 51
-                      bind:
-                        value: "panel.bl"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
-                    - id: cp_bl_ws_val
-                      type: number_input
-                      min: 0
-                      max: 255
-                      style: { width: 64 }
-                      bind:
-                        value: "panel.bl"
-                        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
+                - template: slider_row
+                  params: { label: "R", id_prefix: cp_r_ws, max: 255, step: 51, bind: "panel.r", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                - template: slider_row
+                  params: { label: "G", id_prefix: cp_g_ws, max: 255, step: 51, bind: "panel.g", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                - template: slider_row
+                  params: { label: "B", id_prefix: cp_bl_ws, max: 255, step: 51, bind: "panel.bl", label_width: 10, input_width: 64,
+                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
 
     # ── Row 3: Hex field ─────────────────────────────────────────
     - type: container
