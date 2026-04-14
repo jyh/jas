@@ -676,15 +676,21 @@ def _render_number_input(el, theme, state):
 
 def _render_color_swatch(el, theme, state):
     bind = el.get("bind", {})
+    if isinstance(bind, str):
+        bind = {"color": bind}
     color_ref = bind.get("color", "#888")
-    # Resolve bare state.* references against initial state
-    if isinstance(color_ref, str) and color_ref.startswith("state."):
-        key = color_ref.split(".", 1)[1]
-        color = state.get(key, "#888") or "#888"
+    # Resolve color expression using the expression evaluator
+    color = "#888"
+    if isinstance(color_ref, str) and color_ref.startswith("#"):
+        color = color_ref
     elif isinstance(color_ref, str):
-        color = _resolve(color_ref, theme, state)
-    else:
-        color = "#888"
+        from workspace_interpreter.expr import evaluate as _eval
+        result = _eval(color_ref, state if isinstance(state, dict) else {})
+        val = result.value if hasattr(result, 'value') else result
+        if isinstance(val, str) and val:
+            color = val
+        elif not val:
+            color = "#888"
     style = el.get("style", {})
     sz = style.get("size", 28)
     hollow = el.get("hollow", False)
