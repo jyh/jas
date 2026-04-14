@@ -344,80 +344,11 @@ content:
       id: cp_controls_row
       children:
 
-        # Fill/stroke widget — delegates to native FillStrokeWidgetView
-        # in Rust/Swift/OCaml; the Flask renderer handles the YAML children.
-        - id: cp_fill_stroke_widget
-          type: fill_stroke_widget
+        # Fill/stroke widget — uses shared template
+        - template: fill_stroke_widget
+          params: { id_prefix: "cp_", swatch_size: 24, offset: 8 }
           col: 3
-          summary: "Fill & Stroke"
-          description: >
-            Overlapping fill and stroke swatches with swap and reset buttons,
-            identical to the toolbar fill/stroke indicator. Single-click a
-            swatch to bring it to front (making it the active attribute).
-            Double-click the active swatch to open the color picker. Swap
-            button exchanges fill and stroke colors. Reset button restores
-            defaults (white fill, black stroke). Below the swatches are
-            three mode buttons: Color (solid), Gradient (disabled), and
-            None (removes fill/stroke).
-
-            In native renderers (Rust, Swift, OCaml) this element renders
-            the built-in FillStrokeWidgetView component. In Flask the
-            element falls through to its children for HTML rendering.
           style: { position: relative, min_height: 56 }
-          children:
-
-            - id: cp_fill_swatch
-              type: color_swatch
-              summary: "Fill color"
-              description: >
-                Filled square showing the current fill color. Positioned
-                at top-left, z-index swaps based on fill_on_top. When fill
-                is null, shows the none indicator.
-              style: { size: 24, position: { x: 0, y: 0 } }
-              bind:
-                color: "state.fill_color"
-                z_index: "state.fill_on_top ? 2 : 1"
-              behavior:
-                - event: click
-                  effects:
-                    - set: { fill_on_top: true }
-
-            - id: cp_stroke_swatch
-              type: color_swatch
-              summary: "Stroke color"
-              description: >
-                Hollow square (6px border) showing the current stroke color,
-                offset 8px right and 8px down from the fill swatch. When
-                stroke is null, shows the none indicator.
-              hollow: true
-              style: { size: 24, position: { x: 8, y: 8 } }
-              bind:
-                color: "state.stroke_color"
-                z_index: "state.fill_on_top ? 1 : 2"
-              behavior:
-                - event: click
-                  effects:
-                    - set: { fill_on_top: false }
-
-            - id: cp_swap_btn
-              type: icon_button
-              summary: "Swap"
-              description: "Swaps fill and stroke colors (Shift+X)."
-              icon: swap_arrows
-              style: { size: 10, position: { x: 40, y: 0 } }
-              behavior:
-                - event: click
-                  action: swap_fill_stroke
-
-            - id: cp_reset_btn
-              type: icon_button
-              summary: "Default"
-              description: "Resets fill to white and stroke to 1pt black (D)."
-              icon: default_colors
-              style: { size: 12, position: { x: 0, y: 38 } }
-              behavior:
-                - event: click
-                  action: reset_fill_stroke
 
         # Mode-specific slider groups
         - type: col
