@@ -110,8 +110,6 @@ public struct ContentView: View {
     @ObservedObject var workspace: WorkspaceState
     @State private var currentTool: Tool = .selection
     @State private var paneState = PaneInteractionState()
-    @State private var colorPickerState: ColorPickerState?
-    @State private var showColorPicker = false
     @State private var yamlDialogState: YamlDialogState?
 
     public init(workspace: WorkspaceState) {
@@ -200,40 +198,6 @@ public struct ContentView: View {
                     pl.onViewportResize(newW: newSize.width, newH: newSize.height)
                 }
             }
-            .sheet(isPresented: $showColorPicker) {
-                if let cpState = colorPickerState {
-                    let originalColor = cpState.color()
-                    ColorPickerView(
-                        state: cpState,
-                        onOK: { color in
-                            if let model = workspace.activeModel {
-                                if cpState.forFill {
-                                    model.defaultFill = Fill(color: color)
-                                    if !model.document.selection.isEmpty {
-                                        model.snapshot()
-                                        let ctrl = Controller(model: model)
-                                        ctrl.setSelectionFill(Fill(color: color))
-                                    }
-                                } else {
-                                    let newStroke = Stroke(color: color,
-                                        width: model.defaultStroke?.width ?? 1.0)
-                                    model.defaultStroke = newStroke
-                                    if !model.document.selection.isEmpty {
-                                        model.snapshot()
-                                        let ctrl = Controller(model: model)
-                                        ctrl.setSelectionStroke(newStroke)
-                                    }
-                                }
-                            }
-                            showColorPicker = false
-                        },
-                        onCancel: {
-                            showColorPicker = false
-                        },
-                        originalColor: originalColor
-                    )
-                }
-            }
             .overlay {
                 YamlDialogOverlay(
                     dialogState: $yamlDialogState,
@@ -249,12 +213,21 @@ public struct ContentView: View {
         case .toolbar:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: true,
                           content: { ToolbarPanel(currentTool: $currentTool, model: workspace.activeModel, theme: workspace.theme, onOpenColorPicker: { forFill in
-                              guard let model = workspace.activeModel else { return }
-                              let initial: Color = forFill
-                                  ? (model.defaultFill?.color ?? .white)
-                                  : (model.defaultStroke?.color ?? .black)
-                              colorPickerState = ColorPickerState(color: initial, forFill: forFill)
-                              showColorPicker = true
+                              // Build live state for dialog initialization
+                              var liveState: [String: Any] = WorkspaceData.load()?.stateDefaults() ?? [:]
+                              if let model = workspace.activeModel {
+                                  if let fill = model.defaultFill {
+                                      liveState["fill_color"] = "#" + fill.color.toHex()
+                                  }
+                                  if let stroke = model.defaultStroke {
+                                      liveState["stroke_color"] = "#" + stroke.color.toHex()
+                                  }
+                              }
+                              yamlDialogState = openYamlDialog(
+                                  dialogId: "color_picker",
+                                  rawParams: ["target": forFill ? "fill" : "stroke"],
+                                  liveState: liveState
+                              )
                           }) },
                           paneDrag: $paneState.paneDrag, edgeResize: $paneState.edgeResize, edgeSnappedCoord: $paneState.edgeSnappedCoord, snapPreview: $paneState.snapPreview)
         case .canvas:
