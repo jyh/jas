@@ -29,6 +29,7 @@ pub(crate) fn MenuBarView(
     let mbs = use_context::<MenuBarState>();
     let mut panel_menu = use_context::<PanelMenuState>();
     let open_menu = mbs.open_menu;
+    let mut yaml_dialog_sig = use_context::<crate::interpreter::dialog_view::DialogCtx>().0;
 
     // --- Menu dispatch ---
     let dispatch = {
@@ -387,14 +388,23 @@ pub(crate) fn MenuBarView(
                                         // Save As...
                                         {
                                             let mut open_menu_cl = open_menu_ws;
-                                            let prefill = if has_saved_layout { active_name.clone() } else { String::new() };
+                                            let app_save_as = app.clone();
                                             rsx! {
                                                 div {
                                                     class: "jas-menu-item",
                                                     style: "padding:4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; white-space:nowrap; border-radius:3px; margin:0 4px;",
                                                     onmousedown: move |evt: Event<MouseData>| {
                                                         evt.stop_propagation();
-                                                        save_as_dialog.set(Some(SaveAsDialog::Editing(prefill.clone())));
+                                                        // Open via YAML dialog system
+                                                        let st = app_save_as.borrow();
+                                                        let live_state = crate::workspace::dock_panel::build_live_state_map(&st);
+                                                        drop(st);
+                                                        crate::interpreter::dialog_view::open_dialog(
+                                                            &mut yaml_dialog_sig,
+                                                            "workspace_save_as",
+                                                            &serde_json::Map::new(),
+                                                            &live_state,
+                                                        );
                                                         open_menu_cl.set(None);
                                                         workspace_submenu_open.set(false);
                                                     },
