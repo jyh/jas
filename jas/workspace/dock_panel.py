@@ -11,6 +11,7 @@ from workspace.workspace_layout import (
 )
 from panels.panel_menu import panel_label, panel_menu, panel_dispatch, panel_is_checked, PanelMenuItemKind
 from panels.yaml_menu import get_panel_spec, build_qmenu, panel_label_from_yaml
+from panels.yaml_panel_view import YamlPanelView
 
 DOCK_DRAG_MIME = "application/x-jas-dock-drag"
 
@@ -119,11 +120,12 @@ class DockPanelWidget(QWidget):
     """Renders an anchored dock with panel groups, tab bars, and placeholders."""
 
     def __init__(self, workspace_layout: WorkspaceLayout, edge: DockEdge = DockEdge.RIGHT,
-                 get_model=None):
+                 get_model=None, state_store=None):
         super().__init__()
         self._layout_data = workspace_layout
         self._edge = edge
         self._get_model = get_model
+        self._state_store = state_store
         self._vbox = QVBoxLayout(self)
         self._vbox.setContentsMargins(0, 0, 0, 0)
         self._vbox.setSpacing(0)
@@ -240,20 +242,8 @@ class DockPanelWidget(QWidget):
         if not group.collapsed:
             active = group.active_panel()
             if active is not None:
-                if active == PanelKind.COLOR and self._get_model is not None:
-                    from panels.color_panel_view import ColorPanelView
-                    body = ColorPanelView(
-                        layout=self._layout_data,
-                        get_model=self._get_model,
-                        rebuild_fn=self.rebuild,
-                    )
-                    vbox.addWidget(body)
-                else:
-                    body = QLabel(panel_label(active))
-                    body.setStyleSheet(f"color: {THEME_TEXT_BODY}; font-size: 12px; padding: 12px;")
-                    body.setMinimumHeight(60)
-                    body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-                    vbox.addWidget(body)
+                body = self._create_panel_body(active)
+                vbox.addWidget(body)
 
         # Separator
         sep = QWidget()
@@ -262,6 +252,48 @@ class DockPanelWidget(QWidget):
         vbox.addWidget(sep)
 
         return widget
+
+    def _create_panel_body(self, kind: PanelKind) -> QWidget:
+        """Create a panel body widget, using YAML interpreter when available."""
+        panel_spec = get_panel_spec(kind)
+        if panel_spec and panel_spec.get("content") and self._state_store is not None:
+            return YamlPanelView(
+                panel_spec=panel_spec,
+                store=self._state_store,
+                dispatch_fn=self._dispatch_yaml_action,
+                ctx={},
+            )
+        # Fallback: simple label placeholder
+        body = QLabel(panel_label(kind))
+        body.setStyleSheet(f"color: {THEME_TEXT_BODY}; font-size: 12px; padding: 12px;")
+        body.setMinimumHeight(60)
+        body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        return body
+
+    def _dispatch_yaml_action(self, action_name: str, params: dict):
+        """Dispatch an action from a YAML panel behavior."""
+        from panels.yaml_menu import PANEL_KIND_TO_CONTENT_ID
+        from workspace_interpreter.effects import run_effects
+
+        # Look up the action in the workspace
+        ws = getattr(self, '_workspace_data', None)
+        if ws and action_name in ws.get("actions", {}):
+            action_def = ws["actions"][action_name]
+            ctx = {"param": params} if params else {}
+            run_effects(action_def.get("effects", []), ctx, self._state_store,
+                       actions=ws.get("actions"))
+            self.rebuild()
+            return
+
+        # Fallback: route through legacy dispatch for known actions
+        active_panel = self._state_store.get_active_panel_id() if self._state_store else None
+        if active_panel:
+            # Find the PanelKind for the active panel
+            for kind, cid in PANEL_KIND_TO_CONTENT_ID.items():
+                if cid == active_panel:
+                    addr = PanelAddr(group=GroupAddr(dock_id=0, group_idx=0), panel_idx=0)
+                    self._dispatch_yaml_cmd(kind, action_name, params, addr)
+                    return
 
     def _toggle_dock(self, dock_id):
         self._layout_data.toggle_dock_collapsed(dock_id)
@@ -454,20 +486,8 @@ class FloatingDockWindow(QWidget):
         if not group.collapsed:
             active = group.active_panel()
             if active is not None:
-                if active == PanelKind.COLOR and self._parent_panel._get_model is not None:
-                    from panels.color_panel_view import ColorPanelView
-                    body = ColorPanelView(
-                        layout=self._layout_data,
-                        get_model=self._parent_panel._get_model,
-                        rebuild_fn=self._parent_panel.rebuild_all,
-                    )
-                    vbox.addWidget(body)
-                else:
-                    body = QLabel(panel_label(active))
-                    body.setStyleSheet(f"color: {THEME_TEXT_BODY}; font-size: 12px; padding: 12px;")
-                    body.setMinimumHeight(60)
-                    body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-                    vbox.addWidget(body)
+                body = self._parent_panel._create_panel_body(active)
+                vbox.addWidget(body)
 
         return widget
 
