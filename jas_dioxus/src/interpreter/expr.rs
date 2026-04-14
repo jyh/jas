@@ -19,6 +19,40 @@ pub fn eval(source: &str, ctx: &serde_json::Value) -> Value {
     }
 }
 
+/// Evaluate an expression body that may contain `target <- value_expr`.
+///
+/// Parses `<-` assignments pragmatically (string split, not full AST).
+/// Returns a list of (target_name, evaluated_value) pairs.
+/// Handles sequenced assignments: `a <- e1; b <- e2`.
+pub fn eval_with_store(source: &str, ctx: &serde_json::Value) -> Vec<(String, Value)> {
+    let mut assignments: Vec<(String, Value)> = Vec::new();
+    // Split on ';' for sequencing
+    for part in source.split(';') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        // Check for <- assignment
+        // Find "<-" that's not inside a string
+        if let Some(arrow_pos) = part.find("<-") {
+            let target = part[..arrow_pos].trim();
+            let value_expr = part[arrow_pos + 2..].trim();
+            // Evaluate the value expression
+            // Build updated context with previous assignments applied
+            let mut updated_ctx = ctx.as_object().cloned().unwrap_or_default();
+            for (k, v) in &assignments {
+                updated_ctx.insert(k.clone(), super::effects::value_to_json(v));
+            }
+            let val = eval(value_expr, &serde_json::Value::Object(updated_ctx));
+            assignments.push((target.to_string(), val));
+        } else {
+            // Not an assignment — evaluate for side effects (ignored)
+            eval(part, ctx);
+        }
+    }
+    assignments
+}
+
 /// Evaluate a text string with embedded {{expr}} regions.
 ///
 /// Returns the string with each {{expr}} replaced by its evaluated

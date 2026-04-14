@@ -223,9 +223,11 @@ mod tests {
     fn dialog_state_defaults_extracted() {
         let ws = Workspace::load().unwrap();
         let defaults = ws.dialog_state_defaults("color_picker");
-        assert!(defaults.contains_key("h"));
+        // color is a plain stored variable with a default
         assert!(defaults.contains_key("color"));
-        assert_eq!(defaults.get("h"), Some(&serde_json::json!(0)));
+        assert_eq!(defaults.get("color"), Some(&serde_json::json!("#ffffff")));
+        // h has a get expression, so no default in defaults
+        // (it's computed from color)
     }
 
     #[test]
