@@ -7,11 +7,7 @@ use super::theme::*;
 use crate::document::controller::{FillSummary, StrokeSummary};
 use crate::geometry::element::{Color, Fill, Stroke};
 
-/// Context wrapper for the color picker state signal.
-/// Provided by the App component so child components (including
-/// the YAML-rendered fill/stroke widget) can open the color picker.
-#[derive(Clone)]
-pub(crate) struct ColorPickerCtx(pub Signal<Option<super::color_picker::ColorPickerState>>);
+// ColorPickerCtx removed — color picker now uses YAML dialog system via DialogCtx
 
 #[component]
 pub(crate) fn FillStrokeWidgetView(
@@ -20,10 +16,10 @@ pub(crate) fn FillStrokeWidgetView(
     default_fill: Option<Fill>,
     default_stroke: Option<Stroke>,
     fill_on_top: bool,
-    color_picker_state: Signal<Option<super::color_picker::ColorPickerState>>,
 ) -> Element {
     let act = use_context::<Act>();
     let app = use_context::<AppHandle>();
+    let mut yaml_dialog_sig = use_context::<crate::interpreter::dialog_view::DialogCtx>().0;
 
     // Determine what to display for fill and stroke
     let fill_display = match &fill_summary {
@@ -149,12 +145,13 @@ pub(crate) fn FillStrokeWidgetView(
                             move |evt: Event<MouseData>| {
                                 evt.stop_propagation();
                                 let st = app_dbl.borrow();
-                                let initial_color = st.tab()
-                                    .and_then(|t| t.model.default_fill.map(|f| f.color))
-                                    .unwrap_or(Color::BLACK);
-                                color_picker_state.set(Some(
-                                    super::color_picker::ColorPickerState::new(initial_color, true)
-                                ));
+                                let live_state = crate::workspace::dock_panel::build_live_state_map(&st);
+                                drop(st);
+                                let mut params = serde_json::Map::new();
+                                params.insert("target".to_string(), serde_json::json!("fill"));
+                                crate::interpreter::dialog_view::open_dialog(
+                                    &mut yaml_dialog_sig, "color_picker", &params, &live_state,
+                                );
                             }
                         },
                         if fill_label.is_some() {
@@ -174,12 +171,13 @@ pub(crate) fn FillStrokeWidgetView(
                             move |evt: Event<MouseData>| {
                                 evt.stop_propagation();
                                 let st = app_dbl.borrow();
-                                let initial_color = st.tab()
-                                    .and_then(|t| t.model.default_stroke.map(|s| s.color))
-                                    .unwrap_or(Color::BLACK);
-                                color_picker_state.set(Some(
-                                    super::color_picker::ColorPickerState::new(initial_color, false)
-                                ));
+                                let live_state = crate::workspace::dock_panel::build_live_state_map(&st);
+                                drop(st);
+                                let mut params = serde_json::Map::new();
+                                params.insert("target".to_string(), serde_json::json!("stroke"));
+                                crate::interpreter::dialog_view::open_dialog(
+                                    &mut yaml_dialog_sig, "color_picker", &params, &live_state,
+                                );
                             }
                         },
                         if stroke_label.is_some() {

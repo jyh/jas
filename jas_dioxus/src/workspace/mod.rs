@@ -3,8 +3,7 @@ pub mod app;
 pub(crate) mod app_state;
 pub(crate) mod clipboard;
 pub mod color_panel_view;
-pub mod color_picker;
-pub mod color_picker_dialog;
+// color_picker.rs and color_picker_dialog.rs removed — uses YAML dialog system
 pub(crate) mod dock_panel;
 pub mod fill_stroke_widget;
 pub mod icons;

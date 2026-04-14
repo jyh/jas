@@ -20,7 +20,7 @@ use crate::geometry::element::{Color, Stroke};
 use super::app_state::{Act, AppState};
 use super::keyboard::{make_keydown_handler, make_keyup_handler};
 use super::theme::*;
-use super::color_picker_dialog::ColorPickerDialogView;
+// ColorPickerDialogView removed — color picker now uses YAML dialog system
 use super::fill_stroke_widget::FillStrokeWidgetView;
 use super::menu_bar::MenuBarView;
 // SaveAsDialogView removed — workspace save-as now uses YAML dialog system
@@ -369,8 +369,7 @@ pub fn App() -> Element {
     let mut open_menu = use_signal(|| Option::<String>::None);
     let workspace_submenu_open = use_signal(|| false);
     let appearance_submenu_open = use_signal(|| false);
-    let color_picker_state = use_signal(|| Option::<super::color_picker::ColorPickerState>::None);
-    use_context_provider(|| super::fill_stroke_widget::ColorPickerCtx(color_picker_state));
+    // color_picker_state removed — color picker now uses YAML dialog system
     let yaml_dialog = use_signal(|| Option::<crate::interpreter::dialog_view::DialogState>::None);
     use_context_provider(|| crate::interpreter::dialog_view::DialogCtx(yaml_dialog));
 
@@ -741,7 +740,6 @@ pub fn App() -> Element {
                     default_fill: fs_default_fill,
                     default_stroke: fs_default_stroke,
                     fill_on_top,
-                    color_picker_state,
                 }
 
                 // Toolbar width is not resizable
@@ -981,8 +979,7 @@ pub fn App() -> Element {
             // Panel menu overlay (z-index 1100-1101, above floating docks)
             PanelMenuOverlay {}
 
-            // Color Picker dialog
-            ColorPickerDialogView { color_picker_state }
+            // Color Picker dialog removed — now uses YAML dialog system
 
             // YAML-interpreted dialogs
             crate::interpreter::dialog_view::YamlDialogView { dialog_ctx: yaml_dialog }
