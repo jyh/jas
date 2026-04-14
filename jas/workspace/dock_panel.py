@@ -294,14 +294,36 @@ class DockPanelWidget(QWidget):
             # Check if a dialog was open before running effects
             dialog_before = self._state_store.get_dialog_id() if self._state_store else None
 
+            # Platform effects for timers
+            def handle_start_timer(data, ctx, store):
+                from panels.timer_manager import TimerManager
+                timer_id = data.get("id", "") if isinstance(data, dict) else ""
+                delay_ms = data.get("delay_ms", 250) if isinstance(data, dict) else 250
+                nested = data.get("effects", []) if isinstance(data, dict) else []
+                TimerManager.shared().start_timer(timer_id, delay_ms, lambda: (
+                    run_effects(nested, ctx, store,
+                               actions=ws.get("actions"),
+                               dialogs=ws.get("dialogs")),
+                    self._check_dialog_opened(store),
+                ))
+
+            def handle_cancel_timer(data, ctx, store):
+                from panels.timer_manager import TimerManager
+                timer_id = data if isinstance(data, str) else ""
+                TimerManager.shared().cancel_timer(timer_id)
+
+            platform_effects = {
+                "start_timer": handle_start_timer,
+                "cancel_timer": handle_cancel_timer,
+            }
+
             run_effects(action_def.get("effects", []), ctx, self._state_store,
                        actions=ws.get("actions"),
-                       dialogs=ws.get("dialogs"))
+                       dialogs=ws.get("dialogs"),
+                       platform_effects=platform_effects)
 
             # If a dialog was opened by the effect, show it
-            dialog_after = self._state_store.get_dialog_id() if self._state_store else None
-            if dialog_after and dialog_after != dialog_before:
-                self._show_yaml_dialog(dialog_after)
+            self._check_dialog_opened(self._state_store, dialog_before)
 
             self.rebuild()
             return
@@ -315,6 +337,13 @@ class DockPanelWidget(QWidget):
                     addr = PanelAddr(group=GroupAddr(dock_id=0, group_idx=0), panel_idx=0)
                     self._dispatch_yaml_cmd(kind, action_name, params, addr)
                     return
+
+    def _check_dialog_opened(self, store, dialog_before=None):
+        """Show a YAML dialog if one was opened by effects."""
+        dialog_after = store.get_dialog_id() if store else None
+        if dialog_after and dialog_after != dialog_before:
+            self._show_yaml_dialog(dialog_after)
+            self.rebuild()
 
     def _show_yaml_dialog(self, dialog_id: str):
         """Show a YAML-interpreted dialog."""

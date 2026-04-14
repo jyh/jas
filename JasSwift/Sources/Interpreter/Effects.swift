@@ -231,6 +231,24 @@ private func runOne(
         return
     }
 
+    // start_timer: { id, delay_ms, effects }
+    if let st = effect["start_timer"] as? [String: Any] {
+        let timerId = st["id"] as? String ?? ""
+        let delayMs = (st["delay_ms"] as? NSNumber)?.intValue ?? 250
+        let nestedEffects = st["effects"] as? [[String: Any]] ?? []
+        TimerManager.shared.startTimer(id: timerId, delayMs: delayMs) {
+            runEffects(nestedEffects, ctx: ctx, store: store, actions: actions, dialogs: dialogs)
+        }
+        return
+    }
+
+    // cancel_timer: id
+    if let ct = effect["cancel_timer"] {
+        let timerId = ct as? String ?? ""
+        TimerManager.shared.cancelTimer(id: timerId)
+        return
+    }
+
     // log: message (no-op)
     if effect.keys.contains("log") {
         return
