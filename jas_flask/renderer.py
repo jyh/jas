@@ -559,7 +559,9 @@ def _render_text(el, theme, state):
     content = el.get("content", "")
     if isinstance(content, str) and "{{" in content:
         content = resolve_interpolation(content, theme, state)
-    return Markup(f'<span{_id_attr(el)}>{escape(content)}</span>')
+    style = _style_str(el, theme, state)
+    data = _data_attrs(el)
+    return Markup(f'<span{_id_attr(el)}{style}{data}>{escape(content)}</span>')
 
 
 def _render_text_input(el, theme, state):
