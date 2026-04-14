@@ -1373,24 +1373,21 @@ class toolbar ~title:(_title : string) ~x ~y
               (match get_model with
                | Some gm ->
                  let m = gm () in
-                 let initial_color = if fill_on_top then
-                   (match m#default_fill with
-                    | Some f -> f.Element.fill_color
-                    | None -> Element.white)
-                 else
-                   (match m#default_stroke with
-                    | Some s -> s.Element.stroke_color
-                    | None -> Element.black)
+                 let hex_color c =
+                   let (r, g, b, _) = Element.color_to_rgba c in
+                   Printf.sprintf "#%02x%02x%02x"
+                     (int_of_float (r *. 255.0))
+                     (int_of_float (g *. 255.0))
+                     (int_of_float (b *. 255.0))
                  in
-                 let st = Color_picker.create_state initial_color fill_on_top in
-                 (match Color_picker.run_dialog st with
-                  | Some c ->
-                    if fill_on_top then
-                      m#set_default_fill (Some { Element.fill_color = c;
-                                                 fill_opacity = 1.0 })
-                    else
-                      m#set_default_stroke (Some (Element.make_stroke c));
-                    fs_area#misc#queue_draw ()
+                 let target = if fill_on_top then "fill" else "stroke" in
+                 let live_state = [
+                   ("fill_color", `String (hex_color (match m#default_fill with Some f -> f.Element.fill_color | None -> Element.white)));
+                   ("stroke_color", `String (hex_color (match m#default_stroke with Some s -> s.Element.stroke_color | None -> Element.black)));
+                 ] in
+                 (match Yaml_dialog_view.open_dialog "color_picker"
+                   [("target", `String target)] live_state with
+                  | Some ds -> Yaml_dialog_view.show_dialog ds
                   | None -> ())
                | None -> ());
               true
@@ -1420,12 +1417,20 @@ class toolbar ~title:(_title : string) ~x ~y
                  let m = gm () in
                  let initial = match m#default_fill with
                    | Some f -> f.Element.fill_color | None -> Element.white in
-                 let st = Color_picker.create_state initial true in
-                 (match Color_picker.run_dialog st with
-                  | Some c ->
-                    m#set_default_fill (Some { Element.fill_color = c;
-                                               fill_opacity = 1.0 });
-                    fs_area#misc#queue_draw ()
+                 let hex_color c =
+                   let (r, g, b, _) = Element.color_to_rgba c in
+                   Printf.sprintf "#%02x%02x%02x"
+                     (int_of_float (r *. 255.0))
+                     (int_of_float (g *. 255.0))
+                     (int_of_float (b *. 255.0))
+                 in
+                 let live_state = [
+                   ("fill_color", `String (hex_color initial));
+                   ("stroke_color", `String (hex_color (match m#default_stroke with Some s -> s.Element.stroke_color | None -> Element.black)));
+                 ] in
+                 (match Yaml_dialog_view.open_dialog "color_picker"
+                   [("target", `String "fill")] live_state with
+                  | Some ds -> Yaml_dialog_view.show_dialog ds
                   | None -> ())
                | None -> ())
             end else
@@ -1444,11 +1449,20 @@ class toolbar ~title:(_title : string) ~x ~y
                  let m = gm () in
                  let initial = match m#default_stroke with
                    | Some s -> s.Element.stroke_color | None -> Element.black in
-                 let st = Color_picker.create_state initial false in
-                 (match Color_picker.run_dialog st with
-                  | Some c ->
-                    m#set_default_stroke (Some (Element.make_stroke c));
-                    fs_area#misc#queue_draw ()
+                 let hex_color c =
+                   let (r, g, b, _) = Element.color_to_rgba c in
+                   Printf.sprintf "#%02x%02x%02x"
+                     (int_of_float (r *. 255.0))
+                     (int_of_float (g *. 255.0))
+                     (int_of_float (b *. 255.0))
+                 in
+                 let live_state = [
+                   ("fill_color", `String (hex_color (match m#default_fill with Some f -> f.Element.fill_color | None -> Element.white)));
+                   ("stroke_color", `String (hex_color initial));
+                 ] in
+                 (match Yaml_dialog_view.open_dialog "color_picker"
+                   [("target", `String "stroke")] live_state with
+                  | Some ds -> Yaml_dialog_view.show_dialog ds
                   | None -> ())
                | None -> ())
             end else
