@@ -10,6 +10,7 @@ from workspace.workspace_layout import (
     WorkspaceLayout, DockEdge, PanelKind, GroupAddr, PanelAddr,
 )
 from panels.panel_menu import panel_label, panel_menu, panel_dispatch, panel_is_checked, PanelMenuItemKind
+from panels.yaml_menu import get_panel_spec, build_qmenu, panel_label_from_yaml
 
 DOCK_DRAG_MIME = "application/x-jas-dock-drag"
 
@@ -277,31 +278,82 @@ class DockPanelWidget(QWidget):
 
     def _show_panel_menu(self, dock_id, group_idx, kind, panel_idx):
         addr = PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx)
-        items = panel_menu(kind)
-        menu = QMenu(self)
-        for item in items:
-            if item.kind == PanelMenuItemKind.ACTION:
-                action = menu.addAction(item.label)
-                cmd = item.command
-                action.triggered.connect(
-                    lambda _, c=cmd: self._dispatch_panel_cmd(kind, c, addr))
-            elif item.kind == PanelMenuItemKind.TOGGLE:
-                action = menu.addAction(item.label)
-                action.setCheckable(True)
-                action.setChecked(panel_is_checked(kind, item.command, self._layout_data))
-                cmd = item.command
-                action.triggered.connect(
-                    lambda _, c=cmd: self._dispatch_panel_cmd(kind, c, addr))
-            elif item.kind == PanelMenuItemKind.RADIO:
-                action = menu.addAction(item.label)
-                action.setCheckable(True)
-                action.setChecked(panel_is_checked(kind, item.command, self._layout_data))
-                cmd = item.command
-                action.triggered.connect(
-                    lambda _, c=cmd: self._dispatch_panel_cmd(kind, c, addr))
-            elif item.kind == PanelMenuItemKind.SEPARATOR:
-                menu.addSeparator()
+        panel_spec = get_panel_spec(kind)
+
+        if panel_spec and panel_spec.get("menu"):
+            # YAML-driven menu
+            panel_state = self._get_panel_state(kind)
+            global_state = self._get_global_state()
+            menu = build_qmenu(
+                panel_spec, panel_state, global_state,
+                dispatch_fn=lambda action, params: self._dispatch_yaml_cmd(kind, action, params, addr),
+                parent=self,
+            )
+        else:
+            # Fallback to hardcoded menu
+            menu = QMenu(self)
+            items = panel_menu(kind)
+            for item in items:
+                if item.kind == PanelMenuItemKind.ACTION:
+                    action = menu.addAction(item.label)
+                    cmd = item.command
+                    action.triggered.connect(
+                        lambda _, c=cmd: self._dispatch_panel_cmd(kind, c, addr))
+                elif item.kind in (PanelMenuItemKind.TOGGLE, PanelMenuItemKind.RADIO):
+                    action = menu.addAction(item.label)
+                    action.setCheckable(True)
+                    action.setChecked(panel_is_checked(kind, item.command, self._layout_data))
+                    cmd = item.command
+                    action.triggered.connect(
+                        lambda _, c=cmd: self._dispatch_panel_cmd(kind, c, addr))
+                elif item.kind == PanelMenuItemKind.SEPARATOR:
+                    menu.addSeparator()
+
         menu.exec(self.cursor().pos())
+
+    def _get_panel_state(self, kind: PanelKind) -> dict:
+        """Get current panel-local state for expression evaluation."""
+        if kind == PanelKind.COLOR:
+            return {"mode": self._layout_data.color_panel_mode}
+        return {}
+
+    def _get_global_state(self) -> dict:
+        """Get current global state for expression evaluation."""
+        model = self._get_model() if self._get_model else None
+        if model is None:
+            return {}
+        fill_color = model.default_fill.color.to_hex() if model.default_fill and model.default_fill.color else None
+        stroke_color = model.default_stroke.color.to_hex() if model.default_stroke and model.default_stroke.color else None
+        if fill_color:
+            fill_color = "#" + fill_color
+        if stroke_color:
+            stroke_color = "#" + stroke_color
+        return {
+            "fill_on_top": model.fill_on_top,
+            "fill_color": fill_color,
+            "stroke_color": stroke_color,
+        }
+
+    def _dispatch_yaml_cmd(self, kind, action_name, params, addr):
+        """Dispatch a YAML menu action."""
+        # Map YAML actions to existing panel_dispatch commands
+        if action_name == "set_color_panel_mode" and "mode" in params:
+            mode = params["mode"]
+            cmd = f"mode_{mode}"
+            panel_dispatch(kind, cmd, addr, self._layout_data)
+        elif action_name == "invert_active_color":
+            panel_dispatch(kind, "invert_color", addr, self._layout_data,
+                          model=self._get_model() if self._get_model else None)
+        elif action_name == "complement_active_color":
+            panel_dispatch(kind, "complement_color", addr, self._layout_data,
+                          model=self._get_model() if self._get_model else None)
+        elif action_name == "close_panel":
+            panel_dispatch(kind, "close_panel", addr, self._layout_data)
+        else:
+            # Generic fallback — try as direct command
+            panel_dispatch(kind, action_name, addr, self._layout_data,
+                          model=self._get_model() if self._get_model else None)
+        self.rebuild()
 
     def _dispatch_panel_cmd(self, kind, cmd, addr):
         model = self._get_model() if self._get_model else None
