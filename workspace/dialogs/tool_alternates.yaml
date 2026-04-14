@@ -1,0 +1,220 @@
+arrow_alternates:
+  summary: "Selection Tools"
+  description: >
+    Tool-alternate flyout menu shown on long-press (250ms) of the arrow
+    selection tool button. Lists alternate selection tools: Partial
+    Selection (select individual anchor points and path segments) and
+    Interior Selection (select objects within groups without ungrouping).
+    Clicking an item selects that tool and closes the dialog.
+  modal: false
+  content:
+    type: container
+    layout: column
+    style: { padding: 4, gap: 2 }
+    children:
+      - type: icon_button
+        icon: "partial_selection_arrow"
+        label: "Partial Selection"
+        summary: "Select individual anchor points and path segments"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"partial_selection"' }
+              - close_dialog: null
+      - type: icon_button
+        icon: "interior_selection_arrow"
+        label: "Interior Selection"
+        summary: "Select objects within groups without ungrouping"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"interior_selection"' }
+              - close_dialog: null
+
+pen_alternates:
+  summary: "Pen Tools"
+  description: >
+    Tool-alternate flyout menu for the pen tool slot. Lists: Pen (draw
+    paths by clicking anchor points), Add Anchor Point (add anchors to
+    existing paths), Delete Anchor Point (remove anchors from paths),
+    and Anchor Point (convert anchor point types between smooth and
+    corner). Clicking selects the tool and closes the dialog.
+  modal: false
+  content:
+    type: container
+    layout: column
+    style: { padding: 4, gap: 2 }
+    children:
+      - type: icon_button
+        icon: "pen"
+        label: "Pen"
+        summary: "Draw paths by clicking to place anchor points"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"pen"' }
+              - close_dialog: null
+      - type: icon_button
+        icon: "add_anchor"
+        label: "Add Anchor Point"
+        summary: "Add anchor points to an existing path"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"add_anchor"' }
+              - close_dialog: null
+      - type: icon_button
+        icon: "delete_anchor"
+        label: "Delete Anchor Point"
+        summary: "Remove anchor points from a path"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"delete_anchor"' }
+              - close_dialog: null
+      - type: icon_button
+        icon: "anchor_point"
+        label: "Anchor Point"
+        summary: "Convert anchor points between smooth and corner"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"anchor_point"' }
+              - close_dialog: null
+
+pencil_alternates:
+  summary: "Pencil Tools"
+  description: >
+    Tool-alternate flyout menu for the pencil tool slot. Lists: Pencil
+    (draw freehand paths), Path Eraser (erase portions of paths), and
+    Smooth (smooth out rough path segments). Clicking selects the tool
+    and closes the dialog.
+  modal: false
+  content:
+    type: container
+    layout: column
+    style: { padding: 4, gap: 2 }
+    children:
+      - type: icon_button
+        icon: "pencil"
+        label: "Pencil"
+        summary: "Draw freehand paths"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"pencil"' }
+              - close_dialog: null
+      - type: icon_button
+        icon: "path_eraser"
+        label: "Path Eraser"
+        summary: "Erase portions of paths"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"path_eraser"' }
+              - close_dialog: null
+      - type: icon_button
+        icon: "smooth"
+        label: "Smooth"
+        summary: "Smooth out rough path segments"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"smooth"' }
+              - close_dialog: null
+
+text_alternates:
+  summary: "Type Tools"
+  description: >
+    Tool-alternate flyout menu for the type tool slot. Lists: Type
+    (create and edit text) and Type on a Path (place text along a
+    path curve). Clicking selects the tool and closes the dialog.
+  modal: false
+  content:
+    type: container
+    layout: column
+    style: { padding: 4, gap: 2 }
+    children:
+      - type: icon_button
+        icon: "type"
+        label: "Type"
+        summary: "Create and edit text"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"type"' }
+              - close_dialog: null
+      - type: icon_button
+        icon: "type_on_path"
+        label: "Type on a Path"
+        summary: "Place text along a path curve"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"type_on_path"' }
+              - close_dialog: null
+
+shape_alternates:
+  summary: "Shape Tools"
+  description: >
+    Tool-alternate flyout menu for the shape tool slot. Lists: Rectangle
+    (draw rectangles and squares), Rounded Rectangle (draw rectangles
+    with rounded corners), Polygon (draw regular polygons), and Star
+    (draw star shapes). Clicking selects the tool and closes the dialog.
+  modal: false
+  content:
+    type: container
+    layout: column
+    style: { padding: 4, gap: 2 }
+    children:
+      - type: icon_button
+        icon: "rect"
+        label: "Rectangle"
+        summary: "Draw rectangles and squares"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"rect"' }
+              - close_dialog: null
+      - type: icon_button
+        icon: "rounded_rect"
+        label: "Rounded Rectangle"
+        summary: "Draw rectangles with rounded corners"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"rounded_rect"' }
+              - close_dialog: null
+      - type: icon_button
+        icon: "polygon"
+        label: "Polygon"
+        summary: "Draw regular polygons"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"polygon"' }
+              - close_dialog: null
+      - type: icon_button
+        icon: "star"
+        label: "Star"
+        summary: "Draw star shapes"
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"star"' }
+              - close_dialog: null
