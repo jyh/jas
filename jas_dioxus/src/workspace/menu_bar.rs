@@ -9,7 +9,7 @@ use super::clipboard::{
     clipboard_read_and_paste, clipboard_write, download_file, find_panel,
     open_file_dialog, selection_to_svg,
 };
-use super::save_dialog::SaveAsDialog;
+// SaveAsDialog import removed — workspace save-as now uses YAML dialog system
 use super::theme::*;
 use crate::document::controller::Controller;
 use crate::geometry::element::Element as GeoElement;
@@ -21,7 +21,6 @@ use crate::tools::tool::PASTE_OFFSET;
 pub(crate) fn MenuBarView(
     workspace_submenu_open: Signal<bool>,
     appearance_submenu_open: Signal<bool>,
-    save_as_dialog: Signal<Option<SaveAsDialog>>,
 ) -> Element {
     let act = use_context::<Act>();
     let app = use_context::<AppHandle>();
