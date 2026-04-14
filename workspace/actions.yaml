@@ -764,3 +764,92 @@ actions:
     effects:
       - log: "save_all_and_close"
       - close_dialog: null
+
+
+  new_swatch:
+    description: >
+      Create a new swatch in the active library using the current fill/stroke color (per fill_on_top). Opens the Swatch Options dialog in create mode, initialized from the active color.
+    category: swatches
+    effects:
+      - open_dialog: { id: 'swatch_options', params: {'mode': 'create', 'color': 'state.fill_on_top ? state.fill_color : state.stroke_color', 'color_mode': 'rgb', 'swatch_name': ''} }
+
+  duplicate_swatch:
+    description: >
+      Duplicate the currently selected swatch(es) in the active library. New swatches are inserted immediately after the originals with " copy" appended to the name.
+    category: swatches
+    effects:
+      - log: "duplicate_swatch"
+
+  delete_swatch:
+    description: >
+      Delete the currently selected swatch(es) from the active library. Selection is cleared after deletion.
+    category: swatches
+    effects:
+      - log: "delete_swatch"
+
+  select_all_unused_swatches:
+    description: >
+      Select all swatches in the panel whose color does not appear anywhere in the current document as a fill or stroke color.
+    category: swatches
+    effects:
+      - log: "select_all_unused_swatches"
+
+  add_used_colors:
+    description: >
+      Scan the active document for all unique fill and stroke colors in use and add swatches for any that are not already present in the active swatch library. New swatches are appended to the end of the library.
+    category: swatches
+    effects:
+      - log: "add_used_colors"
+
+  sort_swatches_by_name:
+    description: >
+      Permanently reorder swatches in the active library alphabetically by swatch name. This modifies the library data in place.
+    category: swatches
+    effects:
+      - log: "sort_swatches_by_name"
+
+  set_swatch_thumbnail_size:
+    description: >
+      Set the thumbnail display size for the Swatches panel. Small = 16px, Medium = 32px, Large = 64px. Panel-local state.
+    category: swatches
+    params:
+      size: { type: enum, values: ['small', 'medium', 'large'] }
+    effects:
+      - set_panel_state: { panel: 'swatches', key: 'thumbnail_size', value: 'param.size' }
+
+  open_swatch_options:
+    description: >
+      Open the Swatch Options dialog. In edit mode, populates fields from the selected swatch (passed via params: swatch_name, color, color_mode, library, index). In create mode, populates from the current active color.
+    category: swatches
+    params:
+      mode: { type: enum, values: ['edit', 'create'] }
+      swatch_name: { type: string, optional: True }
+      color: { type: color, optional: True }
+      color_mode: { type: string, optional: True }
+      library: { type: string, optional: True }
+      index: { type: number, optional: True }
+    effects:
+      - open_dialog: { id: 'swatch_options', params: {'mode': 'param.mode', 'swatch_name': 'param.swatch_name', 'color': 'param.color', 'color_mode': 'param.color_mode', 'library': 'param.library', 'index': 'param.index'} }
+
+  swatch_options_confirm:
+    description: >
+      Confirm the Swatch Options dialog. In edit mode, updates the selected swatch with the dialog values. In create mode, appends a new swatch to the selected library. Closes the dialog.
+    category: swatches
+    effects:
+      - log: "swatch_options_confirm"
+      - close_dialog: None
+
+  save_swatch_library:
+    description: >
+      Open the Save Swatch Library dialog prompting the user for a library name and saving the active library to workspace/swatches/.
+    category: swatches
+    effects:
+      - open_dialog: { id: 'swatch_library_save' }
+
+  save_swatch_library_confirm:
+    description: >
+      Confirm saving the swatch library under the entered name. Closes the dialog on success.
+    category: swatches
+    effects:
+      - log: "save_swatch_library_confirm"
+      - close_dialog: None
