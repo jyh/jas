@@ -23,7 +23,7 @@ use super::theme::*;
 use super::color_picker_dialog::ColorPickerDialogView;
 use super::fill_stroke_widget::FillStrokeWidgetView;
 use super::menu_bar::MenuBarView;
-use super::save_dialog::{SaveAsDialog, SaveAsDialogView};
+// SaveAsDialogView removed — workspace save-as now uses YAML dialog system
 use super::dock_panel::{DragState, DockGroupsView, FloatingDocksView};
 use super::toolbar_grid::{ToolbarGrid, TOOLBAR_SLOTS};
 use crate::panels::panel_menu_state::{PanelMenuState, MenuBarState};
@@ -369,7 +369,6 @@ pub fn App() -> Element {
     let mut open_menu = use_signal(|| Option::<String>::None);
     let workspace_submenu_open = use_signal(|| false);
     let appearance_submenu_open = use_signal(|| false);
-    let save_as_dialog = use_signal(|| Option::<SaveAsDialog>::None);
     let color_picker_state = use_signal(|| Option::<super::color_picker::ColorPickerState>::None);
     use_context_provider(|| super::fill_stroke_widget::ColorPickerCtx(color_picker_state));
     let yaml_dialog = use_signal(|| Option::<crate::interpreter::dialog_view::DialogState>::None);
@@ -677,7 +676,6 @@ pub fn App() -> Element {
             MenuBarView {
                 workspace_submenu_open,
                 appearance_submenu_open,
-                save_as_dialog,
             }
 
             // ===== Pane container (fills remaining space) =====
@@ -982,9 +980,6 @@ pub fn App() -> Element {
 
             // Panel menu overlay (z-index 1100-1101, above floating docks)
             PanelMenuOverlay {}
-
-            // Save As dialog
-            SaveAsDialogView { save_as_dialog }
 
             // Color Picker dialog
             ColorPickerDialogView { color_picker_state }
