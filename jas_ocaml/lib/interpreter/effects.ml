@@ -222,6 +222,22 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
   | Some _ -> State_store.close_dialog store
   | None ->
 
+  (* start_timer: { id, delay_ms, effects } *)
+  match mem "start_timer" with
+  | Some (`Assoc st) ->
+    let timer_id = (match List.assoc_opt "id" st with Some (`String s) -> s | _ -> "") in
+    let delay_ms = (match List.assoc_opt "delay_ms" st with Some (`Int n) -> n | _ -> 250) in
+    let nested = (match List.assoc_opt "effects" st with Some (`List e) -> e | _ -> []) in
+    Timer_manager.start_timer timer_id delay_ms (fun () ->
+      run_effects_inner nested ctx store actions dialogs
+    )
+  | _ ->
+
+  (* cancel_timer: id *)
+  match mem "cancel_timer" with
+  | Some (`String id) -> Timer_manager.cancel_timer id
+  | _ ->
+
   (* log: message (no-op) *)
   match mem "log" with
   | Some _ -> ()
