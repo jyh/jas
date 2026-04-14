@@ -162,23 +162,50 @@
 
   // ── Interpolation engine ───────────────────────────────────
 
+  // Known namespace prefixes for expression-context detection
+  var _NAMESPACES = ["state", "panel", "dialog", "param", "prop", "event",
+                     "self", "active_document", "document", "workspace", "theme", "data"];
+
   function resolve(template, ctx) {
     if (template === null || template === undefined) return null;
     if (typeof template === "number" || typeof template === "boolean") return template;
     var s = String(template);
-    if (s.indexOf("{{") === -1) return s;
-    return s.replace(/\{\{(.+?)\}\}/g, function (_, expr) {
-      return evalExpr(expr.trim(), ctx);
-    });
+    // Text context: has {{expr}} — interpolate each region
+    if (s.indexOf("{{") !== -1) {
+      return s.replace(/\{\{(.+?)\}\}/g, function (_, expr) {
+        return evalExpr(expr.trim(), ctx);
+      });
+    }
+    // Expression context: bare expression without {{}}
+    // Check if it starts with a known namespace or is a function call
+    var firstDot = s.indexOf(".");
+    var prefix = firstDot > 0 ? s.substring(0, firstDot) : s;
+    var isFuncCall = /^\w+\(/.test(s);
+    if (isFuncCall || _NAMESPACES.indexOf(prefix) >= 0) {
+      return evalExpr(s, ctx);
+    }
+    // Literal string (CSS values, plain text, etc.)
+    return s;
   }
 
   function evalExpr(expr, ctx) {
     // Simple expression evaluator for interpolation
     ctx = ctx || {};
     // Check for function call syntax: fn_name(arg)
+    // Use a balanced-paren match to handle fn(a ? b : c) correctly
     var fnMatch = expr.match(/^(\w+)\((.+)\)$/);
     if (fnMatch && colorFunctions[fnMatch[1]]) {
-      var arg = resolve(fnMatch[2], ctx);
+      var argStr = fnMatch[2].trim();
+      // If the argument contains a ternary, evaluate it first
+      var ternaryMatch = argStr.match(/^(.+?)\s*\?\s*(.+?)\s*:\s*(.+)$/);
+      if (ternaryMatch) {
+        var cond = resolve(ternaryMatch[1].trim(), ctx);
+        var arg = evalCondition(String(cond), ctx)
+          ? resolve(ternaryMatch[2].trim(), ctx)
+          : resolve(ternaryMatch[3].trim(), ctx);
+        return colorFunctions[fnMatch[1]](arg);
+      }
+      var arg = resolve(argStr, ctx);
       return colorFunctions[fnMatch[1]](arg);
     }
     var parts = expr.split(".");
@@ -214,7 +241,7 @@
 
   function evalCondition(condStr, ctx) {
     if (!condStr) return true;
-    // Resolve interpolations first
+    // Resolve the expression (handles both {{}} and bare expressions)
     var resolved = resolve(condStr, ctx);
     // Simple boolean evaluation
     if (resolved === "true" || resolved === true) return true;
@@ -231,11 +258,42 @@
     if (typeof resolved === "string" && resolved.startsWith("not ")) {
       return !evalCondition(resolved.substring(4), ctx);
     }
-    // Handle "X == Y"
+    // Handle "X == Y" (strip quotes from string literals for comparison)
     var eqMatch = typeof resolved === "string" ? resolved.match(/^(.+?)\s*==\s*(.+)$/) : null;
-    if (eqMatch) return eqMatch[1].trim() === eqMatch[2].trim();
+    if (eqMatch) {
+      var lhs = eqMatch[1].trim();
+      var rhs = eqMatch[2].trim();
+      // Strip surrounding quotes from string literals
+      if (rhs.length >= 2 && rhs.charAt(0) === '"' && rhs.charAt(rhs.length - 1) === '"') {
+        rhs = rhs.substring(1, rhs.length - 1);
+      }
+      if (lhs.length >= 2 && lhs.charAt(0) === '"' && lhs.charAt(lhs.length - 1) === '"') {
+        lhs = lhs.substring(1, lhs.length - 1);
+      }
+      return lhs === rhs;
+    }
     var neqMatch = typeof resolved === "string" ? resolved.match(/^(.+?)\s*!=\s*(.+)$/) : null;
-    if (neqMatch) return neqMatch[1].trim() !== neqMatch[2].trim();
+    if (neqMatch) {
+      var lhs2 = neqMatch[1].trim();
+      var rhs2 = neqMatch[2].trim();
+      if (rhs2.length >= 2 && rhs2.charAt(0) === '"' && rhs2.charAt(rhs2.length - 1) === '"') {
+        rhs2 = rhs2.substring(1, rhs2.length - 1);
+      }
+      return lhs2 !== rhs2;
+    }
+    // Handle "X > Y", "X < Y", "X >= Y", "X <= Y"
+    var gtMatch = typeof resolved === "string" ? resolved.match(/^(.+?)\s*>\s*(.+)$/) : null;
+    if (gtMatch && gtMatch[2].indexOf(">") === -1 && gtMatch[2].indexOf("=") === -1) {
+      var a = parseFloat(gtMatch[1].trim());
+      var b = parseFloat(gtMatch[2].trim());
+      if (!isNaN(a) && !isNaN(b)) return a > b;
+    }
+    var ltMatch = typeof resolved === "string" ? resolved.match(/^(.+?)\s*<\s*(.+)$/) : null;
+    if (ltMatch) {
+      var a2 = parseFloat(ltMatch[1].trim());
+      var b2 = parseFloat(ltMatch[2].trim());
+      if (!isNaN(a2) && !isNaN(b2)) return a2 < b2;
+    }
     // Truthy
     return !!resolved;
   }
@@ -467,16 +525,28 @@
       return;
     }
 
-    // push_recent_color: { color } — prepend to recent_colors, dedup, cap 10
-    if (effect.push_recent_color) {
-      var rcColor = resolve(effect.push_recent_color.color, ctx);
-      if (!rcColor || rcColor === "null") return;
-      var rcList = panelState.recent_colors || [];
-      var rcIdx = rcList.indexOf(rcColor);
-      if (rcIdx >= 0) rcList.splice(rcIdx, 1);
-      rcList.unshift(rcColor);
-      if (rcList.length > 10) rcList.length = 10;
-      panelState.recent_colors = rcList;
+    // list_push: { target, value, unique, max_length }
+    if (effect.list_push) {
+      var lp = effect.list_push;
+      var lpTarget = lp.target || "";
+      var lpValue = resolve(lp.value, ctx);
+      var lpParts = lpTarget.split(".");
+      var lpList;
+      if (lpParts[0] === "panel" && lpParts.length === 2) {
+        lpList = panelState[lpParts[1]] || [];
+        lpList = lpList.slice(); // copy
+      } else {
+        return;
+      }
+      if (lp.unique) {
+        var idx = lpList.indexOf(lpValue);
+        if (idx >= 0) lpList.splice(idx, 1);
+      }
+      lpList.unshift(lpValue);
+      if (lp.max_length && lpList.length > lp.max_length) {
+        lpList.length = lp.max_length;
+      }
+      if (lpParts[0] === "panel") panelState[lpParts[1]] = lpList;
       updateBindings(null, null);
       return;
     }
@@ -1549,21 +1619,8 @@
         var inits = JSON.parse(panelEl.getAttribute("data-panel-init") || "{}");
         for (var pik in inits) {
           if (inits.hasOwnProperty(pik)) {
-            // First pass: substitute {{state.*}} etc. to get e.g. "hsb_h(true ? #ff6600 : #000)"
+            // Evaluate init expression (resolve handles bare expressions)
             var resolved = resolve(inits[pik], {});
-            // Second pass: if result is a color function call, evaluate it.
-            // The arg may contain a ternary left over from state substitution.
-            if (typeof resolved === "string") {
-              var pikFnMatch = resolved.match(/^(\w+)\((.+)\)$/);
-              if (pikFnMatch && colorFunctions[pikFnMatch[1]]) {
-                var pikArg = pikFnMatch[2].trim();
-                var pikTm = pikArg.match(/^(.+?)\s*\?\s*(.+?)\s*:\s*(.+)$/);
-                if (pikTm) {
-                  pikArg = evalCondition(pikTm[1].trim(), {}) ? pikTm[2].trim() : pikTm[3].trim();
-                }
-                resolved = colorFunctions[pikFnMatch[1]](pikArg);
-              }
-            }
             if (resolved !== null && resolved !== undefined) panelState[pik] = resolved;
           }
         }
