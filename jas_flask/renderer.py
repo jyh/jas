@@ -379,38 +379,10 @@ def _render_repeat(el, theme, state):
     var_name = repeat_spec.get("as", "item")
     template = el.get("template", {})
 
-    # Build scope from the incoming state
-    # state may be a plain dict (from Flask) or a scope-flattened dict
-    # (from a parent repeat). Either way, wrap it in a Scope.
-    if isinstance(state, dict):
-        scope = Scope(state)
-    else:
-        scope = Scope()
-
-    # Enrich with panel defaults if not already present
-    if "panel" not in scope and _panels:
-        from workspace_interpreter.loader import panel_state_defaults
-        source_field = source_expr.split(".")[1] if source_expr.startswith("panel.") else ""
-        for pid, pspec in _panels.items():
-            defaults = panel_state_defaults(pspec)
-            if source_field and source_field in defaults:
-                scope = scope | {"panel": defaults}
-                break
-
-    # Enrich with data context if not already present
-    if "data" not in scope:
-        try:
-            from workspace_interpreter.loader import load_workspace
-            for ws_path in ("workspace", "../workspace"):
-                try:
-                    ws = load_workspace(ws_path)
-                    if ws and "swatch_libraries" in ws:
-                        scope = scope | {"data": {"swatch_libraries": ws["swatch_libraries"]}}
-                        break
-                except Exception:
-                    continue
-        except Exception:
-            pass
+    # Build scope from the incoming state — the caller is responsible for
+    # populating all namespaces (state, panel, data, etc.). The repeat
+    # renderer does not hardcode any variable names.
+    scope = Scope(state if isinstance(state, dict) else {})
 
     # Evaluate source expression against the scope
     result = _eval(source_expr, scope.to_dict())
@@ -719,8 +691,7 @@ def _render_disclosure(el, theme, state):
     bind = el.get("bind", {})
     if isinstance(bind, dict) and "collapsed" in bind:
         from workspace_interpreter.expr import evaluate as _eval
-        ctx = {"state": state} if state else {}
-        result = _eval(bind["collapsed"], ctx)
+        result = _eval(bind["collapsed"], state if isinstance(state, dict) else {})
         collapsed = result.value if hasattr(result, 'value') and isinstance(result.value, bool) else False
     children = _render_children(el, theme, state)
     open_attr = "" if collapsed else " open"
@@ -1118,7 +1089,24 @@ def _render_dock_view(el, theme, state):
                         if panel_spec.get("init"):
                             body_attrs += f' data-panel-init="{escape(json.dumps(panel_spec["init"]))}"'
                         content_el = panel_spec.get("content")
-                        content_html = render_element(content_el, theme, state, mode="normal") if isinstance(content_el, dict) else ""
+                        # Build a scope with panel defaults and data context
+                        # so repeat/expressions resolve without hardcoded name checks
+                        from workspace_interpreter.scope import Scope as _Scope
+                        from workspace_interpreter.loader import panel_state_defaults as _psd
+                        panel_scope = _Scope({"state": state, "panel": _psd(panel_spec)})
+                        try:
+                            from workspace_interpreter.loader import load_workspace as _lw
+                            for _wp in ("workspace", "../workspace"):
+                                try:
+                                    _ws = _lw(_wp)
+                                    if _ws and "swatch_libraries" in _ws:
+                                        panel_scope = panel_scope | {"data": {"swatch_libraries": _ws["swatch_libraries"]}}
+                                        break
+                                except Exception:
+                                    continue
+                        except Exception:
+                            pass
+                        content_html = render_element(content_el, theme, panel_scope.to_dict(), mode="normal") if isinstance(content_el, dict) else ""
                         html += f'<div class="jas-dock-panel-body{hidden_cls}"{body_attrs}>{content_html}</div>'
                     else:
                         label = _PANEL_LABELS.get(panel_name, panel_name.title())
