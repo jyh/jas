@@ -13,6 +13,7 @@ class ValueType(Enum):
     COLOR = auto()
     NULL = auto()
     LIST = auto()
+    CLOSURE = auto()
 
 
 @dataclass(slots=True)
