@@ -89,6 +89,13 @@ let panel_state_defaults (ws : workspace) (content_id : string) : (string * Yojs
      | _ -> [])
   | None -> []
 
+(** Get the icons map from the workspace.
+    Returns a JSON object mapping icon names to icon definitions. *)
+let icons (ws : workspace) : Yojson.Safe.t =
+  match json_member "icons" ws.data with
+  | Some icons -> icons
+  | None -> `Assoc []
+
 (** Map a panel_kind variant to its workspace content id string. *)
 let panel_kind_to_content_id (kind : Workspace_layout.panel_kind) : string =
   match kind with

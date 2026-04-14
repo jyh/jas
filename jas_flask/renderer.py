@@ -275,7 +275,7 @@ def _data_attrs(el: dict) -> str:
     # If bind.visible evaluates to false at render time, set initial display:none.
     # Skip server-side evaluation when the expression references panel.* (client-only).
     vis_expr = bind.get("visible")
-    if vis_expr and isinstance(vis_expr, str) and "{{panel." not in vis_expr:
+    if vis_expr and isinstance(vis_expr, str) and "{{panel." not in vis_expr and "panel." not in vis_expr:
         from loader import resolve_interpolation as _ri
         resolved = _ri(vis_expr, {}, _initial_state or {})
         hidden = False
@@ -378,8 +378,14 @@ def _render_container(el, theme, state):
 
 def _render_row(el, theme, state):
     children = _render_children(el, theme, state)
+    # Use Bootstrap grid "row" if any child uses col; otherwise plain flex-row
+    has_col_children = any(
+        c.get("col") is not None or c.get("type") == "col"
+        for c in el.get("children", []) if isinstance(c, dict)
+    )
+    cls = "row g-0" if has_col_children else "d-flex flex-row"
     return Markup(
-        f'<div{_id_attr(el)} class="d-flex flex-row"{_style_str(el, theme, state)}{_data_attrs(el)}>'
+        f'<div{_id_attr(el)} class="{cls}"{_style_str(el, theme, state)}{_data_attrs(el)}>'
         f'{children}</div>'
     )
 
@@ -570,14 +576,22 @@ def _render_number_input(el, theme, state):
         if key in el:
             attrs += f' {key}="{el[key]}"'
     return Markup(
-        f'<input{_id_attr(el)} type="number" class="form-control form-control-sm"{attrs}{_data_attrs(el)}>'
+        f'<input{_id_attr(el)} type="number" class="form-control form-control-sm"{attrs}'
+        f'{_style_str(el, theme, state)}{_data_attrs(el)}>'
     )
 
 
 def _render_color_swatch(el, theme, state):
     bind = el.get("bind", {})
     color_ref = bind.get("color", "#888")
-    color = _resolve(color_ref, theme, state) if isinstance(color_ref, str) else "#888"
+    # Resolve bare state.* references against initial state
+    if isinstance(color_ref, str) and color_ref.startswith("state."):
+        key = color_ref.split(".", 1)[1]
+        color = state.get(key, "#888") or "#888"
+    elif isinstance(color_ref, str):
+        color = _resolve(color_ref, theme, state)
+    else:
+        color = "#888"
     style = el.get("style", {})
     sz = style.get("size", 28)
     hollow = el.get("hollow", False)
@@ -933,16 +947,16 @@ def _render_dock_view(el, theme, state):
 
             html += '</div>'  # header
 
-            # Group body (hidden when collapsed)
+            # Group body (hidden when collapsed) — render ALL panels, hide inactive
             if not collapsed:
                 html += '<div class="jas-dock-group-body" style="flex:1;overflow:auto">'
-                if 0 <= active < len(panels):
-                    active_panel = panels[active]
-                    active_key = f"{active_panel}_panel_content"
-                    panel_spec = _panels.get(active_key)
+                for pi, panel_name in enumerate(panels):
+                    is_active = (pi == active)
+                    panel_key = f"{panel_name}_panel_content"
+                    panel_spec = _panels.get(panel_key)
+                    hidden_cls = "" if is_active else " d-none"
                     if panel_spec is not None:
-                        # Emit panel state/init as data attributes for client-side init
-                        body_attrs = f' data-panel-name="{escape(active_panel)}"'
+                        body_attrs = f' data-panel-name="{escape(panel_name)}"'
                         if panel_spec.get("state"):
                             defaults = {k: v.get("default") if isinstance(v, dict) else v
                                         for k, v in panel_spec["state"].items()}
@@ -951,11 +965,10 @@ def _render_dock_view(el, theme, state):
                             body_attrs += f' data-panel-init="{escape(json.dumps(panel_spec["init"]))}"'
                         content_el = panel_spec.get("content")
                         content_html = render_element(content_el, theme, state, mode="normal") if isinstance(content_el, dict) else ""
-                        html += f'<div class="jas-dock-panel-body"{body_attrs}>{content_html}</div>'
+                        html += f'<div class="jas-dock-panel-body{hidden_cls}"{body_attrs}>{content_html}</div>'
                     else:
-                        # Fallback: label only (panel spec not loaded)
-                        label = _PANEL_LABELS.get(active_panel, active_panel.title())
-                        html += f'<div class="jas-dock-panel-body" style="padding:12px;color:var(--jas-text-body,#aaa);font-size:18px" data-panel-name="{escape(active_panel)}">{escape(label)}</div>'
+                        label = _PANEL_LABELS.get(panel_name, panel_name.title())
+                        html += f'<div class="jas-dock-panel-body{hidden_cls}" style="padding:12px;color:var(--jas-text-body,#aaa);font-size:18px" data-panel-name="{escape(panel_name)}">{escape(label)}</div>'
                 html += '</div>'
 
             html += '</div>'  # group
@@ -1015,4 +1028,5 @@ _RENDERERS = {
     "image": _render_image,
     "color_bar": _render_color_bar,
     "brand_logo": _render_brand_logo,
+    "fill_stroke_widget": _render_col,
 }

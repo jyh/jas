@@ -371,6 +371,7 @@ pub fn App() -> Element {
     let appearance_submenu_open = use_signal(|| false);
     let save_as_dialog = use_signal(|| Option::<SaveAsDialog>::None);
     let color_picker_state = use_signal(|| Option::<super::color_picker::ColorPickerState>::None);
+    use_context_provider(|| super::fill_stroke_widget::ColorPickerCtx(color_picker_state));
 
     // --- Panel menu context ---
     let mut panel_menu_sig = use_signal(|| None);

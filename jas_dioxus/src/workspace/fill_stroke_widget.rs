@@ -7,6 +7,12 @@ use super::theme::*;
 use crate::document::controller::{FillSummary, StrokeSummary};
 use crate::geometry::element::{Color, Fill, Stroke};
 
+/// Context wrapper for the color picker state signal.
+/// Provided by the App component so child components (including
+/// the YAML-rendered fill/stroke widget) can open the color picker.
+#[derive(Clone)]
+pub(crate) struct ColorPickerCtx(pub Signal<Option<super::color_picker::ColorPickerState>>);
+
 #[component]
 pub(crate) fn FillStrokeWidgetView(
     fill_summary: FillSummary,

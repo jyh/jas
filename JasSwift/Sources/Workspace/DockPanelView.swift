@@ -162,7 +162,9 @@ public struct PanelGroupView: View {
                     if let ws = WorkspaceData.load(),
                        let content = ws.panelContent(contentId) {
                         let stateMap = ws.stateDefaults()
-                        let ctx: [String: Any] = ["state": stateMap, "panel": [:] as [String: Any]]
+                        let panelMap = ws.panelStateDefaults(contentId)
+                        let icons = ws.icons()
+                        let ctx: [String: Any] = ["state": stateMap, "panel": panelMap, "icons": icons]
                         YamlPanelBodyView(contentSpec: content, context: ctx)
                     } else {
                         SwiftUI.Text(verbatim: panelLabel(kind))

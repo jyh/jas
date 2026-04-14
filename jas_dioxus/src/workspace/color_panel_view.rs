@@ -184,7 +184,14 @@ fn color_bar_element_size(id: &str) -> (f64, f64) {
 /// Build a data URI for the color bar as a BMP image.
 /// Split y-axis: top half S 0→100%, B 100→80%; bottom half S 100%, B 80→0%.
 /// Uses a 120x32 image (browser scales smoothly).
-fn build_color_bar_data_uri() -> String {
+/// Result is cached — the gradient never changes.
+pub(crate) fn build_color_bar_data_uri() -> String {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<String> = OnceLock::new();
+    CACHE.get_or_init(build_color_bar_data_uri_inner).clone()
+}
+
+fn build_color_bar_data_uri_inner() -> String {
     const W: usize = 120;
     const H: usize = 32;
     let mid_y = H as f64 / 2.0;

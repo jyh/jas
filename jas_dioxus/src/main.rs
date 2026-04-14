@@ -4,6 +4,7 @@ mod canvas;
 mod cross_language_test;
 mod document;
 mod geometry;
+mod interpreter;
 mod panels;
 mod tools;
 mod workspace;

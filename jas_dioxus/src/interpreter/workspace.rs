@@ -3,6 +3,7 @@
 
 use serde_json;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 /// Compiled workspace JSON, embedded at build time.
 ///
@@ -10,15 +11,21 @@ use std::collections::HashMap;
 ///   python -m workspace_interpreter.compile workspace/ workspace/workspace.json
 const WORKSPACE_JSON: &str = include_str!("../../../workspace/workspace.json");
 
+/// Cached parsed workspace data (parsed once, reused forever).
+static WORKSPACE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
+
 /// Parsed workspace data.
 pub struct Workspace {
-    data: serde_json::Value,
+    data: &'static serde_json::Value,
 }
 
 impl Workspace {
-    /// Load the workspace from the embedded JSON.
+    /// Load the workspace from the cached parsed JSON.
     pub fn load() -> Option<Self> {
-        let data: serde_json::Value = serde_json::from_str(WORKSPACE_JSON).ok()?;
+        let data = WORKSPACE_CACHE.get_or_init(|| {
+            serde_json::from_str(WORKSPACE_JSON).unwrap_or(serde_json::Value::Null)
+        });
+        if data.is_null() { return None; }
         Some(Workspace { data })
     }
 
@@ -35,6 +42,11 @@ impl Workspace {
     /// Get a specific panel spec by content id.
     pub fn panel(&self, content_id: &str) -> Option<&serde_json::Value> {
         self.data.get("panels")?.get(content_id)
+    }
+
+    /// Get the icons map.
+    pub fn icons(&self) -> &serde_json::Value {
+        self.data.get("icons").unwrap_or(&serde_json::Value::Null)
     }
 
     /// Get the actions map.
@@ -158,5 +170,56 @@ mod tests {
         let defaults = ws.panel_state_defaults("color_panel_content");
         assert!(defaults.contains_key("mode"));
         assert!(defaults.contains_key("h"));
+    }
+
+    #[test]
+    fn color_panel_slider_visibility() {
+        use super::super::expr;
+        let ws = Workspace::load().unwrap();
+        let content = ws.panel_content("color_panel_content").unwrap();
+        let state_map: serde_json::Map<String, serde_json::Value> =
+            ws.state_defaults().into_iter().collect();
+        let panel_map: serde_json::Map<String, serde_json::Value> =
+            ws.panel_state_defaults("color_panel_content").into_iter().collect();
+        let ctx = serde_json::json!({"state": state_map, "panel": panel_map});
+
+        // Find slider containers by walking children
+        fn find_bind_visible(el: &serde_json::Value, results: &mut Vec<(String, String)>) {
+            if let Some(id) = el.get("id").and_then(|v| v.as_str()) {
+                if let Some(vis) = el.get("bind")
+                    .and_then(|b| b.get("visible"))
+                    .and_then(|v| v.as_str())
+                {
+                    results.push((id.to_string(), vis.to_string()));
+                }
+            }
+            if let Some(children) = el.get("children").and_then(|c| c.as_array()) {
+                for child in children {
+                    find_bind_visible(child, results);
+                }
+            }
+        }
+
+        let mut bindings = Vec::new();
+        find_bind_visible(content, &mut bindings);
+
+        // Default mode is "hsb" — only HSB should be visible
+        let mut hsb_visible = false;
+        let mut others_hidden = true;
+        for (id, vis_expr) in &bindings {
+            let result = expr::eval(vis_expr, &ctx);
+            let visible = result.to_bool();
+            // {id}: expr={vis_expr} -> {result:?} visible={visible}
+            if id.contains("hsb") {
+                hsb_visible = visible;
+            } else {
+                if visible {
+                    others_hidden = false;
+                }
+            }
+        }
+        assert!(!bindings.is_empty(), "should find bind:visible expressions");
+        assert!(hsb_visible, "HSB sliders should be visible");
+        assert!(others_hidden, "non-HSB sliders should be hidden");
     }
 }
