@@ -146,30 +146,12 @@ color_picker:
                         style: { size: 50 }
                         bind:
                           color: "dialog.color"
-                      - type: container
-                        layout: row
-                        style: { gap: 4, alignment: center }
-                        children:
-                          - { type: radio_group, id: cp_radio_h, options: [{id: h, label: ""}], bind: "dialog.radio_channel" }
-                          - { type: text, content: "H:" }
-                          - { type: number_input, id: cp_h, style: { width: 45 }, min: 0, max: 359, bind: "dialog.h" }
-                          - { type: text, content: "\u00b0" }
-                      - type: container
-                        layout: row
-                        style: { gap: 4, alignment: center }
-                        children:
-                          - { type: radio_group, id: cp_radio_s, options: [{id: s, label: ""}], bind: "dialog.radio_channel" }
-                          - { type: text, content: "S:" }
-                          - { type: number_input, id: cp_s, style: { width: 45 }, min: 0, max: 100, bind: "dialog.s" }
-                          - { type: text, content: "%" }
-                      - type: container
-                        layout: row
-                        style: { gap: 4, alignment: center }
-                        children:
-                          - { type: radio_group, id: cp_radio_b, options: [{id: b, label: ""}], bind: "dialog.radio_channel" }
-                          - { type: text, content: "B:" }
-                          - { type: number_input, id: cp_b, style: { width: 45 }, min: 0, max: 100, bind: "dialog.b" }
-                          - { type: text, content: "%" }
+                      - template: radio_field_row
+                        params: { channel: h, label: "H", radio_id: cp_radio_h, input_id: cp_h, max: 359, bind: "dialog.h", unit: "\u00b0" }
+                      - template: radio_field_row
+                        params: { channel: s, label: "S", radio_id: cp_radio_s, input_id: cp_s, max: 100, bind: "dialog.s", unit: "%" }
+                      - template: radio_field_row
+                        params: { channel: b, label: "B", radio_id: cp_radio_b, input_id: cp_b, max: 100, bind: "dialog.b", unit: "%" }
                   # OK / Cancel / Swatches
                   - type: container
                     layout: column
@@ -207,27 +189,12 @@ color_picker:
                     layout: column
                     style: { gap: 4 }
                     children:
-                      - type: container
-                        layout: row
-                        style: { gap: 4, alignment: center }
-                        children:
-                          - { type: radio_group, id: cp_radio_r, options: [{id: r, label: ""}], bind: "dialog.radio_channel" }
-                          - { type: text, content: "R:" }
-                          - { type: number_input, id: cp_r, style: { width: 45 }, min: 0, max: 255, bind: "dialog.r" }
-                      - type: container
-                        layout: row
-                        style: { gap: 4, alignment: center }
-                        children:
-                          - { type: radio_group, id: cp_radio_g, options: [{id: g, label: ""}], bind: "dialog.radio_channel" }
-                          - { type: text, content: "G:" }
-                          - { type: number_input, id: cp_g, style: { width: 45 }, min: 0, max: 255, bind: "dialog.g" }
-                      - type: container
-                        layout: row
-                        style: { gap: 4, alignment: center }
-                        children:
-                          - { type: radio_group, id: cp_radio_bl, options: [{id: bl, label: ""}], bind: "dialog.radio_channel" }
-                          - { type: text, content: "B:" }
-                          - { type: number_input, id: cp_bl, style: { width: 45 }, min: 0, max: 255, bind: "dialog.bl" }
+                      - template: radio_field_row
+                        params: { channel: r, label: "R", radio_id: cp_radio_r, input_id: cp_r, max: 255, bind: "dialog.r" }
+                      - template: radio_field_row
+                        params: { channel: g, label: "G", radio_id: cp_radio_g, input_id: cp_g, max: 255, bind: "dialog.g" }
+                      - template: radio_field_row
+                        params: { channel: bl, label: "B", radio_id: cp_radio_bl, input_id: cp_bl, max: 255, bind: "dialog.bl" }
                       - type: container
                         layout: row
                         style: { gap: 4, alignment: center, margin: "4 0 0 0" }
@@ -239,31 +206,11 @@ color_picker:
                     layout: column
                     style: { gap: 4 }
                     children:
-                      - type: container
-                        layout: row
-                        style: { gap: 2, alignment: center }
-                        children:
-                          - { type: text, content: "C:" }
-                          - { type: number_input, id: cp_c, style: { width: 40 }, min: 0, max: 100, bind: "dialog.c" }
-                          - { type: text, content: "%" }
-                      - type: container
-                        layout: row
-                        style: { gap: 2, alignment: center }
-                        children:
-                          - { type: text, content: "M:" }
-                          - { type: number_input, id: cp_m, style: { width: 40 }, min: 0, max: 100, bind: "dialog.m" }
-                          - { type: text, content: "%" }
-                      - type: container
-                        layout: row
-                        style: { gap: 2, alignment: center }
-                        children:
-                          - { type: text, content: "Y:" }
-                          - { type: number_input, id: cp_y, style: { width: 40 }, min: 0, max: 100, bind: "dialog.y" }
-                          - { type: text, content: "%" }
-                      - type: container
-                        layout: row
-                        style: { gap: 2, alignment: center }
-                        children:
-                          - { type: text, content: "K:" }
-                          - { type: number_input, id: cp_k, style: { width: 40 }, min: 0, max: 100, bind: "dialog.k" }
-                          - { type: text, content: "%" }
+                      - template: cmyk_field_row
+                        params: { label: "C", id_prefix: cp_c, bind: "dialog.c" }
+                      - template: cmyk_field_row
+                        params: { label: "M", id_prefix: cp_m, bind: "dialog.m" }
+                      - template: cmyk_field_row
+                        params: { label: "Y", id_prefix: cp_y, bind: "dialog.y" }
+                      - template: cmyk_field_row
+                        params: { label: "K", id_prefix: cp_k, bind: "dialog.k" }
