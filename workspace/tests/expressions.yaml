@@ -180,7 +180,7 @@ tests:
   - expr: "state.colors.0"
     state: { colors: ["#ff0000", "#00ff00", "#0000ff"] }
     expected: "#ff0000"
-    type: string
+    type: color
 
   # Error handling — missing key
   - expr: "state.missing.nested"
