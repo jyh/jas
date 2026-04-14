@@ -209,8 +209,9 @@ class WorkspaceLayout:
             anchored=[(DockEdge.RIGHT, Dock(
                 id=0,
                 groups=[
+                    PanelGroup(panels=[PanelKind.COLOR, PanelKind.SWATCHES]),
+                    PanelGroup(panels=[PanelKind.STROKE, PanelKind.PROPERTIES]),
                     PanelGroup(panels=[PanelKind.LAYERS]),
-                    PanelGroup(panels=[PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.STROKE, PanelKind.PROPERTIES]),
                 ],
             ))],
             floating=[],

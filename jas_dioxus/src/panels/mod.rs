@@ -120,12 +120,12 @@ mod tests {
 
     #[test]
     fn panel_dispatch_close_removes_panel() {
-        // default_layout has Right dock: group 0 = [Layers], group 1 = [Color, Swatches, Stroke, Properties]
+        // default_layout has Right dock: group 0 = [Color, Swatches], group 1 = [Stroke, Properties], group 2 = [Layers]
         let layout = WorkspaceLayout::default_layout();
         let dock_id = layout.anchored_dock(DockEdge::Right).unwrap().id;
-        // Color is at group 1, panel index 0
+        // Color is at group 0, panel index 0
         let addr = PanelAddr {
-            group: GroupAddr { dock_id, group_idx: 1 },
+            group: GroupAddr { dock_id, group_idx: 0 },
             panel_idx: 0,
         };
 

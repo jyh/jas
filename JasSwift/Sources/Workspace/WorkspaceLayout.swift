@@ -307,8 +307,9 @@ public struct WorkspaceLayout: Codable {
             version: layoutVersion,
             name: name,
             anchored: [(.right, Dock(id: DockId(0), groups: [
+                PanelGroup(panels: [.color, .swatches]),
+                PanelGroup(panels: [.stroke, .properties]),
                 PanelGroup(panels: [.layers]),
-                PanelGroup(panels: [.color, .swatches, .stroke, .properties]),
             ], width: defaultDockWidth))],
             floating: [],
             hiddenPanels: [],

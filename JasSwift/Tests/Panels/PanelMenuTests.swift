@@ -56,8 +56,8 @@ import Testing
 @Test func panelDispatchCloseRemovesPanel() {
     var layout = WorkspaceLayout.defaultLayout()
     let dockId = layout.anchoredDock(.right)!.id
-    // Color is at group 1, panel index 0
-    let addr = PanelAddr(group: GroupAddr(dockId: dockId, groupIdx: 1), panelIdx: 0)
+    // Color is at group 0, panel index 0
+    let addr = PanelAddr(group: GroupAddr(dockId: dockId, groupIdx: 0), panelIdx: 0)
     #expect(layout.isPanelVisible(.color))
     panelDispatch(.color, cmd: "close_panel", addr: addr, layout: &layout)
     #expect(!layout.isPanelVisible(.color))
