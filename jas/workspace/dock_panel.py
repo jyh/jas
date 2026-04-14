@@ -290,8 +290,19 @@ class DockPanelWidget(QWidget):
         if ws and action_name in ws.get("actions", {}):
             action_def = ws["actions"][action_name]
             ctx = {"param": params} if params else {}
+
+            # Check if a dialog was open before running effects
+            dialog_before = self._state_store.get_dialog_id() if self._state_store else None
+
             run_effects(action_def.get("effects", []), ctx, self._state_store,
-                       actions=ws.get("actions"))
+                       actions=ws.get("actions"),
+                       dialogs=ws.get("dialogs"))
+
+            # If a dialog was opened by the effect, show it
+            dialog_after = self._state_store.get_dialog_id() if self._state_store else None
+            if dialog_after and dialog_after != dialog_before:
+                self._show_yaml_dialog(dialog_after)
+
             self.rebuild()
             return
 
@@ -304,6 +315,17 @@ class DockPanelWidget(QWidget):
                     addr = PanelAddr(group=GroupAddr(dock_id=0, group_idx=0), panel_idx=0)
                     self._dispatch_yaml_cmd(kind, action_name, params, addr)
                     return
+
+    def _show_yaml_dialog(self, dialog_id: str):
+        """Show a YAML-interpreted dialog."""
+        from panels.yaml_dialog_view import YamlDialogView
+        dlg = YamlDialogView(dialog_id, self._state_store,
+                             dispatch_fn=self._dispatch_yaml_action,
+                             parent=self)
+        dlg.exec()
+        # Clean up dialog state if still open
+        if self._state_store and self._state_store.get_dialog_id():
+            self._state_store.close_dialog()
 
     def _toggle_dock(self, dock_id):
         self._layout_data.toggle_dock_collapsed(dock_id)
