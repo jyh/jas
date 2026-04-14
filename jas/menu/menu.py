@@ -260,7 +260,8 @@ def create_menus(window: QMainWindow) -> None:
 
     from workspace.workspace_layout import PanelKind
     for kind, label in [(PanelKind.LAYERS, "&Layers"), (PanelKind.COLOR, "&Color"),
-                        (PanelKind.STROKE, "&Stroke"), (PanelKind.PROPERTIES, "&Properties")]:
+                        (PanelKind.SWATCHES, "&Swatches"), (PanelKind.STROKE, "&Stroke"),
+                        (PanelKind.PROPERTIES, "&Properties")]:
         action = window_menu.addAction(label)
         action.triggered.connect(lambda checked=False, k=kind: _toggle_panel(k))
 

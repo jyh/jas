@@ -86,6 +86,7 @@ let dock_edge_str = function
 let panel_kind_str = function
   | Layers -> "layers"
   | Color -> "color"
+  | Swatches -> "swatches"
   | Stroke -> "stroke"
   | Properties -> "properties"
 
@@ -285,6 +286,7 @@ let menu_bar = [
     ("---", "", "");
     ("Layers", "toggle_panel_layers", "");
     ("Color", "toggle_panel_color", "");
+    ("Swatches", "toggle_panel_swatches", "");
     ("Stroke", "toggle_panel_stroke", "");
     ("Properties", "toggle_panel_properties", "");
   ]);
@@ -478,6 +480,7 @@ let parse_dock_edge j =
 let parse_panel_kind_str s =
   match s with
   | "color" -> Color
+  | "swatches" -> Swatches
   | "stroke" -> Stroke
   | "properties" -> Properties
   | _ -> Layers

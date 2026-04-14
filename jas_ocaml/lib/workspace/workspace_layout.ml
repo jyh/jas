@@ -30,7 +30,7 @@ type dock_id = int
 
 type dock_edge = Left | Right | Bottom
 
-type panel_kind = Layers | Color | Stroke | Properties
+type panel_kind = Layers | Color | Swatches | Stroke | Properties
 
 type color_panel_mode = Grayscale | Hsb_mode | Rgb_mode | Cmyk_mode | Web_safe_rgb
 
@@ -180,7 +180,7 @@ type workspace_layout = {
 let named name = {
   version = layout_version;
   name;
-  anchored = [(Right, make_dock 0 [[Layers]; [Color; Stroke; Properties]] default_dock_width)];
+  anchored = [(Right, make_dock 0 [[Layers]; [Color; Swatches; Stroke; Properties]] default_dock_width)];
   floating = [];
   hidden_panels = [];
   z_order = [];
@@ -471,6 +471,7 @@ let set_dock_width l id ~width =
 let panel_label = function
   | Layers -> "Layers"
   | Color -> "Color"
+  | Swatches -> "Swatches"
   | Stroke -> "Stroke"
   | Properties -> "Properties"
 
@@ -511,9 +512,10 @@ let show_panel l kind =
 let is_panel_visible l kind =
   not (List.mem kind l.hidden_panels)
 
+let all_panel_kinds = [Layers; Color; Swatches; Stroke; Properties]
+
 let panel_menu_items l =
-  let all = [Layers; Color; Stroke; Properties] in
-  List.map (fun k -> (k, is_panel_visible l k)) all
+  List.map (fun k -> (k, is_panel_visible l k)) all_panel_kinds
 
 (* ------------------------------------------------------------------ *)
 (* Z-index                                                            *)
@@ -595,7 +597,7 @@ let remove_anchored_dock l edge =
 
 let panels_for_selection ~has_selection ~has_text:_ =
   let panels = [Layers] in
-  if has_selection then panels @ [Properties; Color; Stroke]
+  if has_selection then panels @ [Properties; Color; Swatches; Stroke]
   else panels
 
 (* ------------------------------------------------------------------ *)
@@ -639,9 +641,9 @@ let edge_to_json = function Left -> "Left" | Right -> "Right" | Bottom -> "Botto
 let edge_of_json = function "Left" -> Left | "Right" -> Right | _ -> Bottom
 
 let kind_to_json = function
-  | Layers -> "Layers" | Color -> "Color" | Stroke -> "Stroke" | Properties -> "Properties"
+  | Layers -> "Layers" | Color -> "Color" | Swatches -> "Swatches" | Stroke -> "Stroke" | Properties -> "Properties"
 let kind_of_json = function
-  | "Layers" -> Layers | "Color" -> Color | "Stroke" -> Stroke | _ -> Properties
+  | "Layers" -> Layers | "Color" -> Color | "Swatches" -> Swatches | "Stroke" -> Stroke | _ -> Properties
 
 let panel_group_to_json g : Yojson.Safe.t =
   `Assoc [

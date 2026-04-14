@@ -23,6 +23,7 @@ from workspace.workspace_layout import PanelKind
 PANEL_KIND_TO_CONTENT_ID = {
     PanelKind.LAYERS: "layers_panel_content",
     PanelKind.COLOR: "color_panel_content",
+    PanelKind.SWATCHES: "swatches_panel_content",
     PanelKind.STROKE: "stroke_panel_content",
     PanelKind.PROPERTIES: "properties_panel_content",
 }

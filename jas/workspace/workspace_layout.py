@@ -42,10 +42,11 @@ class DockEdge(Enum):
 class PanelKind(Enum):
     LAYERS = auto()
     COLOR = auto()
+    SWATCHES = auto()
     STROKE = auto()
     PROPERTIES = auto()
 
-ALL_PANEL_KINDS = [PanelKind.LAYERS, PanelKind.COLOR, PanelKind.STROKE, PanelKind.PROPERTIES]
+ALL_PANEL_KINDS = [PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.STROKE, PanelKind.PROPERTIES]
 
 @dataclass
 class PanelGroup:
@@ -209,7 +210,7 @@ class WorkspaceLayout:
                 id=0,
                 groups=[
                     PanelGroup(panels=[PanelKind.LAYERS]),
-                    PanelGroup(panels=[PanelKind.COLOR, PanelKind.STROKE, PanelKind.PROPERTIES]),
+                    PanelGroup(panels=[PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.STROKE, PanelKind.PROPERTIES]),
                 ],
             ))],
             floating=[],
@@ -442,6 +443,7 @@ class WorkspaceLayout:
         return {
             PanelKind.LAYERS: "Layers",
             PanelKind.COLOR: "Color",
+            PanelKind.SWATCHES: "Swatches",
             PanelKind.STROKE: "Stroke",
             PanelKind.PROPERTIES: "Properties",
         }[kind]
@@ -554,7 +556,7 @@ class WorkspaceLayout:
     def panels_for_selection(has_selection: bool, has_text: bool = False) -> list[PanelKind]:
         panels = [PanelKind.LAYERS]
         if has_selection:
-            panels.extend([PanelKind.PROPERTIES, PanelKind.COLOR, PanelKind.STROKE])
+            panels.extend([PanelKind.PROPERTIES, PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.STROKE])
         return panels
 
     # -- Persistence --

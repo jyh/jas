@@ -301,6 +301,7 @@ class CrossLanguageTest(absltest.TestCase):
     def _parse_panel_kind(self, s: str) -> PanelKind:
         return {
             "color": PanelKind.COLOR,
+            "swatches": PanelKind.SWATCHES,
             "stroke": PanelKind.STROKE,
             "properties": PanelKind.PROPERTIES,
         }.get(s, PanelKind.LAYERS)

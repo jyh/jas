@@ -47,7 +47,7 @@ class PanelMenuItem:
 # All panel kinds
 # ---------------------------------------------------------------------------
 
-ALL_PANEL_KINDS = [PanelKind.LAYERS, PanelKind.COLOR, PanelKind.STROKE, PanelKind.PROPERTIES]
+ALL_PANEL_KINDS = [PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.STROKE, PanelKind.PROPERTIES]
 
 # Color panel mode commands
 COLOR_MODE_COMMANDS = {
@@ -68,6 +68,7 @@ COLOR_MODE_TO_CMD = {v: k for k, v in COLOR_MODE_COMMANDS.items()}
 _PANEL_LABELS: dict[PanelKind, str] = {
     PanelKind.LAYERS: "Layers",
     PanelKind.COLOR: "Color",
+    PanelKind.SWATCHES: "Swatches",
     PanelKind.STROKE: "Stroke",
     PanelKind.PROPERTIES: "Properties",
 }

@@ -435,6 +435,7 @@ mod tests {
     fn parse_panel_kind(s: &str) -> PanelKind {
         match s {
             "color" => PanelKind::Color,
+            "swatches" => PanelKind::Swatches,
             "stroke" => PanelKind::Stroke,
             "properties" => PanelKind::Properties,
             _ => PanelKind::Layers,

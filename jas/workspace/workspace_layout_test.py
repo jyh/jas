@@ -30,7 +30,7 @@ def test_default_layout_two_groups():
     d = l.anchored_dock(DockEdge.RIGHT)
     assert len(d.groups) == 2
     assert d.groups[0].panels == [PanelKind.LAYERS]
-    assert d.groups[1].panels == [PanelKind.COLOR, PanelKind.STROKE, PanelKind.PROPERTIES]
+    assert d.groups[1].panels == [PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.STROKE, PanelKind.PROPERTIES]
 
 def test_default_not_collapsed():
     l = WorkspaceLayout.default_layout()
@@ -108,14 +108,14 @@ def test_move_group_forward():
     l = WorkspaceLayout.default_layout()
     id = _rid(l)
     l.move_group_within_dock(id, 0, 1)
-    assert l.dock(id).groups[0].panels == [PanelKind.COLOR, PanelKind.STROKE, PanelKind.PROPERTIES]
+    assert l.dock(id).groups[0].panels == [PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.STROKE, PanelKind.PROPERTIES]
     assert l.dock(id).groups[1].panels == [PanelKind.LAYERS]
 
 def test_move_group_backward():
     l = WorkspaceLayout.default_layout()
     id = _rid(l)
     l.move_group_within_dock(id, 1, 0)
-    assert l.dock(id).groups[0].panels == [PanelKind.COLOR, PanelKind.STROKE, PanelKind.PROPERTIES]
+    assert l.dock(id).groups[0].panels == [PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.STROKE, PanelKind.PROPERTIES]
 
 def test_move_group_same_position():
     l = WorkspaceLayout.default_layout()
@@ -167,7 +167,7 @@ def test_move_group_same_dock_is_reorder():
     l = WorkspaceLayout.default_layout()
     id = _rid(l)
     l.move_group_to_dock(_ga(id, 0), id, 1)
-    assert l.dock(id).groups[0].panels == [PanelKind.COLOR, PanelKind.STROKE, PanelKind.PROPERTIES]
+    assert l.dock(id).groups[0].panels == [PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.STROKE, PanelKind.PROPERTIES]
     assert l.dock(id).groups[1].panels == [PanelKind.LAYERS]
 
 def test_move_group_invalid_source():
@@ -228,8 +228,8 @@ def test_move_panel_same_dock():
     l = WorkspaceLayout.default_layout()
     id = _rid(l)
     l.move_panel_to_group(_pa(id, 1, 1), _ga(id, 0))
-    assert l.dock(id).groups[0].panels == [PanelKind.LAYERS, PanelKind.STROKE]
-    assert l.dock(id).groups[1].panels == [PanelKind.COLOR, PanelKind.PROPERTIES]
+    assert l.dock(id).groups[0].panels == [PanelKind.LAYERS, PanelKind.SWATCHES]
+    assert l.dock(id).groups[1].panels == [PanelKind.COLOR, PanelKind.STROKE, PanelKind.PROPERTIES]
 
 def test_move_panel_becomes_active():
     l = WorkspaceLayout.default_layout()
@@ -243,7 +243,7 @@ def test_move_panel_cross_dock():
     fid = l.detach_group(_ga(id, 0), 50, 50)
     l.move_panel_to_group(_pa(id, 0, 0), _ga(fid, 0))
     assert l.dock(fid).groups[0].panels == [PanelKind.LAYERS, PanelKind.COLOR]
-    assert l.dock(id).groups[0].panels == [PanelKind.STROKE, PanelKind.PROPERTIES]
+    assert l.dock(id).groups[0].panels == [PanelKind.SWATCHES, PanelKind.STROKE, PanelKind.PROPERTIES]
 
 def test_move_last_panel_removes_group():
     l = WorkspaceLayout.default_layout()
@@ -276,7 +276,7 @@ def test_move_panel_invalid_target():
     l = WorkspaceLayout.default_layout()
     id = _rid(l)
     l.move_panel_to_group(_pa(id, 1, 0), _ga(99, 0))
-    assert len(l.dock(id).groups[1].panels) == 3
+    assert len(l.dock(id).groups[1].panels) == 4
 
 # -- Insert panel as group --
 
@@ -285,7 +285,7 @@ def test_insert_panel_creates_group():
     id = _rid(l)
     l.insert_panel_as_new_group(_pa(id, 1, 1), id, 0)
     assert len(l.dock(id).groups) == 3
-    assert l.dock(id).groups[0].panels == [PanelKind.STROKE]
+    assert l.dock(id).groups[0].panels == [PanelKind.SWATCHES]
 
 def test_insert_panel_cleans_source():
     l = WorkspaceLayout.default_layout()
@@ -308,8 +308,8 @@ def test_detach_panel_creates_floating():
     id = _rid(l)
     fid = l.detach_panel(_pa(id, 1, 1), 300, 150)
     assert fid is not None
-    assert l.dock(fid).groups[0].panels == [PanelKind.STROKE]
-    assert l.dock(id).groups[1].panels == [PanelKind.COLOR, PanelKind.PROPERTIES]
+    assert l.dock(fid).groups[0].panels == [PanelKind.SWATCHES]
+    assert l.dock(id).groups[1].panels == [PanelKind.COLOR, PanelKind.STROKE, PanelKind.PROPERTIES]
 
 def test_detach_panel_position():
     l = WorkspaceLayout.default_layout()
@@ -405,6 +405,7 @@ def test_cleanup_multiple_empty_groups():
 def test_panel_label_values():
     assert WorkspaceLayout.panel_label(PanelKind.LAYERS) == "Layers"
     assert WorkspaceLayout.panel_label(PanelKind.COLOR) == "Color"
+    assert WorkspaceLayout.panel_label(PanelKind.SWATCHES) == "Swatches"
     assert WorkspaceLayout.panel_label(PanelKind.STROKE) == "Stroke"
     assert WorkspaceLayout.panel_label(PanelKind.PROPERTIES) == "Properties"
 
@@ -421,15 +422,15 @@ def test_panel_group_active_panel_empty():
 def test_close_panel_hides_it():
     l = WorkspaceLayout.default_layout()
     id = _rid(l)
-    l.close_panel(_pa(id, 1, 1))
+    l.close_panel(_pa(id, 1, 2))
     assert PanelKind.STROKE in l.hidden_panels
     assert not l.is_panel_visible(PanelKind.STROKE)
 
 def test_close_panel_removes_from_group():
     l = WorkspaceLayout.default_layout()
     id = _rid(l)
-    l.close_panel(_pa(id, 1, 1))
-    assert l.dock(id).groups[1].panels == [PanelKind.COLOR, PanelKind.PROPERTIES]
+    l.close_panel(_pa(id, 1, 2))
+    assert l.dock(id).groups[1].panels == [PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.PROPERTIES]
 
 def test_close_last_panel_removes_group():
     l = WorkspaceLayout.default_layout()
@@ -441,7 +442,7 @@ def test_close_last_panel_removes_group():
 def test_show_panel_adds_to_default_group():
     l = WorkspaceLayout.default_layout()
     id = _rid(l)
-    l.close_panel(_pa(id, 1, 1))
+    l.close_panel(_pa(id, 1, 2))
     l.show_panel(PanelKind.STROKE)
     assert PanelKind.STROKE not in l.hidden_panels
     assert PanelKind.STROKE in l.dock(id).groups[0].panels
@@ -460,14 +461,14 @@ def test_hidden_panels_default_empty():
 def test_panel_menu_items_all_visible():
     l = WorkspaceLayout.default_layout()
     items = l.panel_menu_items()
-    assert len(items) == 4
+    assert len(items) == 5
     for _, v in items:
         assert v
 
 def test_panel_menu_items_with_hidden():
     l = WorkspaceLayout.default_layout()
     id = _rid(l)
-    l.close_panel(_pa(id, 1, 1))
+    l.close_panel(_pa(id, 1, 2))
     items = l.panel_menu_items()
     assert not dict(items)[PanelKind.STROKE]
     assert dict(items)[PanelKind.LAYERS]
@@ -621,7 +622,8 @@ def test_focus_next_wraps():
     l.focus_next_panel()
     l.focus_next_panel()
     l.focus_next_panel()
-    assert l.focused_panel == _pa(id, 1, 2)
+    l.focus_next_panel()
+    assert l.focused_panel == _pa(id, 1, 3)
     l.focus_next_panel()
     assert l.focused_panel == _pa(id, 0, 0)
 
@@ -630,13 +632,14 @@ def test_focus_prev_wraps():
     id = _rid(l)
     l.set_focused_panel(None)
     l.focus_prev_panel()
-    assert l.focused_panel == _pa(id, 1, 2)
+    assert l.focused_panel == _pa(id, 1, 3)
+    l.focus_prev_panel()
     l.focus_prev_panel()
     l.focus_prev_panel()
     l.focus_prev_panel()
     assert l.focused_panel == _pa(id, 0, 0)
     l.focus_prev_panel()
-    assert l.focused_panel == _pa(id, 1, 2)
+    assert l.focused_panel == _pa(id, 1, 3)
 
 # -- Safety --
 
@@ -672,27 +675,27 @@ def test_reorder_panel_forward():
     l = WorkspaceLayout.default_layout()
     id = _rid(l)
     l.reorder_panel(_ga(id, 1), 0, 2)
-    assert l.dock(id).groups[1].panels == [PanelKind.STROKE, PanelKind.PROPERTIES, PanelKind.COLOR]
+    assert l.dock(id).groups[1].panels == [PanelKind.SWATCHES, PanelKind.STROKE, PanelKind.COLOR, PanelKind.PROPERTIES]
     assert l.dock(id).groups[1].active == 2
 
 def test_reorder_panel_backward():
     l = WorkspaceLayout.default_layout()
     id = _rid(l)
     l.reorder_panel(_ga(id, 1), 2, 0)
-    assert l.dock(id).groups[1].panels == [PanelKind.PROPERTIES, PanelKind.COLOR, PanelKind.STROKE]
+    assert l.dock(id).groups[1].panels == [PanelKind.STROKE, PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.PROPERTIES]
     assert l.dock(id).groups[1].active == 0
 
 def test_reorder_panel_same_position():
     l = WorkspaceLayout.default_layout()
     id = _rid(l)
     l.reorder_panel(_ga(id, 1), 1, 1)
-    assert l.dock(id).groups[1].panels == [PanelKind.COLOR, PanelKind.STROKE, PanelKind.PROPERTIES]
+    assert l.dock(id).groups[1].panels == [PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.STROKE, PanelKind.PROPERTIES]
 
 def test_reorder_panel_clamped():
     l = WorkspaceLayout.default_layout()
     id = _rid(l)
     l.reorder_panel(_ga(id, 1), 0, 99)
-    assert l.dock(id).groups[1].panels[2] == PanelKind.COLOR
+    assert l.dock(id).groups[1].panels[3] == PanelKind.COLOR
 
 def test_reorder_panel_out_of_bounds():
     l = WorkspaceLayout.default_layout()

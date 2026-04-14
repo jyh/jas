@@ -88,6 +88,7 @@ def _panel_kind_str(k: PanelKind) -> str:
     return {
         PanelKind.LAYERS: "layers",
         PanelKind.COLOR: "color",
+        PanelKind.SWATCHES: "swatches",
         PanelKind.STROKE: "stroke",
         PanelKind.PROPERTIES: "properties",
     }[k]
@@ -318,6 +319,7 @@ MENU_BAR = [
         ("---", "", ""),
         ("Layers", "toggle_panel_layers", ""),
         ("Color", "toggle_panel_color", ""),
+        ("Swatches", "toggle_panel_swatches", ""),
         ("Stroke", "toggle_panel_stroke", ""),
         ("Properties", "toggle_panel_properties", ""),
     ]),
@@ -555,6 +557,7 @@ def _parse_dock_edge(v) -> DockEdge:
 def _parse_panel_kind(v) -> PanelKind:
     return {
         "color": PanelKind.COLOR,
+        "swatches": PanelKind.SWATCHES,
         "stroke": PanelKind.STROKE,
         "properties": PanelKind.PROPERTIES,
     }.get(v, PanelKind.LAYERS)

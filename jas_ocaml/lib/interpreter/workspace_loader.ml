@@ -94,5 +94,6 @@ let panel_kind_to_content_id (kind : Workspace_layout.panel_kind) : string =
   match kind with
   | Workspace_layout.Layers -> "layers_panel_content"
   | Workspace_layout.Color -> "color_panel_content"
+  | Workspace_layout.Swatches -> "swatches_panel_content"
   | Workspace_layout.Stroke -> "stroke_panel_content"
   | Workspace_layout.Properties -> "properties_panel_content"

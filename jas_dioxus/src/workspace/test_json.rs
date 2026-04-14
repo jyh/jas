@@ -96,6 +96,7 @@ fn panel_kind_str(k: PanelKind) -> &'static str {
     match k {
         PanelKind::Layers => "layers",
         PanelKind::Color => "color",
+        PanelKind::Swatches => "swatches",
         PanelKind::Stroke => "stroke",
         PanelKind::Properties => "properties",
     }
@@ -514,6 +515,7 @@ fn parse_dock_edge(v: &serde_json::Value) -> DockEdge {
 fn parse_panel_kind(v: &serde_json::Value) -> PanelKind {
     match v.as_str().unwrap_or("layers") {
         "color" => PanelKind::Color,
+        "swatches" => PanelKind::Swatches,
         "stroke" => PanelKind::Stroke,
         "properties" => PanelKind::Properties,
         _ => PanelKind::Layers,

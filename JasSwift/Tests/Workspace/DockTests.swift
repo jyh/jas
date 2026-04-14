@@ -26,7 +26,7 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     let d = l.anchoredDock(.right)!
     #expect(d.groups.count == 2)
     #expect(d.groups[0].panels == [.layers])
-    #expect(d.groups[1].panels == [.color, .stroke, .properties])
+    #expect(d.groups[1].panels == [.color, .swatches, .stroke, .properties])
 }
 
 @Test func defaultNotCollapsed() {
@@ -116,7 +116,7 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     var l = WorkspaceLayout.defaultLayout()
     let id = rightDockId(l)
     l.moveGroupWithinDock(id, from: 0, to: 1)
-    #expect(l.dock(id)!.groups[0].panels == [.color, .stroke, .properties])
+    #expect(l.dock(id)!.groups[0].panels == [.color, .swatches, .stroke, .properties])
     #expect(l.dock(id)!.groups[1].panels == [.layers])
 }
 
@@ -124,7 +124,7 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     var l = WorkspaceLayout.defaultLayout()
     let id = rightDockId(l)
     l.moveGroupWithinDock(id, from: 1, to: 0)
-    #expect(l.dock(id)!.groups[0].panels == [.color, .stroke, .properties])
+    #expect(l.dock(id)!.groups[0].panels == [.color, .swatches, .stroke, .properties])
 }
 
 @Test func moveGroupSamePosition() {
@@ -182,7 +182,7 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     var l = WorkspaceLayout.defaultLayout()
     let id = rightDockId(l)
     l.moveGroupToDock(ga(id.value, 0), toDock: id, toIdx: 1)
-    #expect(l.dock(id)!.groups[0].panels == [.color, .stroke, .properties])
+    #expect(l.dock(id)!.groups[0].panels == [.color, .swatches, .stroke, .properties])
     #expect(l.dock(id)!.groups[1].panels == [.layers])
 }
 
@@ -251,8 +251,8 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     var l = WorkspaceLayout.defaultLayout()
     let id = rightDockId(l)
     l.movePanelToGroup(pa(id.value, 1, 1), to: ga(id.value, 0))
-    #expect(l.dock(id)!.groups[0].panels == [.layers, .stroke])
-    #expect(l.dock(id)!.groups[1].panels == [.color, .properties])
+    #expect(l.dock(id)!.groups[0].panels == [.layers, .swatches])
+    #expect(l.dock(id)!.groups[1].panels == [.color, .stroke, .properties])
 }
 
 @Test func movePanelBecomesActive() {
@@ -268,7 +268,7 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     let fid = l.detachGroup(ga(id.value, 0), x: 50, y: 50)!
     l.movePanelToGroup(pa(id.value, 0, 0), to: ga(fid.value, 0))
     #expect(l.dock(fid)!.groups[0].panels == [.layers, .color])
-    #expect(l.dock(id)!.groups[0].panels == [.stroke, .properties])
+    #expect(l.dock(id)!.groups[0].panels == [.swatches, .stroke, .properties])
 }
 
 @Test func moveLastPanelRemovesGroup() {
@@ -306,7 +306,7 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     var l = WorkspaceLayout.defaultLayout()
     let id = rightDockId(l)
     l.movePanelToGroup(pa(id.value, 1, 0), to: ga(99, 0))
-    #expect(l.dock(id)!.groups[1].panels.count == 3)
+    #expect(l.dock(id)!.groups[1].panels.count == 4)
 }
 
 // MARK: - Insert Panel as Group
@@ -316,7 +316,7 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     let id = rightDockId(l)
     l.insertPanelAsNewGroup(pa(id.value, 1, 1), toDock: id, atIdx: 0)
     #expect(l.dock(id)!.groups.count == 3)
-    #expect(l.dock(id)!.groups[0].panels == [.stroke])
+    #expect(l.dock(id)!.groups[0].panels == [.swatches])
 }
 
 @Test func insertPanelCleansSource() {
@@ -342,8 +342,8 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     let id = rightDockId(l)
     let fid = l.detachPanel(pa(id.value, 1, 1), x: 300, y: 150)
     #expect(fid != nil)
-    #expect(l.dock(fid!)!.groups[0].panels == [.stroke])
-    #expect(l.dock(id)!.groups[1].panels == [.color, .properties])
+    #expect(l.dock(fid!)!.groups[0].panels == [.swatches])
+    #expect(l.dock(id)!.groups[1].panels == [.color, .stroke, .properties])
 }
 
 @Test func detachPanelPosition() {
@@ -457,6 +457,7 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
 @Test func panelLabelValues() {
     #expect(WorkspaceLayout.panelLabel(.layers) == "Layers")
     #expect(WorkspaceLayout.panelLabel(.color) == "Color")
+    #expect(WorkspaceLayout.panelLabel(.swatches) == "Swatches")
     #expect(WorkspaceLayout.panelLabel(.stroke) == "Stroke")
     #expect(WorkspaceLayout.panelLabel(.properties) == "Properties")
 }
@@ -478,15 +479,15 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     var l = WorkspaceLayout.defaultLayout()
     let id = rightDockId(l)
     l.closePanel(pa(id.value, 1, 1))
-    #expect(l.hiddenPanels.contains(.stroke))
-    #expect(!l.isPanelVisible(.stroke))
+    #expect(l.hiddenPanels.contains(.swatches))
+    #expect(!l.isPanelVisible(.swatches))
 }
 
 @Test func closePanelRemovesFromGroup() {
     var l = WorkspaceLayout.defaultLayout()
     let id = rightDockId(l)
     l.closePanel(pa(id.value, 1, 1))
-    #expect(l.dock(id)!.groups[1].panels == [.color, .properties])
+    #expect(l.dock(id)!.groups[1].panels == [.color, .stroke, .properties])
 }
 
 @Test func closeLastPanelRemovesGroup() {
@@ -500,7 +501,7 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
 @Test func showPanelAddsToDefaultGroup() {
     var l = WorkspaceLayout.defaultLayout()
     let id = rightDockId(l)
-    l.closePanel(pa(id.value, 1, 1))
+    l.closePanel(pa(id.value, 1, 2))
     l.showPanel(.stroke)
     #expect(!l.hiddenPanels.contains(.stroke))
     #expect(l.dock(id)!.groups[0].panels.contains(.stroke))
@@ -523,14 +524,14 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
 @Test func panelMenuItemsAllVisible() {
     let l = WorkspaceLayout.defaultLayout()
     let items = l.panelMenuItems()
-    #expect(items.count == 4)
+    #expect(items.count == 5)
     for (_, visible) in items { #expect(visible) }
 }
 
 @Test func panelMenuItemsWithHidden() {
     var l = WorkspaceLayout.defaultLayout()
     let id = rightDockId(l)
-    l.closePanel(pa(id.value, 1, 1))
+    l.closePanel(pa(id.value, 1, 2))
     let items = l.panelMenuItems()
     #expect(items.first(where: { $0.0 == .stroke })!.1 == false)
     #expect(items.first(where: { $0.0 == .layers })!.1 == true)
@@ -727,9 +728,10 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     l.focusNextPanel()
     #expect(l.focusedPanel == pa(id.value, 0, 0))
     l.focusNextPanel() // Color
+    l.focusNextPanel() // Swatches
     l.focusNextPanel() // Stroke
     l.focusNextPanel() // Properties
-    #expect(l.focusedPanel == pa(id.value, 1, 2))
+    #expect(l.focusedPanel == pa(id.value, 1, 3))
     l.focusNextPanel()
     #expect(l.focusedPanel == pa(id.value, 0, 0))
 }
@@ -739,13 +741,14 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     let id = rightDockId(l)
     l.setFocusedPanel(nil)
     l.focusPrevPanel()
-    #expect(l.focusedPanel == pa(id.value, 1, 2))
+    #expect(l.focusedPanel == pa(id.value, 1, 3))
     l.focusPrevPanel() // Stroke
+    l.focusPrevPanel() // Swatches
     l.focusPrevPanel() // Color
     l.focusPrevPanel() // Layers
     #expect(l.focusedPanel == pa(id.value, 0, 0))
     l.focusPrevPanel()
-    #expect(l.focusedPanel == pa(id.value, 1, 2))
+    #expect(l.focusedPanel == pa(id.value, 1, 3))
 }
 
 // MARK: - Safety
@@ -785,7 +788,7 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     var l = WorkspaceLayout.defaultLayout()
     let id = rightDockId(l)
     l.reorderPanel(ga(id.value, 1), from: 0, to: 2)
-    #expect(l.dock(id)!.groups[1].panels == [.stroke, .properties, .color])
+    #expect(l.dock(id)!.groups[1].panels == [.swatches, .stroke, .color, .properties])
     #expect(l.dock(id)!.groups[1].active == 2)
 }
 
@@ -793,7 +796,7 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     var l = WorkspaceLayout.defaultLayout()
     let id = rightDockId(l)
     l.reorderPanel(ga(id.value, 1), from: 2, to: 0)
-    #expect(l.dock(id)!.groups[1].panels == [.properties, .color, .stroke])
+    #expect(l.dock(id)!.groups[1].panels == [.stroke, .color, .swatches, .properties])
     #expect(l.dock(id)!.groups[1].active == 0)
 }
 
@@ -801,14 +804,14 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
     var l = WorkspaceLayout.defaultLayout()
     let id = rightDockId(l)
     l.reorderPanel(ga(id.value, 1), from: 1, to: 1)
-    #expect(l.dock(id)!.groups[1].panels == [.color, .stroke, .properties])
+    #expect(l.dock(id)!.groups[1].panels == [.color, .swatches, .stroke, .properties])
 }
 
 @Test func reorderPanelClamped() {
     var l = WorkspaceLayout.defaultLayout()
     let id = rightDockId(l)
     l.reorderPanel(ga(id.value, 1), from: 0, to: 99)
-    #expect(l.dock(id)!.groups[1].panels[2] == .color)
+    #expect(l.dock(id)!.groups[1].panels[3] == .color)
 }
 
 @Test func reorderPanelOutOfBounds() {

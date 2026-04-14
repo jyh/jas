@@ -1,0 +1,462 @@
+id: swatches_panel_content
+type: panel
+summary: "Swatches"
+description: >
+  Swatch library panel for managing named color swatches organized into
+  libraries. The panel displays a fill/stroke widget, a recent-colors row,
+  and one or more swatch libraries rendered as collapsible sections with
+  wrapping color tiles.
+
+  Layout (top to bottom):
+
+  Row 1 -- Fill/stroke widget. Same visual behavior as the toolbar widget
+  except single-click only (no double-click to open the modal picker from
+  within the panel).
+
+  Row 2 -- "Recent Colors" label.
+
+  Row 3 -- Recent colors. Same per-document recent colors as the Color
+  panel: ten 16px slots, newest first. Click sets the active color.
+  Double-click opens the Swatch Options dialog in create mode.
+
+  Row 4 -- Swatch tiles area. Each loaded library is rendered as a
+  collapsible section: a disclosure triangle + library name label, followed
+  by swatches wrapping left-to-right, top-to-bottom. The tile size is
+  controlled by the thumbnail_size panel state (small=16px, medium=32px,
+  large=64px).
+
+  Single-click a library swatch to select it and set the active color.
+  Double-click opens the Swatch Options dialog in edit mode. Shift+click
+  adds a range to the selection. Cmd+click toggles individual swatch
+  selection. Multiple swatches can be selected.
+
+  Each swatch has: name (string), color (hex), color_mode (grayscale/rgb/
+  hsb/cmyk/web_safe_rgb), color_type ("process"), global (bool, deferred).
+
+  Libraries are loaded from workspace/swatches/*.json at startup. The
+  default library is "Web Colors" (216 web-safe colors).
+
+state:
+  thumbnail_size:
+    type: enum
+    values: [small, medium, large]
+    default: small
+    description: >
+      Swatch tile display size. Small=16px, Medium=32px, Large=64px.
+  selected_library:
+    type: string
+    default: "web_colors"
+    description: >
+      ID of the library containing the most recent swatch selection.
+      Used as the target for New Swatch, Sort, Save, etc.
+  selected_swatches:
+    type: list
+    item_type: number
+    default: []
+    description: >
+      List of selected swatch indices within the selected library.
+  open_libraries:
+    type: list
+    item_type: object
+    default:
+      - { id: "web_colors", collapsed: false }
+    description: >
+      List of open libraries with their collapsed state. Each entry
+      has an "id" (library filename stem) and "collapsed" (bool).
+  recent_colors:
+    type: list
+    item_type: color
+    max_length: 10
+    default: []
+    per_document: true
+    description: >
+      Per-document list of recently committed colors, newest first.
+      Shared with the Color panel.
+
+init:
+  recent_colors: "document.recent_colors"
+
+menu:
+  - label: "New Swatch"
+    action: new_swatch
+    description: >
+      Appends a new swatch to the selected library, initialized from
+      the current active color (fill or stroke, per fill_on_top). Opens
+      the Swatch Options dialog in create mode so the user can edit the
+      name, color mode, and color before confirming. The new swatch is
+      appended at the end of the library's swatch list.
+  - label: "Duplicate Swatch"
+    action: duplicate_swatch
+    enabled_when: "panel.selected_swatches.length > 0"
+    description: >
+      Create a copy of each currently selected swatch in the selected
+      library. The copies are inserted immediately after their originals
+      with " copy" appended to the name. The copies become the new
+      selection. Disabled when no swatches are selected.
+  - label: "Delete Swatch"
+    action: delete_swatch
+    enabled_when: "panel.selected_swatches.length > 0"
+    description: >
+      Remove the currently selected swatch(es) from the selected
+      library. The deletion is permanent (no undo). The selection is
+      cleared after deletion. Disabled when no swatches are selected.
+  - separator
+  - label: "Select All Unused"
+    action: select_all_unused_swatches
+    description: >
+      Select every swatch in the panel whose color does not appear
+      anywhere in the current document as a fill or stroke color on
+      any object. Useful for identifying swatches that can be safely
+      deleted. The selection replaces any existing selection.
+  - label: "Add Used Colors"
+    action: add_used_colors
+    description: >
+      Scan every object in the current document and collect the set of
+      unique fill and stroke colors in use. For each color that is not
+      already present in the selected library, create a new swatch and
+      append it to the end. Swatch names default to the "R=N G=N B=N"
+      component format. Colors are compared by hex value.
+  - separator
+  - label: "Sort by Name"
+    action: sort_swatches_by_name
+    description: >
+      Permanently reorder the swatches in the selected library
+      alphabetically by swatch name (case-sensitive, lexicographic).
+      This modifies the library data in place. The reordered sequence
+      is preserved when the library is saved.
+  - separator
+  - label: "Small Thumbnail View"
+    action: set_swatch_thumbnail_size
+    params: { size: small }
+    checked_when: 'panel.thumbnail_size == "small"'
+    description: >
+      Display swatch tiles at 16x16 pixels. This is the smallest view,
+      matching the size of recent-color swatches. Radio button group
+      with Medium and Large; a checkmark indicates the active size.
+  - label: "Medium Thumbnail View"
+    action: set_swatch_thumbnail_size
+    params: { size: medium }
+    checked_when: 'panel.thumbnail_size == "medium"'
+    description: >
+      Display swatch tiles at 32x32 pixels. Radio button group with
+      Small and Large; a checkmark indicates the active size.
+  - label: "Large Thumbnail View"
+    action: set_swatch_thumbnail_size
+    params: { size: large }
+    checked_when: 'panel.thumbnail_size == "large"'
+    description: >
+      Display swatch tiles at 64x64 pixels. This is the largest view,
+      showing colors with enough area to distinguish subtle variations.
+      Radio button group with Small and Medium; a checkmark indicates
+      the active size.
+  - separator
+  - label: "Swatch Options..."
+    action: open_swatch_options
+    params: { mode: edit }
+    enabled_when: "panel.selected_swatches.length > 0"
+    description: >
+      Open the Swatch Options dialog in edit mode for the first
+      selected swatch. The dialog displays the swatch's name, color
+      type (always "Process Color"), color mode, color component
+      sliders, and hex value. OK updates the swatch in place. Disabled
+      when no swatches are selected.
+  - separator
+  - label: "Open Swatch Library"
+    type: submenu
+    dynamic: true
+    description: >
+      Submenu listing all available swatch libraries discovered from
+      workspace/swatches/*.json files. Selecting a library adds it to
+      the panel's open_libraries list, displaying it as a new
+      collapsible section in the swatch tiles area. Libraries that are
+      already open are shown with a checkmark. Each library appears as
+      a disclosure section with a triangle toggle and the library name.
+  - label: "Save Swatch Library"
+    action: save_swatch_library
+    description: >
+      Open the Save Swatch Library dialog, which prompts for a library
+      name. The selected library's swatches are saved to
+      workspace/swatches/ as a JSON file. The file contains the library
+      name, description, and the full swatch array (name, color, color
+      mode, color type, global flag for each swatch).
+
+content:
+  type: container
+  id: sp_content
+  layout: column
+  style: { padding: 4, gap: 6 }
+  children:
+
+    # -- Row 1: Fill/stroke widget --
+    - type: container
+      id: sp_fill_stroke_row
+      layout: row
+      style: { gap: 6 }
+      children:
+        - id: sp_fill_stroke_widget
+          type: container
+          summary: "Fill & Stroke"
+          description: >
+            Overlapping fill and stroke swatches. Single-click a swatch to
+            bring it to front (making it the active attribute). Swap button
+            exchanges fill and stroke colors. Reset button restores defaults
+            (white fill, black stroke). No double-click behavior in panel.
+          layout: column
+          style: { width: 52, height: 56, position: relative }
+          children:
+
+            - id: sp_fill_swatch
+              type: color_swatch
+              summary: "Fill color"
+              style: { size: 24, position: { x: 0, y: 0 } }
+              bind:
+                color: "state.fill_color"
+                z_index: "state.fill_on_top ? 2 : 1"
+              behavior:
+                - event: click
+                  effects:
+                    - set: { fill_on_top: true }
+
+            - id: sp_stroke_swatch
+              type: color_swatch
+              summary: "Stroke color"
+              hollow: true
+              style: { size: 24, position: { x: 8, y: 8 } }
+              bind:
+                color: "state.stroke_color"
+                z_index: "state.fill_on_top ? 1 : 2"
+              behavior:
+                - event: click
+                  effects:
+                    - set: { fill_on_top: false }
+
+            - id: sp_swap_btn
+              type: icon_button
+              summary: "Swap"
+              icon: swap_arrows
+              style: { size: 10, position: { x: 40, y: 0 } }
+              behavior:
+                - event: click
+                  action: swap_fill_stroke
+
+            - id: sp_reset_btn
+              type: icon_button
+              summary: "Default"
+              icon: default_colors
+              style: { size: 12, position: { x: 0, y: 38 } }
+              behavior:
+                - event: click
+                  action: reset_fill_stroke
+
+    # -- Row 2: Recent Colors label --
+    - type: text
+      content: "Recent Colors"
+      style: { font_size: 11, color: "{{theme.colors.text_dim}}" }
+
+    # -- Row 3: Recent colors row --
+    - type: container
+      id: sp_recent_row
+      layout: row
+      style: { gap: 2, alignment: center }
+      children:
+        - id: sp_recent_0
+          type: color_swatch
+          summary: "Recent color 1"
+          style: { size: 16 }
+          bind:
+            color: "panel.recent_colors.0"
+          behavior:
+            - event: click
+              condition: "panel.recent_colors.0 != null"
+              action: set_active_color
+              params: { color: "panel.recent_colors.0" }
+
+        - id: sp_recent_1
+          type: color_swatch
+          summary: "Recent color 2"
+          style: { size: 16 }
+          bind:
+            color: "panel.recent_colors.1"
+          behavior:
+            - event: click
+              condition: "panel.recent_colors.1 != null"
+              action: set_active_color
+              params: { color: "panel.recent_colors.1" }
+
+        - id: sp_recent_2
+          type: color_swatch
+          summary: "Recent color 3"
+          style: { size: 16 }
+          bind:
+            color: "panel.recent_colors.2"
+          behavior:
+            - event: click
+              condition: "panel.recent_colors.2 != null"
+              action: set_active_color
+              params: { color: "panel.recent_colors.2" }
+
+        - id: sp_recent_3
+          type: color_swatch
+          summary: "Recent color 4"
+          style: { size: 16 }
+          bind:
+            color: "panel.recent_colors.3"
+          behavior:
+            - event: click
+              condition: "panel.recent_colors.3 != null"
+              action: set_active_color
+              params: { color: "panel.recent_colors.3" }
+
+        - id: sp_recent_4
+          type: color_swatch
+          summary: "Recent color 5"
+          style: { size: 16 }
+          bind:
+            color: "panel.recent_colors.4"
+          behavior:
+            - event: click
+              condition: "panel.recent_colors.4 != null"
+              action: set_active_color
+              params: { color: "panel.recent_colors.4" }
+
+        - id: sp_recent_5
+          type: color_swatch
+          summary: "Recent color 6"
+          style: { size: 16 }
+          bind:
+            color: "panel.recent_colors.5"
+          behavior:
+            - event: click
+              condition: "panel.recent_colors.5 != null"
+              action: set_active_color
+              params: { color: "panel.recent_colors.5" }
+
+        - id: sp_recent_6
+          type: color_swatch
+          summary: "Recent color 7"
+          style: { size: 16 }
+          bind:
+            color: "panel.recent_colors.6"
+          behavior:
+            - event: click
+              condition: "panel.recent_colors.6 != null"
+              action: set_active_color
+              params: { color: "panel.recent_colors.6" }
+
+        - id: sp_recent_7
+          type: color_swatch
+          summary: "Recent color 8"
+          style: { size: 16 }
+          bind:
+            color: "panel.recent_colors.7"
+          behavior:
+            - event: click
+              condition: "panel.recent_colors.7 != null"
+              action: set_active_color
+              params: { color: "panel.recent_colors.7" }
+
+        - id: sp_recent_8
+          type: color_swatch
+          summary: "Recent color 9"
+          style: { size: 16 }
+          bind:
+            color: "panel.recent_colors.8"
+          behavior:
+            - event: click
+              condition: "panel.recent_colors.8 != null"
+              action: set_active_color
+              params: { color: "panel.recent_colors.8" }
+
+        - id: sp_recent_9
+          type: color_swatch
+          summary: "Recent color 10"
+          style: { size: 16 }
+          bind:
+            color: "panel.recent_colors.9"
+          behavior:
+            - event: click
+              condition: "panel.recent_colors.9 != null"
+              action: set_active_color
+              params: { color: "panel.recent_colors.9" }
+
+    # -- Row 4: Swatch tiles area --
+    - id: sp_swatch_tiles
+      type: container
+      layout: column
+      summary: "Swatch libraries"
+      description: >
+        Scrollable area displaying all open swatch libraries. Each library
+        is rendered as a collapsible disclosure section: a disclosure triangle
+        (click to expand/collapse) followed by the library name label. When
+        expanded, the library's swatches are displayed in a wrapping
+        left-to-right, top-to-bottom layout (like text in a paragraph).
+
+        Multiple libraries can be open simultaneously, stacked vertically.
+        The list of open libraries and their collapsed state is stored in
+        panel.open_libraries. New libraries are added via the Open Swatch
+        Library submenu in the panel menu.
+
+        Swatch tile size is controlled by panel.thumbnail_size (small=16px,
+        medium=32px, large=64px), defaulting to small (16px) to match the
+        recent-color swatches.
+
+        Interaction model: Single-click a swatch to select it and set the
+        active fill/stroke color (per fill_on_top). Selection uses the
+        generic select effect with mode=auto: plain click for single
+        selection, Shift+click to extend a range, Cmd/Ctrl+click to toggle.
+        The selected_swatches panel state tracks the selection as a list of
+        indices within the selected_library. Visual selection feedback is
+        provided by the data-bind-selected-in binding, which adds a
+        jas-selected CSS class (2px accent-colored outline).
+
+        Double-click a swatch to open the Swatch Options dialog in edit mode,
+        passing the swatch's name, color, color_mode, library id, and index
+        as dialog parameters.
+
+        This area uses the generic repeat directive to iterate over
+        panel.open_libraries (outer repeat, producing disclosure sections)
+        and data.swatch_libraries[lib.id].swatches (inner repeat, producing
+        color_swatch tiles). The bracket notation [lib.id] resolves the
+        outer repeat variable within the inner repeat's data source path.
+      style: { flex: 1, overflow_y: auto }
+      repeat:
+        source: "panel.open_libraries"
+        as: lib
+      template:
+        type: disclosure
+        label: "{{data.swatch_libraries[lib.id].name}}"
+        bind:
+          collapsed: "lib.collapsed"
+        children:
+          - type: container
+            layout: wrap
+            style: { gap: 1 }
+            repeat:
+              source: "data.swatch_libraries[lib.id].swatches"
+              as: swatch
+            template:
+              type: color_swatch
+              style: { size: 16 }
+              bind:
+                color: "swatch.color"
+                selected_in: "panel.selected_swatches"
+              behavior:
+                - event: click
+                  effects:
+                    - select:
+                        target: "swatch._index"
+                        list: selected_swatches
+                        scope: selected_library
+                        scope_value: "lib.id"
+                        mode: auto
+                  action: set_active_color
+                  params: { color: "swatch.color" }
+                - event: double_click
+                  action: open_swatch_options
+                  params:
+                    mode: edit
+                    swatch_name: "swatch.name"
+                    color: "swatch.color"
+                    color_mode: "swatch.color_mode"
+                    library: "lib.id"
+                    index: "swatch._index"

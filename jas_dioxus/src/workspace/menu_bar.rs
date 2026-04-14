@@ -253,6 +253,17 @@ pub(crate) fn MenuBarView(
                         }
                     }));
                 }
+                "toggle_panel_swatches" => {
+                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Swatches) {
+                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Swatches) {
+                                st.workspace_layout.close_panel(addr);
+                            }
+                        } else {
+                            st.workspace_layout.show_panel(super::workspace::PanelKind::Swatches);
+                        }
+                    }));
+                }
                 "toggle_panel_stroke" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Stroke) {
@@ -531,6 +542,7 @@ pub(crate) fn MenuBarView(
                             "toggle_pane_dock" => st.workspace_layout.pane_layout.as_ref().is_some_and(|pl| pl.is_pane_visible(super::workspace::PaneKind::Dock)),
                             "toggle_panel_layers" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Layers),
                             "toggle_panel_color" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Color),
+                            "toggle_panel_swatches" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Swatches),
                             "toggle_panel_stroke" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Stroke),
                             "toggle_panel_properties" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Properties),
                             _ => false,
