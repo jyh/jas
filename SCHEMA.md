@@ -1137,6 +1137,72 @@ effects:
   - close_dialog: null
 ```
 
+### Dialog Lifecycle Protocol
+
+The interpreter manages dialog lifecycle as follows:
+
+1. **Open**: `open_dialog: { id, params }` effect runs → state defaults
+   are loaded from the dialog definition's `state` section → `params`
+   expressions are resolved → `init` expressions are evaluated (in two
+   passes: non-`dialog.*` referencing first, then `dialog.*` referencing,
+   for key-order independence) → dialog becomes active.
+2. **Render**: The dialog's `content` element tree is rendered with an
+   evaluation context containing `state.*` (global), `panel.*` (active
+   panel), `dialog.*` (dialog-local), and `param.*` (dialog parameters).
+3. **Interact**: Input bindings like `bind: "dialog.name"` read/write
+   dialog-local state. Expression bindings like `bind.disabled` and
+   `bind.visible` re-evaluate when state changes.
+4. **Close**: `close_dialog: null` clears all dialog state. For
+   confirm actions, set global state before closing:
+   `set: { fill_color: "dialog.color" }` then `close_dialog: null`.
+
+Only one dialog can be open at a time. Opening a new dialog replaces
+any currently open dialog.
+
+### Validation
+
+Dialogs support inline validation using `bind.disabled` on the confirm
+button and `bind.visible` on warning text elements:
+
+```yaml
+- id: warning_text
+  type: text
+  content: "\u201cWorkspace\u201d is reserved."
+  style: { color: "#cc4444", font_size: 11 }
+  bind:
+    visible: 'dialog.name == "Workspace"'
+- type: button
+  label: "Save"
+  action: save_confirm
+  variant: primary
+  bind:
+    disabled: 'dialog.name == "" or dialog.name == "Workspace"'
+```
+
+### Non-Modal Dialogs (Tool Alternates)
+
+Dialogs with `modal: false` are flyout menus (e.g., toolbar tool
+alternates). They render as compact lists of action buttons. Each
+button typically selects a tool and closes the dialog:
+
+```yaml
+arrow_alternates:
+  summary: "Selection Tools"
+  modal: false
+  content:
+    type: container
+    layout: column
+    children:
+      - type: icon_button
+        icon: "partial_selection_arrow"
+        label: "Partial Selection"
+        behavior:
+          - event: click
+            effects:
+              - set: { active_tool: '"partial_selection"' }
+              - close_dialog: null
+```
+
 ### Color Conversion Functions
 
 See the Expression Language section for the full list of color
