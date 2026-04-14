@@ -96,6 +96,32 @@ let icons (ws : workspace) : Yojson.Safe.t =
   | Some icons -> icons
   | None -> `Assoc []
 
+(** Get the dialogs map from the workspace. *)
+let dialogs (ws : workspace) : Yojson.Safe.t =
+  match json_member "dialogs" ws.data with
+  | Some d -> d
+  | None -> `Assoc []
+
+(** Get a specific dialog definition by id. *)
+let dialog (ws : workspace) (dialog_id : string) : Yojson.Safe.t option =
+  match json_member "dialogs" ws.data with
+  | Some dialogs -> json_member dialog_id dialogs
+  | None -> None
+
+(** Extract default values from a dialog's state definitions. *)
+let dialog_state_defaults (ws : workspace) (dialog_id : string) : (string * Yojson.Safe.t) list =
+  match dialog ws dialog_id with
+  | Some dlg ->
+    (match json_member "state" dlg with
+     | Some (`Assoc pairs) ->
+       List.filter_map (fun (key, def) ->
+         match json_member "default" def with
+         | Some default_val -> Some (key, default_val)
+         | None -> None
+       ) pairs
+     | _ -> [])
+  | None -> []
+
 (** Get the swatch_libraries data from the workspace.
     Returns a JSON object mapping library ids to library definitions. *)
 let swatch_libraries (ws : workspace) : Yojson.Safe.t =
