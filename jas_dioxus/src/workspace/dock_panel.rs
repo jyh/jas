@@ -14,6 +14,7 @@ use super::color_panel_view::ColorPanelView;
 use super::workspace::{
     DockEdge, DockId, DragPayload, DropTarget, GroupAddr, PanelAddr, PanelGroup, PanelKind,
 };
+use crate::interpreter::workspace::{Workspace, panel_kind_to_content_id};
 use crate::panels::panel_menu_state::{PanelMenuOpen, PanelMenuState, MenuBarState};
 
 // ---------------------------------------------------------------------------
@@ -373,16 +374,29 @@ pub(crate) fn build_dock_groups(
                 } } } // close tab bar div, rsx!, let
 
                 if !group_collapsed {
-                    match group.active_panel() {
-                        Some(PanelKind::Color) => rsx! {
-                            ColorPanelView {}
-                        },
-                        _ => rsx! {
-                            div {
-                                style: "padding:12px; min-height:60px; color:{THEME_TEXT_BODY}; font-size:12px;",
-                                "{body_label}"
-                            }
-                        },
+                    {
+                        let panel_body = group.active_panel().and_then(|kind| {
+                            let content_id = panel_kind_to_content_id(kind);
+                            let ws = Workspace::load()?;
+                            let content = ws.panel_content(content_id)?.clone();
+                            let state_map: serde_json::Map<String, serde_json::Value> = ws.state_defaults().into_iter().collect();
+                            let eval_ctx = serde_json::json!({"state": state_map, "panel": {}});
+                            Some((content, eval_ctx))
+                        });
+                        match panel_body {
+                            Some((content, eval_ctx)) => rsx! {
+                                crate::interpreter::renderer::YamlPanelBody {
+                                    content: content,
+                                    eval_ctx: eval_ctx,
+                                }
+                            },
+                            None => rsx! {
+                                div {
+                                    style: "padding:12px; min-height:60px; color:{THEME_TEXT_BODY}; font-size:12px;",
+                                    "{body_label}"
+                                }
+                            },
+                        }
                     }
                 }
 

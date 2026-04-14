@@ -14,5 +14,8 @@ pub mod state_store;
 pub mod effects;
 pub mod workspace;
 
+#[cfg(feature = "web")]
+pub mod renderer;
+
 #[cfg(test)]
 mod tests;
