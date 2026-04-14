@@ -1,0 +1,37 @@
+radio_field_row:
+  description: "Radio button + label + number input row for color picker HSB/RGB fields"
+  params:
+    channel: { type: string }
+    label: { type: string }
+    radio_id: { type: string }
+    input_id: { type: string }
+    min: { type: number, default: 0 }
+    max: { type: number }
+    bind: { type: string }
+    unit: { type: string, default: "" }
+  content:
+    type: container
+    layout: row
+    style: { gap: 4, alignment: center }
+    children:
+      - { type: radio_group, id: "${radio_id}", options: [{id: "${channel}", label: ""}], bind: "dialog.radio_channel" }
+      - { type: text, content: "${label}:" }
+      - { type: number_input, id: "${input_id}", style: { width: 45 }, min: "${min}", max: "${max}", bind: "${bind}" }
+      - { type: text, content: "${unit}" }
+
+cmyk_field_row:
+  description: "Label + number input + unit row for color picker CMYK fields"
+  params:
+    label: { type: string }
+    id_prefix: { type: string }
+    min: { type: number, default: 0 }
+    max: { type: number, default: 100 }
+    bind: { type: string }
+  content:
+    type: container
+    layout: row
+    style: { gap: 2, alignment: center }
+    children:
+      - { type: text, content: "${label}:" }
+      - { type: number_input, id: "${id_prefix}", style: { width: 40 }, min: "${min}", max: "${max}", bind: "${bind}" }
+      - { type: text, content: "%" }
