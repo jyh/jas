@@ -5,7 +5,6 @@ widget trees. Handles style, bind, behavior, and repeat directives.
 """
 
 from __future__ import annotations
-import copy
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
@@ -257,7 +256,13 @@ def _render_placeholder(el, store, ctx, dispatch_fn):
 
 
 def _render_repeat(el, store, ctx, dispatch_fn):
-    """Expand a repeat directive and render each instance."""
+    """Expand a repeat directive and render each instance.
+
+    Uses context extension: for each item, the loop variable is added
+    as a top-level key in the eval context so the expression evaluator
+    resolves ``var.field`` naturally. The original template is rendered
+    directly without deep-copy or string substitution.
+    """
     repeat = el["repeat"]
     template = el["template"]
     source_expr = repeat.get("source", "")
@@ -286,52 +291,16 @@ def _render_repeat(el, store, ctx, dispatch_fn):
         else:
             item_data = {"_value": item, "_index": i}
 
-        # Deep-substitute {{var_name.*}} in the template
-        expanded = _substitute_repeat_var(copy.deepcopy(template), var_name, item_data)
-
+        # Extend context with the loop variable so the expression
+        # evaluator resolves var.field paths naturally
         child_ctx = dict(ctx)
-        child_widget = render_element(expanded, store, child_ctx, dispatch_fn)
+        child_ctx[var_name] = item_data
+
+        child_widget = render_element(template, store, child_ctx, dispatch_fn)
         if child_widget:
             layout.addWidget(child_widget)
 
     return container
-
-
-def _substitute_repeat_var(obj, var_name: str, item: dict):
-    """Replace repeat variable references in a template."""
-    if isinstance(obj, str):
-        # Replace {{var_name.field}} with concrete values
-        import re
-        def _sub(m):
-            path = m.group(1).strip()
-            parts = path.split(".")
-            if parts[0] == var_name:
-                val = item
-                for p in parts[1:]:
-                    if isinstance(val, dict) and p in val:
-                        val = val[p]
-                    else:
-                        return m.group(0)
-                return str(val) if not isinstance(val, str) else val
-            return m.group(0)
-        # Handle both {{var}} and bare var.field in expression context
-        obj = re.sub(r"\{\{(.+?)\}\}", _sub, obj)
-        # Also handle bare references (expression context)
-        parts = obj.split(".")
-        if parts[0] == var_name:
-            val = item
-            for p in parts[1:]:
-                if isinstance(val, dict) and p in val:
-                    val = val[p]
-                else:
-                    return obj
-            return str(val) if not isinstance(val, str) else val
-        return obj
-    elif isinstance(obj, dict):
-        return {k: _substitute_repeat_var(v, var_name, item) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [_substitute_repeat_var(v, var_name, item) for v in obj]
-    return obj
 
 
 # ── Style ────────────────────────────────────────────────────

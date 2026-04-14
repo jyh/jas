@@ -10,7 +10,7 @@ from workspace.workspace_layout import (
     WorkspaceLayout, DockEdge, PanelKind, GroupAddr, PanelAddr,
 )
 from panels.panel_menu import panel_label, panel_menu, panel_dispatch, panel_is_checked, PanelMenuItemKind
-from panels.yaml_menu import get_panel_spec, build_qmenu, panel_label_from_yaml
+from panels.yaml_menu import get_panel_spec, get_workspace_data, build_qmenu, panel_label_from_yaml
 from panels.yaml_panel_view import YamlPanelView
 
 DOCK_DRAG_MIME = "application/x-jas-dock-drag"
@@ -257,11 +257,21 @@ class DockPanelWidget(QWidget):
         """Create a panel body widget, using YAML interpreter when available."""
         panel_spec = get_panel_spec(kind)
         if panel_spec and panel_spec.get("content") and self._state_store is not None:
+            # Build context with workspace data so repeat sources like
+            # data.swatch_libraries[lib.id] can resolve at render time
+            ctx: dict = {}
+            ws = get_workspace_data()
+            if ws:
+                data: dict = {}
+                if "swatch_libraries" in ws:
+                    data["swatch_libraries"] = ws["swatch_libraries"]
+                if data:
+                    ctx["data"] = data
             return YamlPanelView(
                 panel_spec=panel_spec,
                 store=self._state_store,
                 dispatch_fn=self._dispatch_yaml_action,
-                ctx={},
+                ctx=ctx,
             )
         # Fallback: simple label placeholder
         body = QLabel(panel_label(kind))
@@ -276,7 +286,7 @@ class DockPanelWidget(QWidget):
         from workspace_interpreter.effects import run_effects
 
         # Look up the action in the workspace
-        ws = getattr(self, '_workspace_data', None)
+        ws = get_workspace_data()
         if ws and action_name in ws.get("actions", {}):
             action_def = ws["actions"][action_name]
             ctx = {"param": params} if params else {}

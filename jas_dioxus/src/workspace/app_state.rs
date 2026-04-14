@@ -90,6 +90,10 @@ pub(crate) struct AppState {
     pub(crate) fill_on_top: bool,
     /// Color panel mode (panel-local, not persisted).
     pub(crate) color_panel_mode: super::color_panel_view::ColorMode,
+    /// App-level default fill (used when no document is open).
+    pub(crate) app_default_fill: Option<Fill>,
+    /// App-level default stroke (used when no document is open).
+    pub(crate) app_default_stroke: Option<Stroke>,
 }
 
 impl AppState {
@@ -104,6 +108,8 @@ impl AppState {
             workspace_layout,
             fill_on_top: true,
             color_panel_mode: super::color_panel_view::ColorMode::Hsb,
+            app_default_fill: Some(Fill::new(Color::WHITE)),
+            app_default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
         }
     }
 
@@ -380,6 +386,14 @@ impl AppState {
 
     /// Set the active color (fill or stroke, per fill_on_top) and push to recent colors.
     pub(crate) fn set_active_color(&mut self, color: Color) {
+        // Always update app-level defaults
+        if self.fill_on_top {
+            self.app_default_fill = Some(Fill::new(color));
+        } else {
+            let width = self.app_default_stroke.map(|s| s.width).unwrap_or(1.0);
+            self.app_default_stroke = Some(Stroke::new(color, width));
+        }
+        // Update per-tab state if a document is open
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             if self.fill_on_top {
                 tab.model.default_fill = Some(Fill::new(color));
@@ -419,14 +433,21 @@ impl AppState {
     }
 
     /// Get the active color (fill or stroke, per fill_on_top).
+    /// Falls back to app-level defaults when no document is open.
     pub(crate) fn active_color(&self) -> Option<Color> {
-        self.tab().and_then(|tab| {
+        if let Some(tab) = self.tab() {
             if self.fill_on_top {
                 tab.model.default_fill.map(|f| f.color)
             } else {
                 tab.model.default_stroke.map(|s| s.color)
             }
-        })
+        } else {
+            if self.fill_on_top {
+                self.app_default_fill.map(|f| f.color)
+            } else {
+                self.app_default_stroke.map(|s| s.color)
+            }
+        }
     }
 
     /// Get recent colors for the active tab.

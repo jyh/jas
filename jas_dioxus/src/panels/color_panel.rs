@@ -111,6 +111,8 @@ mod tests {
             workspace_layout: WorkspaceLayout::default_layout(),
             fill_on_top: true,
             color_panel_mode: ColorMode::Hsb,
+            app_default_fill: Some(crate::geometry::element::Fill::new(crate::geometry::element::Color::WHITE)),
+            app_default_stroke: Some(crate::geometry::element::Stroke::new(crate::geometry::element::Color::BLACK, 1.0)),
         }
     }
 

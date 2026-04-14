@@ -81,19 +81,22 @@ fn build_live_state_map(st: &AppState) -> serde_json::Map<String, serde_json::Va
     // Override with live values from AppState
     m.insert("fill_on_top".into(), J::Bool(st.fill_on_top));
 
-    // Override fill/stroke colors only when they have actual values.
-    // When None, keep workspace defaults so sliders aren't disabled at startup.
-    if let Some(tab) = st.tab() {
-        if let Some(fill) = tab.model.default_fill {
-            let (r, g, b, _) = fill.color.to_rgba();
-            m.insert("fill_color".into(), J::String(format!("#{:02x}{:02x}{:02x}",
-                (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)));
-        }
-        if let Some(stroke) = tab.model.default_stroke {
-            let (r, g, b, _) = stroke.color.to_rgba();
-            m.insert("stroke_color".into(), J::String(format!("#{:02x}{:02x}{:02x}",
-                (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)));
-        }
+    // Override fill/stroke colors from tab state or app-level defaults.
+    let fill_color = st.tab()
+        .and_then(|t| t.model.default_fill)
+        .or(st.app_default_fill);
+    let stroke_color = st.tab()
+        .and_then(|t| t.model.default_stroke)
+        .or(st.app_default_stroke);
+    if let Some(fill) = fill_color {
+        let (r, g, b, _) = fill.color.to_rgba();
+        m.insert("fill_color".into(), J::String(format!("#{:02x}{:02x}{:02x}",
+            (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)));
+    }
+    if let Some(stroke) = stroke_color {
+        let (r, g, b, _) = stroke.color.to_rgba();
+        m.insert("stroke_color".into(), J::String(format!("#{:02x}{:02x}{:02x}",
+            (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)));
     }
 
     m
