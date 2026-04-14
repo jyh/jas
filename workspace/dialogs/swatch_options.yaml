@@ -191,24 +191,8 @@ swatch_options:
                 bind:
                   visible: "dialog.color_mode == grayscale"
                 children:
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "K", style: { width: 14, font_size: 10 } }
-                      - id: so_k
-                        type: slider
-                        min: 0
-                        max: 100
-                        step: 1
-                        style: { flex: 1 }
-                        bind: { value: "dialog.k" }
-                      - id: so_k_val
-                        type: number_input
-                        min: 0
-                        max: 100
-                        style: { width: 56 }
-                        bind: { value: "dialog.k" }
+                  - template: slider_row
+                    params: { label: "K", id_prefix: so_k, max: 100, bind: "dialog.k" }
 
               # HSB: H, S, B sliders
               - id: so_sliders_hsb
@@ -218,60 +202,12 @@ swatch_options:
                 bind:
                   visible: "dialog.color_mode == hsb"
                 children:
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "H", style: { width: 14, font_size: 10 } }
-                      - id: so_h
-                        type: slider
-                        min: 0
-                        max: 360
-                        step: 1
-                        style: { flex: 1 }
-                        bind: { value: "dialog.h" }
-                      - id: so_h_val
-                        type: number_input
-                        min: 0
-                        max: 360
-                        style: { width: 56 }
-                        bind: { value: "dialog.h" }
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "S", style: { width: 14, font_size: 10 } }
-                      - id: so_s
-                        type: slider
-                        min: 0
-                        max: 100
-                        step: 1
-                        style: { flex: 1 }
-                        bind: { value: "dialog.s" }
-                      - id: so_s_val
-                        type: number_input
-                        min: 0
-                        max: 100
-                        style: { width: 56 }
-                        bind: { value: "dialog.s" }
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "B", style: { width: 14, font_size: 10 } }
-                      - id: so_b
-                        type: slider
-                        min: 0
-                        max: 100
-                        step: 1
-                        style: { flex: 1 }
-                        bind: { value: "dialog.b" }
-                      - id: so_b_val
-                        type: number_input
-                        min: 0
-                        max: 100
-                        style: { width: 56 }
-                        bind: { value: "dialog.b" }
+                  - template: slider_row
+                    params: { label: "H", id_prefix: so_h, max: 360, bind: "dialog.h" }
+                  - template: slider_row
+                    params: { label: "S", id_prefix: so_s, max: 100, bind: "dialog.s" }
+                  - template: slider_row
+                    params: { label: "B", id_prefix: so_b, max: 100, bind: "dialog.b" }
 
               # RGB: R, G, B sliders
               - id: so_sliders_rgb
@@ -281,60 +217,12 @@ swatch_options:
                 bind:
                   visible: "dialog.color_mode == rgb"
                 children:
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "R", style: { width: 14, font_size: 10 } }
-                      - id: so_r
-                        type: slider
-                        min: 0
-                        max: 255
-                        step: 1
-                        style: { flex: 1 }
-                        bind: { value: "dialog.r" }
-                      - id: so_r_val
-                        type: number_input
-                        min: 0
-                        max: 255
-                        style: { width: 56 }
-                        bind: { value: "dialog.r" }
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "G", style: { width: 14, font_size: 10 } }
-                      - id: so_g
-                        type: slider
-                        min: 0
-                        max: 255
-                        step: 1
-                        style: { flex: 1 }
-                        bind: { value: "dialog.g" }
-                      - id: so_g_val
-                        type: number_input
-                        min: 0
-                        max: 255
-                        style: { width: 56 }
-                        bind: { value: "dialog.g" }
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "B", style: { width: 14, font_size: 10 } }
-                      - id: so_bl
-                        type: slider
-                        min: 0
-                        max: 255
-                        step: 1
-                        style: { flex: 1 }
-                        bind: { value: "dialog.bl" }
-                      - id: so_bl_val
-                        type: number_input
-                        min: 0
-                        max: 255
-                        style: { width: 56 }
-                        bind: { value: "dialog.bl" }
+                  - template: slider_row
+                    params: { label: "R", id_prefix: so_r, max: 255, bind: "dialog.r" }
+                  - template: slider_row
+                    params: { label: "G", id_prefix: so_g, max: 255, bind: "dialog.g" }
+                  - template: slider_row
+                    params: { label: "B", id_prefix: so_bl, max: 255, bind: "dialog.bl" }
 
               # CMYK: C, M, Y, K sliders
               - id: so_sliders_cmyk
@@ -344,78 +232,14 @@ swatch_options:
                 bind:
                   visible: "dialog.color_mode == cmyk"
                 children:
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "C", style: { width: 14, font_size: 10 } }
-                      - id: so_c
-                        type: slider
-                        min: 0
-                        max: 100
-                        step: 1
-                        style: { flex: 1 }
-                        bind: { value: "dialog.c" }
-                      - id: so_c_val
-                        type: number_input
-                        min: 0
-                        max: 100
-                        style: { width: 56 }
-                        bind: { value: "dialog.c" }
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "M", style: { width: 14, font_size: 10 } }
-                      - id: so_m
-                        type: slider
-                        min: 0
-                        max: 100
-                        step: 1
-                        style: { flex: 1 }
-                        bind: { value: "dialog.m" }
-                      - id: so_m_val
-                        type: number_input
-                        min: 0
-                        max: 100
-                        style: { width: 56 }
-                        bind: { value: "dialog.m" }
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "Y", style: { width: 14, font_size: 10 } }
-                      - id: so_y
-                        type: slider
-                        min: 0
-                        max: 100
-                        step: 1
-                        style: { flex: 1 }
-                        bind: { value: "dialog.y" }
-                      - id: so_y_val
-                        type: number_input
-                        min: 0
-                        max: 100
-                        style: { width: 56 }
-                        bind: { value: "dialog.y" }
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "K", style: { width: 14, font_size: 10 } }
-                      - id: so_k_cmyk
-                        type: slider
-                        min: 0
-                        max: 100
-                        step: 1
-                        style: { flex: 1 }
-                        bind: { value: "dialog.k" }
-                      - id: so_k_cmyk_val
-                        type: number_input
-                        min: 0
-                        max: 100
-                        style: { width: 56 }
-                        bind: { value: "dialog.k" }
+                  - template: slider_row
+                    params: { label: "C", id_prefix: so_c, max: 100, bind: "dialog.c" }
+                  - template: slider_row
+                    params: { label: "M", id_prefix: so_m, max: 100, bind: "dialog.m" }
+                  - template: slider_row
+                    params: { label: "Y", id_prefix: so_y, max: 100, bind: "dialog.y" }
+                  - template: slider_row
+                    params: { label: "K", id_prefix: so_k_cmyk, max: 100, bind: "dialog.k" }
 
               # Web Safe RGB: R, G, B sliders (step=51)
               - id: so_sliders_web_safe
@@ -425,60 +249,12 @@ swatch_options:
                 bind:
                   visible: "dialog.color_mode == web_safe_rgb"
                 children:
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "R", style: { width: 14, font_size: 10 } }
-                      - id: so_r_ws
-                        type: slider
-                        min: 0
-                        max: 255
-                        step: 51
-                        style: { flex: 1 }
-                        bind: { value: "dialog.r" }
-                      - id: so_r_ws_val
-                        type: number_input
-                        min: 0
-                        max: 255
-                        style: { width: 56 }
-                        bind: { value: "dialog.r" }
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "G", style: { width: 14, font_size: 10 } }
-                      - id: so_g_ws
-                        type: slider
-                        min: 0
-                        max: 255
-                        step: 51
-                        style: { flex: 1 }
-                        bind: { value: "dialog.g" }
-                      - id: so_g_ws_val
-                        type: number_input
-                        min: 0
-                        max: 255
-                        style: { width: 56 }
-                        bind: { value: "dialog.g" }
-                  - type: container
-                    layout: row
-                    style: { gap: 4, alignment: center }
-                    children:
-                      - { type: text, content: "B", style: { width: 14, font_size: 10 } }
-                      - id: so_bl_ws
-                        type: slider
-                        min: 0
-                        max: 255
-                        step: 51
-                        style: { flex: 1 }
-                        bind: { value: "dialog.bl" }
-                      - id: so_bl_ws_val
-                        type: number_input
-                        min: 0
-                        max: 255
-                        style: { width: 56 }
-                        bind: { value: "dialog.bl" }
+                  - template: slider_row
+                    params: { label: "R", id_prefix: so_r_ws, max: 255, step: 51, bind: "dialog.r" }
+                  - template: slider_row
+                    params: { label: "G", id_prefix: so_g_ws, max: 255, step: 51, bind: "dialog.g" }
+                  - template: slider_row
+                    params: { label: "B", id_prefix: so_bl_ws, max: 255, step: 51, bind: "dialog.bl" }
 
       # Hex field
       - type: row
