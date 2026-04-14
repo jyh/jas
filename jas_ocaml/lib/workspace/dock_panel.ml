@@ -179,20 +179,9 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
           (* Panel body *)
           if not group.collapsed then begin
             match active_panel group with
-            | Some Color ->
-              let refresh_fn = Color_panel_view.create
-                ~packing:(fun w -> group_box#pack ~expand:false w)
-                ~layout ~get_model ~get_fill_on_top
-                ~rebuild
-                ~theme_text ~theme_text_dim ~theme_bg_dark ~theme_border
-                () in
-              color_panel_refresh := refresh_fn
             | Some kind ->
-              let body = GMisc.label ~text:(Panel_menu.panel_label kind) ~packing:(group_box#pack ~expand:false) () in
-              body#misc#set_size_request ~height:60 ();
-              body#set_xalign 0.0;
-              body#set_yalign 0.0;
-              apply_dark_css body (Printf.sprintf "* { color: %s; font-size: 12px; padding: 12px; }" !theme_text_body)
+              let packing = fun w -> group_box#pack ~expand:false w in
+              Yaml_panel_view.create_panel_body ~packing ~kind
             | None -> ()
           end;
 
