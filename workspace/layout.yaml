@@ -715,9 +715,12 @@ layout:
           merges its groups back into this anchored dock.
         collapsed_width: 36
         groups:
-          - panels: [layers]
+          - panels: [color, swatches]
             active: 0
             collapsed: false
-          - panels: [color, swatches, stroke, properties]
+          - panels: [stroke, properties]
+            active: 0
+            collapsed: false
+          - panels: [layers]
             active: 0
             collapsed: false

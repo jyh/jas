@@ -60,8 +60,8 @@ def test_dispatch_close_removes_panel():
     layout = WorkspaceLayout.default_layout()
     dock = layout.anchored_dock(DockEdge.RIGHT)
     assert dock is not None
-    # Color is at group 1, panel index 0
-    addr = PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=1), panel_idx=0)
+    # Color is at group 0, panel index 0
+    addr = PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=0), panel_idx=0)
     assert layout.is_panel_visible(PanelKind.COLOR)
     panel_dispatch(PanelKind.COLOR, "close_panel", addr, layout)
     assert not layout.is_panel_visible(PanelKind.COLOR)

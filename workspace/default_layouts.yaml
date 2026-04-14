@@ -11,9 +11,11 @@ default_layouts:
     dock:
       dock_main:
         groups:
-          - panels: [layers]
+          - panels: [color, swatches]
             active: 0
-          - panels: [color, stroke, properties]
+          - panels: [stroke, properties]
+            active: 0
+          - panels: [layers]
             active: 0
     floating: []
 
@@ -28,9 +30,11 @@ default_layouts:
     dock:
       dock_main:
         groups:
-          - panels: [layers]
+          - panels: [color, swatches]
             active: 0
-          - panels: [color, stroke, properties]
+          - panels: [stroke, properties]
+            active: 0
+          - panels: [layers]
             active: 0
     floating: []
 
@@ -45,8 +49,10 @@ default_layouts:
     dock:
       dock_main:
         groups:
-          - panels: [layers]
+          - panels: [color, swatches]
             active: 0
-          - panels: [color, stroke, properties]
+          - panels: [stroke, properties]
+            active: 0
+          - panels: [layers]
             active: 0
     floating: []

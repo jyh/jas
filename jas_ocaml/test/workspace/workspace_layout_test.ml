@@ -22,9 +22,10 @@ let layout_and_lookup = [
   Alcotest.test_case "default_layout_two_groups" `Quick (fun () ->
     let l = default_layout () in
     let d = Option.get (anchored_dock l Right) in
-    assert (Array.length d.groups = 2);
-    assert (d.groups.(0).panels = [|Layers|]);
-    assert (d.groups.(1).panels = [|Color; Stroke; Properties|]));
+    assert (Array.length d.groups = 3);
+    assert (d.groups.(0).panels = [|Color; Swatches|]);
+    assert (d.groups.(1).panels = [|Stroke; Properties|]);
+    assert (d.groups.(2).panels = [|Layers|]));
 
   Alcotest.test_case "default_not_collapsed" `Quick (fun () ->
     let l = default_layout () in
@@ -91,8 +92,8 @@ let toggle_and_active = [
   Alcotest.test_case "set_active_panel" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    set_active_panel l (pa id 1 2);
-    assert ((Option.get (find_dock l id)).groups.(1).active = 2));
+    set_active_panel l (pa id 1 1);
+    assert ((Option.get (find_dock l id)).groups.(1).active = 1));
 
   Alcotest.test_case "set_active_panel_out_of_bounds" `Quick (fun () ->
     let l = default_layout () in
@@ -113,33 +114,36 @@ let move_group_within = [
     let id = right_dock_id l in
     move_group_within_dock l id ~from:0 ~to_:1;
     let d = Option.get (find_dock l id) in
-    assert (d.groups.(0).panels = [|Color; Stroke; Properties|]);
-    assert (d.groups.(1).panels = [|Layers|]));
+    assert (d.groups.(0).panels = [|Stroke; Properties|]);
+    assert (d.groups.(1).panels = [|Color; Swatches|]);
+    assert (d.groups.(2).panels = [|Layers|]));
 
   Alcotest.test_case "move_group_backward" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
     move_group_within_dock l id ~from:1 ~to_:0;
     let d = Option.get (find_dock l id) in
-    assert (d.groups.(0).panels = [|Color; Stroke; Properties|]));
+    assert (d.groups.(0).panels = [|Stroke; Properties|]);
+    assert (d.groups.(1).panels = [|Color; Swatches|]);
+    assert (d.groups.(2).panels = [|Layers|]));
 
   Alcotest.test_case "move_group_same_position" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
     move_group_within_dock l id ~from:0 ~to_:0;
-    assert ((Option.get (find_dock l id)).groups.(0).panels = [|Layers|]));
+    assert ((Option.get (find_dock l id)).groups.(0).panels = [|Color; Swatches|]));
 
   Alcotest.test_case "move_group_clamped" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
     move_group_within_dock l id ~from:0 ~to_:99;
-    assert ((Option.get (find_dock l id)).groups.(1).panels = [|Layers|]));
+    assert ((Option.get (find_dock l id)).groups.(2).panels = [|Color; Swatches|]));
 
   Alcotest.test_case "move_group_out_of_bounds" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
     move_group_within_dock l id ~from:99 ~to_:0;
-    assert (Array.length (Option.get (find_dock l id)).groups = 2));
+    assert (Array.length (Option.get (find_dock l id)).groups = 3));
 
   Alcotest.test_case "move_group_preserves_state" `Quick (fun () ->
     let l = default_layout () in
@@ -162,7 +166,7 @@ let move_group_between = [
     let id = right_dock_id l in
     let fid = Option.get (detach_group l ~from:(ga id 0) ~x:50.0 ~y:50.0) in
     move_group_to_dock l ~from:(ga id 0) ~to_dock:fid ~to_idx:1;
-    assert (Array.length (Option.get (find_dock l id)).groups = 0);
+    assert (Array.length (Option.get (find_dock l id)).groups = 1);
     assert (Array.length (Option.get (find_dock l fid)).groups = 2));
 
   Alcotest.test_case "move_group_inserts_at_position" `Quick (fun () ->
@@ -171,7 +175,7 @@ let move_group_between = [
     let f1 = Option.get (detach_group l ~from:(ga id 0) ~x:10.0 ~y:10.0) in
     let f2 = Option.get (detach_group l ~from:(ga id 0) ~x:20.0 ~y:20.0) in
     move_group_to_dock l ~from:(ga f1 0) ~to_dock:f2 ~to_idx:0;
-    assert ((Option.get (find_dock l f2)).groups.(0).panels = [|Layers|]);
+    assert ((Option.get (find_dock l f2)).groups.(0).panels = [|Color; Swatches|]);
     assert (find_dock l f1 = None));
 
   Alcotest.test_case "move_group_same_dock_is_reorder" `Quick (fun () ->
@@ -179,20 +183,21 @@ let move_group_between = [
     let id = right_dock_id l in
     move_group_to_dock l ~from:(ga id 0) ~to_dock:id ~to_idx:1;
     let d = Option.get (find_dock l id) in
-    assert (d.groups.(0).panels = [|Color; Stroke; Properties|]);
-    assert (d.groups.(1).panels = [|Layers|]));
+    assert (d.groups.(0).panels = [|Stroke; Properties|]);
+    assert (d.groups.(1).panels = [|Color; Swatches|]);
+    assert (d.groups.(2).panels = [|Layers|]));
 
   Alcotest.test_case "move_group_invalid_source" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
     move_group_to_dock l ~from:(ga id 99) ~to_dock:id ~to_idx:0;
-    assert (Array.length (Option.get (find_dock l id)).groups = 2));
+    assert (Array.length (Option.get (find_dock l id)).groups = 3));
 
   Alcotest.test_case "move_group_invalid_target" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
     move_group_to_dock l ~from:(ga id 0) ~to_dock:99 ~to_idx:0;
-    assert (Array.length (Option.get (find_dock l id)).groups = 2));
+    assert (Array.length (Option.get (find_dock l id)).groups = 3));
 ]
 
 (* ================================================================== *)
@@ -204,8 +209,8 @@ let detach_group_tests = [
     let l = default_layout () in
     let id = right_dock_id l in
     let fid = Option.get (detach_group l ~from:(ga id 0) ~x:100.0 ~y:200.0) in
-    assert ((Option.get (find_dock l fid)).groups.(0).panels = [|Layers|]);
-    assert (Array.length (Option.get (find_dock l id)).groups = 1));
+    assert ((Option.get (find_dock l fid)).groups.(0).panels = [|Color; Swatches|]);
+    assert (Array.length (Option.get (find_dock l id)).groups = 2));
 
   Alcotest.test_case "detach_group_position" `Quick (fun () ->
     let l = default_layout () in
@@ -234,6 +239,7 @@ let detach_group_tests = [
     let id = right_dock_id l in
     ignore (detach_group l ~from:(ga id 0) ~x:10.0 ~y:10.0);
     ignore (detach_group l ~from:(ga id 0) ~x:20.0 ~y:20.0);
+    ignore (detach_group l ~from:(ga id 0) ~x:30.0 ~y:30.0);
     assert (find_dock l id <> None);
     assert (Array.length (Option.get (find_dock l id)).groups = 0));
 ]
@@ -246,45 +252,46 @@ let move_panel_tests = [
   Alcotest.test_case "move_panel_same_dock" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    move_panel_to_group l ~from:(pa id 1 1) ~to_:(ga id 0);
+    move_panel_to_group l ~from:(pa id 1 0) ~to_:(ga id 0);
     let d = Option.get (find_dock l id) in
-    assert (d.groups.(0).panels = [|Layers; Stroke|]);
-    assert (d.groups.(1).panels = [|Color; Properties|]));
+    assert (d.groups.(0).panels = [|Color; Swatches; Stroke|]);
+    assert (d.groups.(1).panels = [|Properties|]);
+    assert (d.groups.(2).panels = [|Layers|]));
 
   Alcotest.test_case "move_panel_becomes_active" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    move_panel_to_group l ~from:(pa id 1 1) ~to_:(ga id 0);
-    assert ((Option.get (find_dock l id)).groups.(0).active = 1));
+    move_panel_to_group l ~from:(pa id 1 0) ~to_:(ga id 0);
+    assert ((Option.get (find_dock l id)).groups.(0).active = 2));
 
   Alcotest.test_case "move_panel_cross_dock" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
     let fid = Option.get (detach_group l ~from:(ga id 0) ~x:50.0 ~y:50.0) in
     move_panel_to_group l ~from:(pa id 0 0) ~to_:(ga fid 0);
-    assert ((Option.get (find_dock l fid)).groups.(0).panels = [|Layers; Color|]);
-    assert ((Option.get (find_dock l id)).groups.(0).panels = [|Stroke; Properties|]));
+    assert ((Option.get (find_dock l fid)).groups.(0).panels = [|Color; Swatches; Stroke|]);
+    assert ((Option.get (find_dock l id)).groups.(0).panels = [|Properties|]));
 
   Alcotest.test_case "move_last_panel_removes_group" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    move_panel_to_group l ~from:(pa id 0 0) ~to_:(ga id 1);
+    move_panel_to_group l ~from:(pa id 2 0) ~to_:(ga id 0);
     let d = Option.get (find_dock l id) in
-    assert (Array.length d.groups = 1);
+    assert (Array.length d.groups = 2);
     assert (Array.mem Layers d.groups.(0).panels));
 
   Alcotest.test_case "move_last_panel_removes_floating" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    let fid = Option.get (detach_group l ~from:(ga id 0) ~x:50.0 ~y:50.0) in
+    let fid = Option.get (detach_group l ~from:(ga id 2) ~x:50.0 ~y:50.0) in
     move_panel_to_group l ~from:(pa fid 0 0) ~to_:(ga id 0);
     assert (find_dock l fid = None));
 
   Alcotest.test_case "move_panel_clamps_active" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    (Option.get (find_dock l id)).groups.(1).active <- 2;
-    move_panel_to_group l ~from:(pa id 1 2) ~to_:(ga id 0);
+    (Option.get (find_dock l id)).groups.(1).active <- 1;
+    move_panel_to_group l ~from:(pa id 1 1) ~to_:(ga id 0);
     let g = (Option.get (find_dock l id)).groups.(1) in
     assert (g.active < Array.length g.panels));
 
@@ -298,7 +305,7 @@ let move_panel_tests = [
     let l = default_layout () in
     let id = right_dock_id l in
     move_panel_to_group l ~from:(pa id 1 0) ~to_:(ga 99 0);
-    assert (Array.length (Option.get (find_dock l id)).groups.(1).panels = 3));
+    assert (Array.length (Option.get (find_dock l id)).groups.(1).panels = 2));
 ]
 
 (* ================================================================== *)
@@ -309,25 +316,25 @@ let insert_panel_tests = [
   Alcotest.test_case "insert_panel_creates_group" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    insert_panel_as_new_group l ~from:(pa id 1 1) ~to_dock:id ~at_idx:0;
+    insert_panel_as_new_group l ~from:(pa id 1 0) ~to_dock:id ~at_idx:0;
     let d = Option.get (find_dock l id) in
-    assert (Array.length d.groups = 3);
+    assert (Array.length d.groups = 4);
     assert (d.groups.(0).panels = [|Stroke|]));
 
   Alcotest.test_case "insert_panel_cleans_source" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    insert_panel_as_new_group l ~from:(pa id 0 0) ~to_dock:id ~at_idx:99;
+    insert_panel_as_new_group l ~from:(pa id 2 0) ~to_dock:id ~at_idx:99;
     let d = Option.get (find_dock l id) in
-    assert (Array.length d.groups = 2);
-    assert (d.groups.(1).panels = [|Layers|]));
+    assert (Array.length d.groups = 3);
+    assert (d.groups.(2).panels = [|Layers|]));
 
   Alcotest.test_case "insert_panel_invalid" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
     insert_panel_as_new_group l ~from:(pa id 1 99) ~to_dock:id ~at_idx:0;
     insert_panel_as_new_group l ~from:(pa 99 0 0) ~to_dock:id ~at_idx:0;
-    assert (Array.length (Option.get (find_dock l id)).groups = 2));
+    assert (Array.length (Option.get (find_dock l id)).groups = 3));
 ]
 
 (* ================================================================== *)
@@ -338,9 +345,9 @@ let detach_panel_tests = [
   Alcotest.test_case "detach_panel_creates_floating" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    let fid = Option.get (detach_panel l ~from:(pa id 1 1) ~x:300.0 ~y:150.0) in
+    let fid = Option.get (detach_panel l ~from:(pa id 1 0) ~x:300.0 ~y:150.0) in
     assert ((Option.get (find_dock l fid)).groups.(0).panels = [|Stroke|]);
-    assert ((Option.get (find_dock l id)).groups.(1).panels = [|Color; Properties|]));
+    assert ((Option.get (find_dock l id)).groups.(1).panels = [|Properties|]));
 
   Alcotest.test_case "detach_panel_position" `Quick (fun () ->
     let l = default_layout () in
@@ -353,13 +360,13 @@ let detach_panel_tests = [
   Alcotest.test_case "detach_panel_last_removes_group" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    ignore (detach_panel l ~from:(pa id 0 0) ~x:50.0 ~y:50.0);
-    assert (Array.length (Option.get (find_dock l id)).groups = 1));
+    ignore (detach_panel l ~from:(pa id 2 0) ~x:50.0 ~y:50.0);
+    assert (Array.length (Option.get (find_dock l id)).groups = 2));
 
   Alcotest.test_case "detach_panel_last_removes_floating" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    let f1 = Option.get (detach_group l ~from:(ga id 0) ~x:50.0 ~y:50.0) in
+    let f1 = Option.get (detach_group l ~from:(ga id 2) ~x:50.0 ~y:50.0) in
     ignore (detach_panel l ~from:(pa f1 0 0) ~x:100.0 ~y:100.0);
     assert (find_dock l f1 = None));
 ]
@@ -434,8 +441,8 @@ let cleanup_tests = [
   Alcotest.test_case "cleanup_clamps_active" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    (Option.get (find_dock l id)).groups.(1).active <- 2;
-    move_panel_to_group l ~from:(pa id 1 2) ~to_:(ga id 0);
+    (Option.get (find_dock l id)).groups.(1).active <- 1;
+    move_panel_to_group l ~from:(pa id 1 1) ~to_:(ga id 0);
     let g = (Option.get (find_dock l id)).groups.(1) in
     assert (g.active < Array.length g.panels));
 
@@ -445,6 +452,7 @@ let cleanup_tests = [
     let d = Option.get (find_dock l id) in
     d.groups.(0).panels <- [||];
     d.groups.(1).panels <- [||];
+    d.groups.(2).panels <- [||];
     cleanup l id;
     assert (Array.length (Option.get (find_dock l id)).groups = 0));
 ]
@@ -477,27 +485,27 @@ let close_show_panels = [
   Alcotest.test_case "close_panel_hides_it" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    close_panel l (pa id 1 1);
+    close_panel l (pa id 1 0);
     assert (List.mem Stroke l.hidden_panels);
     assert (not (is_panel_visible l Stroke)));
 
   Alcotest.test_case "close_panel_removes_from_group" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    close_panel l (pa id 1 1);
-    assert ((Option.get (find_dock l id)).groups.(1).panels = [|Color; Properties|]));
+    close_panel l (pa id 1 0);
+    assert ((Option.get (find_dock l id)).groups.(1).panels = [|Properties|]));
 
   Alcotest.test_case "close_last_panel_removes_group" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    close_panel l (pa id 0 0);
-    assert (Array.length (Option.get (find_dock l id)).groups = 1);
+    close_panel l (pa id 2 0);
+    assert (Array.length (Option.get (find_dock l id)).groups = 2);
     assert (List.mem Layers l.hidden_panels));
 
   Alcotest.test_case "show_panel_adds_to_default_group" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    close_panel l (pa id 1 1);
+    close_panel l (pa id 1 0);
     show_panel l Stroke;
     assert (not (List.mem Stroke l.hidden_panels));
     assert (Array.mem Stroke (Option.get (find_dock l id)).groups.(0).panels));
@@ -505,7 +513,7 @@ let close_show_panels = [
   Alcotest.test_case "show_panel_removes_from_hidden" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    close_panel l (pa id 1 0);
+    close_panel l (pa id 0 0);
     assert (List.length l.hidden_panels = 1);
     show_panel l Color;
     assert (l.hidden_panels = []));
@@ -517,13 +525,13 @@ let close_show_panels = [
   Alcotest.test_case "panel_menu_items_all_visible" `Quick (fun () ->
     let l = default_layout () in
     let items = panel_menu_items l in
-    assert (List.length items = 4);
+    assert (List.length items = 5);
     List.iter (fun (_, v) -> assert v) items);
 
   Alcotest.test_case "panel_menu_items_with_hidden" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    close_panel l (pa id 1 1);
+    close_panel l (pa id 1 0);
     let items = panel_menu_items l in
     assert (not (snd (List.find (fun (k, _) -> k = Stroke) items)));
     assert (snd (List.find (fun (k, _) -> k = Layers) items)));
@@ -592,7 +600,7 @@ let snap_and_redock = [
     let fid = Option.get (detach_group l ~from:(ga id 0) ~x:50.0 ~y:50.0) in
     snap_to_edge l fid Bottom;
     assert (anchored_dock l Bottom <> None);
-    assert ((Option.get (anchored_dock l Bottom)).groups.(0).panels = [|Layers|]));
+    assert ((Option.get (anchored_dock l Bottom)).groups.(0).panels = [|Color; Swatches|]));
 
   Alcotest.test_case "redock_merges_into_right" `Quick (fun () ->
     let l = default_layout () in
@@ -672,7 +680,7 @@ let persistence = [
     reset_to_default l;
     assert (l.floating = []);
     assert (l.hidden_panels = []);
-    assert (Array.length (Option.get (anchored_dock l Right)).groups = 2));
+    assert (Array.length (Option.get (anchored_dock l Right)).groups = 3));
 ]
 
 (* ================================================================== *)
@@ -695,10 +703,11 @@ let focus = [
     set_focused_panel l None;
     focus_next_panel l;
     assert (l.focused_panel = Some (pa id 0 0));
-    focus_next_panel l;
-    focus_next_panel l;
-    focus_next_panel l;
-    assert (l.focused_panel = Some (pa id 1 2));
+    focus_next_panel l; (* Swatches *)
+    focus_next_panel l; (* Stroke *)
+    focus_next_panel l; (* Properties *)
+    focus_next_panel l; (* Layers *)
+    assert (l.focused_panel = Some (pa id 2 0));
     focus_next_panel l;
     assert (l.focused_panel = Some (pa id 0 0)));
 
@@ -707,13 +716,14 @@ let focus = [
     let id = right_dock_id l in
     set_focused_panel l None;
     focus_prev_panel l;
-    assert (l.focused_panel = Some (pa id 1 2));
-    focus_prev_panel l;
-    focus_prev_panel l;
-    focus_prev_panel l;
+    assert (l.focused_panel = Some (pa id 2 0));
+    focus_prev_panel l; (* Properties *)
+    focus_prev_panel l; (* Stroke *)
+    focus_prev_panel l; (* Swatches *)
+    focus_prev_panel l; (* Color *)
     assert (l.focused_panel = Some (pa id 0 0));
     focus_prev_panel l;
-    assert (l.focused_panel = Some (pa id 1 2)));
+    assert (l.focused_panel = Some (pa id 2 0)));
 ]
 
 (* ================================================================== *)
@@ -757,30 +767,30 @@ let reorder_panels = [
   Alcotest.test_case "reorder_panel_forward" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    reorder_panel l ~group:(ga id 1) ~from:0 ~to_:2;
-    let g = (Option.get (find_dock l id)).groups.(1) in
-    assert (g.panels = [|Stroke; Properties; Color|]);
-    assert (g.active = 2));
+    reorder_panel l ~group:(ga id 0) ~from:0 ~to_:1;
+    let g = (Option.get (find_dock l id)).groups.(0) in
+    assert (g.panels = [|Swatches; Color|]);
+    assert (g.active = 1));
 
   Alcotest.test_case "reorder_panel_backward" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
-    reorder_panel l ~group:(ga id 1) ~from:2 ~to_:0;
+    reorder_panel l ~group:(ga id 1) ~from:1 ~to_:0;
     let g = (Option.get (find_dock l id)).groups.(1) in
-    assert (g.panels = [|Properties; Color; Stroke|]);
+    assert (g.panels = [|Properties; Stroke|]);
     assert (g.active = 0));
 
   Alcotest.test_case "reorder_panel_same_position" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
     reorder_panel l ~group:(ga id 1) ~from:1 ~to_:1;
-    assert ((Option.get (find_dock l id)).groups.(1).panels = [|Color; Stroke; Properties|]));
+    assert ((Option.get (find_dock l id)).groups.(1).panels = [|Stroke; Properties|]));
 
   Alcotest.test_case "reorder_panel_clamped" `Quick (fun () ->
     let l = default_layout () in
     let id = right_dock_id l in
     reorder_panel l ~group:(ga id 1) ~from:0 ~to_:99;
-    assert ((Option.get (find_dock l id)).groups.(1).panels.(2) = Color));
+    assert ((Option.get (find_dock l id)).groups.(1).panels.(1) = Stroke));
 
   Alcotest.test_case "reorder_panel_out_of_bounds" `Quick (fun () ->
     let l = default_layout () in
