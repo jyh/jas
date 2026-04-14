@@ -13,43 +13,59 @@ color_picker:
   params:
     target: { type: enum, values: [fill, stroke] }
   state:
+    # Canonical color — the single source of truth
+    color:
+      type: color
+      default: "#ffffff"
+      description: "The working color being edited"
+    # Plain stored variables (no get/set)
     radio_channel:
       type: enum
       values: [h, s, b, r, g, bl]
       default: h
       description: "Which color channel the gradient/colorbar visualize"
-    h:   { type: number, default: 0,   description: "Hue (0-360)" }
-    s:   { type: number, default: 0,   description: "Saturation (0-100)" }
-    b:   { type: number, default: 100, description: "Brightness (0-100)" }
-    r:   { type: number, default: 255, description: "Red (0-255)" }
-    g:   { type: number, default: 255, description: "Green (0-255)" }
-    bl:  { type: number, default: 255, description: "Blue (0-255)" }
-    c:   { type: number, default: 0,   description: "Cyan (0-100)" }
-    m:   { type: number, default: 0,   description: "Magenta (0-100)" }
-    y:   { type: number, default: 0,   description: "Yellow (0-100)" }
-    k:   { type: number, default: 0,   description: "Key/black (0-100)" }
-    hex: { type: string, default: "ffffff", description: "Hex color string" }
     web_only:
       type: bool
       default: false
       description: "Snap to web-safe palette"
-    color:
-      type: color
-      default: "#ffffff"
-      description: "The working color being edited"
+    # HSB — derived from color, setters rebuild color
+    h:
+      type: number
+      get: "hsb_h(color)"
+      set: "fun v -> color <- hsb(v, hsb_s(color), hsb_b(color))"
+    s:
+      type: number
+      get: "hsb_s(color)"
+      set: "fun v -> color <- hsb(hsb_h(color), v, hsb_b(color))"
+    b:
+      type: number
+      get: "hsb_b(color)"
+      set: "fun v -> color <- hsb(hsb_h(color), hsb_s(color), v)"
+    # RGB — derived from color, setters rebuild color
+    r:
+      type: number
+      get: "rgb_r(color)"
+      set: "fun v -> color <- rgb(v, rgb_g(color), rgb_b(color))"
+    g:
+      type: number
+      get: "rgb_g(color)"
+      set: "fun v -> color <- rgb(rgb_r(color), v, rgb_b(color))"
+    bl:
+      type: number
+      get: "rgb_b(color)"
+      set: "fun v -> let r = rgb_r(color) in let g = rgb_g(color) in color <- rgb(r, g, v)"
+    # CMYK — read-only derived from color
+    c:  { type: number, get: "cmyk_c(color)" }
+    m:  { type: number, get: "cmyk_m(color)" }
+    y:  { type: number, get: "cmyk_y(color)" }
+    k:  { type: number, get: "cmyk_k(color)" }
+    # Hex — derived from color, setter parses hex to color
+    hex:
+      type: string
+      get: "hex(color)"
+      set: "fun v -> color <- \"#\" + v"
   init:
     color: 'param.target == "fill" ? state.fill_color : state.stroke_color'
-    h:   "hsb_h(dialog.color)"
-    s:   "hsb_s(dialog.color)"
-    b:   "hsb_b(dialog.color)"
-    r:   "rgb_r(dialog.color)"
-    g:   "rgb_g(dialog.color)"
-    bl:  "rgb_b(dialog.color)"
-    c:   "cmyk_c(dialog.color)"
-    m:   "cmyk_m(dialog.color)"
-    y:   "cmyk_y(dialog.color)"
-    k:   "cmyk_k(dialog.color)"
-    hex: "hex(dialog.color)"
   content:
     type: container
     layout: column
