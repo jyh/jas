@@ -1,0 +1,9 @@
+(test
+ (name state_store_test)
+ (modules state_store_test)
+ (libraries jas alcotest))
+
+(test
+ (name effects_test)
+ (modules effects_test)
+ (libraries jas alcotest))
