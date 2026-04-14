@@ -155,13 +155,26 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         if not dialogs or dlg_id not in dialogs:
             return
         dlg_def = dialogs[dlg_id]
-        # Extract state defaults
+        # Extract state defaults and property definitions (get/set)
         defaults = {}
+        props = {}
         state_defs = dlg_def.get("state", {})
         if isinstance(state_defs, dict):
             for key, defn in state_defs.items():
                 if isinstance(defn, dict):
-                    defaults[key] = defn.get("default")
+                    # Extract get/set property definitions
+                    has_get = "get" in defn
+                    has_set = "set" in defn
+                    if has_get or has_set:
+                        prop = {}
+                        if has_get:
+                            prop["get"] = defn["get"]
+                        if has_set:
+                            prop["set"] = defn["set"]
+                        props[key] = prop
+                    # Only store default for plain variables (no get)
+                    if not has_get:
+                        defaults[key] = defn.get("default")
                 else:
                     defaults[key] = defn
         # Resolve params
@@ -169,8 +182,10 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         raw_params = od.get("params", {}) if isinstance(od, dict) else {}
         for k, v in raw_params.items():
             resolved_params[k] = _eval(v, store, ctx)
-        # Init dialog state with defaults and params
-        store.init_dialog(dlg_id, defaults, params=resolved_params or None)
+        # Init dialog state with defaults, params, and property definitions
+        store.init_dialog(dlg_id, defaults,
+                         params=resolved_params or None,
+                         props=props or None)
         # Evaluate init expressions (order matters — later inits may reference earlier ones)
         init_map = dlg_def.get("init", {})
         if isinstance(init_map, dict):

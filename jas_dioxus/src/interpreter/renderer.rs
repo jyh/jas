@@ -950,17 +950,9 @@ fn render_color_gradient(el: &serde_json::Value, ctx: &serde_json::Value, rctx: 
         let bri = ((1.0 - y / height) * 100.0).clamp(0.0, 100.0);
 
         if let Some(mut ds) = dialog_signal() {
+            // Just set s and b — the YAML get/set properties handle recomputation
             ds.state.insert("s".to_string(), serde_json::json!(sat.round() as i64));
             ds.state.insert("b".to_string(), serde_json::json!(bri.round() as i64));
-            // Recompute color from HSB
-            let h = ds.state.get("h").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let (cr, cg, cb) = crate::interpreter::color_util::hsb_to_rgb(h, sat, bri);
-            let hex = format!("#{:02x}{:02x}{:02x}", cr, cg, cb);
-            ds.state.insert("color".to_string(), serde_json::json!(hex));
-            ds.state.insert("hex".to_string(), serde_json::json!(&hex[1..]));
-            ds.state.insert("r".to_string(), serde_json::json!(cr as i64));
-            ds.state.insert("g".to_string(), serde_json::json!(cg as i64));
-            ds.state.insert("bl".to_string(), serde_json::json!(cb as i64));
             dialog_signal.set(Some(ds));
             revision += 1;
         }
@@ -1020,17 +1012,8 @@ fn render_color_hue_bar(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &
         let new_hue = (y / height * 360.0).clamp(0.0, 359.0);
 
         if let Some(mut ds) = dialog_signal() {
+            // Just set h — the YAML get/set properties handle recomputation
             ds.state.insert("h".to_string(), serde_json::json!(new_hue.round() as i64));
-            // Recompute color from HSB
-            let s = ds.state.get("s").and_then(|v| v.as_f64()).unwrap_or(100.0);
-            let b = ds.state.get("b").and_then(|v| v.as_f64()).unwrap_or(100.0);
-            let (cr, cg, cb) = crate::interpreter::color_util::hsb_to_rgb(new_hue, s, b);
-            let hex = format!("#{:02x}{:02x}{:02x}", cr, cg, cb);
-            ds.state.insert("color".to_string(), serde_json::json!(hex));
-            ds.state.insert("hex".to_string(), serde_json::json!(&hex[1..]));
-            ds.state.insert("r".to_string(), serde_json::json!(cr as i64));
-            ds.state.insert("g".to_string(), serde_json::json!(cg as i64));
-            ds.state.insert("bl".to_string(), serde_json::json!(cb as i64));
             dialog_signal.set(Some(ds));
             revision += 1;
         }
