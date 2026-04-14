@@ -188,9 +188,11 @@ content:
   children:
 
     # -- Row 1: Fill/stroke widget --
-    - template: fill_stroke_widget
-      params: { id_prefix: "sp_", swatch_size: 24, offset: 8 }
-      style: { align_self: start, flex_shrink: 0 }
+    - type: row
+      children:
+        - template: fill_stroke_widget
+          params: { id_prefix: "sp_", swatch_size: 24, offset: 8 }
+          style: { flex_shrink: 0 }
 
     # -- Row 2: Recent Colors label --
     - type: text
