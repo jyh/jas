@@ -13,12 +13,14 @@ pub enum TokenKind {
     And,
     Or,
     In,
-    Eq,     // ==
-    Neq,    // !=
-    Lt,     // <
-    Gt,     // >
-    Lte,    // <=
-    Gte,    // >=
+    Fun,
+    Let,
+    Eq,        // ==
+    Neq,       // !=
+    Lt,        // <
+    Gt,        // >
+    Lte,       // <=
+    Gte,       // >=
     Question,
     Colon,
     Dot,
@@ -27,6 +29,14 @@ pub enum TokenKind {
     RParen,
     LBracket,
     RBracket,
+    Plus,      // +
+    Minus,     // -
+    Star,      // *
+    Slash,     // /
+    Arrow,     // ->
+    LArrow,    // <-
+    Semicolon, // ;
+    Equals,    // =
     Eof,
     Error(String),
 }
@@ -89,10 +99,9 @@ pub fn tokenize(source: &str) -> Vec<Token> {
             continue;
         }
 
-        // Number (including negative)
-        if c.is_ascii_digit() || (c == '-' && i + 1 < n && chars[i + 1].is_ascii_digit()) {
+        // Number (digits only — unary minus handled as operator)
+        if c.is_ascii_digit() {
             let start = i;
-            if c == '-' { i += 1; }
             while i < n && chars[i].is_ascii_digit() { i += 1; }
             if i < n && chars[i] == '.' {
                 i += 1;
@@ -119,20 +128,26 @@ pub fn tokenize(source: &str) -> Vec<Token> {
                 "and" => TokenKind::And,
                 "or" => TokenKind::Or,
                 "in" => TokenKind::In,
+                "fun" => TokenKind::Fun,
+                "let" => TokenKind::Let,
                 _ => TokenKind::Ident(word),
             };
             tokens.push(Token { kind });
             continue;
         }
 
-        // Two-character operators
+        // Two-character operators (order matters for greedy matching)
         if i + 1 < n {
-            let two: String = chars[i..i+2].iter().collect();
-            match two.as_str() {
-                "==" => { tokens.push(Token { kind: TokenKind::Eq }); i += 2; continue; }
-                "!=" => { tokens.push(Token { kind: TokenKind::Neq }); i += 2; continue; }
-                "<=" => { tokens.push(Token { kind: TokenKind::Lte }); i += 2; continue; }
-                ">=" => { tokens.push(Token { kind: TokenKind::Gte }); i += 2; continue; }
+            let next = chars[i + 1];
+            match (c, next) {
+                ('=', '=') => { tokens.push(Token { kind: TokenKind::Eq }); i += 2; continue; }
+                ('!', '=') => { tokens.push(Token { kind: TokenKind::Neq }); i += 2; continue; }
+                // <- must come before < alone (greedy)
+                ('<', '-') => { tokens.push(Token { kind: TokenKind::LArrow }); i += 2; continue; }
+                ('<', '=') => { tokens.push(Token { kind: TokenKind::Lte }); i += 2; continue; }
+                ('>', '=') => { tokens.push(Token { kind: TokenKind::Gte }); i += 2; continue; }
+                // -> must come before - alone (greedy)
+                ('-', '>') => { tokens.push(Token { kind: TokenKind::Arrow }); i += 2; continue; }
                 _ => {}
             }
         }
@@ -141,14 +156,20 @@ pub fn tokenize(source: &str) -> Vec<Token> {
         match c {
             '<' => tokens.push(Token { kind: TokenKind::Lt }),
             '>' => tokens.push(Token { kind: TokenKind::Gt }),
+            '=' => tokens.push(Token { kind: TokenKind::Equals }),
             '?' => tokens.push(Token { kind: TokenKind::Question }),
             ':' => tokens.push(Token { kind: TokenKind::Colon }),
             '.' => tokens.push(Token { kind: TokenKind::Dot }),
             ',' => tokens.push(Token { kind: TokenKind::Comma }),
+            ';' => tokens.push(Token { kind: TokenKind::Semicolon }),
             '(' => tokens.push(Token { kind: TokenKind::LParen }),
             ')' => tokens.push(Token { kind: TokenKind::RParen }),
             '[' => tokens.push(Token { kind: TokenKind::LBracket }),
             ']' => tokens.push(Token { kind: TokenKind::RBracket }),
+            '+' => tokens.push(Token { kind: TokenKind::Plus }),
+            '-' => tokens.push(Token { kind: TokenKind::Minus }),
+            '*' => tokens.push(Token { kind: TokenKind::Star }),
+            '/' => tokens.push(Token { kind: TokenKind::Slash }),
             _ => tokens.push(Token { kind: TokenKind::Error(c.to_string()) }),
         }
         i += 1;

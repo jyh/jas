@@ -2,7 +2,9 @@
 
 use std::fmt;
 
-/// The six value types in the expression language.
+use super::expr_parser::Expr;
+
+/// The value types in the expression language.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Null,
@@ -11,6 +13,15 @@ pub enum Value {
     Str(String),
     Color(String), // normalized #rrggbb
     List(Vec<serde_json::Value>),
+    /// Closure: params, body, captured JSON context, and captured local scope.
+    Closure {
+        params: Vec<String>,
+        body: Box<Expr>,
+        captured_ctx: serde_json::Value,
+        /// Local scope bindings (for closures captured in let-bindings).
+        /// Stored as Option<Box<HashMap>> to keep the enum size reasonable.
+        captured_scope: Option<Box<std::collections::HashMap<String, Value>>>,
+    },
 }
 
 impl Value {
@@ -65,6 +76,7 @@ impl Value {
             Value::Str(s) => !s.is_empty(),
             Value::Color(_) => true,
             Value::List(l) => !l.is_empty(),
+            Value::Closure { .. } => true,
         }
     }
 
@@ -83,6 +95,7 @@ impl Value {
             Value::Str(s) => s.clone(),
             Value::Color(c) => c.clone(),
             Value::List(_) => "[list]".to_string(),
+            Value::Closure { .. } => "[closure]".to_string(),
         }
     }
 

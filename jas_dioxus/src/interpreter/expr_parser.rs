@@ -1,12 +1,26 @@
 //! Recursive descent parser for the expression language.
 //!
 //! Produces an AST from a token list. See SCHEMA.md, Expression Language Grammar.
+//!
+//! Grammar (highest to lowest precedence):
+//!   sequence       = let_expr (';' let_expr)*
+//!   let_expr       = 'let' IDENT '=' sequence 'in' let_expr | assign
+//!   assign         = ternary '<-' assign | ternary
+//!   ternary        = or_expr ('?' ternary ':' ternary)?
+//!   or_expr        = and_expr ('or' and_expr)*
+//!   and_expr       = not_expr ('and' not_expr)*
+//!   not_expr       = 'not' not_expr | '-' not_expr | comparison
+//!   comparison     = addition (comp_op addition)?
+//!   addition       = multiplication (('+' | '-') multiplication)*
+//!   multiplication = primary (('*' | '/') primary)*
+//!   primary        = atom accessor*
+//!   atom           = 'fun' ... | IDENT | literal | '(' sequence ')' | '[' ... ']'
 
 use super::expr_lexer::{tokenize, Token, TokenKind};
 
 // -- AST nodes ---------------------------------------------------------------
 
-/// Binary comparison / membership operator.
+/// Binary comparison operator.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinOp {
     Eq,
@@ -15,7 +29,11 @@ pub enum BinOp {
     Gt,
     Lte,
     Gte,
-    In,
+    // Arithmetic
+    Add,
+    Sub,
+    Mul,
+    Div,
 }
 
 /// Literal value kind.
@@ -26,6 +44,8 @@ pub enum LiteralKind {
     Color(String),
     Bool(bool),
     Null,
+    /// List literal: items are AST nodes that need evaluation.
+    List(Vec<Expr>),
 }
 
 /// Expression AST node.
@@ -38,9 +58,18 @@ pub enum Expr {
     IndexAccess { obj: Box<Expr>, index: Box<Expr> },
     BinaryOp { op: BinOp, left: Box<Expr>, right: Box<Expr> },
     UnaryNot(Box<Expr>),
+    UnaryMinus(Box<Expr>),
     Ternary { cond: Box<Expr>, true_expr: Box<Expr>, false_expr: Box<Expr> },
     LogicalAnd(Box<Expr>, Box<Expr>),
     LogicalOr(Box<Expr>, Box<Expr>),
+    /// Lambda: fun x -> body | fun (x, y) -> body | fun () -> body
+    Lambda { params: Vec<String>, body: Box<Expr> },
+    /// Let binding: let x = e1 in e2
+    Let { name: String, value: Box<Expr>, body: Box<Expr> },
+    /// Assignment: x <- expr (mutates state variable via store callback)
+    Assign { target: String, value: Box<Expr> },
+    /// Sequencing: e1; e2 (evaluate left for side effects, return right)
+    Sequence { left: Box<Expr>, right: Box<Expr> },
 }
 
 // -- Parser ------------------------------------------------------------------
@@ -90,12 +119,70 @@ impl Parser {
         if matches!(self.peek(), TokenKind::Eof) {
             return None;
         }
-        let node = self.parse_ternary();
+        let node = self.parse_sequence();
         // Ignore trailing tokens rather than failing hard.
         Some(node)
     }
 
-    /// ternary = or_expr ( '?' expr ':' expr )?
+    /// sequence = let_expr (';' let_expr)*
+    fn parse_sequence(&mut self) -> Expr {
+        let mut node = self.parse_let();
+        while matches!(self.peek(), TokenKind::Semicolon) {
+            self.pos += 1;
+            let right = self.parse_let();
+            node = Expr::Sequence {
+                left: Box::new(node),
+                right: Box::new(right),
+            };
+        }
+        node
+    }
+
+    /// let_expr = 'let' IDENT '=' sequence 'in' let_expr | assign
+    fn parse_let(&mut self) -> Expr {
+        if matches!(self.peek(), TokenKind::Let) {
+            self.pos += 1;
+            // Expect IDENT
+            let name = match self.advance_clone() {
+                TokenKind::Ident(n) => n,
+                _ => return Expr::Literal(LiteralKind::Null), // error fallback
+            };
+            self.expect(&TokenKind::Equals);
+            let value = self.parse_sequence();
+            self.expect(&TokenKind::In);
+            let body = self.parse_let();
+            return Expr::Let {
+                name,
+                value: Box::new(value),
+                body: Box::new(body),
+            };
+        }
+        self.parse_assign()
+    }
+
+    /// assign = ternary '<-' assign | ternary
+    fn parse_assign(&mut self) -> Expr {
+        let node = self.parse_ternary();
+        if matches!(self.peek(), TokenKind::LArrow) {
+            self.pos += 1;
+            // Left side must be an identifier (Path with one segment)
+            if let Expr::Path(ref segs) = node {
+                if segs.len() == 1 {
+                    let target = segs[0].clone();
+                    let value = self.parse_assign();
+                    return Expr::Assign {
+                        target,
+                        value: Box::new(value),
+                    };
+                }
+            }
+            // Error: assignment target must be an identifier
+            return Expr::Literal(LiteralKind::Null);
+        }
+        node
+    }
+
+    /// ternary = or_expr ( '?' ternary ':' ternary )?
     fn parse_ternary(&mut self) -> Expr {
         let node = self.parse_or();
         if matches!(self.peek(), TokenKind::Question) {
@@ -134,19 +221,25 @@ impl Parser {
         node
     }
 
-    /// not_expr = 'not' not_expr | comparison
+    /// not_expr = 'not' not_expr | '-' not_expr | comparison
     fn parse_not(&mut self) -> Expr {
         if matches!(self.peek(), TokenKind::Not) {
             self.pos += 1;
             let operand = self.parse_not();
             return Expr::UnaryNot(Box::new(operand));
         }
+        if matches!(self.peek(), TokenKind::Minus) {
+            self.pos += 1;
+            let operand = self.parse_not();
+            return Expr::UnaryMinus(Box::new(operand));
+        }
         self.parse_comparison()
     }
 
-    /// comparison = primary ( comp_op primary )?
+    /// comparison = addition ( comp_op addition )?
+    /// Note: 'in' is NOT a comparison operator (use mem() function instead).
     fn parse_comparison(&mut self) -> Expr {
-        let node = self.parse_primary();
+        let node = self.parse_addition();
         let op = match self.peek() {
             TokenKind::Eq => Some(BinOp::Eq),
             TokenKind::Neq => Some(BinOp::Neq),
@@ -154,12 +247,11 @@ impl Parser {
             TokenKind::Gt => Some(BinOp::Gt),
             TokenKind::Lte => Some(BinOp::Lte),
             TokenKind::Gte => Some(BinOp::Gte),
-            TokenKind::In => Some(BinOp::In),
             _ => None,
         };
         if let Some(op) = op {
             self.pos += 1;
-            let right = self.parse_primary();
+            let right = self.parse_addition();
             return Expr::BinaryOp {
                 op,
                 left: Box::new(node),
@@ -169,9 +261,57 @@ impl Parser {
         node
     }
 
+    /// addition = multiplication (('+' | '-') multiplication)*
+    fn parse_addition(&mut self) -> Expr {
+        let mut node = self.parse_multiplication();
+        loop {
+            let op = match self.peek() {
+                TokenKind::Plus => Some(BinOp::Add),
+                TokenKind::Minus => Some(BinOp::Sub),
+                _ => None,
+            };
+            if let Some(op) = op {
+                self.pos += 1;
+                let right = self.parse_multiplication();
+                node = Expr::BinaryOp {
+                    op,
+                    left: Box::new(node),
+                    right: Box::new(right),
+                };
+            } else {
+                break;
+            }
+        }
+        node
+    }
+
+    /// multiplication = primary (('*' | '/') primary)*
+    fn parse_multiplication(&mut self) -> Expr {
+        let mut node = self.parse_primary();
+        loop {
+            let op = match self.peek() {
+                TokenKind::Star => Some(BinOp::Mul),
+                TokenKind::Slash => Some(BinOp::Div),
+                _ => None,
+            };
+            if let Some(op) = op {
+                self.pos += 1;
+                let right = self.parse_primary();
+                node = Expr::BinaryOp {
+                    op,
+                    left: Box::new(node),
+                    right: Box::new(right),
+                };
+            } else {
+                break;
+            }
+        }
+        node
+    }
+
     /// primary = atom accessor*
     ///
-    /// accessor = '.' IDENT | '.' NUMBER | '[' expr ']'
+    /// accessor = '.' IDENT | '.' NUMBER | '[' sequence ']' | '(' args ')'
     fn parse_primary(&mut self) -> Expr {
         let mut node = self.parse_atom();
         loop {
@@ -221,11 +361,40 @@ impl Parser {
                 }
             } else if matches!(self.peek(), TokenKind::LBracket) {
                 self.pos += 1;
-                let index_expr = self.parse_ternary();
+                let index_expr = self.parse_sequence();
                 self.expect(&TokenKind::RBracket);
                 node = Expr::IndexAccess {
                     obj: Box::new(node),
                     index: Box::new(index_expr),
+                };
+            } else if matches!(self.peek(), TokenKind::LParen) {
+                // Function application: expr(args)
+                self.pos += 1;
+                let mut args = Vec::new();
+                if !matches!(self.peek(), TokenKind::RParen) {
+                    args.push(self.parse_sequence());
+                    while matches!(self.peek(), TokenKind::Comma) {
+                        self.pos += 1;
+                        args.push(self.parse_sequence());
+                    }
+                }
+                self.expect(&TokenKind::RParen);
+                // If node is a Path with one segment, use FuncCall for compat
+                if let Expr::Path(ref segs) = node {
+                    if segs.len() == 1 {
+                        node = Expr::FuncCall {
+                            name: segs[0].clone(),
+                            args,
+                        };
+                        continue;
+                    }
+                }
+                // General application: first arg is the callee
+                let mut apply_args = vec![node];
+                apply_args.extend(args);
+                node = Expr::FuncCall {
+                    name: "__apply__".to_string(),
+                    args: apply_args,
                 };
             } else {
                 break;
@@ -247,27 +416,44 @@ impl Parser {
         }
     }
 
-    /// atom = IDENT '(' args? ')' | IDENT | literal | '(' expr ')'
+    /// atom = 'fun' ... | IDENT | literal | '(' sequence ')' | '[' ... ']'
     fn parse_atom(&mut self) -> Expr {
         match self.peek().clone() {
-            TokenKind::Ident(name) => {
+            // Lambda: fun x -> body | fun (params) -> body | fun () -> body
+            TokenKind::Fun => {
                 self.pos += 1;
-                // Check for function call: IDENT '('
+                let mut params = Vec::new();
                 if matches!(self.peek(), TokenKind::LParen) {
                     self.pos += 1;
-                    let mut args = Vec::new();
                     if !matches!(self.peek(), TokenKind::RParen) {
-                        args.push(self.parse_ternary());
+                        if let TokenKind::Ident(name) = self.advance_clone() {
+                            params.push(name);
+                        }
                         while matches!(self.peek(), TokenKind::Comma) {
                             self.pos += 1;
-                            args.push(self.parse_ternary());
+                            if let TokenKind::Ident(name) = self.advance_clone() {
+                                params.push(name);
+                            }
                         }
                     }
                     self.expect(&TokenKind::RParen);
-                    Expr::FuncCall { name, args }
-                } else {
-                    Expr::Path(vec![name])
+                } else if let TokenKind::Ident(_) = self.peek().clone() {
+                    // Unary lambda without parens: fun x -> body
+                    if let TokenKind::Ident(name) = self.advance_clone() {
+                        params.push(name);
+                    }
                 }
+                self.expect(&TokenKind::Arrow);
+                let body = self.parse_sequence();
+                Expr::Lambda {
+                    params,
+                    body: Box::new(body),
+                }
+            }
+
+            TokenKind::Ident(name) => {
+                self.pos += 1;
+                Expr::Path(vec![name])
             }
 
             TokenKind::Number(n) => {
@@ -302,9 +488,24 @@ impl Parser {
 
             TokenKind::LParen => {
                 self.pos += 1;
-                let node = self.parse_ternary();
+                let node = self.parse_sequence();
                 self.expect(&TokenKind::RParen);
                 node
+            }
+
+            // List literal: [expr, expr, ...]
+            TokenKind::LBracket => {
+                self.pos += 1;
+                let mut items = Vec::new();
+                if !matches!(self.peek(), TokenKind::RBracket) {
+                    items.push(self.parse_sequence());
+                    while matches!(self.peek(), TokenKind::Comma) {
+                        self.pos += 1;
+                        items.push(self.parse_sequence());
+                    }
+                }
+                self.expect(&TokenKind::RBracket);
+                Expr::Literal(LiteralKind::List(items))
             }
 
             _ => {
@@ -447,19 +648,6 @@ mod tests {
     }
 
     #[test]
-    fn comparison_in() {
-        let ast = parse("x in y").unwrap();
-        assert_eq!(
-            ast,
-            Expr::BinaryOp {
-                op: BinOp::In,
-                left: Box::new(Expr::Path(vec!["x".to_string()])),
-                right: Box::new(Expr::Path(vec!["y".to_string()])),
-            }
-        );
-    }
-
-    #[test]
     fn logical_and() {
         let ast = parse("a and b").unwrap();
         assert_eq!(
@@ -489,6 +677,15 @@ mod tests {
         assert_eq!(
             ast,
             Expr::UnaryNot(Box::new(Expr::Path(vec!["x".to_string()])))
+        );
+    }
+
+    #[test]
+    fn unary_minus() {
+        let ast = parse("-x").unwrap();
+        assert_eq!(
+            ast,
+            Expr::UnaryMinus(Box::new(Expr::Path(vec!["x".to_string()])))
         );
     }
 
@@ -588,5 +785,203 @@ mod tests {
                 false_expr: Box::new(Expr::Path(vec!["e".to_string()])),
             }
         );
+    }
+
+    #[test]
+    fn addition() {
+        let ast = parse("1 + 2").unwrap();
+        assert_eq!(
+            ast,
+            Expr::BinaryOp {
+                op: BinOp::Add,
+                left: Box::new(Expr::Literal(LiteralKind::Number(1.0))),
+                right: Box::new(Expr::Literal(LiteralKind::Number(2.0))),
+            }
+        );
+    }
+
+    #[test]
+    fn subtraction() {
+        let ast = parse("5 - 3").unwrap();
+        assert_eq!(
+            ast,
+            Expr::BinaryOp {
+                op: BinOp::Sub,
+                left: Box::new(Expr::Literal(LiteralKind::Number(5.0))),
+                right: Box::new(Expr::Literal(LiteralKind::Number(3.0))),
+            }
+        );
+    }
+
+    #[test]
+    fn multiplication() {
+        let ast = parse("2 * 3").unwrap();
+        assert_eq!(
+            ast,
+            Expr::BinaryOp {
+                op: BinOp::Mul,
+                left: Box::new(Expr::Literal(LiteralKind::Number(2.0))),
+                right: Box::new(Expr::Literal(LiteralKind::Number(3.0))),
+            }
+        );
+    }
+
+    #[test]
+    fn division() {
+        let ast = parse("10 / 2").unwrap();
+        assert_eq!(
+            ast,
+            Expr::BinaryOp {
+                op: BinOp::Div,
+                left: Box::new(Expr::Literal(LiteralKind::Number(10.0))),
+                right: Box::new(Expr::Literal(LiteralKind::Number(2.0))),
+            }
+        );
+    }
+
+    #[test]
+    fn precedence_mul_over_add() {
+        // 1 + 2 * 3 => 1 + (2 * 3)
+        let ast = parse("1 + 2 * 3").unwrap();
+        assert_eq!(
+            ast,
+            Expr::BinaryOp {
+                op: BinOp::Add,
+                left: Box::new(Expr::Literal(LiteralKind::Number(1.0))),
+                right: Box::new(Expr::BinaryOp {
+                    op: BinOp::Mul,
+                    left: Box::new(Expr::Literal(LiteralKind::Number(2.0))),
+                    right: Box::new(Expr::Literal(LiteralKind::Number(3.0))),
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn lambda_unary() {
+        let ast = parse("fun x -> x").unwrap();
+        assert_eq!(
+            ast,
+            Expr::Lambda {
+                params: vec!["x".to_string()],
+                body: Box::new(Expr::Path(vec!["x".to_string()])),
+            }
+        );
+    }
+
+    #[test]
+    fn lambda_multi_params() {
+        let ast = parse("fun (a, b) -> a").unwrap();
+        assert_eq!(
+            ast,
+            Expr::Lambda {
+                params: vec!["a".to_string(), "b".to_string()],
+                body: Box::new(Expr::Path(vec!["a".to_string()])),
+            }
+        );
+    }
+
+    #[test]
+    fn lambda_no_params() {
+        let ast = parse("fun () -> 42").unwrap();
+        assert_eq!(
+            ast,
+            Expr::Lambda {
+                params: vec![],
+                body: Box::new(Expr::Literal(LiteralKind::Number(42.0))),
+            }
+        );
+    }
+
+    #[test]
+    fn let_binding() {
+        let ast = parse("let x = 1 in x").unwrap();
+        assert_eq!(
+            ast,
+            Expr::Let {
+                name: "x".to_string(),
+                value: Box::new(Expr::Literal(LiteralKind::Number(1.0))),
+                body: Box::new(Expr::Path(vec!["x".to_string()])),
+            }
+        );
+    }
+
+    #[test]
+    fn assign() {
+        let ast = parse("x <- 42").unwrap();
+        assert_eq!(
+            ast,
+            Expr::Assign {
+                target: "x".to_string(),
+                value: Box::new(Expr::Literal(LiteralKind::Number(42.0))),
+            }
+        );
+    }
+
+    #[test]
+    fn sequence() {
+        let ast = parse("1; 2; 3").unwrap();
+        assert_eq!(
+            ast,
+            Expr::Sequence {
+                left: Box::new(Expr::Sequence {
+                    left: Box::new(Expr::Literal(LiteralKind::Number(1.0))),
+                    right: Box::new(Expr::Literal(LiteralKind::Number(2.0))),
+                }),
+                right: Box::new(Expr::Literal(LiteralKind::Number(3.0))),
+            }
+        );
+    }
+
+    #[test]
+    fn list_literal_empty() {
+        let ast = parse("[]").unwrap();
+        assert_eq!(ast, Expr::Literal(LiteralKind::List(vec![])));
+    }
+
+    #[test]
+    fn list_literal() {
+        let ast = parse("[1, 2, 3]").unwrap();
+        assert_eq!(
+            ast,
+            Expr::Literal(LiteralKind::List(vec![
+                Expr::Literal(LiteralKind::Number(1.0)),
+                Expr::Literal(LiteralKind::Number(2.0)),
+                Expr::Literal(LiteralKind::Number(3.0)),
+            ]))
+        );
+    }
+
+    #[test]
+    fn application_on_expr() {
+        // (fun x -> x)(42) => FuncCall { name: "__apply__", args: [Lambda, 42] }
+        let ast = parse("(fun x -> x)(42)").unwrap();
+        assert_eq!(
+            ast,
+            Expr::FuncCall {
+                name: "__apply__".to_string(),
+                args: vec![
+                    Expr::Lambda {
+                        params: vec!["x".to_string()],
+                        body: Box::new(Expr::Path(vec!["x".to_string()])),
+                    },
+                    Expr::Literal(LiteralKind::Number(42.0)),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn arrow_token() {
+        // Verify -> is tokenized correctly
+        let tokens = tokenize("fun x -> x");
+        assert!(tokens.iter().any(|t| t.kind == TokenKind::Arrow));
+    }
+
+    #[test]
+    fn larrow_token() {
+        // Verify <- is tokenized correctly
+        let tokens = tokenize("x <- 5");
+        assert!(tokens.iter().any(|t| t.kind == TokenKind::LArrow));
     }
 }

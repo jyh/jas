@@ -14,6 +14,28 @@ type value =
   | Str of string
   | Color of string  (** normalized #rrggbb *)
   | List of Yojson.Safe.t list
+  | Closure of string list * ast * env  (** params, body, captured environment *)
+
+(** Local environment for let bindings and closures.
+    Separate from the JSON namespace context. *)
+and env = (string * value) list
+
+(* Forward declaration — the ast type is defined here with value (mutually recursive for Closure) *)
+and ast =
+  | Ast_literal of value
+  | Ast_path of string list
+  | Ast_func_call of string * ast list
+  | Ast_index_access of ast * ast
+  | Ast_dot_access of ast * string
+  | Ast_binary of string * ast * ast
+  | Ast_unary of string * ast
+  | Ast_ternary of ast * ast * ast
+  | Ast_logical of string * ast * ast
+  | Ast_lambda of string list * ast
+  | Ast_let of string * ast * ast
+  | Ast_assign of string * ast
+  | Ast_sequence of ast * ast
+  | Ast_list_literal of ast list
 
 let value_of_json (j : Yojson.Safe.t) : value =
   match j with
@@ -53,6 +75,7 @@ let to_bool (v : value) : bool =
   | Str s -> String.length s > 0
   | Color _ -> true
   | List l -> List.length l > 0
+  | Closure _ -> true
 
 let to_string_coerce (v : value) : string =
   match v with
@@ -65,6 +88,7 @@ let to_string_coerce (v : value) : string =
   | Str s -> s
   | Color c -> c
   | List _ -> "[list]"
+  | Closure _ -> "[closure]"
 
 let strict_eq (a : value) (b : value) : bool =
   match a, b with
@@ -81,7 +105,20 @@ let strict_eq (a : value) (b : value) : bool =
       else c
     in
     normalize a = normalize b
+  | Closure _, Closure _ -> false  (* closures are never equal *)
   | _ -> false
+
+(** Convert a value to JSON for storing in context. *)
+let value_to_json (v : value) : Yojson.Safe.t =
+  match v with
+  | Null -> `Null
+  | Bool b -> `Bool b
+  | Number n ->
+    if Float.is_integer n then `Int (Float.to_int n) else `Float n
+  | Str s -> `String s
+  | Color c -> `String c
+  | List items -> `List items
+  | Closure _ -> `Null  (* closures cannot be serialized to JSON *)
 
 (* ================================================================== *)
 (* Token types                                                         *)
@@ -90,9 +127,12 @@ let strict_eq (a : value) (b : value) : bool =
 type token_kind =
   | Tk_ident | Tk_number | Tk_string | Tk_color
   | Tk_true | Tk_false | Tk_null | Tk_not | Tk_and | Tk_or | Tk_in
+  | Tk_fun | Tk_let
   | Tk_eq | Tk_neq | Tk_lt | Tk_gt | Tk_lte | Tk_gte
   | Tk_question | Tk_colon | Tk_dot | Tk_comma
   | Tk_lparen | Tk_rparen | Tk_lbracket | Tk_rbracket
+  | Tk_plus | Tk_minus | Tk_star | Tk_slash
+  | Tk_arrow | Tk_larrow | Tk_semicolon | Tk_equals
   | Tk_eof | Tk_error
 
 type token = {
@@ -120,6 +160,8 @@ let keyword_kind = function
   | "and" -> Some Tk_and
   | "or" -> Some Tk_or
   | "in" -> Some Tk_in
+  | "fun" -> Some Tk_fun
+  | "let" -> Some Tk_let
   | _ -> None
 
 let tokenize (source : string) : token array =
@@ -159,10 +201,9 @@ let tokenize (source : string) : token array =
       if !j < n then incr j;  (* consume closing quote *)
       add_token (mk_tok_s Tk_string (Buffer.contents buf));
       i := !j
-    end else if c >= '0' && c <= '9' ||
-                (c = '-' && !i + 1 < n && source.[!i + 1] >= '0' && source.[!i + 1] <= '9') then begin
-      (* Number *)
-      let j = ref (if c = '-' then !i + 1 else !i) in
+    end else if c >= '0' && c <= '9' then begin
+      (* Number — unary minus is handled as an operator *)
+      let j = ref !i in
       while !j < n && source.[!j] >= '0' && source.[!j] <= '9' do incr j done;
       if !j < n && source.[!j] = '.' then begin
         incr j;
@@ -186,26 +227,34 @@ let tokenize (source : string) : token array =
        | None -> add_token (mk_tok_s Tk_ident word));
       i := !j
     end else begin
-      (* Operators *)
-      let two =
-        if !i + 1 < n then String.sub source !i 2 else ""
-      in
-      if two = "==" then begin add_token (mk_tok Tk_eq); i := !i + 2 end
-      else if two = "!=" then begin add_token (mk_tok Tk_neq); i := !i + 2 end
-      else if two = "<=" then begin add_token (mk_tok Tk_lte); i := !i + 2 end
-      else if two = ">=" then begin add_token (mk_tok Tk_gte); i := !i + 2 end
+      (* Operators — multi-char first, order matters *)
+      let next = if !i + 1 < n then source.[!i + 1] else '\x00' in
+      if c = '=' && next = '=' then begin add_token (mk_tok Tk_eq); i := !i + 2 end
+      else if c = '!' && next = '=' then begin add_token (mk_tok Tk_neq); i := !i + 2 end
+      (* <- must come before <= check: greedy on < followed by - *)
+      else if c = '<' && next = '-' then begin add_token (mk_tok Tk_larrow); i := !i + 2 end
+      else if c = '<' && next = '=' then begin add_token (mk_tok Tk_lte); i := !i + 2 end
+      else if c = '>' && next = '=' then begin add_token (mk_tok Tk_gte); i := !i + 2 end
+      (* -> must come before single - *)
+      else if c = '-' && next = '>' then begin add_token (mk_tok Tk_arrow); i := !i + 2 end
       else begin
         (match c with
          | '<' -> add_token (mk_tok Tk_lt)
          | '>' -> add_token (mk_tok Tk_gt)
+         | '=' -> add_token (mk_tok Tk_equals)
          | '?' -> add_token (mk_tok Tk_question)
          | ':' -> add_token (mk_tok Tk_colon)
          | '.' -> add_token (mk_tok Tk_dot)
          | ',' -> add_token (mk_tok Tk_comma)
+         | ';' -> add_token (mk_tok Tk_semicolon)
          | '(' -> add_token (mk_tok Tk_lparen)
          | ')' -> add_token (mk_tok Tk_rparen)
          | '[' -> add_token (mk_tok Tk_lbracket)
          | ']' -> add_token (mk_tok Tk_rbracket)
+         | '+' -> add_token (mk_tok Tk_plus)
+         | '-' -> add_token (mk_tok Tk_minus)
+         | '*' -> add_token (mk_tok Tk_star)
+         | '/' -> add_token (mk_tok Tk_slash)
          | _ -> add_token (mk_tok_s Tk_error (String.make 1 c)));
         incr i
       end
@@ -213,21 +262,6 @@ let tokenize (source : string) : token array =
   done;
   add_token (mk_tok Tk_eof);
   Array.of_list (List.rev !result)
-
-(* ================================================================== *)
-(* AST                                                                 *)
-(* ================================================================== *)
-
-type ast =
-  | Ast_literal of value
-  | Ast_path of string list
-  | Ast_func_call of string * ast list
-  | Ast_index_access of ast * ast
-  | Ast_dot_access of ast * string
-  | Ast_binary of string * ast * ast
-  | Ast_unary of string * ast
-  | Ast_ternary of ast * ast * ast
-  | Ast_logical of string * ast * ast
 
 (* ================================================================== *)
 (* Parser                                                              *)
@@ -252,7 +286,49 @@ let parser_expect p kind =
   tok
 let parser_at p kinds = List.mem (parser_peek p).kind kinds
 
-let rec parse_ternary p =
+(** sequence = let_expr (';' let_expr)* *)
+let rec parse_sequence p =
+  let node = parse_let p in
+  if parser_at p [Tk_semicolon] then begin
+    ignore (parser_advance p);
+    let right = parse_let p in
+    let result = ref (Ast_sequence (node, right)) in
+    while parser_at p [Tk_semicolon] do
+      ignore (parser_advance p);
+      let r = parse_let p in
+      result := Ast_sequence (!result, r)
+    done;
+    !result
+  end else
+    node
+
+(** let_expr = 'let' IDENT '=' sequence 'in' let_expr | assign *)
+and parse_let p =
+  if parser_at p [Tk_let] then begin
+    ignore (parser_advance p);
+    let name_tok = parser_expect p Tk_ident in
+    ignore (parser_expect p Tk_equals);
+    let value = parse_sequence p in
+    ignore (parser_expect p Tk_in);
+    let body = parse_let p in
+    Ast_let (name_tok.str_val, value, body)
+  end else
+    parse_assign p
+
+(** assign = ternary '<-' assign | ternary *)
+and parse_assign p =
+  let node = parse_ternary p in
+  if parser_at p [Tk_larrow] then begin
+    ignore (parser_advance p);
+    match node with
+    | Ast_path [name] ->
+      let value = parse_assign p in
+      Ast_assign (name, value)
+    | _ -> raise (Parse_error "Assignment target must be an identifier")
+  end else
+    node
+
+and parse_ternary p =
   let node = parse_or p in
   if parser_at p [Tk_question] then begin
     ignore (parser_advance p);
@@ -286,23 +362,49 @@ and parse_not p =
     ignore (parser_advance p);
     let operand = parse_not p in
     Ast_unary ("not", operand)
+  end else if parser_at p [Tk_minus] then begin
+    ignore (parser_advance p);
+    let operand = parse_not p in
+    Ast_unary ("-", operand)
   end else
     parse_comparison p
 
 and parse_comparison p =
-  let node = parse_primary p in
-  let op_kinds = [Tk_eq; Tk_neq; Tk_lt; Tk_gt; Tk_lte; Tk_gte; Tk_in] in
+  let node = parse_addition p in
+  let op_kinds = [Tk_eq; Tk_neq; Tk_lt; Tk_gt; Tk_lte; Tk_gte] in
   if parser_at p op_kinds then begin
     let op_tok = parser_advance p in
     let op_str = match op_tok.kind with
       | Tk_eq -> "==" | Tk_neq -> "!=" | Tk_lt -> "<" | Tk_gt -> ">"
-      | Tk_lte -> "<=" | Tk_gte -> ">=" | Tk_in -> "in"
+      | Tk_lte -> "<=" | Tk_gte -> ">="
       | _ -> "=="
     in
-    let right = parse_primary p in
+    let right = parse_addition p in
     Ast_binary (op_str, node, right)
   end else
     node
+
+(** addition = multiplication (('+' | '-') multiplication)* *)
+and parse_addition p =
+  let node = ref (parse_multiplication p) in
+  while parser_at p [Tk_plus; Tk_minus] do
+    let op_tok = parser_advance p in
+    let op = if op_tok.kind = Tk_plus then "+" else "-" in
+    let right = parse_multiplication p in
+    node := Ast_binary (op, !node, right)
+  done;
+  !node
+
+(** multiplication = primary (('*' | '/') primary)* *)
+and parse_multiplication p =
+  let node = ref (parse_primary p) in
+  while parser_at p [Tk_star; Tk_slash] do
+    let op_tok = parser_advance p in
+    let op = if op_tok.kind = Tk_star then "*" else "/" in
+    let right = parse_primary p in
+    node := Ast_binary (op, !node, right)
+  done;
+  !node
 
 and parse_primary p =
   let node = ref (parse_atom p) in
@@ -329,9 +431,25 @@ and parse_primary p =
         raise (Parse_error "Expected identifier after '.'")
     end else if parser_at p [Tk_lbracket] then begin
       ignore (parser_advance p);
-      let index_expr = parse_ternary p in
+      let index_expr = parse_sequence p in
       ignore (parser_expect p Tk_rbracket);
       node := Ast_index_access (!node, index_expr)
+    end else if parser_at p [Tk_lparen] then begin
+      (* Function application: expr(args) *)
+      ignore (parser_advance p);
+      let args = ref [] in
+      if not (parser_at p [Tk_rparen]) then begin
+        args := [parse_sequence p];
+        while parser_at p [Tk_comma] do
+          ignore (parser_advance p);
+          args := !args @ [parse_sequence p]
+        done
+      end;
+      ignore (parser_expect p Tk_rparen);
+      (* If node is a simple path with one segment, use Ast_func_call for compat *)
+      (match !node with
+       | Ast_path [name] -> node := Ast_func_call (name, !args)
+       | _ -> node := Ast_func_call ("__apply__", !node :: !args))
     end else
       continue_ := false
   done;
@@ -340,24 +458,31 @@ and parse_primary p =
 and parse_atom p =
   let tok = parser_peek p in
   match tok.kind with
-  | Tk_ident ->
+  | Tk_fun ->
+    (* Lambda: fun x -> body | fun (params) -> body | fun () -> body *)
     let _ = parser_advance p in
-    let name = tok.str_val in
+    let params = ref [] in
     if parser_at p [Tk_lparen] then begin
-      (* Function call *)
       ignore (parser_advance p);
-      let args = ref [] in
       if not (parser_at p [Tk_rparen]) then begin
-        args := [parse_ternary p];
+        params := [(parser_expect p Tk_ident).str_val];
         while parser_at p [Tk_comma] do
           ignore (parser_advance p);
-          args := !args @ [parse_ternary p]
+          params := !params @ [(parser_expect p Tk_ident).str_val]
         done
       end;
-      ignore (parser_expect p Tk_rparen);
-      Ast_func_call (name, !args)
-    end else
-      Ast_path [name]
+      ignore (parser_expect p Tk_rparen)
+    end else if parser_at p [Tk_ident] then begin
+      params := [(parser_advance p).str_val]
+    end;
+    ignore (parser_expect p Tk_arrow);
+    let body = parse_sequence p in
+    Ast_lambda (!params, body)
+  | Tk_ident ->
+    let _ = parser_advance p in
+    let _name = tok.str_val in
+    (* Don't parse func call here — parse_primary handles Tk_lparen in accessor loop *)
+    Ast_path [tok.str_val]
   | Tk_number ->
     let _ = parser_advance p in
     Ast_literal (Number tok.num_val)
@@ -385,9 +510,22 @@ and parse_atom p =
     Ast_literal Null
   | Tk_lparen ->
     let _ = parser_advance p in
-    let node = parse_ternary p in
+    let node = parse_sequence p in
     ignore (parser_expect p Tk_rparen);
     node
+  | Tk_lbracket ->
+    (* List literal: [expr, expr, ...] *)
+    let _ = parser_advance p in
+    let items = ref [] in
+    if not (parser_at p [Tk_rbracket]) then begin
+      items := [parse_sequence p];
+      while parser_at p [Tk_comma] do
+        ignore (parser_advance p);
+        items := !items @ [parse_sequence p]
+      done
+    end;
+    ignore (parser_expect p Tk_rbracket);
+    Ast_list_literal !items
   | _ ->
     raise (Parse_error (Printf.sprintf "Unexpected token: %s" tok.str_val))
 
@@ -396,7 +534,7 @@ let parse (source : string) : ast option =
   let p = { tokens; pos = 0 } in
   if (parser_peek p).kind = Tk_eof then None
   else
-    let node = parse_ternary p in
+    let node = parse_sequence p in
     if (parser_peek p).kind <> Tk_eof then
       raise (Parse_error "Unexpected token after expression");
     Some node
@@ -466,128 +604,303 @@ let is_color_decompose = function
   | "cmyk_c" | "cmyk_m" | "cmyk_y" | "cmyk_k" -> true
   | _ -> false
 
-(** Main evaluator — walks the AST. *)
-let rec eval_node (node : ast) (ctx : Yojson.Safe.t) : value =
+(** Store callback type for assignments. *)
+type store_cb = string -> value -> unit
+
+(** Main evaluator — walks the AST.
+    env: local bindings from let/lambda (can hold closures).
+    ctx: JSON namespace context (state, panel, etc).
+    store_cb: optional callback for <- assignments. *)
+let rec eval_node ?(local_env : env = []) ?(store_cb : store_cb option)
+    (node : ast) (ctx : Yojson.Safe.t) : value =
   match node with
   | Ast_literal v -> v
-  | Ast_path segs -> resolve_path segs ctx
-  | Ast_func_call (name, args) -> eval_func name args ctx
-  | Ast_dot_access (obj, member) -> eval_dot_access obj member ctx
-  | Ast_index_access (obj, index) -> eval_index_access obj index ctx
-  | Ast_binary (op, left, right) -> eval_binary op left right ctx
-  | Ast_unary (op, operand) -> eval_unary op operand ctx
-  | Ast_ternary (cond, t, f) -> eval_ternary cond t f ctx
-  | Ast_logical (op, left, right) -> eval_logical op left right ctx
+  | Ast_path segs ->
+    (* First check local env for single-segment paths *)
+    (match segs with
+     | [name] ->
+       (match List.assoc_opt name local_env with
+        | Some v -> v
+        | None -> resolve_path segs ctx)
+     | _ -> resolve_path segs ctx)
+  | Ast_func_call (name, args) -> eval_func ~local_env ?store_cb name args ctx
+  | Ast_dot_access (obj, member) -> eval_dot_access ~local_env ?store_cb obj member ctx
+  | Ast_index_access (obj, index) -> eval_index_access ~local_env ?store_cb obj index ctx
+  | Ast_binary (op, left, right) -> eval_binary ~local_env ?store_cb op left right ctx
+  | Ast_unary (op, operand) -> eval_unary ~local_env ?store_cb op operand ctx
+  | Ast_ternary (cond, t, f) -> eval_ternary ~local_env ?store_cb cond t f ctx
+  | Ast_logical (op, left, right) -> eval_logical ~local_env ?store_cb op left right ctx
+  | Ast_lambda (params, body) ->
+    Closure (params, body, local_env)
+  | Ast_let (name, value_node, body) ->
+    let v = eval_node ~local_env ?store_cb value_node ctx in
+    let child_env = (name, v) :: local_env in
+    eval_node ~local_env:child_env ?store_cb body ctx
+  | Ast_assign (target, value_node) ->
+    let v = eval_node ~local_env ?store_cb value_node ctx in
+    (match store_cb with
+     | Some cb -> cb target v
+     | None -> ());
+    v
+  | Ast_sequence (left, right) ->
+    ignore (eval_node ~local_env ?store_cb left ctx);
+    eval_node ~local_env ?store_cb right ctx
+  | Ast_list_literal items ->
+    let vals = List.map (fun item ->
+      let v = eval_node ~local_env ?store_cb item ctx in
+      value_to_json v
+    ) items in
+    List vals
 
-and eval_func (name : string) (args : ast list) (ctx : Yojson.Safe.t) : value =
-  (* Color decomposition: single color argument -> number *)
-  if is_color_decompose name then begin
-    if List.length args <> 1 then Number 0.0
-    else
-      let arg = eval_node (List.hd args) ctx in
-      let c = color_arg arg in
-      let (r, g, b) = Color_util.parse_hex c in
-      Number (eval_color_decompose name r g b)
+and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
+    (name : string) (args : ast list) (ctx : Yojson.Safe.t) : value =
+  (* __apply__: first arg is the callee expression result *)
+  if name = "__apply__" && List.length args >= 1 then begin
+    let callee = eval_node ~local_env ?store_cb (List.hd args) ctx in
+    match callee with
+    | Closure (params, body, captured_env) ->
+      let arg_vals = List.map (fun a -> eval_node ~local_env ?store_cb a ctx) (List.tl args) in
+      if List.length arg_vals <> List.length params then Null
+      else begin
+        let call_env = List.combine params arg_vals @ captured_env @ local_env in
+        eval_node ~local_env:call_env ?store_cb body ctx
+      end
+    | _ -> Null
   end
 
-  (* hex: color -> string (6 hex digits without #) *)
-  else if name = "hex" then begin
-    if List.length args <> 1 then Str ""
-    else
-      let arg = eval_node (List.hd args) ctx in
-      let c = color_arg arg in
-      let (r, g, b) = Color_util.parse_hex c in
-      Str (Printf.sprintf "%02x%02x%02x" r g b)
-  end
+  else begin
+    (* Check if name resolves to a closure in the local env *)
+    let closure_val = List.assoc_opt name local_env in
+    match closure_val with
+    | Some (Closure (params, body, captured_env)) ->
+      let arg_vals = List.map (fun a -> eval_node ~local_env ?store_cb a ctx) args in
+      if List.length arg_vals <> List.length params then Null
+      else begin
+        let call_env = List.combine params arg_vals @ captured_env @ local_env in
+        eval_node ~local_env:call_env ?store_cb body ctx
+      end
+    | _ ->
 
-  (* rgb: (r, g, b) -> color *)
-  else if name = "rgb" then begin
-    if List.length args <> 3 then Null
-    else
-      let vals = List.map (fun a -> eval_node a ctx) args in
-      let get_int v = match v with Number n -> Float.to_int n | _ -> 0 in
-      let r = get_int (List.nth vals 0) in
-      let g = get_int (List.nth vals 1) in
-      let b = get_int (List.nth vals 2) in
-      Color (Color_util.rgb_to_hex r g b)
-  end
-
-  (* hsb: (h, s, b) -> color *)
-  else if name = "hsb" then begin
-    if List.length args <> 3 then Null
-    else
-      let vals = List.map (fun a -> eval_node a ctx) args in
-      let get_float v = match v with Number n -> n | _ -> 0.0 in
-      let h = get_float (List.nth vals 0) in
-      let s = get_float (List.nth vals 1) in
-      let bv = get_float (List.nth vals 2) in
-      let (r, g, b) = Color_util.hsb_to_rgb h s bv in
-      Color (Color_util.rgb_to_hex r g b)
-  end
-
-  (* invert: color -> color *)
-  else if name = "invert" then begin
-    if List.length args <> 1 then Null
-    else
-      let arg = eval_node (List.hd args) ctx in
-      let c = color_arg arg in
-      let (r, g, b) = Color_util.parse_hex c in
-      Color (Color_util.rgb_to_hex (255 - r) (255 - g) (255 - b))
-  end
-
-  (* complement: color -> color *)
-  else if name = "complement" then begin
-    if List.length args <> 1 then Null
-    else
-      let arg = eval_node (List.hd args) ctx in
-      let c = color_arg arg in
-      let (r, g, b) = Color_util.parse_hex c in
-      let (h, s, bv) = Color_util.rgb_to_hsb r g b in
-      if s = 0 then
-        Color (Color_util.rgb_to_hex r g b)
+    (* Color decomposition: single color argument -> number *)
+    if is_color_decompose name then begin
+      if List.length args <> 1 then Number 0.0
       else
-        let new_h = (h + 180) mod 360 in
-        let (nr, ng, nb) = Color_util.hsb_to_rgb (float_of_int new_h)
-                             (float_of_int s) (float_of_int bv) in
-        Color (Color_util.rgb_to_hex nr ng nb)
+        let arg = eval_node ~local_env ?store_cb (List.hd args) ctx in
+        let c = color_arg arg in
+        let (r, g, b) = Color_util.parse_hex c in
+        Number (eval_color_decompose name r g b)
+    end
+
+    (* hex: color -> string (6 hex digits without #) *)
+    else if name = "hex" then begin
+      if List.length args <> 1 then Str ""
+      else
+        let arg = eval_node ~local_env ?store_cb (List.hd args) ctx in
+        let c = color_arg arg in
+        let (r, g, b) = Color_util.parse_hex c in
+        Str (Printf.sprintf "%02x%02x%02x" r g b)
+    end
+
+    (* rgb: (r, g, b) -> color *)
+    else if name = "rgb" then begin
+      if List.length args <> 3 then Null
+      else
+        let vals = List.map (fun a -> eval_node ~local_env ?store_cb a ctx) args in
+        let get_int v = match v with Number n -> Float.to_int n | _ -> 0 in
+        let r = get_int (List.nth vals 0) in
+        let g = get_int (List.nth vals 1) in
+        let b = get_int (List.nth vals 2) in
+        Color (Color_util.rgb_to_hex r g b)
+    end
+
+    (* hsb: (h, s, b) -> color *)
+    else if name = "hsb" then begin
+      if List.length args <> 3 then Null
+      else
+        let vals = List.map (fun a -> eval_node ~local_env ?store_cb a ctx) args in
+        let get_float v = match v with Number n -> n | _ -> 0.0 in
+        let h = get_float (List.nth vals 0) in
+        let s = get_float (List.nth vals 1) in
+        let bv = get_float (List.nth vals 2) in
+        let (r, g, b) = Color_util.hsb_to_rgb h s bv in
+        Color (Color_util.rgb_to_hex r g b)
+    end
+
+    (* invert: color -> color *)
+    else if name = "invert" then begin
+      if List.length args <> 1 then Null
+      else
+        let arg = eval_node ~local_env ?store_cb (List.hd args) ctx in
+        let c = color_arg arg in
+        let (r, g, b) = Color_util.parse_hex c in
+        Color (Color_util.rgb_to_hex (255 - r) (255 - g) (255 - b))
+    end
+
+    (* complement: color -> color *)
+    else if name = "complement" then begin
+      if List.length args <> 1 then Null
+      else
+        let arg = eval_node ~local_env ?store_cb (List.hd args) ctx in
+        let c = color_arg arg in
+        let (r, g, b) = Color_util.parse_hex c in
+        let (h, s, bv) = Color_util.rgb_to_hsb r g b in
+        if s = 0 then
+          Color (Color_util.rgb_to_hex r g b)
+        else
+          let new_h = (h + 180) mod 360 in
+          let (nr, ng, nb) = Color_util.hsb_to_rgb (float_of_int new_h)
+                               (float_of_int s) (float_of_int bv) in
+          Color (Color_util.rgb_to_hex nr ng nb)
+    end
+
+    (* mem: (element, list) -> bool — list membership *)
+    else if name = "mem" then begin
+      if List.length args <> 2 then Bool false
+      else
+        let elem = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
+        let lst = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
+        match lst with
+        | List items ->
+          let found = List.exists (fun item ->
+            strict_eq elem (value_of_json item)
+          ) items in
+          Bool found
+        | _ -> Bool false
+    end
+
+    (* Unknown function *)
+    else Null
   end
 
-  (* Unknown function *)
-  else Null
+(** JSON-preserving evaluator — used internally by dot/index access
+    to avoid losing Assoc structure. *)
+and eval_node_json_inner (node : ast) (ctx : Yojson.Safe.t) : Yojson.Safe.t =
+  match node with
+  | Ast_path segs ->
+    (match segs with
+     | [] -> `Null
+     | namespace :: rest ->
+       let obj = match ctx with
+         | `Assoc pairs -> (match List.assoc_opt namespace pairs with Some v -> v | None -> `Null)
+         | _ -> `Null
+       in
+       let rec walk current s =
+         match s with
+         | [] -> current
+         | seg :: rest' ->
+           (match current with
+            | `Assoc pairs ->
+              (match List.assoc_opt seg pairs with
+               | Some v -> walk v rest'
+               | None -> `Null)
+            | `List lst ->
+              (match int_of_string_opt seg with
+               | Some idx when idx >= 0 && idx < List.length lst ->
+                 walk (List.nth lst idx) rest'
+               | _ -> `Null)
+            | _ -> `Null)
+       in
+       walk obj rest)
+  | Ast_index_access (obj_node, index_node) ->
+    let obj_json = eval_node_json_inner obj_node ctx in
+    let idx_val = eval_node index_node ctx in
+    let key = to_string_coerce idx_val in
+    (match obj_json with
+     | `Assoc pairs ->
+       (match List.assoc_opt key pairs with
+        | Some v -> v
+        | None -> `Null)
+     | `List lst ->
+       (match int_of_string_opt key with
+        | Some idx when idx >= 0 && idx < List.length lst ->
+          List.nth lst idx
+        | _ -> `Null)
+     | _ -> `Null)
+  | Ast_dot_access (obj_node, member) ->
+    let obj_json = eval_node_json_inner obj_node ctx in
+    (match obj_json with
+     | `Assoc pairs ->
+       (match List.assoc_opt member pairs with
+        | Some v -> v
+        | None -> `Null)
+     | `List lst ->
+       (match int_of_string_opt member with
+        | Some idx when idx >= 0 && idx < List.length lst ->
+          List.nth lst idx
+        | _ -> `Null)
+     | _ -> `Null)
+  | _ ->
+    (* For non-path expressions, evaluate and convert to JSON *)
+    let v = eval_node node ctx in
+    value_to_json v
 
-and eval_dot_access (obj_node : ast) (member : string) (ctx : Yojson.Safe.t) : value =
-  let obj_val = eval_node obj_node ctx in
-  (* List methods *)
-  (match obj_val with
-   | List l ->
-     if member = "length" then Number (float_of_int (List.length l))
+and eval_dot_access ?(local_env : env = []) ?(store_cb : store_cb option)
+    (obj_node : ast) (member : string) (ctx : Yojson.Safe.t) : value =
+  (* Try JSON-preserving path first for path/accessor chains *)
+  let obj_json = eval_node_json_inner obj_node ctx in
+  (match obj_json with
+   | `Assoc pairs ->
+     (match List.assoc_opt member pairs with
+      | Some v -> value_of_json v
+      | None -> Null)
+   | `List lst ->
+     if member = "length" then Number (float_of_int (List.length lst))
      else begin
-       (* Numeric index on list *)
        match int_of_string_opt member with
-       | Some idx when idx >= 0 && idx < List.length l ->
-         value_of_json (List.nth l idx)
+       | Some idx when idx >= 0 && idx < List.length lst ->
+         value_of_json (List.nth lst idx)
        | _ -> Null
      end
-   | Str s ->
+   | `String s ->
      if member = "length" then Number (float_of_int (String.length s))
      else Null
-   | _ -> Null)
+   | _ ->
+     (* Fallback to value-based eval for computed expressions *)
+     let obj_val = eval_node ~local_env ?store_cb obj_node ctx in
+     (match obj_val with
+      | List l ->
+        if member = "length" then Number (float_of_int (List.length l))
+        else begin
+          match int_of_string_opt member with
+          | Some idx when idx >= 0 && idx < List.length l ->
+            value_of_json (List.nth l idx)
+          | _ -> Null
+        end
+      | Str s ->
+        if member = "length" then Number (float_of_int (String.length s))
+        else Null
+      | _ -> Null))
 
-and eval_index_access (obj_node : ast) (index_node : ast) (ctx : Yojson.Safe.t) : value =
-  let obj_val = eval_node obj_node ctx in
-  let idx_val = eval_node index_node ctx in
+and eval_index_access ?(local_env : env = []) ?(store_cb : store_cb option)
+    (obj_node : ast) (index_node : ast) (ctx : Yojson.Safe.t) : value =
+  let idx_val = eval_node ~local_env ?store_cb index_node ctx in
   let key = to_string_coerce idx_val in
-  (match obj_val with
-   | List l ->
+  (* Try JSON-preserving path first for dict indexing *)
+  let obj_json = eval_node_json_inner obj_node ctx in
+  (match obj_json with
+   | `Assoc pairs ->
+     (match List.assoc_opt key pairs with
+      | Some v -> value_of_json v
+      | None -> Null)
+   | `List lst ->
      (match int_of_string_opt key with
-      | Some idx when idx >= 0 && idx < List.length l ->
-        value_of_json (List.nth l idx)
+      | Some idx when idx >= 0 && idx < List.length lst ->
+        value_of_json (List.nth lst idx)
       | _ -> Null)
-   | _ -> Null)
+   | _ ->
+     let obj_val = eval_node ~local_env ?store_cb obj_node ctx in
+     (match obj_val with
+      | List l ->
+        (match int_of_string_opt key with
+         | Some idx when idx >= 0 && idx < List.length l ->
+           value_of_json (List.nth l idx)
+         | _ -> Null)
+      | _ -> Null))
 
-and eval_binary (op : string) (left_node : ast) (right_node : ast) (ctx : Yojson.Safe.t) : value =
-  let left = eval_node left_node ctx in
-  let right = eval_node right_node ctx in
+and eval_binary ?(local_env : env = []) ?(store_cb : store_cb option)
+    (op : string) (left_node : ast) (right_node : ast) (ctx : Yojson.Safe.t) : value =
+  let left = eval_node ~local_env ?store_cb left_node ctx in
+  let right = eval_node ~local_env ?store_cb right_node ctx in
   match op with
   | "==" -> Bool (strict_eq left right)
   | "!=" -> Bool (not (strict_eq left right))
@@ -596,6 +909,24 @@ and eval_binary (op : string) (left_node : ast) (right_node : ast) (ctx : Yojson
   | "<=" -> numeric_cmp left right ( <= )
   | ">=" -> numeric_cmp left right ( >= )
   | "in" -> eval_in left right
+  | "+" ->
+    (match left, right with
+     | Number a, Number b -> Number (a +. b)
+     | _ -> Str (to_string_coerce left ^ to_string_coerce right))
+  | "-" ->
+    (match left, right with
+     | Number a, Number b -> Number (a -. b)
+     | _ -> Null)
+  | "*" ->
+    (match left, right with
+     | Number a, Number b -> Number (a *. b)
+     | _ -> Null)
+  | "/" ->
+    (match left, right with
+     | Number a, Number b ->
+       if b = 0.0 then Null
+       else Number (a /. b)
+     | _ -> Null)
   | _ -> Null
 
 and numeric_cmp (left : value) (right : value) (cmp : float -> float -> bool) : value =
@@ -612,40 +943,49 @@ and eval_in (left : value) (right : value) : value =
     Bool found
   | _ -> Bool false
 
-and eval_unary (op : string) (operand_node : ast) (ctx : Yojson.Safe.t) : value =
+and eval_unary ?(local_env : env = []) ?(store_cb : store_cb option)
+    (op : string) (operand_node : ast) (ctx : Yojson.Safe.t) : value =
   match op with
   | "not" ->
-    let v = eval_node operand_node ctx in
+    let v = eval_node ~local_env ?store_cb operand_node ctx in
     Bool (not (to_bool v))
+  | "-" ->
+    let v = eval_node ~local_env ?store_cb operand_node ctx in
+    (match v with
+     | Number n -> Number (-.n)
+     | _ -> Null)
   | _ -> Null
 
-and eval_ternary (cond_node : ast) (true_node : ast) (false_node : ast) (ctx : Yojson.Safe.t) : value =
-  let cond = eval_node cond_node ctx in
-  if to_bool cond then eval_node true_node ctx
-  else eval_node false_node ctx
+and eval_ternary ?(local_env : env = []) ?(store_cb : store_cb option)
+    (cond_node : ast) (true_node : ast) (false_node : ast) (ctx : Yojson.Safe.t) : value =
+  let cond = eval_node ~local_env ?store_cb cond_node ctx in
+  if to_bool cond then eval_node ~local_env ?store_cb true_node ctx
+  else eval_node ~local_env ?store_cb false_node ctx
 
-and eval_logical (op : string) (left_node : ast) (right_node : ast) (ctx : Yojson.Safe.t) : value =
-  let left = eval_node left_node ctx in
+and eval_logical ?(local_env : env = []) ?(store_cb : store_cb option)
+    (op : string) (left_node : ast) (right_node : ast) (ctx : Yojson.Safe.t) : value =
+  let left = eval_node ~local_env ?store_cb left_node ctx in
   match op with
   | "and" ->
     if not (to_bool left) then left
-    else eval_node right_node ctx
+    else eval_node ~local_env ?store_cb right_node ctx
   | "or" ->
     if to_bool left then left
-    else eval_node right_node ctx
+    else eval_node ~local_env ?store_cb right_node ctx
   | _ -> Null
 
 (* ================================================================== *)
 (* Public API                                                          *)
 (* ================================================================== *)
 
-let evaluate (expr_str : string) (ctx : Yojson.Safe.t) : value =
+let evaluate ?(local_env : env = []) ?(store_cb : store_cb option)
+    (expr_str : string) (ctx : Yojson.Safe.t) : value =
   if String.length expr_str = 0 then Null
   else
     try
       match parse (String.trim expr_str) with
       | None -> Null
-      | Some ast -> eval_node ast ctx
+      | Some ast -> eval_node ~local_env ?store_cb ast ctx
     with _ -> Null
 
 (** Resolve a dot-separated path through a JSON context, returning raw JSON.
@@ -712,14 +1052,7 @@ let rec eval_node_json (node : ast) (ctx : Yojson.Safe.t) : Yojson.Safe.t =
   | _ ->
     (* For non-path expressions, evaluate and convert back to JSON *)
     let v = eval_node node ctx in
-    (match v with
-     | Null -> `Null
-     | Bool b -> `Bool b
-     | Number n ->
-       if Float.is_integer n then `Int (Float.to_int n) else `Float n
-     | Str s -> `String s
-     | Color c -> `String c
-     | List items -> `List items)
+    value_to_json v
 
 (** Evaluate an expression and return the result as raw Yojson.Safe.t,
     preserving objects and arrays. Used by the repeat directive. *)

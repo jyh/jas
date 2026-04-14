@@ -57,6 +57,8 @@ private enum TokenKind: Equatable {
     case and
     case or
     case `in`
+    case fun
+    case `let`
     case eq       // ==
     case neq      // !=
     case lt       // <
@@ -71,6 +73,14 @@ private enum TokenKind: Equatable {
     case rParen
     case lBracket
     case rBracket
+    case arrow    // ->
+    case larrow   // <-
+    case semicolon // ;
+    case equals   // =
+    case plus     // +
+    case minus    // -
+    case star     // *
+    case slash    // /
     case eof
     case error(String)
 }
@@ -134,10 +144,9 @@ private func tokenize(_ source: String) -> [Token] {
             continue
         }
 
-        // Number (including negative)
-        if c.isNumber || (c == "-" && i + 1 < n && chars[i + 1].isNumber) {
+        // Number (digits only — unary minus is handled as an operator)
+        if c.isNumber {
             let start = i
-            if c == "-" { i += 1 }
             while i < n && chars[i].isNumber { i += 1 }
             if i < n && chars[i] == "." {
                 i += 1
@@ -164,36 +173,54 @@ private func tokenize(_ source: String) -> [Token] {
             case "and": kind = .and
             case "or": kind = .or
             case "in": kind = .in
+            case "fun": kind = .fun
+            case "let": kind = .let
             default: kind = .ident(word)
             }
             tokens.append(Token(kind: kind))
             continue
         }
 
-        // Two-character operators
-        if i + 1 < n {
-            let two = String(chars[i...i+1])
-            switch two {
-            case "==": tokens.append(Token(kind: .eq)); i += 2; continue
-            case "!=": tokens.append(Token(kind: .neq)); i += 2; continue
-            case "<=": tokens.append(Token(kind: .lte)); i += 2; continue
-            case ">=": tokens.append(Token(kind: .gte)); i += 2; continue
-            default: break
-            }
+        // Multi-character operators (order matters)
+        if c == "=" && i + 1 < n && chars[i + 1] == "=" {
+            tokens.append(Token(kind: .eq)); i += 2; continue
+        }
+        if c == "!" && i + 1 < n && chars[i + 1] == "=" {
+            tokens.append(Token(kind: .neq)); i += 2; continue
+        }
+        // <- : no space between < and - (greedy)
+        if c == "<" && i + 1 < n && chars[i + 1] == "-" {
+            tokens.append(Token(kind: .larrow)); i += 2; continue
+        }
+        if c == "<" && i + 1 < n && chars[i + 1] == "=" {
+            tokens.append(Token(kind: .lte)); i += 2; continue
+        }
+        if c == ">" && i + 1 < n && chars[i + 1] == "=" {
+            tokens.append(Token(kind: .gte)); i += 2; continue
+        }
+        // -> : no space between - and > (greedy)
+        if c == "-" && i + 1 < n && chars[i + 1] == ">" {
+            tokens.append(Token(kind: .arrow)); i += 2; continue
         }
 
         // Single-character operators
         switch c {
         case "<": tokens.append(Token(kind: .lt))
         case ">": tokens.append(Token(kind: .gt))
+        case "=": tokens.append(Token(kind: .equals))
         case "?": tokens.append(Token(kind: .question))
         case ":": tokens.append(Token(kind: .colon))
         case ".": tokens.append(Token(kind: .dot))
         case ",": tokens.append(Token(kind: .comma))
+        case ";": tokens.append(Token(kind: .semicolon))
         case "(": tokens.append(Token(kind: .lParen))
         case ")": tokens.append(Token(kind: .rParen))
         case "[": tokens.append(Token(kind: .lBracket))
         case "]": tokens.append(Token(kind: .rBracket))
+        case "+": tokens.append(Token(kind: .plus))
+        case "-": tokens.append(Token(kind: .minus))
+        case "*": tokens.append(Token(kind: .star))
+        case "/": tokens.append(Token(kind: .slash))
         default: tokens.append(Token(kind: .error(String(c))))
         }
         i += 1
@@ -205,22 +232,24 @@ private func tokenize(_ source: String) -> [Token] {
 
 // MARK: - AST
 
-/// Binary comparison / membership operator.
-private enum BinOp {
-    case eq, neq, lt, gt, lte, gte, `in`
+/// Binary comparison / arithmetic operator.
+enum BinOp {
+    case eq, neq, lt, gt, lte, gte
+    case plus, minus, star, slash
 }
 
 /// Literal value kind.
-private enum LiteralKind {
+enum LiteralKind {
     case number(Double)
     case str(String)
     case color(String)
     case bool(Bool)
     case null
+    case list([Expr])
 }
 
 /// Expression AST node.
-private indirect enum Expr {
+indirect enum Expr {
     case literal(LiteralKind)
     case path([String])
     case funcCall(name: String, args: [Expr])
@@ -228,9 +257,14 @@ private indirect enum Expr {
     case indexAccess(obj: Expr, index: Expr)
     case binaryOp(op: BinOp, left: Expr, right: Expr)
     case unaryNot(Expr)
+    case unaryMinus(Expr)
     case ternary(cond: Expr, trueExpr: Expr, falseExpr: Expr)
     case logicalAnd(Expr, Expr)
     case logicalOr(Expr, Expr)
+    case lambda(params: [String], body: Expr)
+    case letBinding(name: String, value: Expr, body: Expr)
+    case assign(target: String, value: Expr)
+    case sequence(left: Expr, right: Expr)
 }
 
 // MARK: - Parser
@@ -281,6 +315,8 @@ private class Parser {
         case .and: return "and"
         case .or: return "or"
         case .in: return "in"
+        case .fun: return "fun"
+        case .let: return "let"
         case .eq: return "eq"
         case .neq: return "neq"
         case .lt: return "lt"
@@ -295,6 +331,14 @@ private class Parser {
         case .rParen: return "rParen"
         case .lBracket: return "lBracket"
         case .rBracket: return "rBracket"
+        case .arrow: return "arrow"
+        case .larrow: return "larrow"
+        case .semicolon: return "semicolon"
+        case .equals: return "equals"
+        case .plus: return "plus"
+        case .minus: return "minus"
+        case .star: return "star"
+        case .slash: return "slash"
         case .eof: return "eof"
         case .error: return "error"
         }
@@ -304,12 +348,56 @@ private class Parser {
 
     func parse() -> Expr? {
         if case .eof = peek() { return nil }
-        let node = parseTernary()
+        let node = parseSequence()
         // Ignore trailing tokens
         return node
     }
 
-    /// ternary = or_expr ( '?' expr ':' expr )?
+    /// sequence = let_expr (';' let_expr)*
+    func parseSequence() -> Expr {
+        var node = parseLet()
+        while case .semicolon = peek() {
+            pos += 1
+            let right = parseLet()
+            node = .sequence(left: node, right: right)
+        }
+        return node
+    }
+
+    /// let_expr = 'let' IDENT '=' sequence 'in' let_expr | assign
+    func parseLet() -> Expr {
+        if case .let = peek() {
+            pos += 1
+            guard case .ident(let name) = peek() else {
+                return .literal(.null)
+            }
+            pos += 1
+            expect(.equals)
+            let value = parseSequence()
+            expect(.in)
+            let body = parseLet()
+            return .letBinding(name: name, value: value, body: body)
+        }
+        return parseAssign()
+    }
+
+    /// assign = ternary '<-' assign | ternary
+    func parseAssign() -> Expr {
+        let node = parseTernary()
+        if case .larrow = peek() {
+            pos += 1
+            // The left side must be an identifier (Path with one segment)
+            if case .path(let segs) = node, segs.count == 1 {
+                let value = parseAssign()
+                return .assign(target: segs[0], value: value)
+            }
+            // Parse error — fall through with null
+            return .literal(.null)
+        }
+        return node
+    }
+
+    /// ternary = or_expr ( '?' ternary ':' ternary )?
     func parseTernary() -> Expr {
         let node = parseOr()
         if case .question = peek() {
@@ -344,19 +432,24 @@ private class Parser {
         return node
     }
 
-    /// not_expr = 'not' not_expr | comparison
+    /// not_expr = 'not' not_expr | '-' not_expr | comparison
     func parseNot() -> Expr {
         if case .not = peek() {
             pos += 1
             let operand = parseNot()
             return .unaryNot(operand)
         }
+        if case .minus = peek() {
+            pos += 1
+            let operand = parseNot()
+            return .unaryMinus(operand)
+        }
         return parseComparison()
     }
 
-    /// comparison = primary ( comp_op primary )?
+    /// comparison = addition ( comp_op addition )?
     func parseComparison() -> Expr {
-        let node = parsePrimary()
+        let node = parseAddition()
         let op: BinOp?
         switch peek() {
         case .eq: op = .eq
@@ -365,19 +458,56 @@ private class Parser {
         case .gt: op = .gt
         case .lte: op = .lte
         case .gte: op = .gte
-        case .in: op = .in
         default: op = nil
         }
         if let op = op {
             pos += 1
-            let right = parsePrimary()
+            let right = parseAddition()
             return .binaryOp(op: op, left: node, right: right)
         }
         return node
     }
 
+    /// addition = multiplication (('+' | '-') multiplication)*
+    func parseAddition() -> Expr {
+        var node = parseMultiplication()
+        while true {
+            if case .plus = peek() {
+                pos += 1
+                let right = parseMultiplication()
+                node = .binaryOp(op: .plus, left: node, right: right)
+            } else if case .minus = peek() {
+                pos += 1
+                let right = parseMultiplication()
+                node = .binaryOp(op: .minus, left: node, right: right)
+            } else {
+                break
+            }
+        }
+        return node
+    }
+
+    /// multiplication = primary (('*' | '/') primary)*
+    func parseMultiplication() -> Expr {
+        var node = parsePrimary()
+        while true {
+            if case .star = peek() {
+                pos += 1
+                let right = parsePrimary()
+                node = .binaryOp(op: .star, left: node, right: right)
+            } else if case .slash = peek() {
+                pos += 1
+                let right = parsePrimary()
+                node = .binaryOp(op: .slash, left: node, right: right)
+            } else {
+                break
+            }
+        }
+        return node
+    }
+
     /// primary = atom accessor*
-    /// accessor = '.' IDENT | '.' NUMBER | '[' expr ']'
+    /// accessor = '.' IDENT | '.' NUMBER | '[' expr ']' | '(' args ')'
     func parsePrimary() -> Expr {
         var node = parseAtom()
         while true {
@@ -408,6 +538,12 @@ private class Parser {
                 case .in:
                     pos += 1
                     node = extendOrDot(node, "in")
+                case .fun:
+                    pos += 1
+                    node = extendOrDot(node, "fun")
+                case .let:
+                    pos += 1
+                    node = extendOrDot(node, "let")
                 case .number(let n):
                     // Integer index after dot (e.g. list.0)
                     pos += 1
@@ -418,9 +554,29 @@ private class Parser {
                 }
             } else if case .lBracket = peek() {
                 pos += 1
-                let indexExpr = parseTernary()
+                let indexExpr = parseSequence()
                 expect(.rBracket)
                 node = .indexAccess(obj: node, index: indexExpr)
+            } else if case .lParen = peek() {
+                // Function application: expr(args)
+                pos += 1
+                var args: [Expr] = []
+                if case .rParen = peek() {
+                    // no args
+                } else {
+                    args.append(parseSequence())
+                    while case .comma = peek() {
+                        pos += 1
+                        args.append(parseSequence())
+                    }
+                }
+                expect(.rParen)
+                // If node is a Path with one segment, use FuncCall for compat
+                if case .path(let segs) = node, segs.count == 1 {
+                    node = .funcCall(name: segs[0], args: args)
+                } else {
+                    node = .funcCall(name: "__apply__", args: [node] + args)
+                }
             } else {
                 break
             }
@@ -437,27 +593,45 @@ private class Parser {
         return .dotAccess(obj: node, member: member)
     }
 
-    /// atom = IDENT '(' args? ')' | IDENT | literal | '(' expr ')'
+    /// atom = 'fun' ... | IDENT | literal | '(' expr ')' | '[' items ']'
     func parseAtom() -> Expr {
         switch peek() {
-        case .ident(let name):
+        // Lambda: fun x -> body | fun (params) -> body | fun () -> body
+        case .fun:
             pos += 1
-            // Check for function call: IDENT '('
+            var params: [String] = []
             if case .lParen = peek() {
                 pos += 1
-                var args: [Expr] = []
                 if case .rParen = peek() {
-                    // no args
+                    // nullary
                 } else {
-                    args.append(parseTernary())
+                    guard case .ident(let first) = peek() else {
+                        return .literal(.null)
+                    }
+                    pos += 1
+                    params.append(first)
                     while case .comma = peek() {
                         pos += 1
-                        args.append(parseTernary())
+                        guard case .ident(let next) = peek() else {
+                            return .literal(.null)
+                        }
+                        pos += 1
+                        params.append(next)
                     }
                 }
                 expect(.rParen)
-                return .funcCall(name: name, args: args)
+            } else if case .ident(let name) = peek() {
+                // Unary lambda without parens: fun x -> body
+                pos += 1
+                params.append(name)
             }
+            // else: fun -> body is nullary (caught by expect below)
+            expect(.arrow)
+            let body = parseSequence()
+            return .lambda(params: params, body: body)
+
+        case .ident(let name):
+            pos += 1
             return .path([name])
 
         case .number(let n):
@@ -486,9 +660,25 @@ private class Parser {
 
         case .lParen:
             pos += 1
-            let node = parseTernary()
+            let node = parseSequence()
             expect(.rParen)
             return node
+
+        // List literal: [expr, expr, ...]
+        case .lBracket:
+            pos += 1
+            var items: [Expr] = []
+            if case .rBracket = peek() {
+                // empty list
+            } else {
+                items.append(parseSequence())
+                while case .comma = peek() {
+                    pos += 1
+                    items.append(parseSequence())
+                }
+            }
+            expect(.rBracket)
+            return .literal(.list(items))
 
         default:
             // Unexpected token -- return null literal as fallback.
@@ -507,10 +697,10 @@ private func parseExpr(_ source: String) -> Expr? {
 // MARK: - Evaluator
 
 /// Evaluate an AST node against a context.
-private func evalNode(_ node: Expr, _ ctx: [String: Any]) -> Value {
+func evalNode(_ node: Expr, _ ctx: [String: Any]) -> Value {
     switch node {
     case .literal(let lit):
-        return evalLiteral(lit)
+        return evalLiteral(lit, ctx)
     case .path(let segs):
         return evalPath(segs, ctx)
     case .funcCall(let name, let args):
@@ -523,24 +713,49 @@ private func evalNode(_ node: Expr, _ ctx: [String: Any]) -> Value {
         return evalBinary(op, left, right, ctx)
     case .unaryNot(let operand):
         return evalUnaryNot(operand, ctx)
+    case .unaryMinus(let operand):
+        return evalUnaryMinus(operand, ctx)
     case .ternary(let cond, let trueExpr, let falseExpr):
         return evalTernary(cond, trueExpr, falseExpr, ctx)
     case .logicalAnd(let left, let right):
         return evalLogicalAnd(left, right, ctx)
     case .logicalOr(let left, let right):
         return evalLogicalOr(left, right, ctx)
+    case .lambda(let params, let body):
+        return .closure(params: params, body: body, capturedCtx: ctx)
+    case .letBinding(let name, let value, let body):
+        let val = evalNode(value, ctx)
+        var childCtx = ctx
+        if case .closure = val {
+            childCtx[name] = val
+        } else {
+            childCtx[name] = val.toAny()
+        }
+        return evalNode(body, childCtx)
+    case .assign(let target, let value):
+        let val = evalNode(value, ctx)
+        if let storeCb = ctx["__store_cb__"] as? (String, Value) -> Void {
+            storeCb(target, val)
+        }
+        return val
+    case .sequence(let left, let right):
+        let _ = evalNode(left, ctx)
+        return evalNode(right, ctx)
     }
 }
 
 // MARK: - Literals
 
-private func evalLiteral(_ lit: LiteralKind) -> Value {
+private func evalLiteral(_ lit: LiteralKind, _ ctx: [String: Any]) -> Value {
     switch lit {
     case .number(let n): return .number(n)
     case .str(let s): return .string(s)
     case .color(let c): return Value.colorValue(c)
     case .bool(let b): return .bool(b)
     case .null: return .null
+    case .list(let items):
+        let values = items.map { evalNode($0, ctx) }
+        return .list(values.map { AnyJSON($0.toAny() ?? NSNull()) })
     }
 }
 
@@ -660,7 +875,41 @@ private func valToDouble(_ v: Value) -> Double {
     return 0.0
 }
 
+/// Apply a closure value to evaluated arguments.
+private func applyClosure(_ closureVal: Value, _ evaluatedArgs: [Value], _ callerCtx: [String: Any]) -> Value {
+    guard case .closure(let params, let body, let capturedCtx) = closureVal else {
+        return .null
+    }
+    guard evaluatedArgs.count == params.count else { return .null }
+    var callCtx = capturedCtx
+    for (k, v) in callerCtx { callCtx[k] = v }
+    for (p, a) in zip(params, evaluatedArgs) {
+        if case .closure = a {
+            callCtx[p] = a
+        } else {
+            callCtx[p] = a.toAny()
+        }
+    }
+    return evalNode(body, callCtx)
+}
+
 private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> Value {
+    // __apply__: first arg is the callee expression result
+    if name == "__apply__" && args.count >= 1 {
+        let callee = evalNode(args[0], ctx)
+        if case .closure = callee {
+            let evaluatedArgs = args.dropFirst().map { evalNode($0, ctx) }
+            return applyClosure(callee, Array(evaluatedArgs), ctx)
+        }
+        return .null
+    }
+
+    // Check if name resolves to a closure in scope
+    if let closureVal = ctx[name] as? Value, case .closure = closureVal {
+        let evaluatedArgs = args.map { evalNode($0, ctx) }
+        return applyClosure(closureVal, evaluatedArgs, ctx)
+    }
+
     // Color decomposition: single color argument -> number
     typealias DecomposeFunc = (UInt8, UInt8, UInt8) -> Int
 
@@ -738,6 +987,20 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         let (nr, ng, nb) = hsbToRgb(Double(newH), Double(s), Double(bv))
         return Value.colorValue(rgbToHex(nr, ng, nb))
 
+    // mem: (element, list) -> bool — list membership
+    case "mem":
+        guard args.count == 2 else { return .bool(false) }
+        let elem = evalNode(args[0], ctx)
+        let lst = evalNode(args[1], ctx)
+        guard case .list(let arr) = lst else { return .bool(false) }
+        for item in arr {
+            let itemVal = Value.fromJson(item.value)
+            if elem.strictEq(itemVal) {
+                return .bool(true)
+            }
+        }
+        return .bool(false)
+
     // Unknown function
     default:
         return .null
@@ -757,7 +1020,28 @@ private func evalBinary(_ op: BinOp, _ left: Expr, _ right: Expr, _ ctx: [String
     case .gt: return numericCmp(lv, rv) { $0 > $1 }
     case .lte: return numericCmp(lv, rv) { $0 <= $1 }
     case .gte: return numericCmp(lv, rv) { $0 >= $1 }
-    case .in: return evalIn(lv, rv)
+    case .plus:
+        if case .number(let a) = lv, case .number(let b) = rv {
+            return .number(a + b)
+        }
+        // String concatenation
+        return .string(lv.toStringCoerce() + rv.toStringCoerce())
+    case .minus:
+        if case .number(let a) = lv, case .number(let b) = rv {
+            return .number(a - b)
+        }
+        return .null
+    case .star:
+        if case .number(let a) = lv, case .number(let b) = rv {
+            return .number(a * b)
+        }
+        return .null
+    case .slash:
+        if case .number(let a) = lv, case .number(let b) = rv {
+            if b == 0 { return .null }
+            return .number(a / b)
+        }
+        return .null
     }
 }
 
@@ -768,23 +1052,21 @@ private func numericCmp(_ left: Value, _ right: Value, _ f: (Double, Double) -> 
     return .bool(false)
 }
 
-private func evalIn(_ left: Value, _ right: Value) -> Value {
-    if case .list(let arr) = right {
-        for item in arr {
-            let itemVal = Value.fromJson(item.value)
-            if left.strictEq(itemVal) {
-                return .bool(true)
-            }
-        }
-    }
-    return .bool(false)
-}
-
 // MARK: - Unary not
 
 private func evalUnaryNot(_ operand: Expr, _ ctx: [String: Any]) -> Value {
     let val = evalNode(operand, ctx)
     return .bool(!val.toBool())
+}
+
+// MARK: - Unary minus
+
+private func evalUnaryMinus(_ operand: Expr, _ ctx: [String: Any]) -> Value {
+    let val = evalNode(operand, ctx)
+    if case .number(let n) = val {
+        return .number(-n)
+    }
+    return .null
 }
 
 // MARK: - Ternary

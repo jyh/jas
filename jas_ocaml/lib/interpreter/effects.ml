@@ -25,6 +25,7 @@ let value_to_json (v : Expr_eval.value) : Yojson.Safe.t =
   | Str s -> `String s
   | Color c -> `String c
   | List l -> `List l
+  | Closure _ -> `Null
 
 (** Extract default values from a dialog state definition. *)
 let state_defaults (state_defs : Yojson.Safe.t) : (string * Yojson.Safe.t) list =
