@@ -616,7 +616,9 @@ def _render_select(el, theme, state):
     options_html = ""
     for opt in el.get("options", []):
         if isinstance(opt, dict):
-            options_html += f'<option value="{escape(opt["id"])}">{escape(opt["label"])}</option>'
+            val = opt.get("value", opt.get("id", ""))
+            label = opt.get("label", str(val))
+            options_html += f'<option value="{escape(str(val))}">{escape(str(label))}</option>'
         else:
             options_html += f'<option value="{escape(str(opt))}">{escape(str(opt))}</option>'
     return Markup(
