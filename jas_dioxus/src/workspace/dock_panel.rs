@@ -69,7 +69,7 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
 
 /// Build a live state map from AppState for the YAML eval context.
 /// Includes fill_color, stroke_color, fill_on_top, and other state fields.
-fn build_live_state_map(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
+pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
     use serde_json::Value as J;
 
     // Start with workspace defaults
