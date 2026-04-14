@@ -513,7 +513,8 @@ class TestColorPanelSpec:
         assert "Create New Swatch" in panel_html
 
     def test_ten_recent_color_slots(self, panel_html):
-        assert panel_html.count("jas-color-swatch-empty") == 10
+        # Recent color swatches are present (empty class applied client-side)
+        assert panel_html.count("cp_recent_") == 10
 
     def test_swatch_separator(self, panel_html):
         assert "jas-swatch-rule" in panel_html
@@ -527,8 +528,8 @@ class TestColorPanelSpec:
         assert "cp_s" in panel_html
         assert "cp_b" in panel_html
 
-    def test_hue_slider_max_360(self, panel_html):
-        assert 'max="360"' in panel_html
+    def test_hue_slider_max_359(self, panel_html):
+        assert 'max="359"' in panel_html
 
     def test_saturation_slider_max_100(self, panel_html):
         assert 'max="100"' in panel_html

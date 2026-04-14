@@ -10,14 +10,14 @@ actions:
       are added.
     category: file
     effects:
-      - set: { active_tab: "{{state.tab_count}}" }
+      - set: { active_tab: "state.tab_count" }
       # Create the tab button (with close x) in the tab bar.
-      # {{prop.index}} is resolved once at creation time; {{state.*}}
+      # prop.index is resolved once at creation time; state.*
       # references remain reactive.
       - create_child:
           parent: canvas_tab_bar
           props:
-            index: "{{state.tab_count}}"
+            index: "state.tab_count"
           element:
             id: "canvas_tab_{{prop.index}}"
             type: container
@@ -26,9 +26,9 @@ actions:
             behavior:
               - event: click
                 effects:
-                  - set: { active_tab: "{{prop.index}}" }
+                  - set: { active_tab: "prop.index" }
             bind:
-              active: "{{state.active_tab}} == {{prop.index}}"
+              active: "state.active_tab == prop.index"
             children:
               - type: text
                 content: "Untitled-{{prop.index}}"
@@ -40,12 +40,12 @@ actions:
                   - event: click
                     stop_propagation: true
                     action: close_tab
-                    params: { index: "{{prop.index}}" }
+                    params: { index: "prop.index" }
       # Create the canvas in the drawing surface
       - create_child:
           parent: drawing_surface
           props:
-            index: "{{state.tab_count}}"
+            index: "state.tab_count"
           element:
             id: "canvas_surface_{{prop.index}}"
             type: canvas
@@ -53,7 +53,7 @@ actions:
             tier: 3
             style: { flex: 1, background: "#ffffff" }
             bind:
-              visible: "{{state.active_tab}} == {{prop.index}}"
+              visible: "state.active_tab == prop.index"
       - increment: { key: tab_count, by: 1 }
   open_file:
     description: >
@@ -317,7 +317,7 @@ actions:
     params:
       tool: { type: state_ref, ref: "active_tool" }
     effects:
-      - set: { active_tool: "{{param.tool}}" }
+      - set: { active_tool: "param.tool" }
 
   # ── Fill / Stroke ─────────────────────────────────────────
   swap_fill_stroke:
@@ -370,7 +370,7 @@ actions:
     params:
       target: { type: enum, values: [fill, stroke] }
     effects:
-      - open_dialog: { id: color_picker, params: { target: "{{param.target}}" } }
+      - open_dialog: { id: color_picker, params: { target: "param.target" } }
 
   set_active_color:
     description: >
@@ -386,12 +386,12 @@ actions:
       color: { type: color }
     effects:
       - if:
-          condition: "{{state.fill_on_top}}"
+          condition: "state.fill_on_top"
           then:
-            - set: { fill_color: "{{param.color}}" }
+            - set: { fill_color: "param.color" }
           else:
-            - set: { stroke_color: "{{param.color}}" }
-      - push_recent_color: { color: "{{param.color}}" }
+            - set: { stroke_color: "param.color" }
+      - list_push: { target: "panel.recent_colors", value: "param.color", unique: true, max_length: 10 }
 
   set_active_color_none:
     description: >
@@ -403,7 +403,7 @@ actions:
     category: fill_stroke
     effects:
       - if:
-          condition: "{{state.fill_on_top}}"
+          condition: "state.fill_on_top"
           then:
             - set: { fill_color: null }
           else:
@@ -418,15 +418,15 @@ actions:
     category: fill_stroke
     effects:
       - if:
-          condition: "{{state.fill_on_top}}"
+          condition: "state.fill_on_top"
           then:
             - if:
-                condition: "{{state.fill_color}} == null"
+                condition: "state.fill_color == null"
                 then:
                   - set: { fill_color: "#000000" }
           else:
             - if:
-                condition: "{{state.stroke_color}} == null"
+                condition: "state.stroke_color == null"
                 then:
                   - set: { stroke_color: "#000000" }
 
@@ -446,10 +446,14 @@ actions:
       mode is unchanged. Disabled when the active attribute is none.
       Enabled only when the active color is non-null.
     category: fill_stroke
-    enabled_when: "{{state.fill_on_top}} ? {{state.fill_color}} != null : {{state.stroke_color}} != null"
+    enabled_when: "state.fill_on_top ? state.fill_color != null : state.stroke_color != null"
     effects:
-      - invert_color:
-          target: "{{state.fill_on_top}} ? fill_color : stroke_color"
+      - if:
+          condition: "state.fill_on_top"
+          then:
+            - set: { fill_color: "invert(state.fill_color)" }
+          else:
+            - set: { stroke_color: "invert(state.stroke_color)" }
 
   complement_active_color:
     description: >
@@ -461,10 +465,14 @@ actions:
       undefined and the operation is a silent no-op — the color is
       unchanged. Disabled when the active attribute is none.
     category: fill_stroke
-    enabled_when: "{{state.fill_on_top}} ? {{state.fill_color}} != null : {{state.stroke_color}} != null"
+    enabled_when: "state.fill_on_top ? state.fill_color != null : state.stroke_color != null"
     effects:
-      - complement_color:
-          target: "{{state.fill_on_top}} ? fill_color : stroke_color"
+      - if:
+          condition: "state.fill_on_top"
+          then:
+            - set: { fill_color: "complement(state.fill_color)" }
+          else:
+            - set: { stroke_color: "complement(state.stroke_color)" }
 
   set_color_panel_mode:
     description: >
@@ -478,7 +486,7 @@ actions:
     params:
       mode: { type: enum, values: [grayscale, rgb, hsb, cmyk, web_safe_rgb] }
     effects:
-      - set_panel_state: { panel: color, key: mode, value: "{{param.mode}}" }
+      - set_panel_state: { panel: color, key: mode, value: "param.mode" }
 
   # ── Window / Layout ──────────────────────────────────────
   toggle_pane:
@@ -609,7 +617,7 @@ actions:
     params:
       name: { type: string }
     effects:
-      - load_layout: { container: main, name: "{{param.name}}" }
+      - load_layout: { container: main, name: "param.name" }
   delete_workspace:
     description: >
       Delete a user-saved workspace layout from storage. The layout is
@@ -619,7 +627,7 @@ actions:
     params:
       name: { type: string }
     effects:
-      - delete_layout: { name: "{{param.name}}" }
+      - delete_layout: { name: "param.name" }
 
   # ── Appearance ────────────────────────────────────────────
   switch_appearance:
@@ -631,7 +639,7 @@ actions:
     params:
       name: { type: string }
     effects:
-      - switch_appearance: { name: "{{param.name}}" }
+      - switch_appearance: { name: "param.name" }
   save_appearance_as:
     description: >
       Open the appearance_save_as dialog prompting the user for an
@@ -664,9 +672,9 @@ actions:
       - if:
           condition: "active_document.is_modified"
           then:
-            - open_dialog: { id: save_changes_tab, params: { filename: "{{active_document.filename}}" } }
+            - open_dialog: { id: save_changes_tab, params: { filename: "active_document.filename" } }
           else:
-            - dispatch: { action: remove_tab, params: { index: "{{param.index}}" } }
+            - dispatch: { action: remove_tab, params: { index: "param.index" } }
   remove_tab:
     description: >
       Remove a tab and its canvas without prompting. Removes both the tab
@@ -686,9 +694,9 @@ actions:
             - set: { active_tab: -1 }
           else:
             - if:
-                condition: "{{param.index}} > 0"
+                condition: "param.index > 0"
                 then:
-                  - set: { active_tab: "{{param.index}} - 1" }
+                  - set: { active_tab: "param.index - 1" }
                 else:
                   - set: { active_tab: 0 }
 
@@ -703,7 +711,7 @@ actions:
     params:
       panel: { type: enum, values: [layers, color, stroke, properties] }
     effects:
-      - close_panel: { panel: "{{param.panel}}" }
+      - close_panel: { panel: "param.panel" }
 
   show_panel:
     description: >
@@ -714,7 +722,7 @@ actions:
     params:
       panel: { type: enum, values: [layers, color, stroke, properties] }
     effects:
-      - show_panel: { panel: "{{param.panel}}", target: dock_main }
+      - show_panel: { panel: "param.panel", target: dock_main }
       - set: { dock_visible: true, dock_collapsed: false }
 
   # ── Dialog ────────────────────────────────────────────────

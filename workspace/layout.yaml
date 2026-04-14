@@ -14,7 +14,7 @@ layout:
       description: "Begin dragging a pane by its title bar"
       effects:
         - cursor: grabbing
-        - set: { _drag_pane: "{{event.target_id}}", _drag_offset_x: "{{event.offset_x}}", _drag_offset_y: "{{event.offset_y}}" }
+        - set: { _drag_pane: "event.target_id", _drag_offset_x: "event.offset_x", _drag_offset_y: "event.offset_y" }
     - event: drag_move
       description: >
         Move pane to follow cursor. If any pane edge is within
@@ -23,9 +23,9 @@ layout:
         snap_preview colored guide line.
       effects:
         - set_style:
-            target: "{{state._drag_pane}}"
-            left: "{{event.client_x - state._drag_offset_x}}"
-            top: "{{event.client_y - state._drag_offset_y}}"
+            target: "state._drag_pane"
+            left: "event.client_x - state._drag_offset_x"
+            top: "event.client_y - state._drag_offset_y"
     - event: drag_end
       description: >
         Drop the pane at its current position. Remove any snap
@@ -38,8 +38,8 @@ layout:
       condition: "event.target_class == 'jas-edge-handle'"
       description: "Begin resizing a pane by its edge handle"
       effects:
-        - cursor: "{{event.resize_cursor}}"
-        - set: { _resize_pane: "{{event.target_id}}", _resize_edge: "{{event.edge}}", _resize_start_x: "{{event.client_x}}", _resize_start_y: "{{event.client_y}}" }
+        - cursor: "event.resize_cursor"
+        - set: { _resize_pane: "event.target_id", _resize_edge: "event.edge", _resize_start_x: "event.client_x", _resize_start_y: "event.client_y" }
     - event: drag_move
       condition: "state._resize_pane != null"
       description: >
@@ -51,8 +51,8 @@ layout:
         theme.sizes.snap_distance pixels.
       effects:
         - set_style:
-            target: "{{state._resize_pane}}"
-            "{{state._resize_edge}}": "{{event.client_x}}"
+            target: "state._resize_pane"
+            "state._resize_edge": "event.client_x"
     - event: drag_end
       condition: "state._resize_pane != null"
       effects:
@@ -78,7 +78,7 @@ layout:
         background: "{{theme.colors.pane_bg}}"
         border: "1px solid {{theme.colors.border}}"
       bind:
-        visible: "{{state.toolbar_visible}}"
+        visible: "state.toolbar_visible"
       title_bar:
         label: ""
         draggable: true
@@ -131,7 +131,7 @@ layout:
                     action: select_tool
                     params: { tool: selection }
                 bind:
-                  checked: "{{state.active_tool}} == selection"
+                  checked: 'state.active_tool == "selection"'
 
               # Row 0, Col 1: Arrow slot (Partial Selection / Interior Selection)
               - id: btn_arrow_slot
@@ -165,7 +165,7 @@ layout:
                     action: select_tool
                     params: { tool: partial_selection }
                 bind:
-                  checked: "{{state.active_tool}} in [partial_selection, interior_selection]"
+                  checked: 'state.active_tool in ["partial_selection", "interior_selection"]'
                 alternates:
                   menu_id: arrow_alternates
                   items:
@@ -209,7 +209,7 @@ layout:
                     action: select_tool
                     params: { tool: pen }
                 bind:
-                  checked: "{{state.active_tool}} in [pen, add_anchor, delete_anchor, anchor_point]"
+                  checked: 'state.active_tool in ["pen", "add_anchor", "delete_anchor", "anchor_point"]'
                 alternates:
                   menu_id: pen_alternates
                   items:
@@ -252,7 +252,7 @@ layout:
                     action: select_tool
                     params: { tool: pencil }
                 bind:
-                  checked: "{{state.active_tool}} in [pencil, path_eraser, smooth]"
+                  checked: 'state.active_tool in ["pencil", "path_eraser", "smooth"]'
                 alternates:
                   menu_id: pencil_alternates
                   items:
@@ -293,7 +293,7 @@ layout:
                     action: select_tool
                     params: { tool: type }
                 bind:
-                  checked: "{{state.active_tool}} in [type, type_on_path]"
+                  checked: 'state.active_tool in ["type", "type_on_path"]'
                 alternates:
                   menu_id: text_alternates
                   items:
@@ -322,7 +322,7 @@ layout:
                     action: select_tool
                     params: { tool: line }
                 bind:
-                  checked: "{{state.active_tool}} == line"
+                  checked: 'state.active_tool == "line"'
 
               # Row 3, Col 0: Shape slot
               - id: btn_shape_slot
@@ -355,7 +355,7 @@ layout:
                     action: select_tool
                     params: { tool: rect }
                 bind:
-                  checked: "{{state.active_tool}} in [rect, rounded_rect, polygon, star]"
+                  checked: 'state.active_tool in ["rect", "rounded_rect", "polygon", "star"]'
                 alternates:
                   menu_id: shape_alternates
                   items:
@@ -388,7 +388,7 @@ layout:
                     action: select_tool
                     params: { tool: lasso }
                 bind:
-                  checked: "{{state.active_tool}} == lasso"
+                  checked: 'state.active_tool == "lasso"'
 
           - type: spacer
             style: { height: 8 }
@@ -428,8 +428,8 @@ layout:
                       When fill is null, shows the none indicator.
                     style: { size: 28, position: { x: 0, y: 0 } }
                     bind:
-                      color: "{{state.fill_color}}"
-                      z_index: "{{state.fill_on_top}} == true ? 2 : 1"
+                      color: "state.fill_color"
+                      z_index: "state.fill_on_top ? 2 : 1"
                     behavior:
                       - event: click
                         effects:
@@ -450,8 +450,8 @@ layout:
                     hollow: true
                     style: { size: 28, position: { x: 10, y: 10 } }
                     bind:
-                      color: "{{state.stroke_color}}"
-                      z_index: "{{state.fill_on_top}} == true ? 1 : 2"
+                      color: "state.stroke_color"
+                      z_index: "state.fill_on_top ? 1 : 2"
                     behavior:
                       - event: click
                         effects:
@@ -521,10 +521,10 @@ layout:
                     behavior:
                       - event: click
                         action: set_fill_none
-                        condition: "{{state.fill_on_top}}"
+                        condition: "state.fill_on_top"
                       - event: click
                         action: set_stroke_none
-                        condition: "not {{state.fill_on_top}}"
+                        condition: "not state.fill_on_top"
 
           - type: spacer
 
@@ -550,17 +550,17 @@ layout:
         background: "{{theme.colors.window_bg}}"
         border: "1px solid {{theme.colors.border}}"
       bind:
-        visible: "{{state.canvas_visible}}"
+        visible: "state.canvas_visible"
       title_bar:
         id: canvas_title_bar
         label: ""
         draggable: true
         behavior:
           - event: double_click
-            condition: "not {{state.canvas_maximized}}"
+            condition: "not state.canvas_maximized"
             action: maximize_canvas
           - event: double_click
-            condition: "{{state.canvas_maximized}}"
+            condition: "state.canvas_maximized"
             action: restore_canvas
         buttons:
           - id: maximize_btn
@@ -570,10 +570,10 @@ layout:
             style: { size: 14 }
             behavior:
               - event: click
-                condition: "not {{state.canvas_maximized}}"
+                condition: "not state.canvas_maximized"
                 action: maximize_canvas
               - event: click
-                condition: "{{state.canvas_maximized}}"
+                condition: "state.canvas_maximized"
                 action: restore_canvas
           - id: canvas_close_btn
             type: icon_button
@@ -608,7 +608,7 @@ layout:
               gap: 0
               alignment: center
             bind:
-              visible: "{{state.tab_count}} != 0"
+              visible: "state.tab_count != 0"
             children: []
 
           # Drawing surface area (canvases added dynamically)
@@ -643,7 +643,7 @@ layout:
                   height: auto
                   opacity: 0.35
                 bind:
-                  visible: "{{state.tab_count}} == 0"
+                  visible: "state.tab_count == 0"
 
     # ─── Dock panel pane ────────────────────────────────────
     - id: dock_pane
@@ -665,7 +665,7 @@ layout:
         background: "{{theme.colors.pane_bg}}"
         border: "1px solid {{theme.colors.border}}"
       bind:
-        visible: "{{state.dock_visible}}"
+        visible: "state.dock_visible"
       title_bar:
         label: ""
         draggable: true
@@ -677,13 +677,13 @@ layout:
             style: { size: 20 }
             behavior:
               - event: click
-                condition: "not {{state.dock_collapsed}}"
+                condition: "not state.dock_collapsed"
                 action: collapse_dock
               - event: click
-                condition: "{{state.dock_collapsed}}"
+                condition: "state.dock_collapsed"
                 action: expand_dock
             bind:
-              icon: "{{state.dock_collapsed}} == true ? chevron_left : chevron_right"
+              icon: 'state.dock_collapsed ? "chevron_left" : "chevron_right"'
           - id: dock_close_btn
             type: icon_button
             summary: "Close panels"
