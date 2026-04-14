@@ -152,3 +152,162 @@ class TestMultipleEffects:
         ], {}, store)
         assert store.get("a") == 10
         assert store.get("b") == 10
+
+
+class TestOpenDialogEffect:
+    """Tests for the open_dialog effect."""
+
+    SIMPLE_DIALOG = {
+        "simple": {
+            "summary": "Simple",
+            "modal": True,
+            "state": {
+                "name": {"type": "string", "default": ""},
+            },
+            "content": {"type": "container"},
+        }
+    }
+
+    COLOR_PICKER_DIALOG = {
+        "color_picker": {
+            "summary": "Select Color",
+            "modal": True,
+            "params": {
+                "target": {"type": "enum", "values": ["fill", "stroke"]},
+            },
+            "state": {
+                "h": {"type": "number", "default": 0},
+                "s": {"type": "number", "default": 0},
+                "b": {"type": "number", "default": 100},
+                "color": {"type": "color", "default": "#ffffff"},
+            },
+            "init": {
+                "color": 'param.target == "fill" ? state.fill_color : state.stroke_color',
+                "h": "hsb_h(dialog.color)",
+                "s": "hsb_s(dialog.color)",
+                "b": "hsb_b(dialog.color)",
+            },
+            "content": {"type": "container"},
+        }
+    }
+
+    def test_open_dialog_sets_defaults(self):
+        store = StateStore()
+        run_effects(
+            [{"open_dialog": {"id": "simple"}}],
+            {}, store, dialogs=self.SIMPLE_DIALOG,
+        )
+        assert store.get_dialog_id() == "simple"
+        assert store.get_dialog("name") == ""
+
+    def test_open_dialog_with_params(self):
+        store = StateStore({"fill_color": "#ff0000", "stroke_color": "#0000ff"})
+        run_effects(
+            [{"open_dialog": {"id": "color_picker",
+                              "params": {"target": '"fill"'}}}],
+            {}, store, dialogs=self.COLOR_PICKER_DIALOG,
+        )
+        assert store.get_dialog_id() == "color_picker"
+        assert store.get_dialog("color") == "#ff0000"
+
+    def test_open_dialog_runs_init(self):
+        store = StateStore({"fill_color": "#00ff00", "stroke_color": "#0000ff"})
+        run_effects(
+            [{"open_dialog": {"id": "color_picker",
+                              "params": {"target": '"fill"'}}}],
+            {}, store, dialogs=self.COLOR_PICKER_DIALOG,
+        )
+        # hsb_h("#00ff00") = 120
+        assert store.get_dialog("h") == 120
+        assert store.get_dialog("s") == 100
+        assert store.get_dialog("b") == 100
+
+    def test_open_dialog_init_references_dialog_state(self):
+        """Init expressions that reference dialog.* (e.g. h: hsb_h(dialog.color))."""
+        store = StateStore({"fill_color": "#ff0000", "stroke_color": "#0000ff"})
+        run_effects(
+            [{"open_dialog": {"id": "color_picker",
+                              "params": {"target": '"stroke"'}}}],
+            {}, store, dialogs=self.COLOR_PICKER_DIALOG,
+        )
+        # dialog.color should be stroke_color = #0000ff
+        assert store.get_dialog("color") == "#0000ff"
+        # hsb_h("#0000ff") = 240
+        assert store.get_dialog("h") == 240
+
+    def test_open_dialog_param_expression_resolved(self):
+        """Param values can be expressions referencing state."""
+        store = StateStore({"fill_color": "#ff0000", "stroke_color": "#0000ff"})
+        run_effects(
+            [{"open_dialog": {"id": "color_picker",
+                              "params": {"target": '"fill"'}}}],
+            {}, store, dialogs=self.COLOR_PICKER_DIALOG,
+        )
+        assert store.get_dialog_params() == {"target": "fill"}
+
+    def test_open_dialog_no_state_section(self):
+        """Dialog with no state section should still open."""
+        dialogs = {
+            "confirm": {
+                "summary": "Confirm",
+                "modal": True,
+                "content": {"type": "container"},
+            }
+        }
+        store = StateStore()
+        run_effects(
+            [{"open_dialog": {"id": "confirm"}}],
+            {}, store, dialogs=dialogs,
+        )
+        assert store.get_dialog_id() == "confirm"
+
+
+class TestCloseDialogEffect:
+    def test_close_dialog_clears_state(self):
+        store = StateStore()
+        store.init_dialog("test", {"x": 1}, params={"p": "v"})
+        run_effects([{"close_dialog": None}], {}, store)
+        assert store.get_dialog_id() is None
+        assert store.get_dialog("x") is None
+
+    def test_close_dialog_with_id(self):
+        store = StateStore()
+        store.init_dialog("test", {"x": 1})
+        run_effects([{"close_dialog": "test"}], {}, store)
+        assert store.get_dialog_id() is None
+
+    def test_open_then_close(self):
+        dialogs = {
+            "simple": {
+                "summary": "S",
+                "state": {"name": {"type": "string", "default": ""}},
+                "content": {"type": "container"},
+            }
+        }
+        store = StateStore()
+        run_effects([{"open_dialog": {"id": "simple"}}], {}, store, dialogs=dialogs)
+        assert store.get_dialog_id() == "simple"
+        run_effects([{"close_dialog": None}], {}, store)
+        assert store.get_dialog_id() is None
+        assert store.get_dialog_state() == {}
+
+
+class TestDialogWithGlobalEffects:
+    """Test that dialog effects work alongside global effects (set, etc.)."""
+
+    def test_set_from_dialog_state(self):
+        """An effect sequence that opens a dialog, then sets global state from dialog."""
+        dialogs = {
+            "picker": {
+                "summary": "Pick",
+                "state": {"color": {"type": "color", "default": "#aabbcc"}},
+                "content": {"type": "container"},
+            }
+        }
+        store = StateStore({"fill_color": None})
+        # Open dialog
+        run_effects([{"open_dialog": {"id": "picker"}}], {}, store, dialogs=dialogs)
+        assert store.get_dialog("color") == "#aabbcc"
+        # Set global state from dialog state
+        run_effects([{"set": {"fill_color": "dialog.color"}}], {}, store)
+        assert store.get("fill_color") == "#aabbcc"

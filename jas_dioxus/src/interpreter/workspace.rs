@@ -111,6 +111,34 @@ impl Workspace {
     pub fn theme(&self) -> &serde_json::Value {
         self.data.get("theme").unwrap_or(&serde_json::Value::Null)
     }
+
+    /// Get the dialogs map.
+    pub fn dialogs(&self) -> &serde_json::Value {
+        self.data.get("dialogs").unwrap_or(&serde_json::Value::Null)
+    }
+
+    /// Get a specific dialog spec by id.
+    pub fn dialog(&self, id: &str) -> Option<&serde_json::Value> {
+        self.data.get("dialogs")?.get(id)
+    }
+
+    /// Extract default values from a dialog's state section.
+    pub fn dialog_state_defaults(&self, id: &str) -> HashMap<String, serde_json::Value> {
+        let mut defaults = HashMap::new();
+        if let Some(dialog) = self.dialog(id) {
+            if let Some(serde_json::Value::Object(state)) = dialog.get("state") {
+                for (key, defn) in state {
+                    let default_val = if let serde_json::Value::Object(d) = defn {
+                        d.get("default").cloned().unwrap_or(serde_json::Value::Null)
+                    } else {
+                        defn.clone()
+                    };
+                    defaults.insert(key.clone(), default_val);
+                }
+            }
+        }
+        defaults
+    }
 }
 
 /// Map PanelKind to YAML content id.
@@ -170,6 +198,43 @@ mod tests {
         let defaults = ws.panel_state_defaults("color_panel_content");
         assert!(defaults.contains_key("mode"));
         assert!(defaults.contains_key("h"));
+    }
+
+    #[test]
+    fn dialogs_present() {
+        let ws = Workspace::load().unwrap();
+        assert!(ws.dialogs().is_object());
+        assert!(ws.dialogs().as_object().unwrap().len() > 0);
+    }
+
+    #[test]
+    fn color_picker_dialog_exists() {
+        let ws = Workspace::load().unwrap();
+        let dialog = ws.dialog("color_picker");
+        assert!(dialog.is_some());
+        let dialog = dialog.unwrap();
+        assert_eq!(dialog.get("summary").and_then(|v| v.as_str()), Some("Select Color"));
+        assert!(dialog.get("state").is_some());
+        assert!(dialog.get("init").is_some());
+        assert!(dialog.get("content").is_some());
+    }
+
+    #[test]
+    fn dialog_state_defaults_extracted() {
+        let ws = Workspace::load().unwrap();
+        let defaults = ws.dialog_state_defaults("color_picker");
+        assert!(defaults.contains_key("h"));
+        assert!(defaults.contains_key("color"));
+        assert_eq!(defaults.get("h"), Some(&serde_json::json!(0)));
+    }
+
+    #[test]
+    fn workspace_save_as_dialog() {
+        let ws = Workspace::load().unwrap();
+        let dialog = ws.dialog("workspace_save_as");
+        assert!(dialog.is_some());
+        let defaults = ws.dialog_state_defaults("workspace_save_as");
+        assert!(defaults.contains_key("name"));
     }
 
     #[test]

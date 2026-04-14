@@ -152,3 +152,92 @@ class TestListPush:
         store.init_panel("color", {"recent": ["#aa", "#bb", "#cc"]})
         store.list_push("color", "recent", "#bb", unique=True, max_length=3)
         assert store.get_panel("color", "recent") == ["#bb", "#aa", "#cc"]
+
+
+class TestDialogState:
+    def test_init_dialog(self):
+        store = StateStore()
+        store.init_dialog("color_picker", {"h": 0, "s": 0, "color": "#ffffff"},
+                          params={"target": "fill"})
+        assert store.get_dialog_id() == "color_picker"
+        assert store.get_dialog("h") == 0
+        assert store.get_dialog("color") == "#ffffff"
+        assert store.get_dialog_params() == {"target": "fill"}
+
+    def test_get_set_dialog(self):
+        store = StateStore()
+        store.init_dialog("test", {"name": ""})
+        store.set_dialog("name", "hello")
+        assert store.get_dialog("name") == "hello"
+
+    def test_get_dialog_missing_key_returns_none(self):
+        store = StateStore()
+        store.init_dialog("test", {"x": 1})
+        assert store.get_dialog("nonexistent") is None
+
+    def test_get_dialog_no_dialog_returns_none(self):
+        store = StateStore()
+        assert store.get_dialog("anything") is None
+        assert store.get_dialog_id() is None
+        assert store.get_dialog_params() is None
+
+    def test_close_dialog(self):
+        store = StateStore()
+        store.init_dialog("test", {"x": 1}, params={"p": "v"})
+        store.close_dialog()
+        assert store.get_dialog_id() is None
+        assert store.get_dialog("x") is None
+        assert store.get_dialog_params() is None
+        assert store.get_dialog_state() == {}
+
+    def test_get_dialog_state_returns_copy(self):
+        store = StateStore()
+        store.init_dialog("test", {"a": 1, "b": 2})
+        state = store.get_dialog_state()
+        assert state == {"a": 1, "b": 2}
+        state["a"] = 999  # mutating copy shouldn't affect store
+        assert store.get_dialog("a") == 1
+
+    def test_eval_context_includes_dialog(self):
+        store = StateStore({"fill_color": "#ff0000"})
+        store.init_dialog("test", {"h": 180, "s": 50})
+        ctx = store.eval_context()
+        assert ctx["state"]["fill_color"] == "#ff0000"
+        assert ctx["dialog"]["h"] == 180
+        assert ctx["dialog"]["s"] == 50
+
+    def test_eval_context_includes_dialog_params(self):
+        store = StateStore()
+        store.init_dialog("test", {"x": 1}, params={"target": "fill"})
+        ctx = store.eval_context()
+        assert ctx["param"]["target"] == "fill"
+
+    def test_eval_context_extra_param_overrides_dialog_params(self):
+        """Extra context param takes precedence over dialog params."""
+        store = StateStore()
+        store.init_dialog("test", {"x": 1}, params={"target": "fill"})
+        ctx = store.eval_context({"param": {"target": "stroke"}})
+        assert ctx["param"]["target"] == "stroke"
+
+    def test_dialog_absent_when_closed(self):
+        store = StateStore({"x": 1})
+        ctx = store.eval_context()
+        assert "dialog" not in ctx
+
+    def test_dialog_and_panel_coexist(self):
+        """Dialog and panel namespaces are independent."""
+        store = StateStore()
+        store.init_panel("color", {"mode": "hsb"})
+        store.set_active_panel("color")
+        store.init_dialog("picker", {"h": 270})
+        ctx = store.eval_context()
+        assert ctx["panel"]["mode"] == "hsb"
+        assert ctx["dialog"]["h"] == 270
+
+    def test_init_dialog_replaces_previous(self):
+        store = StateStore()
+        store.init_dialog("first", {"x": 1})
+        store.init_dialog("second", {"y": 2})
+        assert store.get_dialog_id() == "second"
+        assert store.get_dialog("x") is None
+        assert store.get_dialog("y") == 2

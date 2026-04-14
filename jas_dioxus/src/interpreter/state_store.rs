@@ -8,11 +8,14 @@ use std::collections::HashMap;
 use serde_json;
 use super::expr_types::Value;
 
-/// Reactive state store for global and panel-scoped state.
+/// Reactive state store for global, panel-scoped, and dialog-scoped state.
 pub struct StateStore {
     state: HashMap<String, serde_json::Value>,
     panels: HashMap<String, HashMap<String, serde_json::Value>>,
     active_panel: Option<String>,
+    dialog: Option<HashMap<String, serde_json::Value>>,
+    dialog_id: Option<String>,
+    dialog_params: Option<HashMap<String, serde_json::Value>>,
 }
 
 impl StateStore {
@@ -21,6 +24,9 @@ impl StateStore {
             state: HashMap::new(),
             panels: HashMap::new(),
             active_panel: None,
+            dialog: None,
+            dialog_id: None,
+            dialog_params: None,
         }
     }
 
@@ -37,6 +43,45 @@ impl StateStore {
             }
         }
         store
+    }
+
+    // ── Dialog state ─────────────────────────────────────
+
+    pub fn init_dialog(
+        &mut self,
+        dialog_id: &str,
+        defaults: HashMap<String, serde_json::Value>,
+        params: Option<HashMap<String, serde_json::Value>>,
+    ) {
+        self.dialog_id = Some(dialog_id.to_string());
+        self.dialog = Some(defaults);
+        self.dialog_params = params;
+    }
+
+    pub fn get_dialog(&self, key: &str) -> &serde_json::Value {
+        self.dialog.as_ref()
+            .and_then(|d| d.get(key))
+            .unwrap_or(&serde_json::Value::Null)
+    }
+
+    pub fn set_dialog(&mut self, key: &str, value: serde_json::Value) {
+        if let Some(ref mut d) = self.dialog {
+            d.insert(key.to_string(), value);
+        }
+    }
+
+    pub fn dialog_id(&self) -> Option<&str> {
+        self.dialog_id.as_deref()
+    }
+
+    pub fn dialog_params(&self) -> Option<&HashMap<String, serde_json::Value>> {
+        self.dialog_params.as_ref()
+    }
+
+    pub fn close_dialog(&mut self) {
+        self.dialog_id = None;
+        self.dialog = None;
+        self.dialog_params = None;
     }
 
     // ── Global state ─────────────────────────────────────
@@ -112,6 +157,7 @@ impl StateStore {
     // ── Context for expression evaluation ────────────────
 
     /// Build a serde_json::Value context for the expression evaluator.
+    /// When a dialog is open, includes "dialog" and "param" keys.
     pub fn eval_context(&self) -> serde_json::Value {
         let mut ctx = serde_json::Map::new();
 
@@ -138,6 +184,26 @@ impl StateStore {
             serde_json::Value::Object(serde_json::Map::new())
         };
         ctx.insert("panel".to_string(), panel_state);
+
+        // Dialog state
+        if let Some(ref dialog) = self.dialog {
+            let dialog_obj: serde_json::Value = serde_json::Value::Object(
+                dialog.iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect()
+            );
+            ctx.insert("dialog".to_string(), dialog_obj);
+        }
+
+        // Dialog params
+        if let Some(ref params) = self.dialog_params {
+            let params_obj: serde_json::Value = serde_json::Value::Object(
+                params.iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect()
+            );
+            ctx.insert("param".to_string(), params_obj);
+        }
 
         serde_json::Value::Object(ctx)
     }
@@ -209,5 +275,82 @@ mod tests {
         store.init_panel("test", c);
         store.destroy_panel("test");
         assert_eq!(store.get_panel("test", "x"), &serde_json::Value::Null);
+    }
+
+    #[test]
+    fn dialog_init_and_get() {
+        let mut store = StateStore::new();
+        let mut defaults = HashMap::new();
+        defaults.insert("h".to_string(), serde_json::json!(0));
+        defaults.insert("color".to_string(), serde_json::json!("#ffffff"));
+        let mut params = HashMap::new();
+        params.insert("target".to_string(), serde_json::json!("fill"));
+        store.init_dialog("color_picker", defaults, Some(params));
+        assert_eq!(store.dialog_id(), Some("color_picker"));
+        assert_eq!(store.get_dialog("h"), &serde_json::json!(0));
+        assert_eq!(store.get_dialog("color"), &serde_json::json!("#ffffff"));
+        assert_eq!(
+            store.dialog_params().unwrap().get("target"),
+            Some(&serde_json::json!("fill"))
+        );
+    }
+
+    #[test]
+    fn dialog_set() {
+        let mut store = StateStore::new();
+        let mut defaults = HashMap::new();
+        defaults.insert("name".to_string(), serde_json::json!(""));
+        store.init_dialog("test", defaults, None);
+        store.set_dialog("name", serde_json::json!("hello"));
+        assert_eq!(store.get_dialog("name"), &serde_json::json!("hello"));
+    }
+
+    #[test]
+    fn dialog_close() {
+        let mut store = StateStore::new();
+        let mut defaults = HashMap::new();
+        defaults.insert("x".to_string(), serde_json::json!(1));
+        store.init_dialog("test", defaults, None);
+        store.close_dialog();
+        assert_eq!(store.dialog_id(), None);
+        assert_eq!(store.get_dialog("x"), &serde_json::Value::Null);
+    }
+
+    #[test]
+    fn eval_context_with_dialog() {
+        let mut store = StateStore::new();
+        store.set("fill_color", serde_json::json!("#ff0000"));
+        let mut defaults = HashMap::new();
+        defaults.insert("h".to_string(), serde_json::json!(180));
+        let mut params = HashMap::new();
+        params.insert("target".to_string(), serde_json::json!("fill"));
+        store.init_dialog("picker", defaults, Some(params));
+        let ctx = store.eval_context();
+        assert_eq!(ctx["state"]["fill_color"], serde_json::json!("#ff0000"));
+        assert_eq!(ctx["dialog"]["h"], serde_json::json!(180));
+        assert_eq!(ctx["param"]["target"], serde_json::json!("fill"));
+    }
+
+    #[test]
+    fn eval_context_no_dialog() {
+        let store = StateStore::new();
+        let ctx = store.eval_context();
+        assert!(ctx.get("dialog").is_none());
+        assert!(ctx.get("param").is_none());
+    }
+
+    #[test]
+    fn dialog_and_panel_coexist() {
+        let mut store = StateStore::new();
+        let mut panel = HashMap::new();
+        panel.insert("mode".to_string(), serde_json::json!("hsb"));
+        store.init_panel("color", panel);
+        store.set_active_panel(Some("color"));
+        let mut dialog = HashMap::new();
+        dialog.insert("h".to_string(), serde_json::json!(270));
+        store.init_dialog("picker", dialog, None);
+        let ctx = store.eval_context();
+        assert_eq!(ctx["panel"]["mode"], serde_json::json!("hsb"));
+        assert_eq!(ctx["dialog"]["h"], serde_json::json!(270));
     }
 }
