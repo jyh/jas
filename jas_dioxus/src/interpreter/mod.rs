@@ -10,6 +10,9 @@ pub mod expr_lexer;
 pub mod expr_parser;
 pub mod expr_eval;
 pub mod expr;
+pub mod state_store;
+pub mod effects;
+pub mod workspace;
 
 #[cfg(test)]
 mod tests;
