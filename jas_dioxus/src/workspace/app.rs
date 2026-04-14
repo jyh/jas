@@ -372,6 +372,8 @@ pub fn App() -> Element {
     let save_as_dialog = use_signal(|| Option::<SaveAsDialog>::None);
     let color_picker_state = use_signal(|| Option::<super::color_picker::ColorPickerState>::None);
     use_context_provider(|| super::fill_stroke_widget::ColorPickerCtx(color_picker_state));
+    let yaml_dialog = use_signal(|| Option::<crate::interpreter::dialog_view::DialogState>::None);
+    use_context_provider(|| crate::interpreter::dialog_view::DialogCtx(yaml_dialog));
 
     // --- Panel menu context ---
     let mut panel_menu_sig = use_signal(|| None);
@@ -986,6 +988,9 @@ pub fn App() -> Element {
 
             // Color Picker dialog
             ColorPickerDialogView { color_picker_state }
+
+            // YAML-interpreted dialogs
+            crate::interpreter::dialog_view::YamlDialogView { dialog_ctx: yaml_dialog }
         }
     }
 }

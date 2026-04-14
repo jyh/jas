@@ -21,6 +21,7 @@ struct RenderCtx {
     app: AppHandle,
     revision: Signal<u64>,
     color_picker_ctx: crate::workspace::fill_stroke_widget::ColorPickerCtx,
+    dialog_ctx: super::dialog_view::DialogCtx,
 }
 
 /// Render a YAML element spec into a Dioxus Element.
@@ -38,6 +39,7 @@ pub fn render_element(
         app: use_context::<AppHandle>(),
         revision: use_context::<Signal<u64>>(),
         color_picker_ctx: use_context::<crate::workspace::fill_stroke_widget::ColorPickerCtx>(),
+        dialog_ctx: use_context::<super::dialog_view::DialogCtx>(),
     };
     render_el(el, ctx, &rctx)
 }
@@ -182,7 +184,13 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
 }
 
 /// Run effects (e.g., `set: { fill_on_top: true }`).
-fn run_effects(effects: &[serde_json::Value], st: &mut crate::workspace::app_state::AppState) {
+/// Returns a list of deferred dialog effects (open_dialog/close_dialog)
+/// that must be applied outside the AppState borrow.
+fn run_effects(
+    effects: &[serde_json::Value],
+    st: &mut crate::workspace::app_state::AppState,
+) -> Vec<serde_json::Value> {
+    let mut dialog_effects = Vec::new();
     for effect in effects {
         if let Some(set_map) = effect.get("set").and_then(|v| v.as_object()) {
             for (key, val) in set_map {
@@ -196,7 +204,12 @@ fn run_effects(effects: &[serde_json::Value], st: &mut crate::workspace::app_sta
                 }
             }
         }
+        // Defer dialog effects — they need the dialog signal, not AppState
+        if effect.get("open_dialog").is_some() || effect.get("close_dialog").is_some() {
+            dialog_effects.push(effect.clone());
+        }
     }
+    dialog_effects
 }
 
 /// Build an onclick handler from an element's behavior declarations.
@@ -245,31 +258,55 @@ fn build_click_handler(
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
     let ctx_snapshot = ctx.clone();
+    let mut dialog_signal = rctx.dialog_ctx.0;
 
     Some(EventHandler::new(move |_evt: Event<MouseData>| {
         let app = app.clone();
         let actions = resolved_actions.clone();
         let ctx_snap = ctx_snapshot.clone();
         spawn(async move {
-            let mut st = app.borrow_mut();
-            for (action, params, effects, condition) in &actions {
-                // Check condition
-                if let Some(cond_expr) = condition {
-                    let result = expr::eval(cond_expr, &ctx_snap);
-                    if !result.to_bool() {
-                        continue;
+            let mut deferred_dialog_effects = Vec::new();
+            {
+                let mut st = app.borrow_mut();
+                for (action, params, effects, condition) in &actions {
+                    // Check condition
+                    if let Some(cond_expr) = condition {
+                        let result = expr::eval(cond_expr, &ctx_snap);
+                        if !result.to_bool() {
+                            continue;
+                        }
+                    }
+                    // Run effects (returns deferred dialog effects)
+                    if !effects.is_empty() {
+                        let dialog_effs = run_effects(effects, &mut st);
+                        deferred_dialog_effects.extend(dialog_effs);
+                    }
+                    // Dispatch action
+                    if let Some(action_name) = action {
+                        if action_name == "dismiss_dialog" {
+                            deferred_dialog_effects.push(serde_json::json!({"close_dialog": null}));
+                        } else {
+                            dispatch_action(action_name, params, &mut st);
+                        }
                     }
                 }
-                // Run effects
-                if !effects.is_empty() {
-                    run_effects(effects, &mut st);
+            } // drop st borrow
+
+            // Apply deferred dialog effects (outside AppState borrow)
+            for eff in &deferred_dialog_effects {
+                if eff.get("close_dialog").is_some() {
+                    dialog_signal.set(None);
                 }
-                // Dispatch action
-                if let Some(action_name) = action {
-                    dispatch_action(action_name, params, &mut st);
+                if let Some(od) = eff.get("open_dialog") {
+                    let dlg_id = od.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    let raw_params = od.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
+                    let live_state = {
+                        let st = app.borrow();
+                        crate::workspace::dock_panel::build_live_state_map(&st)
+                    };
+                    super::dialog_view::open_dialog(&mut dialog_signal, dlg_id, &raw_params, &live_state);
                 }
             }
-            drop(st);
             revision += 1;
         });
     }))

@@ -16,6 +16,8 @@ pub mod workspace;
 
 #[cfg(feature = "web")]
 pub mod renderer;
+#[cfg(feature = "web")]
+pub mod dialog_view;
 
 #[cfg(test)]
 mod tests;
