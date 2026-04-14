@@ -95,14 +95,15 @@ fn render_children(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rende
 }
 
 /// Expand a repeat directive: evaluate the source, then render the template
-/// once per item with the loop variable injected into the eval context.
+/// once per item with the loop variable injected via Scope.
 fn render_repeat(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let repeat = el.get("repeat").unwrap();
     let template = el.get("template").unwrap();
     let source_expr = repeat.get("source").and_then(|s| s.as_str()).unwrap_or("");
     let var_name = repeat.get("as").and_then(|s| s.as_str()).unwrap_or("item");
 
-    // Evaluate the source expression to get the list
+    // Build scope from context and evaluate source
+    let scope = super::scope::Scope::from_json(ctx);
     let items = eval_to_json(source_expr, ctx);
 
     let style = build_style(el, ctx);
@@ -120,10 +121,11 @@ fn render_repeat(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             let mut item_obj = item.as_object().cloned().unwrap_or_default();
             item_obj.insert("_index".into(), serde_json::json!(i));
 
-            // Extend the eval context with the loop variable
-            let mut extended_ctx = ctx.as_object().cloned().unwrap_or_default();
-            extended_ctx.insert(var_name.to_string(), serde_json::Value::Object(item_obj));
-            let child_ctx = serde_json::Value::Object(extended_ctx);
+            // Push a child scope with the loop variable — parent is unchanged
+            let child_scope = scope.extend(std::collections::HashMap::from([
+                (var_name.to_string(), serde_json::Value::Object(item_obj)),
+            ]));
+            let child_ctx = child_scope.to_json();
 
             children.push(render_el(template, &child_ctx, rctx));
         }
