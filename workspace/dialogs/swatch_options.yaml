@@ -1,0 +1,517 @@
+swatch_options:
+  summary: "Swatch Options"
+  description: >
+    Modal dialog for editing or creating a named color swatch. Supports two
+    modes, determined by the param.mode parameter:
+
+    Edit mode (param.mode == "edit"): Opened by double-clicking a library
+    swatch tile or choosing Swatch Options... from the panel menu. All fields
+    are populated from the selected swatch's data (name, color, color_mode)
+    passed as dialog parameters. The color component sliders and hex field
+    are initialized from param.color using the color conversion functions.
+    OK updates the swatch in its library at the specified index.
+
+    Create mode (param.mode == "create"): Opened by double-clicking a
+    non-library swatch (recent color, fill/stroke widget), choosing New
+    Swatch from the panel menu, or choosing Create New Swatch... from the
+    Color Panel menu. Fields are initialized from the active fill/stroke
+    color. OK appends a new swatch to the selected library.
+
+    Layout (top to bottom):
+    - Swatch Name: text input (col-3 label / col-9 input)
+    - Color Type: dropdown, always "Process Color" (disabled, future use)
+    - Global: checkbox (centered, disabled, deferred for future use)
+    - Color Mode: dropdown (Grayscale/HSB/RGB/CMYK/Web Safe RGB). Changing
+      the mode switches which slider group is visible via data-bind-visible
+      on each slider container. The dialog change handler updates
+      dialogState.color_mode and calls updateBindings().
+    - Color preview swatch: 40px square showing the current color via
+      bind color="#dialog.hex"
+    - Sliders: one group per color mode, each containing rows of
+      [label, slider, number_input]. Moving a slider updates
+      dialogState via the dialog input handler, which recomputes the
+      hex value from all components and calls updateBindings() to
+      refresh the preview swatch and hex field.
+    - Hex field: 6-character hex string (RRGGBB, displayed with # prefix)
+    - Bottom row: Preview checkbox (live document update, future),
+      Cancel (dismiss_dialog), OK (swatch_options_confirm)
+
+    The dialog state includes working copies of all color components
+    (h, s, b, r, g, bl, c, m, y, k, hex) and a _init_color field used
+    during initialization. On open, the JS dialog init code detects
+    _init_color and computes all component values from it using the
+    color conversion functions (hsb_h, rgb_r, cmyk_c, etc.).
+  modal: true
+  width: 300
+  params:
+    mode: { type: enum, values: [edit, create] }
+  state:
+    swatch_name:
+      type: string
+      default: ""
+      description: "User-editable swatch name"
+    color_type:
+      type: enum
+      values: [process]
+      default: process
+      description: "Color type (always Process Color for now)"
+    global:
+      type: bool
+      default: false
+      description: "Global swatch flag (deferred, always false)"
+    color_mode:
+      type: enum
+      values: [grayscale, rgb, hsb, cmyk, web_safe_rgb]
+      default: rgb
+      description: "Color mode for the swatch"
+    h:  { type: number, default: 0, description: "Working hue (0-360)" }
+    s:  { type: number, default: 0, description: "Working saturation (0-100)" }
+    b:  { type: number, default: 100, description: "Working brightness (0-100)" }
+    r:  { type: number, default: 255, description: "Working red (0-255)" }
+    g:  { type: number, default: 255, description: "Working green (0-255)" }
+    bl: { type: number, default: 255, description: "Working blue (0-255)" }
+    c:  { type: number, default: 0, description: "Working cyan (0-100)" }
+    m:  { type: number, default: 0, description: "Working magenta (0-100)" }
+    y:  { type: number, default: 0, description: "Working yellow (0-100)" }
+    k:  { type: number, default: 0, description: "Working key/black (0-100)" }
+    hex:
+      type: string
+      default: "ffffff"
+      description: "Working hex string (6 chars, no # prefix)"
+    preview:
+      type: bool
+      default: true
+      description: "When checked, color changes update the document live"
+  init:
+    swatch_name: "param.swatch_name"
+    color_mode: "param.color_mode"
+    _init_color: "param.color"
+  content:
+    type: container
+    layout: column
+    style: { gap: 10, padding: 16 }
+    children:
+
+      # Swatch Name
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children:
+              - { type: text, content: "Swatch Name:", style: { font_size: 11 } }
+          - type: col
+            col: 9
+            children:
+              - id: so_name_input
+                type: text_input
+                placeholder: "Swatch Name"
+                bind:
+                  value: "dialog.swatch_name"
+
+      # Color Type (disabled dropdown)
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children:
+              - { type: text, content: "Color Type:", style: { font_size: 11 } }
+          - type: col
+            col: 9
+            children:
+              - id: so_color_type
+                type: select
+                options:
+                  - { label: "Process Color", value: process }
+                bind:
+                  value: "dialog.color_type"
+                  disabled: "true"
+
+      # Global checkbox (centered, disabled)
+      - type: row
+        style: { justify: center }
+        children:
+          - type: col
+            col: 4
+            children: []
+          - type: col
+            col: 4
+            children:
+              - id: so_global
+                type: toggle
+                label: "Global"
+                bind:
+                  checked: "dialog.global"
+                  disabled: "true"
+          - type: col
+            col: 4
+            children: []
+
+      # Color Mode dropdown
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children:
+              - { type: text, content: "Color Mode:", style: { font_size: 11 } }
+          - type: col
+            col: 9
+            children:
+              - id: so_color_mode
+                type: select
+                options:
+                  - { label: "Grayscale", value: grayscale }
+                  - { label: "HSB", value: hsb }
+                  - { label: "RGB", value: rgb }
+                  - { label: "CMYK", value: cmyk }
+                  - { label: "Web Safe RGB", value: web_safe_rgb }
+                bind:
+                  value: "dialog.color_mode"
+
+      # Color preview + Sliders
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children:
+              - id: so_color_preview
+                type: color_swatch
+                summary: "Preview"
+                style: { size: 40 }
+                bind:
+                  color: "#dialog.hex"
+          - type: col
+            col: 9
+            children:
+
+              # Grayscale: K slider
+              - id: so_sliders_grayscale
+                type: container
+                layout: column
+                style: { gap: 2 }
+                bind:
+                  visible: "dialog.color_mode == grayscale"
+                children:
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "K", style: { width: 14, font_size: 10 } }
+                      - id: so_k
+                        type: slider
+                        min: 0
+                        max: 100
+                        step: 1
+                        style: { flex: 1 }
+                        bind: { value: "dialog.k" }
+                      - id: so_k_val
+                        type: number_input
+                        min: 0
+                        max: 100
+                        style: { width: 56 }
+                        bind: { value: "dialog.k" }
+
+              # HSB: H, S, B sliders
+              - id: so_sliders_hsb
+                type: container
+                layout: column
+                style: { gap: 2 }
+                bind:
+                  visible: "dialog.color_mode == hsb"
+                children:
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "H", style: { width: 14, font_size: 10 } }
+                      - id: so_h
+                        type: slider
+                        min: 0
+                        max: 360
+                        step: 1
+                        style: { flex: 1 }
+                        bind: { value: "dialog.h" }
+                      - id: so_h_val
+                        type: number_input
+                        min: 0
+                        max: 360
+                        style: { width: 56 }
+                        bind: { value: "dialog.h" }
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "S", style: { width: 14, font_size: 10 } }
+                      - id: so_s
+                        type: slider
+                        min: 0
+                        max: 100
+                        step: 1
+                        style: { flex: 1 }
+                        bind: { value: "dialog.s" }
+                      - id: so_s_val
+                        type: number_input
+                        min: 0
+                        max: 100
+                        style: { width: 56 }
+                        bind: { value: "dialog.s" }
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "B", style: { width: 14, font_size: 10 } }
+                      - id: so_b
+                        type: slider
+                        min: 0
+                        max: 100
+                        step: 1
+                        style: { flex: 1 }
+                        bind: { value: "dialog.b" }
+                      - id: so_b_val
+                        type: number_input
+                        min: 0
+                        max: 100
+                        style: { width: 56 }
+                        bind: { value: "dialog.b" }
+
+              # RGB: R, G, B sliders
+              - id: so_sliders_rgb
+                type: container
+                layout: column
+                style: { gap: 2 }
+                bind:
+                  visible: "dialog.color_mode == rgb"
+                children:
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "R", style: { width: 14, font_size: 10 } }
+                      - id: so_r
+                        type: slider
+                        min: 0
+                        max: 255
+                        step: 1
+                        style: { flex: 1 }
+                        bind: { value: "dialog.r" }
+                      - id: so_r_val
+                        type: number_input
+                        min: 0
+                        max: 255
+                        style: { width: 56 }
+                        bind: { value: "dialog.r" }
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "G", style: { width: 14, font_size: 10 } }
+                      - id: so_g
+                        type: slider
+                        min: 0
+                        max: 255
+                        step: 1
+                        style: { flex: 1 }
+                        bind: { value: "dialog.g" }
+                      - id: so_g_val
+                        type: number_input
+                        min: 0
+                        max: 255
+                        style: { width: 56 }
+                        bind: { value: "dialog.g" }
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "B", style: { width: 14, font_size: 10 } }
+                      - id: so_bl
+                        type: slider
+                        min: 0
+                        max: 255
+                        step: 1
+                        style: { flex: 1 }
+                        bind: { value: "dialog.bl" }
+                      - id: so_bl_val
+                        type: number_input
+                        min: 0
+                        max: 255
+                        style: { width: 56 }
+                        bind: { value: "dialog.bl" }
+
+              # CMYK: C, M, Y, K sliders
+              - id: so_sliders_cmyk
+                type: container
+                layout: column
+                style: { gap: 2 }
+                bind:
+                  visible: "dialog.color_mode == cmyk"
+                children:
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "C", style: { width: 14, font_size: 10 } }
+                      - id: so_c
+                        type: slider
+                        min: 0
+                        max: 100
+                        step: 1
+                        style: { flex: 1 }
+                        bind: { value: "dialog.c" }
+                      - id: so_c_val
+                        type: number_input
+                        min: 0
+                        max: 100
+                        style: { width: 56 }
+                        bind: { value: "dialog.c" }
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "M", style: { width: 14, font_size: 10 } }
+                      - id: so_m
+                        type: slider
+                        min: 0
+                        max: 100
+                        step: 1
+                        style: { flex: 1 }
+                        bind: { value: "dialog.m" }
+                      - id: so_m_val
+                        type: number_input
+                        min: 0
+                        max: 100
+                        style: { width: 56 }
+                        bind: { value: "dialog.m" }
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "Y", style: { width: 14, font_size: 10 } }
+                      - id: so_y
+                        type: slider
+                        min: 0
+                        max: 100
+                        step: 1
+                        style: { flex: 1 }
+                        bind: { value: "dialog.y" }
+                      - id: so_y_val
+                        type: number_input
+                        min: 0
+                        max: 100
+                        style: { width: 56 }
+                        bind: { value: "dialog.y" }
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "K", style: { width: 14, font_size: 10 } }
+                      - id: so_k_cmyk
+                        type: slider
+                        min: 0
+                        max: 100
+                        step: 1
+                        style: { flex: 1 }
+                        bind: { value: "dialog.k" }
+                      - id: so_k_cmyk_val
+                        type: number_input
+                        min: 0
+                        max: 100
+                        style: { width: 56 }
+                        bind: { value: "dialog.k" }
+
+              # Web Safe RGB: R, G, B sliders (step=51)
+              - id: so_sliders_web_safe
+                type: container
+                layout: column
+                style: { gap: 2 }
+                bind:
+                  visible: "dialog.color_mode == web_safe_rgb"
+                children:
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "R", style: { width: 14, font_size: 10 } }
+                      - id: so_r_ws
+                        type: slider
+                        min: 0
+                        max: 255
+                        step: 51
+                        style: { flex: 1 }
+                        bind: { value: "dialog.r" }
+                      - id: so_r_ws_val
+                        type: number_input
+                        min: 0
+                        max: 255
+                        style: { width: 56 }
+                        bind: { value: "dialog.r" }
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "G", style: { width: 14, font_size: 10 } }
+                      - id: so_g_ws
+                        type: slider
+                        min: 0
+                        max: 255
+                        step: 51
+                        style: { flex: 1 }
+                        bind: { value: "dialog.g" }
+                      - id: so_g_ws_val
+                        type: number_input
+                        min: 0
+                        max: 255
+                        style: { width: 56 }
+                        bind: { value: "dialog.g" }
+                  - type: container
+                    layout: row
+                    style: { gap: 4, alignment: center }
+                    children:
+                      - { type: text, content: "B", style: { width: 14, font_size: 10 } }
+                      - id: so_bl_ws
+                        type: slider
+                        min: 0
+                        max: 255
+                        step: 51
+                        style: { flex: 1 }
+                        bind: { value: "dialog.bl" }
+                      - id: so_bl_ws_val
+                        type: number_input
+                        min: 0
+                        max: 255
+                        style: { width: 56 }
+                        bind: { value: "dialog.bl" }
+
+      # Hex field
+      - type: row
+        children:
+          - type: col
+            col: 9
+            children: []
+          - type: col
+            col: 3
+            children:
+              - type: container
+                layout: row
+                style: { gap: 2, alignment: center }
+                children:
+                  - { type: text, content: "#", style: { font_size: 10 } }
+                  - id: so_hex
+                    type: text_input
+                    placeholder: "000000"
+                    style: { flex: 1 }
+                    bind:
+                      value: "dialog.hex"
+
+      # Bottom row: Preview, Cancel, OK
+      - type: container
+        layout: row
+        style: { gap: 8, alignment: center, justify: end }
+        children:
+          - id: so_preview
+            type: toggle
+            label: "Preview"
+            bind:
+              checked: "dialog.preview"
+          - type: spacer
+            style: { flex: 1 }
+          - { type: button, label: "Cancel", action: dismiss_dialog }
+          - { type: button, label: "OK", action: swatch_options_confirm, variant: primary }
