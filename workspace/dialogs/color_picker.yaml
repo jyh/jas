@@ -38,18 +38,18 @@ color_picker:
       default: "#ffffff"
       description: "The working color being edited"
   init:
-    color: "{{param.target}} == fill ? {{state.fill_color}} : {{state.stroke_color}}"
-    h:   "hsb_h({{dialog.color}})"
-    s:   "hsb_s({{dialog.color}})"
-    b:   "hsb_b({{dialog.color}})"
-    r:   "rgb_r({{dialog.color}})"
-    g:   "rgb_g({{dialog.color}})"
-    bl:  "rgb_b({{dialog.color}})"
-    c:   "cmyk_c({{dialog.color}})"
-    m:   "cmyk_m({{dialog.color}})"
-    y:   "cmyk_y({{dialog.color}})"
-    k:   "cmyk_k({{dialog.color}})"
-    hex: "hex({{dialog.color}})"
+    color: 'param.target == "fill" ? state.fill_color : state.stroke_color'
+    h:   "hsb_h(dialog.color)"
+    s:   "hsb_s(dialog.color)"
+    b:   "hsb_b(dialog.color)"
+    r:   "rgb_r(dialog.color)"
+    g:   "rgb_g(dialog.color)"
+    bl:  "rgb_b(dialog.color)"
+    c:   "cmyk_c(dialog.color)"
+    m:   "cmyk_m(dialog.color)"
+    y:   "cmyk_y(dialog.color)"
+    k:   "cmyk_k(dialog.color)"
+    hex: "hex(dialog.color)"
   content:
     type: container
     layout: column
@@ -144,14 +144,14 @@ color_picker:
                         description: "50x50px swatch showing the working color in real time"
                         style: { size: 50 }
                         bind:
-                          color: "{{dialog.color}}"
+                          color: "dialog.color"
                       - type: container
                         layout: row
                         style: { gap: 4, alignment: center }
                         children:
                           - { type: radio_group, id: cp_radio_h, options: [{id: h, label: ""}], bind: "dialog.radio_channel" }
                           - { type: text, content: "H:" }
-                          - { type: number_input, id: cp_h, style: { width: 45 }, min: 0, max: 360, bind: "dialog.h" }
+                          - { type: number_input, id: cp_h, style: { width: 45 }, min: 0, max: 359, bind: "dialog.h" }
                           - { type: text, content: "\u00b0" }
                       - type: container
                         layout: row
@@ -182,11 +182,11 @@ color_picker:
                           - event: click
                             effects:
                               - if:
-                                  condition: "{{param.target}} == fill"
+                                  condition: 'param.target == "fill"'
                                   then:
-                                    - set: { fill_color: "{{dialog.color}}" }
+                                    - set: { fill_color: "dialog.color" }
                                   else:
-                                    - set: { stroke_color: "{{dialog.color}}" }
+                                    - set: { stroke_color: "dialog.color" }
                               - close_dialog: null
                       - { type: button, label: "Cancel", action: dismiss_dialog,
                           style: { padding: "6 20" } }
