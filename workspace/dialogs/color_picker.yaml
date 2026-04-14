@@ -92,28 +92,29 @@ color_picker:
                 children:
                   # 2D saturation/brightness gradient (square, fills height)
                   - id: cp_gradient
-                    type: placeholder
+                    type: color_gradient
                     summary: "Color gradient"
                     description: >
-                      Square 2D gradient filling the available height.
-                      The two axes represent the two channels NOT selected
-                      by dialog.radio_channel. When H is selected: horizontal
-                      = saturation, vertical = brightness. When R is selected:
-                      horizontal = green, vertical = blue. Circle indicator
-                      shows current position. Drag to change both axis values.
+                      Square 2D gradient for the color picker. In HSB-H mode
+                      (default): horizontal = saturation, vertical = brightness,
+                      colored by the current hue. Click or drag to set the two
+                      axis values. Circle indicator shows current position.
                     style: { aspect_ratio: 1, min_width: 180, min_height: 180 }
+                    bind:
+                      hue: "dialog.h"
+                      saturation: "dialog.s"
+                      brightness: "dialog.b"
                   # Vertical hue colorbar (fills height)
                   - id: cp_colorbar
-                    type: placeholder
+                    type: color_hue_bar
                     summary: "Hue bar"
                     description: >
-                      64px wide vertical bar. The gradient displayed depends
-                      on dialog.radio_channel: when H is selected, shows a
-                      rainbow hue gradient; when S, B, R, G, or B is selected,
-                      shows that channel's range. Triangle sliders on left and
-                      right indicate current position. Drag to change the value
-                      of the selected channel.
-                    style: { width: 64, flex: 1, min_height: 100 }
+                      Vertical bar showing a rainbow hue gradient. Click or
+                      drag to select a hue value (0-360). Arrow indicator
+                      shows current position.
+                    style: { width: 32, flex: 1, min_height: 100 }
+                    bind:
+                      value: "dialog.h"
               # Web-safe checkbox (below both gradient and colorbar)
               - id: cp_web_only
                 type: toggle
