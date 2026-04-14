@@ -568,5 +568,6 @@ _RENDERERS = {
     "spacer": _render_spacer,
     "disclosure": _render_disclosure,
     "panel": _render_panel,
+    "fill_stroke_widget": _render_container,
     "placeholder": _render_placeholder,
 }

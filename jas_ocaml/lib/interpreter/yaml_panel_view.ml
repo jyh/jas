@@ -6,14 +6,37 @@
 
 open Workspace_layout
 
+(** Safely access a nested JSON member path (e.g. "style" -> "gap").
+    Returns `Null if any intermediate value is not an object. *)
+let safe_member (key : string) (j : Yojson.Safe.t) : Yojson.Safe.t =
+  match j with
+  | `Assoc _ -> Yojson.Safe.Util.member key j
+  | _ -> `Null
+
+(** Check if an element should be visible based on its bind.visible expression.
+    Returns true if no bind.visible is present, or if the expression evaluates to truthy. *)
+let is_visible (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
+  let open Yojson.Safe.Util in
+  match el |> member "bind" with
+  | `Assoc _ as bind ->
+    (match bind |> member "visible" |> to_string_option with
+     | Some expr ->
+       let result = Expr_eval.evaluate expr ctx in
+       Expr_eval.to_bool result
+     | None -> true)
+  | _ -> true
+
 (** Render a YAML element spec into GTK widgets.
     [packing] is the GTK packing function for the parent container.
-    [ctx] is the evaluation context (JSON object with "state", "panel" keys). *)
+    [ctx] is the evaluation context (JSON object with "state", "panel", "icons" keys). *)
 let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
+  if not (is_visible el ctx) then ()
+  else
   let open Yojson.Safe.Util in
   let etype = el |> member "type" |> to_string_option |> Option.value ~default:"placeholder" in
   match etype with
   | "container" | "row" | "col" -> render_container ~packing ~ctx el etype
+  | "fill_stroke_widget" -> render_container ~packing ~ctx el "fill_stroke_widget"
   | "grid" -> render_grid ~packing ~ctx el
   | "text" -> render_text ~packing ~ctx el
   | "button" | "icon_button" -> render_button ~packing ~ctx el
@@ -31,7 +54,7 @@ and render_container ~packing ~ctx el etype =
   let open Yojson.Safe.Util in
   let layout_dir = el |> member "layout" |> to_string_option |> Option.value ~default:"column" in
   let is_row = layout_dir = "row" || etype = "row" in
-  let gap = el |> member "style" |> member "gap" |> to_int_option |> Option.value ~default:0 in
+  let gap = el |> member "style" |> safe_member "gap" |> to_int_option |> Option.value ~default:0 in
   if is_row then begin
     let hbox = GPack.hbox ~spacing:gap ~packing () in
     render_children ~packing:(hbox#pack ~expand:false) ~ctx el
@@ -68,7 +91,7 @@ and render_slider ~packing ~ctx el =
   let min_val = el |> member "min" |> to_number_option |> Option.value ~default:0.0 in
   let max_val = el |> member "max" |> to_number_option |> Option.value ~default:100.0 in
   let step = el |> member "step" |> to_number_option |> Option.value ~default:1.0 in
-  let initial = match el |> member "bind" |> member "value" |> to_string_option with
+  let initial = match el |> member "bind" |> safe_member "value" |> to_string_option with
     | Some expr ->
       let v = Expr_eval.evaluate expr ctx in
       (match v with Expr_eval.Number n -> n | _ -> min_val)
@@ -81,7 +104,7 @@ and render_number_input ~packing ~ctx el =
   let open Yojson.Safe.Util in
   let min_val = el |> member "min" |> to_number_option |> Option.value ~default:0.0 in
   let max_val = el |> member "max" |> to_number_option |> Option.value ~default:100.0 in
-  let initial = match el |> member "bind" |> member "value" |> to_string_option with
+  let initial = match el |> member "bind" |> safe_member "value" |> to_string_option with
     | Some expr ->
       let v = Expr_eval.evaluate expr ctx in
       (match v with Expr_eval.Number n -> n | _ -> min_val)
@@ -98,8 +121,8 @@ and render_text_input ~packing ~ctx:_ el =
 
 and render_color_swatch ~packing ~ctx el =
   let open Yojson.Safe.Util in
-  let size = el |> member "style" |> member "size" |> to_int_option |> Option.value ~default:16 in
-  let color_str = match el |> member "bind" |> member "color" |> to_string_option with
+  let size = el |> member "style" |> safe_member "size" |> to_int_option |> Option.value ~default:16 in
+  let color_str = match el |> member "bind" |> safe_member "color" |> to_string_option with
     | Some expr ->
       let v = Expr_eval.evaluate expr ctx in
       (match v with Expr_eval.Color c -> c | Expr_eval.Str s -> s | _ -> "")
@@ -175,5 +198,11 @@ let create_panel_body ~packing ~(kind : panel_kind) =
     | Some content ->
       let state_defaults = Workspace_loader.state_defaults ws in
       let state_obj = `Assoc state_defaults in
-      let ctx = `Assoc [("state", state_obj); ("panel", `Assoc [])] in
+      let panel_defaults = Workspace_loader.panel_state_defaults ws content_id in
+      let icons_obj = Workspace_loader.icons ws in
+      let ctx = `Assoc [
+        ("state", state_obj);
+        ("panel", `Assoc panel_defaults);
+        ("icons", icons_obj)
+      ] in
       render_element ~packing ~ctx content

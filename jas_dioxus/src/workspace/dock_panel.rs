@@ -17,6 +17,89 @@ use crate::interpreter::workspace::{Workspace, panel_kind_to_content_id};
 use crate::panels::panel_menu_state::{PanelMenuOpen, PanelMenuState, MenuBarState};
 
 // ---------------------------------------------------------------------------
+// Live panel state — computed from AppState for YAML eval context
+// ---------------------------------------------------------------------------
+
+/// Build panel state overrides from the live AppState so that the YAML
+/// eval context reflects the current color mode and active color values.
+fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
+    use crate::interpreter::color_util::{rgb_to_hsb, rgb_to_cmyk};
+    use serde_json::Value as J;
+
+    let mode_str = match st.color_panel_mode {
+        super::color_panel_view::ColorMode::Grayscale => "grayscale",
+        super::color_panel_view::ColorMode::Hsb => "hsb",
+        super::color_panel_view::ColorMode::Rgb => "rgb",
+        super::color_panel_view::ColorMode::Cmyk => "cmyk",
+        super::color_panel_view::ColorMode::WebSafeRgb => "web_safe_rgb",
+    };
+    let mut m = serde_json::Map::new();
+    m.insert("mode".into(), J::String(mode_str.into()));
+
+    // Compute slider values from the active color
+    if let Some(color) = st.active_color() {
+        let (rf, gf, bf, _) = color.to_rgba();
+        let r = (rf * 255.0).round() as u8;
+        let g = (gf * 255.0).round() as u8;
+        let b = (bf * 255.0).round() as u8;
+
+        // RGB
+        m.insert("r".into(), J::Number(serde_json::Number::from(r as i64)));
+        m.insert("g".into(), J::Number(serde_json::Number::from(g as i64)));
+        m.insert("bl".into(), J::Number(serde_json::Number::from(b as i64)));
+
+        // HSB
+        let (h, s, br) = rgb_to_hsb(r, g, b);
+        m.insert("h".into(), J::Number(serde_json::Number::from(h as i64)));
+        m.insert("s".into(), J::Number(serde_json::Number::from(s as i64)));
+        m.insert("b".into(), J::Number(serde_json::Number::from(br as i64)));
+
+        // CMYK
+        let (c, mk, y, k) = rgb_to_cmyk(r, g, b);
+        m.insert("c".into(), J::Number(serde_json::Number::from(c as i64)));
+        m.insert("m".into(), J::Number(serde_json::Number::from(mk as i64)));
+        m.insert("y".into(), J::Number(serde_json::Number::from(y as i64)));
+        m.insert("k".into(), J::Number(serde_json::Number::from(k as i64)));
+
+        // Hex
+        m.insert("hex".into(), J::String(format!("{:02x}{:02x}{:02x}", r, g, b)));
+    }
+    m
+}
+
+/// Build a live state map from AppState for the YAML eval context.
+/// Includes fill_color, stroke_color, fill_on_top, and other state fields.
+fn build_live_state_map(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
+    use serde_json::Value as J;
+
+    // Start with workspace defaults
+    let ws = Workspace::load();
+    let mut m: serde_json::Map<String, serde_json::Value> = ws
+        .map(|w| w.state_defaults().into_iter().collect())
+        .unwrap_or_default();
+
+    // Override with live values from AppState
+    m.insert("fill_on_top".into(), J::Bool(st.fill_on_top));
+
+    // Override fill/stroke colors only when they have actual values.
+    // When None, keep workspace defaults so sliders aren't disabled at startup.
+    if let Some(tab) = st.tab() {
+        if let Some(fill) = tab.model.default_fill {
+            let (r, g, b, _) = fill.color.to_rgba();
+            m.insert("fill_color".into(), J::String(format!("#{:02x}{:02x}{:02x}",
+                (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)));
+        }
+        if let Some(stroke) = tab.model.default_stroke {
+            let (r, g, b, _) = stroke.color.to_rgba();
+            m.insert("stroke_color".into(), J::String(format!("#{:02x}{:02x}{:02x}",
+                (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)));
+        }
+    }
+
+    m
+}
+
+// ---------------------------------------------------------------------------
 // DragState — shared drag signals, provided via context
 // ---------------------------------------------------------------------------
 
@@ -47,6 +130,8 @@ pub(crate) fn build_dock_groups(
     focused: Option<PanelAddr>,
     mut panel_menu_open: Signal<Option<PanelMenuOpen>>,
     mut menu_bar_open: Signal<Option<String>>,
+    live_panel_overrides: &serde_json::Map<String, serde_json::Value>,
+    live_state_map: &serde_json::Map<String, serde_json::Value>,
 ) -> Vec<Result<VNode, RenderError>> {
     let did = dock_id;
     let group_count = groups.len();
@@ -374,27 +459,34 @@ pub(crate) fn build_dock_groups(
 
                 if !group_collapsed {
                     {
-                        let panel_body = group.active_panel().and_then(|kind| {
+                        let panel_body: Option<(serde_json::Value, serde_json::Value)> = group.active_panel().and_then(|kind| {
                             let content_id = panel_kind_to_content_id(kind);
                             let ws = Workspace::load()?;
                             let content = ws.panel_content(content_id)?.clone();
-                            let state_map: serde_json::Map<String, serde_json::Value> = ws.state_defaults().into_iter().collect();
-                            let eval_ctx = serde_json::json!({"state": state_map, "panel": {}});
+                            let mut panel_map: serde_json::Map<String, serde_json::Value> = ws.panel_state_defaults(content_id).into_iter().collect();
+                            // Apply live overrides (e.g. color_panel_mode → panel.mode, color values)
+                            for (k, v) in live_panel_overrides {
+                                panel_map.insert(k.clone(), v.clone());
+                            }
+                            let icons = ws.icons().clone();
+                            let swatch_libs = ws.data().get("swatch_libraries").cloned().unwrap_or(serde_json::Value::Null);
+                            let eval_ctx = serde_json::json!({
+                                "state": live_state_map,
+                                "panel": panel_map,
+                                "icons": icons,
+                                "data": { "swatch_libraries": swatch_libs }
+                            });
                             Some((content, eval_ctx))
                         });
-                        match panel_body {
-                            Some((content, eval_ctx)) => rsx! {
-                                crate::interpreter::renderer::YamlPanelBody {
-                                    content: content,
-                                    eval_ctx: eval_ctx,
-                                }
-                            },
-                            None => rsx! {
+                        if let Some((content, eval_ctx)) = panel_body {
+                            crate::interpreter::renderer::render_element(&content, &eval_ctx)
+                        } else {
+                            rsx! {
                                 div {
                                     style: "padding:12px; min-height:60px; color:{THEME_TEXT_BODY}; font-size:12px;",
                                     "{body_label}"
                                 }
-                            },
+                            }
                         }
                     }
                 }
@@ -424,12 +516,18 @@ pub(crate) fn DockGroupsView() -> Element {
     let revision = use_context::<Signal<u64>>();
     let _ = revision();
 
-    let st = app.borrow();
-    let layout = &st.workspace_layout;
-    let focused_panel = layout.focused_panel();
-    let right_dock = layout.anchored_dock(DockEdge::Right);
+    // Extract everything we need from AppState, then drop the borrow
+    // so child components (e.g. FillStrokeWidgetView) can borrow it.
+    let (focused_panel, right_dock_snapshot, live_panel_overrides, live_state_map) = {
+        let st = app.borrow();
+        let focused = st.workspace_layout.focused_panel();
+        let dock = st.workspace_layout.anchored_dock(DockEdge::Right).cloned();
+        let panel_ov = build_live_panel_overrides(&st);
+        let state_map = build_live_state_map(&st);
+        (focused, dock, panel_ov, state_map)
+    };
 
-    let nodes: Vec<Result<VNode, RenderError>> = match right_dock {
+    let nodes: Vec<Result<VNode, RenderError>> = match right_dock_snapshot.as_ref() {
         None => vec![],
         Some(dock) if dock.collapsed => {
             let act_dock = act.0.clone();
@@ -472,12 +570,13 @@ pub(crate) fn DockGroupsView() -> Element {
                 focused_panel,
                 pms.open,
                 mbs.open_menu,
+                &live_panel_overrides,
+                &live_state_map,
             )
         }
     };
 
-    // Release borrow before rendering
-    drop(st);
+    // (borrow already dropped above)
 
     rsx! {
         for node in nodes {
@@ -503,11 +602,17 @@ pub(crate) fn FloatingDocksView() -> Element {
     let _ = revision();
     let mut title_drag = ds.title_drag;
 
-    let st = app.borrow();
-    let layout = &st.workspace_layout;
-    let focused_panel = layout.focused_panel();
+    let (focused_panel, floating_snapshot, live_panel_overrides, live_state_map, z_order) = {
+        let st = app.borrow();
+        let focused = st.workspace_layout.focused_panel();
+        let floating = st.workspace_layout.floating.clone();
+        let panel_ov = build_live_panel_overrides(&st);
+        let state_map = build_live_state_map(&st);
+        let z = st.workspace_layout.z_order.clone();
+        (focused, floating, panel_ov, state_map, z)
+    };
 
-    let floating_nodes: Vec<Result<VNode, RenderError>> = layout.floating.iter().map(|fd| {
+    let floating_nodes: Vec<Result<VNode, RenderError>> = floating_snapshot.iter().map(|fd| {
         let fid = fd.dock.id;
         let fx = fd.x;
         let fy = fd.y;
@@ -525,8 +630,10 @@ pub(crate) fn FloatingDocksView() -> Element {
             focused_panel,
             pms.open,
             mbs.open_menu,
+            &live_panel_overrides,
+            &live_state_map,
         );
-        let z = 900 + layout.z_order.iter().position(|&id| id == fid).unwrap_or(0);
+        let z = 900 + z_order.iter().position(|&id| id == fid).unwrap_or(0);
 
         rsx! {
             div {
@@ -563,8 +670,7 @@ pub(crate) fn FloatingDocksView() -> Element {
         }
     }).collect();
 
-    // Release borrow before rendering
-    drop(st);
+    // (borrow already dropped above)
 
     rsx! {
         for fdock in floating_nodes {

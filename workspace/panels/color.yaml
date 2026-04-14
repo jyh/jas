@@ -340,25 +340,30 @@ content:
               params: { color: "panel.recent_colors.9" }
 
     # ── Row 2: Fill/stroke widget | Sliders ────────────────────
-    - type: container
+    - type: row
       id: cp_controls_row
-      layout: row
-      style: { gap: 6, alignment: center }
       children:
 
-        # Fill/stroke widget (overlapping swatches + swap + reset)
-        # Same visual behavior as the toolbar widget; single-click only
-        # (no double-click to open modal picker from within the panel).
+        # Fill/stroke widget — delegates to native FillStrokeWidgetView
+        # in Rust/Swift/OCaml; the Flask renderer handles the YAML children.
         - id: cp_fill_stroke_widget
-          type: container
+          type: fill_stroke_widget
+          col: 3
           summary: "Fill & Stroke"
           description: >
-            Overlapping fill and stroke swatches. Single-click a swatch to
-            bring it to front (making it the active attribute). Swap button
-            exchanges fill and stroke colors. Reset button restores defaults
-            (white fill, black stroke). No double-click behavior in panel.
-          layout: column
-          style: { width: 52, height: 56, position: relative }
+            Overlapping fill and stroke swatches with swap and reset buttons,
+            identical to the toolbar fill/stroke indicator. Single-click a
+            swatch to bring it to front (making it the active attribute).
+            Double-click the active swatch to open the color picker. Swap
+            button exchanges fill and stroke colors. Reset button restores
+            defaults (white fill, black stroke). Below the swatches are
+            three mode buttons: Color (solid), Gradient (disabled), and
+            None (removes fill/stroke).
+
+            In native renderers (Rust, Swift, OCaml) this element renders
+            the built-in FillStrokeWidgetView component. In Flask the
+            element falls through to its children for HTML rendering.
+          style: { position: relative, min_height: 56 }
           children:
 
             - id: cp_fill_swatch
@@ -415,10 +420,11 @@ content:
                   action: reset_fill_stroke
 
         # Mode-specific slider groups
-        - type: container
+        - type: col
           id: cp_sliders_col
+          col: 9
           layout: column
-          style: { flex: 1, gap: 2 }
+          style: { gap: 2 }
           children:
 
             # Grayscale: single K slider (0–100, % of black ink)
@@ -449,7 +455,7 @@ content:
                       type: number_input
                       min: 0
                       max: 100
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.k"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
@@ -485,7 +491,7 @@ content:
                       type: number_input
                       min: 0
                       max: 359
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.h"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
@@ -513,7 +519,7 @@ content:
                       type: number_input
                       min: 0
                       max: 100
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.s"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
@@ -541,7 +547,7 @@ content:
                       type: number_input
                       min: 0
                       max: 100
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.b"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
@@ -577,7 +583,7 @@ content:
                       type: number_input
                       min: 0
                       max: 255
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.r"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
@@ -602,7 +608,7 @@ content:
                       type: number_input
                       min: 0
                       max: 255
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.g"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
@@ -627,7 +633,7 @@ content:
                       type: number_input
                       min: 0
                       max: 255
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.bl"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
@@ -660,7 +666,7 @@ content:
                       type: number_input
                       min: 0
                       max: 100
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.c"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
@@ -688,7 +694,7 @@ content:
                       type: number_input
                       min: 0
                       max: 100
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.m"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
@@ -716,7 +722,7 @@ content:
                       type: number_input
                       min: 0
                       max: 100
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.y"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
@@ -744,7 +750,7 @@ content:
                       type: number_input
                       min: 0
                       max: 100
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.k"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
@@ -785,7 +791,7 @@ content:
                       type: number_input
                       min: 0
                       max: 255
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.r"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
@@ -810,7 +816,7 @@ content:
                       type: number_input
                       min: 0
                       max: 255
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.g"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
@@ -835,7 +841,7 @@ content:
                       type: number_input
                       min: 0
                       max: 255
-                      style: { width: 36 }
+                      style: { width: 64 }
                       bind:
                         value: "panel.bl"
                         disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"

@@ -176,6 +176,25 @@
         return evalExpr(expr.trim(), ctx);
       });
     }
+    // Ternary: resolve condition, then return the chosen branch
+    var ternMatch = s.match(/^(.+?)\s*\?\s*(.+?)\s*:\s*(.+)$/);
+    if (ternMatch) {
+      var cond = resolve(ternMatch[1].trim(), ctx);
+      var condBool = (cond === true || cond === "true" || (cond && cond !== "false" && cond !== "0" && cond !== "null" && cond !== ""));
+      return condBool ? resolve(ternMatch[2].trim(), ctx) : resolve(ternMatch[3].trim(), ctx);
+    }
+    // Comparison operators: resolve each side separately
+    var compMatch = s.match(/^(.+?)\s*(==|!=)\s*(.+)$/);
+    if (compMatch) {
+      var lhs = String(resolve(compMatch[1].trim(), ctx) || "");
+      var rhs = compMatch[3].trim();
+      if (rhs.length >= 2 && rhs.charAt(0) === '"' && rhs.charAt(rhs.length - 1) === '"') {
+        rhs = rhs.substring(1, rhs.length - 1);
+      } else {
+        rhs = String(resolve(rhs, ctx) || "");
+      }
+      return compMatch[2] === "==" ? lhs === rhs : lhs !== rhs;
+    }
     // Expression context: bare expression without {{}}
     // Check if it starts with a known namespace or is a function call
     var firstDot = s.indexOf(".");
@@ -240,6 +259,7 @@
   }
 
   function evalCondition(condStr, ctx) {
+    if (condStr === false) return false;
     if (!condStr) return true;
     // Resolve the expression (handles both {{}} and bare expressions)
     var resolved = resolve(condStr, ctx);
@@ -370,6 +390,7 @@
     document.querySelectorAll("[data-bind-icon]").forEach(function (el) {
       var expr = el.getAttribute("data-bind-icon");
       var resolved = resolve(expr, {});
+      if (typeof resolved !== "string") return;
       var ternary = resolved.match(/^(.+?)\s*\?\s*(\S+)\s*:\s*(\S+)$/);
       if (ternary) {
         var cond = evalCondition(ternary[1], {});
@@ -388,6 +409,7 @@
     document.querySelectorAll("[data-bind-z_index]").forEach(function (el) {
       var expr = el.getAttribute("data-bind-z_index");
       var resolved = resolve(expr, {});
+      if (typeof resolved !== "string") return;
       var ternary = resolved.match(/^(.+?)\s*\?\s*(\S+)\s*:\s*(\S+)$/);
       if (ternary) {
         var cond = evalCondition(ternary[1], {});
@@ -414,10 +436,11 @@
 
   function drawColorBars() {
     document.querySelectorAll("canvas[data-type='color-bar']").forEach(function (canvas) {
+      if (canvas.offsetParent === null) return; // skip hidden canvases
       var w = canvas.clientWidth || 300;
       var h = canvas.clientHeight || 64;
-      if (canvas.width !== w)  canvas.width  = w;
-      if (canvas.height !== h) canvas.height = h;
+      canvas.width  = w;
+      canvas.height = h;
       var ctx = canvas.getContext("2d");
       var midY = h / 2;
       var imageData = ctx.createImageData(w, h);
@@ -1739,6 +1762,9 @@
         setTimeout(rebuildAppearanceMenu, 0);
       });
     }
+
+    // Redraw color bars once the window has fully loaded and laid out.
+    window.addEventListener("load", function () { drawColorBars(); });
   });
 
   // Map schema event names to DOM event names
@@ -2025,9 +2051,17 @@
     el.setAttribute("data-groups", JSON.stringify(model.groups));
     // Fetch fresh HTML from server would be ideal, but for now rebuild client-side
     rebuildDockViewDOM(el, model);
+    // Redraw any color bar canvases that may have just become visible
+    drawColorBars();
   }
 
   function rebuildDockViewDOM(container, model) {
+    // Preserve server-rendered panel body elements before clearing
+    var savedPanels = {};
+    container.querySelectorAll(".jas-dock-panel-body[data-panel-name]").forEach(function (el) {
+      var name = el.getAttribute("data-panel-name");
+      if (name) savedPanels[name] = el;
+    });
     container.innerHTML = "";
     var collapsed = state.dock_collapsed;
     var groups = model.groups;
@@ -2165,8 +2199,16 @@
         body.className = "jas-dock-group-body";
         body.style.cssText = "flex:1";
         var activeName = panels[Math.min(active, panels.length - 1)];
-        var label = activeName.charAt(0).toUpperCase() + activeName.slice(1);
-        body.innerHTML = '<div class="jas-dock-panel-body" style="padding:12px;color:#aaa;font-size:12px" data-panel-name="' + activeName + '">' + label + '</div>';
+        panels.forEach(function (pn) {
+          var saved = savedPanels[pn];
+          if (saved) {
+            if (pn === activeName) { saved.classList.remove("d-none"); } else { saved.classList.add("d-none"); }
+            body.appendChild(saved);
+          } else if (pn === activeName) {
+            var label = pn.charAt(0).toUpperCase() + pn.slice(1);
+            body.innerHTML += '<div class="jas-dock-panel-body" style="padding:12px;color:#aaa;font-size:12px" data-panel-name="' + pn + '">' + label + '</div>';
+          }
+        });
         groupDiv.appendChild(body);
       }
 
@@ -2470,7 +2512,20 @@
     hideIndicator();
     document.body.style.cursor = "";
     if (pd.ghost) { pd.ghost.remove(); pd.el.style.opacity = ""; }
-    if (!pd.started) return;
+    if (!pd.started) {
+      // Click (no drag) on a tab → switch active panel
+      if (pd.type === "panel" && pd.context) {
+        var m = dockModels[pd.context.dockId];
+        if (m && m.groups[pd.context.groupIdx]) {
+          var pi = parseInt(pd.el.getAttribute("data-panel-index"), 10);
+          if (!isNaN(pi)) {
+            m.groups[pd.context.groupIdx].active = pi;
+            rerenderDockView(pd.context.dockId);
+          }
+        }
+      }
+      return;
+    }
 
     var target = findDropTarget(e.clientX, e.clientY);
 

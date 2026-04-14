@@ -106,6 +106,11 @@ class WorkspaceData {
         return defaults
     }
 
+    /// Get the icons map.
+    func icons() -> [String: Any] {
+        data["icons"] as? [String: Any] ?? [:]
+    }
+
     /// Get the actions map.
     func actions() -> [String: Any] {
         data["actions"] as? [String: Any] ?? [:]

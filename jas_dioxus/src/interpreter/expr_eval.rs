@@ -618,4 +618,21 @@ mod tests {
         let result = eval("hsb(0, 100, 100)", &json!({}));
         assert_eq!(result, Value::Color("#ff0000".to_string()));
     }
+
+    #[test]
+    fn panel_mode_visibility() {
+        let ctx = json!({"state": {}, "panel": {"mode": "hsb"}});
+        // HSB should be visible
+        let r = eval(r#"panel.mode == "hsb""#, &ctx);
+        assert_eq!(r, Value::Bool(true));
+        assert!(r.to_bool());
+        // RGB should NOT be visible
+        let r2 = eval(r#"panel.mode == "rgb""#, &ctx);
+        assert_eq!(r2, Value::Bool(false));
+        assert!(!r2.to_bool());
+        // Grayscale should NOT be visible
+        let r3 = eval(r#"panel.mode == "grayscale""#, &ctx);
+        assert_eq!(r3, Value::Bool(false));
+        assert!(!r3.to_bool());
+    }
 }

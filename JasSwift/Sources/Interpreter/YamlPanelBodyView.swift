@@ -11,37 +11,53 @@ struct YamlElementView: View {
     let context: [String: Any]
 
     var body: some View {
-        let etype = element["type"] as? String ?? "placeholder"
-        switch etype {
-        case "container", "row", "col":
-            renderContainer()
-        case "grid":
-            renderGrid()
-        case "text":
-            renderText()
-        case "button":
-            renderButton()
-        case "icon_button":
-            renderIconButton()
-        case "slider":
-            renderSlider()
-        case "number_input":
-            renderNumberInput()
-        case "text_input":
-            renderTextInput()
-        case "color_swatch":
-            renderColorSwatch()
-        case "separator":
-            renderSeparator()
-        case "spacer":
-            Spacer()
-        case "disclosure":
-            renderDisclosure()
-        case "panel":
-            renderPanel()
-        default:
-            renderPlaceholder()
+        // Check bind.visible — if the expression evaluates to false, hide the element.
+        if !isVisible() {
+            EmptyView()
+        } else {
+            let etype = element["type"] as? String ?? "placeholder"
+            switch etype {
+            case "container", "row", "col":
+                renderContainer()
+            case "grid":
+                renderGrid()
+            case "text":
+                renderText()
+            case "button":
+                renderButton()
+            case "icon_button":
+                renderIconButton()
+            case "slider":
+                renderSlider()
+            case "number_input":
+                renderNumberInput()
+            case "text_input":
+                renderTextInput()
+            case "color_swatch":
+                renderColorSwatch()
+            case "fill_stroke_widget":
+                renderContainer()
+            case "separator":
+                renderSeparator()
+            case "spacer":
+                Spacer()
+            case "disclosure":
+                renderDisclosure()
+            case "panel":
+                renderPanel()
+            default:
+                renderPlaceholder()
+            }
         }
+    }
+
+    /// Evaluate bind.visible expression. Returns true if no binding or if expression is truthy.
+    private func isVisible() -> Bool {
+        guard let bind = element["bind"] as? [String: Any],
+              let visExpr = bind["visible"] as? String else {
+            return true
+        }
+        return evaluate(visExpr, context: context).toBool()
     }
 
     // MARK: - Container

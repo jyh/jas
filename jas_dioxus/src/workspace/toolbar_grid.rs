@@ -162,7 +162,7 @@ pub(crate) fn ToolbarGrid(
     rsx! {
         // Tool buttons
         div {
-            style: "flex:1; padding:4px 2px; display:grid; grid-template-columns:repeat(auto-fill, 32px); grid-auto-rows:32px; gap:2px; justify-content:center; align-content:start; overflow-y:auto;",
+            style: "padding:4px 2px; display:grid; grid-template-columns:repeat(auto-fill, 32px); grid-auto-rows:32px; gap:2px; justify-content:center; align-content:start;",
             for btn in tool_buttons {
                 {btn}
             }
