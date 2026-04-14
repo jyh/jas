@@ -1086,6 +1086,66 @@ bind:
 
 ---
 
+## `templates` — Reusable Element Templates
+
+Templates define parameterized element trees that can be invoked
+from any content tree (layout, panels, dialogs). Templates are
+expanded at compile time — native apps see pre-expanded elements.
+
+### Template Definition
+
+Templates live in `workspace/templates/*.yaml`. Each file contains
+one or more named templates:
+
+```yaml
+slider_row:
+  description: "Labeled slider + number input row"
+  params:
+    label: { type: string }
+    id_prefix: { type: string }
+    min: { type: number, default: 0 }
+    max: { type: number, default: 100 }
+    bind: { type: string }
+  content:
+    type: container
+    layout: row
+    children:
+      - { type: text, content: "${label}" }
+      - id: "${id_prefix}"
+        type: slider
+        min: "${min}"
+        max: "${max}"
+        bind: { value: "${bind}" }
+```
+
+### Invocation
+
+Reference a template with `template:` and `params:`:
+
+```yaml
+- template: slider_row
+  params: { label: "H", id_prefix: cp_h, max: 360, bind: "dialog.h" }
+```
+
+Sibling keys (`id:`, `style:`, `bind:`) merge onto the expanded
+element, overriding template values.
+
+### Parameter Substitution (`${name}`)
+
+- **Whole-value**: `"${name}"` alone replaces the entire value with
+  the typed param (number, dict, list, etc.)
+- **String interpolation**: `"${name}"` inside larger text is
+  interpolated as a string
+- **Defaults**: Params with `default:` in the definition are optional
+- **Missing**: Unknown `${name}` tokens are left unchanged
+
+### Template Composition
+
+Templates can invoke other templates. Resolution recurses until
+no `template:` nodes remain (depth limit: 20).
+
+---
+
 ## `dialogs` — Modal Dialogs
 
 Dialogs are defined at the top level and referenced by id from `behavior`
