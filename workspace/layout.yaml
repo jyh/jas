@@ -718,6 +718,6 @@ layout:
           - panels: [layers]
             active: 0
             collapsed: false
-          - panels: [color, stroke, properties]
+          - panels: [color, swatches, stroke, properties]
             active: 0
             collapsed: false
