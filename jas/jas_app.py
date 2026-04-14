@@ -24,7 +24,7 @@ from document.controller import Controller
 from geometry.element import Fill, RgbColor, Stroke
 from menu.menu import create_menus
 from document.model import Model
-from tools.color_picker import ColorPickerDialog
+from panels.yaml_dialog_view import YamlDialogView
 from tools.toolbar import Tool, Toolbar
 from workspace.pane import PaneKind, EdgeSide
 
@@ -805,33 +805,47 @@ class MainWindow(QMainWindow):
         self._sync_fill_stroke_widget()
 
     def _open_color_picker(self, for_fill: bool):
-        """Open the color picker dialog for fill or stroke."""
+        """Open the YAML color picker dialog for fill or stroke."""
+        from workspace_interpreter.effects import run_effects
+        from workspace_interpreter.loader import load_workspace
+
         m = self.active_model()
         if not m:
             return
-        if for_fill:
-            current = m.default_fill
-            initial = current.color if current else RgbColor(1.0, 1.0, 1.0)
-        else:
-            current = m.default_stroke
-            initial = current.color if current else RgbColor(0, 0, 0)
-        dlg = ColorPickerDialog(initial, for_fill=for_fill, parent=self)
-        if dlg.exec():
-            color = dlg.selected_color()
-            if for_fill:
-                m.default_fill = Fill(color=color)
-                canvas = self.tab_widget.currentWidget()
-                if isinstance(canvas, CanvasWidget) and m.document.selection:
-                    m.snapshot()
-                    canvas._controller.set_selection_fill(m.default_fill)
-            else:
-                stroke_width = m.default_stroke.width if m.default_stroke else 1.0
-                m.default_stroke = Stroke(color=color, width=stroke_width)
-                canvas = self.tab_widget.currentWidget()
-                if isinstance(canvas, CanvasWidget) and m.document.selection:
-                    m.snapshot()
-                    canvas._controller.set_selection_stroke(m.default_stroke)
-            self._sync_fill_stroke_widget()
+
+        # Build live state with current fill/stroke colors
+        def color_hex(c):
+            return "#{:02x}{:02x}{:02x}".format(
+                int(c.r * 255), int(c.g * 255), int(c.b * 255))
+
+        if not hasattr(self, '_yaml_state') or not self._yaml_state:
+            return
+
+        if m.default_fill:
+            self._yaml_state.set("fill_color", color_hex(m.default_fill.color))
+        if m.default_stroke:
+            self._yaml_state.set("stroke_color", color_hex(m.default_stroke.color))
+
+        # Open dialog via effects (initializes dialog state)
+        ws = load_workspace("workspace")
+        target = "fill" if for_fill else "stroke"
+        run_effects(
+            [{"open_dialog": {"id": "color_picker", "params": {"target": f'"{target}"'}}}],
+            {}, self._yaml_state,
+            dialogs=ws.get("dialogs") if ws else None,
+        )
+
+        # Show YAML dialog
+        dlg = YamlDialogView(
+            "color_picker", self._yaml_state,
+            dispatch_fn=self.dock_panel._dispatch_yaml_action if hasattr(self, 'dock_panel') else None,
+            parent=self,
+        )
+        dlg.exec()
+
+        # Clean up dialog state
+        if self._yaml_state.get_dialog_id():
+            self._yaml_state.close_dialog()
 
     def _sync_fill_stroke_widget(self):
         """Update the toolbar fill/stroke indicator from the active model."""
