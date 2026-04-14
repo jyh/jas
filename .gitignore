@@ -19,3 +19,6 @@ transcript/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Compiled workspace (build artifact)
+workspace/workspace.json
