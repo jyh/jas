@@ -195,14 +195,15 @@ content:
           style: { flex_shrink: 0 }
 
     # -- Row 2: Recent Colors label --
-    - type: text
-      content: "Recent Colors"
-      style: { font_size: 11, color: "{{theme.colors.text_dim}}" }
+    - type: row
+      children:
+        - type: text
+          content: "Recent Colors"
+          style: { font_size: 11, color: "{{theme.colors.text_dim}}" }
 
-    # -- Row 3: Recent colors row --
-    - type: container
-      id: sp_recent_row
-      layout: row
+    # -- Row 3: Recent color swatches --
+    - id: sp_recent_row
+      type: row
       style: { gap: 2, alignment: center }
       children:
         - id: sp_recent_0
