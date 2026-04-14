@@ -4,17 +4,19 @@ import Testing
 @Test func panelLabelMatchesAllKinds() {
     #expect(panelLabel(.layers) == "Layers")
     #expect(panelLabel(.color) == "Color")
+    #expect(panelLabel(.swatches) == "Swatches")
     #expect(panelLabel(.stroke) == "Stroke")
     #expect(panelLabel(.properties) == "Properties")
 }
 
 @Test func panelKindAllCount() {
-    #expect(PanelKind.all.count == 4)
+    #expect(PanelKind.all.count == 5)
 }
 
 @Test func panelKindAllContainsAllVariants() {
     #expect(PanelKind.all.contains(.layers))
     #expect(PanelKind.all.contains(.color))
+    #expect(PanelKind.all.contains(.swatches))
     #expect(PanelKind.all.contains(.stroke))
     #expect(PanelKind.all.contains(.properties))
 }

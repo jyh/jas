@@ -122,6 +122,7 @@ func panelKindToContentId(_ kind: PanelKind) -> String {
     switch kind {
     case .layers: return "layers_panel_content"
     case .color: return "color_panel_content"
+    case .swatches: return "swatches_panel_content"
     case .stroke: return "stroke_panel_content"
     case .properties: return "properties_panel_content"
     }

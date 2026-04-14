@@ -107,6 +107,7 @@ pub fn panel_kind_to_content_id(kind: crate::workspace::workspace::PanelKind) ->
     match kind {
         PanelKind::Layers => "layers_panel_content",
         PanelKind::Color => "color_panel_content",
+        PanelKind::Swatches => "swatches_panel_content",
         PanelKind::Stroke => "stroke_panel_content",
         PanelKind::Properties => "properties_panel_content",
     }

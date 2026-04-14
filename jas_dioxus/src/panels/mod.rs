@@ -12,6 +12,7 @@ pub mod color_panel;
 pub mod layers_panel;
 pub mod properties_panel;
 pub mod stroke_panel;
+pub mod swatches_panel;
 
 use crate::workspace::app_state::AppState;
 use crate::workspace::workspace::{PanelAddr, PanelKind};
@@ -22,6 +23,7 @@ pub fn panel_label(kind: PanelKind) -> &'static str {
     match kind {
         PanelKind::Layers => layers_panel::LABEL,
         PanelKind::Color => color_panel::LABEL,
+        PanelKind::Swatches => swatches_panel::LABEL,
         PanelKind::Stroke => stroke_panel::LABEL,
         PanelKind::Properties => properties_panel::LABEL,
     }
@@ -32,6 +34,7 @@ pub fn panel_menu(kind: PanelKind) -> Vec<PanelMenuItem> {
     match kind {
         PanelKind::Layers => layers_panel::menu_items(),
         PanelKind::Color => color_panel::menu_items(),
+        PanelKind::Swatches => swatches_panel::menu_items(),
         PanelKind::Stroke => stroke_panel::menu_items(),
         PanelKind::Properties => properties_panel::menu_items(),
     }
@@ -47,6 +50,7 @@ pub(crate) fn panel_dispatch(
     match kind {
         PanelKind::Layers => layers_panel::dispatch(cmd, addr, state),
         PanelKind::Color => color_panel::dispatch(cmd, addr, state),
+        PanelKind::Swatches => swatches_panel::dispatch(cmd, addr, state),
         PanelKind::Stroke => stroke_panel::dispatch(cmd, addr, state),
         PanelKind::Properties => properties_panel::dispatch(cmd, addr, state),
     }
@@ -57,6 +61,7 @@ pub(crate) fn panel_is_checked(kind: PanelKind, cmd: &str, state: &AppState) -> 
     match kind {
         PanelKind::Layers => layers_panel::is_checked(cmd, state),
         PanelKind::Color => color_panel::is_checked(cmd, state),
+        PanelKind::Swatches => swatches_panel::is_checked(cmd, state),
         PanelKind::Stroke => stroke_panel::is_checked(cmd, state),
         PanelKind::Properties => properties_panel::is_checked(cmd, state),
     }
@@ -115,7 +120,7 @@ mod tests {
 
     #[test]
     fn panel_dispatch_close_removes_panel() {
-        // default_layout has Right dock: group 0 = [Layers], group 1 = [Color, Stroke, Properties]
+        // default_layout has Right dock: group 0 = [Layers], group 1 = [Color, Swatches, Stroke, Properties]
         let layout = WorkspaceLayout::default_layout();
         let dock_id = layout.anchored_dock(DockEdge::Right).unwrap().id;
         // Color is at group 1, panel index 0

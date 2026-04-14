@@ -1,0 +1,1518 @@
+{
+  "name": "Web Colors",
+  "description": "216 web-safe colors (6x6x6 RGB cube)",
+  "swatches": [
+    {
+      "name": "R=0 G=0 B=0",
+      "color": "#000000",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=0 B=51",
+      "color": "#000033",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=0 B=102",
+      "color": "#000066",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=0 B=153",
+      "color": "#000099",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=0 B=204",
+      "color": "#0000cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=0 B=255",
+      "color": "#0000ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=51 B=0",
+      "color": "#003300",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=51 B=51",
+      "color": "#003333",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=51 B=102",
+      "color": "#003366",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=51 B=153",
+      "color": "#003399",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=51 B=204",
+      "color": "#0033cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=51 B=255",
+      "color": "#0033ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=102 B=0",
+      "color": "#006600",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=102 B=51",
+      "color": "#006633",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=102 B=102",
+      "color": "#006666",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=102 B=153",
+      "color": "#006699",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=102 B=204",
+      "color": "#0066cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=102 B=255",
+      "color": "#0066ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=153 B=0",
+      "color": "#009900",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=153 B=51",
+      "color": "#009933",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=153 B=102",
+      "color": "#009966",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=153 B=153",
+      "color": "#009999",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=153 B=204",
+      "color": "#0099cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=153 B=255",
+      "color": "#0099ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=204 B=0",
+      "color": "#00cc00",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=204 B=51",
+      "color": "#00cc33",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=204 B=102",
+      "color": "#00cc66",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=204 B=153",
+      "color": "#00cc99",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=204 B=204",
+      "color": "#00cccc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=204 B=255",
+      "color": "#00ccff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=255 B=0",
+      "color": "#00ff00",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=255 B=51",
+      "color": "#00ff33",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=255 B=102",
+      "color": "#00ff66",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=255 B=153",
+      "color": "#00ff99",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=255 B=204",
+      "color": "#00ffcc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=0 G=255 B=255",
+      "color": "#00ffff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=0 B=0",
+      "color": "#330000",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=0 B=51",
+      "color": "#330033",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=0 B=102",
+      "color": "#330066",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=0 B=153",
+      "color": "#330099",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=0 B=204",
+      "color": "#3300cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=0 B=255",
+      "color": "#3300ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=51 B=0",
+      "color": "#333300",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=51 B=51",
+      "color": "#333333",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=51 B=102",
+      "color": "#333366",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=51 B=153",
+      "color": "#333399",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=51 B=204",
+      "color": "#3333cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=51 B=255",
+      "color": "#3333ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=102 B=0",
+      "color": "#336600",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=102 B=51",
+      "color": "#336633",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=102 B=102",
+      "color": "#336666",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=102 B=153",
+      "color": "#336699",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=102 B=204",
+      "color": "#3366cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=102 B=255",
+      "color": "#3366ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=153 B=0",
+      "color": "#339900",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=153 B=51",
+      "color": "#339933",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=153 B=102",
+      "color": "#339966",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=153 B=153",
+      "color": "#339999",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=153 B=204",
+      "color": "#3399cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=153 B=255",
+      "color": "#3399ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=204 B=0",
+      "color": "#33cc00",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=204 B=51",
+      "color": "#33cc33",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=204 B=102",
+      "color": "#33cc66",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=204 B=153",
+      "color": "#33cc99",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=204 B=204",
+      "color": "#33cccc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=204 B=255",
+      "color": "#33ccff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=255 B=0",
+      "color": "#33ff00",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=255 B=51",
+      "color": "#33ff33",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=255 B=102",
+      "color": "#33ff66",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=255 B=153",
+      "color": "#33ff99",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=255 B=204",
+      "color": "#33ffcc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=51 G=255 B=255",
+      "color": "#33ffff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=0 B=0",
+      "color": "#660000",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=0 B=51",
+      "color": "#660033",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=0 B=102",
+      "color": "#660066",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=0 B=153",
+      "color": "#660099",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=0 B=204",
+      "color": "#6600cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=0 B=255",
+      "color": "#6600ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=51 B=0",
+      "color": "#663300",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=51 B=51",
+      "color": "#663333",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=51 B=102",
+      "color": "#663366",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=51 B=153",
+      "color": "#663399",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=51 B=204",
+      "color": "#6633cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=51 B=255",
+      "color": "#6633ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=102 B=0",
+      "color": "#666600",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=102 B=51",
+      "color": "#666633",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=102 B=102",
+      "color": "#666666",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=102 B=153",
+      "color": "#666699",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=102 B=204",
+      "color": "#6666cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=102 B=255",
+      "color": "#6666ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=153 B=0",
+      "color": "#669900",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=153 B=51",
+      "color": "#669933",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=153 B=102",
+      "color": "#669966",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=153 B=153",
+      "color": "#669999",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=153 B=204",
+      "color": "#6699cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=153 B=255",
+      "color": "#6699ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=204 B=0",
+      "color": "#66cc00",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=204 B=51",
+      "color": "#66cc33",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=204 B=102",
+      "color": "#66cc66",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=204 B=153",
+      "color": "#66cc99",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=204 B=204",
+      "color": "#66cccc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=204 B=255",
+      "color": "#66ccff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=255 B=0",
+      "color": "#66ff00",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=255 B=51",
+      "color": "#66ff33",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=255 B=102",
+      "color": "#66ff66",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=255 B=153",
+      "color": "#66ff99",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=255 B=204",
+      "color": "#66ffcc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=102 G=255 B=255",
+      "color": "#66ffff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=0 B=0",
+      "color": "#990000",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=0 B=51",
+      "color": "#990033",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=0 B=102",
+      "color": "#990066",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=0 B=153",
+      "color": "#990099",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=0 B=204",
+      "color": "#9900cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=0 B=255",
+      "color": "#9900ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=51 B=0",
+      "color": "#993300",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=51 B=51",
+      "color": "#993333",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=51 B=102",
+      "color": "#993366",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=51 B=153",
+      "color": "#993399",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=51 B=204",
+      "color": "#9933cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=51 B=255",
+      "color": "#9933ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=102 B=0",
+      "color": "#996600",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=102 B=51",
+      "color": "#996633",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=102 B=102",
+      "color": "#996666",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=102 B=153",
+      "color": "#996699",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=102 B=204",
+      "color": "#9966cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=102 B=255",
+      "color": "#9966ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=153 B=0",
+      "color": "#999900",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=153 B=51",
+      "color": "#999933",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=153 B=102",
+      "color": "#999966",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=153 B=153",
+      "color": "#999999",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=153 B=204",
+      "color": "#9999cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=153 B=255",
+      "color": "#9999ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=204 B=0",
+      "color": "#99cc00",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=204 B=51",
+      "color": "#99cc33",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=204 B=102",
+      "color": "#99cc66",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=204 B=153",
+      "color": "#99cc99",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=204 B=204",
+      "color": "#99cccc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=204 B=255",
+      "color": "#99ccff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=255 B=0",
+      "color": "#99ff00",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=255 B=51",
+      "color": "#99ff33",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=255 B=102",
+      "color": "#99ff66",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=255 B=153",
+      "color": "#99ff99",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=255 B=204",
+      "color": "#99ffcc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=153 G=255 B=255",
+      "color": "#99ffff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=0 B=0",
+      "color": "#cc0000",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=0 B=51",
+      "color": "#cc0033",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=0 B=102",
+      "color": "#cc0066",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=0 B=153",
+      "color": "#cc0099",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=0 B=204",
+      "color": "#cc00cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=0 B=255",
+      "color": "#cc00ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=51 B=0",
+      "color": "#cc3300",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=51 B=51",
+      "color": "#cc3333",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=51 B=102",
+      "color": "#cc3366",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=51 B=153",
+      "color": "#cc3399",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=51 B=204",
+      "color": "#cc33cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=51 B=255",
+      "color": "#cc33ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=102 B=0",
+      "color": "#cc6600",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=102 B=51",
+      "color": "#cc6633",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=102 B=102",
+      "color": "#cc6666",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=102 B=153",
+      "color": "#cc6699",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=102 B=204",
+      "color": "#cc66cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=102 B=255",
+      "color": "#cc66ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=153 B=0",
+      "color": "#cc9900",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=153 B=51",
+      "color": "#cc9933",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=153 B=102",
+      "color": "#cc9966",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=153 B=153",
+      "color": "#cc9999",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=153 B=204",
+      "color": "#cc99cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=153 B=255",
+      "color": "#cc99ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=204 B=0",
+      "color": "#cccc00",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=204 B=51",
+      "color": "#cccc33",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=204 B=102",
+      "color": "#cccc66",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=204 B=153",
+      "color": "#cccc99",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=204 B=204",
+      "color": "#cccccc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=204 B=255",
+      "color": "#ccccff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=255 B=0",
+      "color": "#ccff00",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=255 B=51",
+      "color": "#ccff33",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=255 B=102",
+      "color": "#ccff66",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=255 B=153",
+      "color": "#ccff99",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=255 B=204",
+      "color": "#ccffcc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=204 G=255 B=255",
+      "color": "#ccffff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=0 B=0",
+      "color": "#ff0000",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=0 B=51",
+      "color": "#ff0033",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=0 B=102",
+      "color": "#ff0066",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=0 B=153",
+      "color": "#ff0099",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=0 B=204",
+      "color": "#ff00cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=0 B=255",
+      "color": "#ff00ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=51 B=0",
+      "color": "#ff3300",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=51 B=51",
+      "color": "#ff3333",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=51 B=102",
+      "color": "#ff3366",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=51 B=153",
+      "color": "#ff3399",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=51 B=204",
+      "color": "#ff33cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=51 B=255",
+      "color": "#ff33ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=102 B=0",
+      "color": "#ff6600",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=102 B=51",
+      "color": "#ff6633",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=102 B=102",
+      "color": "#ff6666",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=102 B=153",
+      "color": "#ff6699",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=102 B=204",
+      "color": "#ff66cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=102 B=255",
+      "color": "#ff66ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=153 B=0",
+      "color": "#ff9900",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=153 B=51",
+      "color": "#ff9933",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=153 B=102",
+      "color": "#ff9966",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=153 B=153",
+      "color": "#ff9999",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=153 B=204",
+      "color": "#ff99cc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=153 B=255",
+      "color": "#ff99ff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=204 B=0",
+      "color": "#ffcc00",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=204 B=51",
+      "color": "#ffcc33",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=204 B=102",
+      "color": "#ffcc66",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=204 B=153",
+      "color": "#ffcc99",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=204 B=204",
+      "color": "#ffcccc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=204 B=255",
+      "color": "#ffccff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=255 B=0",
+      "color": "#ffff00",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=255 B=51",
+      "color": "#ffff33",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=255 B=102",
+      "color": "#ffff66",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=255 B=153",
+      "color": "#ffff99",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=255 B=204",
+      "color": "#ffffcc",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    },
+    {
+      "name": "R=255 G=255 B=255",
+      "color": "#ffffff",
+      "color_mode": "web_safe_rgb",
+      "color_type": "process",
+      "global": false
+    }
+  ]
+}

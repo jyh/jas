@@ -629,5 +629,6 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   in
   toggle_panel Workspace_layout.Layers "Layers";
   toggle_panel Workspace_layout.Color "Color";
+  toggle_panel Workspace_layout.Swatches "Swatches";
   toggle_panel Workspace_layout.Stroke "Stroke";
   toggle_panel Workspace_layout.Properties "Properties"

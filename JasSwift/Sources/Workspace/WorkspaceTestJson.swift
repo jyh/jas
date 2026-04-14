@@ -78,6 +78,7 @@ private func panelKindStr(_ k: PanelKind) -> String {
     switch k {
     case .layers: return "layers"
     case .color: return "color"
+    case .swatches: return "swatches"
     case .stroke: return "stroke"
     case .properties: return "properties"
     }
@@ -309,6 +310,7 @@ public let menuBar: [(String, [MenuItem])] = [
         ("---", "", ""),
         ("Layers", "toggle_panel_layers", ""),
         ("Color", "toggle_panel_color", ""),
+        ("Swatches", "toggle_panel_swatches", ""),
         ("Stroke", "toggle_panel_stroke", ""),
         ("Properties", "toggle_panel_properties", ""),
     ]),
@@ -526,6 +528,7 @@ private func parseDockEdge(_ v: Any?) -> DockEdge {
 private func parsePanelKind(_ v: Any?) -> PanelKind {
     switch v as? String ?? "layers" {
     case "color": return .color
+    case "swatches": return .swatches
     case "stroke": return .stroke
     case "properties": return .properties
     default: return .layers

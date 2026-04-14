@@ -39,10 +39,10 @@ public enum DockEdge: Hashable, Codable {
 }
 
 public enum PanelKind: Hashable, Codable {
-    case layers, color, stroke, properties
+    case layers, color, swatches, stroke, properties
 
     /// All panel kinds, for iteration.
-    public static let all: [PanelKind] = [.layers, .color, .stroke, .properties]
+    public static let all: [PanelKind] = [.layers, .color, .swatches, .stroke, .properties]
 }
 
 /// Color panel mode (not persisted).
@@ -308,7 +308,7 @@ public struct WorkspaceLayout: Codable {
             name: name,
             anchored: [(.right, Dock(id: DockId(0), groups: [
                 PanelGroup(panels: [.layers]),
-                PanelGroup(panels: [.color, .stroke, .properties]),
+                PanelGroup(panels: [.color, .swatches, .stroke, .properties]),
             ], width: defaultDockWidth))],
             floating: [],
             hiddenPanels: [],
@@ -600,6 +600,7 @@ public struct WorkspaceLayout: Codable {
         switch kind {
         case .layers: return "Layers"
         case .color: return "Color"
+        case .swatches: return "Swatches"
         case .stroke: return "Stroke"
         case .properties: return "Properties"
         }
@@ -706,7 +707,7 @@ public struct WorkspaceLayout: Codable {
     public static func panelsForSelection(hasSelection: Bool, hasText: Bool) -> [PanelKind] {
         var panels: [PanelKind] = [.layers]
         if hasSelection {
-            panels.append(contentsOf: [.properties, .color, .stroke])
+            panels.append(contentsOf: [.properties, .color, .swatches, .stroke])
         }
         return panels
     }

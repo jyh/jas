@@ -10,12 +10,13 @@ type panel_menu_item =
   | Separator
 
 (** All panel kinds, for iteration. *)
-let all_panel_kinds = [| Layers; Color; Stroke; Properties |]
+let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties |]
 
 (** Human-readable label for a panel kind. *)
 let panel_label = function
   | Layers -> "Layers"
   | Color -> "Color"
+  | Swatches -> "Swatches"
   | Stroke -> "Stroke"
   | Properties -> "Properties"
 
@@ -33,6 +34,7 @@ let panel_menu = function
       Action { label = "Complement"; command = "complement_color"; shortcut = "" };
       Separator;
       Action { label = "Close Color"; command = "close_panel"; shortcut = "" } ]
+  | Swatches -> [Action { label = "Close Swatches"; command = "close_panel"; shortcut = "" }]
   | Stroke -> [Action { label = "Close Stroke"; command = "close_panel"; shortcut = "" }]
   | Properties -> [Action { label = "Close Properties"; command = "close_panel"; shortcut = "" }]
 

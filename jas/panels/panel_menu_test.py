@@ -12,17 +12,19 @@ from panels.panel_menu import (
 def test_panel_label_all_kinds():
     assert panel_label(PanelKind.LAYERS) == "Layers"
     assert panel_label(PanelKind.COLOR) == "Color"
+    assert panel_label(PanelKind.SWATCHES) == "Swatches"
     assert panel_label(PanelKind.STROKE) == "Stroke"
     assert panel_label(PanelKind.PROPERTIES) == "Properties"
 
 
 def test_all_panel_kinds_count():
-    assert len(ALL_PANEL_KINDS) == 4
+    assert len(ALL_PANEL_KINDS) == 5
 
 
 def test_all_panel_kinds_contains_all():
     assert PanelKind.LAYERS in ALL_PANEL_KINDS
     assert PanelKind.COLOR in ALL_PANEL_KINDS
+    assert PanelKind.SWATCHES in ALL_PANEL_KINDS
     assert PanelKind.STROKE in ALL_PANEL_KINDS
     assert PanelKind.PROPERTIES in ALL_PANEL_KINDS
 

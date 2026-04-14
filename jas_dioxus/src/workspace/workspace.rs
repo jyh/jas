@@ -45,6 +45,7 @@ pub enum DockEdge {
 pub enum PanelKind {
     Layers,
     Color,
+    Swatches,
     Stroke,
     Properties,
 }
@@ -54,6 +55,7 @@ impl PanelKind {
     pub const ALL: &[PanelKind] = &[
         Self::Layers,
         Self::Color,
+        Self::Swatches,
         Self::Stroke,
         Self::Properties,
     ];
@@ -269,6 +271,7 @@ impl WorkspaceLayout {
                         PanelGroup::new(vec![PanelKind::Layers]),
                         PanelGroup::new(vec![
                             PanelKind::Color,
+                            PanelKind::Swatches,
                             PanelKind::Stroke,
                             PanelKind::Properties,
                         ]),
@@ -956,6 +959,7 @@ impl WorkspaceLayout {
         if has_selection {
             panels.push(PanelKind::Properties);
             panels.push(PanelKind::Color);
+            panels.push(PanelKind::Swatches);
             panels.push(PanelKind::Stroke);
         }
         if has_text {
@@ -1090,7 +1094,7 @@ mod tests {
         let d = l.anchored_dock(DockEdge::Right).unwrap();
         assert_eq!(d.groups.len(), 2);
         assert_eq!(d.groups[0].panels, vec![PanelKind::Layers]);
-        assert_eq!(d.groups[1].panels, vec![PanelKind::Color, PanelKind::Stroke, PanelKind::Properties]);
+        assert_eq!(d.groups[1].panels, vec![PanelKind::Color, PanelKind::Swatches, PanelKind::Stroke, PanelKind::Properties]);
     }
 
     #[test]
@@ -1201,7 +1205,7 @@ mod tests {
         let id = right_dock_id(&l);
         l.move_group_within_dock(id, 0, 1);
         let d = l.dock(id).unwrap();
-        assert_eq!(d.groups[0].panels, vec![PanelKind::Color, PanelKind::Stroke, PanelKind::Properties]);
+        assert_eq!(d.groups[0].panels, vec![PanelKind::Color, PanelKind::Swatches, PanelKind::Stroke, PanelKind::Properties]);
         assert_eq!(d.groups[1].panels, vec![PanelKind::Layers]);
     }
 
@@ -1211,7 +1215,7 @@ mod tests {
         let id = right_dock_id(&l);
         l.move_group_within_dock(id, 1, 0);
         let d = l.dock(id).unwrap();
-        assert_eq!(d.groups[0].panels, vec![PanelKind::Color, PanelKind::Stroke, PanelKind::Properties]);
+        assert_eq!(d.groups[0].panels, vec![PanelKind::Color, PanelKind::Swatches, PanelKind::Stroke, PanelKind::Properties]);
         assert_eq!(d.groups[1].panels, vec![PanelKind::Layers]);
     }
 
@@ -1278,7 +1282,7 @@ mod tests {
         l.move_group_to_dock(ga(f1.0, 0), f2, 0);
         let d = l.dock(f2).unwrap();
         assert_eq!(d.groups[0].panels, vec![PanelKind::Layers]);
-        assert_eq!(d.groups[1].panels, vec![PanelKind::Color, PanelKind::Stroke, PanelKind::Properties]);
+        assert_eq!(d.groups[1].panels, vec![PanelKind::Color, PanelKind::Swatches, PanelKind::Stroke, PanelKind::Properties]);
         // f1 should be cleaned up (empty floating dock removed)
         assert!(l.dock(f1).is_none());
     }
@@ -1289,7 +1293,7 @@ mod tests {
         let id = right_dock_id(&l);
         l.move_group_to_dock(ga(id.0, 0), id, 1);
         let d = l.dock(id).unwrap();
-        assert_eq!(d.groups[0].panels, vec![PanelKind::Color, PanelKind::Stroke, PanelKind::Properties]);
+        assert_eq!(d.groups[0].panels, vec![PanelKind::Color, PanelKind::Swatches, PanelKind::Stroke, PanelKind::Properties]);
         assert_eq!(d.groups[1].panels, vec![PanelKind::Layers]);
     }
 
@@ -1374,18 +1378,18 @@ mod tests {
     fn move_panel_same_dock() {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        // Move Stroke (group 1, panel 1) to group 0
-        l.move_panel_to_group(pa(id.0, 1, 1), ga(id.0, 0));
+        // Move Stroke (group 1, panel 2) to group 0
+        l.move_panel_to_group(pa(id.0, 1, 2), ga(id.0, 0));
         let d = l.dock(id).unwrap();
         assert_eq!(d.groups[0].panels, vec![PanelKind::Layers, PanelKind::Stroke]);
-        assert_eq!(d.groups[1].panels, vec![PanelKind::Color, PanelKind::Properties]);
+        assert_eq!(d.groups[1].panels, vec![PanelKind::Color, PanelKind::Swatches, PanelKind::Properties]);
     }
 
     #[test]
     fn move_panel_becomes_active() {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        l.move_panel_to_group(pa(id.0, 1, 1), ga(id.0, 0));
+        l.move_panel_to_group(pa(id.0, 1, 2), ga(id.0, 0));
         assert_eq!(l.dock(id).unwrap().groups[0].active, 1); // newly added panel
     }
 
@@ -1394,12 +1398,12 @@ mod tests {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
-        // Move Color from anchored group 0 (now [Color, Stroke, Properties]) to floating group 0
+        // Move Color from anchored group 0 (now [Color, Swatches, Stroke, Properties]) to floating group 0
         l.move_panel_to_group(pa(id.0, 0, 0), ga(fid.0, 0));
         assert_eq!(l.dock(fid).unwrap().groups[0].panels,
                    vec![PanelKind::Layers, PanelKind::Color]);
         assert_eq!(l.dock(id).unwrap().groups[0].panels,
-                   vec![PanelKind::Stroke, PanelKind::Properties]);
+                   vec![PanelKind::Swatches, PanelKind::Stroke, PanelKind::Properties]);
     }
 
     #[test]
@@ -1428,12 +1432,12 @@ mod tests {
     fn move_panel_clamps_active() {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        // Set active to 2 (Properties) in group 1
-        l.dock_mut(id).unwrap().groups[1].active = 2;
-        // Remove Properties (index 2)
-        l.move_panel_to_group(pa(id.0, 1, 2), ga(id.0, 0));
-        // Active should be clamped to 1
-        assert!(l.dock(id).unwrap().groups[1].active <= 1);
+        // Set active to 3 (Properties) in group 1
+        l.dock_mut(id).unwrap().groups[1].active = 3;
+        // Remove Properties (index 3)
+        l.move_panel_to_group(pa(id.0, 1, 3), ga(id.0, 0));
+        // Active should be clamped to 2
+        assert!(l.dock(id).unwrap().groups[1].active <= 2);
     }
 
     #[test]
@@ -1450,7 +1454,7 @@ mod tests {
         let id = right_dock_id(&l);
         l.move_panel_to_group(pa(id.0, 1, 0), ga(99, 0));
         // Panel should be put back — unchanged
-        assert_eq!(l.dock(id).unwrap().groups[1].panels.len(), 3);
+        assert_eq!(l.dock(id).unwrap().groups[1].panels.len(), 4);
     }
 
     // -----------------------------------------------------------------------
@@ -1462,7 +1466,7 @@ mod tests {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Insert Stroke as a new group at position 0
-        l.insert_panel_as_new_group(pa(id.0, 1, 1), id, 0);
+        l.insert_panel_as_new_group(pa(id.0, 1, 2), id, 0);
         let d = l.dock(id).unwrap();
         assert_eq!(d.groups.len(), 3);
         assert_eq!(d.groups[0].panels, vec![PanelKind::Stroke]);
@@ -1498,11 +1502,11 @@ mod tests {
     fn detach_panel_creates_floating() {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        let fid = l.detach_panel(pa(id.0, 1, 1), 300.0, 150.0);
+        let fid = l.detach_panel(pa(id.0, 1, 2), 300.0, 150.0);
         assert!(fid.is_some());
         let fid = fid.unwrap();
         assert_eq!(l.dock(fid).unwrap().groups[0].panels, vec![PanelKind::Stroke]);
-        assert_eq!(l.dock(id).unwrap().groups[1].panels, vec![PanelKind::Color, PanelKind::Properties]);
+        assert_eq!(l.dock(id).unwrap().groups[1].panels, vec![PanelKind::Color, PanelKind::Swatches, PanelKind::Properties]);
     }
 
     #[test]
@@ -1620,8 +1624,8 @@ mod tests {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         // Set active beyond range, then trigger cleanup via a move
-        l.dock_mut(id).unwrap().groups[1].active = 2; // Properties
-        l.move_panel_to_group(pa(id.0, 1, 2), ga(id.0, 0)); // remove Properties
+        l.dock_mut(id).unwrap().groups[1].active = 3; // Properties
+        l.move_panel_to_group(pa(id.0, 1, 3), ga(id.0, 0)); // remove Properties
         let g = &l.dock(id).unwrap().groups[1];
         assert!(g.active < g.panels.len());
     }
@@ -1643,13 +1647,14 @@ mod tests {
 
     #[test]
     fn panel_kind_all_count() {
-        assert_eq!(PanelKind::ALL.len(), 4);
+        assert_eq!(PanelKind::ALL.len(), 5);
     }
 
     #[test]
     fn panel_kind_all_contains_all_variants() {
         assert!(PanelKind::ALL.contains(&PanelKind::Layers));
         assert!(PanelKind::ALL.contains(&PanelKind::Color));
+        assert!(PanelKind::ALL.contains(&PanelKind::Swatches));
         assert!(PanelKind::ALL.contains(&PanelKind::Stroke));
         assert!(PanelKind::ALL.contains(&PanelKind::Properties));
     }
@@ -1674,7 +1679,7 @@ mod tests {
     fn close_panel_hides_it() {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        l.close_panel(pa(id.0, 1, 1)); // close Stroke
+        l.close_panel(pa(id.0, 1, 2)); // close Stroke
         assert!(l.hidden_panels().contains(&PanelKind::Stroke));
         assert!(!l.is_panel_visible(PanelKind::Stroke));
     }
@@ -1683,9 +1688,9 @@ mod tests {
     fn close_panel_removes_from_group() {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        l.close_panel(pa(id.0, 1, 1)); // close Stroke
+        l.close_panel(pa(id.0, 1, 2)); // close Stroke
         let d = l.dock(id).unwrap();
-        assert_eq!(d.groups[1].panels, vec![PanelKind::Color, PanelKind::Properties]);
+        assert_eq!(d.groups[1].panels, vec![PanelKind::Color, PanelKind::Swatches, PanelKind::Properties]);
     }
 
     #[test]
@@ -1702,7 +1707,7 @@ mod tests {
     fn show_panel_adds_to_default_group() {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        l.close_panel(pa(id.0, 1, 1)); // close Stroke
+        l.close_panel(pa(id.0, 1, 2)); // close Stroke
         l.show_panel(PanelKind::Stroke);
         assert!(!l.hidden_panels().contains(&PanelKind::Stroke));
         // Stroke should be added to the first group of the anchored dock
@@ -1730,7 +1735,7 @@ mod tests {
     fn panel_menu_items_all_visible() {
         let l = WorkspaceLayout::default_layout();
         let items = l.panel_menu_items();
-        assert_eq!(items.len(), 4);
+        assert_eq!(items.len(), 5);
         for (_, visible) in &items {
             assert!(visible);
         }
@@ -1740,7 +1745,7 @@ mod tests {
     fn panel_menu_items_with_hidden() {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        l.close_panel(pa(id.0, 1, 1)); // close Stroke
+        l.close_panel(pa(id.0, 1, 2)); // close Stroke
         let items = l.panel_menu_items();
         let stroke_item = items.iter().find(|(k, _)| *k == PanelKind::Stroke).unwrap();
         assert!(!stroke_item.1);
@@ -1975,16 +1980,17 @@ mod tests {
     fn focus_next_wraps() {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        // Default: 2 groups, [Layers] and [Color, Stroke, Properties] = 4 panels total
+        // Default: 2 groups, [Layers] and [Color, Swatches, Stroke, Properties] = 5 panels total
         l.set_focused_panel(None);
         l.focus_next_panel();
         // Should focus the first panel (Layers)
         assert_eq!(l.focused_panel(), Some(pa(id.0, 0, 0)));
-        // Advance through all 4
+        // Advance through all 5
         l.focus_next_panel(); // Color
+        l.focus_next_panel(); // Swatches
         l.focus_next_panel(); // Stroke
         l.focus_next_panel(); // Properties
-        assert_eq!(l.focused_panel(), Some(pa(id.0, 1, 2)));
+        assert_eq!(l.focused_panel(), Some(pa(id.0, 1, 3)));
         // Next should wrap to Layers
         l.focus_next_panel();
         assert_eq!(l.focused_panel(), Some(pa(id.0, 0, 0)));
@@ -1997,14 +2003,15 @@ mod tests {
         l.set_focused_panel(None);
         l.focus_prev_panel();
         // Should focus the last panel (Properties)
-        assert_eq!(l.focused_panel(), Some(pa(id.0, 1, 2)));
+        assert_eq!(l.focused_panel(), Some(pa(id.0, 1, 3)));
         l.focus_prev_panel(); // Stroke
+        l.focus_prev_panel(); // Swatches
         l.focus_prev_panel(); // Color
         l.focus_prev_panel(); // Layers
         assert_eq!(l.focused_panel(), Some(pa(id.0, 0, 0)));
         // Prev should wrap to Properties
         l.focus_prev_panel();
-        assert_eq!(l.focused_panel(), Some(pa(id.0, 1, 2)));
+        assert_eq!(l.focused_panel(), Some(pa(id.0, 1, 3)));
     }
 
     // -----------------------------------------------------------------------
@@ -2054,21 +2061,21 @@ mod tests {
     fn reorder_panel_forward() {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        // Group 1: [Color, Stroke, Properties] → move Color to position 2
-        l.reorder_panel(ga(id.0, 1), 0, 2);
+        // Group 1: [Color, Swatches, Stroke, Properties] → move Color to position 3
+        l.reorder_panel(ga(id.0, 1), 0, 3);
         let g = &l.dock(id).unwrap().groups[1];
-        assert_eq!(g.panels, vec![PanelKind::Stroke, PanelKind::Properties, PanelKind::Color]);
-        assert_eq!(g.active, 2); // active follows the moved panel
+        assert_eq!(g.panels, vec![PanelKind::Swatches, PanelKind::Stroke, PanelKind::Properties, PanelKind::Color]);
+        assert_eq!(g.active, 3); // active follows the moved panel
     }
 
     #[test]
     fn reorder_panel_backward() {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        // Group 1: [Color, Stroke, Properties] → move Properties to position 0
-        l.reorder_panel(ga(id.0, 1), 2, 0);
+        // Group 1: [Color, Swatches, Stroke, Properties] → move Properties to position 0
+        l.reorder_panel(ga(id.0, 1), 3, 0);
         let g = &l.dock(id).unwrap().groups[1];
-        assert_eq!(g.panels, vec![PanelKind::Properties, PanelKind::Color, PanelKind::Stroke]);
+        assert_eq!(g.panels, vec![PanelKind::Properties, PanelKind::Color, PanelKind::Swatches, PanelKind::Stroke]);
         assert_eq!(g.active, 0);
     }
 
@@ -2078,7 +2085,7 @@ mod tests {
         let id = right_dock_id(&l);
         l.reorder_panel(ga(id.0, 1), 1, 1);
         let g = &l.dock(id).unwrap().groups[1];
-        assert_eq!(g.panels, vec![PanelKind::Color, PanelKind::Stroke, PanelKind::Properties]);
+        assert_eq!(g.panels, vec![PanelKind::Color, PanelKind::Swatches, PanelKind::Stroke, PanelKind::Properties]);
     }
 
     #[test]
@@ -2087,7 +2094,7 @@ mod tests {
         let id = right_dock_id(&l);
         l.reorder_panel(ga(id.0, 1), 0, 99);
         let g = &l.dock(id).unwrap().groups[1];
-        assert_eq!(g.panels[2], PanelKind::Color); // moved to end
+        assert_eq!(g.panels[3], PanelKind::Color); // moved to end
     }
 
     #[test]

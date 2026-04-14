@@ -8,6 +8,7 @@ public func panelLabel(_ kind: PanelKind) -> String {
     switch kind {
     case .layers: return LayersPanel.label
     case .color: return ColorPanel.label
+    case .swatches: return SwatchesPanel.label
     case .stroke: return StrokePanel.label
     case .properties: return PropertiesPanel.label
     }
@@ -18,6 +19,7 @@ public func panelMenu(_ kind: PanelKind) -> [PanelMenuItem] {
     switch kind {
     case .layers: return LayersPanel.menuItems()
     case .color: return ColorPanel.menuItems()
+    case .swatches: return SwatchesPanel.menuItems()
     case .stroke: return StrokePanel.menuItems()
     case .properties: return PropertiesPanel.menuItems()
     }
@@ -28,6 +30,7 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     switch kind {
     case .layers: LayersPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .color: ColorPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
+    case .swatches: SwatchesPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .stroke: StrokePanel.dispatch(cmd, addr: addr, layout: &layout)
     case .properties: PropertiesPanel.dispatch(cmd, addr: addr, layout: &layout)
     }
@@ -38,6 +41,7 @@ public func panelIsChecked(_ kind: PanelKind, cmd: String, layout: WorkspaceLayo
     switch kind {
     case .layers: return LayersPanel.isChecked(cmd, layout: layout)
     case .color: return ColorPanel.isChecked(cmd, layout: layout)
+    case .swatches: return SwatchesPanel.isChecked(cmd, layout: layout)
     case .stroke: return StrokePanel.isChecked(cmd, layout: layout)
     case .properties: return PropertiesPanel.isChecked(cmd, layout: layout)
     }
