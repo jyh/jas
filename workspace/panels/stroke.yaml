@@ -1,9 +1,211 @@
 id: stroke_panel_content
-type: placeholder
-summary: "Stroke properties"
+type: panel
+summary: "Stroke"
 description: >
-  Stroke attribute controls: width (number input with unit selector),
+  Stroke attribute controls: width (slider + number input),
   cap style (butt, round, square), join style (miter, round, bevel),
-  miter limit, dash pattern editor (dash/gap array with preview),
-  and arrowhead selectors (start/end). All changes apply to the
-  current selection immediately.
+  and opacity. All changes apply to the active stroke color.
+
+state:
+  width:
+    type: number
+    default: 1
+    description: "Stroke width in points"
+  opacity:
+    type: number
+    default: 100
+    description: "Stroke opacity (0-100)"
+  cap:
+    type: enum
+    values: [butt, round, square]
+    default: butt
+    description: "Line cap style"
+  join:
+    type: enum
+    values: [miter, round, bevel]
+    default: miter
+    description: "Line join style"
+
+init:
+  width: "state.stroke_width"
+
+menu:
+  - label: "Butt Cap"
+    action: set_stroke_cap
+    params: { cap: butt }
+    checked_when: 'panel.cap == "butt"'
+  - label: "Round Cap"
+    action: set_stroke_cap
+    params: { cap: round }
+    checked_when: 'panel.cap == "round"'
+  - label: "Square Cap"
+    action: set_stroke_cap
+    params: { cap: square }
+    checked_when: 'panel.cap == "square"'
+  - separator
+  - label: "Miter Join"
+    action: set_stroke_join
+    params: { join: miter }
+    checked_when: 'panel.join == "miter"'
+  - label: "Round Join"
+    action: set_stroke_join
+    params: { join: round }
+    checked_when: 'panel.join == "round"'
+  - label: "Bevel Join"
+    action: set_stroke_join
+    params: { join: bevel }
+    checked_when: 'panel.join == "bevel"'
+  - separator
+  - label: "Close Stroke"
+    action: close_panel
+
+content:
+  type: container
+  id: sp_content
+  layout: column
+  style: { padding: 4, gap: 6 }
+  children:
+
+    # ── Stroke color indicator ─────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Color"
+          style: { width: 40, font_size: 10 }
+        - id: sp_color_swatch
+          type: color_swatch
+          style: { size: 20 }
+          bind:
+            color: "state.stroke_color"
+
+    # ── Width ──────────────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Weight"
+          style: { width: 40, font_size: 10 }
+        - id: sp_width
+          type: slider
+          min: 0
+          max: 50
+          step: 1
+          bind:
+            value: "panel.width"
+        - id: sp_width_val
+          type: number_input
+          min: 0
+          max: 100
+          style: { width: 40 }
+          bind:
+            value: "panel.width"
+        - type: text
+          content: "pt"
+          style: { font_size: 10 }
+
+    # ── Opacity ────────────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Opacity"
+          style: { width: 40, font_size: 10 }
+        - id: sp_opacity
+          type: slider
+          min: 0
+          max: 100
+          step: 1
+          bind:
+            value: "panel.opacity"
+        - id: sp_opacity_val
+          type: number_input
+          min: 0
+          max: 100
+          style: { width: 40 }
+          bind:
+            value: "panel.opacity"
+        - type: text
+          content: "%"
+          style: { font_size: 10 }
+
+    # ── Cap Style ──────────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Cap"
+          style: { width: 40, font_size: 10 }
+        - id: sp_cap_butt
+          type: button
+          label: "Butt"
+          style: { font_size: 10 }
+          bind:
+            checked: 'panel.cap == "butt"'
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: cap, value: '"butt"' }
+        - id: sp_cap_round
+          type: button
+          label: "Round"
+          style: { font_size: 10 }
+          bind:
+            checked: 'panel.cap == "round"'
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: cap, value: '"round"' }
+        - id: sp_cap_square
+          type: button
+          label: "Square"
+          style: { font_size: 10 }
+          bind:
+            checked: 'panel.cap == "square"'
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: cap, value: '"square"' }
+
+    # ── Join Style ─────────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Join"
+          style: { width: 40, font_size: 10 }
+        - id: sp_join_miter
+          type: button
+          label: "Miter"
+          style: { font_size: 10 }
+          bind:
+            checked: 'panel.join == "miter"'
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: join, value: '"miter"' }
+        - id: sp_join_round
+          type: button
+          label: "Round"
+          style: { font_size: 10 }
+          bind:
+            checked: 'panel.join == "round"'
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: join, value: '"round"' }
+        - id: sp_join_bevel
+          type: button
+          label: "Bevel"
+          style: { font_size: 10 }
+          bind:
+            checked: 'panel.join == "bevel"'
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: join, value: '"bevel"' }
