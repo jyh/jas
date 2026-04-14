@@ -1,0 +1,32 @@
+slider_row:
+  description: "Labeled slider + number input row for color dialogs and panels"
+  params:
+    label: { type: string }
+    id_prefix: { type: string }
+    min: { type: number, default: 0 }
+    max: { type: number, default: 100 }
+    step: { type: number, default: 1 }
+    bind: { type: string }
+    unit: { type: string, default: "" }
+    gap: { type: number, default: 4 }
+    label_width: { type: number, default: 14 }
+    input_width: { type: number, default: 56 }
+  content:
+    type: container
+    layout: row
+    style: { gap: "${gap}", alignment: center }
+    children:
+      - { type: text, content: "${label}", style: { width: "${label_width}", font_size: 10 } }
+      - id: "${id_prefix}"
+        type: slider
+        min: "${min}"
+        max: "${max}"
+        step: "${step}"
+        style: { flex: 1 }
+        bind: { value: "${bind}" }
+      - id: "${id_prefix}_val"
+        type: number_input
+        min: "${min}"
+        max: "${max}"
+        style: { width: "${input_width}" }
+        bind: { value: "${bind}" }

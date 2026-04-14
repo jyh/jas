@@ -1,0 +1,64 @@
+fill_stroke_widget:
+  description: "Overlapping fill/stroke color swatches with swap and reset buttons"
+  params:
+    id_prefix: { type: string, default: "" }
+    swatch_size: { type: number, default: 28 }
+    offset: { type: number, default: 10 }
+    swap_icon_size: { type: number, default: 10 }
+    reset_icon_size: { type: number, default: 12 }
+    swap_position: { type: object, default: { x: 40, y: 0 } }
+    reset_position: { type: object, default: { x: 0, y: 38 } }
+    width: { type: number, default: 56 }
+    height: { type: number, default: 52 }
+  content:
+    type: container
+    layout: column
+    style:
+      width: "${width}"
+      height: "${height}"
+    children:
+      - id: "${id_prefix}fill_swatch"
+        type: color_swatch
+        summary: "Fill color"
+        style: { size: "${swatch_size}", position: { x: 0, y: 0 } }
+        bind:
+          color: "state.fill_color"
+          z_index: "state.fill_on_top ? 2 : 1"
+        behavior:
+          - event: click
+            effects:
+              - set: { fill_on_top: "true" }
+          - event: double_click
+            action: open_color_picker
+            params: { target: fill }
+      - id: "${id_prefix}stroke_swatch"
+        type: color_swatch
+        summary: "Stroke color"
+        hollow: true
+        style: { size: "${swatch_size}", position: { x: "${offset}", y: "${offset}" } }
+        bind:
+          color: "state.stroke_color"
+          z_index: "state.fill_on_top ? 1 : 2"
+        behavior:
+          - event: click
+            effects:
+              - set: { fill_on_top: "false" }
+          - event: double_click
+            action: open_color_picker
+            params: { target: stroke }
+      - id: "${id_prefix}swap_btn"
+        type: icon_button
+        summary: "Swap"
+        icon: swap_arrows
+        style: { size: "${swap_icon_size}", position: "${swap_position}" }
+        behavior:
+          - event: click
+            action: swap_fill_stroke
+      - id: "${id_prefix}reset_btn"
+        type: icon_button
+        summary: "Default"
+        icon: default_colors
+        style: { size: "${reset_icon_size}", position: "${reset_position}" }
+        behavior:
+          - event: click
+            action: reset_fill_stroke
