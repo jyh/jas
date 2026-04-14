@@ -20,7 +20,6 @@ use crate::workspace::app_state::AppHandle;
 struct RenderCtx {
     app: AppHandle,
     revision: Signal<u64>,
-    color_picker_ctx: crate::workspace::fill_stroke_widget::ColorPickerCtx,
     dialog_ctx: super::dialog_view::DialogCtx,
 }
 
@@ -38,7 +37,6 @@ pub fn render_element(
     let rctx = RenderCtx {
         app: use_context::<AppHandle>(),
         revision: use_context::<Signal<u64>>(),
-        color_picker_ctx: use_context::<crate::workspace::fill_stroke_widget::ColorPickerCtx>(),
         dialog_ctx: use_context::<super::dialog_view::DialogCtx>(),
     };
     render_el(el, ctx, &rctx)
@@ -862,7 +860,6 @@ fn render_fill_stroke_widget(el: &serde_json::Value, ctx: &serde_json::Value, rc
     use crate::geometry::element::Color;
 
     let app = rctx.app.clone();
-    let color_picker_ctx = rctx.color_picker_ctx.clone();
 
     let (fill_summary, stroke_summary, default_fill, default_stroke, fill_on_top) = {
         let st = app.borrow();
@@ -897,7 +894,6 @@ fn render_fill_stroke_widget(el: &serde_json::Value, ctx: &serde_json::Value, rc
                 default_fill,
                 default_stroke,
                 fill_on_top,
-                color_picker_state: color_picker_ctx.0,
             }
         }
     }
