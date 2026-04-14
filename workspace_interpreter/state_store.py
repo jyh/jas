@@ -16,6 +16,9 @@ class StateStore:
         self._state: dict = dict(defaults) if defaults else {}
         self._panels: dict[str, dict] = {}
         self._active_panel: str | None = None
+        self._dialog: dict = {}
+        self._dialog_id: str | None = None
+        self._dialog_params: dict | None = None
         self._subscribers: list[tuple[set | None, Callable]] = []
         self._panel_subscribers: dict[str, list[Callable]] = {}
 
@@ -76,6 +79,39 @@ class StateStore:
         if self._active_panel == panel_id:
             self._active_panel = None
 
+    # ── Dialog state ───────────────────────────────────────────
+
+    def init_dialog(self, dialog_id: str, defaults: dict,
+                    params: dict | None = None):
+        """Initialize dialog-local state. Replaces any previous dialog."""
+        self._dialog_id = dialog_id
+        self._dialog = dict(defaults)
+        self._dialog_params = dict(params) if params else None
+
+    def get_dialog(self, key: str):
+        if self._dialog_id is None:
+            return None
+        return self._dialog.get(key)
+
+    def set_dialog(self, key: str, value):
+        if self._dialog_id is None:
+            return
+        self._dialog[key] = value
+
+    def get_dialog_state(self) -> dict:
+        return dict(self._dialog)
+
+    def get_dialog_id(self) -> str | None:
+        return self._dialog_id
+
+    def get_dialog_params(self) -> dict | None:
+        return self._dialog_params
+
+    def close_dialog(self):
+        self._dialog_id = None
+        self._dialog = {}
+        self._dialog_params = None
+
     # ── List operations ──────────────────────────────────────
 
     def list_push(self, panel_id: str, key: str, value,
@@ -126,12 +162,17 @@ class StateStore:
         """Build an evaluation context dict for the expression evaluator.
 
         Returns {"state": {...}, "panel": {...}, ...}.
+        When a dialog is open, also includes "dialog" and "param" keys.
         """
         ctx = {"state": dict(self._state)}
         if self._active_panel and self._active_panel in self._panels:
             ctx["panel"] = dict(self._panels[self._active_panel])
         else:
             ctx["panel"] = {}
+        if self._dialog_id is not None:
+            ctx["dialog"] = dict(self._dialog)
+            if self._dialog_params is not None:
+                ctx["param"] = dict(self._dialog_params)
         if extra:
             ctx.update(extra)
         return ctx

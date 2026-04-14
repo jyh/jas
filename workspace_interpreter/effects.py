@@ -13,7 +13,8 @@ from workspace_interpreter.state_store import StateStore
 
 def run_effects(effects: list, ctx: dict, store: StateStore,
                 actions: dict | None = None,
-                platform_effects: dict | None = None):
+                platform_effects: dict | None = None,
+                dialogs: dict | None = None):
     """Execute a list of effects.
 
     Args:
@@ -23,12 +24,13 @@ def run_effects(effects: list, ctx: dict, store: StateStore,
         actions: The actions catalog for dispatch effects.
         platform_effects: Registry of platform-specific effect handlers
             keyed by effect name. Each handler receives (effect_data, ctx, store).
+        dialogs: Dialog definitions dict for open_dialog effects.
     """
     if not effects:
         return
     for effect in effects:
         if isinstance(effect, dict):
-            _run_one(effect, ctx, store, actions, platform_effects)
+            _run_one(effect, ctx, store, actions, platform_effects, dialogs)
 
 
 def _eval(expr, store: StateStore, ctx: dict):
@@ -39,7 +41,8 @@ def _eval(expr, store: StateStore, ctx: dict):
 
 
 def _run_one(effect: dict, ctx: dict, store: StateStore,
-             actions: dict | None, platform_effects: dict | None):
+             actions: dict | None, platform_effects: dict | None,
+             dialogs: dict | None):
 
     # set: { key: expr, ... }
     if "set" in effect:
@@ -94,9 +97,9 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         eval_ctx = store.eval_context(ctx)
         result = evaluate(str(cond_expr), eval_ctx)
         if result.to_bool():
-            run_effects(cond.get("then", []), ctx, store, actions, platform_effects)
+            run_effects(cond.get("then", []), ctx, store, actions, platform_effects, dialogs)
         elif "else" in cond:
-            run_effects(cond["else"], ctx, store, actions, platform_effects)
+            run_effects(cond["else"], ctx, store, actions, platform_effects, dialogs)
         return
 
     # set_panel_state: { key, value, panel? }
@@ -142,7 +145,43 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 for k, v in params.items():
                     resolved_params[k] = _eval(v, store, ctx)
                 dispatch_ctx["param"] = resolved_params
-            run_effects(action_effects, dispatch_ctx, store, actions, platform_effects)
+            run_effects(action_effects, dispatch_ctx, store, actions, platform_effects, dialogs)
+        return
+
+    # open_dialog: { id, params }
+    if "open_dialog" in effect:
+        od = effect["open_dialog"]
+        dlg_id = od.get("id", "") if isinstance(od, dict) else str(od)
+        if not dialogs or dlg_id not in dialogs:
+            return
+        dlg_def = dialogs[dlg_id]
+        # Extract state defaults
+        defaults = {}
+        state_defs = dlg_def.get("state", {})
+        if isinstance(state_defs, dict):
+            for key, defn in state_defs.items():
+                if isinstance(defn, dict):
+                    defaults[key] = defn.get("default")
+                else:
+                    defaults[key] = defn
+        # Resolve params
+        resolved_params = {}
+        raw_params = od.get("params", {}) if isinstance(od, dict) else {}
+        for k, v in raw_params.items():
+            resolved_params[k] = _eval(v, store, ctx)
+        # Init dialog state with defaults and params
+        store.init_dialog(dlg_id, defaults, params=resolved_params or None)
+        # Evaluate init expressions (order matters — later inits may reference earlier ones)
+        init_map = dlg_def.get("init", {})
+        if isinstance(init_map, dict):
+            for key, expr in init_map.items():
+                value = _eval(expr, store, ctx)
+                store.set_dialog(key, value)
+        return
+
+    # close_dialog: null or dialog_id
+    if "close_dialog" in effect:
+        store.close_dialog()
         return
 
     # log: message (no-op in interpreter, just print for debug)
