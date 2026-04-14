@@ -1,4 +1,5 @@
 pub mod algorithms;
+pub mod interpreter;
 #[cfg(feature = "web")]
 pub mod canvas;
 #[cfg(test)]
