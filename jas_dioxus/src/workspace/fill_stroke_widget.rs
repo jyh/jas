@@ -69,7 +69,7 @@ pub(crate) fn FillStrokeWidgetView(
             style: "padding:8px 4px 4px; border-top:1px solid {THEME_BORDER}; flex-shrink:0;",
             // Overlapping squares container
             div {
-                style: "position:relative; width:54px; height:54px; margin:0 auto;",
+                style: "position:relative; width:54px; height:54px;",
                 // Swap arrow (top-right)
                 div {
                     style: "position:absolute; top:0; right:0; cursor:pointer; font-size:11px; color:{THEME_TEXT}; z-index:3; user-select:none; line-height:1;",
@@ -193,7 +193,7 @@ pub(crate) fn FillStrokeWidgetView(
             }
             // Mode buttons: Color | Gradient | None
             div {
-                style: "display:flex; gap:2px; margin-top:6px; justify-content:center;",
+                style: "display:flex; gap:2px; margin-top:6px;",
                 // Color button
                 div {
                     style: "width:18px; height:18px; background:{color_btn_bg}; border:1px solid {THEME_BORDER}; cursor:pointer; border-radius:2px;",

@@ -648,6 +648,90 @@ let evaluate (expr_str : string) (ctx : Yojson.Safe.t) : value =
       | Some ast -> eval_node ast ctx
     with _ -> Null
 
+(** Resolve a dot-separated path through a JSON context, returning raw JSON.
+    Unlike resolve_path, this preserves Assoc/List structure. *)
+let resolve_path_json (segments : string list) (ctx : Yojson.Safe.t) : Yojson.Safe.t =
+  match segments with
+  | [] -> `Null
+  | namespace :: rest ->
+    let obj = match ctx with
+      | `Assoc pairs -> (match List.assoc_opt namespace pairs with Some v -> v | None -> `Null)
+      | _ -> `Null
+    in
+    let rec walk current segs =
+      match segs with
+      | [] -> current
+      | seg :: rest' ->
+        (match current with
+         | `Assoc pairs ->
+           (match List.assoc_opt seg pairs with
+            | Some v -> walk v rest'
+            | None -> `Null)
+         | `List lst ->
+           (match int_of_string_opt seg with
+            | Some idx when idx >= 0 && idx < List.length lst ->
+              walk (List.nth lst idx) rest'
+            | _ -> `Null)
+         | _ -> `Null)
+    in
+    walk obj rest
+
+(** Walk an AST node returning raw Yojson.Safe.t, preserving objects and arrays.
+    Falls back to value-to-json conversion for non-path expressions. *)
+let rec eval_node_json (node : ast) (ctx : Yojson.Safe.t) : Yojson.Safe.t =
+  match node with
+  | Ast_path segs -> resolve_path_json segs ctx
+  | Ast_index_access (obj_node, index_node) ->
+    let obj_json = eval_node_json obj_node ctx in
+    let idx_val = eval_node index_node ctx in
+    let key = to_string_coerce idx_val in
+    (match obj_json with
+     | `Assoc pairs ->
+       (match List.assoc_opt key pairs with
+        | Some v -> v
+        | None -> `Null)
+     | `List lst ->
+       (match int_of_string_opt key with
+        | Some idx when idx >= 0 && idx < List.length lst ->
+          List.nth lst idx
+        | _ -> `Null)
+     | _ -> `Null)
+  | Ast_dot_access (obj_node, member) ->
+    let obj_json = eval_node_json obj_node ctx in
+    (match obj_json with
+     | `Assoc pairs ->
+       (match List.assoc_opt member pairs with
+        | Some v -> v
+        | None -> `Null)
+     | `List lst ->
+       (match int_of_string_opt member with
+        | Some idx when idx >= 0 && idx < List.length lst ->
+          List.nth lst idx
+        | _ -> `Null)
+     | _ -> `Null)
+  | _ ->
+    (* For non-path expressions, evaluate and convert back to JSON *)
+    let v = eval_node node ctx in
+    (match v with
+     | Null -> `Null
+     | Bool b -> `Bool b
+     | Number n ->
+       if Float.is_integer n then `Int (Float.to_int n) else `Float n
+     | Str s -> `String s
+     | Color c -> `String c
+     | List items -> `List items)
+
+(** Evaluate an expression and return the result as raw Yojson.Safe.t,
+    preserving objects and arrays. Used by the repeat directive. *)
+let evaluate_to_json (expr_str : string) (ctx : Yojson.Safe.t) : Yojson.Safe.t =
+  if String.length expr_str = 0 then `Null
+  else
+    try
+      match parse (String.trim expr_str) with
+      | None -> `Null
+      | Some ast -> eval_node_json ast ctx
+    with _ -> `Null
+
 let evaluate_text (text : string) (ctx : Yojson.Safe.t) : string =
   if String.length text = 0 || not (try ignore (Str.search_forward (Str.regexp_string "{{") text 0); true with Not_found -> false) then
     text

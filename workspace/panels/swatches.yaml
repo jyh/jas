@@ -188,65 +188,59 @@ content:
   children:
 
     # -- Row 1: Fill/stroke widget --
-    - type: container
-      id: sp_fill_stroke_row
-      layout: row
-      style: { gap: 6 }
+    - id: sp_fill_stroke_widget
+      type: fill_stroke_widget
+      style: { align_self: start }
+      summary: "Fill & Stroke"
+      description: >
+        Overlapping fill and stroke swatches with swap and reset buttons,
+        identical to the toolbar fill/stroke indicator and the Color panel
+        widget. In native renderers this delegates to FillStrokeWidgetView.
+      style: { flex_shrink: 0 }
       children:
-        - id: sp_fill_stroke_widget
-          type: container
-          summary: "Fill & Stroke"
-          description: >
-            Overlapping fill and stroke swatches. Single-click a swatch to
-            bring it to front (making it the active attribute). Swap button
-            exchanges fill and stroke colors. Reset button restores defaults
-            (white fill, black stroke). No double-click behavior in panel.
-          layout: column
-          style: { width: 52, height: 56, position: relative }
-          children:
 
-            - id: sp_fill_swatch
-              type: color_swatch
-              summary: "Fill color"
-              style: { size: 24, position: { x: 0, y: 0 } }
-              bind:
-                color: "state.fill_color"
-                z_index: "state.fill_on_top ? 2 : 1"
-              behavior:
-                - event: click
-                  effects:
-                    - set: { fill_on_top: true }
+        - id: sp_fill_swatch
+          type: color_swatch
+          summary: "Fill color"
+          style: { size: 24, position: { x: 0, y: 0 } }
+          bind:
+            color: "state.fill_color"
+            z_index: "state.fill_on_top ? 2 : 1"
+          behavior:
+            - event: click
+              effects:
+                - set: { fill_on_top: true }
 
-            - id: sp_stroke_swatch
-              type: color_swatch
-              summary: "Stroke color"
-              hollow: true
-              style: { size: 24, position: { x: 8, y: 8 } }
-              bind:
-                color: "state.stroke_color"
-                z_index: "state.fill_on_top ? 1 : 2"
-              behavior:
-                - event: click
-                  effects:
-                    - set: { fill_on_top: false }
+        - id: sp_stroke_swatch
+          type: color_swatch
+          summary: "Stroke color"
+          hollow: true
+          style: { size: 24, position: { x: 8, y: 8 } }
+          bind:
+            color: "state.stroke_color"
+            z_index: "state.fill_on_top ? 1 : 2"
+          behavior:
+            - event: click
+              effects:
+                - set: { fill_on_top: false }
 
-            - id: sp_swap_btn
-              type: icon_button
-              summary: "Swap"
-              icon: swap_arrows
-              style: { size: 10, position: { x: 40, y: 0 } }
-              behavior:
-                - event: click
-                  action: swap_fill_stroke
+        - id: sp_swap_btn
+          type: icon_button
+          summary: "Swap"
+          icon: swap_arrows
+          style: { size: 10, position: { x: 40, y: 0 } }
+          behavior:
+            - event: click
+              action: swap_fill_stroke
 
-            - id: sp_reset_btn
-              type: icon_button
-              summary: "Default"
-              icon: default_colors
-              style: { size: 12, position: { x: 0, y: 38 } }
-              behavior:
-                - event: click
-                  action: reset_fill_stroke
+        - id: sp_reset_btn
+          type: icon_button
+          summary: "Default"
+          icon: default_colors
+          style: { size: 12, position: { x: 0, y: 38 } }
+          behavior:
+            - event: click
+              action: reset_fill_stroke
 
     # -- Row 2: Recent Colors label --
     - type: text

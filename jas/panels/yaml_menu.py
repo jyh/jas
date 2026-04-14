@@ -61,6 +61,15 @@ def get_panel_spec(kind: PanelKind) -> dict | None:
     return get_panel_specs().get(content_id)
 
 
+def get_workspace_data() -> dict | None:
+    """Return the cached workspace data dict.
+
+    Available after load_panel_specs or get_panel_specs has been called.
+    """
+    get_panel_specs()  # ensure loaded
+    return _workspace_data
+
+
 def build_menu_items(panel_spec: dict) -> list:
     """Extract menu items from a panel spec.
 

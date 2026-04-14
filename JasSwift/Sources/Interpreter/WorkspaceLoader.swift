@@ -106,6 +106,11 @@ class WorkspaceData {
         return defaults
     }
 
+    /// Get the swatch libraries data map.
+    func swatchLibraries() -> [String: Any] {
+        data["swatch_libraries"] as? [String: Any] ?? [:]
+    }
+
     /// Get the icons map.
     func icons() -> [String: Any] {
         data["icons"] as? [String: Any] ?? [:]

@@ -14,6 +14,9 @@ struct YamlElementView: View {
         // Check bind.visible — if the expression evaluates to false, hide the element.
         if !isVisible() {
             EmptyView()
+        } else if element["repeat"] != nil && element["template"] != nil {
+            // Repeat directive: expand template for each item in source list.
+            renderRepeat()
         } else {
             let etype = element["type"] as? String ?? "placeholder"
             switch etype {
@@ -58,6 +61,97 @@ struct YamlElementView: View {
             return true
         }
         return evaluate(visExpr, context: context).toBool()
+    }
+
+    // MARK: - Repeat
+
+    /// Expand a repeat directive: evaluate the source expression to get a list,
+    /// then render the template element once per item with the loop variable
+    /// injected into the eval context.
+    @ViewBuilder
+    private func renderRepeat() -> some View {
+        let repeatSpec = element["repeat"] as? [String: Any] ?? [:]
+        let template = element["template"] as? [String: Any] ?? [:]
+        let sourceExpr = repeatSpec["source"] as? String ?? ""
+        let varName = repeatSpec["as"] as? String ?? "item"
+
+        // Evaluate the source expression to get the list items.
+        let items = evaluateToList(sourceExpr, context: context)
+
+        let layout = element["layout"] as? String ?? "column"
+        let gap = (element["style"] as? [String: Any])?["gap"] as? CGFloat ?? 0
+
+        if layout == "wrap" {
+            // Wrap layout: use LazyVGrid with flexible columns
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 20), spacing: gap)],
+                spacing: gap
+            ) {
+                ForEach(0..<items.count, id: \.self) { i in
+                    let extCtx = extendContext(context, varName: varName, item: items[i], index: i)
+                    YamlElementView(element: template, context: extCtx)
+                }
+            }
+        } else if layout == "row" {
+            HStack(spacing: gap) {
+                ForEach(0..<items.count, id: \.self) { i in
+                    let extCtx = extendContext(context, varName: varName, item: items[i], index: i)
+                    YamlElementView(element: template, context: extCtx)
+                }
+            }
+        } else {
+            VStack(spacing: gap) {
+                ForEach(0..<items.count, id: \.self) { i in
+                    let extCtx = extendContext(context, varName: varName, item: items[i], index: i)
+                    YamlElementView(element: template, context: extCtx)
+                }
+            }
+        }
+    }
+
+    /// Evaluate a source expression and return the result as a list of dictionaries.
+    /// Handles both direct array values and JSON-serialized results from the evaluator.
+    private func evaluateToList(_ expr: String, context: [String: Any]) -> [[String: Any]] {
+        let result = evaluate(expr, context: context)
+        switch result {
+        case .list(let arr):
+            // Convert AnyJSON items to [String: Any] dicts
+            return arr.map { item in
+                if let dict = item.value as? [String: Any] {
+                    return dict
+                } else {
+                    // Wrap scalar values so they can be used in the context
+                    return ["value": item.value]
+                }
+            }
+        case .string(let s):
+            // The evaluator serializes dicts/arrays to JSON strings;
+            // try parsing it back as an array of objects.
+            if let data = s.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                return parsed
+            }
+            // Try as array of any
+            if let data = s.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: data) as? [Any] {
+                return parsed.map { item in
+                    if let dict = item as? [String: Any] { return dict }
+                    return ["value": item]
+                }
+            }
+            return []
+        default:
+            return []
+        }
+    }
+
+    /// Extend the eval context with the loop variable and its index.
+    private func extendContext(_ ctx: [String: Any], varName: String, item: [String: Any], index: Int) -> [String: Any] {
+        var extended = ctx
+        var itemWithIndex = item
+        itemWithIndex["_index"] = index
+        extended[varName] = itemWithIndex
+        return extended
     }
 
     // MARK: - Container

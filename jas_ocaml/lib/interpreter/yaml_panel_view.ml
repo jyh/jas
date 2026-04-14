@@ -33,6 +33,11 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
   if not (is_visible el ctx) then ()
   else
   let open Yojson.Safe.Util in
+  (* Handle repeat directive: expand template for each item in source *)
+  match el |> member "repeat", el |> member "template" with
+  | `Assoc _, template when template <> `Null ->
+    render_repeat ~packing ~ctx el
+  | _ ->
   let etype = el |> member "type" |> to_string_option |> Option.value ~default:"placeholder" in
   match etype with
   | "container" | "row" | "col" -> render_container ~packing ~ctx el etype
@@ -178,6 +183,41 @@ and render_children ~packing ~ctx el =
     List.iter (fun child -> render_element ~packing ~ctx child) children
   | _ -> ()
 
+and render_repeat ~packing ~ctx el =
+  let open Yojson.Safe.Util in
+  let repeat_obj = el |> member "repeat" in
+  let template = el |> member "template" in
+  let source_expr = repeat_obj |> member "source" |> to_string_option |> Option.value ~default:"" in
+  let var_name = repeat_obj |> member "as" |> to_string_option |> Option.value ~default:"item" in
+  (* Resolve the source expression to raw JSON (preserving lists/objects) *)
+  let items_json = Expr_eval.evaluate_to_json source_expr ctx in
+  (* Determine layout direction from the element *)
+  let layout_dir = el |> member "layout" |> to_string_option |> Option.value ~default:"column" in
+  let gap = el |> member "style" |> safe_member "gap" |> to_int_option |> Option.value ~default:0 in
+  let is_row = layout_dir = "row" || layout_dir = "wrap" in
+  let container = if is_row
+    then (GPack.hbox ~spacing:gap ~packing () :> GPack.box)
+    else (GPack.vbox ~spacing:gap ~packing () :> GPack.box) in
+  if layout_dir = "wrap" then
+    container#misc#set_size_request ~width:0 ();
+  (* Iterate over the source list *)
+  (match items_json with
+   | `List items ->
+     List.iteri (fun i item ->
+       (* Build item data with _index *)
+       let item_obj = match item with
+         | `Assoc pairs -> `Assoc (("_index", `Int i) :: pairs)
+         | other -> `Assoc [("_index", `Int i); ("value", other)]
+       in
+       (* Extend the eval context with the loop variable *)
+       let extended_ctx = match ctx with
+         | `Assoc pairs -> `Assoc ((var_name, item_obj) :: pairs)
+         | _ -> `Assoc [(var_name, item_obj)]
+       in
+       render_element ~packing:(container#pack ~expand:false) ~ctx:extended_ctx template
+     ) items
+   | _ -> ())
+
 (** Helper to convert number from JSON safely. *)
 and to_number_option (j : Yojson.Safe.t) : float option =
   match j with
@@ -200,9 +240,12 @@ let create_panel_body ~packing ~(kind : panel_kind) =
       let state_obj = `Assoc state_defaults in
       let panel_defaults = Workspace_loader.panel_state_defaults ws content_id in
       let icons_obj = Workspace_loader.icons ws in
+      let swatch_libs = Workspace_loader.swatch_libraries ws in
+      let data_obj = `Assoc [("swatch_libraries", swatch_libs)] in
       let ctx = `Assoc [
         ("state", state_obj);
         ("panel", `Assoc panel_defaults);
-        ("icons", icons_obj)
+        ("icons", icons_obj);
+        ("data", data_obj)
       ] in
       render_element ~packing ~ctx content

@@ -58,12 +58,12 @@ fn render_el(
         "container" | "row" | "col" => render_container(el, ctx, rctx),
         "grid" => render_grid(el, ctx, rctx),
         "text" => render_text(el, ctx),
-        "button" => render_button(el, ctx),
-        "icon_button" => render_icon_button(el, ctx),
+        "button" => render_button(el, ctx, rctx),
+        "icon_button" => render_icon_button(el, ctx, rctx),
         "slider" => render_slider(el, ctx, rctx),
         "number_input" => render_number_input(el, ctx),
         "text_input" => render_text_input(el, ctx),
-        "color_swatch" => render_color_swatch(el, ctx),
+        "color_swatch" => render_color_swatch(el, ctx, rctx),
         "fill_stroke_widget" => render_fill_stroke_widget(el, ctx, rctx),
         "color_bar" => render_color_bar(el, ctx, rctx),
         "separator" => render_separator(el, ctx),
@@ -161,6 +161,139 @@ fn eval_to_json(source: &str, ctx: &serde_json::Value) -> serde_json::Value {
     }
 }
 
+// ── Generic behavior dispatch ──────────────────────────────────
+
+/// Dispatch a named action with resolved params on AppState.
+fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) {
+    use crate::geometry::element::Color;
+    match action {
+        "set_active_color" => {
+            if let Some(color_val) = params.get("color").and_then(|v| v.as_str()) {
+                if let Some(c) = parse_hex_color(color_val) {
+                    st.set_active_color(c);
+                }
+            }
+        }
+        "set_active_color_none" => st.set_active_to_none(),
+        "swap_fill_stroke" => st.swap_fill_stroke(),
+        "reset_fill_stroke" => st.reset_fill_stroke_defaults(),
+        _ => {}
+    }
+}
+
+/// Run effects (e.g., `set: { fill_on_top: true }`).
+fn run_effects(effects: &[serde_json::Value], st: &mut crate::workspace::app_state::AppState) {
+    for effect in effects {
+        if let Some(set_map) = effect.get("set").and_then(|v| v.as_object()) {
+            for (key, val) in set_map {
+                match key.as_str() {
+                    "fill_on_top" => {
+                        if let Some(b) = val.as_bool() {
+                            st.fill_on_top = b;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+/// Build an onclick handler from an element's behavior declarations.
+/// Returns None if the element has no click behaviors.
+fn build_click_handler(
+    el: &serde_json::Value,
+    ctx: &serde_json::Value,
+    rctx: &RenderCtx,
+) -> Option<EventHandler<Event<MouseData>>> {
+    let behaviors = el.get("behavior").and_then(|b| b.as_array())?;
+    let click_behaviors: Vec<&serde_json::Value> = behaviors.iter()
+        .filter(|b| b.get("event").and_then(|e| e.as_str()).unwrap_or("click") == "click")
+        .collect();
+    if click_behaviors.is_empty() {
+        return None;
+    }
+
+    // Pre-resolve params and snapshot what we need for the closure
+    let mut resolved_actions: Vec<(Option<String>, serde_json::Map<String, serde_json::Value>, Vec<serde_json::Value>, Option<String>)> = Vec::new();
+    for b in &click_behaviors {
+        let action = b.get("action").and_then(|a| a.as_str()).map(|s| s.to_string());
+        let condition = b.get("condition").and_then(|c| c.as_str()).map(|s| s.to_string());
+        let effects = b.get("effects").and_then(|e| e.as_array()).cloned().unwrap_or_default();
+
+        // Resolve params against context
+        let raw_params = b.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
+        let mut resolved_params = serde_json::Map::new();
+        for (k, v) in &raw_params {
+            if let Some(expr_str) = v.as_str() {
+                let result = expr::eval(expr_str, ctx);
+                match result {
+                    Value::Color(c) => { resolved_params.insert(k.clone(), serde_json::Value::String(c)); }
+                    Value::Str(s) => { resolved_params.insert(k.clone(), serde_json::Value::String(s)); }
+                    Value::Number(n) => { resolved_params.insert(k.clone(), serde_json::json!(n)); }
+                    Value::Bool(b) => { resolved_params.insert(k.clone(), serde_json::json!(b)); }
+                    Value::Null => { resolved_params.insert(k.clone(), serde_json::Value::Null); }
+                    Value::List(l) => { resolved_params.insert(k.clone(), serde_json::Value::Array(l)); }
+                };
+            } else {
+                resolved_params.insert(k.clone(), v.clone());
+            }
+        }
+        resolved_actions.push((action, resolved_params, effects, condition));
+    }
+
+    let app = rctx.app.clone();
+    let mut revision = rctx.revision;
+    let ctx_snapshot = ctx.clone();
+
+    Some(EventHandler::new(move |_evt: Event<MouseData>| {
+        let app = app.clone();
+        let actions = resolved_actions.clone();
+        let ctx_snap = ctx_snapshot.clone();
+        spawn(async move {
+            let mut st = app.borrow_mut();
+            for (action, params, effects, condition) in &actions {
+                // Check condition
+                if let Some(cond_expr) = condition {
+                    let result = expr::eval(cond_expr, &ctx_snap);
+                    if !result.to_bool() {
+                        continue;
+                    }
+                }
+                // Run effects
+                if !effects.is_empty() {
+                    run_effects(effects, &mut st);
+                }
+                // Dispatch action
+                if let Some(action_name) = action {
+                    dispatch_action(action_name, params, &mut st);
+                }
+            }
+            drop(st);
+            revision += 1;
+        });
+    }))
+}
+
+/// Parse a hex color string (#rgb or #rrggbb) into a Color.
+fn parse_hex_color(s: &str) -> Option<crate::geometry::element::Color> {
+    let s = s.trim_start_matches('#');
+    let (r, g, b) = if s.len() == 3 {
+        let r = u8::from_str_radix(&s[0..1], 16).ok()?;
+        let g = u8::from_str_radix(&s[1..2], 16).ok()?;
+        let b = u8::from_str_radix(&s[2..3], 16).ok()?;
+        (r * 17, g * 17, b * 17)
+    } else if s.len() == 6 {
+        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+        (r, g, b)
+    } else {
+        return None;
+    };
+    Some(crate::geometry::element::Color::rgb(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0))
+}
+
 /// Build a CSS style string from the element's style properties.
 fn build_style(el: &serde_json::Value, ctx: &serde_json::Value) -> String {
     let style = match el.get("style") {
@@ -203,6 +336,17 @@ fn build_style(el: &serde_json::Value, ctx: &serde_json::Value) -> String {
             }
             "z_index" => parts.push(format!("z-index:{resolved}")),
             "font_size" => parts.push(format!("font-size:{resolved}px")),
+            "flex_shrink" => parts.push(format!("flex-shrink:{resolved}")),
+            "align_self" => {
+                let v = match resolved.as_str() {
+                    "start" => "flex-start",
+                    "end" => "flex-end",
+                    "center" => "center",
+                    "stretch" => "stretch",
+                    _ => &resolved,
+                };
+                parts.push(format!("align-self:{v}"));
+            }
             "size" => {
                 parts.push(format!("width:{resolved}px;height:{resolved}px"));
             }
@@ -336,21 +480,20 @@ fn render_text(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
     }
 }
 
-fn render_button(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
+fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let label = el.get("label").and_then(|l| l.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
+    let on_click = build_click_handler(el, ctx, rctx);
 
-    rsx! {
-        button {
-            id: "{id}",
-            style: "{style}",
-            "{label}"
-        }
+    if let Some(handler) = on_click {
+        rsx! { button { id: "{id}", style: "{style}", onclick: handler, "{label}" } }
+    } else {
+        rsx! { button { id: "{id}", style: "{style}", "{label}" } }
     }
 }
 
-fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
+fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
@@ -369,11 +512,14 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value) -> Elemen
         String::new()
     };
 
+    let on_click = build_click_handler(el, ctx, rctx);
+
     rsx! {
         div {
             id: "{id}",
             style: "cursor:pointer;{style}",
             title: "{summary}",
+            onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             if !icon_svg.is_empty() {
                 div {
                     style: "width:100%;height:100%;",
@@ -528,7 +674,7 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value) -> Element
     }
 }
 
-fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
+fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let size = el.get("style")
         .and_then(|s| s.get("size"))
@@ -556,10 +702,22 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value) -> Eleme
         format!("width:{size}px;height:{size}px;background:{bg};border:{border};cursor:pointer;box-sizing:border-box;")
     };
 
-    rsx! {
-        div {
-            id: "{id}",
-            style: "{style}",
+    let on_click = build_click_handler(el, ctx, rctx);
+
+    if let Some(handler) = on_click {
+        rsx! {
+            div {
+                id: "{id}",
+                style: "{style}",
+                onclick: handler,
+            }
+        }
+    } else {
+        rsx! {
+            div {
+                id: "{id}",
+                style: "{style}",
+            }
         }
     }
 }
@@ -658,7 +816,7 @@ fn render_disclosure(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
     }
 }
 
-fn render_fill_stroke_widget(_el: &serde_json::Value, _ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+fn render_fill_stroke_widget(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     use crate::document::controller::{
         FillSummary, StrokeSummary,
         selection_fill_summary, selection_stroke_summary,
@@ -692,14 +850,18 @@ fn render_fill_stroke_widget(_el: &serde_json::Value, _ctx: &serde_json::Value, 
         }
     };
 
+    let wrapper_style = build_style(el, ctx);
     rsx! {
-        crate::workspace::fill_stroke_widget::FillStrokeWidgetView {
-            fill_summary,
-            stroke_summary,
-            default_fill,
-            default_stroke,
-            fill_on_top,
-            color_picker_state: color_picker_ctx.0,
+        div {
+            style: "{wrapper_style}",
+            crate::workspace::fill_stroke_widget::FillStrokeWidgetView {
+                fill_summary,
+                stroke_summary,
+                default_fill,
+                default_stroke,
+                fill_on_top,
+                color_picker_state: color_picker_ctx.0,
+            }
         }
     }
 }

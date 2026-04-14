@@ -96,6 +96,13 @@ let icons (ws : workspace) : Yojson.Safe.t =
   | Some icons -> icons
   | None -> `Assoc []
 
+(** Get the swatch_libraries data from the workspace.
+    Returns a JSON object mapping library ids to library definitions. *)
+let swatch_libraries (ws : workspace) : Yojson.Safe.t =
+  match json_member "swatch_libraries" ws.data with
+  | Some libs -> libs
+  | None -> `Assoc []
+
 (** Map a panel_kind variant to its workspace content id string. *)
 let panel_kind_to_content_id (kind : Workspace_layout.panel_kind) : string =
   match kind with

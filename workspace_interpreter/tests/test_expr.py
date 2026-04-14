@@ -187,3 +187,114 @@ class TestEvaluateEdgeCases:
     def test_list_index_out_of_bounds(self):
         result = evaluate("state.items.99", {"state": {"items": [1, 2, 3]}})
         assert result.type == ValueType.NULL
+
+
+class TestLoopVariableContext:
+    """Test that loop variables work as top-level context keys.
+
+    When a repeat directive iterates, the loop variable (e.g., 'lib',
+    'swatch') is injected as a top-level key in the eval context. The
+    expression evaluator must resolve dotted paths and bracket notation
+    against these variables naturally, without string substitution.
+    """
+
+    def test_loop_var_dot_access(self):
+        """lib.id resolves when lib is a top-level context key."""
+        ctx = {"lib": {"id": "web_colors", "collapsed": False}}
+        result = evaluate("lib.id", ctx)
+        assert result.value == "web_colors"
+
+    def test_loop_var_nested_dot_access(self):
+        """swatch.color resolves when swatch is a top-level context key."""
+        ctx = {"swatch": {"color": "#ff0000", "name": "Red", "_index": 0}}
+        result = evaluate("swatch.color", ctx)
+        assert result.value == "#ff0000"
+
+    def test_loop_var_index(self):
+        """swatch._index resolves to the numeric index."""
+        ctx = {"swatch": {"color": "#00ff00", "_index": 3}}
+        result = evaluate("swatch._index", ctx)
+        assert result.value == 3
+
+    def test_bracket_with_loop_var(self):
+        """data.swatch_libraries[lib.id].name uses bracket notation with loop var."""
+        ctx = {
+            "data": {
+                "swatch_libraries": {
+                    "web_colors": {
+                        "name": "Web Colors",
+                        "swatches": [{"color": "#ff0000"}],
+                    }
+                }
+            },
+            "lib": {"id": "web_colors", "collapsed": False},
+        }
+        result = evaluate("data.swatch_libraries[lib.id].name", ctx)
+        assert result.value == "Web Colors"
+
+    def test_bracket_with_loop_var_nested_list(self):
+        """data.swatch_libraries[lib.id].swatches resolves to a list."""
+        ctx = {
+            "data": {
+                "swatch_libraries": {
+                    "web_colors": {
+                        "name": "Web Colors",
+                        "swatches": [
+                            {"color": "#ff0000", "name": "Red"},
+                            {"color": "#00ff00", "name": "Green"},
+                        ],
+                    }
+                }
+            },
+            "lib": {"id": "web_colors"},
+        }
+        result = evaluate("data.swatch_libraries[lib.id].swatches", ctx)
+        assert result.type == ValueType.LIST
+        assert len(result.value) == 2
+
+    def test_text_interpolation_with_loop_var(self):
+        """{{data.swatch_libraries[lib.id].name}} in text interpolation."""
+        ctx = {
+            "data": {
+                "swatch_libraries": {
+                    "web_colors": {"name": "Web Colors"},
+                }
+            },
+            "lib": {"id": "web_colors"},
+        }
+        result = evaluate_text(
+            "Library: {{data.swatch_libraries[lib.id].name}}", ctx
+        )
+        assert result == "Library: Web Colors"
+
+    def test_loop_var_with_state_and_panel(self):
+        """Loop var coexists with state and panel namespaces."""
+        ctx = {
+            "state": {"fill_color": "#ffffff"},
+            "panel": {"thumbnail_size": "small"},
+            "lib": {"id": "basic", "collapsed": False},
+        }
+        result = evaluate("lib.id", ctx)
+        assert result.value == "basic"
+        result2 = evaluate("state.fill_color", ctx)
+        assert result2.value == "#ffffff"
+
+    def test_nested_loop_vars(self):
+        """Both outer and inner loop variables resolve simultaneously."""
+        ctx = {
+            "data": {
+                "swatch_libraries": {
+                    "web_colors": {
+                        "swatches": [{"color": "#ff0000"}],
+                    }
+                }
+            },
+            "lib": {"id": "web_colors"},
+            "swatch": {"color": "#ff0000", "name": "Red", "_index": 0},
+        }
+        result_lib = evaluate("lib.id", ctx)
+        assert result_lib.value == "web_colors"
+        result_swatch = evaluate("swatch.color", ctx)
+        assert result_swatch.value == "#ff0000"
+        result_idx = evaluate("swatch._index", ctx)
+        assert result_idx.value == 0
