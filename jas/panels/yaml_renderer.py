@@ -284,6 +284,9 @@ def _render_repeat(el, store, ctx, dispatch_fn):
     if "gap" in style:
         layout.setSpacing(int(style["gap"]))
 
+    from workspace_interpreter.scope import Scope
+    scope = Scope(ctx)
+
     for i, item in enumerate(items):
         if isinstance(item, dict):
             item_data = dict(item)
@@ -291,12 +294,10 @@ def _render_repeat(el, store, ctx, dispatch_fn):
         else:
             item_data = {"_value": item, "_index": i}
 
-        # Extend context with the loop variable so the expression
-        # evaluator resolves var.field paths naturally
-        child_ctx = dict(ctx)
-        child_ctx[var_name] = item_data
+        # Push a child scope with the loop variable — parent unchanged
+        child_scope = scope.extend(**{var_name: item_data})
 
-        child_widget = render_element(template, store, child_ctx, dispatch_fn)
+        child_widget = render_element(template, store, child_scope.to_dict(), dispatch_fn)
         if child_widget:
             layout.addWidget(child_widget)
 

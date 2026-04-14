@@ -200,7 +200,8 @@ and render_repeat ~packing ~ctx el =
     else (GPack.vbox ~spacing:gap ~packing () :> GPack.box) in
   if layout_dir = "wrap" then
     container#misc#set_size_request ~width:0 ();
-  (* Iterate over the source list *)
+  (* Build scope from context and iterate with child scopes *)
+  let scope = Scope.from_json ctx in
   (match items_json with
    | `List items ->
      List.iteri (fun i item ->
@@ -209,12 +210,10 @@ and render_repeat ~packing ~ctx el =
          | `Assoc pairs -> `Assoc (("_index", `Int i) :: pairs)
          | other -> `Assoc [("_index", `Int i); ("value", other)]
        in
-       (* Extend the eval context with the loop variable *)
-       let extended_ctx = match ctx with
-         | `Assoc pairs -> `Assoc ((var_name, item_obj) :: pairs)
-         | _ -> `Assoc [(var_name, item_obj)]
-       in
-       render_element ~packing:(container#pack ~expand:false) ~ctx:extended_ctx template
+       (* Push a child scope with the loop variable — parent unchanged *)
+       let child_scope = Scope.extend scope [(var_name, item_obj)] in
+       let child_ctx = Scope.to_json child_scope in
+       render_element ~packing:(container#pack ~expand:false) ~ctx:child_ctx template
      ) items
    | _ -> ())
 

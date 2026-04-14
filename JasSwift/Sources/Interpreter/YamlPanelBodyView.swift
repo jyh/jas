@@ -67,7 +67,7 @@ struct YamlElementView: View {
 
     /// Expand a repeat directive: evaluate the source expression to get a list,
     /// then render the template element once per item with the loop variable
-    /// injected into the eval context.
+    /// injected via Scope for proper static scoping.
     @ViewBuilder
     private func renderRepeat() -> some View {
         let repeatSpec = element["repeat"] as? [String: Any] ?? [:]
@@ -75,38 +75,44 @@ struct YamlElementView: View {
         let sourceExpr = repeatSpec["source"] as? String ?? ""
         let varName = repeatSpec["as"] as? String ?? "item"
 
-        // Evaluate the source expression to get the list items.
+        // Build scope from context and evaluate source
+        let scope = Scope(context)
         let items = evaluateToList(sourceExpr, context: context)
 
         let layout = element["layout"] as? String ?? "column"
         let gap = (element["style"] as? [String: Any])?["gap"] as? CGFloat ?? 0
 
         if layout == "wrap" {
-            // Wrap layout: use LazyVGrid with flexible columns
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 20), spacing: gap)],
                 spacing: gap
             ) {
                 ForEach(0..<items.count, id: \.self) { i in
-                    let extCtx = extendContext(context, varName: varName, item: items[i], index: i)
-                    YamlElementView(element: template, context: extCtx)
+                    let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
+                    YamlElementView(element: template, context: childScope.toDict())
                 }
             }
         } else if layout == "row" {
             HStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
-                    let extCtx = extendContext(context, varName: varName, item: items[i], index: i)
-                    YamlElementView(element: template, context: extCtx)
+                    let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
+                    YamlElementView(element: template, context: childScope.toDict())
                 }
             }
         } else {
             VStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
-                    let extCtx = extendContext(context, varName: varName, item: items[i], index: i)
-                    YamlElementView(element: template, context: extCtx)
+                    let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
+                    YamlElementView(element: template, context: childScope.toDict())
                 }
             }
         }
+    }
+
+    private func itemBindings(_ varName: String, item: [String: Any], index: Int) -> [String: Any] {
+        var data = item
+        data["_index"] = index
+        return [varName: data]
     }
 
     /// Evaluate a source expression and return the result as a list of dictionaries.

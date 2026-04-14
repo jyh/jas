@@ -12,6 +12,7 @@ pub mod expr_eval;
 pub mod expr;
 pub mod state_store;
 pub mod effects;
+pub mod scope;
 pub mod workspace;
 
 #[cfg(feature = "web")]
