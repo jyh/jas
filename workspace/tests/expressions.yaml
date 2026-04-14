@@ -1,0 +1,259 @@
+# Expression language conformance tests.
+# Every interpreter MUST pass all test cases.
+# See SCHEMA.md, Expression Language section.
+
+tests:
+  # Path resolution
+  - expr: "state.x"
+    state: { x: 5 }
+    expected: 5
+    type: number
+
+  - expr: "state.missing"
+    state: { x: 5 }
+    expected: null
+    type: "null"
+
+  # Comparison — strict typed
+  - expr: '5 == "5"'
+    expected: false
+    type: bool
+
+  - expr: "5 == 5"
+    expected: true
+    type: bool
+
+  - expr: "#ff0000 == #ff0000"
+    expected: true
+    type: bool
+
+  - expr: '#ff0000 == "#ff0000"'
+    expected: false
+    type: bool
+    note: "color vs string — different types"
+
+  # Numeric comparison
+  - expr: "state.count > 0"
+    state: { count: 3 }
+    expected: true
+    type: bool
+
+  - expr: "state.count > 0"
+    state: { count: 0 }
+    expected: false
+    type: bool
+
+  # Ternary
+  - expr: "state.flag ? state.a : state.b"
+    state: { flag: true, a: 10, b: 20 }
+    expected: 10
+    type: number
+
+  - expr: "state.flag ? state.a : state.b"
+    state: { flag: false, a: 10, b: 20 }
+    expected: 20
+    type: number
+
+  # Null checks
+  - expr: "state.color != null"
+    state: { color: null }
+    expected: false
+    type: bool
+
+  - expr: "state.color != null"
+    state: { color: "#ff0000" }
+    expected: true
+    type: bool
+
+  # Bool coercion
+  - expr: "not state.x"
+    state: { x: 0 }
+    expected: true
+    type: bool
+
+  - expr: "not state.x"
+    state: { x: "" }
+    expected: true
+    type: bool
+
+  - expr: "not state.x"
+    state: { x: "hello" }
+    expected: false
+    type: bool
+
+  # Function calls
+  - expr: "hsb_h(#ff0000)"
+    expected: 0
+    type: number
+
+  - expr: "rgb_r(#ff0000)"
+    expected: 255
+    type: number
+
+  - expr: "hex(#ff0000)"
+    expected: "ff0000"
+    type: string
+
+  # Function with ternary argument
+  - expr: "hsb_h(state.flag ? state.a : state.b)"
+    state: { flag: true, a: "#ff0000", b: "#00ff00" }
+    expected: 0
+    type: number
+
+  - expr: "hsb_h(state.flag ? state.a : state.b)"
+    state: { flag: false, a: "#ff0000", b: "#00ff00" }
+    expected: 120
+    type: number
+
+  # Color construction
+  - expr: "rgb(255, 0, 0)"
+    expected: "#ff0000"
+    type: color
+
+  - expr: "hsb(120, 100, 100)"
+    expected: "#00ff00"
+    type: color
+
+  # Hue wrapping — 360 is out of range, should clamp or wrap to 0
+  - expr: "hsb_h(hsb(0, 100, 100))"
+    expected: 0
+    type: number
+
+  - expr: "hsb_h(#ff0000)"
+    expected: 0
+    type: number
+    note: "pure red hue is 0, never 360"
+
+  # Method calls
+  - expr: "state.items.length"
+    state: { items: [1, 2, 3] }
+    expected: 3
+    type: number
+
+  - expr: "state.items.length > 0"
+    state: { items: [] }
+    expected: false
+    type: bool
+
+  # In operator
+  - expr: '"pen" in state.tools'
+    state: { tools: ["pen", "rect", "ellipse"] }
+    expected: true
+    type: bool
+
+  - expr: '"brush" in state.tools'
+    state: { tools: ["pen", "rect", "ellipse"] }
+    expected: false
+    type: bool
+
+  - expr: "3 in state.ids"
+    state: { ids: [1, 2, 3] }
+    expected: true
+    type: bool
+
+  # In with non-list RHS
+  - expr: '"x" in state.name'
+    state: { name: "hello" }
+    expected: false
+    type: bool
+    note: "RHS is not a list — always false"
+
+  # Logical operators
+  - expr: "state.a and state.b"
+    state: { a: true, b: false }
+    expected: false
+    type: bool
+
+  - expr: "state.a or state.b"
+    state: { a: false, b: true }
+    expected: true
+    type: bool
+
+  # Dynamic indexing
+  - expr: "data.libs[state.key].name"
+    state: { key: "web" }
+    data: { libs: { web: { name: "Web Colors" } } }
+    expected: "Web Colors"
+    type: string
+
+  # Numeric list indexing via dot
+  - expr: "state.colors.0"
+    state: { colors: ["#ff0000", "#00ff00", "#0000ff"] }
+    expected: "#ff0000"
+    type: string
+
+  # Error handling — missing key
+  - expr: "state.missing.nested"
+    state: {}
+    expected: null
+    type: "null"
+
+  # Error handling — wrong type for comparison
+  - expr: '"hello" > 5'
+    expected: false
+    type: bool
+
+  # Nested ternary
+  - expr: 'state.x == 1 ? "one" : state.x == 2 ? "two" : "other"'
+    state: { x: 2 }
+    expected: "two"
+    type: string
+
+  # Precedence: and binds tighter than or
+  - expr: "state.a or state.b and state.c"
+    state: { a: false, b: true, c: false }
+    expected: false
+    type: bool
+    note: "b and c = false, then a or false = false"
+
+  # Color literal equality
+  - expr: "#fff == #ffffff"
+    expected: true
+    type: bool
+    note: "3-digit shorthand normalized to 6-digit"
+
+  # Color transformation — invert
+  - expr: "invert(#ff0000)"
+    expected: "#00ffff"
+    type: color
+    note: "255-255=0, 255-0=255, 255-0=255 → cyan"
+
+  - expr: "invert(#000000)"
+    expected: "#ffffff"
+    type: color
+
+  - expr: "invert(#ffffff)"
+    expected: "#000000"
+    type: color
+
+  - expr: "invert(null)"
+    expected: "#ffffff"
+    type: color
+    note: "null treated as #000000, inverted to white"
+
+  # Color transformation — complement
+  - expr: "complement(#ff0000)"
+    expected: "#00ffff"
+    type: color
+    note: "hue 0 → 180 = cyan"
+
+  - expr: "complement(#00ff00)"
+    expected: "#ff00ff"
+    type: color
+    note: "hue 120 → 300 = magenta"
+
+  - expr: "complement(#808080)"
+    expected: "#808080"
+    type: color
+    note: "achromatic (s=0) — unchanged"
+
+  # Invert/complement with ternary (the real-world pattern)
+  - expr: "invert(state.flag ? state.a : state.b)"
+    state: { flag: true, a: "#ff0000", b: "#00ff00" }
+    expected: "#00ffff"
+    type: color
+
+  - expr: "complement(state.flag ? state.a : state.b)"
+    state: { flag: false, a: "#ff0000", b: "#00ff00" }
+    expected: "#ff00ff"
+    type: color
