@@ -18,6 +18,8 @@ pub mod workspace;
 pub mod renderer;
 #[cfg(feature = "web")]
 pub mod dialog_view;
+#[cfg(feature = "web")]
+pub mod timer;
 
 #[cfg(test)]
 mod tests;

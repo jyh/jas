@@ -21,6 +21,7 @@ struct RenderCtx {
     app: AppHandle,
     revision: Signal<u64>,
     dialog_ctx: super::dialog_view::DialogCtx,
+    timer_ctx: super::timer::TimerCtx,
 }
 
 /// Render a YAML element spec into a Dioxus Element.
@@ -38,6 +39,7 @@ pub fn render_element(
         app: use_context::<AppHandle>(),
         revision: use_context::<Signal<u64>>(),
         dialog_ctx: use_context::<super::dialog_view::DialogCtx>(),
+        timer_ctx: use_context::<super::timer::TimerCtx>(),
     };
     render_el(el, ctx, &rctx)
 }
@@ -310,6 +312,93 @@ fn build_click_handler(
     }))
 }
 
+/// Build a mousedown handler that processes start_timer effects.
+fn build_mousedown_handler(
+    el: &serde_json::Value,
+    ctx: &serde_json::Value,
+    rctx: &RenderCtx,
+) -> Option<EventHandler<Event<MouseData>>> {
+    let behaviors = el.get("behavior").and_then(|b| b.as_array())?;
+    let md_behaviors: Vec<&serde_json::Value> = behaviors.iter()
+        .filter(|b| b.get("event").and_then(|e| e.as_str()) == Some("mouse_down"))
+        .collect();
+    if md_behaviors.is_empty() {
+        return None;
+    }
+
+    let mut timer_specs: Vec<(String, u32, Vec<serde_json::Value>)> = Vec::new();
+    for b in &md_behaviors {
+        if let Some(effects) = b.get("effects").and_then(|e| e.as_array()) {
+            for eff in effects {
+                if let Some(st) = eff.get("start_timer").and_then(|s| s.as_object()) {
+                    let id = st.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let delay = st.get("delay_ms").and_then(|v| v.as_u64()).unwrap_or(250) as u32;
+                    let nested = st.get("effects").and_then(|e| e.as_array()).cloned().unwrap_or_default();
+                    timer_specs.push((id, delay, nested));
+                }
+            }
+        }
+    }
+
+    if timer_specs.is_empty() {
+        return None;
+    }
+
+    let timer_ctx = rctx.timer_ctx.clone();
+    let app = rctx.app.clone();
+    let dialog_signal = rctx.dialog_ctx.0;
+    let revision = rctx.revision;
+
+    Some(EventHandler::new(move |_evt: Event<MouseData>| {
+        for (id, delay, effects) in &timer_specs {
+            super::timer::start_timer(
+                &timer_ctx, id, *delay, effects.clone(),
+                app.clone(), dialog_signal, revision,
+            );
+        }
+    }))
+}
+
+/// Build a mouseup handler that processes cancel_timer effects.
+fn build_mouseup_handler(
+    el: &serde_json::Value,
+    _ctx: &serde_json::Value,
+    rctx: &RenderCtx,
+) -> Option<EventHandler<Event<MouseData>>> {
+    let behaviors = el.get("behavior").and_then(|b| b.as_array())?;
+    let mu_behaviors: Vec<&serde_json::Value> = behaviors.iter()
+        .filter(|b| b.get("event").and_then(|e| e.as_str()) == Some("mouse_up"))
+        .collect();
+    if mu_behaviors.is_empty() {
+        return None;
+    }
+
+    let mut cancel_ids: Vec<String> = Vec::new();
+    for b in &mu_behaviors {
+        if let Some(effects) = b.get("effects").and_then(|e| e.as_array()) {
+            for eff in effects {
+                if let Some(ct) = eff.get("cancel_timer") {
+                    if let Some(id) = ct.as_str() {
+                        cancel_ids.push(id.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    if cancel_ids.is_empty() {
+        return None;
+    }
+
+    let timer_ctx = rctx.timer_ctx.clone();
+
+    Some(EventHandler::new(move |_evt: Event<MouseData>| {
+        for id in &cancel_ids {
+            super::timer::cancel_timer(&timer_ctx, id);
+        }
+    }))
+}
+
 /// Parse a hex color string (#rgb or #rrggbb) into a Color.
 fn parse_hex_color(s: &str) -> Option<crate::geometry::element::Color> {
     let s = s.trim_start_matches('#');
@@ -548,6 +637,8 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     };
 
     let on_click = build_click_handler(el, ctx, rctx);
+    let on_mousedown = build_mousedown_handler(el, ctx, rctx);
+    let on_mouseup = build_mouseup_handler(el, ctx, rctx);
 
     rsx! {
         div {
@@ -555,6 +646,8 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
             style: "cursor:pointer;{style}",
             title: "{summary}",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
+            onmousedown: move |evt| { if let Some(ref h) = on_mousedown { h.call(evt); } },
+            onmouseup: move |evt| { if let Some(ref h) = on_mouseup { h.call(evt); } },
             if !icon_svg.is_empty() {
                 div {
                     style: "width:100%;height:100%;",

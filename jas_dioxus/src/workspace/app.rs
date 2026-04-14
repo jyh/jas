@@ -372,6 +372,9 @@ pub fn App() -> Element {
     // color_picker_state removed — color picker now uses YAML dialog system
     let yaml_dialog = use_signal(|| Option::<crate::interpreter::dialog_view::DialogState>::None);
     use_context_provider(|| crate::interpreter::dialog_view::DialogCtx(yaml_dialog));
+    use_context_provider(|| crate::interpreter::timer::TimerCtx(
+        std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new()))
+    ));
 
     // --- Panel menu context ---
     let mut panel_menu_sig = use_signal(|| None);
