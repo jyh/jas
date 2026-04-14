@@ -10,7 +10,6 @@ use dioxus::prelude::*;
 
 use super::app_state::{Act, AppState};
 use super::theme::*;
-use super::color_panel_view::ColorPanelView;
 use super::workspace::{
     DockEdge, DockId, DragPayload, DropTarget, GroupAddr, PanelAddr, PanelGroup, PanelKind,
 };
