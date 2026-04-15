@@ -1245,53 +1245,109 @@ and completeness. Make suggestions for improvements, ranking them in priority
 from high to low, and giving each a number. Be ready for a deep dive into any of
 the suggestions.
 
-# Swatch Options
+# Swatches Panel
 
-```yaml
-dialog:
-- .row: [Swatch Name, NAME]
-- .row: ["Color Type:", COLOR_TYPE]
-- .row:
-  - .col-4:
-  - .col-4: [GLOBAL]
-  - .col-4:
-- .row: ["Color Mode:", COLOR_MODE]
-- .row:
-  - .col-3: COLOR
-  - .col-9:
-  - .row: [SLIDER, VALUE]
-- .row:
-  - .col-9:
-  - .col-3: HEX
-- .row:
-  - .col-4: PREVIEW
-  - .col-4: CANCEL
-  - .col-4: OK
-```
+Let's create the Swatches Panel. An example is shown in examples/swatches.png.
+- FILL_STROKE: a fill/stroke widget in the upper left.
+- RECENT_COLORS: Below that is a row of swatches for Recent Colors.
+- SWATCH_TILES: Below that is a container of swatches from swatch
+  "libraries". Within this container, the swatch layout is left-to-right,
+  top-to-bottom, like the way text flows in a paragraph.
 
-# Swatches
+Swatches are selected with a single click, which also sets the current color. A double-click on
+a swatch brings up the Swatch Options dialog box for editing the swatch's color. This applies to
+any swatch anywhere in any part of the workspace.
 
+Multiple swatches can be selected by pressing the shift key, which
+adds a range to the selection. Command-click toggles the selection
+of a swatch.
+
+The implementation of pattern/gradient swatches and special swatches is deferred.
+
+Here is a layout description using bootstrap style.
 ```yaml
 panel:
 - .row
   - .col-2: FILL_STROKE
-- .row: Recent colors
+- .row: "Recent colors"
 - .row: RECENT_COLORS
-- .row: Swatch Tiles
+- .row: "Swatch Tiles"
 - .row:
+  # A large area with wrapping content
   - .col-12: SWATCH_TILES
 ```
 
-# Color Guide
+By default, we'll create and initialize a library "Web Colors" containing the
+RGB Web Colors, where component values are 00, 33, 66, 99, CC, FF in hex.
 
+The Menu has the following items:
+- New Swatch (appends a new swatch with the current color)
+- Duplicate Swatch (create a copy of the currently selected swatch)
+- Delete Swatch (delete the selected swatch from its library)
+- ----
+- Select All Unused (select the swatches whose color does not appear anywhere in
+  the current document as a fill or stroke color)
+- Add Used Colors (take the set of fill and stroke colors in the document, and
+  create swatches in the current library for all the colors that are not already
+  part of the library)
+- ----
+- Sort by Name (each swatch has a name, sort them alphabetically)
+- ----
+- Small Thumbnail View (swatche squares are 16px*16px)
+- Medium Thumbnail View (swatches squares are 32px * 32px)
+- Large Thumbnail View (swatches squares are 64px * 64px)
+- ----
+- Swatch Options... (bring up the Swatch Options dialogue box, described below)
+- ----
+- Open Swatch Library (brings up a submenu listing the available swatch
+  libraries)
+- Save Swatch Library (brings up a "Save As" file dialogue box, and saves the
+  current swatch library to a file)
+
+Swatch Libraries are stored in a way similar to appearances. We will need a YAML
+spec, and the actual libraries are saved in JSON format.
+
+The Swatch Options dialogue box is shown in example/swatch-options.png.  It
+contains the following rows:
+- The Swatch Name NAME (initialized with the color components, e.g. "R=140 G=198 B=63")
+- COLOR_TYPE dropdown (for now always "Process Color")
+- COLOR_MODE is one of Grayscale/HSB/RGB/CMYK/Web Safe RGB
+- Sliders with the color components, like in the Color panel
+- HEX rgb-6
+- Bottom row has 3 items: Preview checkbox (updates the document as the color is changed),
+  Cancel Button, OK button
+
+Here is a layout description based on bootstrap layout.
 ```yaml
-panel:
+dialog:
+- .row: "Swatch Name:" NAME
+- .row: "Color Type:" COLOR_TYPE
 - .row:
-  - .col-1: CURRENT\_COLOR
-  - .col-11: HARMONY\_RULES\_DROPDOWN
+  - .col-4:
+  # GLOBAL is deferred for now, disable this checkbox
+  - .col-4: GLOBAL_CHECKBOX
+  - .col-4:
+- .row: "Color Mode:" COLOR_MODE
 - .row:
-  - .col-12: COLOR\_HARMONIES
+  - .col-3: COLOR
+  - .col-9:
+    # One row for each slider
+    - .row:
+	  - .col-9: SLIDER
+	  - .col-3: VALUE 
+- .row:
+  - .col-9:
+  - .col-3: HEX
+- .row:
+  - .col-4: PREVIEW_CHECKBOX
+  - .col-4: CANCEL_BUTTON
+  - .col-4: OK_BUTTON
 ```
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
 
 # Align
 
@@ -1325,7 +1381,8 @@ panel:
   - .col-2: ALIGN_TOP_BUTTON
   - .col-2: ALIGN_VERTICAL_BUTTON
   - .col-2: ALIGN_BOTTOM_BUTTON
-- .row: "Distribute Objects"
+- .row: "Distribute Objects:"
+- .row:
   - .col-2: DISTRIBUTE_LEFT_BUTTON
   - .col-2: DISTRIBUTE_HORIZONTAL_BUTTON
   - .col-2: DISTRIBUTE_RIGHT_BUTTON
@@ -1341,11 +1398,6 @@ panel:
 
 The Alignment panel has the following menu:
 - Use Preview Bounds (if this is checked, the preview bounding box is used, which takes into account fill and stroke)
-
-Please read and understand these requirements. Analyze them for inconsistencies
-and completeness. Make suggestions for improvements, ranking them in priority
-from high to low, and giving each a number. Be ready for a deep dive into any of
-the suggestions.
 
 # Boolean Operations
 
@@ -1566,6 +1618,11 @@ panel:
   - .col-1: ARROW_BEYOND_BUTTON
   - .col-1: ARROW_TIP_BUTTON
 ```
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
 
 # Layer
 
