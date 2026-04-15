@@ -2,32 +2,233 @@ id: stroke_panel_content
 type: panel
 summary: "Stroke"
 description: >
-  Stroke attribute controls: width (slider + number input),
-  cap style (butt, round, square), join style (miter, round, bevel),
-  and opacity. All changes apply to the active stroke color.
+  Stroke attribute controls for the selected path(s). The panel provides
+  controls for stroke weight, endpoint cap style, corner join style with
+  miter limit, stroke alignment relative to the path, dashed line patterns,
+  arrowheads with independent start/end shape and scale, arrow alignment
+  mode, and variable-width stroke profiles.
+
+  Layout (top to bottom):
+
+  Row 1 — Weight. A label and a number input for the stroke weight in
+  points. Accepts any non-negative value including decimals.
+
+  Row 2 — Cap. Three mutually exclusive icon toggle buttons for line
+  endpoint style: butt (flat at the endpoint), round (semicircular beyond
+  the endpoint), and square (extends beyond the endpoint by half the
+  stroke width). Default is butt.
+
+  Row 3 — Corner. Three mutually exclusive icon toggle buttons for line
+  join style: miter (sharp corner), round (circular arc), and bevel
+  (flat diagonal). Followed by a miter limit label and numeric input.
+  The miter limit controls when a miter join auto-converts to bevel on
+  acute angles; the value is the ratio of miter length to stroke width.
+  Default miter limit is 10. The miter limit field is disabled when the
+  join style is round or bevel.
+
+  Row 4 — Align Stroke. Three mutually exclusive icon toggle buttons
+  controlling where the stroke is drawn relative to the path: center
+  (stroke straddles the path, the default), inside (stroke drawn inside
+  closed paths), or outside (stroke drawn outside closed paths). Inside
+  and outside behave the same as center on open paths.
+
+  Row 5 — Dashed Line. A checkbox to enable dashing, plus two preset
+  buttons: even dash (12pt/12pt) and dash-dot (12pt/6pt/0pt/6pt).
+  Clicking a preset enables dashing and fills in the dash/gap fields.
+
+  Row 6 — Dash/gap pattern. Six numeric inputs arranged as three
+  dash/gap pairs. Pair 1 defaults to 12pt/12pt. Pairs 2 and 3 default
+  to blank (unused — not part of the pattern). A value of 0 in a dash
+  position produces a zero-length segment (a dot with round caps). The
+  effective dash array is built left to right from non-blank pairs. All
+  six fields are disabled (grayed out) when the dashed line checkbox is
+  unchecked. The values persist and reappear when re-checked.
+
+  Row 7 — Arrowheads. A label, two dropdowns (start and end) selecting
+  from 15 arrowhead shapes, and a swap button that exchanges start and
+  end arrowhead selections (both shape and scale). Both dropdowns share
+  the same shape list. The renderer flips the shape based on which end
+  it is placed on.
+
+  Arrowhead shapes: none (default), simple_arrow (filled triangle),
+  open_arrow (unfilled triangle), closed_arrow (filled triangle with
+  bar at base), stealth_arrow (sharp swept-back chevron, filled),
+  barbed_arrow (curved swept-back, filled), half_arrow_upper (upper
+  half of filled triangle), half_arrow_lower (lower half of filled
+  triangle), circle (filled), open_circle (outline), square (filled),
+  open_square (outline), diamond (filled diamond/rhombus),
+  open_diamond (outline diamond), slash (perpendicular line across
+  the path).
+
+  Row 8 — Scale. A label, two editable combo boxes (start and end)
+  for arrowhead scale as a percentage, and a link/unlink toggle button
+  (chain icon). Preset dropdown values: 50%, 75%, 100%, 150%, 200%,
+  300%, 400%. The user can also type any positive value (minimum 1%).
+  Default is 100%. Scale is relative to the stroke weight. When the
+  link button is active, changing either scale updates both. Default
+  is unlinked.
+
+  Row 9 — Arrow Align. A label and two mutually exclusive icon toggle
+  buttons: tip-at-end (the arrowhead tip sits exactly at the path
+  endpoint; the body extends inward along the path) and center-at-end
+  (the arrowhead center sits at the path endpoint; the tip extends
+  beyond). Default is tip-at-end.
+
+  Row 10 — Profile. A dropdown selecting a variable-width stroke
+  profile, plus flip and reset buttons. Profiles: uniform (constant
+  width, the default), taper_both (tapers at both ends), taper_start
+  (tapers at start), taper_end (tapers at end), bulge (wider in the
+  middle), pinch (narrower in the middle). Flip mirrors the profile
+  along the path. Reset restores uniform.
 
 state:
-  width:
+  weight:
     type: number
     default: 1
-    description: "Stroke width in points"
-  opacity:
-    type: number
-    default: 100
-    description: "Stroke opacity (0-100)"
+    description: "Stroke weight in points. Non-negative, decimals allowed."
   cap:
     type: enum
     values: [butt, round, square]
     default: butt
-    description: "Line cap style"
+    description: >
+      Line cap style. Butt: flat at the endpoint. Round: semicircular
+      beyond the endpoint. Square: extends beyond the endpoint by half
+      the stroke width.
   join:
     type: enum
     values: [miter, round, bevel]
     default: miter
-    description: "Line join style"
+    description: >
+      Line join style. Miter: sharp pointed corner. Round: circular arc.
+      Bevel: flat diagonal cut.
+  miter_limit:
+    type: number
+    default: 10
+    description: >
+      Miter length / stroke width ratio. When exceeded, the miter join
+      auto-converts to bevel. Minimum 1. Only effective when join is
+      miter.
+  align_stroke:
+    type: enum
+    values: [center, inside, outside]
+    default: center
+    description: >
+      Stroke alignment relative to the path. Center: stroke straddles
+      the path. Inside: stroke drawn inside closed paths. Outside:
+      stroke drawn outside closed paths. Inside and outside behave as
+      center on open paths.
+  dashed:
+    type: bool
+    default: false
+    description: "Whether the stroke is dashed."
+  dash_1:
+    type: number
+    default: 12
+    description: "Dash length for pair 1, in points."
+  gap_1:
+    type: number
+    default: 12
+    description: "Gap length for pair 1, in points."
+  dash_2:
+    type: number
+    default: null
+    nullable: true
+    description: "Dash length for pair 2, in points. Null means unused."
+  gap_2:
+    type: number
+    default: null
+    nullable: true
+    description: "Gap length for pair 2, in points. Null means unused."
+  dash_3:
+    type: number
+    default: null
+    nullable: true
+    description: "Dash length for pair 3, in points. Null means unused."
+  gap_3:
+    type: number
+    default: null
+    nullable: true
+    description: "Gap length for pair 3, in points. Null means unused."
+  start_arrowhead:
+    type: enum
+    values: [none, simple_arrow, open_arrow, closed_arrow, stealth_arrow,
+             barbed_arrow, half_arrow_upper, half_arrow_lower,
+             circle, open_circle, square, open_square,
+             diamond, open_diamond, slash]
+    default: none
+    description: "Arrowhead shape at the start of the path."
+  end_arrowhead:
+    type: enum
+    values: [none, simple_arrow, open_arrow, closed_arrow, stealth_arrow,
+             barbed_arrow, half_arrow_upper, half_arrow_lower,
+             circle, open_circle, square, open_square,
+             diamond, open_diamond, slash]
+    default: none
+    description: "Arrowhead shape at the end of the path."
+  start_arrowhead_scale:
+    type: number
+    default: 100
+    description: >
+      Arrowhead scale at the start of the path, as a percentage of the
+      stroke weight. Minimum 1. Presets: 50, 75, 100, 150, 200, 300, 400.
+      Free entry allowed.
+  end_arrowhead_scale:
+    type: number
+    default: 100
+    description: >
+      Arrowhead scale at the end of the path, as a percentage of the
+      stroke weight. Minimum 1. Presets: 50, 75, 100, 150, 200, 300, 400.
+      Free entry allowed.
+  link_arrowhead_scale:
+    type: bool
+    default: false
+    description: >
+      When true, changing either arrowhead scale updates both to the
+      same value.
+  arrow_align:
+    type: enum
+    values: [tip_at_end, center_at_end]
+    default: tip_at_end
+    description: >
+      Arrow alignment mode. Tip-at-end: the arrowhead tip sits exactly
+      at the path endpoint, body extends inward. Center-at-end: the
+      arrowhead center sits at the endpoint, tip extends beyond.
+  profile:
+    type: enum
+    values: [uniform, taper_both, taper_start, taper_end, bulge, pinch]
+    default: uniform
+    description: >
+      Variable-width stroke profile. Uniform: constant width. Taper_both:
+      tapers at both ends. Taper_start/taper_end: tapers at one end.
+      Bulge: wider in the middle. Pinch: narrower in the middle.
+  profile_flipped:
+    type: bool
+    default: false
+    description: >
+      Whether the stroke profile is flipped (mirrored along the path).
+      Only meaningful for asymmetric profiles (taper_start, taper_end).
 
 init:
-  width: "state.stroke_width"
+  weight: "state.stroke_width"
+  cap: "state.stroke_cap"
+  join: "state.stroke_join"
+  miter_limit: "state.stroke_miter_limit"
+  align_stroke: "state.stroke_align"
+  dashed: "state.stroke_dashed"
+  dash_1: "state.stroke_dash_1"
+  gap_1: "state.stroke_gap_1"
+  dash_2: "state.stroke_dash_2"
+  gap_2: "state.stroke_gap_2"
+  dash_3: "state.stroke_dash_3"
+  gap_3: "state.stroke_gap_3"
+  start_arrowhead: "state.stroke_start_arrowhead"
+  end_arrowhead: "state.stroke_end_arrowhead"
+  start_arrowhead_scale: "state.stroke_start_arrowhead_scale"
+  end_arrowhead_scale: "state.stroke_end_arrowhead_scale"
+  link_arrowhead_scale: "state.stroke_link_arrowhead_scale"
+  arrow_align: "state.stroke_arrow_align"
+  profile: "state.stroke_profile"
+  profile_flipped: "state.stroke_profile_flipped"
 
 menu:
   - label: "Butt Cap"
@@ -61,26 +262,12 @@ menu:
 
 content:
   type: container
-  id: sp_content
+  id: stk_content
   layout: column
   style: { padding: 4, gap: 6 }
   children:
 
-    # ── Stroke color indicator ─────────────────────────────
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
-      children:
-        - type: text
-          content: "Color"
-          style: { width: 40, font_size: 10 }
-        - id: sp_color_swatch
-          type: color_swatch
-          style: { size: 20 }
-          bind:
-            color: "state.stroke_color"
-
-    # ── Width ──────────────────────────────────────────────
+    # ── Weight ──────────────────────────────────────────────
     - type: container
       layout: row
       style: { gap: 4, alignment: center }
@@ -88,48 +275,19 @@ content:
         - type: text
           content: "Weight"
           style: { width: 40, font_size: 10 }
-        - id: sp_width
-          type: slider
-          min: 0
-          max: 50
-          step: 1
-          bind:
-            value: "panel.width"
-        - id: sp_width_val
+        - id: stk_weight
           type: number_input
+          summary: "Stroke weight"
+          description: >
+            Stroke weight in points. Accepts any non-negative value
+            including decimals. Committed on Enter or focus loss.
           min: 0
-          max: 100
-          style: { width: 40 }
+          max: 1000
+          style: { flex: 1 }
           bind:
-            value: "panel.width"
+            value: "panel.weight"
         - type: text
           content: "pt"
-          style: { font_size: 10 }
-
-    # ── Opacity ────────────────────────────────────────────
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
-      children:
-        - type: text
-          content: "Opacity"
-          style: { width: 40, font_size: 10 }
-        - id: sp_opacity
-          type: slider
-          min: 0
-          max: 100
-          step: 1
-          bind:
-            value: "panel.opacity"
-        - id: sp_opacity_val
-          type: number_input
-          min: 0
-          max: 100
-          style: { width: 40 }
-          bind:
-            value: "panel.opacity"
-        - type: text
-          content: "%"
           style: { font_size: 10 }
 
     # ── Cap Style ──────────────────────────────────────────
@@ -140,72 +298,552 @@ content:
         - type: text
           content: "Cap"
           style: { width: 40, font_size: 10 }
-        - id: sp_cap_butt
-          type: button
-          label: "Butt"
-          style: { font_size: 10 }
+        - id: stk_cap_butt
+          type: icon_button
+          icon: cap_butt
+          summary: "Butt cap"
+          description: "Flat endpoint — stroke ends exactly at the path endpoint."
+          style: { size: 20 }
           bind:
             checked: 'panel.cap == "butt"'
           behavior:
             - event: click
               effects:
                 - set_panel_state: { key: cap, value: '"butt"' }
-        - id: sp_cap_round
-          type: button
-          label: "Round"
-          style: { font_size: 10 }
+                - set: { stroke_cap: '"butt"' }
+        - id: stk_cap_round
+          type: icon_button
+          icon: cap_round
+          summary: "Round cap"
+          description: "Semicircular endpoint — stroke extends beyond the path endpoint with a half-circle."
+          style: { size: 20 }
           bind:
             checked: 'panel.cap == "round"'
           behavior:
             - event: click
               effects:
                 - set_panel_state: { key: cap, value: '"round"' }
-        - id: sp_cap_square
-          type: button
-          label: "Square"
-          style: { font_size: 10 }
+                - set: { stroke_cap: '"round"' }
+        - id: stk_cap_square
+          type: icon_button
+          icon: cap_square
+          summary: "Square cap"
+          description: "Projecting endpoint — stroke extends beyond the path endpoint by half the stroke weight."
+          style: { size: 20 }
           bind:
             checked: 'panel.cap == "square"'
           behavior:
             - event: click
               effects:
                 - set_panel_state: { key: cap, value: '"square"' }
+                - set: { stroke_cap: '"square"' }
 
-    # ── Join Style ─────────────────────────────────────────
+    # ── Join Style + Miter Limit ───────────────────────────
     - type: container
       layout: row
       style: { gap: 4, alignment: center }
       children:
         - type: text
-          content: "Join"
+          content: "Corner"
           style: { width: 40, font_size: 10 }
-        - id: sp_join_miter
-          type: button
-          label: "Miter"
-          style: { font_size: 10 }
+        - id: stk_join_miter
+          type: icon_button
+          icon: join_miter
+          summary: "Miter join"
+          description: "Sharp pointed corner. May auto-convert to bevel when the miter limit is exceeded."
+          style: { size: 20 }
           bind:
             checked: 'panel.join == "miter"'
           behavior:
             - event: click
               effects:
                 - set_panel_state: { key: join, value: '"miter"' }
-        - id: sp_join_round
-          type: button
-          label: "Round"
-          style: { font_size: 10 }
+                - set: { stroke_join: '"miter"' }
+        - id: stk_join_round
+          type: icon_button
+          icon: join_round
+          summary: "Round join"
+          description: "Circular arc at the corner."
+          style: { size: 20 }
           bind:
             checked: 'panel.join == "round"'
           behavior:
             - event: click
               effects:
                 - set_panel_state: { key: join, value: '"round"' }
-        - id: sp_join_bevel
-          type: button
-          label: "Bevel"
-          style: { font_size: 10 }
+                - set: { stroke_join: '"round"' }
+        - id: stk_join_bevel
+          type: icon_button
+          icon: join_bevel
+          summary: "Bevel join"
+          description: "Flat diagonal cut at the corner."
+          style: { size: 20 }
           bind:
             checked: 'panel.join == "bevel"'
           behavior:
             - event: click
               effects:
                 - set_panel_state: { key: join, value: '"bevel"' }
+                - set: { stroke_join: '"bevel"' }
+        - type: text
+          content: "Limit"
+          style: { font_size: 10 }
+        - id: stk_miter_limit
+          type: number_input
+          summary: "Miter limit"
+          description: >
+            Miter length / stroke width ratio. When the ratio of a miter
+            join exceeds this value, the join auto-converts to bevel.
+            Minimum 1. Disabled when join style is round or bevel.
+          min: 1
+          max: 500
+          style: { width: 40 }
+          bind:
+            value: "panel.miter_limit"
+            disabled: 'panel.join != "miter"'
+
+    # ── Align Stroke ───────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Align Stroke"
+          style: { width: 64, font_size: 10 }
+        - id: stk_align_stroke_center
+          type: icon_button
+          icon: align_stroke_center
+          summary: "Center"
+          description: "Stroke straddles the path, half on each side."
+          style: { size: 20 }
+          bind:
+            checked: 'panel.align_stroke == "center"'
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: align_stroke, value: '"center"' }
+                - set: { stroke_align: '"center"' }
+        - id: stk_align_stroke_inside
+          type: icon_button
+          icon: align_stroke_inside
+          summary: "Inside"
+          description: >
+            Stroke drawn inside the path boundary. Behaves as center on
+            open paths.
+          style: { size: 20 }
+          bind:
+            checked: 'panel.align_stroke == "inside"'
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: align_stroke, value: '"inside"' }
+                - set: { stroke_align: '"inside"' }
+        - id: stk_align_stroke_outside
+          type: icon_button
+          icon: align_stroke_outside
+          summary: "Outside"
+          description: >
+            Stroke drawn outside the path boundary. Behaves as center on
+            open paths.
+          style: { size: 20 }
+          bind:
+            checked: 'panel.align_stroke == "outside"'
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: align_stroke, value: '"outside"' }
+                - set: { stroke_align: '"outside"' }
+
+    # ── Dashed Line ────────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - id: stk_dashed
+          type: checkbox
+          summary: "Dashed Line"
+          description: "Enable dashed stroke. When unchecked, the dash/gap fields are disabled but retain their values."
+          label: "Dashed Line"
+          bind:
+            checked: "panel.dashed"
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: dashed, value: "not panel.dashed" }
+                - set: { stroke_dashed: "not state.stroke_dashed" }
+        - id: stk_preset_even_dash
+          type: icon_button
+          icon: dash_even
+          summary: "Even dash preset"
+          description: >
+            Sets dash/gap pattern to 12pt dash, 12pt gap (pair 1 only)
+            and enables dashing.
+          style: { size: 16 }
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: dashed, value: true }
+                - set_panel_state: { key: dash_1, value: 12 }
+                - set_panel_state: { key: gap_1, value: 12 }
+                - set_panel_state: { key: dash_2, value: null }
+                - set_panel_state: { key: gap_2, value: null }
+                - set_panel_state: { key: dash_3, value: null }
+                - set_panel_state: { key: gap_3, value: null }
+                - set: { stroke_dashed: true, stroke_dash_1: 12, stroke_gap_1: 12, stroke_dash_2: null, stroke_gap_2: null, stroke_dash_3: null, stroke_gap_3: null }
+        - id: stk_preset_dash_dot
+          type: icon_button
+          icon: dash_dot
+          summary: "Dash-dot preset"
+          description: >
+            Sets dash/gap pattern to 12pt dash, 6pt gap, 0pt dash
+            (dot), 6pt gap (pairs 1 and 2) and enables dashing.
+          style: { size: 16 }
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: dashed, value: true }
+                - set_panel_state: { key: dash_1, value: 12 }
+                - set_panel_state: { key: gap_1, value: 6 }
+                - set_panel_state: { key: dash_2, value: 0 }
+                - set_panel_state: { key: gap_2, value: 6 }
+                - set_panel_state: { key: dash_3, value: null }
+                - set_panel_state: { key: gap_3, value: null }
+                - set: { stroke_dashed: true, stroke_dash_1: 12, stroke_gap_1: 6, stroke_dash_2: 0, stroke_gap_2: 6, stroke_dash_3: null, stroke_gap_3: null }
+
+    # ── Dash / Gap pattern ─────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 2, alignment: center }
+      children:
+        # Pair 1: dash
+        - type: container
+          layout: column
+          style: { flex: 1, gap: 1, alignment: center }
+          children:
+            - id: stk_dash_1
+              type: number_input
+              summary: "Dash 1"
+              description: "Dash length for pair 1, in points. 0 produces a dot with round caps."
+              min: 0
+              style: { width: "100%" }
+              bind:
+                value: "panel.dash_1"
+                disabled: "not panel.dashed"
+            - type: text
+              content: "dash"
+              style: { font_size: 9, text_align: center }
+        # Pair 1: gap
+        - type: container
+          layout: column
+          style: { flex: 1, gap: 1, alignment: center }
+          children:
+            - id: stk_gap_1
+              type: number_input
+              summary: "Gap 1"
+              description: "Gap length for pair 1, in points."
+              min: 0
+              style: { width: "100%" }
+              bind:
+                value: "panel.gap_1"
+                disabled: "not panel.dashed"
+            - type: text
+              content: "gap"
+              style: { font_size: 9, text_align: center }
+        # Pair 2: dash
+        - type: container
+          layout: column
+          style: { flex: 1, gap: 1, alignment: center }
+          children:
+            - id: stk_dash_2
+              type: number_input
+              summary: "Dash 2"
+              description: "Dash length for pair 2, in points. Blank means unused."
+              min: 0
+              style: { width: "100%" }
+              bind:
+                value: "panel.dash_2"
+                disabled: "not panel.dashed"
+            - type: text
+              content: "dash"
+              style: { font_size: 9, text_align: center }
+        # Pair 2: gap
+        - type: container
+          layout: column
+          style: { flex: 1, gap: 1, alignment: center }
+          children:
+            - id: stk_gap_2
+              type: number_input
+              summary: "Gap 2"
+              description: "Gap length for pair 2, in points. Blank means unused."
+              min: 0
+              style: { width: "100%" }
+              bind:
+                value: "panel.gap_2"
+                disabled: "not panel.dashed"
+            - type: text
+              content: "gap"
+              style: { font_size: 9, text_align: center }
+        # Pair 3: dash
+        - type: container
+          layout: column
+          style: { flex: 1, gap: 1, alignment: center }
+          children:
+            - id: stk_dash_3
+              type: number_input
+              summary: "Dash 3"
+              description: "Dash length for pair 3, in points. Blank means unused."
+              min: 0
+              style: { width: "100%" }
+              bind:
+                value: "panel.dash_3"
+                disabled: "not panel.dashed"
+            - type: text
+              content: "dash"
+              style: { font_size: 9, text_align: center }
+        # Pair 3: gap
+        - type: container
+          layout: column
+          style: { flex: 1, gap: 1, alignment: center }
+          children:
+            - id: stk_gap_3
+              type: number_input
+              summary: "Gap 3"
+              description: "Gap length for pair 3, in points. Blank means unused."
+              min: 0
+              style: { width: "100%" }
+              bind:
+                value: "panel.gap_3"
+                disabled: "not panel.dashed"
+            - type: text
+              content: "gap"
+              style: { font_size: 9, text_align: center }
+
+    # ── Arrowheads ─────────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Arrowheads"
+          style: { width: 64, font_size: 10 }
+        - id: stk_start_arrowhead
+          type: select
+          summary: "Start arrowhead"
+          description: >
+            Arrowhead shape at the start of the path. The renderer
+            flips the shape so it points outward from the path start.
+          style: { flex: 1 }
+          options:
+            - { value: none, label: "None" }
+            - { value: simple_arrow, label: "Simple Arrow" }
+            - { value: open_arrow, label: "Open Arrow" }
+            - { value: closed_arrow, label: "Closed Arrow" }
+            - { value: stealth_arrow, label: "Stealth Arrow" }
+            - { value: barbed_arrow, label: "Barbed Arrow" }
+            - { value: half_arrow_upper, label: "Half Arrow Upper" }
+            - { value: half_arrow_lower, label: "Half Arrow Lower" }
+            - { value: circle, label: "Circle" }
+            - { value: open_circle, label: "Open Circle" }
+            - { value: square, label: "Square" }
+            - { value: open_square, label: "Open Square" }
+            - { value: diamond, label: "Diamond" }
+            - { value: open_diamond, label: "Open Diamond" }
+            - { value: slash, label: "Slash" }
+          bind:
+            value: "panel.start_arrowhead"
+        - id: stk_end_arrowhead
+          type: select
+          summary: "End arrowhead"
+          description: >
+            Arrowhead shape at the end of the path. The renderer
+            flips the shape so it points outward from the path end.
+          style: { flex: 1 }
+          options:
+            - { value: none, label: "None" }
+            - { value: simple_arrow, label: "Simple Arrow" }
+            - { value: open_arrow, label: "Open Arrow" }
+            - { value: closed_arrow, label: "Closed Arrow" }
+            - { value: stealth_arrow, label: "Stealth Arrow" }
+            - { value: barbed_arrow, label: "Barbed Arrow" }
+            - { value: half_arrow_upper, label: "Half Arrow Upper" }
+            - { value: half_arrow_lower, label: "Half Arrow Lower" }
+            - { value: circle, label: "Circle" }
+            - { value: open_circle, label: "Open Circle" }
+            - { value: square, label: "Square" }
+            - { value: open_square, label: "Open Square" }
+            - { value: diamond, label: "Diamond" }
+            - { value: open_diamond, label: "Open Diamond" }
+            - { value: slash, label: "Slash" }
+          bind:
+            value: "panel.end_arrowhead"
+        - id: stk_swap_arrowheads
+          type: icon_button
+          icon: swap
+          summary: "Swap arrowheads"
+          description: >
+            Swap start and end arrowhead selections, including both
+            the shape and the scale values.
+          style: { size: 16 }
+          behavior:
+            - event: click
+              effects:
+                - swap_panel_state: [start_arrowhead, end_arrowhead]
+                - swap_panel_state: [start_arrowhead_scale, end_arrowhead_scale]
+                - swap: [stroke_start_arrowhead, stroke_end_arrowhead]
+                - swap: [stroke_start_arrowhead_scale, stroke_end_arrowhead_scale]
+
+    # ── Arrowhead Scale ────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Scale"
+          style: { width: 64, font_size: 10 }
+        - id: stk_start_arrowhead_scale
+          type: combo_box
+          summary: "Start arrowhead scale"
+          description: >
+            Scale of the start arrowhead as a percentage of the stroke
+            weight. Dropdown presets plus free entry. Minimum 1%.
+            Committed on Enter or focus loss. Invalid input reverts to
+            the previous value.
+          min: 1
+          style: { flex: 1 }
+          options:
+            - { value: 50, label: "50%" }
+            - { value: 75, label: "75%" }
+            - { value: 100, label: "100%" }
+            - { value: 150, label: "150%" }
+            - { value: 200, label: "200%" }
+            - { value: 300, label: "300%" }
+            - { value: 400, label: "400%" }
+          bind:
+            value: "panel.start_arrowhead_scale"
+        - id: stk_end_arrowhead_scale
+          type: combo_box
+          summary: "End arrowhead scale"
+          description: >
+            Scale of the end arrowhead as a percentage of the stroke
+            weight. Dropdown presets plus free entry. Minimum 1%.
+            Committed on Enter or focus loss. Invalid input reverts to
+            the previous value.
+          min: 1
+          style: { flex: 1 }
+          options:
+            - { value: 50, label: "50%" }
+            - { value: 75, label: "75%" }
+            - { value: 100, label: "100%" }
+            - { value: 150, label: "150%" }
+            - { value: 200, label: "200%" }
+            - { value: 300, label: "300%" }
+            - { value: 400, label: "400%" }
+          bind:
+            value: "panel.end_arrowhead_scale"
+        - id: stk_link_arrowhead_scale
+          type: icon_button
+          icon: chain
+          summary: "Link arrowhead scales"
+          description: >
+            Toggle linked arrowhead scales. When linked (active),
+            changing either scale updates both to the same value.
+          style: { size: 16 }
+          bind:
+            checked: "panel.link_arrowhead_scale"
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: link_arrowhead_scale, value: "not panel.link_arrowhead_scale" }
+                - set: { stroke_link_arrowhead_scale: "not state.stroke_link_arrowhead_scale" }
+
+    # ── Arrow Align ────────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Align"
+          style: { width: 64, font_size: 10 }
+        - id: stk_arrow_tip_at_end
+          type: icon_button
+          icon: arrow_tip_at_end
+          summary: "Tip at end"
+          description: >
+            The arrowhead tip sits exactly at the path endpoint. The
+            arrowhead body extends inward along the path.
+          style: { size: 20 }
+          bind:
+            checked: 'panel.arrow_align == "tip_at_end"'
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: arrow_align, value: '"tip_at_end"' }
+                - set: { stroke_arrow_align: '"tip_at_end"' }
+        - id: stk_arrow_center_at_end
+          type: icon_button
+          icon: arrow_center_at_end
+          summary: "Center at end"
+          description: >
+            The arrowhead center sits at the path endpoint. The tip
+            extends beyond the endpoint.
+          style: { size: 20 }
+          bind:
+            checked: 'panel.arrow_align == "center_at_end"'
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: arrow_align, value: '"center_at_end"' }
+                - set: { stroke_arrow_align: '"center_at_end"' }
+
+    # ── Stroke Profile ─────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Profile"
+          style: { width: 64, font_size: 10 }
+        - id: stk_profile
+          type: select
+          summary: "Stroke profile"
+          description: >
+            Variable-width stroke profile. Controls how the stroke
+            weight varies along the length of the path.
+          style: { flex: 1 }
+          options:
+            - { value: uniform, label: "Uniform" }
+            - { value: taper_both, label: "Taper Both" }
+            - { value: taper_start, label: "Taper Start" }
+            - { value: taper_end, label: "Taper End" }
+            - { value: bulge, label: "Bulge" }
+            - { value: pinch, label: "Pinch" }
+          bind:
+            value: "panel.profile"
+        - id: stk_flip_profile
+          type: icon_button
+          icon: flip_horizontal
+          summary: "Flip profile"
+          description: >
+            Mirror the stroke profile along the path. Toggles the
+            profile_flipped state. Only visually meaningful for
+            asymmetric profiles (taper_start, taper_end).
+          style: { size: 16 }
+          bind:
+            checked: "panel.profile_flipped"
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: profile_flipped, value: "not panel.profile_flipped" }
+                - set: { stroke_profile_flipped: "not state.stroke_profile_flipped" }
+        - id: stk_reset_profile
+          type: icon_button
+          icon: reset
+          summary: "Reset profile"
+          description: "Reset the stroke profile to uniform and clear the flipped state."
+          style: { size: 16 }
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: profile, value: '"uniform"' }
+                - set_panel_state: { key: profile_flipped, value: false }
+                - set: { stroke_profile: '"uniform"', stroke_profile_flipped: false }

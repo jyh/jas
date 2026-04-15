@@ -227,3 +227,118 @@ icons:
     svg: >
       <rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1"/>
       <rect x="2" y="2" width="6" height="12" fill="currentColor"/>
+
+  # ── Stroke panel icons ─────────────────────────────────────
+
+  cap_butt:
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="3" y1="8" x2="13" y2="8" stroke="currentColor" stroke-width="6" stroke-linecap="butt"/>
+      <line x1="3" y1="8" x2="13" y2="8" stroke="none" stroke-width="0"/>
+      <line x1="3" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="0.5" opacity="0.5"/>
+      <line x1="13" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="0.5" opacity="0.5"/>
+
+  cap_round:
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="4" y1="8" x2="12" y2="8" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+
+  cap_square:
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="5" y1="8" x2="11" y2="8" stroke="currentColor" stroke-width="6" stroke-linecap="square"/>
+      <line x1="5" y1="3" x2="5" y2="13" stroke="currentColor" stroke-width="0.5" opacity="0.5"/>
+      <line x1="11" y1="3" x2="11" y2="13" stroke="currentColor" stroke-width="0.5" opacity="0.5"/>
+
+  join_miter:
+    viewbox: "0 0 16 16"
+    svg: >
+      <polyline points="4,13 4,4 13,4" fill="none" stroke="currentColor"
+        stroke-width="3" stroke-linejoin="miter" stroke-linecap="butt"/>
+
+  join_round:
+    viewbox: "0 0 16 16"
+    svg: >
+      <polyline points="4,13 4,4 13,4" fill="none" stroke="currentColor"
+        stroke-width="3" stroke-linejoin="round" stroke-linecap="butt"/>
+
+  join_bevel:
+    viewbox: "0 0 16 16"
+    svg: >
+      <polyline points="4,13 4,4 13,4" fill="none" stroke="currentColor"
+        stroke-width="3" stroke-linejoin="bevel" stroke-linecap="butt"/>
+
+  align_stroke_center:
+    viewbox: "0 0 16 16"
+    svg: >
+      <rect x="3" y="3" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3"/>
+      <rect x="3" y="3" width="10" height="10" fill="none" stroke="none" stroke-width="0"/>
+      <line x1="3" y1="1" x2="3" y2="15" stroke="currentColor" stroke-width="0.5" opacity="0.4"/>
+      <line x1="13" y1="1" x2="13" y2="15" stroke="currentColor" stroke-width="0.5" opacity="0.4"/>
+
+  align_stroke_inside:
+    viewbox: "0 0 16 16"
+    svg: >
+      <rect x="4.5" y="4.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="3"/>
+      <rect x="3" y="3" width="10" height="10" fill="none" stroke="currentColor" stroke-width="0.5" opacity="0.4"/>
+
+  align_stroke_outside:
+    viewbox: "0 0 16 16"
+    svg: >
+      <rect x="1.5" y="1.5" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3"/>
+      <rect x="3" y="3" width="10" height="10" fill="none" stroke="currentColor" stroke-width="0.5" opacity="0.4"/>
+
+  chain:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M6,4 C6,2 10,2 10,4 L10,6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M6,12 C6,14 10,14 10,12 L10,10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="6" y1="6" x2="6" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="10" y1="6" x2="10" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+
+  swap:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M3,5 L7,2 L7,4 L13,4 L13,6 L7,6 L7,8 Z" fill="currentColor"/>
+      <path d="M13,11 L9,14 L9,12 L3,12 L3,10 L9,10 L9,8 Z" fill="currentColor"/>
+
+  dash_even:
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="1" y1="8" x2="5" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
+      <line x1="7" y1="8" x2="11" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
+      <line x1="13" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
+
+  dash_dot:
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="1" y1="8" x2="5" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
+      <circle cx="8" cy="8" r="1" fill="currentColor"/>
+      <line x1="11" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="butt"/>
+
+  arrow_tip_at_end:
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="2" y1="8" x2="11" y2="8" stroke="currentColor" stroke-width="1.5"/>
+      <polygon points="14,8 9,5 9,11" fill="currentColor"/>
+      <line x1="14" y1="3" x2="14" y2="13" stroke="currentColor" stroke-width="0.5" opacity="0.5"/>
+
+  arrow_center_at_end:
+    viewbox: "0 0 16 16"
+    svg: >
+      <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="1.5"/>
+      <polygon points="16,8 11,5 11,11" fill="currentColor"/>
+      <line x1="14" y1="3" x2="14" y2="13" stroke="currentColor" stroke-width="0.5" opacity="0.5"/>
+
+  flip_horizontal:
+    viewbox: "0 0 16 16"
+    svg: >
+      <polygon points="2,8 6,4 6,12" fill="currentColor"/>
+      <polygon points="14,8 10,4 10,12" fill="currentColor"/>
+      <line x1="8" y1="3" x2="8" y2="13" stroke="currentColor" stroke-width="0.5" stroke-dasharray="2,1"/>
+
+  reset:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M4,8 A4,4 0 1,1 8,12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <polygon points="4,5 2,9 6,9" fill="currentColor"/>

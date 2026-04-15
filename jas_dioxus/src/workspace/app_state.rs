@@ -12,7 +12,7 @@ use wasm_bindgen::JsCast;
 use crate::canvas::render;
 use crate::document::controller::Controller;
 use crate::document::model::Model;
-use crate::geometry::element::{Color, Fill, Stroke, Element as GeoElement};
+use crate::geometry::element::{Color, Fill, Stroke, LineCap, LineJoin, Element as GeoElement};
 use crate::tools::partial_selection_tool::PartialSelectionTool;
 use crate::tools::interior_selection_tool::InteriorSelectionTool;
 use crate::tools::line_tool::LineTool;
@@ -96,6 +96,58 @@ pub(crate) struct AppState {
     pub(crate) app_default_stroke: Option<Stroke>,
     /// Mutable swatch libraries (initialized from workspace data).
     pub(crate) swatch_libraries: serde_json::Value,
+    /// Stroke panel state — mirrored to/from global state for selection sync.
+    pub(crate) stroke_panel: StrokePanelState,
+}
+
+/// Stroke panel state fields that sync with global state and the selection.
+#[derive(Debug, Clone)]
+pub(crate) struct StrokePanelState {
+    pub cap: String,
+    pub join: String,
+    pub miter_limit: f64,
+    pub align: String,
+    pub dashed: bool,
+    pub dash_1: f64,
+    pub gap_1: f64,
+    pub dash_2: Option<f64>,
+    pub gap_2: Option<f64>,
+    pub dash_3: Option<f64>,
+    pub gap_3: Option<f64>,
+    pub start_arrowhead: String,
+    pub end_arrowhead: String,
+    pub start_arrowhead_scale: f64,
+    pub end_arrowhead_scale: f64,
+    pub link_arrowhead_scale: bool,
+    pub arrow_align: String,
+    pub profile: String,
+    pub profile_flipped: bool,
+}
+
+impl Default for StrokePanelState {
+    fn default() -> Self {
+        Self {
+            cap: "butt".into(),
+            join: "miter".into(),
+            miter_limit: 10.0,
+            align: "center".into(),
+            dashed: false,
+            dash_1: 12.0,
+            gap_1: 12.0,
+            dash_2: None,
+            gap_2: None,
+            dash_3: None,
+            gap_3: None,
+            start_arrowhead: "none".into(),
+            end_arrowhead: "none".into(),
+            start_arrowhead_scale: 100.0,
+            end_arrowhead_scale: 100.0,
+            link_arrowhead_scale: false,
+            arrow_align: "tip_at_end".into(),
+            profile: "uniform".into(),
+            profile_flipped: false,
+        }
+    }
 }
 
 impl AppState {
@@ -128,6 +180,7 @@ impl AppState {
             swatch_libraries: crate::interpreter::workspace::Workspace::load()
                 .map(|ws| ws.data().get("swatch_libraries").cloned().unwrap_or(serde_json::json!({})))
                 .unwrap_or(serde_json::json!({})),
+            stroke_panel: StrokePanelState::default(),
         }
     }
 
@@ -447,6 +500,97 @@ impl AppState {
                 let width = tab.model.default_stroke.map(|s| s.width).unwrap_or(1.0);
                 tab.model.default_stroke = Some(Stroke::new(color, width));
             }
+        }
+    }
+
+    /// Apply the current stroke panel state to the selected element(s).
+    /// Builds a Stroke from the panel fields and calls set_selection_stroke.
+    pub(crate) fn apply_stroke_panel_to_selection(&mut self) {
+        let sp = &self.stroke_panel;
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            // Get the current stroke color and width
+            let current_stroke = tab.model.default_stroke
+                .or(self.app_default_stroke);
+            if let Some(base) = current_stroke {
+                let linecap = match sp.cap.as_str() {
+                    "round" => LineCap::Round,
+                    "square" => LineCap::Square,
+                    _ => LineCap::Butt,
+                };
+                let linejoin = match sp.join.as_str() {
+                    "round" => LineJoin::Round,
+                    "bevel" => LineJoin::Bevel,
+                    _ => LineJoin::Miter,
+                };
+                // Build dash pattern from panel state
+                let mut dash_pattern = [0.0f64; 6];
+                let mut dash_len: u8 = 0;
+                if sp.dashed {
+                    dash_pattern[0] = sp.dash_1;
+                    dash_pattern[1] = sp.gap_1;
+                    dash_len = 2;
+                    if let (Some(d), Some(g)) = (sp.dash_2, sp.gap_2) {
+                        dash_pattern[2] = d;
+                        dash_pattern[3] = g;
+                        dash_len = 4;
+                    }
+                    if let (Some(d), Some(g)) = (sp.dash_3, sp.gap_3) {
+                        dash_pattern[4] = d;
+                        dash_pattern[5] = g;
+                        dash_len = 6;
+                    }
+                }
+                let new_stroke = Stroke {
+                    color: base.color,
+                    width: base.width,
+                    linecap,
+                    linejoin,
+                    miter_limit: sp.miter_limit,
+                    dash_pattern,
+                    dash_len,
+                    opacity: base.opacity,
+                };
+                // Update default stroke
+                tab.model.default_stroke = Some(new_stroke);
+                self.app_default_stroke = Some(new_stroke);
+                // Apply to selection
+                if !tab.model.document().selection.is_empty() {
+                    tab.model.snapshot();
+                    Controller::set_selection_stroke(&mut tab.model, Some(new_stroke));
+                }
+            }
+        }
+    }
+
+    /// Sync stroke panel state from the first selected element's stroke.
+    /// Called after selection changes so the panel reflects the selection.
+    pub(crate) fn sync_stroke_panel_from_selection(&mut self) {
+        let stroke = if let Some(tab) = self.tab() {
+            let doc = tab.model.document();
+            if let Some(es) = doc.selection.first() {
+                doc.get_element(&es.path).and_then(|e| e.stroke().cloned())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(s) = stroke {
+            self.stroke_panel.cap = match s.linecap {
+                LineCap::Butt => "butt",
+                LineCap::Round => "round",
+                LineCap::Square => "square",
+            }.into();
+            self.stroke_panel.join = match s.linejoin {
+                LineJoin::Miter => "miter",
+                LineJoin::Round => "round",
+                LineJoin::Bevel => "bevel",
+            }.into();
+            // Update default stroke to match selection
+            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                tab.model.default_stroke = Some(s);
+            }
+            self.app_default_stroke = Some(s);
         }
     }
 

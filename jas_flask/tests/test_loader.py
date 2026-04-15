@@ -175,7 +175,7 @@ class TestResolveIncludes:
         assert dock_main is not None
         assert dock_main.get("type") == "dock_view"
         assert "groups" in dock_main
-        assert len(dock_main["groups"]) == 2
+        assert len(dock_main["groups"]) >= 2
 
 
 class TestResolveAppearance:

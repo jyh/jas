@@ -26,6 +26,118 @@ state:
     default: 1.0
     description: "Active stroke width in points"
 
+  stroke_cap:
+    type: enum
+    values: [butt, round, square]
+    default: butt
+    description: "Active stroke cap style"
+
+  stroke_join:
+    type: enum
+    values: [miter, round, bevel]
+    default: miter
+    description: "Active stroke join style"
+
+  stroke_miter_limit:
+    type: number
+    default: 10
+    description: "Active stroke miter limit"
+
+  stroke_align:
+    type: enum
+    values: [center, inside, outside]
+    default: center
+    description: "Active stroke alignment relative to the path"
+
+  stroke_dashed:
+    type: bool
+    default: false
+    description: "Active stroke uses dashed pattern"
+
+  stroke_dash_1:
+    type: number
+    default: 12
+    description: "Active stroke dash length for pair 1"
+
+  stroke_gap_1:
+    type: number
+    default: 12
+    description: "Active stroke gap length for pair 1"
+
+  stroke_dash_2:
+    type: number
+    default: null
+    nullable: true
+    description: "Active stroke dash length for pair 2 (null = unused)"
+
+  stroke_gap_2:
+    type: number
+    default: null
+    nullable: true
+    description: "Active stroke gap length for pair 2 (null = unused)"
+
+  stroke_dash_3:
+    type: number
+    default: null
+    nullable: true
+    description: "Active stroke dash length for pair 3 (null = unused)"
+
+  stroke_gap_3:
+    type: number
+    default: null
+    nullable: true
+    description: "Active stroke gap length for pair 3 (null = unused)"
+
+  stroke_start_arrowhead:
+    type: enum
+    values: [none, simple_arrow, open_arrow, closed_arrow, stealth_arrow,
+             barbed_arrow, half_arrow_upper, half_arrow_lower,
+             circle, open_circle, square, open_square,
+             diamond, open_diamond, slash]
+    default: none
+    description: "Active stroke start arrowhead shape"
+
+  stroke_end_arrowhead:
+    type: enum
+    values: [none, simple_arrow, open_arrow, closed_arrow, stealth_arrow,
+             barbed_arrow, half_arrow_upper, half_arrow_lower,
+             circle, open_circle, square, open_square,
+             diamond, open_diamond, slash]
+    default: none
+    description: "Active stroke end arrowhead shape"
+
+  stroke_start_arrowhead_scale:
+    type: number
+    default: 100
+    description: "Active stroke start arrowhead scale (%)"
+
+  stroke_end_arrowhead_scale:
+    type: number
+    default: 100
+    description: "Active stroke end arrowhead scale (%)"
+
+  stroke_link_arrowhead_scale:
+    type: bool
+    default: false
+    description: "Active stroke arrowhead scales are linked"
+
+  stroke_arrow_align:
+    type: enum
+    values: [tip_at_end, center_at_end]
+    default: tip_at_end
+    description: "Active stroke arrow alignment mode"
+
+  stroke_profile:
+    type: enum
+    values: [uniform, taper_both, taper_start, taper_end, bulge, pinch]
+    default: uniform
+    description: "Active stroke variable-width profile"
+
+  stroke_profile_flipped:
+    type: bool
+    default: false
+    description: "Active stroke profile is flipped"
+
   fill_on_top:
     type: bool
     default: true

@@ -327,6 +327,9 @@ fn unpack_stroke(v: &Value) -> Option<Stroke> {
         width: as_f64(&arr[1]),
         linecap: cap,
         linejoin: join,
+        miter_limit: 10.0,
+        dash_pattern: [0.0; 6],
+        dash_len: 0,
         opacity: as_f64(&arr[4]),
     })
 }

@@ -599,6 +599,40 @@ def _render_toggle(el, theme, state):
     )
 
 
+def _render_checkbox(el, theme, state):
+    label = escape(el.get("label", ""))
+    return Markup(
+        f'<div{_id_attr(el)} class="form-check"{_data_attrs(el)}>'
+        f'<input class="form-check-input" type="checkbox">'
+        f'<label class="form-check-label">{label}</label></div>'
+    )
+
+
+def _render_combo_box(el, theme, state):
+    """Render an editable combo box: text input with a datalist for presets."""
+    options = el.get("options", [])
+    eid = el.get("id", "combo")
+    list_id = f"{eid}_opts"
+    attrs = ""
+    for key in ("min", "max", "step"):
+        if key in el:
+            attrs += f' {key}="{el[key]}"'
+    opts_html = ""
+    for opt in options:
+        if isinstance(opt, dict):
+            val = opt.get("value", "")
+            label = opt.get("label", str(val))
+            opts_html += f'<option value="{escape(str(val))}">{escape(str(label))}</option>'
+        else:
+            opts_html += f'<option value="{escape(str(opt))}">{escape(str(opt))}</option>'
+    return Markup(
+        f'<input{_id_attr(el)} type="text" class="form-control form-control-sm"'
+        f' list="{list_id}"{attrs}'
+        f'{_style_str(el, theme, state)}{_data_attrs(el)}>'
+        f'<datalist id="{list_id}">{opts_html}</datalist>'
+    )
+
+
 def _render_radio_group(el, theme, state):
     """Render a group of radio buttons or a single radio in a named group."""
     options = el.get("options", [])
@@ -1180,6 +1214,8 @@ _RENDERERS = {
     "icon_button": _render_icon_button,
     "dropdown": _render_dropdown,
     "toggle": _render_toggle,
+    "checkbox": _render_checkbox,
+    "combo_box": _render_combo_box,
     "radio_group": _render_radio_group,
     "text": _render_text,
     "text_input": _render_text_input,

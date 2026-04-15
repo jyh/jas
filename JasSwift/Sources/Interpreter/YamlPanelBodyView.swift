@@ -36,6 +36,12 @@ struct YamlElementView: View {
                 renderNumberInput()
             case "text_input":
                 renderTextInput()
+            case "select":
+                renderSelect()
+            case "toggle", "checkbox":
+                renderToggle()
+            case "combo_box":
+                renderComboBox()
             case "color_swatch":
                 renderColorSwatch()
             case "fill_stroke_widget":
@@ -376,6 +382,77 @@ struct YamlElementView: View {
         SwiftUI.Text("[\(summary)]")
             .foregroundColor(.gray)
             .frame(minHeight: 30)
+    }
+
+    // MARK: - Select
+
+    @ViewBuilder
+    private func renderSelect() -> some View {
+        let options = element["options"] as? [[String: Any]] ?? []
+        let currentValue: String = {
+            if let bind = element["bind"] as? [String: Any],
+               let valueExpr = bind["value"] as? String {
+                let result = evaluate(valueExpr, context: context)
+                if case .string(let s) = result { return s }
+            }
+            return ""
+        }()
+
+        Picker("", selection: .constant(currentValue)) {
+            ForEach(Array(options.enumerated()), id: \.offset) { item in
+                let val = item.element["value"].map { "\($0)" } ?? ""
+                let label = item.element["label"] as? String ?? val
+                Text(label).tag(val)
+            }
+        }
+        .labelsHidden()
+    }
+
+    // MARK: - Toggle / Checkbox
+
+    @ViewBuilder
+    private func renderToggle() -> some View {
+        let label = element["label"] as? String ?? ""
+        let isChecked: Bool = {
+            if let bind = element["bind"] as? [String: Any],
+               let checkedExpr = bind["checked"] as? String {
+                return evaluate(checkedExpr, context: context).toBool()
+            }
+            return false
+        }()
+
+        Toggle(label, isOn: .constant(isChecked))
+            .toggleStyle(.checkbox)
+    }
+
+    // MARK: - Combo Box
+
+    @ViewBuilder
+    private func renderComboBox() -> some View {
+        let options = element["options"] as? [[String: Any]] ?? []
+        let currentValue: String = {
+            if let bind = element["bind"] as? [String: Any],
+               let valueExpr = bind["value"] as? String {
+                let result = evaluate(valueExpr, context: context)
+                switch result {
+                case .string(let s): return s
+                case .number(let n): return String(Int(n))
+                default: return ""
+                }
+            }
+            return ""
+        }()
+
+        // SwiftUI doesn't have a native combo box with free entry;
+        // use Picker as a dropdown with the current value displayed.
+        Picker("", selection: .constant(currentValue)) {
+            ForEach(Array(options.enumerated()), id: \.offset) { item in
+                let val = item.element["value"].map { "\($0)" } ?? ""
+                let label = item.element["label"] as? String ?? val
+                Text(label).tag(val)
+            }
+        }
+        .labelsHidden()
     }
 
     // MARK: - Children

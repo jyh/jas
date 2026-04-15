@@ -16,6 +16,23 @@ use crate::document::controller::Controller;
 use crate::geometry::svg::document_to_svg;
 use crate::tools::tool::{ToolKind, PASTE_OFFSET};
 
+/// Check if the keyboard event originated from a text input element.
+/// When true, non-modifier keys (Backspace, Delete, letters) should
+/// be left to the input — not intercepted as app shortcuts.
+fn event_targets_input(evt: &Event<KeyboardData>) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            if let Some(el) = doc.active_element() {
+                let tag = el.tag_name().to_uppercase();
+                return matches!(tag.as_str(), "INPUT" | "TEXTAREA" | "SELECT");
+            }
+        }
+    }
+    false
+}
+
 /// Build the `onkeydown` closure for the main application.
 pub(crate) fn make_keydown_handler(
     act: Rc<RefCell<dyn FnMut(Box<dyn FnOnce(&mut AppState)>)>>,
@@ -86,6 +103,12 @@ pub(crate) fn make_keydown_handler(
                 );
                 return;
             }
+        }
+
+        // If a text input has focus, let it handle non-modifier keys.
+        // Cmd/Ctrl shortcuts (Cmd+Z, Cmd+C, etc.) still pass through.
+        if event_targets_input(&evt) && !cmd {
+            return;
         }
 
         match key {
