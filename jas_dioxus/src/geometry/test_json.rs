@@ -545,6 +545,7 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             x1: parse_f(&v["x1"]), y1: parse_f(&v["y1"]),
             x2: parse_f(&v["x2"]), y2: parse_f(&v["y2"]),
             stroke: parse_stroke(&v["stroke"]),
+            width_points: vec![],
             common,
         }),
         "rect" => Element::Rect(RectElem {
@@ -578,6 +579,7 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
         "path" => Element::Path(PathElem {
             d: parse_path_commands(&v["d"]),
             fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
+            width_points: vec![],
             common,
         }),
         "text" => Element::Text(TextElem {

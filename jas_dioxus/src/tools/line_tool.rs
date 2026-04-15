@@ -64,6 +64,7 @@ impl CanvasTool for LineTool {
                     x2: x,
                     y2: y,
                     stroke: model.default_stroke,
+                    width_points: vec![],
                     common: CommonProps::default(),
                 });
                 Controller::add_element(model, elem);

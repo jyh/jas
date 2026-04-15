@@ -571,6 +571,11 @@ impl AppState {
                 if !tab.model.document().selection.is_empty() {
                     tab.model.snapshot();
                     Controller::set_selection_stroke(&mut tab.model, Some(new_stroke));
+                    // Apply width profile
+                    let width_pts = crate::geometry::element::profile_to_width_points(
+                        &sp.profile, base.width, sp.profile_flipped,
+                    );
+                    Controller::set_selection_width_profile(&mut tab.model, width_pts);
                 }
             }
         }

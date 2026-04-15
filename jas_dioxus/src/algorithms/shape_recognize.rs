@@ -337,6 +337,7 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
             x2: b.0,
             y2: b.1,
             stroke,
+            width_points: vec![],
             common,
         }),
         RecognizedShape::Triangle { pts } => Element::Polygon(PolygonElem {
@@ -450,6 +451,7 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
                 d,
                 fill,
                 stroke,
+                width_points: vec![],
                 common,
             })
         }

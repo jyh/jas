@@ -419,6 +419,7 @@ mod tests {
         Element::Line(LineElem {
             x1, y1, x2, y2,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: vec![],
             common: CommonProps::default(),
         })
     }

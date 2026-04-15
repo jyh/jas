@@ -945,6 +945,7 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             x2: pt(get_f(node, "x2", 0.0)),
             y2: pt(get_f(node, "y2", 0.0)),
             stroke: parse_stroke(node),
+            width_points: vec![],
             common,
         })),
         "rect" => Some(Element::Rect(RectElem {
@@ -999,6 +1000,7 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 d,
                 fill: parse_fill(node),
                 stroke: parse_stroke(node),
+                width_points: vec![],
                 common,
             }))
         }

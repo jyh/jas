@@ -128,6 +128,7 @@ impl PathEraserTool {
                                 d: cmds,
                                 fill: path_elem.fill,
                                 stroke: path_elem.stroke,
+                                width_points: path_elem.width_points.clone(),
                                 common: CommonProps::default(),
                             });
                             layer_children.insert(ci, Rc::new(new_path));
