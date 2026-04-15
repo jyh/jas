@@ -1349,6 +1349,23 @@ and completeness. Make suggestions for improvements, ranking them in priority
 from high to low, and giving each a number. Be ready for a deep dive into any of
 the suggestions.
 
+# Interpreted UI
+
+I've been thinking, these panel and dialogue implementation files are fairly big
+and the workspace control logic is pretty complicated. What if we switch to
+interpreting the YAML spec for the UI, like the flask implementation does. This
+manages only the workspace UI appearance and behavior, so the performance should
+be perfectly fine. It would include as much of the workspace as
+practical. Later, we can still decide to hardcode parts of the UI as needed. Our
+objective would be for the UI interpreter itself to be generic.  All
+jas-specific features are defined through the YAML files.
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. What are the benefits? What are the
+downsides? Be ready for a deep dive into any of the suggestions.
+
+
 # Align
 
 The Alignment Panel allows the elements on the selection to be aligned in a few different ways.
@@ -1618,11 +1635,6 @@ panel:
   - .col-1: ARROW_BEYOND_BUTTON
   - .col-1: ARROW_TIP_BUTTON
 ```
-
-Please read and understand these requirements. Analyze them for inconsistencies
-and completeness. Make suggestions for improvements, ranking them in priority
-from high to low, and giving each a number. Be ready for a deep dive into any of
-the suggestions.
 
 # Layer
 
