@@ -54,13 +54,10 @@ fn render_el(
         return render_repeat(el, ctx, rctx);
     }
 
-    // Check for native widget override via _template tag
-    if let Some(tpl) = el.get("_template").and_then(|t| t.as_str()) {
-        match tpl {
-            "fill_stroke_widget" => return render_fill_stroke_widget(el, ctx, rctx),
-            _ => {} // fall through to generic rendering
-        }
-    }
+    // _template tag is available for native widget overrides.
+    // Currently all templates fall through to generic rendering.
+    // Native overrides can be added here when needed:
+    //   if let Some(tpl) = el.get("_template").and_then(|t| t.as_str()) { ... }
 
     let etype = el.get("type").and_then(|t| t.as_str()).unwrap_or("placeholder");
 
