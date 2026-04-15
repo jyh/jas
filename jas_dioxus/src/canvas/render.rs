@@ -62,6 +62,17 @@ fn apply_stroke(ctx: &CanvasRenderingContext2d, stroke: Option<&Stroke>) -> f64 
                 LineJoin::Round => "round",
                 LineJoin::Bevel => "bevel",
             });
+            ctx.set_miter_limit(s.miter_limit);
+            let da = s.dash_array();
+            if !da.is_empty() {
+                let js_array = js_sys::Array::new();
+                for &v in da {
+                    js_array.push(&wasm_bindgen::JsValue::from_f64(v));
+                }
+                ctx.set_line_dash(&js_array).ok();
+            } else {
+                ctx.set_line_dash(&js_sys::Array::new()).ok();
+            }
             s.opacity
         }
         None => {

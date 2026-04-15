@@ -236,6 +236,11 @@ pub struct Stroke {
     pub width: f64,
     pub linecap: LineCap,
     pub linejoin: LineJoin,
+    pub miter_limit: f64,
+    /// Dash pattern as fixed-size array (up to 6 values: 3 dash/gap pairs).
+    /// Unused slots are 0.0. `dash_len` indicates how many values are active.
+    pub dash_pattern: [f64; 6],
+    pub dash_len: u8,
     pub opacity: f64,
 }
 
@@ -246,8 +251,16 @@ impl Stroke {
             width,
             linecap: LineCap::Butt,
             linejoin: LineJoin::Miter,
+            miter_limit: 10.0,
+            dash_pattern: [0.0; 6],
+            dash_len: 0,
             opacity: 1.0,
         }
+    }
+
+    /// Get the active dash array slice, or empty if no dashing.
+    pub fn dash_array(&self) -> &[f64] {
+        &self.dash_pattern[..self.dash_len as usize]
     }
 }
 

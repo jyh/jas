@@ -48,6 +48,9 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
   | "slider" -> render_slider ~packing ~ctx el
   | "number_input" -> render_number_input ~packing ~ctx el
   | "text_input" -> render_text_input ~packing ~ctx el
+  | "select" -> render_select ~packing ~ctx el
+  | "toggle" | "checkbox" -> render_toggle ~packing ~ctx el
+  | "combo_box" -> render_combo_box ~packing ~ctx el
   | "color_swatch" -> render_color_swatch ~packing ~ctx el
   | "separator" -> render_separator ~packing el
   | "spacer" -> render_spacer ~packing ()
@@ -123,6 +126,48 @@ and render_text_input ~packing ~ctx:_ el =
   let _placeholder = el |> member "placeholder" |> to_string_option |> Option.value ~default:"" in
   let _entry = GEdit.entry ~packing () in
   ()
+
+and render_select ~packing ~ctx:_ el =
+  let open Yojson.Safe.Util in
+  let options = match el |> member "options" with `List l -> l | _ -> [] in
+  let (combo, (store, col)) = GEdit.combo_box_text ~packing () in
+  List.iter (fun opt ->
+    let label = match opt with
+      | `Assoc _ ->
+        let lbl = opt |> member "label" |> to_string_option in
+        let v = opt |> member "value" |> to_string_option in
+        (match lbl with Some l -> l | None -> Option.value ~default:"" v)
+      | `String s -> s
+      | _ -> "" in
+    let row = store#append () in
+    store#set ~row ~column:col label
+  ) options;
+  if List.length options > 0 then combo#set_active 0
+
+and render_toggle ~packing ~ctx el =
+  let open Yojson.Safe.Util in
+  let label = el |> member "label" |> to_string_option |> Option.value ~default:"" in
+  let checked = match el |> member "bind" |> safe_member "checked" |> to_string_option with
+    | Some expr -> Expr_eval.to_bool (Expr_eval.evaluate expr ctx)
+    | None -> false in
+  let btn = GButton.check_button ~label ~active:checked ~packing () in
+  ignore btn
+
+and render_combo_box ~packing ~ctx:_ el =
+  let open Yojson.Safe.Util in
+  let options = match el |> member "options" with `List l -> l | _ -> [] in
+  let (_combo, (store, col)) = GEdit.combo_box_text ~has_entry:true ~packing () in
+  List.iter (fun opt ->
+    let label = match opt with
+      | `Assoc _ ->
+        let lbl = opt |> member "label" |> to_string_option in
+        let v = opt |> member "value" |> to_string_option in
+        (match lbl with Some l -> l | None -> Option.value ~default:"" v)
+      | `String s -> s
+      | _ -> "" in
+    let row = store#append () in
+    store#set ~row ~column:col label
+  ) options
 
 and render_color_swatch ~packing ~ctx el =
   let open Yojson.Safe.Util in

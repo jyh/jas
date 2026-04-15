@@ -89,6 +89,52 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
         // Hex
         m.insert("hex".into(), J::String(format!("{:02x}{:02x}{:02x}", r, g, b)));
     }
+
+    // ── Stroke panel overrides ──────────────────────────────
+    // Read cap/join/width from the selected element; fall back to panel state.
+    let sel_stroke = st.tab().and_then(|tab| {
+        let doc = tab.model.document();
+        doc.selection.first()
+            .and_then(|es| doc.get_element(&es.path))
+            .and_then(|e| e.stroke().cloned())
+    });
+    let sp = &st.stroke_panel;
+    if let Some(ref s) = sel_stroke {
+        m.insert("weight".into(), serde_json::json!(s.width));
+        m.insert("cap".into(), J::String(match s.linecap {
+            crate::geometry::element::LineCap::Butt => "butt",
+            crate::geometry::element::LineCap::Round => "round",
+            crate::geometry::element::LineCap::Square => "square",
+        }.into()));
+        m.insert("join".into(), J::String(match s.linejoin {
+            crate::geometry::element::LineJoin::Miter => "miter",
+            crate::geometry::element::LineJoin::Round => "round",
+            crate::geometry::element::LineJoin::Bevel => "bevel",
+        }.into()));
+    } else {
+        m.insert("weight".into(), serde_json::json!(
+            st.app_default_stroke.map(|s| s.width).unwrap_or(1.0)));
+        m.insert("cap".into(), J::String(sp.cap.clone()));
+        m.insert("join".into(), J::String(sp.join.clone()));
+    }
+    m.insert("miter_limit".into(), serde_json::json!(sp.miter_limit));
+    m.insert("align_stroke".into(), J::String(sp.align.clone()));
+    m.insert("dashed".into(), J::Bool(sp.dashed));
+    m.insert("dash_1".into(), serde_json::json!(sp.dash_1));
+    m.insert("gap_1".into(), serde_json::json!(sp.gap_1));
+    m.insert("dash_2".into(), sp.dash_2.map_or(J::Null, |v| serde_json::json!(v)));
+    m.insert("gap_2".into(), sp.gap_2.map_or(J::Null, |v| serde_json::json!(v)));
+    m.insert("dash_3".into(), sp.dash_3.map_or(J::Null, |v| serde_json::json!(v)));
+    m.insert("gap_3".into(), sp.gap_3.map_or(J::Null, |v| serde_json::json!(v)));
+    m.insert("start_arrowhead".into(), J::String(sp.start_arrowhead.clone()));
+    m.insert("end_arrowhead".into(), J::String(sp.end_arrowhead.clone()));
+    m.insert("start_arrowhead_scale".into(), serde_json::json!(sp.start_arrowhead_scale));
+    m.insert("end_arrowhead_scale".into(), serde_json::json!(sp.end_arrowhead_scale));
+    m.insert("link_arrowhead_scale".into(), J::Bool(sp.link_arrowhead_scale));
+    m.insert("arrow_align".into(), J::String(sp.arrow_align.clone()));
+    m.insert("profile".into(), J::String(sp.profile.clone()));
+    m.insert("profile_flipped".into(), J::Bool(sp.profile_flipped));
+
     m
 }
 
@@ -128,6 +174,27 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
     // Mutable swatch libraries for rendering
     m.insert("_swatch_libraries".into(), st.swatch_libraries.clone());
 
+    m
+}
+
+/// Build a minimal state subset for a panel's eval context.
+/// Only includes the state keys the panel actually references,
+/// so unrelated state changes don't invalidate the panel memo cache.
+fn build_panel_state_subset(
+    panel_name: &str,
+    full_state: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let keys: &[&str] = match panel_name {
+        "stroke" => &["stroke_width", "stroke_color"],
+        "color" | "swatches" => &["fill_color", "stroke_color", "fill_on_top"],
+        _ => &["fill_color", "stroke_color", "fill_on_top"],
+    };
+    let mut m = serde_json::Map::new();
+    for &k in keys {
+        if let Some(v) = full_state.get(k) {
+            m.insert(k.into(), v.clone());
+        }
+    }
     m
 }
 
@@ -496,19 +563,28 @@ pub(crate) fn build_dock_groups(
                             let ws = Workspace::load()?;
                             let content = ws.panel_content(content_id)?.clone();
                             let mut panel_map: serde_json::Map<String, serde_json::Value> = ws.panel_state_defaults(content_id).into_iter().collect();
-                            // Apply live overrides (e.g. color_panel_mode → panel.mode, color values)
+                            // Apply live overrides only for relevant panels
+                            let panel_name = content_id.strip_suffix("_panel_content").unwrap_or("");
                             for (k, v) in live_panel_overrides {
-                                panel_map.insert(k.clone(), v.clone());
+                                // Color overrides: mode, h, s, b, r, g, bl, c, m, y, k, hex
+                                // Stroke overrides: weight, cap, join, miter_limit, etc.
+                                // Only apply if key exists in this panel's state defaults
+                                if panel_map.contains_key(k) {
+                                    panel_map.insert(k.clone(), v.clone());
+                                }
                             }
-                            let icons = ws.icons().clone();
-                            let swatch_libs = live_state_map.get("_swatch_libraries")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null);
+                            // Build a minimal state map containing only the keys this
+                            // panel references. This prevents unrelated state changes
+                            // (e.g. active_tool) from invalidating the panel memo cache.
+                            let panel_state = build_panel_state_subset(panel_name, live_state_map);
                             let eval_ctx = serde_json::json!({
-                                "state": live_state_map,
+                                "state": panel_state,
                                 "panel": panel_map,
-                                "icons": icons,
-                                "data": { "swatch_libraries": swatch_libs }
+                                "icons": {},
+                                "data": {
+                                    "swatch_libraries": live_state_map.get("_swatch_libraries")
+                                        .cloned().unwrap_or(serde_json::Value::Null)
+                                }
                             });
                             Some((content, eval_ctx))
                         });

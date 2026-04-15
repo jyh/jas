@@ -632,3 +632,212 @@ class TestColorPanelInDock:
         html = render_element(dock_el, theme, color_state, mode="normal")
         assert "Grayscale" in html
         assert "Invert" in html
+
+
+# ── Stroke Panel spec ────────────────────────────────────────
+
+
+class TestStrokePanelSpec:
+    """Tests against the real workspace stroke panel spec."""
+
+    @pytest.fixture(autouse=True)
+    def load_ws(self):
+        from loader import load_workspace
+        from renderer import set_icons, set_panels, set_initial_state
+        ws = load_workspace(WORKSPACE_PATH)
+        set_icons(ws.get("icons", {}))
+        set_panels(ws.get("panels", {}))
+        set_initial_state(ws.get("state", {}))
+
+    @pytest.fixture
+    def panel(self):
+        from loader import load_workspace
+        ws = load_workspace(WORKSPACE_PATH)
+        return ws.get("panels", {}).get("stroke_panel_content", {})
+
+    @pytest.fixture
+    def panel_html(self, panel, theme, state):
+        from renderer import render_element
+        return render_element(panel, theme, state, mode="normal")
+
+    def test_panel_renders(self, panel_html):
+        assert panel_html
+
+    # ── Weight row ──
+    def test_weight_input_present(self, panel_html):
+        assert "stk_weight" in panel_html
+
+    # ── Cap buttons ──
+    def test_cap_butt_present(self, panel_html):
+        assert "stk_cap_butt" in panel_html
+
+    def test_cap_round_present(self, panel_html):
+        assert "stk_cap_round" in panel_html
+
+    def test_cap_square_present(self, panel_html):
+        assert "stk_cap_square" in panel_html
+
+    # ── Join buttons ──
+    def test_join_miter_present(self, panel_html):
+        assert "stk_join_miter" in panel_html
+
+    def test_join_round_present(self, panel_html):
+        assert "stk_join_round" in panel_html
+
+    def test_join_bevel_present(self, panel_html):
+        assert "stk_join_bevel" in panel_html
+
+    # ── Miter limit ──
+    def test_miter_limit_present(self, panel_html):
+        assert "stk_miter_limit" in panel_html
+
+    # ── Align stroke ──
+    def test_align_stroke_center_present(self, panel_html):
+        assert "stk_align_stroke_center" in panel_html
+
+    def test_align_stroke_inside_present(self, panel_html):
+        assert "stk_align_stroke_inside" in panel_html
+
+    def test_align_stroke_outside_present(self, panel_html):
+        assert "stk_align_stroke_outside" in panel_html
+
+    # ── Dashed line ──
+    def test_dashed_checkbox_present(self, panel_html):
+        assert "stk_dashed" in panel_html
+
+    def test_dashed_checkbox_is_checkbox(self, panel_html):
+        assert 'type="checkbox"' in panel_html
+
+    def test_dash_preset_even_present(self, panel_html):
+        assert "stk_preset_even_dash" in panel_html
+
+    def test_dash_preset_dot_present(self, panel_html):
+        assert "stk_preset_dash_dot" in panel_html
+
+    # ── Dash/gap inputs ──
+    def test_dash_1_present(self, panel_html):
+        assert "stk_dash_1" in panel_html
+
+    def test_gap_1_present(self, panel_html):
+        assert "stk_gap_1" in panel_html
+
+    def test_dash_2_present(self, panel_html):
+        assert "stk_dash_2" in panel_html
+
+    def test_gap_2_present(self, panel_html):
+        assert "stk_gap_2" in panel_html
+
+    def test_dash_3_present(self, panel_html):
+        assert "stk_dash_3" in panel_html
+
+    def test_gap_3_present(self, panel_html):
+        assert "stk_gap_3" in panel_html
+
+    # ── Arrowheads ──
+    def test_start_arrowhead_dropdown_present(self, panel_html):
+        assert "stk_start_arrowhead" in panel_html
+
+    def test_end_arrowhead_dropdown_present(self, panel_html):
+        assert "stk_end_arrowhead" in panel_html
+
+    def test_arrowhead_has_fifteen_options(self, panel_html):
+        # Each dropdown has 15 options; two dropdowns = 30
+        assert panel_html.count("Simple Arrow") == 2
+
+    def test_swap_arrowheads_present(self, panel_html):
+        assert "stk_swap_arrowheads" in panel_html
+
+    # ── Scale ──
+    def test_start_scale_present(self, panel_html):
+        assert "stk_start_arrowhead_scale" in panel_html
+
+    def test_end_scale_present(self, panel_html):
+        assert "stk_end_arrowhead_scale" in panel_html
+
+    def test_scale_has_presets(self, panel_html):
+        # Combo box datalist should contain preset values
+        assert "50%" in panel_html or '"50"' in panel_html
+
+    def test_link_scale_present(self, panel_html):
+        assert "stk_link_arrowhead_scale" in panel_html
+
+    # ── Arrow align ──
+    def test_arrow_tip_at_end_present(self, panel_html):
+        assert "stk_arrow_tip_at_end" in panel_html
+
+    def test_arrow_center_at_end_present(self, panel_html):
+        assert "stk_arrow_center_at_end" in panel_html
+
+    # ── Profile ──
+    def test_profile_dropdown_present(self, panel_html):
+        assert "stk_profile" in panel_html
+
+    def test_profile_has_options(self, panel_html):
+        assert "Uniform" in panel_html
+        assert "Taper Both" in panel_html
+
+    def test_flip_profile_present(self, panel_html):
+        assert "stk_flip_profile" in panel_html
+
+    def test_reset_profile_present(self, panel_html):
+        assert "stk_reset_profile" in panel_html
+
+    # ── Panel state/init ──
+    def test_panel_state_embedded(self, panel_html):
+        assert "data-panel-state" in panel_html
+
+    def test_panel_init_embedded(self, panel_html):
+        assert "data-panel-init" in panel_html
+
+    # ── Menu items ──
+    def test_menu_cap_items(self, panel_html):
+        assert "Butt Cap" in panel_html
+        assert "Round Cap" in panel_html
+        assert "Square Cap" in panel_html
+
+    def test_menu_join_items(self, panel_html):
+        assert "Miter Join" in panel_html
+        assert "Round Join" in panel_html
+        assert "Bevel Join" in panel_html
+
+    def test_menu_close_item(self, panel_html):
+        assert "Close Stroke" in panel_html
+
+
+# ── Stroke Panel in Dock (integration) ──────────────────────
+
+
+class TestStrokePanelInDock:
+    """Test that the real stroke panel renders correctly inside a dock_view."""
+
+    @pytest.fixture(autouse=True)
+    def load_ws(self):
+        from loader import load_workspace
+        from renderer import set_icons, set_panels, set_initial_state
+        ws = load_workspace(WORKSPACE_PATH)
+        set_icons(ws.get("icons", {}))
+        set_panels(ws.get("panels", {}))
+        set_initial_state(ws.get("state", {}))
+
+    def test_stroke_panel_in_dock(self, theme, state):
+        from renderer import render_element
+        dock_el = {
+            "id": "dock_main",
+            "type": "dock_view",
+            "collapsed_width": 36,
+            "groups": [{"panels": ["stroke"], "active": 0, "collapsed": False}],
+        }
+        html = render_element(dock_el, theme, state, mode="normal")
+        assert "stk_weight" in html
+
+    def test_stroke_panel_menu_in_dock(self, theme, state):
+        from renderer import render_element
+        dock_el = {
+            "id": "dock_main",
+            "type": "dock_view",
+            "collapsed_width": 36,
+            "groups": [{"panels": ["stroke"], "active": 0, "collapsed": False}],
+        }
+        html = render_element(dock_el, theme, state, mode="normal")
+        assert "Butt Cap" in html
+        assert "Miter Join" in html

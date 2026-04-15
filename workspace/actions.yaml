@@ -330,12 +330,37 @@ actions:
       - swap: [fill_color, stroke_color]
   reset_fill_stroke:
     description: >
-      Reset colors to defaults: white fill (#ffffff), black stroke
-      (#000000), 1pt stroke width, and fill swatch on top. The toolbar
-      swatches update immediately.
+      Reset colors and stroke attributes to defaults: white fill (#ffffff),
+      black stroke (#000000), 1pt stroke width, butt cap, miter join,
+      limit 10, center alignment, no dashing, no arrowheads, 100% scale,
+      tip-at-end alignment, uniform profile, and fill swatch on top. The
+      toolbar swatches update immediately.
     category: fill_stroke
     effects:
-      - set: { fill_color: "#ffffff", stroke_color: "#000000", stroke_width: 1.0, fill_on_top: true }
+      - set:
+          fill_color: "#ffffff"
+          stroke_color: "#000000"
+          stroke_width: 1.0
+          fill_on_top: true
+          stroke_cap: butt
+          stroke_join: miter
+          stroke_miter_limit: 10
+          stroke_align: center
+          stroke_dashed: false
+          stroke_dash_1: 12
+          stroke_gap_1: 12
+          stroke_dash_2: null
+          stroke_gap_2: null
+          stroke_dash_3: null
+          stroke_gap_3: null
+          stroke_start_arrowhead: none
+          stroke_end_arrowhead: none
+          stroke_start_arrowhead_scale: 100
+          stroke_end_arrowhead_scale: 100
+          stroke_link_arrowhead_scale: false
+          stroke_arrow_align: tip_at_end
+          stroke_profile: uniform
+          stroke_profile_flipped: false
   toggle_fill_on_top:
     description: >
       Toggle which swatch is in front in the toolbar fill/stroke widget.
@@ -853,3 +878,136 @@ actions:
     effects:
       - log: "save_swatch_library_confirm"
       - close_dialog: None
+
+  # ── Stroke ───────────────────────────────────────────────
+  set_stroke_cap:
+    description: >
+      Set the line cap style for the active stroke. Butt: flat at the
+      endpoint. Round: semicircular beyond the endpoint. Square: extends
+      beyond the endpoint by half the stroke weight. Updates both panel
+      state and global state (which propagates to the selection).
+    category: stroke
+    params:
+      cap: { type: enum, values: [butt, round, square] }
+    effects:
+      - set_panel_state: { panel: stroke, key: cap, value: "param.cap" }
+      - set: { stroke_cap: "param.cap" }
+
+  set_stroke_join:
+    description: >
+      Set the line join style for the active stroke. Miter: sharp pointed
+      corner (subject to miter limit). Round: circular arc. Bevel: flat
+      diagonal cut. Updates both panel state and global state.
+    category: stroke
+    params:
+      join: { type: enum, values: [miter, round, bevel] }
+    effects:
+      - set_panel_state: { panel: stroke, key: join, value: "param.join" }
+      - set: { stroke_join: "param.join" }
+
+  set_stroke_align:
+    description: >
+      Set the stroke alignment relative to the path. Center: stroke
+      straddles the path. Inside: stroke drawn inside closed paths.
+      Outside: stroke drawn outside closed paths. Inside and outside
+      behave as center on open paths. Updates both panel state and
+      global state.
+    category: stroke
+    params:
+      align: { type: enum, values: [center, inside, outside] }
+    effects:
+      - set_panel_state: { panel: stroke, key: align_stroke, value: "param.align" }
+      - set: { stroke_align: "param.align" }
+
+  toggle_dashed_line:
+    description: >
+      Toggle dashed stroke on or off. When disabled, the dash/gap fields
+      are grayed out but retain their values. Updates both panel state
+      and global state.
+    category: stroke
+    effects:
+      - set_panel_state: { panel: stroke, key: dashed, value: "not panel.dashed" }
+      - set: { stroke_dashed: "not state.stroke_dashed" }
+
+  apply_dash_preset:
+    description: >
+      Apply a dash pattern preset, enabling dashing and filling in the
+      dash/gap fields. The even_dash preset sets 12pt dash, 12pt gap
+      (pair 1 only). The dash_dot preset sets 12pt dash, 6pt gap, 0pt
+      dash (dot), 6pt gap (pairs 1 and 2). Updates both panel state
+      and global state.
+    category: stroke
+    params:
+      preset: { type: enum, values: [even_dash, dash_dot] }
+    effects:
+      - set_panel_state: { panel: stroke, key: dashed, value: true }
+      - set: { stroke_dashed: true }
+      - log: "apply_dash_preset: {{param.preset}}"
+
+  swap_arrowheads:
+    description: >
+      Swap the start and end arrowhead selections, including both the
+      shape and the scale values. Updates both panel state and global
+      state.
+    category: stroke
+    effects:
+      - swap_panel_state: { panel: stroke, keys: [start_arrowhead, end_arrowhead] }
+      - swap_panel_state: { panel: stroke, keys: [start_arrowhead_scale, end_arrowhead_scale] }
+      - swap: [stroke_start_arrowhead, stroke_end_arrowhead]
+      - swap: [stroke_start_arrowhead_scale, stroke_end_arrowhead_scale]
+
+  toggle_link_arrowhead_scale:
+    description: >
+      Toggle linked arrowhead scales. When linked, changing either
+      start or end arrowhead scale updates both to the same value.
+      Updates both panel state and global state.
+    category: stroke
+    effects:
+      - set_panel_state: { panel: stroke, key: link_arrowhead_scale, value: "not panel.link_arrowhead_scale" }
+      - set: { stroke_link_arrowhead_scale: "not state.stroke_link_arrowhead_scale" }
+
+  set_arrow_align:
+    description: >
+      Set the arrow alignment mode. Tip-at-end: the arrowhead tip sits
+      exactly at the path endpoint. Center-at-end: the arrowhead center
+      sits at the endpoint, with the tip extending beyond. Updates both
+      panel state and global state.
+    category: stroke
+    params:
+      align: { type: enum, values: [tip_at_end, center_at_end] }
+    effects:
+      - set_panel_state: { panel: stroke, key: arrow_align, value: "param.align" }
+      - set: { stroke_arrow_align: "param.align" }
+
+  set_stroke_profile:
+    description: >
+      Set the variable-width stroke profile. Uniform: constant width.
+      Taper_both: tapers at both ends. Taper_start/taper_end: tapers
+      at one end. Bulge: wider in the middle. Pinch: narrower in the
+      middle. Updates both panel state and global state.
+    category: stroke
+    params:
+      profile: { type: enum, values: [uniform, taper_both, taper_start, taper_end, bulge, pinch] }
+    effects:
+      - set_panel_state: { panel: stroke, key: profile, value: "param.profile" }
+      - set: { stroke_profile: "param.profile" }
+
+  flip_stroke_profile:
+    description: >
+      Flip (mirror) the stroke profile along the path. Only visually
+      meaningful for asymmetric profiles (taper_start, taper_end).
+      Updates both panel state and global state.
+    category: stroke
+    effects:
+      - set_panel_state: { panel: stroke, key: profile_flipped, value: "not panel.profile_flipped" }
+      - set: { stroke_profile_flipped: "not state.stroke_profile_flipped" }
+
+  reset_stroke_profile:
+    description: >
+      Reset the stroke profile to uniform and clear the flipped state.
+      Updates both panel state and global state.
+    category: stroke
+    effects:
+      - set_panel_state: { panel: stroke, key: profile, value: '"uniform"' }
+      - set_panel_state: { panel: stroke, key: profile_flipped, value: false }
+      - set: { stroke_profile: '"uniform"', stroke_profile_flipped: false }

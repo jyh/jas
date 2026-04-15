@@ -162,8 +162,25 @@ def _render_toggle(el, store, ctx, dispatch_fn):
     return cb
 
 
+def _render_checkbox(el, store, ctx, dispatch_fn):
+    label = el.get("label", "")
+    cb = QCheckBox(label)
+    return cb
+
+
 def _render_select(el, store, ctx, dispatch_fn):
     combo = QComboBox()
+    for opt in el.get("options", []):
+        if isinstance(opt, dict):
+            combo.addItem(opt.get("label", ""), opt.get("value", ""))
+        else:
+            combo.addItem(str(opt), str(opt))
+    return combo
+
+
+def _render_combo_box(el, store, ctx, dispatch_fn):
+    combo = QComboBox()
+    combo.setEditable(True)
     for opt in el.get("options", []):
         if isinstance(opt, dict):
             combo.addItem(opt.get("label", ""), opt.get("value", ""))
@@ -532,7 +549,9 @@ _RENDERERS = {
     "number_input": _render_number_input,
     "text_input": _render_text_input,
     "toggle": _render_toggle,
+    "checkbox": _render_checkbox,
     "select": _render_select,
+    "combo_box": _render_combo_box,
     "color_swatch": _render_color_swatch,
     "separator": _render_separator,
     "spacer": _render_spacer,

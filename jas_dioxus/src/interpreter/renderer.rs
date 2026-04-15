@@ -77,7 +77,8 @@ fn render_el(
         "number_input" => render_number_input(el, ctx, rctx),
         "text_input" => render_text_input(el, ctx, rctx),
         "select" => render_select(el, ctx, rctx),
-        "toggle" => render_toggle(el, ctx, rctx),
+        "toggle" | "checkbox" => render_toggle(el, ctx, rctx),
+        "combo_box" => render_combo_box(el, ctx, rctx),
         "color_swatch" => render_color_swatch(el, ctx, rctx),
         "fill_stroke_widget" => render_fill_stroke_widget(el, ctx, rctx),
         "color_bar" => render_color_bar(el, ctx, rctx),
@@ -115,8 +116,6 @@ fn render_repeat(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     let source_expr = repeat.get("source").and_then(|s| s.as_str()).unwrap_or("");
     let var_name = repeat.get("as").and_then(|s| s.as_str()).unwrap_or("item");
 
-    // Build scope from context and evaluate source
-    let scope = super::scope::Scope::from_json(ctx);
     let items = eval_to_json(source_expr, ctx);
 
     let style = build_style(el, ctx);
@@ -127,18 +126,30 @@ fn render_repeat(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
         _      => format!("display:flex;flex-direction:column;{style}"),
     };
 
+    // Build a lightweight base context for iteration. Heavy keys like
+    // "data" (which may contain the full swatch library) are only included
+    // if the template actually references them. The loop variable and any
+    // outer loop variables are always included.
+    let full_map = ctx.as_object().cloned().unwrap_or_default();
+    let template_json = serde_json::to_string(template).unwrap_or_default();
+    let mut base_map = serde_json::Map::new();
+    for (k, v) in &full_map {
+        // Always include small keys; skip heavy keys unless the template references them
+        let is_heavy = k == "data" || k == "icons";
+        if !is_heavy || template_json.contains(k.as_str()) {
+            base_map.insert(k.clone(), v.clone());
+        }
+    }
+
     let mut children = Vec::new();
     if let Some(arr) = items.as_array() {
         for (i, item) in arr.iter().enumerate() {
-            // Build item data with _index
             let mut item_obj = item.as_object().cloned().unwrap_or_default();
             item_obj.insert("_index".into(), serde_json::json!(i));
 
-            // Push a child scope with the loop variable — parent is unchanged
-            let child_scope = scope.extend(std::collections::HashMap::from([
-                (var_name.to_string(), serde_json::Value::Object(item_obj)),
-            ]));
-            let child_ctx = child_scope.to_json();
+            let mut child_map = base_map.clone();
+            child_map.insert(var_name.into(), serde_json::Value::Object(item_obj));
+            let child_ctx = serde_json::Value::Object(child_map);
 
             children.push(render_el(template, &child_ctx, rctx));
         }
@@ -300,17 +311,33 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
                     }
                     // Handle set effects
                     if let Some(set_map) = eff.get("set").and_then(|v| v.as_object()) {
-                        for (key, val) in set_map {
-                            match key.as_str() {
-                                "fill_on_top" => {
-                                    if let Some(b) = val.as_bool() {
-                                        st.fill_on_top = b;
-                                    } else if let Some(s) = val.as_str() {
-                                        st.fill_on_top = s == "true";
-                                    }
-                                }
-                                _ => {}
-                            }
+                        apply_set_effects(set_map, st);
+                    }
+                    // Handle set_panel_state effects
+                    if let Some(sps) = eff.get("set_panel_state").and_then(|v| v.as_object()) {
+                        apply_set_panel_state(sps, st);
+                    }
+                    // Handle swap effects
+                    if let Some(serde_json::Value::Array(keys)) = eff.get("swap") {
+                        if keys.len() == 2 {
+                            let a = keys[0].as_str().unwrap_or("");
+                            let b = keys[1].as_str().unwrap_or("");
+                            let a_val = get_stroke_state_field(&st.stroke_panel, a);
+                            let b_val = get_stroke_state_field(&st.stroke_panel, b);
+                            set_stroke_state_field(&mut st.stroke_panel, a, &b_val);
+                            set_stroke_state_field(&mut st.stroke_panel, b, &a_val);
+                        }
+                    }
+                    // Handle swap_panel_state effects
+                    if let Some(serde_json::Value::Array(keys)) = eff.get("swap_panel_state") {
+                        if keys.len() == 2 {
+                            let a = keys[0].as_str().unwrap_or("");
+                            let b = keys[1].as_str().unwrap_or("");
+                            let sp = &mut st.stroke_panel;
+                            let a_val = get_stroke_field(sp, a);
+                            let b_val = get_stroke_field(sp, b);
+                            set_stroke_field(sp, a, &b_val);
+                            set_stroke_field(sp, b, &a_val);
                         }
                     }
                 }
@@ -331,17 +358,33 @@ fn run_effects(
     let mut dialog_effects = Vec::new();
     for effect in effects {
         if let Some(set_map) = effect.get("set").and_then(|v| v.as_object()) {
-            for (key, val) in set_map {
-                match key.as_str() {
-                    "fill_on_top" => {
-                        if let Some(b) = val.as_bool() {
-                            st.fill_on_top = b;
-                        } else if let Some(s) = val.as_str() {
-                            st.fill_on_top = s == "true";
-                        }
-                    }
-                    _ => {}
-                }
+            apply_set_effects(set_map, st);
+        }
+        // set_panel_state: { key, value }
+        if let Some(sps) = effect.get("set_panel_state").and_then(|v| v.as_object()) {
+            apply_set_panel_state(sps, st);
+        }
+        // swap_panel_state: [key_a, key_b]
+        if let Some(serde_json::Value::Array(keys)) = effect.get("swap_panel_state") {
+            if keys.len() == 2 {
+                let a = keys[0].as_str().unwrap_or("");
+                let b = keys[1].as_str().unwrap_or("");
+                let sp = &mut st.stroke_panel;
+                let a_val = get_stroke_field(sp, a);
+                let b_val = get_stroke_field(sp, b);
+                set_stroke_field(sp, a, &b_val);
+                set_stroke_field(sp, b, &a_val);
+            }
+        }
+        // swap: [state_key_a, state_key_b]
+        if let Some(serde_json::Value::Array(keys)) = effect.get("swap") {
+            if keys.len() == 2 {
+                let a = keys[0].as_str().unwrap_or("");
+                let b = keys[1].as_str().unwrap_or("");
+                let a_val = get_stroke_state_field(&st.stroke_panel, a);
+                let b_val = get_stroke_state_field(&st.stroke_panel, b);
+                set_stroke_state_field(&mut st.stroke_panel, a, &b_val);
+                set_stroke_state_field(&mut st.stroke_panel, b, &a_val);
             }
         }
         // Defer dialog effects — they need the dialog signal, not AppState
@@ -350,6 +393,142 @@ fn run_effects(
         }
     }
     dialog_effects
+}
+
+/// Apply `set: { key: value, ... }` effects to AppState.
+fn apply_set_effects(
+    set_map: &serde_json::Map<String, serde_json::Value>,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    for (key, val) in set_map {
+        match key.as_str() {
+            "fill_on_top" => {
+                if let Some(b) = val.as_bool() { st.fill_on_top = b; }
+                else if let Some(s) = val.as_str() { st.fill_on_top = s == "true"; }
+            }
+            k if k.starts_with("stroke_") => {
+                set_stroke_state_field(&mut st.stroke_panel, k, val);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Apply `set_panel_state: { key, value }` effects to the stroke panel state.
+fn apply_set_panel_state(
+    sps: &serde_json::Map<String, serde_json::Value>,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    let key = sps.get("key").and_then(|v| v.as_str()).unwrap_or("");
+    let val = sps.get("value").unwrap_or(&serde_json::Value::Null);
+    // Evaluate expression values
+    let resolved = if let Some(expr_str) = val.as_str() {
+        // Build minimal eval context
+        let sp = &st.stroke_panel;
+        let panel_json = serde_json::json!({
+            "cap": sp.cap, "join": sp.join, "miter_limit": sp.miter_limit,
+            "align_stroke": sp.align, "dashed": sp.dashed,
+            "dash_1": sp.dash_1, "gap_1": sp.gap_1,
+            "weight": st.app_default_stroke.as_ref().map(|s| s.width).unwrap_or(1.0),
+            "start_arrowhead": sp.start_arrowhead, "end_arrowhead": sp.end_arrowhead,
+            "start_arrowhead_scale": sp.start_arrowhead_scale,
+            "end_arrowhead_scale": sp.end_arrowhead_scale,
+            "link_arrowhead_scale": sp.link_arrowhead_scale,
+            "arrow_align": sp.arrow_align, "profile": sp.profile,
+            "profile_flipped": sp.profile_flipped,
+        });
+        let ctx = serde_json::json!({"panel": panel_json, "state": {}});
+        let result = super::expr::eval(expr_str, &ctx);
+        super::effects::value_to_json(&result)
+    } else {
+        val.clone()
+    };
+    set_stroke_field(&mut st.stroke_panel, key, &resolved);
+    // Also sync stroke_width when weight changes
+    if key == "weight" {
+        if let Some(w) = resolved.as_f64() {
+            if let Some(ref mut stroke) = st.app_default_stroke {
+                stroke.width = w;
+            }
+            if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                if let Some(ref mut stroke) = tab.model.default_stroke {
+                    stroke.width = w;
+                }
+            }
+        }
+    }
+    // Propagate rendering-affecting changes to selected elements
+    if matches!(key, "cap" | "join" | "weight" | "miter_limit" |
+                "dashed" | "dash_1" | "gap_1" | "dash_2" | "gap_2" | "dash_3" | "gap_3") {
+        st.apply_stroke_panel_to_selection();
+    }
+}
+
+/// Get a stroke panel field as a JSON value.
+fn get_stroke_field(sp: &crate::workspace::app_state::StrokePanelState, key: &str) -> serde_json::Value {
+    use serde_json::Value as J;
+    match key {
+        "cap" => J::String(sp.cap.clone()),
+        "join" => J::String(sp.join.clone()),
+        "miter_limit" => serde_json::json!(sp.miter_limit),
+        "align_stroke" => J::String(sp.align.clone()),
+        "dashed" => J::Bool(sp.dashed),
+        "dash_1" => serde_json::json!(sp.dash_1),
+        "gap_1" => serde_json::json!(sp.gap_1),
+        "dash_2" => sp.dash_2.map_or(J::Null, |v| serde_json::json!(v)),
+        "gap_2" => sp.gap_2.map_or(J::Null, |v| serde_json::json!(v)),
+        "dash_3" => sp.dash_3.map_or(J::Null, |v| serde_json::json!(v)),
+        "gap_3" => sp.gap_3.map_or(J::Null, |v| serde_json::json!(v)),
+        "start_arrowhead" => J::String(sp.start_arrowhead.clone()),
+        "end_arrowhead" => J::String(sp.end_arrowhead.clone()),
+        "start_arrowhead_scale" => serde_json::json!(sp.start_arrowhead_scale),
+        "end_arrowhead_scale" => serde_json::json!(sp.end_arrowhead_scale),
+        "link_arrowhead_scale" => J::Bool(sp.link_arrowhead_scale),
+        "arrow_align" => J::String(sp.arrow_align.clone()),
+        "profile" => J::String(sp.profile.clone()),
+        "profile_flipped" => J::Bool(sp.profile_flipped),
+        _ => J::Null,
+    }
+}
+
+/// Set a stroke panel field from a JSON value.
+fn set_stroke_field(sp: &mut crate::workspace::app_state::StrokePanelState, key: &str, val: &serde_json::Value) {
+    match key {
+        "cap" => { if let Some(s) = val.as_str() { sp.cap = s.into(); } }
+        "join" => { if let Some(s) = val.as_str() { sp.join = s.into(); } }
+        "miter_limit" => { if let Some(n) = val.as_f64() { sp.miter_limit = n; } }
+        "align_stroke" => { if let Some(s) = val.as_str() { sp.align = s.into(); } }
+        "dashed" => { if let Some(b) = val.as_bool() { sp.dashed = b; } }
+        "dash_1" => { if let Some(n) = val.as_f64() { sp.dash_1 = n; } }
+        "gap_1" => { if let Some(n) = val.as_f64() { sp.gap_1 = n; } }
+        "dash_2" => { sp.dash_2 = val.as_f64(); }
+        "gap_2" => { sp.gap_2 = val.as_f64(); }
+        "dash_3" => { sp.dash_3 = val.as_f64(); }
+        "gap_3" => { sp.gap_3 = val.as_f64(); }
+        "start_arrowhead" => { if let Some(s) = val.as_str() { sp.start_arrowhead = s.into(); } }
+        "end_arrowhead" => { if let Some(s) = val.as_str() { sp.end_arrowhead = s.into(); } }
+        "start_arrowhead_scale" => { if let Some(n) = val.as_f64() { sp.start_arrowhead_scale = n; } }
+        "end_arrowhead_scale" => { if let Some(n) = val.as_f64() { sp.end_arrowhead_scale = n; } }
+        "link_arrowhead_scale" => { if let Some(b) = val.as_bool() { sp.link_arrowhead_scale = b; } }
+        "arrow_align" => { if let Some(s) = val.as_str() { sp.arrow_align = s.into(); } }
+        "profile" => { if let Some(s) = val.as_str() { sp.profile = s.into(); } }
+        "profile_flipped" => { if let Some(b) = val.as_bool() { sp.profile_flipped = b; } }
+        "weight" => {
+            // weight is not on StrokePanelState — handled by caller via Stroke.width
+        }
+        _ => {}
+    }
+}
+
+/// Get/set stroke state fields using the `state.stroke_*` naming convention.
+fn get_stroke_state_field(sp: &crate::workspace::app_state::StrokePanelState, key: &str) -> serde_json::Value {
+    let panel_key = key.strip_prefix("stroke_").unwrap_or(key);
+    get_stroke_field(sp, panel_key)
+}
+
+fn set_stroke_state_field(sp: &mut crate::workspace::app_state::StrokePanelState, key: &str, val: &serde_json::Value) {
+    let panel_key = key.strip_prefix("stroke_").unwrap_or(key);
+    set_stroke_field(sp, panel_key, val);
 }
 
 /// Build an onclick handler from an element's behavior declarations.
@@ -748,6 +927,23 @@ fn dialog_field(bind_expr: &str) -> String {
     bind_expr.strip_prefix("dialog.").unwrap_or("").to_string()
 }
 
+/// Classify a bind expression as dialog, panel, or state field.
+enum BindTarget {
+    Dialog(String),
+    Panel(String),
+    None,
+}
+
+fn classify_bind(bind_expr: &str) -> BindTarget {
+    if let Some(field) = bind_expr.strip_prefix("dialog.") {
+        BindTarget::Dialog(field.to_string())
+    } else if let Some(field) = bind_expr.strip_prefix("panel.") {
+        BindTarget::Panel(field.to_string())
+    } else {
+        BindTarget::None
+    }
+}
+
 // ── Element renderers ────────────────────────────────────────
 
 fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
@@ -935,8 +1131,12 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
 
     // Look up icon SVG from the icons map in ctx
     let icon_name = el.get("icon").and_then(|i| i.as_str()).unwrap_or("");
+    // Look up icon from ctx first, then fall back to cached workspace
+    let ws_for_icons = super::workspace::Workspace::load();
     let icon_svg = if !icon_name.is_empty() {
-        if let Some(icon_def) = ctx.get("icons").and_then(|i| i.get(icon_name)) {
+        let icon_from_ctx = ctx.get("icons").and_then(|i| i.get(icon_name));
+        let icon_from_ws = ws_for_icons.as_ref().and_then(|ws| ws.icons().get(icon_name));
+        if let Some(icon_def) = icon_from_ctx.or(icon_from_ws) {
             let viewbox = icon_def.get("viewbox").and_then(|v| v.as_str()).unwrap_or("0 0 16 16");
             let svg_inner = icon_def.get("svg").and_then(|v| v.as_str()).unwrap_or("");
             format!(r#"<svg viewBox="{viewbox}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">{svg_inner}</svg>"#)
@@ -1098,8 +1298,9 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         min
     };
 
-    let field = dialog_field(bind_expr);
+    let bind_target = classify_bind(bind_expr);
     let mut dialog_signal = rctx.dialog_ctx.0;
+    let app = rctx.app.clone();
     let mut revision = rctx.revision;
 
     rsx! {
@@ -1111,11 +1312,35 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
             value: "{value}",
             style: "width:45px;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
             oninput: move |evt: Event<FormData>| {
-                if field.is_empty() { return; }
                 let new_val: f64 = evt.value().parse().unwrap_or(0.0);
-                if let Some(mut ds) = dialog_signal() {
-                    ds.set_value(&field, serde_json::json!(new_val));
-                    dialog_signal.set(Some(ds));
+                match &bind_target {
+                    BindTarget::Dialog(field) => {
+                        if let Some(mut ds) = dialog_signal() {
+                            ds.set_value(field, serde_json::json!(new_val));
+                            dialog_signal.set(Some(ds));
+                        }
+                    }
+                    BindTarget::Panel(field) => {
+                        let f = field.clone();
+                        let app = app.clone();
+                        spawn(async move {
+                            let mut st = app.borrow_mut();
+                            set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
+                            if f == "weight" {
+                                if let Some(ref mut stroke) = st.app_default_stroke {
+                                    stroke.width = new_val;
+                                }
+                                let idx = st.active_tab;
+                                if let Some(tab) = st.tabs.get_mut(idx) {
+                                    if let Some(ref mut stroke) = tab.model.default_stroke {
+                                        stroke.width = new_val;
+                                    }
+                                }
+                            }
+                            st.apply_stroke_panel_to_selection();
+                        });
+                    }
+                    BindTarget::None => { return; }
                 }
                 revision += 1;
             },
@@ -1187,8 +1412,9 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
         false
     };
 
-    let field = dialog_field(bind_expr);
+    let bind_target = classify_bind(bind_expr);
     let mut dialog_signal = rctx.dialog_ctx.0;
+    let app = rctx.app.clone();
     let mut revision = rctx.revision;
     let cv = current_value.clone();
 
@@ -1199,11 +1425,25 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             disabled: disabled,
             style: "color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);font-size:11px;padding:2px 4px;{style}",
             onchange: move |evt: Event<FormData>| {
-                if field.is_empty() { return; }
                 let new_val = evt.value();
-                if let Some(mut ds) = dialog_signal() {
-                    ds.set_value(&field, serde_json::json!(new_val));
-                    dialog_signal.set(Some(ds));
+                match &bind_target {
+                    BindTarget::Dialog(field) => {
+                        if let Some(mut ds) = dialog_signal() {
+                            ds.set_value(field, serde_json::json!(new_val));
+                            dialog_signal.set(Some(ds));
+                        }
+                    }
+                    BindTarget::Panel(field) => {
+                        let f = field.clone();
+                        let v = new_val.clone();
+                        let app = app.clone();
+                        spawn(async move {
+                            let mut st = app.borrow_mut();
+                            set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
+                            st.apply_stroke_panel_to_selection();
+                        });
+                    }
+                    BindTarget::None => { return; }
                 }
                 revision += 1;
             },
@@ -1242,6 +1482,106 @@ fn render_select_option(opt: &serde_json::Value, current_value: &str) -> Element
     }
 }
 
+fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let style = build_style(el, ctx);
+    let options = el.get("options").and_then(|o| o.as_array()).cloned().unwrap_or_default();
+    let list_id = format!("{id}_opts");
+
+    let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
+    let current_value = if !bind_expr.is_empty() {
+        let result = expr::eval(bind_expr, ctx);
+        match result {
+            Value::Str(s) => s,
+            Value::Number(n) => n.to_string(),
+            _ => String::new(),
+        }
+    } else {
+        String::new()
+    };
+
+    let disabled = if let Some(dis_expr) = el.get("bind").and_then(|b| b.get("disabled")).and_then(|v| v.as_str()) {
+        expr::eval(dis_expr, ctx).to_bool()
+    } else {
+        false
+    };
+
+    let bind_target = classify_bind(bind_expr);
+    let mut dialog_signal = rctx.dialog_ctx.0;
+    let app = rctx.app.clone();
+    let mut revision = rctx.revision;
+
+    rsx! {
+        span {
+            style: "display:inline-flex;{style}",
+            input {
+                id: "{id}",
+                r#type: "text",
+                list: "{list_id}",
+                value: "{current_value}",
+                disabled: disabled,
+                style: "color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);font-size:11px;padding:2px 4px;width:100%",
+                onchange: move |evt: Event<FormData>| {
+                    let new_val = evt.value();
+                    match &bind_target {
+                        BindTarget::Dialog(field) => {
+                            if let Some(mut ds) = dialog_signal() {
+                                ds.set_value(field, serde_json::json!(new_val));
+                                dialog_signal.set(Some(ds));
+                            }
+                        }
+                        BindTarget::Panel(field) => {
+                            let f = field.clone();
+                            let v = new_val.clone();
+                            let app = app.clone();
+                            spawn(async move {
+                                let mut st = app.borrow_mut();
+                                // Parse as number if possible (for scale percentages)
+                                let json_val = if let Ok(n) = v.parse::<f64>() {
+                                    serde_json::json!(n)
+                                } else {
+                                    serde_json::json!(v)
+                                };
+                                set_stroke_field(&mut st.stroke_panel, &f, &json_val);
+                            });
+                        }
+                        BindTarget::None => { return; }
+                    }
+                    revision += 1;
+                },
+            }
+            datalist {
+                id: "{list_id}",
+                for opt in options.iter() {
+                    {render_combo_box_option(opt)}
+                }
+            }
+        }
+    }
+}
+
+fn render_combo_box_option(opt: &serde_json::Value) -> Element {
+    if let Some(obj) = opt.as_object() {
+        let value = obj.get("value")
+            .map(|v| if let Some(n) = v.as_f64() { n.to_string() } else { v.as_str().unwrap_or("").to_string() })
+            .unwrap_or_default();
+        let label = obj.get("label").and_then(|v| v.as_str()).unwrap_or(&value);
+        rsx! {
+            option {
+                value: "{value}",
+                "{label}"
+            }
+        }
+    } else {
+        let value = opt.as_str().unwrap_or("");
+        rsx! {
+            option {
+                value: "{value}",
+            }
+        }
+    }
+}
+
 fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let label_text = el.get("label").and_then(|l| l.as_str()).unwrap_or("");
@@ -1260,28 +1600,44 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
         false
     };
 
-    let field = dialog_field(bind_expr);
+    let bind_target = classify_bind(bind_expr);
     let mut dialog_signal = rctx.dialog_ctx.0;
+    let app = rctx.app.clone();
     let mut revision = rctx.revision;
+    let on_click = build_click_handler(el, ctx, rctx);
 
+    let check_icon = if checked { "\u{2611}" } else { "\u{2610}" };
     rsx! {
-        label {
+        div {
             id: "{id}",
-            style: "display:flex;align-items:center;gap:4px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;{style}",
-            input {
-                r#type: "checkbox",
-                checked: checked,
-                disabled: disabled,
-                onchange: move |_evt: Event<FormData>| {
-                    if field.is_empty() { return; }
+            style: "display:flex;align-items:center;gap:4px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;user-select:none;{style}",
+            onclick: move |evt| {
+                if disabled { return; }
+                if let Some(ref handler) = on_click {
+                    handler.call(evt);
+                } else {
                     let new_val = !checked;
-                    if let Some(mut ds) = dialog_signal() {
-                        ds.set_value(&field, serde_json::json!(new_val));
-                        dialog_signal.set(Some(ds));
+                    match &bind_target {
+                        BindTarget::Dialog(field) => {
+                            if let Some(mut ds) = dialog_signal() {
+                                ds.set_value(field, serde_json::json!(new_val));
+                                dialog_signal.set(Some(ds));
+                            }
+                        }
+                        BindTarget::Panel(field) => {
+                            let f = field.clone();
+                            let app = app.clone();
+                            spawn(async move {
+                                let mut st = app.borrow_mut();
+                                set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
+                            });
+                        }
+                        BindTarget::None => {}
                     }
                     revision += 1;
-                },
-            }
+                }
+            },
+            span { style: "font-size:14px;", "{check_icon}" }
             "{label_text}"
         }
     }
