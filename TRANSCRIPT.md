@@ -1244,3 +1244,353 @@ Please read and understand these requirements. Analyze them for inconsistencies
 and completeness. Make suggestions for improvements, ranking them in priority
 from high to low, and giving each a number. Be ready for a deep dive into any of
 the suggestions.
+
+# Swatch Options
+
+```yaml
+dialog:
+- .row: [Swatch Name, NAME]
+- .row: ["Color Type:", COLOR_TYPE]
+- .row:
+  - .col-4:
+  - .col-4: [GLOBAL]
+  - .col-4:
+- .row: ["Color Mode:", COLOR_MODE]
+- .row:
+  - .col-3: COLOR
+  - .col-9:
+  - .row: [SLIDER, VALUE]
+- .row:
+  - .col-9:
+  - .col-3: HEX
+- .row:
+  - .col-4: PREVIEW
+  - .col-4: CANCEL
+  - .col-4: OK
+```
+
+# Swatches
+
+```yaml
+panel:
+- .row
+  - .col-2: FILL_STROKE
+- .row: Recent colors
+- .row: RECENT_COLORS
+- .row: Swatch Tiles
+- .row:
+  - .col-12: SWATCH_TILES
+```
+
+# Color Guide
+
+```yaml
+panel:
+- .row:
+  - .col-1: CURRENT\_COLOR
+  - .col-11: HARMONY\_RULES\_DROPDOWN
+- .row:
+  - .col-12: COLOR\_HARMONIES
+```
+
+# Align
+
+The Alignment Panel allows the elements on the selection to be aligned in a few different ways.
+
+Alignment:
+- The ALIGN_LEFT_BUTTON finds the leftmost bounding box of all the elements in the selection, and moves all elements horizontally to have the same left position
+- The ALIGN_HORIZONTAL_BUTTON finds the mid-point of all the elements in the selection, and moves all elements horizontally to have the same midpoint
+- The ALIGN_RIGHT_BUTTON finds the rightmost bounding box of all the elements in the selection, and moves all elements horizontally to have the same right position
+- ALIGN_TOP_BUTTON, ALIGN_VERTICAL_BUTTON, ALIGN_BOTTOM_BUTTON do the same, but in the vertical dimension
+
+Distribute tries to ensure that the _spacing_ of elements is uniform.
+- The DISTRIBUTE_LEFT_BUTTON moves the elements in the selection horizontally so that the left coordinates of their bounding boxes are evenly spaced
+- DISTRIBUTE_HORIZONTAL_BUTTON does the same, with the midpoints
+- DISTRIBUTE_RIGHT_BUTTON does the same, with the right coordinates
+- DISTRIBUTE_TOP_BUTTON, DISTRIBUTE_VERTICAL_BUTTON, and DISTRIBUTE_BOTTOM_BUTTON do the same, but moving element vertically to ensure an even vertical distribution
+
+The spacing tools look at the spacing between elements and tries to ensure even spacing.
+- DISTRIBUTE_VERTICAL_SPACING_BUTTON moves elements vertically to ensure that the spacing between the elements is the same
+- DISTRIBUTE_HORIZONTAL_SPACING_BUTTON moves elements horizontally to ensure that the spacing between the elements is the same
+
+Here is the layout described in bootstrap form.
+
+```yaml
+panel:
+- .row: "Align Objects:"
+- .row:
+  - .col-2: ALIGN_LEFT_BUTTON
+  - .col-2: ALIGN_HORIZONTAL_BUTTON
+  - .col-2: ALGN_RIGHT_BUTTON
+  - .col-2: ALIGN_TOP_BUTTON
+  - .col-2: ALIGN_VERTICAL_BUTTON
+  - .col-2: ALIGN_BOTTOM_BUTTON
+- .row: "Distribute Objects"
+  - .col-2: DISTRIBUTE_LEFT_BUTTON
+  - .col-2: DISTRIBUTE_HORIZONTAL_BUTTON
+  - .col-2: DISTRIBUTE_RIGHT_BUTTON
+  - .col-2: DISTRIBUTE_TOP_BUTTON
+  - .col-2: DISTRIBUTE_VERTICAL_BUTTON
+  - .col-2: DISTRIBUTE_BOTTOM_BUTTON
+- .row:
+  - .col-6:
+    - .row: "Distribute Spacing:"
+	- .col-3: DISTRIBUTE_VERTICAL_SPACING_BUTTON
+	- .col-3: DISTRIBUTE_HORIZONTAL_SPACING_BUTTON
+```
+
+The Alignment panel has the following menu:
+- Use Preview Bounds (if this is checked, the preview bounding box is used, which takes into account fill and stroke)
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
+
+# Boolean Operations
+
+The Boolean Operations Panel allows performing a set of boolean operations on the geometry in the selection. These boolean operation are performed on the fill, and ignore stroke properties on the elements.
+
+- UNION merges all elements into a single element, taking the union of their fills.
+- INTERSECTION takes the intersection of fills
+- SUBTRACT_FRONT subtracts the fill of the frontmost element from all other elements in the selection
+- EXCLUDE subtracts the intersection of all elements from all elements in the selection
+- DIVIDE cuts the elements apart so that none of them overlap
+- TRIM removes the parts of elements that are hidden behind other elements
+- MERGE performs a TRIM, and afterwards merges all elements that are touching and have exactly the same fill color
+- CROP uses the topmost element as a mask and crops all other elements in the selection, removing anything outside the mask
+- SUBTRACT_BACK is like SUBTRACT_FRONT but it subtracts the backmost element from all other elements
+
+```yaml
+panel:
+- .row: "Shape Modes:"
+- .row:
+  - .col-2: UNION
+  - .col-2: SUBTRACT_FRONT
+  - .col-2: INTERSECTION
+  - .col-2: EXCLUDE
+- .row:
+  - .col-2: DIVIDE
+  - .col-2: TRIM
+  - .col-2: MERGE
+  - .col-2: CHOP
+  - .col-2: SUBTRACT_BACK
+```
+
+# Character
+
+The Character Panel allows setting properties of text in the selection.
+- The FONT_DROPDOWN contains a list of available fonts, with a checkmark next to the current font.
+- The STYLE_DROPDOWN allows selecting from the available style of the font (e.g. italic, bold, etc)
+- The FONT_SIZE_DROPDOWN gives a selection of font sizes from 6pt to 64pt, and allows direct input of a point size
+- The LEADING_DROPDOWN is like font size, but sets the leading of the text
+- KERNING affects the spacing between characters
+- TRACKING is similar to KERNING
+- VERTICAL_SCALE stretches the vertical size of the text
+- HORIZONTAL_SCALE stretches the horizontal size
+- BASELINE_SHIFT allows shifting the baseline
+- CHARACTER_ROTATION applies a rotation to each character in the text
+- ALL_CAPS produces all capitals, even if the text is written in lowercase
+- SMALL_CAPS produces small captials for text written in lowercase, and regular capitals for character writeen in uppercase
+- SUPERSCRIPT places the selected text n superscript position
+- SUBSCRIPT does the same for subscript position
+- UNDERLINE underlines the selected text
+- STRIKETHROUGH applies strikethrough to the text
+
+Note that these operations are performed on the selected text, which may be a tspan within a text element.
+
+Here is the panel layout in bootstrap style.
+
+```yaml
+panel:
+- .row: FONT_DROPDOWN
+- .row: STYLE_DROPDOWN
+- .row:
+  - .col-2: font size icon
+  - .col-4: FONT_SIZE_DROPDOWN
+  - .col-2: leading icon
+  - .col-4: LEADING_DROPDOWN
+- .row:
+  - .col-2: kerning icon
+  - .col-4: KERNING_DROPDOWN
+  - .col-2: tracking icon
+  - .col-4: TRACKING_DROPDOWN
+- .row:
+  - .col-2: vertical scale icon
+  - .col-4: VERTICAL_SCALE_DROPDOWN
+  - .col-2: horizontal scale icon
+  - .col-4: HORIZONTAL SCALE DROPDOWN
+- .row:
+  - .col-2: baseline shift icon
+  - .col-4: BASELINE_SHIFT_DROPDOWN
+  - .col-2: character rotaton icon
+  - .col-4: CHARACTER_ROTATION_DROPDOWN
+- .row:
+  - .col-2: ALL_CAPS_BUTTON
+  - .col-2: SMALL_CAPS_BUTTON
+  - .col-2: SUPERSCRIPT_BUTTON
+  - .col-2: SUBSCRIPT_BUTTON
+  - .col-2: UNDERLINE_BUTTON
+  - .col-2: STRIKETHROUGH_BUTTON
+```
+
+# Paragraph
+
+The Paragraph Panel sets properties of paragraphs, longer space of text that may include wrapping and indentation.
+
+- ALIGN_LEFT aligns each line to the left boundary, with a ragged right.
+- ALIGN_CENTER centers each line, the left and right are ragged.
+- ALIGN_RIGHT aligns each line to the right margin, leaving the left ragged.
+- The JUSTIFY operations justify to both margins.
+  - JUSTIFY_LEFT justifies the last line left, leaving the right ragged.
+  - JUSTIFY_RIGHT justifies the last line right, leaving the left ragged.
+  - JUSTIFY_CENTER justifies the last line in the center.
+  - JUSTIFY_ALL forces justification on all lines
+- BULLETS_DROPDOWN lists a set of bullet list styles. Each paragraph starts with a bullet. We can include normal bullets, dashes, checkmarks.
+- NUMBERED_LIST_DROPDOWN gives a set of numbered list styles. Each paragraph starts with a number. We can give numbers, roman numerals (both capitals and lower case).
+- LEFT_INDENT allows specifying an identation for all the lines in a paragraph.
+- RIGHT_INDENT does the same, but indents from the right margin.
+- FIRST_LINE_INDENT_VALUE specifies additional indentation for the first line of each paragraph.
+- SPACE_BEFORE_VALUE indicates additional vertical spacing for every paragraph but the first one.
+- SPACE_AFTER_VALUE indicates additional veritcal spacing between paragraphs.
+- HYPHENATE, when checked, specifies that line breaking is allowed to use hyphenation.
+
+Here is the layour in bootstrap style format.
+
+```yaml
+panel:
+- .row: [ALIGN\_LEFT, ALIGN\_CENTER, ALIGN\_RIGHT, JUSTIFY\_LEFT, JUSTIFY\_CENTER, JUSTIFY\_RIGHT, JUSTIFY\_ALL]
+- .row: [BULLETS_DROPDOWN, NUMBERED_LIST_DROPDOWN]
+- .row:
+  - .col-1: left indent icon
+  - .col-5: LEFT_INDENT_VALUE
+  - .col-1: right indent icon
+  - .col-5: RIGHT_INDENT_VALUE
+- .row:
+  - .col-1: first line indent icon
+  - .col-5: FIRST_LINE_INDENT_VALUE
+- .row:
+  - .col-1: space before icon
+  - .col-5: SPACE_BEFORE_VALUE
+  - .col-1: space after icon
+  - .col-5: SPACE AFTER VALIE
+- .row:
+  - .col-3: HYPHENATE_CHECKBOX
+```
+
+# Magic wand
+
+The Magic Wand Panel specifies properties of the Magic Wand, which starts with a selection, and selects additional elements based on whether those elements are similar to the selection in stroke and fill.
+
+- If FILL_COLOR_CHECKBOX is active, elements are selected if they have a similar fill color, tolerance is given by FILL_TOLERANCE. This is RMS distance in RGB.
+- STROKE_COLOR is similar to FILL_COLOR.
+- STROKE_WEIGHT allows selecting elements if they have similar stroke weight. STROKE_TOLERANCE is in points.
+- OPACITY allows selecting elements if they have similar opacity. OPACITY_TOLERANCE is in percent.
+
+Here is the layout in bootstrp-style format.
+```yaml
+panel:
+- .row:
+  - .col-5: FILL\_COLOR\_CHECKBOX
+  - .col-7: ["Tolerance:", FILL\_TOLERANCE]
+- .row:
+  - .col-5: STROKE\_COLOR\_CHECKBOX
+  - .col-7: ["Tolerance:", STROKE\_TOLERANCE]
+- .row:
+  - .col-5: STROKE\_WEIGHT\_CHECKBOX
+  - .col-7: ["Tolerance:", STROKE\_WEIGHT\_TOLERANCE (pt)]
+- .row:
+  - .col-5: OPACITY\_CHECKBOX
+  - .col-7: ["Tolerance:", OPACITY\_TOLERANCE (%)]
+```
+
+# Stroke
+
+The Stroke Panel allows specifying the stroke atrributes of the elements in the selection.
+- WEIGTH_VALUE is the weight of the stroke inpoints.
+- Strokes have one of three enpoint styles, butt caps, rounded caps, and projecting caps.
+- Corners have one of thr see styles: miter joints (the default), rounded joints, and bevel joints.
+- If the DASHED_LINE_CHECKBOX is active, the line is dashed. The default is dash length of 12pt with a gap of 12pt. The DASH_VALUE and GAP_VALUE allow changing the dash+gap values.
+- Each line can have arrowheads. The START_ARROWHEAD_DROPDOWN and END_ARROWHEAD_DROPDOWN give several options.
+- The START_ARROWHEAD_SCALE_DROPDOWN and END_ARROWHEAD_SCALE_DROPDOWN allow changing the size of the arrowheads in percent.
+- Arrows can have their tip at the endpoint, or have the center at the endpoint.
+
+The following gives the layout of the panel in bootstrap-style format.
+
+```yaml
+panel:
+- .row:
+  - .col-4: "Weight:"
+  - .col-4: WEIGHT_VALUE
+- .row:
+  - .col-4: "Cap:"
+  - .col-1: BUTT_CAP_BUTTON
+  - .col-1: ROUNDING_CAP_BUTTON
+  - .col-1: PROJECTING_CAP_BUTTON
+- .row:
+  - .col-4: "Corner:"
+  - .col-1: MITER_JOIN_BUTTON
+  - .col-1: ROUND_JOIN_BUTTON
+  - .col-2: BEVEL_JOIN_BUTTON
+- .row:
+  - .col-4: DASHED_LINE_CHECKBOX
+- .row
+  - .col-2
+    - .col-12: DASH_VALUE_1
+    - .col-12: "dash"
+  - .col-2
+    - .col-12: GAP_VALUE_1
+    - .col-12: "gap"
+  - .col-2
+    - .col-12: DASH_VALUE_2
+    - .col-12: "dash"
+  - .col-2
+    - .col-12: GAP_VALUE_2
+    - .col-12: "gap"
+  - .col-2
+    - .col-12: DASH_VALUE_3
+    - .col-12: "dash"
+  - .col-2
+    - .col-12: GAP_VALUE_3
+    - .col-12: "gap"
+- .row:
+  - .col-3: "Arrowheads:"
+  - .col-3: START_ARROWHEAD_DROPDOWN
+  - .col-3: END_ARROWHEAD_DROPDOWN
+- .row:
+  - .col-3: "Scale:"
+  - .col-3: START_ARROWHEAD_SCALE_DROPDOWN
+  - .col-3: END_ARROWHEAD_SCALE_DROPDOWN
+- .row:
+  - .col-3: "Align:"
+  - .col-1: ARROW_BEYOND_BUTTON
+  - .col-1: ARROW_TIP_BUTTON
+```
+
+# Layer
+
+The Layer Panel displays the elements in the document.
+
+Each element has a row in the panel.
+- The EYE_BUTTON indicates the element's visibility.
+- The LOCK_BUTTON indicates whether the element is locked.
+- The TWIRL_DOWN_BUTTON is used to display or hide the elements of Layers and Groups.
+- The ELEMENT_PREVIEW gives a small 32px square visual summary of the element.
+- The ELEMENT_NAME is the name of the element, if it has one.
+- The SELECT_CHECKMARK is checked if the element is selected.
+
+The SPACER is used for indentation in increments of 16px. Toplevel elements like Layers and elements directly in the layer are not indented. Each time a Group is untwirled, the elements in the Group 16px is added to the SPACER so that the elements are indented.
+
+Here is the layout in bootstrap-style format.
+
+```yaml
+panel:
+- .row:
+  - .col-11: SEARCH_ALL_TEXT
+  - .col-1: SEARCH_FILTER_BUTTON
+- .row: (per element)
+  - .col-1: EYE_BUTTON
+  - .col-1: LOCK_BUTTON
+  - .col-9: SPACER TWIRL_DOWN_BUTTON ELEMENT_PREVIEW ELEMENT_NAME
+  - .col-1: SELECT_CHECKMARK
+```
