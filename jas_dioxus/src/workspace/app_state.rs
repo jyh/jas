@@ -508,10 +508,20 @@ impl AppState {
     pub(crate) fn apply_stroke_panel_to_selection(&mut self) {
         let sp = &self.stroke_panel;
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-            // Get the current stroke color and width
-            let current_stroke = tab.model.default_stroke
-                .or(self.app_default_stroke);
+            // Color/opacity come from the selected element (preserve what's there).
+            // Width comes from the default stroke (updated by the weight input).
+            let sel_stroke = {
+                let doc = tab.model.document();
+                doc.selection.first()
+                    .and_then(|es| doc.get_element(&es.path))
+                    .and_then(|e| e.stroke().cloned())
+            };
+            let default_stroke = tab.model.default_stroke.or(self.app_default_stroke);
+            let current_stroke = sel_stroke.or(default_stroke);
             if let Some(base) = current_stroke {
+                // Use the default stroke width (set by weight input), not the
+                // selected element's width which may not have been updated yet.
+                let width = default_stroke.map(|s| s.width).unwrap_or(base.width);
                 let linecap = match sp.cap.as_str() {
                     "round" => LineCap::Round,
                     "square" => LineCap::Square,
@@ -542,7 +552,7 @@ impl AppState {
                 }
                 let new_stroke = Stroke {
                     color: base.color,
-                    width: base.width,
+                    width,
                     linecap,
                     linejoin,
                     miter_limit: sp.miter_limit,
@@ -573,7 +583,7 @@ impl AppState {
                     Controller::set_selection_stroke(&mut tab.model, Some(new_stroke));
                     // Apply width profile
                     let width_pts = crate::geometry::element::profile_to_width_points(
-                        &sp.profile, base.width, sp.profile_flipped,
+                        &sp.profile, width, sp.profile_flipped,
                     );
                     Controller::set_selection_width_profile(&mut tab.model, width_pts);
                 }
