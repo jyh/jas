@@ -47,11 +47,17 @@ fn apply_fill(ctx: &CanvasRenderingContext2d, fill: Option<&Fill>) -> f64 {
     }
 }
 
-fn apply_stroke(ctx: &CanvasRenderingContext2d, stroke: Option<&Stroke>) -> f64 {
+/// Return value from apply_stroke: (opacity, alignment).
+fn apply_stroke(ctx: &CanvasRenderingContext2d, stroke: Option<&Stroke>) -> (f64, StrokeAlign) {
     match stroke {
         Some(s) => {
             ctx.set_stroke_style_str(&css_color(&s.color));
-            ctx.set_line_width(s.width);
+            // Inside/outside use 2x width; the clip removes the unwanted half
+            let effective_width = match s.align {
+                StrokeAlign::Center => s.width,
+                StrokeAlign::Inside | StrokeAlign::Outside => s.width * 2.0,
+            };
+            ctx.set_line_width(effective_width);
             ctx.set_line_cap(match s.linecap {
                 LineCap::Butt => "butt",
                 LineCap::Round => "round",
@@ -73,12 +79,50 @@ fn apply_stroke(ctx: &CanvasRenderingContext2d, stroke: Option<&Stroke>) -> f64 
             } else {
                 ctx.set_line_dash(&js_sys::Array::new()).ok();
             }
-            s.opacity
+            (s.opacity, s.align)
         }
         None => {
             ctx.set_stroke_style_str("transparent");
             ctx.set_line_width(0.0);
-            1.0
+            (1.0, StrokeAlign::Center)
+        }
+    }
+}
+
+/// Stroke the current path with alignment clipping.
+/// The current path must already be traced on the context.
+/// For Inside, clips to the path fill area, strokes at 2x width (set by apply_stroke).
+/// For Outside, clips to the inverse of the path (evenodd with large rect), strokes at 2x width.
+/// For Center, just strokes normally.
+fn stroke_aligned(ctx: &CanvasRenderingContext2d, align: StrokeAlign) {
+    match align {
+        StrokeAlign::Center => {
+            ctx.stroke();
+        }
+        StrokeAlign::Inside => {
+            // The current path is still on the context. Clip to it,
+            // then stroke — only the inner half of the 2x-width stroke is visible.
+            ctx.save();
+            ctx.clip();
+            ctx.stroke();
+            ctx.restore();
+        }
+        StrokeAlign::Outside => {
+            // The current path is still on the context. Add a huge rect
+            // to the existing path (rect() doesn't clear it), then clip
+            // with evenodd — this clips to everything OUTSIDE the shape.
+            ctx.save();
+            ctx.rect(-1e6, -1e6, 2e6, 2e6);
+            // Call clip("evenodd") via js_sys since web-sys may not expose the overload
+            let _ = js_sys::Reflect::apply(
+                &js_sys::Function::from(wasm_bindgen::JsValue::from(
+                    js_sys::Reflect::get(ctx, &wasm_bindgen::JsValue::from_str("clip")).unwrap()
+                )),
+                ctx,
+                &js_sys::Array::of1(&wasm_bindgen::JsValue::from_str("evenodd")),
+            );
+            ctx.stroke();
+            ctx.restore();
         }
     }
 }
@@ -149,25 +193,25 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
 
     match elem {
         Element::Line(e) => {
-            let mut stroke_op = 1.0;
+            let (mut stroke_op, mut stroke_align) = (1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
             } else {
-                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
+                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
             ctx.begin_path();
             ctx.move_to(e.x1, e.y1);
             ctx.line_to(e.x2, e.y2);
             ctx.set_global_alpha(base_alpha * stroke_op);
-            ctx.stroke();
+            stroke_aligned(ctx, stroke_align);
         }
         Element::Rect(e) => {
-            let (mut fill_op, mut stroke_op) = (1.0, 1.0);
+            let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
             } else {
                 fill_op = apply_fill(ctx, e.fill.as_ref());
-                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
+                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
             let has_fill = !outline && e.fill.is_some();
             let has_stroke = outline || e.stroke.is_some();
@@ -195,7 +239,7 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                 }
                 if has_stroke {
                     ctx.set_global_alpha(base_alpha * stroke_op);
-                    ctx.stroke();
+                    stroke_aligned(ctx, stroke_align);
                 }
             } else {
                 if has_fill {
@@ -204,17 +248,20 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                 }
                 if has_stroke {
                     ctx.set_global_alpha(base_alpha * stroke_op);
-                    ctx.stroke_rect(e.x, e.y, e.width, e.height);
+                    // Use path-based stroke for alignment support
+                    ctx.begin_path();
+                    ctx.rect(e.x, e.y, e.width, e.height);
+                    stroke_aligned(ctx, stroke_align);
                 }
             }
         }
         Element::Circle(e) => {
-            let (mut fill_op, mut stroke_op) = (1.0, 1.0);
+            let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
             } else {
                 fill_op = apply_fill(ctx, e.fill.as_ref());
-                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
+                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
             ctx.begin_path();
             ctx.arc(e.cx, e.cy, e.r, 0.0, std::f64::consts::TAU).ok();
@@ -224,16 +271,16 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             }
             if outline || e.stroke.is_some() {
                 ctx.set_global_alpha(base_alpha * stroke_op);
-                ctx.stroke();
+                stroke_aligned(ctx, stroke_align);
             }
         }
         Element::Ellipse(e) => {
-            let (mut fill_op, mut stroke_op) = (1.0, 1.0);
+            let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
             } else {
                 fill_op = apply_fill(ctx, e.fill.as_ref());
-                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
+                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
             ctx.begin_path();
             ctx.ellipse(e.cx, e.cy, e.rx, e.ry, 0.0, 0.0, std::f64::consts::TAU)
@@ -244,16 +291,16 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             }
             if outline || e.stroke.is_some() {
                 ctx.set_global_alpha(base_alpha * stroke_op);
-                ctx.stroke();
+                stroke_aligned(ctx, stroke_align);
             }
         }
         Element::Polyline(e) => {
-            let (mut fill_op, mut stroke_op) = (1.0, 1.0);
+            let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
             } else {
                 fill_op = apply_fill(ctx, e.fill.as_ref());
-                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
+                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
             if !e.points.is_empty() {
                 ctx.begin_path();
@@ -267,17 +314,17 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                 }
                 if outline || e.stroke.is_some() {
                     ctx.set_global_alpha(base_alpha * stroke_op);
-                    ctx.stroke();
+                    stroke_aligned(ctx, stroke_align);
                 }
             }
         }
         Element::Polygon(e) => {
-            let (mut fill_op, mut stroke_op) = (1.0, 1.0);
+            let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
             } else {
                 fill_op = apply_fill(ctx, e.fill.as_ref());
-                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
+                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
             if !e.points.is_empty() {
                 ctx.begin_path();
@@ -292,17 +339,17 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                 }
                 if outline || e.stroke.is_some() {
                     ctx.set_global_alpha(base_alpha * stroke_op);
-                    ctx.stroke();
+                    stroke_aligned(ctx, stroke_align);
                 }
             }
         }
         Element::Path(e) => {
-            let (mut fill_op, mut stroke_op) = (1.0, 1.0);
+            let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
             } else {
                 fill_op = apply_fill(ctx, e.fill.as_ref());
-                stroke_op = apply_stroke(ctx, e.stroke.as_ref());
+                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
             ctx.begin_path();
             build_path(ctx, &e.d);
@@ -312,7 +359,7 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             }
             if outline || e.stroke.is_some() {
                 ctx.set_global_alpha(base_alpha * stroke_op);
-                ctx.stroke();
+                stroke_aligned(ctx, stroke_align);
             }
         }
         Element::Text(e) => {

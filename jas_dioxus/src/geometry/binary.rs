@@ -328,6 +328,7 @@ fn unpack_stroke(v: &Value) -> Option<Stroke> {
         linecap: cap,
         linejoin: join,
         miter_limit: 10.0,
+        align: StrokeAlign::Center,
         dash_pattern: [0.0; 6],
         dash_len: 0,
         opacity: as_f64(&arr[4]),
