@@ -174,6 +174,25 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
     // Mutable swatch libraries for rendering
     m.insert("_swatch_libraries".into(), st.swatch_libraries.clone());
 
+    // Document generation counter — changes on every document mutation,
+    // ensuring the layers panel re-renders when selection, visibility,
+    // lock state, or element structure changes.
+    let doc_gen = st.tab().map(|t| t.model.generation()).unwrap_or(0);
+    m.insert("_doc_generation".into(), serde_json::Value::Number(doc_gen.into()));
+
+    // Layers panel UI state — included so the panel re-renders when
+    // inline rename or twirl state changes.
+    if let Some(ref path) = st.layers_renaming {
+        m.insert("_layers_renaming".into(), serde_json::json!(path));
+    }
+    let collapsed_count = st.layers_collapsed.len();
+    m.insert("_layers_collapsed_count".into(), serde_json::Value::Number(collapsed_count.into()));
+    let panel_sel_count = st.layers_panel_selection.len();
+    m.insert("_layers_panel_sel_count".into(), serde_json::Value::Number(panel_sel_count.into()));
+    if let Some(ref dt) = st.layers_drag_target {
+        m.insert("_layers_drag_target".into(), serde_json::json!(dt));
+    }
+
     m
 }
 
@@ -187,6 +206,7 @@ fn build_panel_state_subset(
     let keys: &[&str] = match panel_name {
         "stroke" => &["stroke_width", "stroke_color"],
         "color" | "swatches" => &["fill_color", "stroke_color", "fill_on_top"],
+        "layers" => &["_doc_generation", "_layers_renaming", "_layers_collapsed_count", "_layers_panel_sel_count", "_layers_drag_target"],
         _ => &["fill_color", "stroke_color", "fill_on_top"],
     };
     let mut m = serde_json::Map::new();
@@ -583,6 +603,8 @@ pub(crate) fn build_dock_groups(
                                 "icons": {},
                                 "data": {
                                     "swatch_libraries": live_state_map.get("_swatch_libraries")
+                                        .cloned().unwrap_or(serde_json::Value::Null),
+                                    "_doc_generation": live_state_map.get("_doc_generation")
                                         .cloned().unwrap_or(serde_json::Value::Null)
                                 }
                             });
