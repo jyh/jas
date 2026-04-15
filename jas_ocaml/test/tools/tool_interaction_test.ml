@@ -943,8 +943,7 @@ let () =
       Alcotest.test_case "type-on-path tool: click on existing path converts to TextPath" `Quick (fun () ->
         let tool = new Jas.Type_on_path_tool.type_on_path_tool in
         let path_elem = Jas.Element.make_path
-          ~stroke:(Some Jas.Element.{ stroke_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
-                                       stroke_width = 1.0; stroke_linecap = Butt; stroke_linejoin = Miter; stroke_opacity = 1.0 })
+          ~stroke:(Some (Jas.Element.make_stroke Jas.Element.black))
           [MoveTo (0.0, 0.0); LineTo (100.0, 0.0)] in
         let model = Jas.Model.create () in
         let layer = Jas.Element.make_layer ~name:"L" [| path_elem |] in
@@ -993,8 +992,7 @@ let () =
       Alcotest.test_case "type-on-path tool: click on existing path starts session" `Quick (fun () ->
         let tool = new Jas.Type_on_path_tool.type_on_path_tool in
         let path_elem = Jas.Element.make_path
-          ~stroke:(Some Jas.Element.{ stroke_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
-                                       stroke_width = 1.0; stroke_linecap = Butt; stroke_linejoin = Miter; stroke_opacity = 1.0 })
+          ~stroke:(Some (Jas.Element.make_stroke Jas.Element.black))
           [MoveTo (0.0, 0.0); LineTo (100.0, 0.0)] in
         let model = Jas.Model.create () in
         let layer = Jas.Element.make_layer ~name:"L" [| path_elem |] in

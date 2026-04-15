@@ -433,10 +433,33 @@ let parse_stroke j =
       | _ -> Miter
     in
     let opacity = try j |> member "opacity" |> to_num with _ -> 1.0 in
+    let miter_limit = try j |> member "miter_limit" |> to_num with _ -> 10.0 in
+    let align = match (try j |> member "align" |> to_string with _ -> "center") with
+      | "inside" -> Inside | "outside" -> Outside | _ -> Center in
+    let dash_pattern = try
+      let dl = j |> member "dash_pattern" in
+      (match dl with `List l -> List.map to_num l | _ -> [])
+    with _ -> [] in
+    let start_arrow = arrowhead_of_string
+      (try j |> member "start_arrow" |> to_string with _ -> "none") in
+    let end_arrow = arrowhead_of_string
+      (try j |> member "end_arrow" |> to_string with _ -> "none") in
+    let start_arrow_scale = try j |> member "start_arrow_scale" |> to_num with _ -> 100.0 in
+    let end_arrow_scale = try j |> member "end_arrow_scale" |> to_num with _ -> 100.0 in
+    let arrow_align = match (try j |> member "arrow_align" |> to_string with _ -> "tip_at_end") with
+      | "center_at_end" -> Center_at_end | _ -> Tip_at_end in
     Some { stroke_color = parse_color (j |> member "color");
            stroke_width = j |> member "width" |> to_num;
            stroke_linecap = lc;
            stroke_linejoin = lj;
+           stroke_miter_limit = miter_limit;
+           stroke_align = align;
+           stroke_dash_pattern = dash_pattern;
+           stroke_start_arrow = start_arrow;
+           stroke_end_arrow = end_arrow;
+           stroke_start_arrow_scale = start_arrow_scale;
+           stroke_end_arrow_scale = end_arrow_scale;
+           stroke_arrow_align = arrow_align;
            stroke_opacity = opacity }
 
 let parse_transform j =
@@ -503,6 +526,7 @@ let rec parse_element j =
            x2 = j |> member "x2" |> to_num;
            y2 = j |> member "y2" |> to_num;
            stroke = parse_stroke (j |> member "stroke");
+           width_points = [];
            opacity; transform; locked; visibility }
   | "rect" ->
     Rect { x = j |> member "x" |> to_num;
@@ -543,6 +567,7 @@ let rec parse_element j =
     Path { d = j |> member "d" |> to_list |> List.map parse_path_command;
            fill = parse_fill (j |> member "fill");
            stroke = parse_stroke (j |> member "stroke");
+           width_points = [];
            opacity; transform; locked; visibility }
   | "text" ->
     Text { x = j |> member "x" |> to_num;

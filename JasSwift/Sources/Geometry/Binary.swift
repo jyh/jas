@@ -385,7 +385,18 @@ private func packStroke(_ stroke: Stroke?) -> MsgValue {
     guard let s = stroke else { return .nil }
     let cap: Int = switch s.linecap { case .butt: 0; case .round: 1; case .square: 2 }
     let join: Int = switch s.linejoin { case .miter: 0; case .round: 1; case .bevel: 2 }
-    return .array([packColor(s.color), vf64(s.width), vint(cap), vint(join), vf64(s.opacity)])
+    let align: Int = switch s.align { case .center: 0; case .inside: 1; case .outside: 2 }
+    let arrowAlign: Int = switch s.arrowAlign { case .tipAtEnd: 0; case .centerAtEnd: 1 }
+    let dash: [MsgValue] = s.dashPattern.map { vf64($0) }
+    return .array([packColor(s.color), vf64(s.width), vint(cap), vint(join), vf64(s.opacity),
+                   vf64(s.miterLimit), vint(align), .array(dash),
+                   vstr(s.startArrow.name), vstr(s.endArrow.name),
+                   vf64(s.startArrowScale), vf64(s.endArrowScale), vint(arrowAlign)])
+}
+
+private func packWidthPoints(_ pts: [StrokeWidthPoint]) -> MsgValue {
+    if pts.isEmpty { return .nil }
+    return .array(pts.map { .array([vf64($0.t), vf64($0.widthLeft), vf64($0.widthRight)]) })
 }
 
 private func packTransform(_ t: Transform?) -> MsgValue {
@@ -432,7 +443,7 @@ private func packElement(_ elem: Element) -> MsgValue {
         return .array([vint(tagLine), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
                        packTransform(e.transform),
                        vf64(e.x1), vf64(e.y1), vf64(e.x2), vf64(e.y2),
-                       packStroke(e.stroke)])
+                       packStroke(e.stroke), packWidthPoints(e.widthPoints)])
     case .rect(let e):
         return .array([vint(tagRect), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
                        packTransform(e.transform),
@@ -463,7 +474,8 @@ private func packElement(_ elem: Element) -> MsgValue {
         let cmds: [MsgValue] = e.d.map { packPathCommand($0) }
         return .array([vint(tagPath), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
                        packTransform(e.transform),
-                       .array(cmds), packFill(e.fill), packStroke(e.stroke)])
+                       .array(cmds), packFill(e.fill), packStroke(e.stroke),
+                       packWidthPoints(e.widthPoints)])
     case .text(let e):
         return .array([vint(tagText), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
                        packTransform(e.transform),
@@ -529,7 +541,31 @@ private func unpackStroke(_ v: MsgValue) -> Stroke? {
     let arr = asArray(v)
     let cap: LineCap = switch asInt(arr[2]) { case 0: .butt; case 1: .round; case 2: .square; default: .butt }
     let join: LineJoin = switch asInt(arr[3]) { case 0: .miter; case 1: .round; case 2: .bevel; default: .miter }
+    // Extended fields (backward compatible: old files have 5 elements)
+    if arr.count > 5 {
+        let miterLimit = asF64(arr[5])
+        let align: StrokeAlign = switch asInt(arr[6]) { case 1: .inside; case 2: .outside; default: .center }
+        let dashPattern = asArray(arr[7]).map { asF64($0) }
+        let startArrow = Arrowhead(fromString: asStr(arr[8]))
+        let endArrow = Arrowhead(fromString: asStr(arr[9]))
+        let startArrowScale = asF64(arr[10])
+        let endArrowScale = asF64(arr[11])
+        let arrowAlign: ArrowAlign = switch asInt(arr[12]) { case 1: .centerAtEnd; default: .tipAtEnd }
+        return Stroke(color: unpackColor(arr[0]), width: asF64(arr[1]), linecap: cap, linejoin: join,
+                      miterLimit: miterLimit, align: align, dashPattern: dashPattern,
+                      startArrow: startArrow, endArrow: endArrow,
+                      startArrowScale: startArrowScale, endArrowScale: endArrowScale,
+                      arrowAlign: arrowAlign, opacity: asF64(arr[4]))
+    }
     return Stroke(color: unpackColor(arr[0]), width: asF64(arr[1]), linecap: cap, linejoin: join, opacity: asF64(arr[4]))
+}
+
+private func unpackWidthPoints(_ v: MsgValue) -> [StrokeWidthPoint] {
+    if case .nil = v { return [] }
+    return asArray(v).map { p in
+        let a = asArray(p)
+        return StrokeWidthPoint(t: asF64(a[0]), widthLeft: asF64(a[1]), widthRight: asF64(a[2]))
+    }
 }
 
 private func unpackTransform(_ v: MsgValue) -> Transform? {
@@ -583,9 +619,10 @@ private func unpackElement(_ v: MsgValue) -> Element {
         return .group(Group(children: children, opacity: opacity,
                             transform: xform, locked: locked, visibility: vis))
     case tagLine:
+        let wp = arr.count > 10 ? unpackWidthPoints(arr[10]) : []
         return .line(Line(x1: asF64(arr[5]), y1: asF64(arr[6]),
                           x2: asF64(arr[7]), y2: asF64(arr[8]),
-                          stroke: unpackStroke(arr[9]),
+                          stroke: unpackStroke(arr[9]), widthPoints: wp,
                           opacity: opacity, transform: xform, locked: locked, visibility: vis))
     case tagRect:
         return .rect(Rect(x: asF64(arr[5]), y: asF64(arr[6]),
@@ -612,7 +649,9 @@ private func unpackElement(_ v: MsgValue) -> Element {
                                 opacity: opacity, transform: xform, locked: locked, visibility: vis))
     case tagPath:
         let cmds = asArray(arr[5]).map { unpackPathCommand($0) }
+        let wp = arr.count > 8 ? unpackWidthPoints(arr[8]) : []
         return .path(Path(d: cmds, fill: unpackFill(arr[6]), stroke: unpackStroke(arr[7]),
+                          widthPoints: wp,
                           opacity: opacity, transform: xform, locked: locked, visibility: vis))
     case tagText:
         return .text(Text(x: asF64(arr[5]), y: asF64(arr[6]), content: asStr(arr[7]),

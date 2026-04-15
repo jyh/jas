@@ -7,6 +7,7 @@ class line_tool = object
     Some (Element.Line {
       x1 = sx; y1 = sy; x2 = ex; y2 = ey;
       stroke = ctx.model#default_stroke;
+      width_points = [];
       opacity = 1.0; transform = None; locked = false; visibility = Preview;
     })
 

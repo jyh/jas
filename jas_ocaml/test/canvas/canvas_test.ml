@@ -75,16 +75,9 @@ let tests = [
   Alcotest.test_case "add line element via controller" `Quick (fun () ->
     let model3 = Jas.Model.create () in
     let ctrl3 = Jas.Controller.create ~model:model3 () in
-    let line = Jas.Element.Line {
-      x1 = 10.0; y1 = 20.0; x2 = 50.0; y2 = 60.0;
-      stroke = Some { stroke_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
-                      stroke_width = 1.0;
-                      stroke_linecap = Butt;
-                      stroke_linejoin = Miter;
-                      stroke_opacity = 1.0 };
-      opacity = 1.0; transform = None; locked = false;
-      visibility = Jas.Element.Preview;
-    } in
+    let line = Jas.Element.make_line
+      ~stroke:(Some (Jas.Element.make_stroke Jas.Element.black))
+      10.0 20.0 50.0 60.0 in
     let layer = Jas.Element.make_layer ~name:"Layer 1" [|line|] in
     ctrl3#set_document (Jas.Document.make_document [|layer|]);
     assert (Array.length ctrl3#document.Jas.Document.layers = 1);
@@ -104,18 +97,9 @@ let tests = [
   Alcotest.test_case "add rect element via controller" `Quick (fun () ->
     let model3 = Jas.Model.create () in
     let ctrl3 = Jas.Controller.create ~model:model3 () in
-    let rect = Jas.Element.Rect {
-      x = 10.0; y = 20.0; width = 40.0; height = 40.0;
-      rx = 0.0; ry = 0.0;
-      fill = None;
-      stroke = Some { stroke_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
-                      stroke_width = 1.0;
-                      stroke_linecap = Butt;
-                      stroke_linejoin = Miter;
-                      stroke_opacity = 1.0 };
-      opacity = 1.0; transform = None; locked = false;
-      visibility = Jas.Element.Preview;
-    } in
+    let rect = Jas.Element.make_rect
+      ~stroke:(Some (Jas.Element.make_stroke Jas.Element.black))
+      10.0 20.0 40.0 40.0 in
     let layer_r = Jas.Element.make_layer ~name:"Layer 1" [|rect|] in
     ctrl3#set_document (Jas.Document.make_document [|layer_r|]);
     begin match ctrl3#document.Jas.Document.layers.(0) with

@@ -119,6 +119,53 @@ type linejoin =
   | Round_join
   | Bevel
 
+(** Stroke alignment relative to the path. *)
+type stroke_align = Center | Inside | Outside
+
+(** Arrowhead shape identifier. *)
+type arrowhead =
+  | Arrow_none | Simple_arrow | Open_arrow | Closed_arrow
+  | Stealth_arrow | Barbed_arrow | Half_arrow_upper | Half_arrow_lower
+  | Arrow_circle | Open_circle | Arrow_square | Open_square
+  | Arrow_diamond | Open_diamond | Arrow_slash
+
+(** Arrow alignment mode. *)
+type arrow_align = Tip_at_end | Center_at_end
+
+let arrowhead_of_string = function
+  | "simple_arrow" -> Simple_arrow
+  | "open_arrow" -> Open_arrow
+  | "closed_arrow" -> Closed_arrow
+  | "stealth_arrow" -> Stealth_arrow
+  | "barbed_arrow" -> Barbed_arrow
+  | "half_arrow_upper" -> Half_arrow_upper
+  | "half_arrow_lower" -> Half_arrow_lower
+  | "circle" -> Arrow_circle
+  | "open_circle" -> Open_circle
+  | "square" -> Arrow_square
+  | "open_square" -> Open_square
+  | "diamond" -> Arrow_diamond
+  | "open_diamond" -> Open_diamond
+  | "slash" -> Arrow_slash
+  | _ -> Arrow_none
+
+let string_of_arrowhead = function
+  | Arrow_none -> "none"
+  | Simple_arrow -> "simple_arrow"
+  | Open_arrow -> "open_arrow"
+  | Closed_arrow -> "closed_arrow"
+  | Stealth_arrow -> "stealth_arrow"
+  | Barbed_arrow -> "barbed_arrow"
+  | Half_arrow_upper -> "half_arrow_upper"
+  | Half_arrow_lower -> "half_arrow_lower"
+  | Arrow_circle -> "circle"
+  | Open_circle -> "open_circle"
+  | Arrow_square -> "square"
+  | Open_square -> "open_square"
+  | Arrow_diamond -> "diamond"
+  | Open_diamond -> "open_diamond"
+  | Arrow_slash -> "slash"
+
 (** SVG fill presentation attribute. *)
 type fill = {
   fill_color : color;
@@ -131,8 +178,54 @@ type stroke = {
   stroke_width : float;
   stroke_linecap : linecap;
   stroke_linejoin : linejoin;
+  stroke_miter_limit : float;
+  stroke_align : stroke_align;
+  stroke_dash_pattern : float list;
+  stroke_start_arrow : arrowhead;
+  stroke_end_arrow : arrowhead;
+  stroke_start_arrow_scale : float;
+  stroke_end_arrow_scale : float;
+  stroke_arrow_align : arrow_align;
   stroke_opacity : float;
 }
+
+(** A width control point for variable-width stroke profiles. *)
+type stroke_width_point = {
+  swp_t : float;
+  swp_width_left : float;
+  swp_width_right : float;
+}
+
+let profile_to_width_points profile width flipped =
+  let hw = width /. 2.0 in
+  let pts = match profile with
+    | "taper_both" ->
+      [{ swp_t = 0.0; swp_width_left = 0.0; swp_width_right = 0.0 };
+       { swp_t = 0.5; swp_width_left = hw; swp_width_right = hw };
+       { swp_t = 1.0; swp_width_left = 0.0; swp_width_right = 0.0 }]
+    | "taper_start" ->
+      [{ swp_t = 0.0; swp_width_left = 0.0; swp_width_right = 0.0 };
+       { swp_t = 1.0; swp_width_left = hw; swp_width_right = hw }]
+    | "taper_end" ->
+      [{ swp_t = 0.0; swp_width_left = hw; swp_width_right = hw };
+       { swp_t = 1.0; swp_width_left = 0.0; swp_width_right = 0.0 }]
+    | "bulge" ->
+      [{ swp_t = 0.0; swp_width_left = hw; swp_width_right = hw };
+       { swp_t = 0.5; swp_width_left = hw *. 1.5; swp_width_right = hw *. 1.5 };
+       { swp_t = 1.0; swp_width_left = hw; swp_width_right = hw }]
+    | "pinch" ->
+      [{ swp_t = 0.0; swp_width_left = hw; swp_width_right = hw };
+       { swp_t = 0.5; swp_width_left = hw *. 0.5; swp_width_right = hw *. 0.5 };
+       { swp_t = 1.0; swp_width_left = hw; swp_width_right = hw }]
+    | _ -> []  (* "uniform" or unknown *)
+  in
+  if flipped then
+    List.rev_map (fun p ->
+      { swp_t = 1.0 -. p.swp_t;
+        swp_width_left = p.swp_width_left;
+        swp_width_right = p.swp_width_right }
+    ) pts
+  else pts
 
 (** SVG transform as a 2D affine matrix [a b c d e f]. *)
 type transform = {
@@ -161,6 +254,7 @@ type element =
       x1 : float; y1 : float;
       x2 : float; y2 : float;
       stroke : stroke option;
+      width_points : stroke_width_point list;
       opacity : float;
       transform : transform option;
       locked : bool;
@@ -218,6 +312,7 @@ type element =
       d : path_command list;
       fill : fill option;
       stroke : stroke option;
+      width_points : stroke_width_point list;
       opacity : float;
       transform : transform option;
       locked : bool;
@@ -462,8 +557,20 @@ let make_color ?(a = 1.0) r g b = Rgb { r; g; b; a }
 
 let make_fill ?(opacity = 1.0) color = { fill_color = color; fill_opacity = opacity }
 
-let make_stroke ?(width = 1.0) ?(linecap = Butt) ?(linejoin = Miter) ?(opacity = 1.0) color =
-  { stroke_color = color; stroke_width = width; stroke_linecap = linecap; stroke_linejoin = linejoin; stroke_opacity = opacity }
+let make_stroke ?(width = 1.0) ?(linecap = Butt) ?(linejoin = Miter)
+    ?(miter_limit = 10.0) ?(align = Center) ?(dash_pattern = [])
+    ?(start_arrow = Arrow_none) ?(end_arrow = Arrow_none)
+    ?(start_arrow_scale = 100.0) ?(end_arrow_scale = 100.0)
+    ?(arrow_align = Tip_at_end) ?(opacity = 1.0) color =
+  { stroke_color = color; stroke_width = width;
+    stroke_linecap = linecap; stroke_linejoin = linejoin;
+    stroke_miter_limit = miter_limit; stroke_align = align;
+    stroke_dash_pattern = dash_pattern;
+    stroke_start_arrow = start_arrow; stroke_end_arrow = end_arrow;
+    stroke_start_arrow_scale = start_arrow_scale;
+    stroke_end_arrow_scale = end_arrow_scale;
+    stroke_arrow_align = arrow_align;
+    stroke_opacity = opacity }
 
 let identity_transform = { a = 1.0; b = 0.0; c = 0.0; d = 1.0; e = 0.0; f = 0.0 }
 
@@ -500,8 +607,8 @@ let transform_of elem =
   | Path r -> r.transform | Text r -> r.transform | Text_path r -> r.transform
   | Group r -> r.transform | Layer r -> r.transform
 
-let make_line ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
-  Line { x1; y1; x2; y2; stroke; opacity; transform; locked; visibility = Preview }
+let make_line ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
+  Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview }
 
 let make_rect ?(rx = 0.0) ?(ry = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y width height =
   Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview }
@@ -518,8 +625,8 @@ let make_polyline ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform =
 let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
   Polygon { points; fill; stroke; opacity; transform; locked; visibility = Preview }
 
-let make_path ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d =
-  Path { d; fill; stroke; opacity; transform; locked; visibility = Preview }
+let make_path ?(fill = None) ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d =
+  Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview }
 
 let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none") ?(text_width = 0.0) ?(text_height = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y content =
   Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration; text_width; text_height; fill; stroke; opacity; transform; locked; visibility = Preview }
@@ -596,6 +703,12 @@ let with_stroke elem s =
   | Text r -> Text { r with stroke = s }
   | Text_path r -> Text_path { r with stroke = s }
   | Group _ | Layer _ -> elem
+
+let with_width_points elem wp =
+  match elem with
+  | Line r -> Line { r with width_points = wp }
+  | Path r -> Path { r with width_points = wp }
+  | _ -> elem
 
 let color_to_hex c =
   let (r, g, b, _) = color_to_rgba c in

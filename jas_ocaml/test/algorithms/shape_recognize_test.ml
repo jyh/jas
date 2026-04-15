@@ -392,10 +392,9 @@ let () =
     "element conversion", [
       Alcotest.test_case "recognized_to_element_preserves_stroke_and_common" `Quick (fun () ->
         let open Jas.Element in
-        let template = Path { d = []; fill = None;
-          stroke = Some { stroke_color = make_color 0.0 0.0 0.0; stroke_width = 2.5;
-                           stroke_linecap = Butt; stroke_linejoin = Miter; stroke_opacity = 1.0 };
-          opacity = 0.7; transform = None; locked = false; visibility = Preview } in
+        let template = make_path
+          ~stroke:(Some (make_stroke ~width:2.5 (make_color 0.0 0.0 0.0)))
+          ~opacity:0.7 [] in
         let shape = Recognized_rectangle { x = 10.0; y = 20.0; w = 30.0; h = 40.0 } in
         match recognized_to_element shape template with
         | Rect { x; width; height; rx; stroke; opacity; _ } ->
@@ -409,8 +408,7 @@ let () =
 
       Alcotest.test_case "recognized_to_element_round_rect_sets_rx_ry" `Quick (fun () ->
         let open Jas.Element in
-        let template = Path { d = []; fill = None; stroke = None;
-          opacity = 1.0; transform = None; locked = false; visibility = Preview } in
+        let template = make_path [] in
         let shape = Recognized_round_rect { x = 0.0; y = 0.0; w = 100.0; h = 60.0; r = 12.0 } in
         match recognized_to_element shape template with
         | Rect { rx; ry; _ } -> assert (rx = 12.0); assert (ry = 12.0)
@@ -418,8 +416,7 @@ let () =
 
       Alcotest.test_case "recognized_to_element_arrow_emits_polygon" `Quick (fun () ->
         let open Jas.Element in
-        let template = Path { d = []; fill = None; stroke = None;
-          opacity = 1.0; transform = None; locked = false; visibility = Preview } in
+        let template = make_path [] in
         let shape = Recognized_arrow { tail = (0.0, 0.0); tip = (100.0, 0.0);
           head_len = 25.0; head_half_width = 20.0; shaft_half_width = 8.0 } in
         match recognized_to_element shape template with
@@ -461,8 +458,7 @@ let () =
 
       Alcotest.test_case "recognized_to_element_scribble_emits_polyline" `Quick (fun () ->
         let open Jas.Element in
-        let template = Path { d = []; fill = None; stroke = None;
-          opacity = 1.0; transform = None; locked = false; visibility = Preview } in
+        let template = make_path [] in
         let shape = Recognized_scribble {
           points = [(0.0, 0.0); (10.0, 20.0); (20.0, 0.0); (30.0, 20.0); (40.0, 0.0)] } in
         match recognized_to_element shape template with
@@ -473,8 +469,7 @@ let () =
     "recognize_element", [
       Alcotest.test_case "recognize_element_skips_line" `Quick (fun () ->
         let open Jas.Element in
-        let elem = Line { x1 = 0.0; y1 = 0.0; x2 = 100.0; y2 = 0.0;
-          stroke = None; opacity = 1.0; transform = None; locked = false; visibility = Preview } in
+        let elem = make_line 0.0 0.0 100.0 0.0 in
         assert (recognize_element elem cfg = None));
 
       Alcotest.test_case "recognize_element_skips_rect" `Quick (fun () ->
@@ -500,8 +495,7 @@ let () =
         let pts = sample_circle 50.0 50.0 30.0 64 in
         let d = List.mapi (fun i (x, y) ->
           if i = 0 then MoveTo (x, y) else LineTo (x, y)) pts in
-        let elem = Path { d; fill = None; stroke = None;
-          opacity = 1.0; transform = None; locked = false; visibility = Preview } in
+        let elem = make_path d in
         match recognize_element elem cfg with
         | Some (Circle, Jas.Element.Circle _) -> ()
         | _ -> failwith "expected (Circle, Circle)");
@@ -511,8 +505,7 @@ let () =
         let pts = sample_rect 0.0 0.0 80.0 80.0 16 in
         let d = List.mapi (fun i (x, y) ->
           if i = 0 then MoveTo (x, y) else LineTo (x, y)) pts in
-        let elem = Path { d; fill = None; stroke = None;
-          opacity = 1.0; transform = None; locked = false; visibility = Preview } in
+        let elem = make_path d in
         match recognize_element elem cfg with
         | Some (Square, Jas.Element.Rect _) -> ()
         | _ -> failwith "expected (Square, Rect)");
