@@ -344,7 +344,8 @@ content:
       id: cp_controls_row
       children:
 
-        # Fill/stroke widget — uses shared template
+        # Fill/stroke widget — template expands to standard elements;
+        # native renderers may override via _template tag
         - template: fill_stroke_widget
           params: { id_prefix: "cp_", swatch_size: 24, offset: 8 }
           col: 3
