@@ -292,6 +292,7 @@ mod tests {
             ],
             fill: None,
             stroke: None,
+            width_points: vec![],
             common: Default::default(),
         }
     }
@@ -305,6 +306,7 @@ mod tests {
             ],
             fill: None,
             stroke: None,
+            width_points: vec![],
             common: Default::default(),
         }
     }

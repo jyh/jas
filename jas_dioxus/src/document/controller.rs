@@ -12,7 +12,8 @@ use crate::document::document::{
 use crate::document::model::Model;
 use crate::geometry::element::{
     control_point_count, control_points, move_control_points,
-    move_path_handle, with_fill, with_stroke, Element, Fill, Stroke,
+    move_path_handle, with_fill, with_stroke, with_width_points,
+    Element, Fill, Stroke, StrokeWidthPoint,
 };
 use crate::algorithms::hit_test::{element_intersects_polygon, element_intersects_rect, point_in_rect};
 
@@ -210,6 +211,18 @@ impl Controller {
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
                 new_doc = new_doc.replace_element(&es.path, with_stroke(elem, stroke));
+            }
+        }
+        model.set_document(new_doc);
+    }
+
+    /// Set width profile points on selected Path and Line elements.
+    pub fn set_selection_width_profile(model: &mut Model, width_points: Vec<StrokeWidthPoint>) {
+        let doc = model.document().clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                new_doc = new_doc.replace_element(&es.path, with_width_points(elem, width_points.clone()));
             }
         }
         model.set_document(new_doc);
@@ -798,6 +811,7 @@ mod tests {
         Element::Line(LineElem {
             x1, y1, x2, y2,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: vec![],
             common: CommonProps::default(),
         })
     }

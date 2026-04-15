@@ -10,6 +10,59 @@
 
 use std::rc::Rc;
 
+/// A width control point for variable-width stroke profiles.
+/// Stored as a sorted list on PathElem/LineElem.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StrokeWidthPoint {
+    /// Position along path [0.0, 1.0].
+    pub t: f64,
+    /// Half-width on the left side of the centerline.
+    pub width_left: f64,
+    /// Half-width on the right side of the centerline.
+    pub width_right: f64,
+}
+
+/// Convert a named profile preset to width control points.
+pub fn profile_to_width_points(profile: &str, width: f64, flipped: bool) -> Vec<StrokeWidthPoint> {
+    let hw = width / 2.0;
+    let pts = match profile {
+        "taper_both" => vec![
+            StrokeWidthPoint { t: 0.0, width_left: 0.0, width_right: 0.0 },
+            StrokeWidthPoint { t: 0.5, width_left: hw, width_right: hw },
+            StrokeWidthPoint { t: 1.0, width_left: 0.0, width_right: 0.0 },
+        ],
+        "taper_start" => vec![
+            StrokeWidthPoint { t: 0.0, width_left: 0.0, width_right: 0.0 },
+            StrokeWidthPoint { t: 1.0, width_left: hw, width_right: hw },
+        ],
+        "taper_end" => vec![
+            StrokeWidthPoint { t: 0.0, width_left: hw, width_right: hw },
+            StrokeWidthPoint { t: 1.0, width_left: 0.0, width_right: 0.0 },
+        ],
+        "bulge" => vec![
+            StrokeWidthPoint { t: 0.0, width_left: hw, width_right: hw },
+            StrokeWidthPoint { t: 0.5, width_left: hw * 1.5, width_right: hw * 1.5 },
+            StrokeWidthPoint { t: 1.0, width_left: hw, width_right: hw },
+        ],
+        "pinch" => vec![
+            StrokeWidthPoint { t: 0.0, width_left: hw, width_right: hw },
+            StrokeWidthPoint { t: 0.5, width_left: hw * 0.5, width_right: hw * 0.5 },
+            StrokeWidthPoint { t: 1.0, width_left: hw, width_right: hw },
+        ],
+        _ => return vec![], // "uniform" or unknown → empty = use Stroke.width
+    };
+    if flipped {
+        // Reverse the t values
+        pts.into_iter().rev().map(|p| StrokeWidthPoint {
+            t: 1.0 - p.t,
+            width_left: p.width_left,
+            width_right: p.width_right,
+        }).collect()
+    } else {
+        pts
+    }
+}
+
 /// Line segments per Bezier curve when flattening paths.
 pub const FLATTEN_STEPS: usize = 20;
 
@@ -571,6 +624,7 @@ pub struct LineElem {
     pub x2: f64,
     pub y2: f64,
     pub stroke: Option<Stroke>,
+    pub width_points: Vec<StrokeWidthPoint>,
     pub common: CommonProps,
 }
 
@@ -629,6 +683,7 @@ pub struct PathElem {
     pub d: Vec<PathCommand>,
     pub fill: Option<Fill>,
     pub stroke: Option<Stroke>,
+    pub width_points: Vec<StrokeWidthPoint>,
     pub common: CommonProps,
 }
 
@@ -1822,6 +1877,15 @@ pub fn with_stroke(elem: &Element, stroke: Option<Stroke>) -> Element {
         Element::Text(e) => Element::Text(TextElem { stroke, ..e.clone() }),
         Element::TextPath(e) => Element::TextPath(TextPathElem { stroke, ..e.clone() }),
         Element::Group(_) | Element::Layer(_) => elem.clone(),
+    }
+}
+
+/// Set width profile points on an element (Line and Path only).
+pub fn with_width_points(elem: &Element, width_points: Vec<StrokeWidthPoint>) -> Element {
+    match elem {
+        Element::Line(e) => Element::Line(LineElem { width_points, ..e.clone() }),
+        Element::Path(e) => Element::Path(PathElem { width_points, ..e.clone() }),
+        _ => elem.clone(),
     }
 }
 

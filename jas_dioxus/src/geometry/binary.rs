@@ -418,6 +418,7 @@ fn unpack_element(v: &Value) -> Element {
             x1: as_f64(&arr[5]), y1: as_f64(&arr[6]),
             x2: as_f64(&arr[7]), y2: as_f64(&arr[8]),
             stroke: unpack_stroke(&arr[9]),
+            width_points: vec![],
             common,
         }),
         TAG_RECT => Element::Rect(RectElem {
@@ -462,6 +463,7 @@ fn unpack_element(v: &Value) -> Element {
             Element::Path(PathElem {
                 d: cmds,
                 fill: unpack_fill(&arr[6]), stroke: unpack_stroke(&arr[7]),
+                width_points: vec![],
                 common,
             })
         }

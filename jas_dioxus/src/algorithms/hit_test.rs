@@ -482,6 +482,7 @@ mod tests {
             common: CommonProps::default(),
             x1: -5.0, y1: 5.0, x2: 15.0, y2: 5.0,
             stroke: None,
+            width_points: vec![],
         });
         assert!(element_intersects_rect(&line, 0.0, 0.0, 10.0, 10.0));
     }
@@ -492,6 +493,7 @@ mod tests {
             common: CommonProps::default(),
             x1: 20.0, y1: 0.0, x2: 30.0, y2: 0.0,
             stroke: None,
+            width_points: vec![],
         });
         assert!(!element_intersects_rect(&line, 0.0, 0.0, 10.0, 10.0));
     }
@@ -578,6 +580,7 @@ mod tests {
             common: CommonProps::default(),
             x1: -5.0, y1: 5.0, x2: 15.0, y2: 5.0,
             stroke: None,
+            width_points: vec![],
         });
         let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         assert!(element_intersects_polygon(&line, &sq));
@@ -589,6 +592,7 @@ mod tests {
             common: CommonProps::default(),
             x1: 20.0, y1: 0.0, x2: 30.0, y2: 0.0,
             stroke: None,
+            width_points: vec![],
         });
         let sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         assert!(!element_intersects_polygon(&line, &sq));
@@ -632,6 +636,7 @@ mod tests {
             },
             x1: 0.0, y1: 5.0, x2: 10.0, y2: 5.0,
             stroke: None,
+            width_points: vec![],
         });
         // Selection rect around the visual position should hit
         assert!(element_intersects_rect(&line, 95.0, 0.0, 20.0, 10.0));
@@ -670,6 +675,7 @@ mod tests {
             },
             x1: 0.0, y1: 0.0, x2: 5.0, y2: 0.0,
             stroke: None,
+            width_points: vec![],
         });
         // A rect at x=8..12 should hit the scaled line (which reaches x=10)
         assert!(element_intersects_rect(&line, 8.0, -1.0, 4.0, 2.0));
@@ -688,6 +694,7 @@ mod tests {
             },
             x1: 0.0, y1: 0.0, x2: 10.0, y2: 0.0,
             stroke: None,
+            width_points: vec![],
         });
         assert!(!element_intersects_rect(&line, 0.0, 0.0, 10.0, 10.0));
     }
@@ -699,6 +706,7 @@ mod tests {
             common: CommonProps::default(),
             x1: 0.0, y1: 5.0, x2: 10.0, y2: 5.0,
             stroke: None,
+            width_points: vec![],
         });
         assert!(element_intersects_rect(&line, 0.0, 0.0, 10.0, 10.0));
         assert!(!element_intersects_rect(&line, 20.0, 0.0, 10.0, 10.0));
@@ -713,6 +721,7 @@ mod tests {
             },
             x1: 0.0, y1: 5.0, x2: 10.0, y2: 5.0,
             stroke: None,
+            width_points: vec![],
         });
         let sq = [(95.0, 0.0), (115.0, 0.0), (115.0, 10.0), (95.0, 10.0)];
         assert!(element_intersects_polygon(&line, &sq));

@@ -220,11 +220,22 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                     }
                 }
             }
-            ctx.begin_path();
-            ctx.move_to(lx1, ly1);
-            ctx.line_to(lx2, ly2);
             ctx.set_global_alpha(base_alpha * stroke_op);
-            stroke_aligned(ctx, stroke_align);
+            if !outline && !e.width_points.is_empty() {
+                // Variable-width stroke via offset paths
+                if let Some(s) = e.stroke.as_ref() {
+                    let color = css_color(&s.color);
+                    crate::algorithms::offset_path::render_variable_width_line(
+                        ctx, lx1, ly1, lx2, ly2,
+                        &e.width_points, &color, s.linecap,
+                    );
+                }
+            } else {
+                ctx.begin_path();
+                ctx.move_to(lx1, ly1);
+                ctx.line_to(lx2, ly2);
+                stroke_aligned(ctx, stroke_align);
+            }
             // Arrowheads
             if !outline {
                 if let Some(s) = e.stroke.as_ref() {
@@ -405,10 +416,21 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                         } else { None }
                     } else { None }
                 } else { None };
-                ctx.begin_path();
-                build_path(ctx, shortened.as_deref().unwrap_or(&e.d));
+                let stroke_cmds = shortened.as_deref().unwrap_or(&e.d);
                 ctx.set_global_alpha(base_alpha * stroke_op);
-                stroke_aligned(ctx, stroke_align);
+                if !outline && !e.width_points.is_empty() {
+                    // Variable-width stroke via offset paths
+                    if let Some(s) = e.stroke.as_ref() {
+                        let color = css_color(&s.color);
+                        crate::algorithms::offset_path::render_variable_width_path(
+                            ctx, stroke_cmds, &e.width_points, &color, s.linecap,
+                        );
+                    }
+                } else {
+                    ctx.begin_path();
+                    build_path(ctx, stroke_cmds);
+                    stroke_aligned(ctx, stroke_align);
+                }
             }
             // Arrowheads
             if !outline {

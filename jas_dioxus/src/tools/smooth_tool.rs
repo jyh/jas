@@ -242,6 +242,7 @@ impl SmoothTool {
                 d: new_cmds,
                 fill: path_elem.fill,
                 stroke: path_elem.stroke,
+                width_points: path_elem.width_points.clone(),
                 common: path_elem.common.clone(),
             });
             new_doc = new_doc.replace_element(path, new_elem);

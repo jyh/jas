@@ -7,3 +7,4 @@ pub mod path_text_layout;
 #[allow(dead_code)]
 pub mod shape_recognize;
 pub mod text_layout;
+pub mod offset_path;
