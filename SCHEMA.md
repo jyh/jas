@@ -1165,9 +1165,11 @@ dialogs:
       <name>:
         type: enum | color | number | bool | string
         values: [...]                # when type=enum
-        default: <value>
+        default: <value>             # for plain stored variables
+        get: <expression>            # computed getter (read from siblings)
+        set: <lambda>                # setter (fun v -> target <- expr)
         description: <string>
-    init:                            # optional; initialize dialog state on open
+    init:                            # optional; initialize stored state on open
       <state_name>: <expression>   # expression evaluated at open time
     content: <element>               # layout tree for dialog body
 ```
@@ -1196,6 +1198,29 @@ effects:
   - set: { fill_color: "{{dialog.color}}" }
   - close_dialog: null
 ```
+
+### Reactive Properties (get/set)
+
+State variables can declare `get` and `set` expressions for reactive
+computed properties. Get/set expressions use a **local scope** —
+sibling state variables are accessible by bare name (no `dialog.`
+prefix).
+
+```yaml
+state:
+  color: { type: color, default: "#ffffff" }   # canonical stored value
+  h:
+    type: number
+    get: "hsb_h(color)"                         # computed from color
+    set: "fun v -> color <- hsb(v, hsb_s(color), hsb_b(color))"
+  c: { type: number, get: "cmyk_c(color)" }    # read-only derived
+```
+
+**Semantics:**
+- **`get`**: evaluated when the value is read. No stored default.
+- **`set`**: lambda applied when the value is written. Uses `<-` to
+  update canonical state. Read-only vars (get without set) ignore writes.
+- **No get/set**: plain stored variable with a default value.
 
 ### Dialog Lifecycle Protocol
 
@@ -1297,58 +1322,52 @@ dialogs:
 ## Expression Language
 
 A typed expression language for the workspace YAML schema. All `bind`,
-`condition`, `enabled_when`, `checked_when`, `init`, effect parameters,
-and `repeat.source` values are parsed using this grammar. The language
-is intentionally small — no assignment, no loops, no side effects.
+`condition`, `enabled_when`, `checked_when`, `init`, `get`, `set`,
+effect parameters, and `foreach.source` values are parsed using this
+grammar.
 
 ### Type System
 
-Six value types. Every expression evaluates to exactly one of these.
+Seven value types. Every expression evaluates to exactly one of these.
 
-| Type     | Description                        | Examples                          |
-|----------|------------------------------------|-----------------------------------|
-| `bool`   | Boolean                            | `true`, `false`                   |
-| `number` | IEEE 754 double                    | `0`, `255`, `1.5`, `-3`          |
-| `string` | Unicode text, double-quoted        | `"hsb"`, `"hello world"`         |
-| `color`  | RGB hex color                      | `#ff0000`, `#fff`                |
-| `null`   | Absence of a value                 | `null`                           |
-| `list`   | Ordered sequence (no literal form) | `panel.selected_swatches`        |
-
-Lists have no literal syntax. They arise from state variables, data
-paths, and function return values.
+| Type      | Description                       | Examples                          |
+|-----------|-----------------------------------|-----------------------------------|
+| `bool`    | Boolean                           | `true`, `false`                   |
+| `number`  | IEEE 754 double                   | `0`, `255`, `1.5`, `-3`          |
+| `string`  | Unicode text, double-quoted       | `"hsb"`, `"hello world"`         |
+| `color`   | RGB hex color                     | `#ff0000`, `#fff`                |
+| `null`    | Absence of a value                | `null`                           |
+| `list`    | Ordered sequence                  | `["a", "b"]`, `panel.items`      |
+| `closure` | First-class function              | `fun x -> x + 1`                 |
 
 ### Grammar
 
 ```
-expr          = ternary
-
-ternary       = or_expr ( '?' expr ':' expr )?
-
+expr          = sequence
+sequence      = let_expr (';' let_expr)*
+let_expr      = 'let' IDENT '=' sequence 'in' let_expr
+              | assign
+assign        = ternary '<-' assign
+              | ternary
+ternary       = 'if' expr 'then' expr 'else' expr
+              | or_expr
 or_expr       = and_expr ( 'or' and_expr )*
-
 and_expr      = not_expr ( 'and' not_expr )*
-
-not_expr      = 'not' not_expr
-              | comparison
-
-comparison    = primary ( comp_op primary )?
-
-comp_op       = '==' | '!=' | '<' | '>' | '<=' | '>=' | 'in'
-
+not_expr      = 'not' not_expr | '-' not_expr | comparison
+comparison    = addition ( comp_op addition )?
+comp_op       = '==' | '!=' | '<' | '>' | '<=' | '>='
+addition      = multiplication ( ('+' | '-') multiplication )*
+multiplication = primary ( ('*' | '/') primary )*
 primary       = atom accessor*
-
-accessor      = '.' IDENT
-              | '.' INT_LITERAL
-              | '[' expr ']'
-
-atom          = IDENT '(' args? ')'          -- function call
-              | IDENT                         -- identifier (start of path)
-              | STRING
-              | COLOR
-              | NUMBER
+accessor      = '.' IDENT | '.' INT_LITERAL | '[' expr ']' | '(' args? ')'
+atom          = 'fun' IDENT '->' expr
+              | 'fun' '(' params? ')' '->' expr
+              | IDENT '(' args? ')'
+              | IDENT | STRING | COLOR | NUMBER
               | 'null' | 'true' | 'false'
+              | '[' args? ']'
               | '(' expr ')'
-
+params        = IDENT ( ',' IDENT )*
 args          = expr ( ',' expr )*
 ```
 
@@ -1356,36 +1375,93 @@ args          = expr ( ',' expr )*
 
 ```
 IDENT         = [a-zA-Z_][a-zA-Z0-9_]*
-INT_LITERAL   = [0-9]+
-NUMBER        = '-'? [0-9]+ ( '.' [0-9]+ )?
+NUMBER        = [0-9]+ ( '.' [0-9]+ )?
 STRING        = '"' ( [^"\\] | '\\' . )* '"'
-COLOR         = '#' [0-9a-fA-F]{6}
-              | '#' [0-9a-fA-F]{3}
+COLOR         = '#' [0-9a-fA-F]{6}  |  '#' [0-9a-fA-F]{3}
 ```
 
-Whitespace (spaces, tabs) is ignored between tokens. There are no
-comments, no newlines (expressions are always single-line strings in
-YAML).
+Special token rules:
+- `<-` — no space allowed between `<` and `-` (greedy). `x <- 1` is
+  assignment; `x < -1` is less-than with unary minus.
+- `->` — no space allowed between `-` and `>` (greedy).
+- `=` vs `==` — `==` is equality; `=` alone is let-binding.
 
 #### Reserved Words
 
-`true`, `false`, `null`, `not`, `and`, `or`, `in`
+`true`, `false`, `null`, `not`, `and`, `or`, `in`, `if`, `then`,
+`else`, `fun`, `let`
 
 ### Operator Precedence
 
 From lowest (evaluated last) to highest (evaluated first):
 
-| Precedence | Operator              | Associativity | Description            |
-|------------|-----------------------|---------------|------------------------|
-| 1 (lowest) | `? :`                 | right         | Ternary conditional    |
-| 2          | `or`                  | left          | Logical OR             |
-| 3          | `and`                 | left          | Logical AND            |
-| 4          | `not`                 | unary (right) | Logical NOT            |
-| 5          | `==` `!=` `<` `>` `<=` `>=` `in` | none | Comparison (no chaining) |
-| 6          | `.` `[]`              | left          | Property/index access  |
-| 7 (highest)| `f()`                 | —             | Function call          |
+| Precedence  | Operator              | Assoc | Description             |
+|-------------|-----------------------|-------|-------------------------|
+| 1 (lowest)  | `;`                   | left  | Sequencing              |
+| 2           | `let`..`in`           | right | Let binding             |
+| 3           | `<-`                  | right | Assignment              |
+| 4           | `if`..`then`..`else`  | —     | Conditional             |
+| 5           | `or`                  | left  | Logical OR              |
+| 6           | `and`                 | left  | Logical AND             |
+| 7           | `not`, `-` (unary)    | right | Logical NOT, negation   |
+| 8           | `==` `!=` `<` `>` `<=` `>=` | none | Comparison       |
+| 9           | `+` `-`               | left  | Addition, subtraction   |
+| 10          | `*` `/`               | left  | Multiplication, division|
+| 11          | `.` `[]` `()`         | left  | Access, application     |
+| 12 (highest)| `fun`                 | —     | Lambda                  |
 
 Parentheses `( expr )` override precedence.
+
+### Binding Forms
+
+#### Lambda: `fun params -> body`
+
+```
+fun x -> x + 1              -- unary, no parens
+fun (x, y) -> x + y         -- binary
+fun () -> 42                 -- nullary (thunk)
+let f = fun x -> x * 2 in f(10)   -- named, applied
+```
+
+Creates a closure that captures the defining scope. Applied via
+`f(args)` syntax. First-class — can be stored, passed, returned.
+
+#### Let binding: `let x = e1 in e2`
+
+```
+let r = rgb_r(color) in let g = rgb_g(color) in rgb(r, g, 100)
+```
+
+Immutable local binding. `e1` evaluates in current scope; `e2`
+evaluates in scope extended with `x`. Uses `Scope.extend()`.
+
+#### Assignment: `target <- expr`
+
+```
+color <- hsb(v, hsb_s(color), hsb_b(color))
+```
+
+Mutates a state variable in the dialog/panel store. Returns the
+assigned value. Only valid in setter expressions.
+
+#### Sequencing: `e1; e2`
+
+```
+color <- rgb(v, g, b); hex <- hex(color)
+```
+
+Evaluates `e1` for side effects, then `e2`. Returns `e2`'s value.
+The second expression sees mutations from the first.
+
+### List Membership
+
+```
+mem("pen", state.tools)        -- true if "pen" is in state.tools
+mem(3, [1, 2, 3])              -- true
+```
+
+The `mem(element, list)` function replaces the `in` operator for
+list membership.
 
 ### Evaluation Rules
 
@@ -1430,7 +1506,7 @@ patterns like:
 data.swatch_libraries[lib.id].swatches
 ```
 
-where `lib.id` is a variable from an enclosing `repeat` that resolves
+where `lib.id` is a variable from an enclosing `foreach` that resolves
 to a library name at runtime.
 
 #### Method Calls
@@ -1581,7 +1657,7 @@ Properties evaluated as expressions:
 - `enabled_when` — in actions and menu items
 - `checked_when` — in menu items
 - `init.*` — panel and dialog initialization
-- `repeat.source` — data source for repeat directives
+- `foreach.source` — data source for foreach directives
 - Effect parameters — values inside `set:`, `if.condition:`,
   `select.target:`, etc.
 
