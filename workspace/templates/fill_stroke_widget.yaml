@@ -17,7 +17,7 @@ fill_stroke_widget:
     swap_y: { type: number, default: "${size} * 3 / 100" }
     reset_size: { type: number, default: "${size} * 30 / 100" }
     reset_x: { type: number, default: "${size} * 3 / 100" }
-    reset_y: { type: number, default: "${size} * 64 / 100" }
+    reset_y: { type: number, default: "${size} * 68 / 100" }
     mode_btn_size: { type: number, default: "${size} * 24 / 100" }
     mode_x: { type: number, default: "${size} * 6 / 100" }
     mode_y: { type: number, default: "${size} * 94 / 100" }
