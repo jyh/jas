@@ -505,11 +505,11 @@ fn build_style(el: &serde_json::Value, ctx: &serde_json::Value) -> String {
                 parts.push(format!("justify-content:{v}"));
             }
             "position" => {
-                // position: {x, y} → absolute positioning
+                // position: {x, y} → relative offset positioning
                 if let Some(obj) = val.as_object() {
                     let x = obj.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                     let y = obj.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    parts.push(format!("position:absolute;left:{x}px;top:{y}px"));
+                    parts.push(format!("position:relative;left:{x}px;top:{y}px"));
                 } else {
                     // position: "relative" etc.
                     parts.push(format!("position:{resolved}"));
