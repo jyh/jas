@@ -2023,6 +2023,10 @@ struct TreeRow {
     display_name: String,
     is_named: bool,
     is_selected: bool,
+    is_renaming: bool,
+    is_layer: bool,
+    is_collapsed: bool,
+    is_panel_selected: bool,
     layer_color: String,
     visibility_str: String, // "preview", "outline", "invisible"
 }
@@ -2090,17 +2094,24 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         path_prefix: &[usize],
         layer_color: &str,
         selected_paths: &HashSet<Vec<usize>>,
+        collapsed_paths: &HashSet<Vec<usize>>,
+        panel_selection: &[Vec<usize>],
+        renaming_path: &Option<Vec<usize>>,
         rows: &mut Vec<TreeRow>,
     ) {
-        for (i, child_rc) in children.iter().enumerate() {
+        for (i, child_rc) in children.iter().enumerate().rev() {
             let child = child_rc.as_ref();
             let mut path = path_prefix.to_vec();
             path.push(i);
 
             let is_container = child.is_group_or_layer();
             let is_selected = selected_paths.contains(&path);
+            let is_renaming = renaming_path.as_ref() == Some(&path);
+            let is_layer = child.is_layer();
+            let is_collapsed = collapsed_paths.contains(&path);
+            let is_panel_selected = panel_selection.contains(&path);
 
-            let current_layer_color = if let GeoElement::Layer(_) = child {
+            let current_layer_color = if is_layer {
                 if path.len() == 1 { LAYER_COLORS[i % LAYER_COLORS.len()].to_string() } else { layer_color.to_string() }
             } else {
                 layer_color.to_string()
@@ -2118,7 +2129,11 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             };
             let lock_icon = if child.locked() { "lock_locked" } else { "lock_unlocked" };
 
-            let twirl_svg = if is_container { icon_svg("twirl_open") } else { String::new() };
+            let twirl_svg = if is_container {
+                icon_svg(if is_collapsed { "twirl_closed" } else { "twirl_open" })
+            } else {
+                String::new()
+            };
             let (display_name, is_named) = elem_display_name(child);
 
             rows.push(TreeRow {
@@ -2131,12 +2146,19 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                 display_name,
                 is_named,
                 is_selected,
+                is_renaming,
+                is_layer,
+                is_collapsed,
+                is_panel_selected,
                 layer_color: current_layer_color.clone(),
                 visibility_str: vis_str.to_string(),
             });
 
-            if let Some(grandchildren) = child.children() {
-                flatten_rc_children(grandchildren, depth + 1, &path, &current_layer_color, selected_paths, rows);
+            // Only recurse if expanded
+            if !is_collapsed {
+                if let Some(grandchildren) = child.children() {
+                    flatten_rc_children(grandchildren, depth + 1, &path, &current_layer_color, selected_paths, collapsed_paths, panel_selection, renaming_path, rows);
+                }
             }
         }
     }
@@ -2144,12 +2166,19 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     fn flatten_layers(
         layers: &[GeoElement],
         selected_paths: &HashSet<Vec<usize>>,
+        collapsed_paths: &HashSet<Vec<usize>>,
+        panel_selection: &[Vec<usize>],
+        renaming_path: &Option<Vec<usize>>,
     ) -> Vec<TreeRow> {
         let mut rows = Vec::new();
-        for (i, elem) in layers.iter().enumerate() {
+        for (i, elem) in layers.iter().enumerate().rev() {
             let path = vec![i];
             let is_container = elem.is_group_or_layer();
             let is_selected = selected_paths.contains(&path);
+            let is_renaming = renaming_path.as_ref() == Some(&path);
+            let is_layer = elem.is_layer();
+            let is_collapsed = collapsed_paths.contains(&path);
+            let is_panel_selected = panel_selection.contains(&path);
             let layer_color = LAYER_COLORS[i % LAYER_COLORS.len()].to_string();
 
             let vis_str = match elem.visibility() {
@@ -2163,7 +2192,11 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                 Visibility::Invisible => "eye_invisible",
             };
             let lock_icon = if elem.locked() { "lock_locked" } else { "lock_unlocked" };
-            let twirl_svg = if is_container { icon_svg("twirl_open") } else { String::new() };
+            let twirl_svg = if is_container {
+                icon_svg(if is_collapsed { "twirl_closed" } else { "twirl_open" })
+            } else {
+                String::new()
+            };
             let (display_name, is_named) = elem_display_name(elem);
 
             rows.push(TreeRow {
@@ -2176,12 +2209,19 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                 display_name,
                 is_named,
                 is_selected,
+                is_renaming,
+                is_layer,
+                is_collapsed,
+                is_panel_selected,
                 layer_color: layer_color.clone(),
                 visibility_str: vis_str.to_string(),
             });
 
-            if let Some(children) = elem.children() {
-                flatten_rc_children(children, 1, &path, &layer_color, selected_paths, &mut rows);
+            // Only recurse if expanded
+            if !is_collapsed {
+                if let Some(children) = elem.children() {
+                    flatten_rc_children(children, 1, &path, &layer_color, selected_paths, collapsed_paths, panel_selection, renaming_path, &mut rows);
+                }
             }
         }
         rows
@@ -2193,7 +2233,10 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         if let Some(tab) = st.tab() {
             let doc = tab.model.document();
             let selected_paths = doc.selected_paths();
-            flatten_layers(&doc.layers, &selected_paths)
+            let renaming_path = st.layers_renaming.clone();
+            let collapsed_paths = &st.layers_collapsed;
+            let panel_selection = &st.layers_panel_selection;
+            flatten_layers(&doc.layers, &selected_paths, collapsed_paths, panel_selection, &renaming_path)
         } else {
             Vec::new()
         }
@@ -2223,7 +2266,8 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     let eye_path = row.path.clone();
                     let eye_app = app.clone();
                     let mut eye_rev = revision;
-                    let on_eye_click = move |_: Event<MouseData>| {
+                    let on_eye_click = move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
                         let p = eye_path.clone();
                         let a = eye_app.clone();
                         spawn(async move {
@@ -2238,6 +2282,14 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                         crate::geometry::element::Visibility::Invisible => crate::geometry::element::Visibility::Preview,
                                     };
                                     elem.common_mut().visibility = new_vis;
+                                    // Remove invisible elements (and their descendants) from selection
+                                    if new_vis == crate::geometry::element::Visibility::Invisible {
+                                        let path = p.clone();
+                                        doc.selection.retain(|es| {
+                                            // Remove if path matches exactly or is a descendant
+                                            !(es.path == path || es.path.starts_with(&path))
+                                        });
+                                    }
                                 }
                             }
                             eye_rev += 1;
@@ -2247,7 +2299,8 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     let lock_path = row.path.clone();
                     let lock_app = app.clone();
                     let mut lock_rev = revision;
-                    let on_lock_click = move |_: Event<MouseData>| {
+                    let on_lock_click = move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
                         let p = lock_path.clone();
                         let a = lock_app.clone();
                         spawn(async move {
@@ -2256,8 +2309,15 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 tab.model.snapshot();
                                 let doc = tab.model.document_mut();
                                 if let Some(elem) = doc.get_element_mut(&p) {
-                                    let locked = elem.locked();
-                                    elem.common_mut().locked = !locked;
+                                    let was_unlocked = !elem.locked();
+                                    elem.common_mut().locked = was_unlocked;
+                                    // Locking an element removes it and its descendants from selection
+                                    if was_unlocked {
+                                        let path = p.clone();
+                                        doc.selection.retain(|es| {
+                                            !(es.path == path || es.path.starts_with(&path))
+                                        });
+                                    }
                                 }
                             }
                             lock_rev += 1;
@@ -2268,33 +2328,200 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     let sel_app = app.clone();
                     let mut sel_rev = revision;
                     let on_select_click = move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
                         let p = sel_path.clone();
                         let a = sel_app.clone();
                         let meta = evt.data().modifiers().meta();
                         spawn(async move {
                             use crate::document::document::ElementSelection;
+
+                            /// Collect all descendant paths of a container element.
+                            fn collect_descendants(
+                                elem: &crate::geometry::element::Element,
+                                path: &[usize],
+                                out: &mut Vec<Vec<usize>>,
+                            ) {
+                                if let Some(children) = elem.children() {
+                                    for (i, child) in children.iter().enumerate() {
+                                        let mut child_path = path.to_vec();
+                                        child_path.push(i);
+                                        out.push(child_path.clone());
+                                        collect_descendants(child, &child_path, out);
+                                    }
+                                }
+                            }
+
                             let mut st = a.borrow_mut();
                             if let Some(tab) = st.tab_mut() {
                                 let doc = tab.model.document_mut();
+                                // Build the list of paths to select: the element itself
+                                // plus all descendants if it's a container.
+                                let mut paths_to_select = vec![p.clone()];
+                                if let Some(elem) = doc.get_element(&p) {
+                                    if elem.is_group_or_layer() {
+                                        collect_descendants(elem, &p, &mut paths_to_select);
+                                    }
+                                }
                                 if meta {
-                                    // Cmd-click: toggle element in/out of selection
-                                    if let Some(idx) = doc.selection.iter().position(|es| es.path == p) {
-                                        doc.selection.remove(idx);
+                                    // Cmd-click: toggle all paths in/out of selection
+                                    let any_selected = paths_to_select.iter()
+                                        .any(|pp| doc.selection.iter().any(|es| &es.path == pp));
+                                    if any_selected {
+                                        let path_set: std::collections::HashSet<&Vec<usize>> =
+                                            paths_to_select.iter().collect();
+                                        doc.selection.retain(|es| !path_set.contains(&es.path));
                                     } else {
-                                        doc.selection.push(ElementSelection::all(p));
+                                        for pp in paths_to_select {
+                                            if !doc.selection.iter().any(|es| es.path == pp) {
+                                                doc.selection.push(ElementSelection::all(pp));
+                                            }
+                                        }
                                     }
                                 } else {
-                                    // Click: select this element, deselect all others
-                                    doc.selection = vec![ElementSelection::all(p)];
+                                    // Click: select these elements, deselect all others
+                                    doc.selection = paths_to_select.into_iter()
+                                        .map(ElementSelection::all)
+                                        .collect();
                                 }
                             }
                             sel_rev += 1;
                         });
                     };
 
+                    let row_path = row.path.clone();
+                    let row_app = app.clone();
+                    let mut row_rev = revision;
+                    let row_bg = if row.is_panel_selected {
+                        "background:rgba(51,122,183,0.4);"
+                    } else {
+                        ""
+                    };
+                    let on_row_click = move |evt: Event<MouseData>| {
+                        let p = row_path.clone();
+                        let a = row_app.clone();
+                        let meta = evt.data().modifiers().meta();
+                        spawn(async move {
+                            let mut st = a.borrow_mut();
+                            if meta {
+                                if let Some(idx) = st.layers_panel_selection.iter().position(|pp| *pp == p) {
+                                    st.layers_panel_selection.remove(idx);
+                                } else {
+                                    st.layers_panel_selection.push(p);
+                                }
+                            } else {
+                                st.layers_panel_selection = vec![p];
+                            }
+                            row_rev += 1;
+                        });
+                    };
+
+                    // Drag handlers
+                    let drag_down_path = row.path.clone();
+                    let drag_down_app = app.clone();
+                    let drag_down_selected = row.is_panel_selected;
+                    let on_mousedown = move |evt: Event<MouseData>| {
+                        if drag_down_selected {
+                            evt.stop_propagation();
+                            let a = drag_down_app.clone();
+                            let p = drag_down_path.clone();
+                            spawn(async move {
+                                // Mark drag as active by setting target to the source path initially
+                                a.borrow_mut().layers_drag_target = Some(p);
+                            });
+                        }
+                    };
+
+                    let drag_enter_path = row.path.clone();
+                    let drag_enter_app = app.clone();
+                    let mut drag_enter_rev = revision;
+                    let on_mouseenter = move |_: Event<MouseData>| {
+                        let a = drag_enter_app.clone();
+                        let p = drag_enter_path.clone();
+                        spawn(async move {
+                            let mut st = a.borrow_mut();
+                            if st.layers_drag_target.is_some() {
+                                st.layers_drag_target = Some(p);
+                                drag_enter_rev += 1;
+                            }
+                        });
+                    };
+
+                    let drag_up_path = row.path.clone();
+                    let drag_up_app = app.clone();
+                    let mut drag_up_rev = revision;
+                    let on_mouseup = move |_: Event<MouseData>| {
+                        let a = drag_up_app.clone();
+                        let target = drag_up_path.clone();
+                        spawn(async move {
+                            let mut st = a.borrow_mut();
+                            if let Some(_drag_target) = st.layers_drag_target.take() {
+                                // Move all panel-selected elements to before the target
+                                let sources = st.layers_panel_selection.clone();
+                                if !sources.is_empty() && !sources.contains(&target) {
+                                    if let Some(tab) = st.tab_mut() {
+                                        tab.model.snapshot();
+                                        // Collect elements, delete from old positions (reverse order),
+                                        // then insert at target position
+                                        let mut elements: Vec<(Vec<usize>, crate::geometry::element::Element)> = Vec::new();
+                                        let doc = tab.model.document();
+                                        for src in &sources {
+                                            if let Some(elem) = doc.get_element(src) {
+                                                elements.push((src.clone(), elem.clone()));
+                                            }
+                                        }
+                                        // Delete in reverse order to preserve indices
+                                        let mut sorted_sources = sources.clone();
+                                        sorted_sources.sort();
+                                        sorted_sources.reverse();
+                                        let mut doc = tab.model.document().clone();
+                                        for src in &sorted_sources {
+                                            doc = doc.delete_element(src);
+                                        }
+                                        // Insert at target — adjust target path for deleted elements
+                                        let mut insert_path = target.clone();
+                                        let mut new_paths = Vec::new();
+                                        for (_, elem) in elements {
+                                            doc = doc.insert_element_at(&insert_path, elem);
+                                            new_paths.push(insert_path.clone());
+                                            // Next element goes after this one
+                                            let last = insert_path.len() - 1;
+                                            insert_path[last] += 1;
+                                        }
+                                        // Update element selection to track moved elements
+                                        doc.selection = new_paths.iter()
+                                            .map(|p| crate::document::document::ElementSelection::all(p.clone()))
+                                            .collect();
+                                        tab.model.set_document(doc);
+                                        // Update panel selection to new positions
+                                        st.layers_panel_selection = new_paths;
+                                    }
+                                } else {
+                                    st.layers_panel_selection.clear();
+                                }
+                            }
+                            drag_up_rev += 1;
+                        });
+                    };
+
+                    // Drop indicator
+                    let is_drag_target = {
+                        let st = rctx.app.borrow();
+                        st.layers_drag_target.as_ref() == Some(&row.path) &&
+                        !st.layers_panel_selection.contains(&row.path)
+                    };
+                    let drop_indicator = if is_drag_target {
+                        "border-top:2px solid var(--jas-accent,#3a7bd5);"
+                    } else {
+                        ""
+                    };
+
                     rsx! {
                         div {
-                            style: "display:flex;align-items:center;height:24px;padding:0 4px;gap:2px;font-size:11px;color:var(--jas-text,#ccc);cursor:default;user-select:none",
+                            style: "display:flex;align-items:center;height:24px;padding:0 4px;gap:2px;font-size:11px;color:var(--jas-text,#ccc);cursor:default;user-select:none;{row_bg}{drop_indicator}",
+                            onclick: on_row_click,
+                            onmousedown: on_mousedown,
+                            onmouseenter: on_mouseenter,
+                            onmouseup: on_mouseup,
                             // Indent
                             span { style: "{indent_style}" }
                             // Eye button
@@ -2311,17 +2538,125 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             }
                             // Twirl or gap
                             if row.is_container {
-                                div {
-                                    style: "{btn_style}",
-                                    div { style: "width:100%;height:100%", dangerous_inner_html: "{twirl_svg}" }
+                                {
+                                    let twirl_path = row.path.clone();
+                                    let twirl_app = app.clone();
+                                    let mut twirl_rev = revision;
+                                    rsx! {
+                                        div {
+                                            style: "{btn_style}",
+                                            onclick: move |evt: Event<MouseData>| {
+                                                evt.stop_propagation();
+                                                let p = twirl_path.clone();
+                                                let a = twirl_app.clone();
+                                                spawn(async move {
+                                                    let mut st = a.borrow_mut();
+                                                    if st.layers_collapsed.contains(&p) {
+                                                        st.layers_collapsed.remove(&p);
+                                                    } else {
+                                                        st.layers_collapsed.insert(p);
+                                                    }
+                                                    twirl_rev += 1;
+                                                });
+                                            },
+                                            div { style: "width:100%;height:100%", dangerous_inner_html: "{twirl_svg}" }
+                                        }
+                                    }
                                 }
                             } else {
                                 div { style: "width:16px;flex-shrink:0" }
                             }
                             // Preview placeholder
                             div { style: "width:24px;height:24px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0" }
-                            // Name
-                            span { style: "{name_style}", "{row.display_name}" }
+                            // Name — inline input when renaming, otherwise span with double-click
+                            if row.is_renaming {
+                                {
+                                    let confirm_path = row.path.clone();
+                                    let confirm_app = app.clone();
+                                    let mut confirm_rev = revision;
+                                    let cancel_app = app.clone();
+                                    let mut cancel_rev = revision;
+                                    let initial_name = if row.is_named { row.display_name.clone() } else { String::new() };
+                                    rsx! {
+                                        input {
+                                            r#type: "text",
+                                            value: "{initial_name}",
+                                            style: "flex:1;font-size:11px;background:var(--jas-input-bg,#333);color:var(--jas-text,#ccc);border:1px solid var(--jas-accent,#3a7bd5);outline:none;padding:0 2px;min-width:0",
+                                            autofocus: true,
+                                            onkeydown: move |evt: Event<KeyboardData>| {
+                                                let key = evt.data().key();
+                                                if key == dioxus::prelude::Key::Enter {
+                                                    // Read value from DOM and commit rename
+                                                    #[cfg(target_arch = "wasm32")]
+                                                    {
+                                                        let p = confirm_path.clone();
+                                                        let a = confirm_app.clone();
+                                                        if let Some(el) = web_sys::window()
+                                                            .and_then(|w| w.document())
+                                                            .and_then(|d| d.active_element())
+                                                        {
+                                                            let val = el.get_attribute("value").unwrap_or_default();
+                                                            let val_inner: String = js_sys::Reflect::get(&el, &"value".into())
+                                                                .ok()
+                                                                .and_then(|v| v.as_string())
+                                                                .unwrap_or(val);
+                                                            spawn(async move {
+                                                                let mut st = a.borrow_mut();
+                                                                if let Some(tab) = st.tab_mut() {
+                                                                    tab.model.snapshot();
+                                                                    let doc = tab.model.document_mut();
+                                                                    if let Some(crate::geometry::element::Element::Layer(le)) = doc.get_element_mut(&p) {
+                                                                        le.name = val_inner;
+                                                                    }
+                                                                }
+                                                                st.layers_renaming = None;
+                                                                confirm_rev += 1;
+                                                            });
+                                                        }
+                                                    }
+                                                    #[cfg(not(target_arch = "wasm32"))]
+                                                    {
+                                                        let a = confirm_app.clone();
+                                                        spawn(async move {
+                                                            a.borrow_mut().layers_renaming = None;
+                                                            confirm_rev += 1;
+                                                        });
+                                                    }
+                                                } else if key == dioxus::prelude::Key::Escape {
+                                                    let a = cancel_app.clone();
+                                                    spawn(async move {
+                                                        a.borrow_mut().layers_renaming = None;
+                                                        cancel_rev += 1;
+                                                    });
+                                                }
+                                            },
+                                        }
+                                    }
+                                }
+                            } else {
+                                {
+                                    let name_path = row.path.clone();
+                                    let name_app = app.clone();
+                                    let mut name_rev = revision;
+                                    let can_rename = row.is_layer;
+                                    rsx! {
+                                        span {
+                                            style: "{name_style}",
+                                            ondoubleclick: move |_: Event<MouseData>| {
+                                                if can_rename {
+                                                    let p = name_path.clone();
+                                                    let a = name_app.clone();
+                                                    spawn(async move {
+                                                        a.borrow_mut().layers_renaming = Some(p);
+                                                        name_rev += 1;
+                                                    });
+                                                }
+                                            },
+                                            "{row.display_name}"
+                                        }
+                                    }
+                                }
+                            }
                             // Select square
                             div {
                                 style: "{sq_style};cursor:pointer",

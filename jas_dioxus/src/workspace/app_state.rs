@@ -98,6 +98,17 @@ pub(crate) struct AppState {
     pub(crate) swatch_libraries: serde_json::Value,
     /// Stroke panel state — mirrored to/from global state for selection sync.
     pub(crate) stroke_panel: StrokePanelState,
+    /// Element path currently being renamed in the layers panel, or None.
+    pub(crate) layers_renaming: Option<Vec<usize>>,
+    /// Collapsed element paths in the layers panel. Elements not in this
+    /// set are expanded (open) by default.
+    pub(crate) layers_collapsed: std::collections::HashSet<Vec<usize>>,
+    /// Panel-selected element paths in the layers panel. Independent of
+    /// element selection (select square). Used for menu operations and drag.
+    pub(crate) layers_panel_selection: Vec<Vec<usize>>,
+    /// Active drag in the layers panel: drop target path and position.
+    /// The drop inserts before the element at this path.
+    pub(crate) layers_drag_target: Option<Vec<usize>>,
 }
 
 /// Stroke panel state fields that sync with global state and the selection.
@@ -181,6 +192,10 @@ impl AppState {
                 .map(|ws| ws.data().get("swatch_libraries").cloned().unwrap_or(serde_json::json!({})))
                 .unwrap_or(serde_json::json!({})),
             stroke_panel: StrokePanelState::default(),
+            layers_renaming: None,
+            layers_collapsed: std::collections::HashSet::new(),
+            layers_panel_selection: Vec::new(),
+            layers_drag_target: None,
         }
     }
 
