@@ -2,4 +2,4 @@
 
 (library
  (name jas)
- (libraries lablgtk3 xmlm str unix yojson))
+ (libraries lablgtk3 xmlm str unix yojson msgpck camlzip))

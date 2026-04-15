@@ -229,8 +229,52 @@ let run_workspace_operation_fixture fixture_name =
     end
   ) tests
 
+let read_fixture_bytes path =
+  let full = Filename.concat fixtures_dir path in
+  let ic = open_in_bin full in
+  let n = in_channel_length ic in
+  let s = Bytes.create n in
+  really_input ic s 0 n;
+  close_in ic;
+  Bytes.to_string s
+
+let assert_binary_roundtrip name =
+  let expected = read_fixture (Printf.sprintf "expected/%s.json" name) in
+  let doc = Jas.Test_json.test_json_to_document expected in
+  let binary = Jas.Binary.document_to_binary doc in
+  let doc2 = Jas.Binary.binary_to_document binary in
+  let actual = Jas.Test_json.document_to_test_json doc2 in
+  if actual <> expected then begin
+    Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name expected;
+    Printf.eprintf "=== ACTUAL (%s) ===\n%s\n" name actual;
+    assert false
+  end
+
+let assert_binary_read_python name =
+  let bin_data = read_fixture_bytes (Printf.sprintf "expected/%s.bin" name) in
+  let doc = Jas.Binary.binary_to_document bin_data in
+  let actual = Jas.Test_json.document_to_test_json doc in
+  let expected = read_fixture (Printf.sprintf "expected/%s.json" name) in
+  if actual <> expected then begin
+    Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name expected;
+    Printf.eprintf "=== ACTUAL (%s) ===\n%s\n" name actual;
+    assert false
+  end
+
 let () =
   Alcotest.run "Cross_language" [
+    (* Binary round-trip *)
+    "Binary round-trip", [
+      Alcotest.test_case "binary_roundtrip all expected" `Quick (fun () ->
+        List.iter assert_binary_roundtrip roundtrip_names);
+    ];
+
+    (* Binary read Python fixtures *)
+    "Binary read Python", [
+      Alcotest.test_case "binary_read_python all fixtures" `Quick (fun () ->
+        List.iter assert_binary_read_python roundtrip_names);
+    ];
+
     (* SVG round-trip idempotence *)
     "SVG round-trip", [
       Alcotest.test_case "svg_roundtrip all fixtures" `Quick (fun () ->

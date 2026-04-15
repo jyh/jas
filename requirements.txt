@@ -3,3 +3,4 @@ PySide6
 pytest
 absl-py
 pyyaml
+msgpack

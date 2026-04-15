@@ -142,6 +142,7 @@ impl Workspace {
 }
 
 /// Map PanelKind to YAML content id.
+#[cfg(feature = "web")]
 pub fn panel_kind_to_content_id(kind: crate::workspace::workspace::PanelKind) -> &'static str {
     use crate::workspace::workspace::PanelKind;
     match kind {

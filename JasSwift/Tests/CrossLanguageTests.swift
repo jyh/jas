@@ -120,6 +120,54 @@ private func assertJsonRoundtrip(_ name: String) {
     for name in names { assertJsonRoundtrip(name) }
 }
 
+// MARK: - Binary round-trip
+
+private func readFixtureData(_ path: String) -> Data {
+    let full = (fixturesPath() as NSString).appendingPathComponent(path)
+    let standardized = (full as NSString).standardizingPath
+    guard let data = FileManager.default.contents(atPath: standardized) else {
+        fatalError("Failed to read fixture: \(standardized)")
+    }
+    return data
+}
+
+@Test func binaryRoundtripAllExpected() {
+    let names = [
+        "line_basic", "rect_basic", "rect_with_stroke",
+        "circle_basic", "ellipse_basic",
+        "polyline_basic", "polygon_basic", "path_all_commands",
+        "text_basic", "text_path_basic",
+        "group_nested", "transform_translate", "transform_rotate",
+        "multi_layer", "complex_document",
+    ]
+    for name in names {
+        let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
+        let doc = testJsonToDocument(expected)
+        let binary = documentToBinary(doc)
+        let doc2 = try! binaryToDocument(binary)
+        let actual = documentToTestJson(doc2)
+        #expect(actual == expected, "Binary round-trip '\(name)' failed")
+    }
+}
+
+@Test func binaryReadPythonFixtures() {
+    let names = [
+        "line_basic", "rect_basic", "rect_with_stroke",
+        "circle_basic", "ellipse_basic",
+        "polyline_basic", "polygon_basic", "path_all_commands",
+        "text_basic", "text_path_basic",
+        "group_nested", "transform_translate", "transform_rotate",
+        "multi_layer", "complex_document",
+    ]
+    for name in names {
+        let binData = readFixtureData("expected/\(name).bin")
+        let doc = try! binaryToDocument(binData)
+        let actual = documentToTestJson(doc)
+        let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(actual == expected, "Python binary fixture '\(name)' did not produce expected JSON")
+    }
+}
+
 // MARK: - Algorithm test vectors
 
 private struct HitTestCase: Decodable {
