@@ -98,8 +98,23 @@ let pack_stroke = function
   | Some s ->
     let cap = match s.stroke_linecap with Butt -> 0 | Round_cap -> 1 | Square -> 2 in
     let join = match s.stroke_linejoin with Miter -> 0 | Round_join -> 1 | Bevel -> 2 in
+    let align = match s.stroke_align with Center -> 0 | Inside -> 1 | Outside -> 2 in
+    let arrow_align = match s.stroke_arrow_align with Tip_at_end -> 0 | Center_at_end -> 1 in
+    let dash = vlist (List.map vf64 s.stroke_dash_pattern) in
     vlist [pack_color s.stroke_color; vf64 s.stroke_width;
-           vint cap; vint join; vf64 s.stroke_opacity]
+           vint cap; vint join; vf64 s.stroke_opacity;
+           vf64 s.stroke_miter_limit; vint align; dash;
+           vstr (string_of_arrowhead s.stroke_start_arrow);
+           vstr (string_of_arrowhead s.stroke_end_arrow);
+           vf64 s.stroke_start_arrow_scale;
+           vf64 s.stroke_end_arrow_scale;
+           vint arrow_align]
+
+let pack_width_points pts =
+  if pts = [] then Msgpck.Nil
+  else vlist (List.map (fun (p : stroke_width_point) ->
+    vlist [vf64 p.swp_t; vf64 p.swp_width_left; vf64 p.swp_width_right]
+  ) pts)
 
 let pack_transform = function
   | None -> Msgpck.Nil
@@ -133,10 +148,11 @@ let rec pack_element = function
     let ch = Array.to_list (Array.map pack_element children) in
     vlist [vint tag_group; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform; vlist ch]
-  | Line { x1; y1; x2; y2; stroke; opacity; transform; locked; visibility } ->
+  | Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility } ->
     vlist [vint tag_line; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
-           vf64 x1; vf64 y1; vf64 x2; vf64 y2; pack_stroke stroke]
+           vf64 x1; vf64 y1; vf64 x2; vf64 y2; pack_stroke stroke;
+           pack_width_points width_points]
   | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility } ->
     vlist [vint tag_rect; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
@@ -161,11 +177,12 @@ let rec pack_element = function
     vlist [vint tag_polygon; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
            vlist pts; pack_fill fill; pack_stroke stroke]
-  | Path { d; fill; stroke; opacity; transform; locked; visibility } ->
+  | Path { d; fill; stroke; width_points; opacity; transform; locked; visibility } ->
     let cmds = List.map pack_path_command d in
     vlist [vint tag_path; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
-           vlist cmds; pack_fill fill; pack_stroke stroke]
+           vlist cmds; pack_fill fill; pack_stroke stroke;
+           pack_width_points width_points]
   | Text { x; y; content; font_family; font_size; font_weight; font_style;
            text_decoration; text_width; text_height; fill; stroke;
            opacity; transform; locked; visibility } ->
@@ -236,10 +253,46 @@ let unpack_stroke v =
     let join = match as_int (List.nth arr 3) with
       | 0 -> Miter | 1 -> Round_join | 2 -> Bevel
       | n -> failwith (Printf.sprintf "unknown linejoin: %d" n) in
-    Some { stroke_color = unpack_color (List.nth arr 0);
-           stroke_width = as_f64 (List.nth arr 1);
-           stroke_linecap = cap; stroke_linejoin = join;
-           stroke_opacity = as_f64 (List.nth arr 4) }
+    if List.length arr > 5 then
+      let miter_limit = as_f64 (List.nth arr 5) in
+      let align = match as_int (List.nth arr 6) with
+        | 1 -> Inside | 2 -> Outside | _ -> Center in
+      let dash_pattern = List.map as_f64 (as_list (List.nth arr 7)) in
+      let start_arrow = arrowhead_of_string (as_str (List.nth arr 8)) in
+      let end_arrow = arrowhead_of_string (as_str (List.nth arr 9)) in
+      let start_arrow_scale = as_f64 (List.nth arr 10) in
+      let end_arrow_scale = as_f64 (List.nth arr 11) in
+      let arrow_align = match as_int (List.nth arr 12) with
+        | 1 -> Center_at_end | _ -> Tip_at_end in
+      Some { stroke_color = unpack_color (List.nth arr 0);
+             stroke_width = as_f64 (List.nth arr 1);
+             stroke_linecap = cap; stroke_linejoin = join;
+             stroke_miter_limit = miter_limit; stroke_align = align;
+             stroke_dash_pattern = dash_pattern;
+             stroke_start_arrow = start_arrow; stroke_end_arrow = end_arrow;
+             stroke_start_arrow_scale = start_arrow_scale;
+             stroke_end_arrow_scale = end_arrow_scale;
+             stroke_arrow_align = arrow_align;
+             stroke_opacity = as_f64 (List.nth arr 4) }
+    else
+      Some { stroke_color = unpack_color (List.nth arr 0);
+             stroke_width = as_f64 (List.nth arr 1);
+             stroke_linecap = cap; stroke_linejoin = join;
+             stroke_miter_limit = 10.0; stroke_align = Center;
+             stroke_dash_pattern = [];
+             stroke_start_arrow = Arrow_none; stroke_end_arrow = Arrow_none;
+             stroke_start_arrow_scale = 100.0; stroke_end_arrow_scale = 100.0;
+             stroke_arrow_align = Tip_at_end;
+             stroke_opacity = as_f64 (List.nth arr 4) }
+
+let unpack_width_points v =
+  if is_nil v then []
+  else List.map (fun p ->
+    let a = as_list p in
+    { swp_t = as_f64 (List.nth a 0);
+      swp_width_left = as_f64 (List.nth a 1);
+      swp_width_right = as_f64 (List.nth a 2) }
+  ) (as_list v)
 
 let unpack_transform v =
   if is_nil v then None
@@ -293,9 +346,11 @@ let rec unpack_element v =
     let children = Array.of_list (List.map unpack_element (as_list (List.nth arr 5))) in
     Group { children; opacity; transform; locked; visibility }
   else if tag = tag_line then
+    let wp = if List.length arr > 10 then unpack_width_points (List.nth arr 10) else [] in
     Line { x1 = as_f64 (List.nth arr 5); y1 = as_f64 (List.nth arr 6);
            x2 = as_f64 (List.nth arr 7); y2 = as_f64 (List.nth arr 8);
            stroke = unpack_stroke (List.nth arr 9);
+           width_points = wp;
            opacity; transform; locked; visibility }
   else if tag = tag_rect then
     Rect { x = as_f64 (List.nth arr 5); y = as_f64 (List.nth arr 6);
@@ -332,8 +387,10 @@ let rec unpack_element v =
               opacity; transform; locked; visibility }
   else if tag = tag_path then
     let cmds = List.map unpack_path_command (as_list (List.nth arr 5)) in
+    let wp = if List.length arr > 8 then unpack_width_points (List.nth arr 8) else [] in
     Path { d = cmds; fill = unpack_fill (List.nth arr 6);
            stroke = unpack_stroke (List.nth arr 7);
+           width_points = wp;
            opacity; transform; locked; visibility }
   else if tag = tag_text then
     Text { x = as_f64 (List.nth arr 5); y = as_f64 (List.nth arr 6);

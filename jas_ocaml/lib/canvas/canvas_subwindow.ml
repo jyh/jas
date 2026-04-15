@@ -46,14 +46,64 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
   let outline = effective = Element.Outline in
   Cairo.save cr;
   begin match elem with
-  | Line { x1; y1; x2; y2; stroke; opacity; transform; _ } ->
+  | Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
+    let stroke_align = ref Element.Center in
     if outline then apply_outline_style cr
-    else apply_stroke cr stroke;
-    Cairo.move_to cr x1 y1;
-    Cairo.line_to cr x2 y2;
-    Cairo.stroke cr;
+    else begin
+      let (_, al) = apply_stroke cr stroke in
+      stroke_align := al
+    end;
+    (* Shorten line for arrowheads *)
+    let lx1 = ref x1 and ly1 = ref y1 and lx2 = ref x2 and ly2 = ref y2 in
+    if not outline then begin
+      match stroke with
+      | Some s ->
+        let dx = !lx2 -. !lx1 in
+        let dy = !ly2 -. !ly1 in
+        let len = sqrt (dx *. dx +. dy *. dy) in
+        if len > 0.0 then begin
+          let ux = dx /. len and uy = dy /. len in
+          let start_sb = Arrowheads.arrow_setback
+            (Element.string_of_arrowhead s.stroke_start_arrow)
+            s.stroke_width s.stroke_start_arrow_scale in
+          let end_sb = Arrowheads.arrow_setback
+            (Element.string_of_arrowhead s.stroke_end_arrow)
+            s.stroke_width s.stroke_end_arrow_scale in
+          lx1 := !lx1 +. ux *. start_sb;
+          ly1 := !ly1 +. uy *. start_sb;
+          lx2 := !lx2 -. ux *. end_sb;
+          ly2 := !ly2 -. uy *. end_sb
+        end
+      | None -> ()
+    end;
+    if not outline && width_points <> [] then begin
+      match stroke with
+      | Some s ->
+        let sc = Element.color_to_rgba s.stroke_color in
+        Offset_path.render_variable_width_line cr !lx1 !ly1 !lx2 !ly2
+          width_points sc s.stroke_linecap
+      | None -> ()
+    end else begin
+      Cairo.move_to cr !lx1 !ly1;
+      Cairo.line_to cr !lx2 !ly2;
+      if outline then Cairo.stroke cr
+      else stroke_aligned cr !stroke_align
+    end;
+    (* Arrowheads *)
+    if not outline then begin
+      match stroke with
+      | Some s ->
+        let center = s.stroke_arrow_align = Element.Center_at_end in
+        let sc = Element.color_to_rgba s.stroke_color in
+        Arrowheads.draw_arrowheads_line cr x1 y1 x2 y2
+          (Element.string_of_arrowhead s.stroke_start_arrow)
+          (Element.string_of_arrowhead s.stroke_end_arrow)
+          s.stroke_start_arrow_scale s.stroke_end_arrow_scale
+          s.stroke_width sc center
+      | None -> ()
+    end;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
@@ -119,14 +169,62 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Path { d; fill; stroke; opacity; transform; _ } ->
+  | Path { d; fill; stroke; width_points; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
-    build_path cr d;
     if outline then begin
+      build_path cr d;
       apply_outline_style cr;
       Cairo.stroke cr
-    end else fill_and_stroke cr fill stroke;
+    end else begin
+      (* Shorten path for arrowheads *)
+      let stroke_cmds = match stroke with
+        | Some s ->
+          let start_sb = Arrowheads.arrow_setback
+            (Element.string_of_arrowhead s.stroke_start_arrow)
+            s.stroke_width s.stroke_start_arrow_scale in
+          let end_sb = Arrowheads.arrow_setback
+            (Element.string_of_arrowhead s.stroke_end_arrow)
+            s.stroke_width s.stroke_end_arrow_scale in
+          if start_sb > 0.0 || end_sb > 0.0 then
+            Arrowheads.shorten_path d start_sb end_sb
+          else d
+        | None -> d
+      in
+      if width_points <> [] then begin
+        match stroke with
+        | Some s ->
+          (* Fill first if present *)
+          (match fill with
+           | Some f ->
+             let (r, g, b, a) = Element.color_to_rgba f.fill_color in
+             Cairo.set_source_rgba cr r g b a;
+             build_path cr d;
+             Cairo.fill cr
+           | None -> ());
+          (* Variable-width stroke *)
+          let sc = Element.color_to_rgba s.stroke_color in
+          Offset_path.render_variable_width_path cr stroke_cmds width_points
+            sc s.stroke_linecap
+        | None ->
+          build_path cr d;
+          fill_and_stroke cr fill stroke
+      end else begin
+        build_path cr stroke_cmds;
+        fill_and_stroke cr fill stroke
+      end;
+      (* Arrowheads *)
+      (match stroke with
+       | Some s ->
+         let center = s.stroke_arrow_align = Element.Center_at_end in
+         let sc = Element.color_to_rgba s.stroke_color in
+         Arrowheads.draw_arrowheads cr d
+           (Element.string_of_arrowhead s.stroke_start_arrow)
+           (Element.string_of_arrowhead s.stroke_end_arrow)
+           s.stroke_start_arrow_scale s.stroke_end_arrow_scale
+           s.stroke_width sc center
+       | None -> ())
+    end;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
@@ -298,11 +396,13 @@ and apply_transform cr = function
     Cairo.transform cr m
 
 and apply_stroke cr = function
-  | None -> ()
+  | None -> (1.0, Element.Center)
   | Some (s : Element.stroke) ->
     let (r, g, b, a) = Element.color_to_rgba s.stroke_color in
     Cairo.set_source_rgba cr r g b a;
-    Cairo.set_line_width cr s.stroke_width;
+    let effective_width = if s.stroke_align = Element.Center then s.stroke_width
+      else s.stroke_width *. 2.0 in
+    Cairo.set_line_width cr effective_width;
     begin match s.stroke_linecap with
     | Butt -> Cairo.set_line_cap cr Cairo.BUTT
     | Round_cap -> Cairo.set_line_cap cr Cairo.ROUND
@@ -312,7 +412,29 @@ and apply_stroke cr = function
     | Miter -> Cairo.set_line_join cr Cairo.JOIN_MITER
     | Round_join -> Cairo.set_line_join cr Cairo.JOIN_ROUND
     | Bevel -> Cairo.set_line_join cr Cairo.JOIN_BEVEL
-    end
+    end;
+    Cairo.set_miter_limit cr s.stroke_miter_limit;
+    if s.stroke_dash_pattern <> [] then
+      Cairo.set_dash cr (Array.of_list s.stroke_dash_pattern) ~ofs:0.0
+    else
+      Cairo.set_dash cr [||] ~ofs:0.0;
+    (s.stroke_opacity, s.stroke_align)
+
+and stroke_aligned cr align =
+  match align with
+  | Element.Center -> Cairo.stroke cr
+  | Element.Inside ->
+    Cairo.save cr;
+    Cairo.clip_preserve cr;
+    Cairo.stroke cr;
+    Cairo.restore cr
+  | Element.Outside ->
+    Cairo.save cr;
+    Cairo.rectangle cr (-1e6) (-1e6) ~w:2e6 ~h:2e6;
+    Cairo.set_fill_rule cr Cairo.EVEN_ODD;
+    Cairo.clip cr;
+    Cairo.stroke cr;
+    Cairo.restore cr
 
 and fill_and_stroke cr fill stroke =
   let has_fill = fill <> None in
@@ -324,8 +446,8 @@ and fill_and_stroke cr fill stroke =
        Cairo.set_source_rgba cr r g b a
      | None -> ());
     Cairo.fill_preserve cr;
-    apply_stroke cr stroke;
-    Cairo.stroke cr
+    let (_, align) = apply_stroke cr stroke in
+    stroke_aligned cr align
   end else if has_fill then begin
     (match fill with
      | Some (f : Element.fill) ->
@@ -334,8 +456,8 @@ and fill_and_stroke cr fill stroke =
      | None -> ());
     Cairo.fill cr
   end else if has_stroke then begin
-    apply_stroke cr stroke;
-    Cairo.stroke cr
+    let (_, align) = apply_stroke cr stroke in
+    stroke_aligned cr align
   end
 
 and draw_points cr points close =

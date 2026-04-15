@@ -14,10 +14,11 @@ from document.document import (
     selection_all, selection_partial,
 )
 from geometry.element import (
-    Element, Fill, Group, Layer, Path, Stroke, Visibility,
+    Element, Fill, Group, Layer, Path, Stroke, StrokeWidthPoint, Visibility,
     control_point_count, control_points, move_control_points,
     move_path_handle as _move_path_handle,
     with_fill as _with_fill, with_stroke as _with_stroke,
+    with_width_points as _with_width_points,
     element_fill as _element_fill, element_stroke as _element_stroke,
 )
 from algorithms.hit_test import (
@@ -475,6 +476,19 @@ class Controller:
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
             new_elem = _with_stroke(elem, stroke)
+            if new_elem is not elem:
+                new_doc = new_doc.replace_element(es.path, new_elem)
+        self._model.document = new_doc
+
+    def set_selection_width_profile(self, width_points: tuple[StrokeWidthPoint, ...]) -> None:
+        """Set the variable-width stroke profile for all selected elements."""
+        doc = self._model.document
+        if not doc.selection:
+            return
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            new_elem = _with_width_points(elem, width_points)
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.document = new_doc

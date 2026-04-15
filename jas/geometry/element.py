@@ -237,6 +237,49 @@ class LineJoin(Enum):
     BEVEL = "bevel"
 
 
+class StrokeAlign(Enum):
+    """Stroke alignment relative to the path."""
+    CENTER = "center"
+    INSIDE = "inside"
+    OUTSIDE = "outside"
+
+
+class Arrowhead(Enum):
+    """Arrowhead shape for stroke start/end."""
+    NONE = "none"
+    SIMPLE_ARROW = "simple_arrow"
+    OPEN_ARROW = "open_arrow"
+    CLOSED_ARROW = "closed_arrow"
+    STEALTH_ARROW = "stealth_arrow"
+    BARBED_ARROW = "barbed_arrow"
+    HALF_ARROW_UPPER = "half_arrow_upper"
+    HALF_ARROW_LOWER = "half_arrow_lower"
+    CIRCLE = "circle"
+    OPEN_CIRCLE = "open_circle"
+    SQUARE = "square"
+    OPEN_SQUARE = "open_square"
+    DIAMOND = "diamond"
+    OPEN_DIAMOND = "open_diamond"
+    SLASH = "slash"
+
+    @classmethod
+    def from_string(cls, s: str) -> "Arrowhead":
+        for member in cls:
+            if member.value == s:
+                return member
+        return cls.NONE
+
+    @property
+    def name_str(self) -> str:
+        return self.value
+
+
+class ArrowAlign(Enum):
+    """Arrowhead alignment mode."""
+    TIP_AT_END = "tip_at_end"
+    CENTER_AT_END = "center_at_end"
+
+
 @dataclass(frozen=True)
 class Fill:
     """SVG fill presentation attribute. None means fill='none'."""
@@ -252,6 +295,52 @@ class Stroke:
     linecap: LineCap = LineCap.BUTT
     linejoin: LineJoin = LineJoin.MITER
     opacity: float = 1.0
+    miter_limit: float = 10.0
+    align: StrokeAlign = StrokeAlign.CENTER
+    dash_pattern: tuple[float, ...] = ()
+    start_arrow: Arrowhead = Arrowhead.NONE
+    end_arrow: Arrowhead = Arrowhead.NONE
+    start_arrow_scale: float = 100.0
+    end_arrow_scale: float = 100.0
+    arrow_align: ArrowAlign = ArrowAlign.TIP_AT_END
+
+
+@dataclass(frozen=True)
+class StrokeWidthPoint:
+    """A width control point for variable-width stroke profiles."""
+    t: float
+    width_left: float
+    width_right: float
+
+
+def profile_to_width_points(profile: str, width: float, flipped: bool) -> tuple[StrokeWidthPoint, ...]:
+    """Convert a named profile preset to width control points."""
+    hw = width / 2.0
+    if profile == "taper_both":
+        pts = (StrokeWidthPoint(t=0, width_left=0, width_right=0),
+               StrokeWidthPoint(t=0.5, width_left=hw, width_right=hw),
+               StrokeWidthPoint(t=1, width_left=0, width_right=0))
+    elif profile == "taper_start":
+        pts = (StrokeWidthPoint(t=0, width_left=0, width_right=0),
+               StrokeWidthPoint(t=1, width_left=hw, width_right=hw))
+    elif profile == "taper_end":
+        pts = (StrokeWidthPoint(t=0, width_left=hw, width_right=hw),
+               StrokeWidthPoint(t=1, width_left=0, width_right=0))
+    elif profile == "bulge":
+        pts = (StrokeWidthPoint(t=0, width_left=hw, width_right=hw),
+               StrokeWidthPoint(t=0.5, width_left=hw * 1.5, width_right=hw * 1.5),
+               StrokeWidthPoint(t=1, width_left=hw, width_right=hw))
+    elif profile == "pinch":
+        pts = (StrokeWidthPoint(t=0, width_left=hw, width_right=hw),
+               StrokeWidthPoint(t=0.5, width_left=hw * 0.5, width_right=hw * 0.5),
+               StrokeWidthPoint(t=1, width_left=hw, width_right=hw))
+    else:
+        return ()  # "uniform" or unknown
+    if flipped:
+        return tuple(StrokeWidthPoint(t=1.0 - p.t, width_left=p.width_left,
+                                       width_right=p.width_right)
+                     for p in reversed(pts))
+    return pts
 
 
 @dataclass(frozen=True)
@@ -415,6 +504,7 @@ class Line(Element):
     x2: float
     y2: float
     stroke: Stroke | None = None
+    width_points: tuple[StrokeWidthPoint, ...] = ()
     opacity: float = 1.0
     transform: Transform | None = None
     locked: bool = False
@@ -535,6 +625,7 @@ class Path(Element):
     d: tuple[PathCommand, ...]
     fill: Fill | None = None
     stroke: Stroke | None = None
+    width_points: tuple[StrokeWidthPoint, ...] = ()
     opacity: float = 1.0
     transform: Transform | None = None
     locked: bool = False
@@ -775,6 +866,16 @@ def with_stroke(element: Element, stroke: Stroke | None) -> Element:
         return element
     if hasattr(element, 'stroke'):
         return dataclasses.replace(element, stroke=stroke)
+    return element
+
+
+def with_width_points(element: Element, width_points: tuple[StrokeWidthPoint, ...]) -> Element:
+    """Return a copy of element with width_points replaced.
+
+    Only Line and Path support width points; others are returned unchanged.
+    """
+    if isinstance(element, (Line, Path)):
+        return dataclasses.replace(element, width_points=width_points)
     return element
 
 

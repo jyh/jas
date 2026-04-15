@@ -21,7 +21,8 @@ from geometry.element import (
     Path, Text, TextPath, Group, Layer,
     Color, RgbColor, HsbColor, CmykColor,
     Fill, Stroke, Transform, Visibility,
-    LineCap, LineJoin,
+    LineCap, LineJoin, StrokeAlign, Arrowhead, ArrowAlign,
+    StrokeWidthPoint,
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
 )
@@ -75,6 +76,16 @@ _VISIBILITY_TO_INT = {
 }
 _INT_TO_VISIBILITY = {v: k for k, v in _VISIBILITY_TO_INT.items()}
 
+_STROKEALIGN_TO_INT = {
+    StrokeAlign.CENTER: 0, StrokeAlign.INSIDE: 1, StrokeAlign.OUTSIDE: 2,
+}
+_INT_TO_STROKEALIGN = {v: k for k, v in _STROKEALIGN_TO_INT.items()}
+
+_ARROWALIGN_TO_INT = {
+    ArrowAlign.TIP_AT_END: 0, ArrowAlign.CENTER_AT_END: 1,
+}
+_INT_TO_ARROWALIGN = {v: k for k, v in _ARROWALIGN_TO_INT.items()}
+
 # -- Pack (Document -> msgpack-ready structure) ------------------------------
 
 
@@ -97,13 +108,28 @@ def _pack_fill(fill: Fill | None):
 def _pack_stroke(stroke: Stroke | None):
     if stroke is None:
         return None
+    dash = list(stroke.dash_pattern)
     return [
         _pack_color(stroke.color),
         stroke.width,
         _LINECAP_TO_INT[stroke.linecap],
         _LINEJOIN_TO_INT[stroke.linejoin],
         stroke.opacity,
+        stroke.miter_limit,
+        _STROKEALIGN_TO_INT[stroke.align],
+        dash,
+        stroke.start_arrow.value,
+        stroke.end_arrow.value,
+        stroke.start_arrow_scale,
+        stroke.end_arrow_scale,
+        _ARROWALIGN_TO_INT[stroke.arrow_align],
     ]
+
+
+def _pack_width_points(pts: tuple[StrokeWidthPoint, ...]):
+    if not pts:
+        return None
+    return [[p.t, p.width_left, p.width_right] for p in pts]
 
 
 def _pack_transform(t: Transform | None):
@@ -149,7 +175,7 @@ def _pack_element(elem: Element) -> list:
     elif isinstance(elem, Line):
         return [_TAG_LINE, locked, opacity, vis, xform,
                 elem.x1, elem.y1, elem.x2, elem.y2,
-                _pack_stroke(elem.stroke)]
+                _pack_stroke(elem.stroke), _pack_width_points(elem.width_points)]
     elif isinstance(elem, Rect):
         return [_TAG_RECT, locked, opacity, vis, xform,
                 elem.x, elem.y, elem.width, elem.height, elem.rx, elem.ry,
@@ -173,7 +199,8 @@ def _pack_element(elem: Element) -> list:
     elif isinstance(elem, Path):
         cmds = [_pack_path_command(c) for c in elem.d]
         return [_TAG_PATH, locked, opacity, vis, xform,
-                cmds, _pack_fill(elem.fill), _pack_stroke(elem.stroke)]
+                cmds, _pack_fill(elem.fill), _pack_stroke(elem.stroke),
+                _pack_width_points(elem.width_points)]
     elif isinstance(elem, Text):
         return [_TAG_TEXT, locked, opacity, vis, xform,
                 elem.x, elem.y, elem.content,
@@ -233,12 +260,32 @@ def _unpack_fill(v) -> Fill | None:
 def _unpack_stroke(v) -> Stroke | None:
     if v is None:
         return None
-    return Stroke(
+    base = dict(
         color=_unpack_color(v[0]),
         width=v[1],
         linecap=_INT_TO_LINECAP[v[2]],
         linejoin=_INT_TO_LINEJOIN[v[3]],
         opacity=v[4],
+    )
+    # Extended fields (backward compatible: old files have 5 elements)
+    if len(v) > 5:
+        base['miter_limit'] = float(v[5])
+        base['align'] = _INT_TO_STROKEALIGN.get(v[6], StrokeAlign.CENTER)
+        base['dash_pattern'] = tuple(float(x) for x in v[7])
+        base['start_arrow'] = Arrowhead.from_string(v[8])
+        base['end_arrow'] = Arrowhead.from_string(v[9])
+        base['start_arrow_scale'] = float(v[10])
+        base['end_arrow_scale'] = float(v[11])
+        base['arrow_align'] = _INT_TO_ARROWALIGN.get(v[12], ArrowAlign.TIP_AT_END)
+    return Stroke(**base)
+
+
+def _unpack_width_points(v) -> tuple[StrokeWidthPoint, ...]:
+    if v is None:
+        return ()
+    return tuple(
+        StrokeWidthPoint(t=float(p[0]), width_left=float(p[1]), width_right=float(p[2]))
+        for p in v
     )
 
 
@@ -289,8 +336,9 @@ def _unpack_element(arr: list) -> Element:
         children = tuple(_unpack_element(c) for c in arr[5])
         return Group(children=children, **common)
     elif tag == _TAG_LINE:
+        wp = _unpack_width_points(arr[10]) if len(arr) > 10 else ()
         return Line(x1=arr[5], y1=arr[6], x2=arr[7], y2=arr[8],
-                    stroke=_unpack_stroke(arr[9]), **common)
+                    stroke=_unpack_stroke(arr[9]), width_points=wp, **common)
     elif tag == _TAG_RECT:
         return Rect(x=arr[5], y=arr[6], width=arr[7], height=arr[8],
                     rx=arr[9], ry=arr[10],
@@ -316,9 +364,11 @@ def _unpack_element(arr: list) -> Element:
                        stroke=_unpack_stroke(arr[7]), **common)
     elif tag == _TAG_PATH:
         cmds = tuple(_unpack_path_command(c) for c in arr[5])
+        wp = _unpack_width_points(arr[8]) if len(arr) > 8 else ()
         return Path(d=cmds,
                     fill=_unpack_fill(arr[6]),
-                    stroke=_unpack_stroke(arr[7]), **common)
+                    stroke=_unpack_stroke(arr[7]),
+                    width_points=wp, **common)
     elif tag == _TAG_TEXT:
         return Text(x=arr[5], y=arr[6], content=arr[7],
                     font_family=arr[8], font_size=arr[9],

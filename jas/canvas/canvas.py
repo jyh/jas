@@ -15,11 +15,18 @@ from geometry.element import (
     ArcTo, Circle, ClosePath, CurveTo, Element, Ellipse, Group, Layer, Line,
     LineTo, MoveTo, Path, PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
     SmoothQuadTo, Text, TextPath,
-    Color, Fill, LineCap, LineJoin, Stroke, Transform,
+    Color, Fill, LineCap, LineJoin, Stroke, StrokeAlign, Transform,
     control_points as element_control_points,
     path_handle_positions,
     path_distance_to_point,
     path_point_at_offset,
+)
+from canvas.arrowheads import (
+    arrow_setback, shorten_path,
+    draw_arrowheads, draw_arrowheads_line,
+)
+from canvas.offset_path import (
+    render_variable_width_path, render_variable_width_line,
 )
 from document.model import Model
 from tools.tool import CanvasTool, ToolContext, HIT_RADIUS, HANDLE_DRAW_SIZE
@@ -195,14 +202,42 @@ _JOIN_MAP : dict[LineJoin, Qt.PenJoinStyle] = {
 }
 
 
-def _apply_stroke(painter: QPainter, stroke: Stroke | None) -> None:
+def _apply_stroke(painter: QPainter, stroke: Stroke | None) -> tuple[float, StrokeAlign]:
+    """Apply stroke properties to the painter. Returns (opacity, align)."""
     if stroke is not None:
-        pen = QPen(_qcolor(stroke.color), stroke.width)
+        effective_width = stroke.width if stroke.align == StrokeAlign.CENTER else stroke.width * 2.0
+        pen = QPen(_qcolor(stroke.color), effective_width)
         pen.setCapStyle(_CAP_MAP[stroke.linecap])
         pen.setJoinStyle(_JOIN_MAP[stroke.linejoin])
+        pen.setMiterLimit(stroke.miter_limit)
+        if stroke.dash_pattern:
+            pen.setDashPattern([float(x) for x in stroke.dash_pattern])
         painter.setPen(pen)
+        return (stroke.opacity, stroke.align)
     else:
         painter.setPen(QPen(0))
+        return (1.0, StrokeAlign.CENTER)
+
+
+def _stroke_aligned(painter: QPainter, path: QPainterPath,
+                    align: StrokeAlign) -> None:
+    """Stroke a path with alignment clipping."""
+    if align == StrokeAlign.CENTER:
+        painter.strokePath(path, painter.pen())
+    elif align == StrokeAlign.INSIDE:
+        painter.save()
+        painter.setClipPath(path)
+        painter.strokePath(path, painter.pen())
+        painter.restore()
+    elif align == StrokeAlign.OUTSIDE:
+        inverse = QPainterPath()
+        inverse.addRect(-1e6, -1e6, 2e6, 2e6)
+        inverse.addPath(path)
+        inverse.setFillRule(Qt.FillRule.OddEvenFill)
+        painter.save()
+        painter.setClipPath(inverse)
+        painter.strokePath(path, painter.pen())
+        painter.restore()
 
 
 def _apply_transform(painter: QPainter, transform: Transform | None) -> None:
@@ -442,9 +477,42 @@ def _draw_element(painter: QPainter, elem: Element,
         case Line(x1=x1, y1=y1, x2=x2, y2=y2, stroke=stroke):
             if outline:
                 _apply_outline_style(painter)
+                painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
             else:
-                _apply_stroke(painter, stroke)
-            painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+                stroke_opacity, stroke_align = _apply_stroke(painter, stroke)
+                if stroke_opacity < 1.0:
+                    painter.setOpacity(painter.opacity() * stroke_opacity)
+                # Shorten line for arrowheads
+                lx1, ly1, lx2, ly2 = x1, y1, x2, y2
+                if stroke is not None:
+                    dx = lx2 - lx1
+                    dy = ly2 - ly1
+                    ln = math.sqrt(dx * dx + dy * dy)
+                    if ln > 0:
+                        ux, uy = dx / ln, dy / ln
+                        start_sb = arrow_setback(stroke.start_arrow.value, stroke.width, stroke.start_arrow_scale)
+                        end_sb = arrow_setback(stroke.end_arrow.value, stroke.width, stroke.end_arrow_scale)
+                        lx1 += ux * start_sb
+                        ly1 += uy * start_sb
+                        lx2 -= ux * end_sb
+                        ly2 -= uy * end_sb
+                # Variable-width or normal stroke
+                wp = getattr(elem, 'width_points', ())
+                if wp and stroke is not None:
+                    render_variable_width_line(painter, lx1, ly1, lx2, ly2,
+                                              wp, _qcolor(stroke.color), stroke.linecap)
+                else:
+                    line_path = QPainterPath()
+                    line_path.moveTo(lx1, ly1)
+                    line_path.lineTo(lx2, ly2)
+                    _stroke_aligned(painter, line_path, stroke_align)
+                # Arrowheads
+                if stroke is not None:
+                    center = stroke.arrow_align.value == "center_at_end"
+                    draw_arrowheads_line(painter, x1, y1, x2, y2,
+                                        stroke.start_arrow.value, stroke.end_arrow.value,
+                                        stroke.start_arrow_scale, stroke.end_arrow_scale,
+                                        stroke.width, _qcolor(stroke.color), center)
 
         case Rect(x=x, y=y, width=w, height=h, rx=rx, ry=ry,
                   fill=fill, stroke=stroke):
@@ -497,10 +565,52 @@ def _draw_element(painter: QPainter, elem: Element,
         case Path(d=d, fill=fill, stroke=stroke):
             if outline:
                 _apply_outline_style(painter)
+                painter.drawPath(_build_path(d))
             else:
-                _apply_fill(painter, fill)
-                _apply_stroke(painter, stroke)
-            painter.drawPath(_build_path(d))
+                # Shorten path for arrowheads
+                stroke_cmds = d
+                if stroke is not None:
+                    start_sb = arrow_setback(stroke.start_arrow.value, stroke.width, stroke.start_arrow_scale)
+                    end_sb = arrow_setback(stroke.end_arrow.value, stroke.width, stroke.end_arrow_scale)
+                    if start_sb > 0 or end_sb > 0:
+                        stroke_cmds = tuple(shorten_path(list(d), start_sb, end_sb))
+                wp = getattr(elem, 'width_points', ())
+                if wp and stroke is not None:
+                    # Fill first if present
+                    if fill is not None:
+                        _apply_fill(painter, fill)
+                        painter.setPen(QPen(0))
+                        painter.drawPath(_build_path(d))
+                    # Variable-width stroke
+                    stroke_opacity, _ = _apply_stroke(painter, stroke)
+                    if stroke_opacity < 1.0:
+                        painter.setOpacity(painter.opacity() * stroke_opacity)
+                    render_variable_width_path(painter, stroke_cmds,
+                                              wp, _qcolor(stroke.color),
+                                              stroke.linecap)
+                else:
+                    # Normal fill+stroke
+                    _apply_fill(painter, fill)
+                    stroke_opacity, stroke_align = _apply_stroke(painter, stroke)
+                    if stroke_opacity < 1.0:
+                        painter.setOpacity(painter.opacity() * stroke_opacity)
+                    qpath = _build_path(stroke_cmds)
+                    if fill is not None:
+                        painter.drawPath(_build_path(d))
+                        _stroke_aligned(painter, qpath, stroke_align)
+                    else:
+                        if stroke_align == StrokeAlign.CENTER:
+                            painter.drawPath(qpath)
+                        else:
+                            painter.setBrush(QBrush())
+                            _stroke_aligned(painter, qpath, stroke_align)
+                # Arrowheads
+                if stroke is not None:
+                    center = stroke.arrow_align.value == "center_at_end"
+                    draw_arrowheads(painter, d,
+                                   stroke.start_arrow.value, stroke.end_arrow.value,
+                                   stroke.start_arrow_scale, stroke.end_arrow_scale,
+                                   stroke.width, _qcolor(stroke.color), center)
 
         case Text(x=x, y=y, content=content, font_family=ff,
                   font_size=fs, font_weight=fw, font_style=fst,
