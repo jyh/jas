@@ -2264,6 +2264,34 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         });
                     };
 
+                    let sel_path = row.path.clone();
+                    let sel_app = app.clone();
+                    let mut sel_rev = revision;
+                    let on_select_click = move |evt: Event<MouseData>| {
+                        let p = sel_path.clone();
+                        let a = sel_app.clone();
+                        let meta = evt.data().modifiers().meta();
+                        spawn(async move {
+                            use crate::document::document::ElementSelection;
+                            let mut st = a.borrow_mut();
+                            if let Some(tab) = st.tab_mut() {
+                                let doc = tab.model.document_mut();
+                                if meta {
+                                    // Cmd-click: toggle element in/out of selection
+                                    if let Some(idx) = doc.selection.iter().position(|es| es.path == p) {
+                                        doc.selection.remove(idx);
+                                    } else {
+                                        doc.selection.push(ElementSelection::all(p));
+                                    }
+                                } else {
+                                    // Click: select this element, deselect all others
+                                    doc.selection = vec![ElementSelection::all(p)];
+                                }
+                            }
+                            sel_rev += 1;
+                        });
+                    };
+
                     rsx! {
                         div {
                             style: "display:flex;align-items:center;height:24px;padding:0 4px;gap:2px;font-size:11px;color:var(--jas-text,#ccc);cursor:default;user-select:none",
@@ -2295,7 +2323,10 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             // Name
                             span { style: "{name_style}", "{row.display_name}" }
                             // Select square
-                            div { style: "{sq_style}" }
+                            div {
+                                style: "{sq_style};cursor:pointer",
+                                onclick: on_select_click,
+                            }
                         }
                     }
                 }
