@@ -202,18 +202,32 @@ def resolve_templates(element: dict, templates: dict, _depth: int = 0) -> None:
                 template_def = templates.get(template_name)
                 if template_def is None:
                     continue
-                # Resolve params: apply defaults from template definition
+                # Resolve params: apply defaults from template definition.
+                # Defaults can be expressions referencing earlier params,
+                # e.g. default: "${size} * 55 / 100"
                 param_defs = template_def.get("params", {})
                 resolved = {}
-                for pname, pdef in param_defs.items():
-                    if pname in provided_params:
-                        resolved[pname] = provided_params[pname]
-                    elif isinstance(pdef, dict) and "default" in pdef:
-                        resolved[pname] = pdef["default"]
-                # Also pass through any extra params not in the definition
                 for pname, pval in provided_params.items():
-                    if pname not in resolved:
-                        resolved[pname] = pval
+                    resolved[pname] = pval
+                for pname, pdef in param_defs.items():
+                    if pname in resolved:
+                        continue
+                    if isinstance(pdef, dict) and "default" in pdef:
+                        default = pdef["default"]
+                        # Evaluate expression defaults that reference other params
+                        if isinstance(default, str) and "${" in default:
+                            evaled = substitute_params(default, resolved)
+                            if isinstance(evaled, str):
+                                try:
+                                    from workspace_interpreter.expr import evaluate
+                                    result = evaluate(evaled, resolved)
+                                    resolved[pname] = result.value
+                                except Exception:
+                                    resolved[pname] = evaled
+                            else:
+                                resolved[pname] = evaled
+                        else:
+                            resolved[pname] = default
                 # Deep-clone and substitute
                 import copy
                 content = copy.deepcopy(template_def.get("content", {}))

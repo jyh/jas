@@ -189,7 +189,12 @@ def _style_str(el: dict, theme: dict, state: dict, extra: str = "") -> str:
         elif key == "z_index":
             parts.append(f"z-index:{val}")
         elif key == "position":
-            parts.append(f"position:{val}")
+            if isinstance(val, dict):
+                px = val.get("x", 0)
+                py = val.get("y", 0)
+                parts.append(f"position:absolute;left:{px}px;top:{py}px")
+            else:
+                parts.append(f"position:{val}")
         elif key == "top":
             parts.append(f"top:{_px(val)}")
         elif key == "right":

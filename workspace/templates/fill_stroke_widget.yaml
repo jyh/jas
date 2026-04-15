@@ -1,28 +1,38 @@
 fill_stroke_widget:
-  description: "Overlapping fill/stroke color swatches with swap and reset buttons"
+  description: >
+    Overlapping fill/stroke color swatches with swap and reset buttons,
+    plus Color/Gradient/None mode buttons at the bottom. All positions
+    and sizes are derived from a single 'size' parameter.
   params:
     id_prefix: { type: string, default: "" }
-    swatch_size: { type: number, default: 28 }
-    fill_position: { type: object, default: { x: 0, y: 0 } }
-    stroke_position: { type: object, default: { x: 10, y: 10 } }
-    offset: { type: number, default: 10 }
-    swap_icon_size: { type: number, default: 14 }
-    reset_icon_size: { type: number, default: 16 }
-    swap_position: { type: object, default: { x: 40, y: 0 } }
-    reset_position: { type: object, default: { x: 0, y: 38 } }
-    width: { type: number, default: 56 }
-    height: { type: number, default: 52 }
+    size: { type: number, default: 66 }
+    # Derived params — computed from size if not overridden
+    swatch_size: { type: number, default: "${size} * 55 / 100" }
+    fill_x: { type: number, default: "${size} * 9 / 100" }
+    fill_y: { type: number, default: "${size} * 9 / 100" }
+    stroke_x: { type: number, default: "${size} * 33 / 100" }
+    stroke_y: { type: number, default: "${size} * 33 / 100" }
+    swap_size: { type: number, default: "${size} * 30 / 100" }
+    swap_x: { type: number, default: "${size} * 64 / 100" }
+    swap_y: { type: number, default: "${size} * 3 / 100" }
+    reset_size: { type: number, default: "${size} * 30 / 100" }
+    reset_x: { type: number, default: "${size} * 3 / 100" }
+    reset_y: { type: number, default: "${size} * 64 / 100" }
+    mode_btn_size: { type: number, default: "${size} * 24 / 100" }
+    mode_x: { type: number, default: "${size} * 6 / 100" }
+    mode_y: { type: number, default: "${size} * 94 / 100" }
+    total_height: { type: number, default: "${size} * 124 / 100" }
   content:
     type: container
     layout: column
     style:
-      width: "${width}"
-      height: "${height}"
+      width: "${size}"
+      height: "${total_height}"
     children:
       - id: "${id_prefix}fill_swatch"
         type: color_swatch
         summary: "Fill color"
-        style: { size: "${swatch_size}", position: "${fill_position}" }
+        style: { size: "${swatch_size}", position: { x: "${fill_x}", y: "${fill_y}" } }
         bind:
           color: "state.fill_color"
           z_index: "if state.fill_on_top then 2 else 1"
@@ -37,7 +47,7 @@ fill_stroke_widget:
         type: color_swatch
         summary: "Stroke color"
         hollow: true
-        style: { size: "${swatch_size}", position: "${stroke_position}" }
+        style: { size: "${swatch_size}", position: { x: "${stroke_x}", y: "${stroke_y}" } }
         bind:
           color: "state.stroke_color"
           z_index: "if state.fill_on_top then 1 else 2"
@@ -52,7 +62,7 @@ fill_stroke_widget:
         type: icon_button
         summary: "Swap"
         icon: swap_arrows
-        style: { size: "${swap_icon_size}", position: "${swap_position}" }
+        style: { size: "${swap_size}", position: { x: "${swap_x}", y: "${swap_y}" } }
         behavior:
           - event: click
             action: swap_fill_stroke
@@ -60,7 +70,41 @@ fill_stroke_widget:
         type: icon_button
         summary: "Default"
         icon: default_colors
-        style: { size: "${reset_icon_size}", position: "${reset_position}" }
+        style: { size: "${reset_size}", position: { x: "${reset_x}", y: "${reset_y}" } }
         behavior:
           - event: click
             action: reset_fill_stroke
+      # Mode buttons: Color / Gradient / None
+      - id: "${id_prefix}mode_btns"
+        type: container
+        layout: row
+        style: { position: { x: "${mode_x}", y: "${mode_y}" }, gap: 2 }
+        children:
+          - id: "${id_prefix}solid_btn"
+            type: icon_button
+            summary: "Color"
+            icon: fill_solid
+            style: { size: "${mode_btn_size}" }
+            behavior:
+              - event: click
+                action: set_fill_type_solid
+          - id: "${id_prefix}gradient_btn"
+            type: icon_button
+            summary: "Gradient"
+            icon: fill_gradient
+            style: { size: "${mode_btn_size}" }
+            behavior:
+              - event: click
+                action: set_fill_type_gradient
+          - id: "${id_prefix}none_btn"
+            type: icon_button
+            summary: "None"
+            icon: color_none
+            style: { size: "${mode_btn_size}" }
+            behavior:
+              - event: click
+                action: set_fill_none
+                condition: "state.fill_on_top"
+              - event: click
+                action: set_stroke_none
+                condition: "not state.fill_on_top"
