@@ -62,7 +62,7 @@ fn render_el(
                 let col_style = el.get("col").and_then(|c| c.as_u64())
                     .map(|c| {
                         let pct = (c as f64 / 12.0 * 100.0).round();
-                        format!("flex:0 0 {pct}%;max-width:{pct}%;min-width:0;padding:0 4px;")
+                        format!("flex:0 0 {pct}%;max-width:{pct}%;min-width:0;overflow:hidden;padding:0 4px;")
                     })
                     .unwrap_or_default();
                 let style = format!("{col_style}{base_style}");
@@ -589,7 +589,7 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let col_style = el.get("col").and_then(|c| c.as_u64())
         .map(|c| {
             let pct = (c as f64 / 12.0 * 100.0).round();
-            format!("flex:0 0 {pct}%;max-width:{pct}%;min-width:0;padding:0 4px;")
+            format!("flex:0 0 {pct}%;max-width:{pct}%;min-width:0;overflow:hidden;padding:0 4px;")
         })
         .unwrap_or_default();
     // Apply default text color if not explicitly set in the element's style
