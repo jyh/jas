@@ -62,7 +62,7 @@ fn render_el(
                 let col_style = el.get("col").and_then(|c| c.as_u64())
                     .map(|c| {
                         let pct = (c as f64 / 12.0 * 100.0).round();
-                        format!("flex:0 0 {pct}%;max-width:{pct}%;min-width:0;padding:0 4px;box-sizing:border-box;")
+                        format!("flex:0 0 {pct}%;max-width:{pct}%;padding:0 4px;")
                     })
                     .unwrap_or_default();
                 let style = format!("{col_style}{base_style}");
@@ -589,7 +589,7 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let col_style = el.get("col").and_then(|c| c.as_u64())
         .map(|c| {
             let pct = (c as f64 / 12.0 * 100.0).round();
-            format!("flex:0 0 {pct}%;max-width:{pct}%;min-width:0;padding:0 4px;box-sizing:border-box;")
+            format!("flex:0 0 {pct}%;max-width:{pct}%;padding:0 4px;")
         })
         .unwrap_or_default();
     // Apply default text color if not explicitly set in the element's style
@@ -755,7 +755,7 @@ fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             step: "{step}",
             initial_value: "{value}",
             disabled: disabled,
-            style: "flex:1;min-width:0;width:0;{style}",
+            style: "flex:1;{style}",
             oninput: move |evt: Event<FormData>| {
                 if field.is_empty() { return; }
                 let new_val: f64 = evt.value().parse().unwrap_or(0.0);
