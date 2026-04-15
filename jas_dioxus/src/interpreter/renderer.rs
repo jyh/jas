@@ -504,6 +504,17 @@ fn build_style(el: &serde_json::Value, ctx: &serde_json::Value) -> String {
                 };
                 parts.push(format!("justify-content:{v}"));
             }
+            "position" => {
+                // position: {x, y} → absolute positioning
+                if let Some(obj) = val.as_object() {
+                    let x = obj.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    let y = obj.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    parts.push(format!("position:absolute;left:{x}px;top:{y}px"));
+                } else {
+                    // position: "relative" etc.
+                    parts.push(format!("position:{resolved}"));
+                }
+            }
             _ => {}
         }
     }
@@ -834,10 +845,13 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     let border = if color.is_empty() { "1px dashed var(--jas-border,#555)" } else { "1px solid var(--jas-border,#666)" };
     let hollow = el.get("hollow").and_then(|h| h.as_bool()).unwrap_or(false);
 
+    // Build positioning from style (handles position: {x, y} → absolute)
+    let extra_style = build_style(el, ctx);
+
     let style = if hollow {
-        format!("width:{size}px;height:{size}px;background:transparent;border:6px solid {bg};cursor:pointer;box-sizing:border-box;")
+        format!("width:{size}px;height:{size}px;background:transparent;border:6px solid {bg};cursor:pointer;box-sizing:border-box;{extra_style}")
     } else {
-        format!("width:{size}px;height:{size}px;background:{bg};border:{border};cursor:pointer;box-sizing:border-box;")
+        format!("width:{size}px;height:{size}px;background:{bg};border:{border};cursor:pointer;box-sizing:border-box;{extra_style}")
     };
 
     let on_click = build_click_handler(el, ctx, rctx);
