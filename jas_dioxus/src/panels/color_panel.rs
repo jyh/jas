@@ -113,6 +113,8 @@ mod tests {
             color_panel_mode: ColorMode::Hsb,
             app_default_fill: Some(crate::geometry::element::Fill::new(crate::geometry::element::Color::WHITE)),
             app_default_stroke: Some(crate::geometry::element::Stroke::new(crate::geometry::element::Color::BLACK, 1.0)),
+            swatch_libraries: serde_json::json!({}),
+            stroke_panel: crate::workspace::app_state::StrokePanelState::default(),
         }
     }
 
