@@ -98,11 +98,36 @@ fn pack_stroke(stroke: &Option<Stroke>) -> Value {
                 LineJoin::Round => 1,
                 LineJoin::Bevel => 2,
             };
+            let align = match s.align {
+                StrokeAlign::Center => 0,
+                StrokeAlign::Inside => 1,
+                StrokeAlign::Outside => 2,
+            };
+            let start_arrow = vstr(s.start_arrow.as_str());
+            let end_arrow = vstr(s.end_arrow.as_str());
+            let arrow_align = match s.arrow_align {
+                ArrowAlign::TipAtEnd => 0,
+                ArrowAlign::CenterAtEnd => 1,
+            };
+            // Dash pattern: pack as array of active values
+            let dash: Vec<Value> = s.dash_array().iter().map(|&v| vf64(v)).collect();
             Value::Array(vec![
                 pack_color(&s.color), vf64(s.width), vint(cap), vint(join), vf64(s.opacity),
+                vf64(s.miter_limit), vint(align),
+                Value::Array(dash),
+                start_arrow, end_arrow,
+                vf64(s.start_arrow_scale), vf64(s.end_arrow_scale),
+                vint(arrow_align),
             ])
         }
     }
+}
+
+fn pack_width_points(pts: &[StrokeWidthPoint]) -> Value {
+    if pts.is_empty() { return Value::Nil; }
+    Value::Array(pts.iter().map(|p| {
+        Value::Array(vec![vf64(p.t), vf64(p.width_left), vf64(p.width_right)])
+    }).collect())
 }
 
 fn pack_transform(t: &Option<Transform>) -> Value {
@@ -161,7 +186,7 @@ fn pack_element(elem: &Element) -> Value {
             let (locked, opacity, vis, xform) = pack_common(&e.common);
             Value::Array(vec![vint(TAG_LINE), locked, opacity, vis, xform,
                               vf64(e.x1), vf64(e.y1), vf64(e.x2), vf64(e.y2),
-                              pack_stroke(&e.stroke)])
+                              pack_stroke(&e.stroke), pack_width_points(&e.width_points)])
         }
         Element::Rect(e) => {
             let (locked, opacity, vis, xform) = pack_common(&e.common);
@@ -200,7 +225,8 @@ fn pack_element(elem: &Element) -> Value {
             let (locked, opacity, vis, xform) = pack_common(&e.common);
             let cmds: Vec<Value> = e.d.iter().map(pack_path_command).collect();
             Value::Array(vec![vint(TAG_PATH), locked, opacity, vis, xform,
-                              Value::Array(cmds), pack_fill(&e.fill), pack_stroke(&e.stroke)])
+                              Value::Array(cmds), pack_fill(&e.fill), pack_stroke(&e.stroke),
+                              pack_width_points(&e.width_points)])
         }
         Element::Text(e) => {
             let (locked, opacity, vis, xform) = pack_common(&e.common);
@@ -322,22 +348,63 @@ fn unpack_stroke(v: &Value) -> Option<Stroke> {
         2 => LineJoin::Bevel,
         n => panic!("unknown linejoin: {}", n),
     };
+    // Extended fields (backward compatible: old files have 5 elements)
+    let (miter_limit, align, dash_pattern, dash_len,
+         start_arrow, end_arrow, start_arrow_scale, end_arrow_scale, arrow_align)
+    = if arr.len() > 5 {
+        let ml = as_f64(&arr[5]);
+        let al = match as_i64(&arr[6]) {
+            1 => StrokeAlign::Inside,
+            2 => StrokeAlign::Outside,
+            _ => StrokeAlign::Center,
+        };
+        let dash_arr = as_array(&arr[7]);
+        let mut dp = [0.0f64; 6];
+        let dl = dash_arr.len().min(6) as u8;
+        for (i, v) in dash_arr.iter().enumerate().take(6) {
+            dp[i] = as_f64(v);
+        }
+        let sa = Arrowhead::from_str(as_str(&arr[8]));
+        let ea = Arrowhead::from_str(as_str(&arr[9]));
+        let sas = as_f64(&arr[10]);
+        let eas = as_f64(&arr[11]);
+        let aa = match as_i64(&arr[12]) {
+            1 => ArrowAlign::CenterAtEnd,
+            _ => ArrowAlign::TipAtEnd,
+        };
+        (ml, al, dp, dl, sa, ea, sas, eas, aa)
+    } else {
+        (10.0, StrokeAlign::Center, [0.0; 6], 0,
+         Arrowhead::None, Arrowhead::None, 100.0, 100.0, ArrowAlign::TipAtEnd)
+    };
     Some(Stroke {
         color: unpack_color(&arr[0]),
         width: as_f64(&arr[1]),
         linecap: cap,
         linejoin: join,
-        miter_limit: 10.0,
-        align: StrokeAlign::Center,
-        dash_pattern: [0.0; 6],
-        dash_len: 0,
-        start_arrow: Arrowhead::None,
-        end_arrow: Arrowhead::None,
-        start_arrow_scale: 100.0,
-        end_arrow_scale: 100.0,
-        arrow_align: ArrowAlign::TipAtEnd,
+        miter_limit,
+        align,
+        dash_pattern,
+        dash_len,
+        start_arrow,
+        end_arrow,
+        start_arrow_scale,
+        end_arrow_scale,
+        arrow_align,
         opacity: as_f64(&arr[4]),
     })
+}
+
+fn unpack_width_points(v: &Value) -> Vec<StrokeWidthPoint> {
+    if v.is_nil() { return vec![]; }
+    as_array(v).iter().map(|p| {
+        let a = as_array(p);
+        StrokeWidthPoint {
+            t: as_f64(&a[0]),
+            width_left: as_f64(&a[1]),
+            width_right: as_f64(&a[2]),
+        }
+    }).collect()
 }
 
 fn unpack_transform(v: &Value) -> Option<Transform> {
@@ -418,7 +485,7 @@ fn unpack_element(v: &Value) -> Element {
             x1: as_f64(&arr[5]), y1: as_f64(&arr[6]),
             x2: as_f64(&arr[7]), y2: as_f64(&arr[8]),
             stroke: unpack_stroke(&arr[9]),
-            width_points: vec![],
+            width_points: if arr.len() > 10 { unpack_width_points(&arr[10]) } else { vec![] },
             common,
         }),
         TAG_RECT => Element::Rect(RectElem {
@@ -463,7 +530,7 @@ fn unpack_element(v: &Value) -> Element {
             Element::Path(PathElem {
                 d: cmds,
                 fill: unpack_fill(&arr[6]), stroke: unpack_stroke(&arr[7]),
-                width_points: vec![],
+                width_points: if arr.len() > 8 { unpack_width_points(&arr[8]) } else { vec![] },
                 common,
             })
         }

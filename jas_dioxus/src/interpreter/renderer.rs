@@ -1306,47 +1306,70 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
 
-    rsx! {
-        input {
-            id: "{id}",
-            r#type: "number",
-            min: "{min}",
-            max: "{max}",
-            value: "{value}",
-            style: "width:45px;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
-            oninput: move |evt: Event<FormData>| {
-                let new_val: f64 = evt.value().parse().unwrap_or(0.0);
-                match &bind_target {
-                    BindTarget::Dialog(field) => {
+    // Panel bindings: commit on Enter/blur only, don't fight with re-renders.
+    // Dialog bindings: controlled value with live updates.
+    let panel_handler = if let BindTarget::Panel(ref field) = bind_target {
+        let f = field.clone();
+        let app = app.clone();
+        let mut revision = revision;
+        Some(EventHandler::new(move |evt: Event<FormData>| {
+            let new_val: f64 = evt.value().parse().unwrap_or(0.0);
+            let f = f.clone();
+            let app = app.clone();
+            spawn(async move {
+                let mut st = app.borrow_mut();
+                set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
+                if f == "weight" {
+                    if let Some(ref mut stroke) = st.app_default_stroke {
+                        stroke.width = new_val;
+                    }
+                    let idx = st.active_tab;
+                    if let Some(tab) = st.tabs.get_mut(idx) {
+                        if let Some(ref mut stroke) = tab.model.default_stroke {
+                            stroke.width = new_val;
+                        }
+                    }
+                }
+                st.apply_stroke_panel_to_selection();
+            });
+            revision += 1;
+        }))
+    } else { None };
+
+    if panel_handler.is_some() {
+        rsx! {
+            input {
+                id: "{id}",
+                r#type: "number",
+                min: "{min}",
+                max: "{max}",
+                initial_value: "{value}",
+                style: "width:45px;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
+                onchange: move |evt: Event<FormData>| {
+                    if let Some(ref h) = panel_handler { h.call(evt); }
+                },
+            }
+        }
+    } else {
+        rsx! {
+            input {
+                id: "{id}",
+                r#type: "number",
+                min: "{min}",
+                max: "{max}",
+                value: "{value}",
+                style: "width:45px;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
+                oninput: move |evt: Event<FormData>| {
+                    let new_val: f64 = evt.value().parse().unwrap_or(0.0);
+                    if let BindTarget::Dialog(ref field) = bind_target {
                         if let Some(mut ds) = dialog_signal() {
                             ds.set_value(field, serde_json::json!(new_val));
                             dialog_signal.set(Some(ds));
                         }
                     }
-                    BindTarget::Panel(field) => {
-                        let f = field.clone();
-                        let app = app.clone();
-                        spawn(async move {
-                            let mut st = app.borrow_mut();
-                            set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
-                            if f == "weight" {
-                                if let Some(ref mut stroke) = st.app_default_stroke {
-                                    stroke.width = new_val;
-                                }
-                                let idx = st.active_tab;
-                                if let Some(tab) = st.tabs.get_mut(idx) {
-                                    if let Some(ref mut stroke) = tab.model.default_stroke {
-                                        stroke.width = new_val;
-                                    }
-                                }
-                            }
-                            st.apply_stroke_panel_to_selection();
-                        });
-                    }
-                    BindTarget::None => { return; }
-                }
-                revision += 1;
-            },
+                    revision += 1;
+                },
+            }
         }
     }
 }
