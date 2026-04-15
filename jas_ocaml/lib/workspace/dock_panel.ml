@@ -181,7 +181,7 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
             match active_panel group with
             | Some kind ->
               let packing = fun w -> group_box#pack ~expand:false w in
-              Yaml_panel_view.create_panel_body ~packing ~kind
+              Yaml_panel_view.create_panel_body ~packing ~kind ~get_model:(fun () -> Some (get_model ())) ()
             | None -> ()
           end;
 
@@ -297,7 +297,7 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
           match Workspace_layout.active_panel group with
           | Some kind ->
             let packing = fun w -> group_box#pack ~expand:false w in
-            Yaml_panel_view.create_panel_body ~packing ~kind
+            Yaml_panel_view.create_panel_body ~packing ~kind ~get_model:(fun () -> Some (get_model ())) ()
           | None -> ()
         end
       ) fd.dock.groups;

@@ -261,56 +261,171 @@ def _render_panel(el, store, ctx, dispatch_fn):
     return _render_placeholder(el, store, ctx, dispatch_fn)
 
 
+_LAYER_COLORS = [
+    "#4a90d9", "#d94a4a", "#4ad94a", "#4a4ad9", "#d9d94a",
+    "#d94ad9", "#4ad9d9", "#b0b0b0", "#2a7a2a",
+]
+
+_TYPE_LABELS = {
+    "Line": "Line", "Rect": "Rectangle", "Circle": "Circle",
+    "Ellipse": "Ellipse", "Polyline": "Polyline", "Polygon": "Polygon",
+    "Path": "Path", "Text": "Text", "TextPath": "Text Path",
+    "Group": "Group", "Layer": "Layer",
+}
+
+def _element_type_label(elem):
+    return _TYPE_LABELS.get(type(elem).__name__, type(elem).__name__)
+
+def _element_display_name(elem):
+    from geometry.element import Layer
+    if isinstance(elem, Layer) and elem.name:
+        return elem.name, True
+    return f"<{_element_type_label(elem)}>", False
+
+def _vis_icon(vis):
+    from geometry.element import Visibility
+    if vis == Visibility.OUTLINE: return "\u25d0"
+    if vis == Visibility.INVISIBLE: return "\u25cb"
+    return "\u25c9"
+
+def _cycle_visibility(vis):
+    from geometry.element import Visibility
+    if vis == Visibility.PREVIEW: return Visibility.OUTLINE
+    if vis == Visibility.OUTLINE: return Visibility.INVISIBLE
+    return Visibility.PREVIEW
+
 def _render_tree_view(el, store, ctx, dispatch_fn):
-    """Render a tree_view widget with sample document data."""
+    """Render a tree_view widget from the live document model."""
+    from dataclasses import replace as dc_replace
+    from geometry.element import Group, Layer, Visibility
+    from document.document import ElementSelection
+
     widget = QWidget()
     layout = QVBoxLayout(widget)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
 
-    # Sample tree data matching the Flask/Rust implementations
-    rows = [
-        (0, "\u25c9", "\U0001F513", "\u25bc", "Layer 1",     True,  False),
-        (1, "\u25c9", "\U0001F513", "\u25bc", "<Group>",     False, False),
-        (2, "\u25c9", "\U0001F513", "",       "<Path>",      False, False),
-        (2, "\u25c9", "\U0001F512", "",       "Background",  True,  False),
-        (2, "\u25d0", "\U0001F513", "",       "Title",       True,  True),
-        (1, "\u25cb", "\U0001F513", "",       "<Circle>",    False, False),
-        (0, "\u25c9", "\U0001F513", "\u25bc", "Layer 2",     True,  False),
-        (1, "\u25c9", "\U0001F513", "",       "<Line>",      False, True),
-    ]
+    get_model = ctx.get("_get_model")
+    if not get_model:
+        layout.addStretch()
+        return widget
 
-    for depth, eye, lock, twirl, name, _is_named, selected in rows:
+    model = get_model()
+    if model is None:
+        layout.addStretch()
+        return widget
+
+    doc = model.document
+    selected_paths = doc.selected_paths()
+
+    def _flatten(elements, depth, path_prefix, layer_color, rows):
+        for i in reversed(range(len(elements))):
+            elem = elements[i]
+            path = path_prefix + (i,)
+            is_container = isinstance(elem, Group)
+            is_selected = path in selected_paths
+            cur_color = _LAYER_COLORS[i % len(_LAYER_COLORS)] if isinstance(elem, Layer) and len(path) == 1 else layer_color
+            name, is_named = _element_display_name(elem)
+            rows.append((depth, path, elem, name, is_named, is_selected, is_container, cur_color))
+            if is_container and hasattr(elem, 'children'):
+                _flatten(elem.children, depth + 1, path, cur_color, rows)
+
+    rows = []
+    _flatten(doc.layers, 0, (), "#4a90d9", rows)
+
+    def _rebuild():
+        """Rebuild the tree view after a document change."""
+        # Clear existing widgets
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        # Re-render
+        new_model = get_model()
+        if new_model is None:
+            return
+        new_doc = new_model.document
+        new_selected = new_doc.selected_paths()
+        new_rows = []
+        _flatten(new_doc.layers, 0, (), "#4a90d9", new_rows)
+        for depth, path, elem, name, is_named, is_sel, is_cont, lcolor in new_rows:
+            _add_row(layout, depth, path, elem, name, is_named, is_sel, is_cont, lcolor)
+        layout.addStretch()
+
+    def _add_row(parent_layout, depth, path, elem, name, is_named, is_selected, is_container, layer_color):
         row = QWidget()
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(4, 0, 4, 0)
         row_layout.setSpacing(2)
         row.setFixedHeight(24)
 
-        # Indentation
         if depth > 0:
             spacer = QLabel("")
             spacer.setFixedWidth(depth * 16)
             row_layout.addWidget(spacer)
 
-        # Eye, Lock, Twirl
-        for icon_text in [eye, lock]:
-            lbl = QLabel(icon_text)
-            lbl.setFixedWidth(16)
-            lbl.setAlignment(Qt.AlignCenter)
-            row_layout.addWidget(lbl)
+        # Eye button
+        vis = getattr(elem, 'visibility', Visibility.PREVIEW)
+        eye_btn = QPushButton(_vis_icon(vis))
+        eye_btn.setFixedSize(16, 16)
+        eye_btn.setFlat(True)
+        eye_btn.setStyleSheet("font-size: 10px; padding: 0;")
+        def _on_eye(checked, p=path):
+            m = get_model()
+            if m is None: return
+            d = m.document
+            e = d.get_element(p)
+            if e is None: return
+            new_vis = _cycle_visibility(getattr(e, 'visibility', Visibility.PREVIEW))
+            new_e = dc_replace(e, visibility=new_vis)
+            m.snapshot()
+            new_doc = d.replace_element(p, new_e)
+            if new_vis == Visibility.INVISIBLE:
+                new_doc = dc_replace(new_doc, selection=frozenset(
+                    es for es in new_doc.selection if not (es.path == p or es.path[:len(p)] == p)
+                ))
+            m.document = new_doc
+            _rebuild()
+        eye_btn.clicked.connect(_on_eye)
+        row_layout.addWidget(eye_btn)
 
-        if twirl:
-            lbl = QLabel(twirl)
-            lbl.setFixedWidth(16)
-            lbl.setAlignment(Qt.AlignCenter)
-            row_layout.addWidget(lbl)
+        # Lock button
+        locked = getattr(elem, 'locked', False)
+        lock_btn = QPushButton("\U0001F512" if locked else "\U0001F513")
+        lock_btn.setFixedSize(16, 16)
+        lock_btn.setFlat(True)
+        lock_btn.setStyleSheet("font-size: 10px; padding: 0;")
+        def _on_lock(checked, p=path):
+            m = get_model()
+            if m is None: return
+            d = m.document
+            e = d.get_element(p)
+            if e is None: return
+            new_locked = not getattr(e, 'locked', False)
+            new_e = dc_replace(e, locked=new_locked)
+            m.snapshot()
+            new_doc = d.replace_element(p, new_e)
+            if new_locked:
+                new_doc = dc_replace(new_doc, selection=frozenset(
+                    es for es in new_doc.selection if not (es.path == p or es.path[:len(p)] == p)
+                ))
+            m.document = new_doc
+            _rebuild()
+        lock_btn.clicked.connect(_on_lock)
+        row_layout.addWidget(lock_btn)
+
+        # Twirl or gap
+        if is_container:
+            twirl_lbl = QLabel("\u25bc")
+            twirl_lbl.setFixedWidth(16)
+            twirl_lbl.setAlignment(Qt.AlignCenter)
+            row_layout.addWidget(twirl_lbl)
         else:
             gap = QLabel("")
             gap.setFixedWidth(16)
             row_layout.addWidget(gap)
 
-        # Preview placeholder
+        # Preview
         preview = QFrame()
         preview.setFixedSize(24, 24)
         preview.setFrameStyle(QFrame.Box)
@@ -320,17 +435,30 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
         # Name
         name_lbl = QLabel(name)
         name_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        if not is_named:
+            name_lbl.setStyleSheet("color: #999;")
         row_layout.addWidget(name_lbl)
 
         # Select square
         sq = QFrame()
         sq.setFixedSize(12, 12)
         sq.setFrameStyle(QFrame.Box)
-        if selected:
-            sq.setStyleSheet("background: #4a90d9;")
+        if is_selected:
+            sq.setStyleSheet(f"background: {layer_color};")
+        def _on_select(event, p=path):
+            m = get_model()
+            if m is None: return
+            d = m.document
+            new_sel = frozenset([ElementSelection.all(p)])
+            m.document = dc_replace(d, selection=new_sel)
+            _rebuild()
+        sq.mousePressEvent = _on_select
         row_layout.addWidget(sq)
 
-        layout.addWidget(row)
+        parent_layout.addWidget(row)
+
+    for depth, path, elem, name, is_named, is_selected, is_container, layer_color in rows:
+        _add_row(layout, depth, path, elem, name, is_named, is_selected, is_container, layer_color)
 
     layout.addStretch()
     return widget
