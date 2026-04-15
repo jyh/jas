@@ -429,7 +429,7 @@ layout:
                     style: { size: 28, position: { x: 0, y: 0 } }
                     bind:
                       color: "state.fill_color"
-                      z_index: "state.fill_on_top ? 2 : 1"
+                      z_index: "if state.fill_on_top then 2 else 1"
                     behavior:
                       - event: click
                         effects:
@@ -451,7 +451,7 @@ layout:
                     style: { size: 28, position: { x: 10, y: 10 } }
                     bind:
                       color: "state.stroke_color"
-                      z_index: "state.fill_on_top ? 1 : 2"
+                      z_index: "if state.fill_on_top then 1 else 2"
                     behavior:
                       - event: click
                         effects:
@@ -683,7 +683,7 @@ layout:
                 condition: "state.dock_collapsed"
                 action: expand_dock
             bind:
-              icon: 'state.dock_collapsed ? "chevron_left" : "chevron_right"'
+              icon: 'if state.dock_collapsed then "chevron_left" else "chevron_right"'
           - id: dock_close_btn
             type: icon_button
             summary: "Close panels"

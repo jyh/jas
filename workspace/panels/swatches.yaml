@@ -366,10 +366,10 @@ content:
         color_swatch tiles). The bracket notation [lib.id] resolves the
         outer repeat variable within the inner repeat's data source path.
       style: { flex: 1, overflow_y: auto }
-      repeat:
+      foreach:
         source: "panel.open_libraries"
         as: lib
-      template:
+      do:
         type: disclosure
         label: "{{data.swatch_libraries[lib.id].name}}"
         bind:
@@ -378,10 +378,10 @@ content:
           - type: container
             layout: wrap
             style: { gap: 1 }
-            repeat:
+            foreach:
               source: "data.swatch_libraries[lib.id].swatches"
               as: swatch
-            template:
+            do:
               type: color_swatch
               style: { size: 16 }
               bind:

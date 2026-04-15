@@ -34,7 +34,7 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
   else
   let open Yojson.Safe.Util in
   (* Handle repeat directive: expand template for each item in source *)
-  match el |> member "repeat", el |> member "template" with
+  match el |> member "foreach", el |> member "do" with
   | `Assoc _, template when template <> `Null ->
     render_repeat ~packing ~ctx el
   | _ ->
@@ -185,8 +185,8 @@ and render_children ~packing ~ctx el =
 
 and render_repeat ~packing ~ctx el =
   let open Yojson.Safe.Util in
-  let repeat_obj = el |> member "repeat" in
-  let template = el |> member "template" in
+  let repeat_obj = el |> member "foreach" in
+  let template = el |> member "do" in
   let source_expr = repeat_obj |> member "source" |> to_string_option |> Option.value ~default:"" in
   let var_name = repeat_obj |> member "as" |> to_string_option |> Option.value ~default:"item" in
   (* Resolve the source expression to raw JSON (preserving lists/objects) *)

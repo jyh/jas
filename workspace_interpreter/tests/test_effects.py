@@ -182,7 +182,7 @@ class TestOpenDialogEffect:
                 "color": {"type": "color", "default": "#ffffff"},
             },
             "init": {
-                "color": 'param.target == "fill" ? state.fill_color : state.stroke_color',
+                "color": 'if param.target == "fill" then state.fill_color else state.stroke_color',
                 "h": "hsb_h(dialog.color)",
                 "s": "hsb_s(dialog.color)",
                 "b": "hsb_b(dialog.color)",

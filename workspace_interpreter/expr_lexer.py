@@ -21,6 +21,9 @@ class TokenKind(Enum):
     IN = auto()
     FUN = auto()
     LET = auto()
+    IF = auto()
+    THEN = auto()
+    ELSE = auto()
     # Operators
     EQ = auto()        # ==
     NEQ = auto()       # !=
@@ -59,6 +62,9 @@ _KEYWORDS = {
     "in": TokenKind.IN,
     "fun": TokenKind.FUN,
     "let": TokenKind.LET,
+    "if": TokenKind.IF,
+    "then": TokenKind.THEN,
+    "else": TokenKind.ELSE,
 }
 
 

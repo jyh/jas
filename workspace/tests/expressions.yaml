@@ -44,12 +44,12 @@ tests:
     type: bool
 
   # Ternary
-  - expr: "state.flag ? state.a : state.b"
+  - expr: "if state.flag then state.a else state.b"
     state: { flag: true, a: 10, b: 20 }
     expected: 10
     type: number
 
-  - expr: "state.flag ? state.a : state.b"
+  - expr: "if state.flag then state.a else state.b"
     state: { flag: false, a: 10, b: 20 }
     expected: 20
     type: number
@@ -95,12 +95,12 @@ tests:
     type: string
 
   # Function with ternary argument
-  - expr: "hsb_h(state.flag ? state.a : state.b)"
+  - expr: "hsb_h(if state.flag then state.a else state.b)"
     state: { flag: true, a: "#ff0000", b: "#00ff00" }
     expected: 0
     type: number
 
-  - expr: "hsb_h(state.flag ? state.a : state.b)"
+  - expr: "hsb_h(if state.flag then state.a else state.b)"
     state: { flag: false, a: "#ff0000", b: "#00ff00" }
     expected: 120
     type: number
@@ -194,7 +194,7 @@ tests:
     type: bool
 
   # Nested ternary
-  - expr: 'state.x == 1 ? "one" : state.x == 2 ? "two" : "other"'
+  - expr: 'if state.x == 1 then "one" else if state.x == 2 then "two" else "other"'
     state: { x: 2 }
     expected: "two"
     type: string
@@ -248,12 +248,12 @@ tests:
     note: "achromatic (s=0) — unchanged"
 
   # Invert/complement with ternary (the real-world pattern)
-  - expr: "invert(state.flag ? state.a : state.b)"
+  - expr: "invert(if state.flag then state.a else state.b)"
     state: { flag: true, a: "#ff0000", b: "#00ff00" }
     expected: "#00ffff"
     type: color
 
-  - expr: "complement(state.flag ? state.a : state.b)"
+  - expr: "complement(if state.flag then state.a else state.b)"
     state: { flag: false, a: "#ff0000", b: "#00ff00" }
     expected: "#ff00ff"
     type: color

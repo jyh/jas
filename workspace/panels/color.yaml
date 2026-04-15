@@ -109,17 +109,17 @@ state:
       Empty slots render as hollow squares with a solid border.
 
 init:
-  h:   "hsb_h(state.fill_on_top ? state.fill_color : state.stroke_color)"
-  s:   "hsb_s(state.fill_on_top ? state.fill_color : state.stroke_color)"
-  b:   "hsb_b(state.fill_on_top ? state.fill_color : state.stroke_color)"
-  r:   "rgb_r(state.fill_on_top ? state.fill_color : state.stroke_color)"
-  g:   "rgb_g(state.fill_on_top ? state.fill_color : state.stroke_color)"
-  bl:  "rgb_b(state.fill_on_top ? state.fill_color : state.stroke_color)"
-  c:   "cmyk_c(state.fill_on_top ? state.fill_color : state.stroke_color)"
-  m:   "cmyk_m(state.fill_on_top ? state.fill_color : state.stroke_color)"
-  y:   "cmyk_y(state.fill_on_top ? state.fill_color : state.stroke_color)"
-  k:   "cmyk_k(state.fill_on_top ? state.fill_color : state.stroke_color)"
-  hex: "hex(state.fill_on_top ? state.fill_color : state.stroke_color)"
+  h:   "hsb_h(if state.fill_on_top then state.fill_color else state.stroke_color)"
+  s:   "hsb_s(if state.fill_on_top then state.fill_color else state.stroke_color)"
+  b:   "hsb_b(if state.fill_on_top then state.fill_color else state.stroke_color)"
+  r:   "rgb_r(if state.fill_on_top then state.fill_color else state.stroke_color)"
+  g:   "rgb_g(if state.fill_on_top then state.fill_color else state.stroke_color)"
+  bl:  "rgb_b(if state.fill_on_top then state.fill_color else state.stroke_color)"
+  c:   "cmyk_c(if state.fill_on_top then state.fill_color else state.stroke_color)"
+  m:   "cmyk_m(if state.fill_on_top then state.fill_color else state.stroke_color)"
+  y:   "cmyk_y(if state.fill_on_top then state.fill_color else state.stroke_color)"
+  k:   "cmyk_k(if state.fill_on_top then state.fill_color else state.stroke_color)"
+  hex: "hex(if state.fill_on_top then state.fill_color else state.stroke_color)"
   recent_colors: "document.recent_colors"
 
 menu:
@@ -146,10 +146,10 @@ menu:
   - separator
   - label: "Invert"
     action: invert_active_color
-    enabled_when: "state.fill_on_top ? state.fill_color != null : state.stroke_color != null"
+    enabled_when: "if state.fill_on_top then state.fill_color != null else state.stroke_color != null"
   - label: "Complement"
     action: complement_active_color
-    enabled_when: "state.fill_on_top ? state.fill_color != null : state.stroke_color != null"
+    enabled_when: "if state.fill_on_top then state.fill_color != null else state.stroke_color != null"
   - separator
   - label: "Create New Swatch..."
     disabled: true
@@ -368,7 +368,7 @@ content:
               children:
                 - template: slider_row
                   params: { label: "K", id_prefix: cp_k, max: 100, bind: "panel.k", unit: "%", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
 
             # HSB: H (0–360 °), S (0–100 %), B (0–100 %)
             - id: cp_sliders_hsb
@@ -380,13 +380,13 @@ content:
               children:
                 - template: slider_row
                   params: { label: "H", id_prefix: cp_h, max: 359, bind: "panel.h", unit: "\u00b0", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
                 - template: slider_row
                   params: { label: "S", id_prefix: cp_s, max: 100, bind: "panel.s", unit: "%", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
                 - template: slider_row
                   params: { label: "B", id_prefix: cp_b, max: 100, bind: "panel.b", unit: "%", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
 
             # RGB: R, G, B (0–255)
             - id: cp_sliders_rgb
@@ -398,13 +398,13 @@ content:
               children:
                 - template: slider_row
                   params: { label: "R", id_prefix: cp_r, max: 255, bind: "panel.r", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
                 - template: slider_row
                   params: { label: "G", id_prefix: cp_g, max: 255, bind: "panel.g", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
                 - template: slider_row
                   params: { label: "B", id_prefix: cp_bl, max: 255, bind: "panel.bl", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
 
             # CMYK: C, M, Y, K (0–100 %)
             - id: cp_sliders_cmyk
@@ -416,16 +416,16 @@ content:
               children:
                 - template: slider_row
                   params: { label: "C", id_prefix: cp_c, max: 100, bind: "panel.c", unit: "%", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
                 - template: slider_row
                   params: { label: "M", id_prefix: cp_m, max: 100, bind: "panel.m", unit: "%", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
                 - template: slider_row
                   params: { label: "Y", id_prefix: cp_y, max: 100, bind: "panel.y", unit: "%", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
                 - template: slider_row
                   params: { label: "K", id_prefix: cp_k_cmyk, max: 100, bind: "panel.k", unit: "%", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
 
             # Web Safe RGB: R, G, B (step=51, snaps to 0/51/102/153/204/255)
             - id: cp_sliders_web_safe
@@ -437,13 +437,13 @@ content:
               children:
                 - template: slider_row
                   params: { label: "R", id_prefix: cp_r_ws, max: 255, step: 51, bind: "panel.r", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
                 - template: slider_row
                   params: { label: "G", id_prefix: cp_g_ws, max: 255, step: 51, bind: "panel.g", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
                 - template: slider_row
                   params: { label: "B", id_prefix: cp_bl_ws, max: 255, step: 51, bind: "panel.bl", label_width: 10, input_width: 64,
-                            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null" }
+                            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null" }
 
     # ── Row 3: Hex field ─────────────────────────────────────────
     - type: container
@@ -467,7 +467,7 @@ content:
           style: { width: 52 }
           bind:
             value: "panel.hex"
-            disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
+            disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null"
 
     # ── Color bar ───────────────────────────────────────────────
     - id: cp_color_bar
@@ -485,4 +485,4 @@ content:
         Disabled when the active attribute is none.
       bind:
         brightness: "panel.b"
-        disabled: "state.fill_on_top ? state.fill_color == null : state.stroke_color == null"
+        disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null"

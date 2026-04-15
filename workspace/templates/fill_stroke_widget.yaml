@@ -23,7 +23,7 @@ fill_stroke_widget:
         style: { size: "${swatch_size}", position: { x: 0, y: 0 } }
         bind:
           color: "state.fill_color"
-          z_index: "state.fill_on_top ? 2 : 1"
+          z_index: "if state.fill_on_top then 2 else 1"
         behavior:
           - event: click
             effects:
@@ -38,7 +38,7 @@ fill_stroke_widget:
         style: { size: "${swatch_size}", position: { x: "${offset}", y: "${offset}" } }
         bind:
           color: "state.stroke_color"
-          z_index: "state.fill_on_top ? 1 : 2"
+          z_index: "if state.fill_on_top then 1 else 2"
         behavior:
           - event: click
             effects:

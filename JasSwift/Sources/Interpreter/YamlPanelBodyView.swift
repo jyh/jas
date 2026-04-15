@@ -14,7 +14,7 @@ struct YamlElementView: View {
         // Check bind.visible — if the expression evaluates to false, hide the element.
         if !isVisible() {
             EmptyView()
-        } else if element["repeat"] != nil && element["template"] != nil {
+        } else if element["foreach"] != nil && element["do"] != nil {
             // Repeat directive: expand template for each item in source list.
             renderRepeat()
         } else {
@@ -70,8 +70,8 @@ struct YamlElementView: View {
     /// injected via Scope for proper static scoping.
     @ViewBuilder
     private func renderRepeat() -> some View {
-        let repeatSpec = element["repeat"] as? [String: Any] ?? [:]
-        let template = element["template"] as? [String: Any] ?? [:]
+        let repeatSpec = element["foreach"] as? [String: Any] ?? [:]
+        let template = element["do"] as? [String: Any] ?? [:]
         let sourceExpr = repeatSpec["source"] as? String ?? ""
         let varName = repeatSpec["as"] as? String ?? "item"
 

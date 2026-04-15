@@ -179,15 +179,16 @@ class Parser:
         return node
 
     def _parse_ternary(self):
-        """ternary = or_expr ( '?' ternary ':' ternary )?"""
-        node = self._parse_or()
-        if self._at(TokenKind.QUESTION):
+        """ternary = 'if' expr 'then' expr 'else' expr | or_expr"""
+        if self._at(TokenKind.IF):
             self._advance()
-            true_expr = self._parse_ternary()
-            self._expect(TokenKind.COLON)
-            false_expr = self._parse_ternary()
-            return Ternary(node, true_expr, false_expr)
-        return node
+            condition = self._parse_sequence()
+            self._expect(TokenKind.THEN)
+            true_expr = self._parse_sequence()
+            self._expect(TokenKind.ELSE)
+            false_expr = self._parse_sequence()
+            return Ternary(condition, true_expr, false_expr)
+        return self._parse_or()
 
     def _parse_or(self):
         """or_expr = and_expr ( 'or' and_expr )*"""
