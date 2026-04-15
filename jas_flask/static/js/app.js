@@ -303,8 +303,8 @@
         return evalExpr(expr.trim(), ctx);
       });
     }
-    // Ternary: resolve condition, then return the chosen branch
-    var ternMatch = s.match(/^(.+?)\s*\?\s*(.+?)\s*:\s*(.+)$/);
+    // Ternary: if COND then TRUE else FALSE
+    var ternMatch = s.match(/^if\s+(.+?)\s+then\s+(.+?)\s+else\s+(.+)$/);
     if (ternMatch) {
       var cond = resolve(ternMatch[1].trim(), ctx);
       var condBool = (cond === true || cond === "true" || (cond && cond !== "false" && cond !== "0" && cond !== "null" && cond !== ""));
@@ -338,12 +338,12 @@
     // Simple expression evaluator for interpolation
     ctx = ctx || {};
     // Check for function call syntax: fn_name(arg)
-    // Use a balanced-paren match to handle fn(a ? b : c) correctly
+    // Use a balanced-paren match to handle fn(if a then b else c) correctly
     var fnMatch = expr.match(/^(\w+)\((.+)\)$/);
     if (fnMatch && colorFunctions[fnMatch[1]]) {
       var argStr = fnMatch[2].trim();
-      // If the argument contains a ternary, evaluate it first
-      var ternaryMatch = argStr.match(/^(.+?)\s*\?\s*(.+?)\s*:\s*(.+)$/);
+      // If the argument contains an if/then/else, evaluate it first
+      var ternaryMatch = argStr.match(/^if\s+(.+?)\s+then\s+(.+?)\s+else\s+(.+)$/);
       if (ternaryMatch) {
         var cond = resolve(ternaryMatch[1].trim(), ctx);
         var arg = evalCondition(String(cond), ctx)
@@ -393,9 +393,9 @@
     // Simple boolean evaluation
     if (resolved === "true" || resolved === true) return true;
     if (resolved === "false" || resolved === false || resolved === "" || resolved === "null" || resolved === null) return false;
-    // Handle ternary: "cond ? true_branch : false_branch"
+    // Handle ternary: "if COND then TRUE else FALSE"
     var ternaryMatch = typeof resolved === "string"
-      ? resolved.match(/^(.+?)\s*\?\s*(.+)\s*:\s*(.+)$/) : null;
+      ? resolved.match(/^if\s+(.+?)\s+then\s+(.+?)\s+else\s+(.+)$/) : null;
     if (ternaryMatch) {
       return evalCondition(ternaryMatch[1].trim(), ctx)
         ? evalCondition(ternaryMatch[2].trim(), ctx)
@@ -513,12 +513,12 @@
         el.style.cursor = "default";
       }
     });
-    // Generic data-bind-icon: swap SVG content via ternary expression
+    // Generic data-bind-icon: swap SVG content via if/then/else expression
     document.querySelectorAll("[data-bind-icon]").forEach(function (el) {
       var expr = el.getAttribute("data-bind-icon");
       var resolved = resolve(expr, {});
       if (typeof resolved !== "string") return;
-      var ternary = resolved.match(/^(.+?)\s*\?\s*(\S+)\s*:\s*(\S+)$/);
+      var ternary = resolved.match(/^if\s+(.+?)\s+then\s+(\S+)\s+else\s+(\S+)$/);
       if (ternary) {
         var cond = evalCondition(ternary[1], {});
         var iconName = cond ? ternary[2] : ternary[3];
@@ -532,12 +532,12 @@
         }
       }
     });
-    // Generic data-bind-z_index: set z-index via ternary expression
+    // Generic data-bind-z_index: set z-index via if/then/else expression
     document.querySelectorAll("[data-bind-z_index]").forEach(function (el) {
       var expr = el.getAttribute("data-bind-z_index");
       var resolved = resolve(expr, {});
       if (typeof resolved !== "string") return;
-      var ternary = resolved.match(/^(.+?)\s*\?\s*(\S+)\s*:\s*(\S+)$/);
+      var ternary = resolved.match(/^if\s+(.+?)\s+then\s+(\S+)\s+else\s+(\S+)$/);
       if (ternary) {
         var cond = evalCondition(ternary[1], {});
         el.style.zIndex = cond ? ternary[2] : ternary[3];

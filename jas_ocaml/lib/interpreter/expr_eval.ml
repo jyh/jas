@@ -127,7 +127,7 @@ let value_to_json (v : value) : Yojson.Safe.t =
 type token_kind =
   | Tk_ident | Tk_number | Tk_string | Tk_color
   | Tk_true | Tk_false | Tk_null | Tk_not | Tk_and | Tk_or | Tk_in
-  | Tk_fun | Tk_let
+  | Tk_fun | Tk_let | Tk_if | Tk_then | Tk_else
   | Tk_eq | Tk_neq | Tk_lt | Tk_gt | Tk_lte | Tk_gte
   | Tk_question | Tk_colon | Tk_dot | Tk_comma
   | Tk_lparen | Tk_rparen | Tk_lbracket | Tk_rbracket
@@ -162,6 +162,9 @@ let keyword_kind = function
   | "in" -> Some Tk_in
   | "fun" -> Some Tk_fun
   | "let" -> Some Tk_let
+  | "if" -> Some Tk_if
+  | "then" -> Some Tk_then
+  | "else" -> Some Tk_else
   | _ -> None
 
 let tokenize (source : string) : token array =
@@ -329,15 +332,16 @@ and parse_assign p =
     node
 
 and parse_ternary p =
-  let node = parse_or p in
-  if parser_at p [Tk_question] then begin
+  if parser_at p [Tk_if] then begin
     ignore (parser_advance p);
-    let true_expr = parse_ternary p in
-    ignore (parser_expect p Tk_colon);
-    let false_expr = parse_ternary p in
-    Ast_ternary (node, true_expr, false_expr)
+    let cond = parse_sequence p in
+    ignore (parser_expect p Tk_then);
+    let true_expr = parse_sequence p in
+    ignore (parser_expect p Tk_else);
+    let false_expr = parse_sequence p in
+    Ast_ternary (cond, true_expr, false_expr)
   end else
-    node
+    parse_or p
 
 and parse_or p =
   let node = ref (parse_and p) in
@@ -414,7 +418,8 @@ and parse_primary p =
       ignore (parser_advance p);
       let tok = parser_peek p in
       let is_ident_like = match tok.kind with
-        | Tk_ident | Tk_true | Tk_false | Tk_null | Tk_not | Tk_and | Tk_or | Tk_in -> true
+        | Tk_ident | Tk_true | Tk_false | Tk_null | Tk_not | Tk_and | Tk_or | Tk_in
+        | Tk_if | Tk_then | Tk_else -> true
         | _ -> false
       in
       if is_ident_like then begin

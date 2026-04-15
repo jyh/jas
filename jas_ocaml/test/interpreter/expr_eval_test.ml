@@ -179,7 +179,7 @@ let regression_tests = [
   Alcotest.test_case "ternary_still_works" `Quick (fun () ->
     assert_number 10.0
       (eval ~state:[("flag", `Bool true); ("a", `Int 10); ("b", `Int 20)]
-         "state.flag ? state.a : state.b"));
+         "if state.flag then state.a else state.b"));
 
   Alcotest.test_case "comparison_still_works" `Quick (fun () ->
     assert_bool true (eval "5 == 5"));

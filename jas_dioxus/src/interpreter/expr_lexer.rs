@@ -15,6 +15,9 @@ pub enum TokenKind {
     In,
     Fun,
     Let,
+    If,
+    Then,
+    Else,
     Eq,        // ==
     Neq,       // !=
     Lt,        // <
@@ -130,6 +133,9 @@ pub fn tokenize(source: &str) -> Vec<Token> {
                 "in" => TokenKind::In,
                 "fun" => TokenKind::Fun,
                 "let" => TokenKind::Let,
+                "if" => TokenKind::If,
+                "then" => TokenKind::Then,
+                "else" => TokenKind::Else,
                 _ => TokenKind::Ident(word),
             };
             tokens.push(Token { kind });

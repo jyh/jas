@@ -6,7 +6,7 @@
 //!   sequence       = let_expr (';' let_expr)*
 //!   let_expr       = 'let' IDENT '=' sequence 'in' let_expr | assign
 //!   assign         = ternary '<-' assign | ternary
-//!   ternary        = or_expr ('?' ternary ':' ternary)?
+//!   ternary        = 'if' sequence 'then' sequence 'else' sequence | or_expr
 //!   or_expr        = and_expr ('or' and_expr)*
 //!   and_expr       = not_expr ('and' not_expr)*
 //!   not_expr       = 'not' not_expr | '-' not_expr | comparison
@@ -182,21 +182,22 @@ impl Parser {
         node
     }
 
-    /// ternary = or_expr ( '?' ternary ':' ternary )?
+    /// ternary = 'if' sequence 'then' sequence 'else' sequence | or_expr
     fn parse_ternary(&mut self) -> Expr {
-        let node = self.parse_or();
-        if matches!(self.peek(), TokenKind::Question) {
+        if matches!(self.peek(), TokenKind::If) {
             self.pos += 1;
-            let true_expr = self.parse_ternary();
-            self.expect(&TokenKind::Colon);
-            let false_expr = self.parse_ternary();
+            let cond = self.parse_sequence();
+            self.expect(&TokenKind::Then);
+            let true_expr = self.parse_sequence();
+            self.expect(&TokenKind::Else);
+            let false_expr = self.parse_sequence();
             return Expr::Ternary {
-                cond: Box::new(node),
+                cond: Box::new(cond),
                 true_expr: Box::new(true_expr),
                 false_expr: Box::new(false_expr),
             };
         }
-        node
+        self.parse_or()
     }
 
     /// or_expr = and_expr ( 'or' and_expr )*
@@ -350,6 +351,18 @@ impl Parser {
                     TokenKind::In => {
                         self.pos += 1;
                         node = self.extend_or_dot(node, "in".to_string());
+                    }
+                    TokenKind::If => {
+                        self.pos += 1;
+                        node = self.extend_or_dot(node, "if".to_string());
+                    }
+                    TokenKind::Then => {
+                        self.pos += 1;
+                        node = self.extend_or_dot(node, "then".to_string());
+                    }
+                    TokenKind::Else => {
+                        self.pos += 1;
+                        node = self.extend_or_dot(node, "else".to_string());
                     }
                     TokenKind::Number(n) => {
                         // Integer index after dot (e.g. list.0)
@@ -691,7 +704,7 @@ mod tests {
 
     #[test]
     fn ternary() {
-        let ast = parse("cond ? 1 : 2").unwrap();
+        let ast = parse("if cond then 1 else 2").unwrap();
         assert_eq!(
             ast,
             Expr::Ternary {
@@ -771,8 +784,8 @@ mod tests {
 
     #[test]
     fn nested_ternary() {
-        // a ? b ? c : d : e  =>  a ? (b ? c : d) : e
-        let ast = parse("a ? b ? c : d : e").unwrap();
+        // if a then (if b then c else d) else e
+        let ast = parse("if a then if b then c else d else e").unwrap();
         assert_eq!(
             ast,
             Expr::Ternary {
