@@ -59,6 +59,9 @@ private enum TokenKind: Equatable {
     case `in`
     case fun
     case `let`
+    case ifKw
+    case then
+    case elseKw
     case eq       // ==
     case neq      // !=
     case lt       // <
@@ -175,6 +178,9 @@ private func tokenize(_ source: String) -> [Token] {
             case "in": kind = .in
             case "fun": kind = .fun
             case "let": kind = .let
+            case "if": kind = .ifKw
+            case "then": kind = .then
+            case "else": kind = .elseKw
             default: kind = .ident(word)
             }
             tokens.append(Token(kind: kind))
@@ -317,6 +323,9 @@ private class Parser {
         case .in: return "in"
         case .fun: return "fun"
         case .let: return "let"
+        case .ifKw: return "ifKw"
+        case .then: return "then"
+        case .elseKw: return "elseKw"
         case .eq: return "eq"
         case .neq: return "neq"
         case .lt: return "lt"
@@ -397,17 +406,18 @@ private class Parser {
         return node
     }
 
-    /// ternary = or_expr ( '?' ternary ':' ternary )?
+    /// ternary = 'if' sequence 'then' sequence 'else' sequence | or_expr
     func parseTernary() -> Expr {
-        let node = parseOr()
-        if case .question = peek() {
+        if case .ifKw = peek() {
             pos += 1
-            let trueExpr = parseTernary()
-            expect(.colon)
-            let falseExpr = parseTernary()
-            return .ternary(cond: node, trueExpr: trueExpr, falseExpr: falseExpr)
+            let cond = parseSequence()
+            expect(.then)
+            let trueExpr = parseSequence()
+            expect(.elseKw)
+            let falseExpr = parseSequence()
+            return .ternary(cond: cond, trueExpr: trueExpr, falseExpr: falseExpr)
         }
-        return node
+        return parseOr()
     }
 
     /// or_expr = and_expr ( 'or' and_expr )*
@@ -544,6 +554,15 @@ private class Parser {
                 case .let:
                     pos += 1
                     node = extendOrDot(node, "let")
+                case .ifKw:
+                    pos += 1
+                    node = extendOrDot(node, "if")
+                case .then:
+                    pos += 1
+                    node = extendOrDot(node, "then")
+                case .elseKw:
+                    pos += 1
+                    node = extendOrDot(node, "else")
                 case .number(let n):
                     // Integer index after dot (e.g. list.0)
                     pos += 1

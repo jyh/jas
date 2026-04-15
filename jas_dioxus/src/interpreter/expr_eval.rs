@@ -776,7 +776,7 @@ mod tests {
     fn ternary_true_branch() {
         let ctx = json!({"state": {"on": true}});
         assert_eq!(
-            eval("state.on ? \"yes\" : \"no\"", &ctx),
+            eval("if state.on then \"yes\" else \"no\"", &ctx),
             Value::Str("yes".to_string())
         );
     }
@@ -785,7 +785,7 @@ mod tests {
     fn ternary_false_branch() {
         let ctx = json!({"state": {"on": false}});
         assert_eq!(
-            eval("state.on ? \"yes\" : \"no\"", &ctx),
+            eval("if state.on then \"yes\" else \"no\"", &ctx),
             Value::Str("no".to_string())
         );
     }

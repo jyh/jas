@@ -95,7 +95,7 @@ let dialog_tests = [
           ("h", `Assoc [("type", `String "number"); ("default", `Int 0)]);
           ("color", `Assoc [("type", `String "color"); ("default", `String "#ffffff")])]);
         ("init", `Assoc [
-          ("color", `String "param.target == \"fill\" ? state.fill_color : state.stroke_color");
+          ("color", `String "if param.target == \"fill\" then state.fill_color else state.stroke_color");
           ("h", `String "hsb_h(dialog.color)")]);
         ("content", `Assoc [("type", `String "container")])])
     ] in
