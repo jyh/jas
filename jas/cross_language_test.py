@@ -17,6 +17,7 @@ from algorithms.hit_test import (
 from document.controller import Controller
 from document.model import Model
 from geometry.svg import document_to_svg, svg_to_document
+from geometry.binary import document_to_binary, binary_to_document
 from geometry.test_json import document_to_test_json, test_json_to_document
 from workspace.workspace_layout import (
     WorkspaceLayout, DockEdge, PanelKind, GroupAddr, PanelAddr,
@@ -98,6 +99,28 @@ class CrossLanguageTest(absltest.TestCase):
             actual = document_to_test_json(doc)
             self.assertEqual(actual, expected,
                 f"JSON round-trip '{name}' failed: canonical JSON changed")
+
+    # ---------------------------------------------------------------
+    # Binary round-trip idempotence
+    # ---------------------------------------------------------------
+
+    def test_binary_roundtrip_all_expected(self):
+        names = [
+            "line_basic", "rect_basic", "rect_with_stroke",
+            "circle_basic", "ellipse_basic",
+            "polyline_basic", "polygon_basic", "path_all_commands",
+            "text_basic", "text_path_basic",
+            "group_nested", "transform_translate", "transform_rotate",
+            "multi_layer", "complex_document",
+        ]
+        for name in names:
+            expected = _read_fixture(f"expected/{name}.json")
+            doc = test_json_to_document(expected)
+            binary_data = document_to_binary(doc)
+            doc2 = binary_to_document(binary_data)
+            actual = document_to_test_json(doc2)
+            self.assertEqual(actual, expected,
+                f"Binary round-trip '{name}' failed: canonical JSON changed")
 
     # ---------------------------------------------------------------
     # SVG parse equivalence

@@ -1,3 +1,4 @@
+pub mod binary;
 pub mod element;
 pub mod measure;
 pub mod normalize;
