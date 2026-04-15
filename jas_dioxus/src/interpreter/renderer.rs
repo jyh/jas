@@ -88,6 +88,8 @@ fn render_el(
         "spacer" => render_spacer(el, ctx),
         "disclosure" => render_disclosure(el, ctx, rctx),
         "panel" => render_panel(el, ctx, rctx),
+        "tree_view" => render_tree_view(el, ctx, rctx),
+        "element_preview" => render_element_preview(el, ctx, rctx),
         _ => render_placeholder(el, ctx),
     }
 }
@@ -2006,6 +2008,197 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
         render_el(content, ctx, rctx)
     } else {
         render_placeholder(el, ctx)
+    }
+}
+
+/// Render a tree_view widget with sample document data.
+///
+/// Displays an interactive hierarchical tree with visibility, lock, and
+/// twirl-down controls per row. Uses sample data until a live document
+/// model is connected.
+fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let style = build_style(el, ctx);
+
+    // Sample tree data matching the Flask JS demo
+    struct TreeNode {
+        id: &'static str,
+        name: &'static str,
+        type_label: &'static str,
+        visibility: &'static str,
+        locked: bool,
+        element_selected: bool,
+        layer_color: &'static str,
+        is_container: bool,
+        children: Vec<TreeNode>,
+    }
+
+    fn build_sample_tree() -> Vec<TreeNode> {
+        vec![
+            TreeNode {
+                id: "layer1", name: "Layer 1", type_label: "Layer",
+                visibility: "preview", locked: false, element_selected: false,
+                layer_color: "#4a90d9", is_container: true,
+                children: vec![
+                    TreeNode {
+                        id: "group1", name: "", type_label: "Group",
+                        visibility: "preview", locked: false, element_selected: false,
+                        layer_color: "#4a90d9", is_container: true,
+                        children: vec![
+                            TreeNode {
+                                id: "path1", name: "", type_label: "Path",
+                                visibility: "preview", locked: false, element_selected: false,
+                                layer_color: "#4a90d9", is_container: false, children: vec![],
+                            },
+                            TreeNode {
+                                id: "rect1", name: "Background", type_label: "Rectangle",
+                                visibility: "preview", locked: true, element_selected: false,
+                                layer_color: "#4a90d9", is_container: false, children: vec![],
+                            },
+                            TreeNode {
+                                id: "text1", name: "Title", type_label: "Text",
+                                visibility: "outline", locked: false, element_selected: true,
+                                layer_color: "#4a90d9", is_container: false, children: vec![],
+                            },
+                        ],
+                    },
+                    TreeNode {
+                        id: "circle1", name: "", type_label: "Circle",
+                        visibility: "invisible", locked: false, element_selected: false,
+                        layer_color: "#4a90d9", is_container: false, children: vec![],
+                    },
+                ],
+            },
+            TreeNode {
+                id: "layer2", name: "Layer 2", type_label: "Layer",
+                visibility: "preview", locked: false, element_selected: false,
+                layer_color: "#d94a4a", is_container: true,
+                children: vec![
+                    TreeNode {
+                        id: "line1", name: "", type_label: "Line",
+                        visibility: "preview", locked: false, element_selected: true,
+                        layer_color: "#d94a4a", is_container: false, children: vec![],
+                    },
+                ],
+            },
+        ]
+    }
+
+    // Icon SVG lookup helper
+    fn icon_svg(icon_name: &str) -> String {
+        let ws = super::workspace::Workspace::load();
+        if let Some(ws) = &ws {
+            if let Some(icon_def) = ws.icons().get(icon_name) {
+                let viewbox = icon_def.get("viewbox").and_then(|v| v.as_str()).unwrap_or("0 0 16 16");
+                let svg_inner = icon_def.get("svg").and_then(|v| v.as_str()).unwrap_or("");
+                return format!(
+                    r#"<svg viewBox="{viewbox}" width="14" height="14" xmlns="http://www.w3.org/2000/svg">{svg_inner}</svg>"#
+                );
+            }
+        }
+        String::new()
+    }
+
+    // Flatten tree into visible rows
+    struct FlatRow {
+        node_html: String,
+    }
+
+    fn flatten_to_html(nodes: &[TreeNode], depth: usize, rows: &mut Vec<FlatRow>) {
+        for node in nodes {
+            let indent_px = depth * 16;
+
+            // Eye icon
+            let eye_icon_name = match node.visibility {
+                "outline" => "eye_outline",
+                "invisible" => "eye_invisible",
+                _ => "eye_preview",
+            };
+            let eye_svg = icon_svg(eye_icon_name);
+
+            // Lock icon
+            let lock_icon_name = if node.locked { "lock_locked" } else { "lock_unlocked" };
+            let lock_svg = icon_svg(lock_icon_name);
+
+            // Twirl or gap
+            let twirl_html = if node.is_container {
+                let twirl_svg = icon_svg("twirl_open");
+                format!(
+                    r#"<div style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">{twirl_svg}</div>"#
+                )
+            } else {
+                r#"<div style="width:16px;flex-shrink:0"></div>"#.to_string()
+            };
+
+            // Preview placeholder
+            let preview_html = r#"<div style="width:24px;height:24px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0"></div>"#;
+
+            // Name
+            let (display_name, name_class) = if node.name.is_empty() {
+                (format!("&lt;{}&gt;", node.type_label), "color:var(--jas-text-dim,#999)")
+            } else {
+                (node.name.to_string(), "color:var(--jas-text,#ccc)")
+            };
+
+            // Select square
+            let sq_bg = if node.element_selected { node.layer_color } else { "transparent" };
+
+            let btn_style = "width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer";
+            let row_html = format!(
+                concat!(
+                    r#"<div style="display:flex;align-items:center;height:24px;padding:0 4px;gap:2px;font-size:11px;color:var(--jas-text,#ccc);cursor:default;user-select:none">"#,
+                    r#"<span style="width:{indent}px;flex-shrink:0;display:inline-block"></span>"#,
+                    r#"<div style="{btn}">{eye}</div>"#,
+                    r#"<div style="{btn}">{lock}</div>"#,
+                    "{twirl}",
+                    r#"<div style="width:24px;height:24px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0"></div>"#,
+                    r#"<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;{ncls}">{name}</span>"#,
+                    r#"<div style="width:12px;height:12px;border:1px solid var(--jas-border,#555);flex-shrink:0;background:{sq}"></div>"#,
+                    "</div>",
+                ),
+                indent = indent_px,
+                btn = btn_style,
+                eye = eye_svg,
+                lock = lock_svg,
+                twirl = twirl_html,
+                ncls = name_class,
+                name = display_name,
+                sq = sq_bg,
+            );
+
+            rows.push(FlatRow { node_html: row_html });
+
+            if node.is_container {
+                flatten_to_html(&node.children, depth + 1, rows);
+            }
+        }
+    }
+
+    let tree = build_sample_tree();
+    let mut rows = Vec::new();
+    flatten_to_html(&tree, 0, &mut rows);
+
+    let all_html = rows.into_iter().map(|r| r.node_html).collect::<String>();
+
+    rsx! {
+        div {
+            id: "{id}",
+            style: "overflow-y:auto;flex:1;min-height:0;{style}",
+            dangerous_inner_html: "{all_html}",
+        }
+    }
+}
+
+/// Render an element_preview widget as a placeholder thumbnail square.
+fn render_element_preview(el: &serde_json::Value, ctx: &serde_json::Value, _rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let sz = el.get("style").and_then(|s| s.get("size")).and_then(|v| v.as_u64()).unwrap_or(32);
+    let style = build_style(el, ctx);
+    rsx! {
+        div {
+            id: "{id}",
+            style: "width:{sz}px;height:{sz}px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0;{style}",
+        }
     }
 }
 
