@@ -656,6 +656,8 @@ recommended for every element.
 | `separator` | Visual divider line | `orientation`: `horizontal` or `vertical` |
 | `spacer` | Flexible empty space | `size`: number (optional, else flex) |
 | `image` | Static image | `src` |
+| `tree_view` | Recursive data-driven tree with drag-and-drop | `bind.source`, `row_template`, `context_menu`, `keyboard` |
+| `element_preview` | Rasterized thumbnail of a document element | `bind.element_id` |
 
 Any string not in this table is treated as an **opaque custom widget** —
 rendered as a labeled rectangle in wireframe mode.
@@ -825,6 +827,74 @@ Each panel's hamburger menu contains items for closing the panel.
   group: <string>                # for radio items
   shortcut: <string>             # optional
 ```
+
+---
+
+## `tree_view` — Recursive Data-Driven Tree
+
+A `tree_view` element renders a recursive tree of rows from a data source.
+It supports drag-and-drop reordering, inline editing, keyboard navigation,
+multi-selection, and context menus.
+
+```yaml
+type: tree_view
+bind:
+  source: <expression>             # tree data structure to render
+  panel_selection: <expression>    # list of selected element IDs
+  element_selection: <expression>  # document-level selection
+  search_query: <expression>       # filter string
+  type_filter: <expression>        # active type filter list
+  isolation_root: <expression>     # root container ID for isolation mode
+  twirl_states: <expression>       # map of element_id to expanded bool
+  renaming_element: <expression>   # element ID being renamed, or null
+  drag_active: <expression>        # whether a drag is in progress
+row_template: <element>            # per-row element spec (see node.* below)
+behavior: <list of behavior>       # row-level events
+context_menu: <list of menu_item>  # right-click menu
+keyboard: <list of key_binding>    # keyboard shortcuts when focused
+```
+
+### `node.*` — Row Template Scope Variables
+
+Within `row_template`, `behavior`, and `context_menu`, the following
+variables are available for the current row's tree node:
+
+| Variable | Type | Description |
+|---|---|---|
+| `node.id` | string | Unique element ID |
+| `node.name` | string | Element name (empty string if unnamed) |
+| `node.type` | string | Element type identifier (e.g., `path`, `layer`) |
+| `node.type_label` | string | Human-readable type name (e.g., `Path`, `Layer`) |
+| `node.depth` | number | Nesting depth (0 for top-level layers) |
+| `node.is_container` | bool | True for layers and groups |
+| `node.visibility` | string | `preview`, `outline`, or `invisible` |
+| `node.locked` | bool | Whether the element is locked |
+| `node.element_selected` | bool | Whether element-selected (document selection) |
+| `node.panel_selected` | bool | Whether panel-selected |
+| `node.ancestor_layer_color` | color | Color of the nearest ancestor layer |
+| `node.parent_id` | string | ID of the parent element (null for top-level) |
+| `node.children` | list | Child nodes (for containers) |
+| `node.search_ancestor_only` | bool | True if this node is shown only as context for a search match |
+
+---
+
+## `element_preview` — Element Thumbnail
+
+An `element_preview` widget renders a rasterized thumbnail of a document
+element. The thumbnail is a square bitmap scaled to fit the element within
+the given size, rendered on a white background.
+
+```yaml
+type: element_preview
+style:
+  size: <number>                   # width and height in px (default 32)
+bind:
+  element_id: <expression>        # ID of the element to preview
+```
+
+Elements with outline or invisible visibility are rendered as if in preview
+mode for the thumbnail. Empty containers show a blank (white) preview.
+Thumbnails are refreshed on a best-effort basis as elements change.
 
 ---
 

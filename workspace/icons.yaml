@@ -342,3 +342,65 @@ icons:
     svg: >
       <path d="M4,8 A4,4 0 1,1 8,12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
       <polygon points="4,5 2,9 6,9" fill="currentColor"/>
+
+  # ── Layers panel icons ─────────────────────────────────────
+
+  eye_preview:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M1,8 C3,4 6,2 8,2 C10,2 13,4 15,8 C13,12 10,14 8,14 C6,14 3,12 1,8 Z"
+        fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+      <circle cx="8" cy="8" r="2.5" fill="currentColor"/>
+
+  eye_outline:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M1,8 C3,4 6,2 8,2 C10,2 13,4 15,8 C13,12 10,14 8,14 C6,14 3,12 1,8 Z"
+        fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+      <circle cx="8" cy="8" r="2.5" fill="none" stroke="currentColor" stroke-width="1"
+        stroke-dasharray="2,1.5"/>
+
+  eye_invisible:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M1,8 C3,4 6,2 8,2 C10,2 13,4 15,8 C13,12 10,14 8,14 C6,14 3,12 1,8 Z"
+        fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.4"/>
+      <line x1="3" y1="13" x2="13" y2="3" stroke="currentColor" stroke-width="1.5"
+        stroke-linecap="round"/>
+
+  lock_locked:
+    viewbox: "0 0 16 16"
+    svg: >
+      <rect x="3" y="7" width="10" height="8" rx="1" fill="currentColor"/>
+      <path d="M5,7 V5 C5,2.5 6.5,1 8,1 C9.5,1 11,2.5 11,5 V7"
+        fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+
+  lock_unlocked:
+    viewbox: "0 0 16 16"
+    svg: >
+      <rect x="3" y="7" width="10" height="8" rx="1" fill="currentColor" opacity="0.4"/>
+      <path d="M5,7 V5 C5,2.5 6.5,1 8,1 C9.5,1 11,2.5 11,5"
+        fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+
+  twirl_open:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M4,5 L8,10 L12,5" fill="currentColor"/>
+
+  twirl_closed:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M5,4 L10,8 L5,12" fill="currentColor"/>
+
+  search:
+    viewbox: "0 0 16 16"
+    svg: >
+      <circle cx="7" cy="7" r="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <line x1="10" y1="10" x2="14" y2="14" stroke="currentColor" stroke-width="1.5"
+        stroke-linecap="round"/>
+
+  filter:
+    viewbox: "0 0 16 16"
+    svg: >
+      <path d="M2,3 L14,3 L9.5,8.5 L9.5,12 L6.5,13.5 L6.5,8.5 Z"
+        fill="currentColor" opacity="0.8"/>
