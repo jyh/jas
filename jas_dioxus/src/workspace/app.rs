@@ -33,6 +33,7 @@ use crate::panels::panel_menu_view::PanelMenuOverlay;
 pub fn App() -> Element {
     let app = use_hook(|| Rc::new(RefCell::new(AppState::new())));
     let mut revision = use_signal(|| 0u64);
+    let mut layout_revision = use_signal(|| 0u64);
 
     // Repaint after each render
     {
@@ -123,14 +124,14 @@ pub fn App() -> Element {
     }
 
     // Macro-like helper: mutate state, then bump revision to trigger repaint.
+    // Use `act` for state changes (color, tool, etc.) — panels re-render.
+    // Use `layout_act` for pane drag/resize — only geometry re-renders.
     let act = {
         let app = app.clone();
         move |f: Box<dyn FnOnce(&mut AppState)>| {
             {
                 let mut st = app.borrow_mut();
                 f(&mut st);
-                // Always bump after any mutation — pane_layout mutations
-                // bypass bump(), so we ensure saves happen.
                 st.workspace_layout.bump();
                 st.save_workspace_layout();
                 st.workspace_layout.mark_saved();
@@ -139,6 +140,21 @@ pub fn App() -> Element {
         }
     };
     let act = Rc::new(RefCell::new(act));
+
+    let layout_act = {
+        let app = app.clone();
+        move |f: Box<dyn FnOnce(&mut AppState)>| {
+            {
+                let mut st = app.borrow_mut();
+                f(&mut st);
+                st.workspace_layout.bump();
+                st.save_workspace_layout();
+                st.workspace_layout.mark_saved();
+            }
+            layout_revision += 1;  // does NOT bump revision
+        }
+    };
+    let layout_act = Rc::new(RefCell::new(layout_act));
 
     // Provide shared state via context so child components can access them.
     use_context_provider(|| Act(act.clone()));
@@ -265,8 +281,9 @@ pub fn App() -> Element {
     // Snap preview lines shown during drag
     let mut snap_preview = use_signal(Vec::<super::workspace::SnapConstraint>::new);
 
-    // Read revision to trigger re-render when state changes.
+    // Read both signals to trigger re-render on state OR layout changes.
     let _ = revision();
+    let _ = layout_revision();
 
     // Ensure pane layout exists and repair snaps once on init.
     {
@@ -542,13 +559,13 @@ pub fn App() -> Element {
                 popup_slot.set(None);
             },
             onmousemove: {
-                let act = act.clone();
+                let layout_act = layout_act.clone();
                 let app = app.clone();
                 move |evt: Event<MouseData>| {
                     let coords = evt.data().page_coordinates();
                     // Floating dock title bar drag
                     if let Some((fid, off_x, off_y)) = title_drag() {
-                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                        (layout_act.borrow_mut())(Box::new(move |st: &mut AppState| {
                             st.workspace_layout.set_floating_position(fid, coords.x - off_x, coords.y - off_y);
                         }));
                         return;
@@ -557,7 +574,7 @@ pub fn App() -> Element {
                     if let Some((pid, off_x, off_y)) = pane_drag() {
                         let new_x = coords.x - off_x;
                         let new_y = coords.y - off_y;
-                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                        (layout_act.borrow_mut())(Box::new(move |st: &mut AppState| {
                             if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                 // Move to raw mouse position first
                                 pl.set_pane_position(pid, new_x, new_y);
@@ -587,7 +604,7 @@ pub fn App() -> Element {
                         let delta = if is_vert { coords.x - start_coord } else { coords.y - start_coord };
                         let new_start = if is_vert { coords.x } else { coords.y };
                         border_drag.set(Some((snap_idx, new_start)));
-                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                        (layout_act.borrow_mut())(Box::new(move |st: &mut AppState| {
                             if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                 pl.drag_shared_border(snap_idx, delta);
                             }
@@ -596,7 +613,7 @@ pub fn App() -> Element {
                     }
                     // Pane edge resize
                     if let Some((pid, edge, start_mx, start_my, start_w, start_h, start_px, start_py)) = pane_resize() {
-                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                        (layout_act.borrow_mut())(Box::new(move |st: &mut AppState| {
                             if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                 let dx = coords.x - start_mx;
                                 let dy = coords.y - start_my;
@@ -737,6 +754,9 @@ pub fn App() -> Element {
                 }
 
                 // --- Fill/Stroke indicator widget ---
+                // Uses native component in toolbar for performance (avoids
+                // per-frame YAML eval during canvas/toolbar drag). The YAML
+                // template is the design source of truth; this matches it.
                 FillStrokeWidgetView {
                     fill_summary: fs_fill_summary.clone(),
                     stroke_summary: fs_stroke_summary.clone(),

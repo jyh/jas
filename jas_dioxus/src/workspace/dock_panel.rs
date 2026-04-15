@@ -482,7 +482,12 @@ pub(crate) fn build_dock_groups(
                             Some((content, eval_ctx))
                         });
                         if let Some((content, eval_ctx)) = panel_body {
-                            crate::interpreter::renderer::render_element(&content, &eval_ctx)
+                            rsx! {
+                                crate::interpreter::renderer::MemoYamlElement {
+                                    el: content,
+                                    ctx: eval_ctx,
+                                }
+                            }
                         } else {
                             rsx! {
                                 div {

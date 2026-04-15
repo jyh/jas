@@ -44,6 +44,14 @@ pub fn render_element(
     render_el(el, ctx, &rctx)
 }
 
+/// Memoized YAML element component. Only re-renders when el or ctx change.
+/// Use this for elements that appear in frequently-rerendering parents
+/// (like toolbar elements inside the App component).
+#[component]
+pub fn MemoYamlElement(el: serde_json::Value, ctx: serde_json::Value) -> Element {
+    render_element(&el, &ctx)
+}
+
 fn render_el(
     el: &serde_json::Value,
     ctx: &serde_json::Value,
