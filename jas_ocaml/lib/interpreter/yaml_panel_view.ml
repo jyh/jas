@@ -6,6 +6,9 @@
 
 open Workspace_layout
 
+(** Module-level ref to the model accessor, set by create_panel_body. *)
+let _get_model_ref : (unit -> Model.model option) ref = ref (fun () -> None)
+
 (** Safely access a nested JSON member path (e.g. "style" -> "gap").
     Returns `Null if any intermediate value is not an object. *)
 let safe_member (key : string) (j : Yojson.Safe.t) : Yojson.Safe.t =
@@ -216,45 +219,203 @@ and render_panel ~packing ~ctx el =
   | content -> render_element ~packing ~ctx content
 
 and render_tree_view ~packing ~ctx:_ _el =
-  (* Sample tree data for demonstration. *)
   let vbox = GPack.vbox ~spacing:0 ~packing () in
-  let rows = [
-    (0, "\xe2\x97\x89", "\xf0\x9f\x94\x93", "\xe2\x96\xbc", "Layer 1",     true,  false);
-    (1, "\xe2\x97\x89", "\xf0\x9f\x94\x93", "\xe2\x96\xbc", "<Group>",      false, false);
-    (2, "\xe2\x97\x89", "\xf0\x9f\x94\x93", "",              "<Path>",       false, false);
-    (2, "\xe2\x97\x89", "\xf0\x9f\x94\x92", "",              "Background",   true,  false);
-    (2, "\xe2\x97\x90", "\xf0\x9f\x94\x93", "",              "Title",        true,  true);
-    (1, "\xe2\x97\x8b", "\xf0\x9f\x94\x93", "",              "<Circle>",     false, false);
-    (0, "\xe2\x97\x89", "\xf0\x9f\x94\x93", "\xe2\x96\xbc", "Layer 2",      true,  false);
-    (1, "\xe2\x97\x89", "\xf0\x9f\x94\x93", "",              "<Line>",       false, true);
-  ] in
-  List.iter (fun (depth, eye, lock, twirl, name, _is_named, selected) ->
-    let hbox = GPack.hbox ~spacing:2 ~packing:(vbox#pack ~expand:false) () in
-    (* Indentation *)
-    if depth > 0 then begin
-      let spacer = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
-      spacer#misc#set_size_request ~width:(depth * 16) ()
-    end;
-    (* Eye, Lock, Twirl *)
-    ignore (GMisc.label ~text:eye ~packing:(hbox#pack ~expand:false) ());
-    ignore (GMisc.label ~text:lock ~packing:(hbox#pack ~expand:false) ());
-    if String.length twirl > 0 then
-      ignore (GMisc.label ~text:twirl ~packing:(hbox#pack ~expand:false) ())
-    else begin
-      let gap = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
-      gap#misc#set_size_request ~width:16 ()
-    end;
-    (* Preview placeholder *)
-    let preview = GBin.frame ~shadow_type:`ETCHED_IN ~packing:(hbox#pack ~expand:false) () in
-    preview#misc#set_size_request ~width:24 ~height:24 ();
-    (* Name *)
-    ignore (GMisc.label ~text:name ~packing:(hbox#pack ~expand:true) ());
-    (* Select square *)
-    let sq = GBin.frame ~shadow_type:`ETCHED_IN ~packing:(hbox#pack ~expand:false) () in
-    sq#misc#set_size_request ~width:12 ~height:12 ();
-    if selected then
-      sq#misc#modify_bg [`NORMAL, `NAME "blue"]
-  ) rows
+  let get_model = !_get_model_ref in
+  let type_label e =
+    match e with
+    | Element.Line _ -> "Line" | Element.Rect _ -> "Rectangle"
+    | Element.Circle _ -> "Circle" | Element.Ellipse _ -> "Ellipse"
+    | Element.Polyline _ -> "Polyline" | Element.Polygon _ -> "Polygon"
+    | Element.Path _ -> "Path" | Element.Text _ -> "Text"
+    | Element.Text_path _ -> "Text Path"
+    | Element.Group _ -> "Group" | Element.Layer _ -> "Layer"
+  in
+  let display_name e =
+    match e with
+    | Element.Layer le when le.name <> "" -> (le.name, true)
+    | _ -> (Printf.sprintf "<%s>" (type_label e), false)
+  in
+  let is_container e = match e with Element.Group _ | Element.Layer _ -> true | _ -> false in
+  let is_layer e = match e with Element.Layer _ -> true | _ -> false in
+  let vis_icon v =
+    match v with
+    | Element.Outline -> "\xe2\x97\x90"
+    | Element.Invisible -> "\xe2\x97\x8b"
+    | Element.Preview -> "\xe2\x97\x89"
+  in
+  let layer_colors = [| "#4a90d9"; "#d94a4a"; "#4ad94a"; "#4a4ad9"; "#d9d94a";
+                         "#d94ad9"; "#4ad9d9"; "#b0b0b0"; "#2a7a2a" |] in
+  match get_model () with
+  | None -> ()
+  | Some m ->
+    let doc = m#document in
+    let selected_paths = Document.selected_paths doc.Document.selection in
+    let rec add_children children depth path_prefix layer_color =
+      let n = Array.length children in
+      for ri = n - 1 downto 0 do
+        let i = ri in
+        let elem = children.(i) in
+        let path = path_prefix @ [i] in
+        let is_container = is_container elem in
+        let is_selected = Document.PathSet.mem path selected_paths in
+        let cur_color =
+          if is_layer elem && List.length path = 1
+          then layer_colors.(i mod Array.length layer_colors)
+          else layer_color
+        in
+        let (name, _is_named) = display_name elem in
+        let vis = Element.get_visibility elem in
+        let locked = Element.is_locked elem in
+        let hbox = GPack.hbox ~spacing:2 ~packing:(vbox#pack ~expand:false) () in
+        if depth > 0 then begin
+          let spacer = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
+          spacer#misc#set_size_request ~width:(depth * 16) ()
+        end;
+        (* Eye button *)
+        let eye_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
+        ignore (GMisc.label ~text:(vis_icon vis) ~packing:eye_eb#add ());
+        eye_eb#misc#set_size_request ~width:16 ();
+        ignore (eye_eb#event#connect#button_press ~callback:(fun _ ->
+          (match get_model () with
+           | None -> ()
+           | Some m2 ->
+             let d = m2#document in
+             let e = Document.get_element d path in
+                let new_vis = match Element.get_visibility e with
+                  | Element.Preview -> Element.Outline
+                  | Element.Outline -> Element.Invisible
+                  | Element.Invisible -> Element.Preview
+                in
+                let new_e = Element.set_visibility new_vis e in
+                m2#snapshot;
+                m2#set_document (Document.replace_element d path new_e));
+          true));
+        (* Lock button *)
+        let lock_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
+        let lock_text = if locked then "\xf0\x9f\x94\x92" else "\xf0\x9f\x94\x93" in
+        ignore (GMisc.label ~text:lock_text ~packing:lock_eb#add ());
+        lock_eb#misc#set_size_request ~width:16 ();
+        ignore (lock_eb#event#connect#button_press ~callback:(fun _ ->
+          (match get_model () with
+           | None -> ()
+           | Some m2 ->
+             let d = m2#document in
+             let e = Document.get_element d path in
+                let new_e = Element.set_locked (not (Element.is_locked e)) e in
+                m2#snapshot;
+                m2#set_document (Document.replace_element d path new_e));
+          true));
+        (* Twirl or gap *)
+        if is_container then
+          ignore (GMisc.label ~text:"\xe2\x96\xbc" ~packing:(hbox#pack ~expand:false) ())
+        else begin
+          let gap = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
+          gap#misc#set_size_request ~width:16 ()
+        end;
+        (* Preview *)
+        let preview = GBin.frame ~shadow_type:`ETCHED_IN ~packing:(hbox#pack ~expand:false) () in
+        preview#misc#set_size_request ~width:24 ~height:24 ();
+        (* Name *)
+        ignore (GMisc.label ~text:name ~packing:(hbox#pack ~expand:true) ());
+        (* Select square *)
+        let sq_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
+        let sq = GBin.frame ~shadow_type:`ETCHED_IN ~packing:sq_eb#add () in
+        sq#misc#set_size_request ~width:12 ~height:12 ();
+        if is_selected then
+          sq#misc#modify_bg [`NORMAL, `NAME "blue"];
+        ignore (sq_eb#event#connect#button_press ~callback:(fun _ ->
+          (match get_model () with
+           | None -> ()
+           | Some m2 ->
+             let d = m2#document in
+             let new_sel = Document.PathMap.singleton path (Document.element_selection_all path) in
+             m2#set_document { d with Document.selection = new_sel });
+          true));
+        (* Recurse into children *)
+        if is_container then begin
+          let ch = Document.children_of elem in
+          add_children ch (depth + 1) path cur_color
+        end
+      done
+    in
+    let n = Array.length doc.Document.layers in
+    for ri = n - 1 downto 0 do
+      let i = ri in
+      let elem = doc.Document.layers.(i) in
+      let path = [i] in
+      let is_container = is_container elem in
+      let is_selected = Document.PathSet.mem path selected_paths in
+      let layer_color = layer_colors.(i mod Array.length layer_colors) in
+      let (name, _is_named) = display_name elem in
+      let vis = Element.get_visibility elem in
+      let locked = Element.is_locked elem in
+      let hbox = GPack.hbox ~spacing:2 ~packing:(vbox#pack ~expand:false) () in
+      (* Eye *)
+      let eye_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
+      ignore (GMisc.label ~text:(vis_icon vis) ~packing:eye_eb#add ());
+      eye_eb#misc#set_size_request ~width:16 ();
+      ignore (eye_eb#event#connect#button_press ~callback:(fun _ ->
+        (match get_model () with
+         | None -> ()
+         | Some m2 ->
+           let d = m2#document in
+           let e = Document.get_element d path in
+              let new_vis = match Element.get_visibility e with
+                | Element.Preview -> Element.Outline
+                | Element.Outline -> Element.Invisible
+                | Element.Invisible -> Element.Preview
+              in
+              let new_e = Element.set_visibility new_vis e in
+              m2#snapshot;
+              m2#set_document (Document.replace_element d path new_e));
+        true));
+      (* Lock *)
+      let lock_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
+      let lock_text = if locked then "\xf0\x9f\x94\x92" else "\xf0\x9f\x94\x93" in
+      ignore (GMisc.label ~text:lock_text ~packing:lock_eb#add ());
+      lock_eb#misc#set_size_request ~width:16 ();
+      ignore (lock_eb#event#connect#button_press ~callback:(fun _ ->
+        (match get_model () with
+         | None -> ()
+         | Some m2 ->
+           let d = m2#document in
+           let e = Document.get_element d path in
+              let new_e = Element.set_locked (not (Element.is_locked e)) e in
+              m2#snapshot;
+              m2#set_document (Document.replace_element d path new_e));
+        true));
+      (* Twirl or gap *)
+      if is_container then
+        ignore (GMisc.label ~text:"\xe2\x96\xbc" ~packing:(hbox#pack ~expand:false) ())
+      else begin
+        let gap = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
+        gap#misc#set_size_request ~width:16 ()
+      end;
+      (* Preview *)
+      let preview = GBin.frame ~shadow_type:`ETCHED_IN ~packing:(hbox#pack ~expand:false) () in
+      preview#misc#set_size_request ~width:24 ~height:24 ();
+      (* Name *)
+      ignore (GMisc.label ~text:name ~packing:(hbox#pack ~expand:true) ());
+      (* Select square *)
+      let sq_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
+      let sq = GBin.frame ~shadow_type:`ETCHED_IN ~packing:sq_eb#add () in
+      sq#misc#set_size_request ~width:12 ~height:12 ();
+      if is_selected then
+        sq#misc#modify_bg [`NORMAL, `NAME "blue"];
+      ignore (sq_eb#event#connect#button_press ~callback:(fun _ ->
+        (match get_model () with
+         | None -> ()
+         | Some m2 ->
+           let d = m2#document in
+           let new_sel = Document.PathMap.singleton path (Document.element_selection_all path) in
+           m2#set_document { d with Document.selection = new_sel });
+        true));
+      (* Recurse *)
+      if is_container then begin
+        let ch = Document.children_of elem in
+        add_children ch 1 path layer_color
+      end
+    done
 
 and render_element_preview ~packing _el =
   let frame = GBin.frame ~shadow_type:`ETCHED_IN ~packing () in
@@ -319,7 +480,7 @@ and to_number_option (j : Yojson.Safe.t) : float option =
 (** Create a YAML-interpreted panel body in a GTK container.
     Returns unit. The panel content is rendered from the compiled
     workspace JSON. *)
-let create_panel_body ~packing ~(kind : panel_kind) =
+let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None) () =
   let content_id = Workspace_loader.panel_kind_to_content_id kind in
   match Workspace_loader.load () with
   | None -> ()
@@ -337,6 +498,9 @@ let create_panel_body ~packing ~(kind : panel_kind) =
         ("state", state_obj);
         ("panel", `Assoc panel_defaults);
         ("icons", icons_obj);
-        ("data", data_obj)
+        ("data", data_obj);
+        ("_get_model", `Null)  (* Placeholder; actual model passed via closure *)
       ] in
+      (* Store get_model in a ref accessible from render_tree_view *)
+      _get_model_ref := get_model;
       render_element ~packing ~ctx content

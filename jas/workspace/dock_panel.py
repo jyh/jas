@@ -267,6 +267,9 @@ class DockPanelWidget(QWidget):
                     data["swatch_libraries"] = ws["swatch_libraries"]
                 if data:
                     ctx["data"] = data
+            # Pass model accessor so panels (e.g. layers) can read/write the document
+            if self._get_model:
+                ctx["_get_model"] = self._get_model
             return YamlPanelView(
                 panel_spec=panel_spec,
                 store=self._state_store,
