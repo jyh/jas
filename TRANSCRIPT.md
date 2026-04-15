@@ -1663,3 +1663,11 @@ panel:
   - .col-9: SPACER TWIRL_DOWN_BUTTON ELEMENT_PREVIEW ELEMENT_NAME
   - .col-1: SELECT_CHECKMARK
 ```
+
+# Binary
+
+We want a compact, compressed, versioned binary representation of a Document. Give me your suggestions.
+
+[...]
+
+In dioxus, before reloading, save all open documents to local storage in binary format. On restart, reload them. Give me your suggestions.
