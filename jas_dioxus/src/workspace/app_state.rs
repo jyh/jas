@@ -12,7 +12,7 @@ use wasm_bindgen::JsCast;
 use crate::canvas::render;
 use crate::document::controller::Controller;
 use crate::document::model::Model;
-use crate::geometry::element::{Color, Fill, Stroke, LineCap, LineJoin, StrokeAlign, Element as GeoElement};
+use crate::geometry::element::{Color, Fill, Stroke, LineCap, LineJoin, StrokeAlign, Arrowhead, ArrowAlign, Element as GeoElement};
 use crate::tools::partial_selection_tool::PartialSelectionTool;
 use crate::tools::interior_selection_tool::InteriorSelectionTool;
 use crate::tools::line_tool::LineTool;
@@ -553,6 +553,15 @@ impl AppState {
                     },
                     dash_pattern,
                     dash_len,
+                    start_arrow: Arrowhead::from_str(&sp.start_arrowhead),
+                    end_arrow: Arrowhead::from_str(&sp.end_arrowhead),
+                    start_arrow_scale: sp.start_arrowhead_scale,
+                    end_arrow_scale: sp.end_arrowhead_scale,
+                    arrow_align: if sp.arrow_align == "center_at_end" {
+                        ArrowAlign::CenterAtEnd
+                    } else {
+                        ArrowAlign::TipAtEnd
+                    },
                     opacity: base.opacity,
                 };
                 // Update default stroke

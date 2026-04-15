@@ -460,7 +460,8 @@ fn apply_set_panel_state(
     // Propagate rendering-affecting changes to selected elements
     if matches!(key, "cap" | "join" | "weight" | "miter_limit" |
                 "dashed" | "dash_1" | "gap_1" | "dash_2" | "gap_2" | "dash_3" | "gap_3" |
-                "align_stroke") {
+                "align_stroke" | "start_arrowhead" | "end_arrowhead" |
+                "start_arrowhead_scale" | "end_arrowhead_scale" | "arrow_align") {
         st.apply_stroke_panel_to_selection();
     }
 }

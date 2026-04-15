@@ -137,7 +137,7 @@ fn apply_transform(ctx: &CanvasRenderingContext2d, transform: Option<&Transform>
 // Build path commands into canvas path
 // ---------------------------------------------------------------------------
 
-fn build_path(ctx: &CanvasRenderingContext2d, cmds: &[PathCommand]) {
+pub(crate) fn build_path(ctx: &CanvasRenderingContext2d, cmds: &[PathCommand]) {
     for cmd in cmds {
         match cmd {
             PathCommand::MoveTo { x, y } => ctx.move_to(*x, *y),
@@ -199,11 +199,45 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             } else {
                 (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
+            // Shorten line endpoints to accommodate arrowheads
+            let (mut lx1, mut ly1, mut lx2, mut ly2) = (e.x1, e.y1, e.x2, e.y2);
+            if !outline {
+                if let Some(s) = e.stroke.as_ref() {
+                    let dx = lx2 - lx1;
+                    let dy = ly2 - ly1;
+                    let len = (dx * dx + dy * dy).sqrt();
+                    if len > 0.0 {
+                        let ux = dx / len;
+                        let uy = dy / len;
+                        let start_sb = super::arrowheads::arrow_setback(
+                            s.start_arrow.as_str(), s.width, s.start_arrow_scale);
+                        let end_sb = super::arrowheads::arrow_setback(
+                            s.end_arrow.as_str(), s.width, s.end_arrow_scale);
+                        lx1 += ux * start_sb;
+                        ly1 += uy * start_sb;
+                        lx2 -= ux * end_sb;
+                        ly2 -= uy * end_sb;
+                    }
+                }
+            }
             ctx.begin_path();
-            ctx.move_to(e.x1, e.y1);
-            ctx.line_to(e.x2, e.y2);
+            ctx.move_to(lx1, ly1);
+            ctx.line_to(lx2, ly2);
             ctx.set_global_alpha(base_alpha * stroke_op);
             stroke_aligned(ctx, stroke_align);
+            // Arrowheads
+            if !outline {
+                if let Some(s) = e.stroke.as_ref() {
+                    let color = css_color(&s.color);
+                    let center = s.arrow_align == ArrowAlign::CenterAtEnd;
+                    super::arrowheads::draw_arrowheads_line(
+                        ctx, e.x1, e.y1, e.x2, e.y2,
+                        s.start_arrow.as_str(), s.end_arrow.as_str(),
+                        s.start_arrow_scale, s.end_arrow_scale,
+                        s.width, &color, center,
+                    );
+                }
+            }
         }
         Element::Rect(e) => {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
@@ -351,15 +385,43 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                 fill_op = apply_fill(ctx, e.fill.as_ref());
                 (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
-            ctx.begin_path();
-            build_path(ctx, &e.d);
+            // Fill uses the original path
             if !outline && e.fill.is_some() {
+                ctx.begin_path();
+                build_path(ctx, &e.d);
                 ctx.set_global_alpha(base_alpha * fill_op);
                 ctx.fill();
             }
+            // Stroke uses a shortened path to accommodate arrowheads
             if outline || e.stroke.is_some() {
+                let shortened = if !outline {
+                    if let Some(s) = e.stroke.as_ref() {
+                        let start_sb = super::arrowheads::arrow_setback(
+                            s.start_arrow.as_str(), s.width, s.start_arrow_scale);
+                        let end_sb = super::arrowheads::arrow_setback(
+                            s.end_arrow.as_str(), s.width, s.end_arrow_scale);
+                        if start_sb > 0.0 || end_sb > 0.0 {
+                            Some(super::arrowheads::shorten_path(&e.d, start_sb, end_sb))
+                        } else { None }
+                    } else { None }
+                } else { None };
+                ctx.begin_path();
+                build_path(ctx, shortened.as_deref().unwrap_or(&e.d));
                 ctx.set_global_alpha(base_alpha * stroke_op);
                 stroke_aligned(ctx, stroke_align);
+            }
+            // Arrowheads
+            if !outline {
+                if let Some(s) = e.stroke.as_ref() {
+                    let color = css_color(&s.color);
+                    let center = s.arrow_align == ArrowAlign::CenterAtEnd;
+                    super::arrowheads::draw_arrowheads(
+                        ctx, &e.d,
+                        s.start_arrow.as_str(), s.end_arrow.as_str(),
+                        s.start_arrow_scale, s.end_arrow_scale,
+                        s.width, &color, center,
+                    );
+                }
             }
         }
         Element::Text(e) => {
