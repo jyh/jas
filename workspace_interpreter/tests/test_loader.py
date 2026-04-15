@@ -405,7 +405,7 @@ class TestResolveTemplates:
             ],
         }
         resolve_templates(element, templates)
-        assert element["children"][0] == {"type": "text", "content": "Hello World"}
+        assert element["children"][0] == {"type": "text", "content": "Hello World", "_template": "greeting"}
 
     def test_typed_number_substitution(self):
         templates = {
@@ -491,7 +491,7 @@ class TestResolveTemplates:
         }
         resolve_templates(element, templates)
         inner = element["children"][0]["children"][0]
-        assert inner == {"type": "text", "content": "hello"}
+        assert inner == {"type": "text", "content": "hello", "_template": "inner"}
 
     def test_no_template_key_remains(self):
         templates = {

@@ -227,6 +227,8 @@ def resolve_templates(element: dict, templates: dict, _depth: int = 0) -> None:
                         content[k] = merged
                     else:
                         content[k] = v
+                # Tag with original template name for native override
+                content["_template"] = template_name
                 children[i] = content
                 # Recurse into expanded element (handles nested templates)
                 resolve_templates(content, templates, _depth + 1)
