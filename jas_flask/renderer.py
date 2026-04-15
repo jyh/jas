@@ -428,9 +428,12 @@ def _render_container(el, theme, state):
         c.get("style", {}).get("position") for c in el.get("children", []) if isinstance(c, dict)
     )
     extra = "position:relative" if has_abs_children else ""
+    # col: N → Bootstrap column class
+    col = el.get("col")
+    col_class = f" col-{col}" if col is not None else ""
     children = _render_children(el, theme, state)
     return Markup(
-        f'<div{_id_attr(el)} class="d-flex {direction}"{_style_str(el, theme, state, extra)}{_data_attrs(el)}>'
+        f'<div{_id_attr(el)} class="d-flex {direction}{col_class}"{_style_str(el, theme, state, extra)}{_data_attrs(el)}>'
         f'{children}</div>'
     )
 
@@ -666,9 +669,13 @@ def _render_color_swatch(el, theme, state):
     pos_css = f"position:absolute;left:{pos['x']}px;top:{pos['y']}px;" if pos else ""
     # Empty swatch: color is unresolvable (panel namespace) or explicitly empty
     is_empty = not color or color.startswith("{{") or color in ("none", "null", "")
+    has_behavior = bool(el.get("behavior"))
     if is_empty:
+        # Fill/stroke swatches with behavior show "none" indicator (red diagonal)
+        # Plain empty slots (recent colors) show hollow square
+        empty_class = "jas-color-swatch-none" if has_behavior else "jas-color-swatch-empty"
         return Markup(
-            f'<div{_id_attr(el)} class="jas-color-swatch jas-color-swatch-empty"'
+            f'<div{_id_attr(el)} class="jas-color-swatch {empty_class}"'
             f' style="{pos_css}width:{sz}px;height:{sz}px;box-sizing:border-box"'
             f'{_data_attrs(el)}></div>'
         )

@@ -3,9 +3,11 @@ fill_stroke_widget:
   params:
     id_prefix: { type: string, default: "" }
     swatch_size: { type: number, default: 28 }
+    fill_position: { type: object, default: { x: 0, y: 0 } }
+    stroke_position: { type: object, default: { x: 10, y: 10 } }
     offset: { type: number, default: 10 }
-    swap_icon_size: { type: number, default: 10 }
-    reset_icon_size: { type: number, default: 12 }
+    swap_icon_size: { type: number, default: 14 }
+    reset_icon_size: { type: number, default: 16 }
     swap_position: { type: object, default: { x: 40, y: 0 } }
     reset_position: { type: object, default: { x: 0, y: 38 } }
     width: { type: number, default: 56 }
@@ -20,7 +22,7 @@ fill_stroke_widget:
       - id: "${id_prefix}fill_swatch"
         type: color_swatch
         summary: "Fill color"
-        style: { size: "${swatch_size}", position: { x: 0, y: 0 } }
+        style: { size: "${swatch_size}", position: "${fill_position}" }
         bind:
           color: "state.fill_color"
           z_index: "if state.fill_on_top then 2 else 1"
@@ -35,7 +37,7 @@ fill_stroke_widget:
         type: color_swatch
         summary: "Stroke color"
         hollow: true
-        style: { size: "${swatch_size}", position: { x: "${offset}", y: "${offset}" } }
+        style: { size: "${swatch_size}", position: "${stroke_position}" }
         bind:
           color: "state.stroke_color"
           z_index: "if state.fill_on_top then 1 else 2"

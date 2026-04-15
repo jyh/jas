@@ -208,8 +208,8 @@ icons:
   default_colors:
     viewbox: "0 0 16 16"
     svg: >
-      <rect x="4" y="4" width="8" height="8" fill="#fff" stroke="#999" stroke-width="1"/>
-      <rect x="1" y="1" width="8" height="8" fill="none" stroke="#000" stroke-width="2"/>
+      <rect x="6" y="6" width="9" height="9" fill="#000" stroke="#000" stroke-width="1"/>
+      <rect x="1" y="1" width="9" height="9" fill="#fff" stroke="#888" stroke-width="1"/>
 
   color_none:
     viewbox: "0 0 16 16"
