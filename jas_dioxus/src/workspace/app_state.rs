@@ -94,6 +94,8 @@ pub(crate) struct AppState {
     pub(crate) app_default_fill: Option<Fill>,
     /// App-level default stroke (used when no document is open).
     pub(crate) app_default_stroke: Option<Stroke>,
+    /// Mutable swatch libraries (initialized from workspace data).
+    pub(crate) swatch_libraries: serde_json::Value,
 }
 
 impl AppState {
@@ -110,6 +112,9 @@ impl AppState {
             color_panel_mode: super::color_panel_view::ColorMode::Hsb,
             app_default_fill: Some(Fill::new(Color::WHITE)),
             app_default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            swatch_libraries: crate::interpreter::workspace::Workspace::load()
+                .map(|ws| ws.data().get("swatch_libraries").cloned().unwrap_or(serde_json::json!({})))
+                .unwrap_or(serde_json::json!({})),
         }
     }
 

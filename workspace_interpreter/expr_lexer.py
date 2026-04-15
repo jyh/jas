@@ -102,11 +102,12 @@ def tokenize(source: str) -> list[Token]:
             i = j
             continue
 
-        # String literal
-        if c == '"':
+        # String literal (double or single quotes)
+        if c == '"' or c == "'":
+            quote = c
             j = i + 1
             parts = []
-            while j < n and source[j] != '"':
+            while j < n and source[j] != quote:
                 if source[j] == "\\" and j + 1 < n:
                     parts.append(source[j + 1])
                     j += 2
@@ -114,7 +115,7 @@ def tokenize(source: str) -> list[Token]:
                     parts.append(source[j])
                     j += 1
             if j < n:
-                j += 1  # consume closing "
+                j += 1  # consume closing quote
             tokens.append(Token(TokenKind.STRING, "".join(parts)))
             i = j
             continue

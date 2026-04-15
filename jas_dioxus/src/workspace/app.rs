@@ -29,6 +29,36 @@ use super::toolbar_grid::{ToolbarGrid, TOOLBAR_SLOTS};
 use crate::panels::panel_menu_state::{PanelMenuState, MenuBarState};
 use crate::panels::panel_menu_view::PanelMenuOverlay;
 
+/// Toolbar content rendered from YAML. Takes revision as prop so it only
+/// re-renders on state changes, not during layout drag/resize.
+#[component]
+fn YamlToolbarContent(revision: u64) -> Element {
+    use std::sync::OnceLock;
+    static TOOLBAR_CONTENT: OnceLock<Option<serde_json::Value>> = OnceLock::new();
+    let content = TOOLBAR_CONTENT.get_or_init(|| {
+        let ws = crate::interpreter::workspace::Workspace::load()?;
+        let layout = ws.data().get("layout")?;
+        let toolbar_pane = layout.get("children")?.as_array()?.iter()
+            .find(|c| c.get("id").and_then(|i| i.as_str()) == Some("toolbar_pane"))?;
+        toolbar_pane.get("content").cloned()
+    });
+    if let Some(el) = content {
+        let app = use_context::<super::app_state::AppHandle>();
+        let st = app.borrow();
+        let live_state = crate::workspace::dock_panel::build_live_state_map(&st);
+        drop(st);
+        let icons = crate::interpreter::workspace::Workspace::load()
+            .map(|w| w.icons().clone()).unwrap_or(serde_json::Value::Null);
+        let eval_ctx = serde_json::json!({
+            "state": serde_json::Value::Object(live_state),
+            "icons": icons,
+        });
+        crate::interpreter::renderer::render_element(el, &eval_ctx)
+    } else {
+        rsx! { div { "Toolbar not found" } }
+    }
+}
+
 #[component]
 pub fn App() -> Element {
     let app = use_hook(|| Rc::new(RefCell::new(AppState::new())));
@@ -746,24 +776,8 @@ pub fn App() -> Element {
                     }
                 }
 
-                // Tool buttons and popup
-                ToolbarGrid {
-                    active_tool,
-                    slot_alternates,
-                    popup_slot,
-                }
-
-                // --- Fill/Stroke indicator widget ---
-                // Uses native component in toolbar for performance (avoids
-                // per-frame YAML eval during canvas/toolbar drag). The YAML
-                // template is the design source of truth; this matches it.
-                FillStrokeWidgetView {
-                    fill_summary: fs_fill_summary.clone(),
-                    stroke_summary: fs_stroke_summary.clone(),
-                    default_fill: fs_default_fill,
-                    default_stroke: fs_default_stroke,
-                    fill_on_top,
-                }
+                // Toolbar content from YAML — memoized, only re-renders on state changes
+                YamlToolbarContent { revision: revision() }
 
                 // Toolbar width is not resizable
             }

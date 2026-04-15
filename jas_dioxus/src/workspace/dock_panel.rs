@@ -16,6 +16,31 @@ use super::workspace::{
 use crate::interpreter::workspace::{Workspace, panel_kind_to_content_id};
 use crate::panels::panel_menu_state::{PanelMenuOpen, PanelMenuState, MenuBarState};
 
+/// Convert a ToolKind to its YAML snake_case name.
+fn tool_kind_name(kind: crate::tools::tool::ToolKind) -> &'static str {
+    use crate::tools::tool::ToolKind;
+    match kind {
+        ToolKind::Selection => "selection",
+        ToolKind::PartialSelection => "partial_selection",
+        ToolKind::InteriorSelection => "interior_selection",
+        ToolKind::Pen => "pen",
+        ToolKind::AddAnchorPoint => "add_anchor",
+        ToolKind::DeleteAnchorPoint => "delete_anchor",
+        ToolKind::AnchorPoint => "anchor_point",
+        ToolKind::Pencil => "pencil",
+        ToolKind::PathEraser => "path_eraser",
+        ToolKind::Smooth => "smooth",
+        ToolKind::Type => "type",
+        ToolKind::TypeOnPath => "type_on_path",
+        ToolKind::Line => "line",
+        ToolKind::Rect => "rect",
+        ToolKind::RoundedRect => "rounded_rect",
+        ToolKind::Polygon => "polygon",
+        ToolKind::Star => "star",
+        ToolKind::Lasso => "lasso",
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Live panel state — computed from AppState for YAML eval context
 // ---------------------------------------------------------------------------
@@ -80,6 +105,7 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
 
     // Override with live values from AppState
     m.insert("fill_on_top".into(), J::Bool(st.fill_on_top));
+    m.insert("active_tool".into(), J::String(tool_kind_name(st.active_tool).into()));
 
     // Override fill/stroke colors from tab state or app-level defaults.
     let fill_color = st.tab()
@@ -98,6 +124,9 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
         m.insert("stroke_color".into(), J::String(format!("#{:02x}{:02x}{:02x}",
             (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)));
     }
+
+    // Mutable swatch libraries for rendering
+    m.insert("_swatch_libraries".into(), st.swatch_libraries.clone());
 
     m
 }
@@ -472,7 +501,9 @@ pub(crate) fn build_dock_groups(
                                 panel_map.insert(k.clone(), v.clone());
                             }
                             let icons = ws.icons().clone();
-                            let swatch_libs = ws.data().get("swatch_libraries").cloned().unwrap_or(serde_json::Value::Null);
+                            let swatch_libs = live_state_map.get("_swatch_libraries")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null);
                             let eval_ctx = serde_json::json!({
                                 "state": live_state_map,
                                 "panel": panel_map,
