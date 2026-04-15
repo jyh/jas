@@ -12,7 +12,7 @@ use wasm_bindgen::JsCast;
 use crate::canvas::render;
 use crate::document::controller::Controller;
 use crate::document::model::Model;
-use crate::geometry::element::{Color, Fill, Stroke, LineCap, LineJoin, Element as GeoElement};
+use crate::geometry::element::{Color, Fill, Stroke, LineCap, LineJoin, StrokeAlign, Element as GeoElement};
 use crate::tools::partial_selection_tool::PartialSelectionTool;
 use crate::tools::interior_selection_tool::InteriorSelectionTool;
 use crate::tools::line_tool::LineTool;
@@ -546,6 +546,11 @@ impl AppState {
                     linecap,
                     linejoin,
                     miter_limit: sp.miter_limit,
+                    align: match sp.align.as_str() {
+                        "inside" => StrokeAlign::Inside,
+                        "outside" => StrokeAlign::Outside,
+                        _ => StrokeAlign::Center,
+                    },
                     dash_pattern,
                     dash_len,
                     opacity: base.opacity,

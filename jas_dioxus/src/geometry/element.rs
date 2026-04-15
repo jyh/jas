@@ -198,6 +198,15 @@ impl Default for Color {
     }
 }
 
+/// Stroke alignment relative to the path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StrokeAlign {
+    #[default]
+    Center,
+    Inside,
+    Outside,
+}
+
 /// SVG stroke-linecap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LineCap {
@@ -237,6 +246,7 @@ pub struct Stroke {
     pub linecap: LineCap,
     pub linejoin: LineJoin,
     pub miter_limit: f64,
+    pub align: StrokeAlign,
     /// Dash pattern as fixed-size array (up to 6 values: 3 dash/gap pairs).
     /// Unused slots are 0.0. `dash_len` indicates how many values are active.
     pub dash_pattern: [f64; 6],
@@ -252,6 +262,7 @@ impl Stroke {
             linecap: LineCap::Butt,
             linejoin: LineJoin::Miter,
             miter_limit: 10.0,
+            align: StrokeAlign::Center,
             dash_pattern: [0.0; 6],
             dash_len: 0,
             opacity: 1.0,

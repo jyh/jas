@@ -603,7 +603,7 @@ fn parse_stroke(node: &XmlNode) -> Option<Stroke> {
         _ => LineJoin::Miter,
     };
     let opacity = get_f(node, "stroke-opacity", 1.0);
-    Some(Stroke { color, width, linecap: lc, linejoin: lj, miter_limit: 10.0, dash_pattern: [0.0; 6], dash_len: 0, opacity })
+    Some(Stroke { color, width, linecap: lc, linejoin: lj, miter_limit: 10.0, align: StrokeAlign::Center, dash_pattern: [0.0; 6], dash_len: 0, opacity })
 }
 
 fn parse_transform(node: &XmlNode) -> Option<Transform> {

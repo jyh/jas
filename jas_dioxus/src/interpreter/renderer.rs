@@ -459,7 +459,8 @@ fn apply_set_panel_state(
     }
     // Propagate rendering-affecting changes to selected elements
     if matches!(key, "cap" | "join" | "weight" | "miter_limit" |
-                "dashed" | "dash_1" | "gap_1" | "dash_2" | "gap_2" | "dash_3" | "gap_3") {
+                "dashed" | "dash_1" | "gap_1" | "dash_2" | "gap_2" | "dash_3" | "gap_3" |
+                "align_stroke") {
         st.apply_stroke_panel_to_selection();
     }
 }
