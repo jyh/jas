@@ -117,11 +117,5 @@ let regular_polygon_points x1 y1 x2 y2 n =
 (* Shared defaults                                                     *)
 (* ------------------------------------------------------------------ *)
 
-let default_stroke = Some Element.{
-  stroke_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 };
-  stroke_width = 1.0;
-  stroke_linecap = Butt;
-  stroke_linejoin = Miter;
-  stroke_opacity = 1.0;
-}
+let default_stroke = Some (Element.make_stroke Element.black)
 

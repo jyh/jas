@@ -389,6 +389,15 @@ class controller ?(model = Model.create ()) () =
         Document.replace_element acc path new_elem
       ) doc.Document.selection doc in
       model#set_document new_doc
+
+    method set_selection_width_profile (wp : Element.stroke_width_point list) =
+      let doc = model#document in
+      let new_doc = Document.PathMap.fold (fun path _ acc ->
+        let elem = Document.get_element acc path in
+        let new_elem = Element.with_width_points elem wp in
+        Document.replace_element acc path new_elem
+      ) doc.Document.selection doc in
+      model#set_document new_doc
   end
 
 (* ------------------------------------------------------------------ *)

@@ -51,6 +51,25 @@ type linecap = Butt | Round_cap | Square
 (** SVG stroke-linejoin. *)
 type linejoin = Miter | Round_join | Bevel
 
+(** Stroke alignment relative to the path. *)
+type stroke_align = Center | Inside | Outside
+
+(** Arrowhead shape identifier. *)
+type arrowhead =
+  | Arrow_none | Simple_arrow | Open_arrow | Closed_arrow
+  | Stealth_arrow | Barbed_arrow | Half_arrow_upper | Half_arrow_lower
+  | Arrow_circle | Open_circle | Arrow_square | Open_square
+  | Arrow_diamond | Open_diamond | Arrow_slash
+
+(** Arrow alignment mode. *)
+type arrow_align = Tip_at_end | Center_at_end
+
+(** Convert an arrowhead name string to the enum. *)
+val arrowhead_of_string : string -> arrowhead
+
+(** Convert an arrowhead enum to its name string. *)
+val string_of_arrowhead : arrowhead -> string
+
 (** SVG fill presentation attribute. *)
 type fill = { fill_color : color; fill_opacity : float }
 
@@ -60,8 +79,26 @@ type stroke = {
   stroke_width : float;
   stroke_linecap : linecap;
   stroke_linejoin : linejoin;
+  stroke_miter_limit : float;
+  stroke_align : stroke_align;
+  stroke_dash_pattern : float list;
+  stroke_start_arrow : arrowhead;
+  stroke_end_arrow : arrowhead;
+  stroke_start_arrow_scale : float;
+  stroke_end_arrow_scale : float;
+  stroke_arrow_align : arrow_align;
   stroke_opacity : float;
 }
+
+(** A width control point for variable-width stroke profiles. *)
+type stroke_width_point = {
+  swp_t : float;
+  swp_width_left : float;
+  swp_width_right : float;
+}
+
+(** Convert a named profile preset to width control points. *)
+val profile_to_width_points : string -> float -> bool -> stroke_width_point list
 
 (** SVG transform as a 2D affine matrix [a b c d e f]. *)
 type transform = {
@@ -86,6 +123,7 @@ type element =
       x1 : float; y1 : float;
       x2 : float; y2 : float;
       stroke : stroke option;
+      width_points : stroke_width_point list;
       opacity : float;
       transform : transform option;
       locked : bool;
@@ -143,6 +181,7 @@ type element =
       d : path_command list;
       fill : fill option;
       stroke : stroke option;
+      width_points : stroke_width_point list;
       opacity : float;
       transform : transform option;
       locked : bool;
@@ -204,7 +243,11 @@ val bounds : element -> float * float * float * float
 
 val make_color : ?a:float -> float -> float -> float -> color
 val make_fill : ?opacity:float -> color -> fill
-val make_stroke : ?width:float -> ?linecap:linecap -> ?linejoin:linejoin -> ?opacity:float -> color -> stroke
+val make_stroke : ?width:float -> ?linecap:linecap -> ?linejoin:linejoin
+  -> ?miter_limit:float -> ?align:stroke_align -> ?dash_pattern:float list
+  -> ?start_arrow:arrowhead -> ?end_arrow:arrowhead
+  -> ?start_arrow_scale:float -> ?end_arrow_scale:float
+  -> ?arrow_align:arrow_align -> ?opacity:float -> color -> stroke
 val identity_transform : transform
 val make_translate : float -> float -> transform
 val make_scale : float -> float -> transform
@@ -212,13 +255,13 @@ val make_rotate : float -> transform
 val apply_point : transform -> float -> float -> float * float
 val inverse : transform -> transform option
 val transform_of : element -> transform option
-val make_line : ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
+val make_line : ?stroke:stroke option -> ?width_points:stroke_width_point list -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
 val make_rect : ?rx:float -> ?ry:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
 val make_circle : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> element
 val make_ellipse : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> float -> float -> element
 val make_polyline : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
 val make_polygon : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
-val make_path : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> path_command list -> element
+val make_path : ?fill:fill option -> ?stroke:stroke option -> ?width_points:stroke_width_point list -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> path_command list -> element
 val make_text : ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?text_width:float -> ?text_height:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> string -> element
 val make_text_path : ?start_offset:float -> ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> path_command list -> string -> element
 val make_group : ?opacity:float -> ?transform:transform option -> ?locked:bool -> element array -> element
@@ -238,6 +281,7 @@ val set_visibility : visibility -> element -> element
 
 val with_fill : element -> fill option -> element
 val with_stroke : element -> stroke option -> element
+val with_width_points : element -> stroke_width_point list -> element
 val color_to_hex : color -> string
 val color_from_hex : string -> color option
 

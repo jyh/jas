@@ -23,7 +23,7 @@ private func normalizeElement(_ elem: Element) -> Element {
     switch elem {
     case .line(let e):
         return .line(Line(x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2,
-                          stroke: e.stroke.map(normalizeStroke),
+                          stroke: e.stroke.map(normalizeStroke), widthPoints: e.widthPoints,
                           opacity: e.opacity, transform: e.transform,
                           locked: e.locked, visibility: e.visibility))
     case .rect(let e):
@@ -55,6 +55,7 @@ private func normalizeElement(_ elem: Element) -> Element {
     case .path(let e):
         return .path(Path(d: e.d,
                           fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
+                          widthPoints: e.widthPoints,
                           opacity: e.opacity, transform: e.transform,
                           locked: e.locked, visibility: e.visibility))
     case .text(let e):

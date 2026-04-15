@@ -676,7 +676,8 @@ let recognized_to_element shape template =
   let a = template_appearance template in
   match shape with
   | Recognized_line { a = (x1, y1); b = (x2, y2) } ->
-    Element.Line { x1; y1; x2; y2; stroke = a.a_stroke; opacity = a.a_opacity;
+    Element.Line { x1; y1; x2; y2; stroke = a.a_stroke; width_points = [];
+                   opacity = a.a_opacity;
                    transform = a.a_transform; locked = a.a_locked; visibility = a.a_visibility }
   | Recognized_triangle { pts = (p1, p2, p3) } ->
     Element.Polygon { points = [p1; p2; p3]; fill = a.a_fill; stroke = a.a_stroke;
@@ -734,6 +735,7 @@ let recognized_to_element shape template =
       else Element.LineTo (x, y)
     ) @ [Element.ClosePath] in
     Element.Path { d; fill = a.a_fill; stroke = a.a_stroke;
+                   width_points = [];
                    opacity = a.a_opacity; transform = a.a_transform;
                    locked = a.a_locked; visibility = a.a_visibility }
 

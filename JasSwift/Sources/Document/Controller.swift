@@ -243,6 +243,7 @@ public class Controller {
         if case .path(let v) = elem {
             let newD = JasLib.movePathHandle(v.d, anchorIdx: anchorIdx, handleType: handleType, dx: dx, dy: dy)
             let newElem = Element.path(Path(d: newD, fill: v.fill, stroke: v.stroke,
+                                               widthPoints: v.widthPoints,
                                                opacity: v.opacity, transform: v.transform,
                                                locked: v.locked))
             doc = doc.replaceElement(path, with: newElem)
@@ -517,6 +518,17 @@ public class Controller {
         for es in doc.selection {
             let elem = doc.getElement(es.path)
             let newElem = withStroke(elem, stroke: stroke)
+            doc = doc.replaceElement(es.path, with: newElem)
+        }
+        model.document = doc
+    }
+
+    public func setSelectionWidthProfile(_ widthPoints: [StrokeWidthPoint]) {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let newElem = withWidthPoints(elem, widthPoints: widthPoints)
             doc = doc.replaceElement(es.path, with: newElem)
         }
         model.document = doc

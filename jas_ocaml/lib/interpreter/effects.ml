@@ -251,3 +251,181 @@ let run_effects
     (ctx : (string * Yojson.Safe.t) list)
     (store : State_store.t) : unit =
   run_effects_inner effects ctx store actions dialogs
+
+(* ------------------------------------------------------------------ *)
+(* Stroke panel state binding                                          *)
+(* ------------------------------------------------------------------ *)
+
+(** Rendering-affecting stroke state keys. *)
+let stroke_render_keys = [
+  "stroke_cap"; "stroke_join"; "stroke_weight"; "stroke_miter_limit";
+  "stroke_dashed"; "stroke_dash_1"; "stroke_gap_1";
+  "stroke_dash_2"; "stroke_gap_2"; "stroke_dash_3"; "stroke_gap_3";
+  "stroke_align_stroke"; "stroke_start_arrowhead"; "stroke_end_arrowhead";
+  "stroke_start_arrowhead_scale"; "stroke_end_arrowhead_scale";
+  "stroke_arrow_align"; "stroke_profile"; "stroke_profile_flipped";
+]
+
+let json_to_float_opt = function
+  | `Float f -> Some f
+  | `Int n -> Some (float_of_int n)
+  | _ -> None
+
+let json_to_float_default default = function
+  | `Float f -> f
+  | `Int n -> float_of_int n
+  | _ -> default
+
+let json_to_string_default default = function
+  | `String s -> s
+  | _ -> default
+
+let json_to_bool_default default = function
+  | `Bool b -> b
+  | _ -> default
+
+(** Build a Stroke from the state store's stroke_* keys and apply to selection. *)
+let apply_stroke_panel_to_selection (store : State_store.t)
+    (ctrl : Controller.controller) =
+  let s = State_store.get_all store in
+  let get key = match List.assoc_opt key s with Some v -> v | None -> `Null in
+  let cap = match json_to_string_default "butt" (get "stroke_cap") with
+    | "round" -> Element.Round_cap
+    | "square" -> Element.Square
+    | _ -> Element.Butt in
+  let join = match json_to_string_default "miter" (get "stroke_join") with
+    | "round" -> Element.Round_join
+    | "bevel" -> Element.Bevel
+    | _ -> Element.Miter in
+  let miter_limit = json_to_float_default 10.0 (get "stroke_miter_limit") in
+  let align = match json_to_string_default "center" (get "stroke_align_stroke") with
+    | "inside" -> Element.Inside
+    | "outside" -> Element.Outside
+    | _ -> Element.Center in
+  let dashed = json_to_bool_default false (get "stroke_dashed") in
+  let dash_pattern =
+    if dashed then begin
+      let d1 = json_to_float_default 12.0 (get "stroke_dash_1") in
+      let g1 = json_to_float_default 12.0 (get "stroke_gap_1") in
+      let base = [d1; g1] in
+      let extra1 = match json_to_float_opt (get "stroke_dash_2"),
+                          json_to_float_opt (get "stroke_gap_2") with
+        | Some d2, Some g2 -> [d2; g2]
+        | _ -> [] in
+      let extra2 = match json_to_float_opt (get "stroke_dash_3"),
+                          json_to_float_opt (get "stroke_gap_3") with
+        | Some d3, Some g3 -> [d3; g3]
+        | _ -> [] in
+      base @ extra1 @ extra2
+    end else [] in
+  let start_arrow = Element.arrowhead_of_string
+    (json_to_string_default "none" (get "stroke_start_arrowhead")) in
+  let end_arrow = Element.arrowhead_of_string
+    (json_to_string_default "none" (get "stroke_end_arrowhead")) in
+  let start_arrow_scale = json_to_float_default 100.0
+    (get "stroke_start_arrowhead_scale") in
+  let end_arrow_scale = json_to_float_default 100.0
+    (get "stroke_end_arrowhead_scale") in
+  let arrow_align = match json_to_string_default "tip_at_end" (get "stroke_arrow_align") with
+    | "center_at_end" -> Element.Center_at_end
+    | _ -> Element.Tip_at_end in
+  (* Get base stroke from selection or default *)
+  let doc = ctrl#document in
+  let base_stroke =
+    match Document.PathMap.min_binding_opt doc.Document.selection with
+    | Some (path, _) ->
+      let elem = Document.get_element doc path in
+      (match elem with
+       | Element.Line { stroke; _ } | Element.Rect { stroke; _ }
+       | Element.Circle { stroke; _ } | Element.Ellipse { stroke; _ }
+       | Element.Polyline { stroke; _ } | Element.Polygon { stroke; _ }
+       | Element.Path { stroke; _ } | Element.Text { stroke; _ }
+       | Element.Text_path { stroke; _ } -> stroke
+       | _ -> ctrl#model#default_stroke)
+    | None -> ctrl#model#default_stroke
+  in
+  let base = match base_stroke with
+    | Some s -> s
+    | None -> match ctrl#model#default_stroke with
+      | Some s -> s
+      | None -> Element.make_stroke Element.black
+  in
+  let width = match ctrl#model#default_stroke with
+    | Some ds -> ds.stroke_width
+    | None -> base.stroke_width in
+  let new_stroke = Element.make_stroke ~width ~linecap:cap ~linejoin:join
+    ~miter_limit ~align ~dash_pattern ~start_arrow ~end_arrow
+    ~start_arrow_scale ~end_arrow_scale ~arrow_align
+    ~opacity:base.stroke_opacity base.stroke_color in
+  ctrl#model#set_default_stroke (Some new_stroke);
+  if not (Document.PathMap.is_empty doc.Document.selection) then begin
+    ctrl#model#snapshot;
+    ctrl#set_selection_stroke (Some new_stroke);
+    let profile = json_to_string_default "uniform" (get "stroke_profile") in
+    let flipped = json_to_bool_default false (get "stroke_profile_flipped") in
+    let width_pts = Element.profile_to_width_points profile width flipped in
+    ctrl#set_selection_width_profile width_pts
+  end
+
+(** Sync stroke panel state from the first selected element's stroke. *)
+let sync_stroke_panel_from_selection (store : State_store.t)
+    (ctrl : Controller.controller) =
+  let doc = ctrl#document in
+  match Document.PathMap.min_binding_opt doc.Document.selection with
+  | None -> ()
+  | Some (path, _) ->
+    let elem = Document.get_element doc path in
+    let stroke_opt = match elem with
+      | Element.Line { stroke; _ } | Element.Rect { stroke; _ }
+      | Element.Circle { stroke; _ } | Element.Ellipse { stroke; _ }
+      | Element.Polyline { stroke; _ } | Element.Polygon { stroke; _ }
+      | Element.Path { stroke; _ } | Element.Text { stroke; _ }
+      | Element.Text_path { stroke; _ } -> stroke
+      | _ -> None
+    in
+    match stroke_opt with
+    | None -> ()
+    | Some s ->
+      let cap_str = match s.stroke_linecap with
+        | Butt -> "butt" | Round_cap -> "round" | Square -> "square" in
+      let join_str = match s.stroke_linejoin with
+        | Miter -> "miter" | Round_join -> "round" | Bevel -> "bevel" in
+      State_store.set store "stroke_cap" (`String cap_str);
+      State_store.set store "stroke_join" (`String join_str);
+      State_store.set store "stroke_weight" (`Float s.stroke_width);
+      State_store.set store "stroke_miter_limit" (`Float s.stroke_miter_limit);
+      let align_str = match s.stroke_align with
+        | Center -> "center" | Inside -> "inside" | Outside -> "outside" in
+      State_store.set store "stroke_align_stroke" (`String align_str);
+      State_store.set store "stroke_dashed" (`Bool (s.stroke_dash_pattern <> []));
+      let dp = s.stroke_dash_pattern in
+      (match dp with
+       | d1 :: g1 :: rest ->
+         State_store.set store "stroke_dash_1" (`Float d1);
+         State_store.set store "stroke_gap_1" (`Float g1);
+         (match rest with
+          | d2 :: g2 :: rest2 ->
+            State_store.set store "stroke_dash_2" (`Float d2);
+            State_store.set store "stroke_gap_2" (`Float g2);
+            (match rest2 with
+             | d3 :: g3 :: _ ->
+               State_store.set store "stroke_dash_3" (`Float d3);
+               State_store.set store "stroke_gap_3" (`Float g3)
+             | _ -> ())
+          | _ -> ())
+       | _ -> ());
+      State_store.set store "stroke_start_arrowhead"
+        (`String (Element.string_of_arrowhead s.stroke_start_arrow));
+      State_store.set store "stroke_end_arrowhead"
+        (`String (Element.string_of_arrowhead s.stroke_end_arrow));
+      State_store.set store "stroke_start_arrowhead_scale"
+        (`Float s.stroke_start_arrow_scale);
+      State_store.set store "stroke_end_arrowhead_scale"
+        (`Float s.stroke_end_arrow_scale);
+      let arrow_align_str = match s.stroke_arrow_align with
+        | Tip_at_end -> "tip_at_end" | Center_at_end -> "center_at_end" in
+      State_store.set store "stroke_arrow_align" (`String arrow_align_str)
+
+(** Check if a state key is a rendering-affecting stroke key. *)
+let is_stroke_render_key key =
+  List.mem key stroke_render_keys

@@ -228,6 +228,44 @@ public enum LineJoin: Equatable, Hashable {
     case bevel
 }
 
+/// Stroke alignment relative to the path.
+public enum StrokeAlign: Equatable, Hashable {
+    case center
+    case inside
+    case outside
+}
+
+/// Arrowhead shape identifier.
+public enum Arrowhead: String, CaseIterable, Equatable, Hashable {
+    case none
+    case simpleArrow = "simple_arrow"
+    case openArrow = "open_arrow"
+    case closedArrow = "closed_arrow"
+    case stealthArrow = "stealth_arrow"
+    case barbedArrow = "barbed_arrow"
+    case halfArrowUpper = "half_arrow_upper"
+    case halfArrowLower = "half_arrow_lower"
+    case circle
+    case openCircle = "open_circle"
+    case square
+    case openSquare = "open_square"
+    case diamond
+    case openDiamond = "open_diamond"
+    case slash
+
+    public init(fromString s: String) {
+        self = Arrowhead(rawValue: s) ?? .none
+    }
+
+    public var name: String { rawValue }
+}
+
+/// Arrow alignment mode.
+public enum ArrowAlign: Equatable, Hashable {
+    case tipAtEnd
+    case centerAtEnd
+}
+
 /// SVG fill presentation attribute.
 public struct Fill: Equatable, Hashable {
     public let color: Color
@@ -241,15 +279,78 @@ public struct Stroke: Equatable, Hashable {
     public let width: Double
     public let linecap: LineCap
     public let linejoin: LineJoin
+    public let miterLimit: Double
+    public let align: StrokeAlign
+    public let dashPattern: [Double]
+    public let startArrow: Arrowhead
+    public let endArrow: Arrowhead
+    public let startArrowScale: Double
+    public let endArrowScale: Double
+    public let arrowAlign: ArrowAlign
     public let opacity: Double
 
-    public init(color: Color, width: Double = 1.0, linecap: LineCap = .butt, linejoin: LineJoin = .miter, opacity: Double = 1.0) {
+    public init(color: Color, width: Double = 1.0, linecap: LineCap = .butt, linejoin: LineJoin = .miter,
+                miterLimit: Double = 10.0, align: StrokeAlign = .center,
+                dashPattern: [Double] = [], startArrow: Arrowhead = .none, endArrow: Arrowhead = .none,
+                startArrowScale: Double = 100.0, endArrowScale: Double = 100.0,
+                arrowAlign: ArrowAlign = .tipAtEnd, opacity: Double = 1.0) {
         self.color = color
         self.width = width
         self.linecap = linecap
         self.linejoin = linejoin
+        self.miterLimit = miterLimit
+        self.align = align
+        self.dashPattern = dashPattern
+        self.startArrow = startArrow
+        self.endArrow = endArrow
+        self.startArrowScale = startArrowScale
+        self.endArrowScale = endArrowScale
+        self.arrowAlign = arrowAlign
         self.opacity = opacity
     }
+}
+
+/// A width control point for variable-width stroke profiles.
+public struct StrokeWidthPoint: Equatable, Hashable {
+    public let t: Double
+    public let widthLeft: Double
+    public let widthRight: Double
+
+    public init(t: Double, widthLeft: Double, widthRight: Double) {
+        self.t = t; self.widthLeft = widthLeft; self.widthRight = widthRight
+    }
+}
+
+/// Convert a named profile preset to width control points.
+public func profileToWidthPoints(profile: String, width: Double, flipped: Bool) -> [StrokeWidthPoint] {
+    let hw = width / 2.0
+    let pts: [StrokeWidthPoint]
+    switch profile {
+    case "taper_both":
+        pts = [StrokeWidthPoint(t: 0, widthLeft: 0, widthRight: 0),
+               StrokeWidthPoint(t: 0.5, widthLeft: hw, widthRight: hw),
+               StrokeWidthPoint(t: 1, widthLeft: 0, widthRight: 0)]
+    case "taper_start":
+        pts = [StrokeWidthPoint(t: 0, widthLeft: 0, widthRight: 0),
+               StrokeWidthPoint(t: 1, widthLeft: hw, widthRight: hw)]
+    case "taper_end":
+        pts = [StrokeWidthPoint(t: 0, widthLeft: hw, widthRight: hw),
+               StrokeWidthPoint(t: 1, widthLeft: 0, widthRight: 0)]
+    case "bulge":
+        pts = [StrokeWidthPoint(t: 0, widthLeft: hw, widthRight: hw),
+               StrokeWidthPoint(t: 0.5, widthLeft: hw * 1.5, widthRight: hw * 1.5),
+               StrokeWidthPoint(t: 1, widthLeft: hw, widthRight: hw)]
+    case "pinch":
+        pts = [StrokeWidthPoint(t: 0, widthLeft: hw, widthRight: hw),
+               StrokeWidthPoint(t: 0.5, widthLeft: hw * 0.5, widthRight: hw * 0.5),
+               StrokeWidthPoint(t: 1, widthLeft: hw, widthRight: hw)]
+    default:
+        return []  // "uniform" or unknown
+    }
+    if flipped {
+        return pts.reversed().map { StrokeWidthPoint(t: 1.0 - $0.t, widthLeft: $0.widthLeft, widthRight: $0.widthRight) }
+    }
+    return pts
 }
 
 /// SVG transform as a 2D affine matrix [a b c d e f].
@@ -552,6 +653,7 @@ public enum Element: Equatable {
                 anchorIdx += 1
             }
             return .path(Path(d: cmds, fill: v.fill, stroke: v.stroke,
+                                 widthPoints: v.widthPoints,
                                  opacity: v.opacity, transform: v.transform,
                                  locked: v.locked))
         case .textPath(let v):
@@ -651,7 +753,8 @@ public enum Element: Equatable {
         switch self {
         case .line(let v):
             return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
-                              stroke: v.stroke, opacity: v.opacity, transform: v.transform,
+                              stroke: v.stroke, widthPoints: v.widthPoints,
+                              opacity: v.opacity, transform: v.transform,
                               locked: locked, visibility: v.visibility))
         case .rect(let v):
             return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
@@ -678,6 +781,7 @@ public enum Element: Equatable {
                                     visibility: v.visibility))
         case .path(let v):
             return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
+                              widthPoints: v.widthPoints,
                               opacity: v.opacity, transform: v.transform, locked: locked,
                               visibility: v.visibility))
         case .text(let v):
@@ -750,7 +854,8 @@ public enum Element: Equatable {
         switch self {
         case .line(let v):
             return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
-                              stroke: v.stroke, opacity: v.opacity, transform: v.transform,
+                              stroke: v.stroke, widthPoints: v.widthPoints,
+                              opacity: v.opacity, transform: v.transform,
                               locked: v.locked, visibility: visibility))
         case .rect(let v):
             return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
@@ -777,6 +882,7 @@ public enum Element: Equatable {
                                     visibility: visibility))
         case .path(let v):
             return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
+                              widthPoints: v.widthPoints,
                               opacity: v.opacity, transform: v.transform, locked: v.locked,
                               visibility: visibility))
         case .text(let v):
@@ -842,6 +948,7 @@ public func withFill(_ element: Element, fill: Fill?) -> Element {
                                 visibility: v.visibility))
     case .path(let v):
         return .path(Path(d: v.d, fill: fill, stroke: v.stroke,
+                          widthPoints: v.widthPoints,
                           opacity: v.opacity, transform: v.transform, locked: v.locked,
                           visibility: v.visibility))
     case .text(let v):
@@ -873,7 +980,8 @@ public func withStroke(_ element: Element, stroke: Stroke?) -> Element {
     switch element {
     case .line(let v):
         return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
-                          stroke: stroke, opacity: v.opacity, transform: v.transform,
+                          stroke: stroke, widthPoints: v.widthPoints,
+                          opacity: v.opacity, transform: v.transform,
                           locked: v.locked, visibility: v.visibility))
     case .rect(let v):
         return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
@@ -900,6 +1008,7 @@ public func withStroke(_ element: Element, stroke: Stroke?) -> Element {
                                 visibility: v.visibility))
     case .path(let v):
         return .path(Path(d: v.d, fill: v.fill, stroke: stroke,
+                          widthPoints: v.widthPoints,
                           opacity: v.opacity, transform: v.transform, locked: v.locked,
                           visibility: v.visibility))
     case .text(let v):
@@ -921,6 +1030,25 @@ public func withStroke(_ element: Element, stroke: Stroke?) -> Element {
                                   opacity: v.opacity, transform: v.transform, locked: v.locked,
                                   visibility: v.visibility))
     case .group, .layer:
+        return element
+    }
+}
+
+/// Return a copy of `element` with width points replaced.
+/// Only Line and Path support width points; others returned unchanged.
+public func withWidthPoints(_ element: Element, widthPoints: [StrokeWidthPoint]) -> Element {
+    switch element {
+    case .line(let v):
+        return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
+                          stroke: v.stroke, widthPoints: widthPoints,
+                          opacity: v.opacity, transform: v.transform,
+                          locked: v.locked, visibility: v.visibility))
+    case .path(let v):
+        return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
+                          widthPoints: widthPoints,
+                          opacity: v.opacity, transform: v.transform, locked: v.locked,
+                          visibility: v.visibility))
+    default:
         return element
     }
 }
@@ -1172,17 +1300,20 @@ public func convertSmoothToCorner(_ d: [PathCommand], anchorIdx: Int) -> [PathCo
 public struct Line: Equatable {
     public let x1: Double, y1: Double, x2: Double, y2: Double
     public let stroke: Stroke?
+    public let widthPoints: [StrokeWidthPoint]
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
     public let visibility: Visibility
 
     public init(x1: Double, y1: Double, x2: Double, y2: Double,
-                stroke: Stroke? = nil, opacity: Double = 1.0, transform: Transform? = nil,
+                stroke: Stroke? = nil, widthPoints: [StrokeWidthPoint] = [],
+                opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
                 visibility: Visibility = .preview) {
         self.x1 = x1; self.y1 = y1; self.x2 = x2; self.y2 = y2
-        self.stroke = stroke; self.opacity = opacity; self.transform = transform
+        self.stroke = stroke; self.widthPoints = widthPoints
+        self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
     }
@@ -1431,6 +1562,7 @@ public struct Path: Equatable {
     public let d: [PathCommand]
     public let fill: Fill?
     public let stroke: Stroke?
+    public let widthPoints: [StrokeWidthPoint]
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
@@ -1438,11 +1570,13 @@ public struct Path: Equatable {
 
     public init(d: [PathCommand],
                 fill: Fill? = nil, stroke: Stroke? = nil,
+                widthPoints: [StrokeWidthPoint] = [],
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
                 visibility: Visibility = .preview) {
         self.d = d
-        self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
+        self.fill = fill; self.stroke = stroke; self.widthPoints = widthPoints
+        self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
     }
