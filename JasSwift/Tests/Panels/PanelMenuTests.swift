@@ -69,3 +69,51 @@ import Testing
         #expect(!panelIsChecked(kind, cmd: "anything", layout: layout))
     }
 }
+
+@Test func layersMenuHasNewLayer() {
+    let items = panelMenu(.layers)
+    let has = items.contains { if case .action(_, "new_layer", _) = $0 { return true }; return false }
+    #expect(has, "Layers menu missing new_layer")
+}
+
+@Test func layersMenuHasNewGroup() {
+    let items = panelMenu(.layers)
+    let has = items.contains { if case .action(_, "new_group", _) = $0 { return true }; return false }
+    #expect(has, "Layers menu missing new_group")
+}
+
+@Test func layersMenuHasVisibilityToggles() {
+    let items = panelMenu(.layers)
+    for cmd in ["toggle_all_layers_visibility", "toggle_all_layers_outline", "toggle_all_layers_lock"] {
+        let has = items.contains { if case .action(_, let c, _) = $0 { return c == cmd }; return false }
+        #expect(has, "Layers menu missing \(cmd)")
+    }
+}
+
+@Test func layersMenuHasIsolationMode() {
+    let items = panelMenu(.layers)
+    for cmd in ["enter_isolation_mode", "exit_isolation_mode"] {
+        let has = items.contains { if case .action(_, let c, _) = $0 { return c == cmd }; return false }
+        #expect(has, "Layers menu missing \(cmd)")
+    }
+}
+
+@Test func layersMenuHasFlattenAndCollect() {
+    let items = panelMenu(.layers)
+    for cmd in ["flatten_artwork", "collect_in_new_layer"] {
+        let has = items.contains { if case .action(_, let c, _) = $0 { return c == cmd }; return false }
+        #expect(has, "Layers menu missing \(cmd)")
+    }
+}
+
+@Test func layersDispatchTier3NoError() {
+    var layout = WorkspaceLayout.defaultLayout()
+    let dockId = layout.anchoredDock(.right)!.id
+    let addr = PanelAddr(group: GroupAddr(dockId: dockId, groupIdx: 2), panelIdx: 0)
+    for cmd in ["new_layer", "new_group", "toggle_all_layers_visibility",
+                "toggle_all_layers_outline", "toggle_all_layers_lock",
+                "enter_isolation_mode", "exit_isolation_mode",
+                "flatten_artwork", "collect_in_new_layer"] {
+        panelDispatch(.layers, cmd: cmd, addr: addr, layout: &layout)
+    }
+}
