@@ -54,29 +54,8 @@ fn render_el(
         return render_repeat(el, ctx, rctx);
     }
 
-    // Native widget override via _template tag — wrap in layout div
-    if let Some(tpl) = el.get("_template").and_then(|t| t.as_str()) {
-        match tpl {
-            "fill_stroke_widget" => {
-                let base_style = build_style(el, ctx);
-                let col_style = el.get("col").and_then(|c| c.as_u64())
-                    .map(|c| {
-                        let pct = (c as f64 / 12.0 * 100.0).round();
-                        format!("flex:0 0 {pct}%;max-width:{pct}%;min-width:0;position:relative;padding:0 4px;")
-                    })
-                    .unwrap_or_default();
-                let style = format!("{col_style}{base_style}");
-                let native = render_fill_stroke_widget(el, ctx, rctx);
-                return rsx! {
-                    div {
-                        style: "{style}",
-                        {native}
-                    }
-                };
-            }
-            _ => {}
-        }
-    }
+    // _template tag available for native widget overrides when needed.
+    // Currently using generic rendering for all templates (matches Flask).
 
     let etype = el.get("type").and_then(|t| t.as_str()).unwrap_or("placeholder");
 
@@ -529,11 +508,11 @@ fn build_style(el: &serde_json::Value, ctx: &serde_json::Value) -> String {
                 parts.push(format!("justify-content:{v}"));
             }
             "position" => {
-                // position: {x, y} → relative offset positioning
+                // position: {x, y} → absolute positioning within parent
                 if let Some(obj) = val.as_object() {
                     let x = obj.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                     let y = obj.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    parts.push(format!("position:relative;left:{x}px;top:{y}px"));
+                    parts.push(format!("position:absolute;left:{x}px;top:{y}px"));
                 } else {
                     // position: "relative" etc.
                     parts.push(format!("position:{resolved}"));
@@ -585,31 +564,46 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let etype = el.get("type").and_then(|t| t.as_str()).unwrap_or("container");
     let dir = if layout == "row" || etype == "row" { "row" } else { "column" };
     let base_style = build_style(el, ctx);
-    // col: N → flex-basis percentage (Bootstrap 12-column grid)
-    let col_style = el.get("col").and_then(|c| c.as_u64())
-        .map(|c| {
-            let pct = (c as f64 / 12.0 * 100.0).round();
-            format!("flex:0 0 {pct}%;max-width:{pct}%;min-width:0;position:relative;padding:0 4px;")
-        })
+    // Bootstrap grid: col: N → class="col-N", type: row → class="row"
+    let col_class = el.get("col").and_then(|c| c.as_u64())
+        .map(|c| format!("col-{c}"))
         .unwrap_or_default();
-    // type: row needs flex-wrap for Bootstrap grid compatibility
-    let wrap_style = if etype == "row" { "flex-wrap:wrap;" } else { "" };
+    let row_class = if etype == "row" { "row" } else { "" };
+    // If any child uses position: {x, y}, this container needs position:relative
+    let has_abs_children = el.get("children")
+        .and_then(|c| c.as_array())
+        .map_or(false, |children| {
+            children.iter().any(|c| {
+                c.get("style")
+                    .and_then(|s| s.get("position"))
+                    .map_or(false, |p| p.is_object())
+            })
+        });
+    let pos_style = if has_abs_children { "position:relative;" } else { "" };
     // Apply default text color if not explicitly set in the element's style
     let has_color = el.get("style")
         .and_then(|s| s.as_object())
         .map_or(false, |m| m.contains_key("color"));
     let color_default = if has_color { "" } else { "color:var(--jas-text,#ccc);" };
     let visible = is_visible(el, ctx);
-    let style = if visible {
-        format!("display:flex;flex-direction:{dir};{wrap_style}{color_default}{col_style}{base_style}")
+    let flex_dir = if !col_class.is_empty() {
+        // col elements don't override display — Bootstrap handles it
+        String::new()
     } else {
-        format!("display:none;flex-direction:{dir};{wrap_style}{color_default}{col_style}{base_style}")
+        format!("display:flex;flex-direction:{dir};")
     };
+    let style = if visible {
+        format!("{flex_dir}{pos_style}{color_default}{base_style}")
+    } else {
+        format!("display:none;{pos_style}{color_default}{base_style}")
+    };
+    let css_class = format!("{row_class} {col_class}").trim().to_string();
     let children = render_children(el, ctx, rctx);
 
     rsx! {
         div {
             id: "{id}",
+            class: "{css_class}",
             style: "{style}",
             for child in children {
                 {child}

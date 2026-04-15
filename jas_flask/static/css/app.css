@@ -91,11 +91,23 @@
 /* Empty recent-color slot: hollow square */
 .jas-color-swatch-empty {
     border: 1px solid var(--jas-border, #666);
-    background: transparent;
+    background: #fff;
     cursor: default;
 }
 .jas-color-swatch-empty:hover {
     box-shadow: none;
+}
+/* None indicator: red diagonal line over white background */
+.jas-color-swatch-none {
+    background: linear-gradient(
+        to bottom right,
+        #fff 40%, transparent 40%,
+        transparent 48%, #f00 48%,
+        #f00 52%, transparent 52%,
+        transparent 60%, #fff 60%
+    );
+    border: 1px solid #888;
+    cursor: pointer;
 }
 
 /* Thin vertical rule between fixed and recent swatches */
