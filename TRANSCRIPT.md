@@ -1636,6 +1636,11 @@ panel:
   - .col-1: ARROW_TIP_BUTTON
 ```
 
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
+
 # Layer
 
 The Layer Panel displays the elements in the document.
@@ -1663,6 +1668,11 @@ panel:
   - .col-9: SPACER TWIRL_DOWN_BUTTON ELEMENT_PREVIEW ELEMENT_NAME
   - .col-1: SELECT_CHECKMARK
 ```
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. Be ready for a deep dive into any of
+the suggestions.
 
 # Binary
 
