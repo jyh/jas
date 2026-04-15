@@ -1,8 +1,677 @@
 id: layers_panel_content
-type: placeholder
-summary: "Layer list"
+type: panel
+summary: "Layers"
 description: >
-  Layer hierarchy tree with visibility and lock toggles per layer.
-  Supports drag-and-drop reordering, nested groups, and multi-select.
-  Each row shows: visibility eye icon, lock icon, layer thumbnail,
-  layer name (editable on double-click), and target indicator.
+  Layer hierarchy panel displaying all elements in the document as an
+  interactive tree. Each element occupies one row. The panel supports
+  two independent selection models (element selection and panel
+  selection), drag-and-drop reordering, inline renaming, search and
+  filter, isolation mode, and a Layer Options dialog.
+
+  === Row Layout ===
+
+  Each row is laid out left to right as:
+
+  SPACER — EYE_BUTTON — LOCK_BUTTON — TWIRL_DOWN_BUTTON — ELEMENT_PREVIEW
+  — ELEMENT_NAME — SELECT_SQUARE
+
+  SPACER provides indentation in increments of 16px. Top-level layers
+  are not indented. Each nesting level adds 16px: direct children of a
+  layer are indented 16px, grandchildren 32px, and so on.
+
+  EYE_BUTTON displays and controls the element's visibility state (see
+  Visibility below).
+
+  LOCK_BUTTON displays and controls whether the element is locked (see
+  Locking below).
+
+  TWIRL_DOWN_BUTTON is present on layers and groups; clicking it
+  expands or collapses the container's children in the tree (see
+  Twirl-Down below). Leaf elements (paths, text, images, etc.) do not
+  have a twirl button; a blank gap of the same width preserves column
+  alignment.
+
+  ELEMENT_PREVIEW is a 32px square rasterized thumbnail of the element
+  scaled to fit, rendered on a white background. Thumbnails are
+  refreshed as elements change on a best-effort basis. Elements with
+  outline or invisible visibility modes are rendered as if in preview
+  mode for the thumbnail. Empty groups and layers show a blank preview.
+
+  ELEMENT_NAME is the name of the element, if it has one. Unnamed
+  elements display their element type in angle brackets, truncated with
+  ellipsis if the name exceeds the available space. The display names
+  are: <Line>, <Rectangle>, <Circle>, <Ellipse>, <Polyline>,
+  <Polygon>, <Path>, <Text>, <Text Path>, <Group>, <Layer>.
+
+  SELECT_SQUARE is a 12px square. It is filled with the color of the
+  element's nearest ancestor layer if the element is currently
+  element-selected (see Element Selection below). Otherwise it is
+  empty (transparent fill with a thin border).
+
+  === Visibility ===
+
+  Each element has one of three visibility states: preview (normal
+  rendering), outline (wireframe rendering), or invisible (not
+  rendered).
+
+  Clicking the EYE_BUTTON cycles visibility: preview -> outline ->
+  invisible -> preview. The icon changes to match: eye_preview (open
+  eye), eye_outline (eye with dashed pupil), or eye_invisible
+  (closed/struck-through eye).
+
+  When a container (layer or group) changes visibility, the change
+  applies to all its descendants.
+
+  Option-click (Alt-click) on the EYE_BUTTON triggers solo/unsolo
+  among the clicked element's siblings at the same tree level. On the
+  first Option-click, the clicked element becomes the only visible
+  sibling; all other siblings are set to invisible and their previous
+  visibility states are saved. On a second Option-click of the same
+  element, all siblings are restored to their saved visibility states.
+  If the user manually changes any sibling's visibility between the
+  two Option-clicks, the saved state is discarded (no restore).
+
+  === Locking ===
+
+  Clicking the LOCK_BUTTON toggles the element's lock state. Locked
+  elements cannot be selected or edited on the canvas but remain
+  visible. The icon shows lock_locked when locked, lock_unlocked when
+  unlocked.
+
+  When locking a container, the container saves each direct child's
+  current lock state, then sets all children to locked. When unlocking
+  a container, each direct child's lock state is restored to the value
+  saved at the time the container was locked. This is per-container:
+  each container remembers only its own direct children's states.
+
+  Locked elements can still be dragged and reparented in the layers
+  panel (lock protects content editing, not organizational position).
+
+  === Twirl-Down ===
+
+  Layers and groups have a TWIRL_DOWN_BUTTON, expanded (open) by
+  default. The icon shows twirl_open when expanded and twirl_closed
+  when collapsed. Twirl state persists across sessions. Leaf elements
+  do not have a twirl button; a blank gap preserves alignment. Empty
+  layers and groups still show an active twirl button.
+
+  === Element Selection ===
+
+  Element selection is the document-level selection, synchronized with
+  the canvas. Clicking on the SELECT_SQUARE selects that element and
+  deselects all others. Shift-click extends the selection in visual
+  (flattened) row order from the last-clicked element to the clicked
+  element. Selecting a collapsed group includes all its descendants.
+  Command-click toggles the clicked element in or out of the current
+  selection. Elements can be selected across layers.
+
+  When an element is selected on the canvas, the panel auto-scrolls to
+  ensure that element's row is visible. If the element is inside a
+  collapsed group, the group and all ancestor groups are auto-expanded
+  first. If multiple elements are selected, the panel scrolls to the
+  first selected element in document order.
+
+  === Panel Selection ===
+
+  Panel selection is independent from element selection and is local to
+  the layers panel. An element is panel-selected by clicking on its
+  spacer, twirl-down gap, preview, or name area. Panel-selected
+  elements are highlighted with the system selection color as a
+  background on the row. Click selects one element and deselects all
+  others. Shift-click extends the selection in visual row order;
+  selecting a collapsed group includes all its descendants.
+  Command-click toggles the element. In isolation mode, panel
+  selection is constrained to the isolated subtree.
+
+  Panel-selected elements can be moved within the panel by dragging
+  (see Drag-and-Drop below). All menu operations that refer to
+  "selected" items act on panel selection, not element selection.
+
+  Right-clicking a row opens the context menu. If the right-clicked
+  element is not already panel-selected, it becomes the sole
+  panel-selected element first, then the menu acts on the selection.
+
+  === Drag-and-Drop ===
+
+  Panel-selected elements can be dragged to reorder or reparent
+  elements in the document. A horizontal line between rows indicates
+  the drop insertion point.
+
+  Constraints:
+  - Layers can be dragged to the top level or into other layers.
+    Layers cannot be dragged into groups.
+  - Groups can be dragged into layers and other groups.
+  - Leaf elements can be dragged into layers and groups.
+  - Nothing can be dragged into a locked container.
+  - Nothing can be dragged into itself or its own descendants.
+  - Every element must live inside a layer; elements cannot be dragged
+    to the root level unless they are layers.
+  - When dragging multiple panel-selected elements, all constraints
+    must be satisfied for every element. If any element violates a
+    constraint, the entire drop is rejected.
+  - Locked elements can be dragged (lock protects content, not
+    position).
+
+  Hovering over a collapsed container for 500ms auto-expands it.
+  Elements preserve their relative order when moved. Drag-and-drop
+  is disabled while a search query is active.
+
+  === Search and Filter ===
+
+  A search field appears at the top of the panel. Typing in the field
+  incrementally filters the tree to show elements whose name (or
+  auto-generated type name like <Path>) contains the search string,
+  case-insensitive. Ancestor nodes of matching elements are shown to
+  preserve tree context but are dimmed to distinguish them from actual
+  matches. Clearing the field restores the full tree.
+
+  A filter button to the right of the search field opens a dropdown
+  with checkboxes for each element type: Layer, Group, Path, Rectangle,
+  Circle, Ellipse, Polyline, Polygon, Text, Text Path, Line. By
+  default all types are checked. Unchecking a type hides all elements
+  of that type. Filtering composes with the search field — both must
+  match for an element to appear.
+
+  Collapsed nodes are searched; if a match is inside a collapsed group,
+  the group is auto-expanded to reveal it. Panel selection and element
+  selection are constrained to visible (matching) rows only. In
+  isolation mode, search and filter operate within the isolated
+  subtree only.
+
+  === Isolation Mode ===
+
+  Isolation mode restricts editing to a single container and its
+  descendants. Enter isolation by double-clicking a layer or group row
+  (outside the name text area), or via the menu/context menu "Enter
+  Isolation Mode" (enabled when exactly one container is
+  panel-selected).
+
+  All content outside the isolated container is dimmed to 10% opacity
+  and becomes non-interactive (cannot be selected, edited, or targeted).
+  The dimmed content remains visible as spatial context.
+
+  Isolation is a stack. While in isolation, double-clicking a nested
+  group enters a second level. The outer container also dims, leaving
+  only the inner group's children fully interactive.
+
+  A breadcrumb bar appears at the top of the panel showing the
+  isolation path (e.g., "Layer 1 > Group > Inner Group"). Each
+  breadcrumb segment is clickable — clicking a segment exits isolation
+  to that level. The root segment exits isolation entirely.
+
+  Exiting isolation:
+  - Escape pops one level. At the outermost level, exits entirely.
+  - Double-click an empty area of the canvas exits one level.
+  - Menu/context menu "Exit Isolation Mode" exits one level.
+  - Click a breadcrumb segment exits to that level directly.
+
+  On entering each isolation level, the visibility state of every
+  element is saved. On exit, each element's visibility is restored. If
+  the user changes a visibility state while in isolation, that change
+  is preserved on exit (overwrites the saved value for that element).
+
+  Constraints during isolation:
+  - Element selection constrained to the isolated container's
+    descendants.
+  - Panel selection constrained to the isolated subtree.
+  - Drag-and-drop constrained to within the isolated subtree.
+  - "New Layer" and "Collect in New Layer" are disabled.
+  - "New Group" operates within the isolated container.
+
+  === Keyboard Shortcuts ===
+
+  - Delete / Backspace: delete panel-selected elements.
+  - F2 or Enter: start renaming the panel-selected element (single
+    selection only).
+  - Command-A: select all visible elements in the panel.
+  - Up arrow: move focus to the previous visible row.
+  - Down arrow: move focus to the next visible row.
+  - Right arrow: expand a collapsed container, or move to its first
+    child if already expanded.
+  - Left arrow: collapse an expanded container, or move to the parent
+    if already collapsed or a leaf.
+  - Escape: exit one level of isolation mode, or cancel an active
+    rename.
+
+  === Renaming ===
+
+  Renaming is triggered by F2, Enter (when exactly one element is
+  panel-selected), or double-clicking the element name text. The name
+  becomes an editable text field in place. Confirm by pressing Enter
+  or clicking outside the field. Cancel by pressing Escape (reverts to
+  the value before editing). Confirming with an empty string removes
+  the custom name — the element reverts to its auto-generated type
+  name. Duplicate names are allowed. Renaming is a single undoable
+  action.
+
+  Double-click on the name text starts rename; double-click on the row
+  area outside the name enters isolation mode (for containers).
+
+  === Empty State ===
+
+  A document always has at least one layer. Attempting to delete the
+  last remaining layer is prevented (delete action is disabled). New
+  documents start with a single layer named "Layer 1" with the first
+  color in the preset cycle (Light Blue). No special empty-state
+  message or placeholder is shown.
+
+  === Layer Color Presets ===
+
+  The nine preset colors, in cycle order for auto-assignment:
+  1. Light Blue   (#4a90d9)
+  2. Red          (#d94a4a)
+  3. Green        (#4ad94a)
+  4. Blue         (#4a4ad9)
+  5. Yellow       (#d9d94a)
+  6. Magenta      (#d94ad9)
+  7. Cyan         (#4ad9d9)
+  8. Light Gray   (#b0b0b0)
+  9. Dark Green   (#2a7a2a)
+
+  Auto-assignment cycles through this list in order: Layer 1 gets
+  Light Blue, Layer 2 gets Red, etc., wrapping after 9. The cycle
+  index is per-document and advances with each layer created.
+
+  When a layer's color matches a preset, the Layer Options dialog
+  dropdown shows that preset name. Otherwise it displays "Custom."
+  "Custom" is a display-only label, not selectable from the dropdown;
+  the user must click the color swatch to pick a custom color.
+
+state:
+  search_query:
+    type: string
+    default: ""
+    description: "Current search text for filtering the tree by element name"
+
+  type_filter:
+    type: list
+    item_type: string
+    default: []
+    description: "Active element type filter; empty list means all types shown"
+
+  panel_selection:
+    type: list
+    item_type: string
+    default: []
+    description: "List of element IDs that are panel-selected"
+
+  isolation_stack:
+    type: list
+    item_type: object
+    default: []
+    description: "Stack of isolation contexts; each entry has container_id and saved_visibility map"
+
+  twirl_states:
+    type: object
+    default: {}
+    persist: true
+    description: "Map of element_id to bool (true=expanded). Persists across sessions. Missing entries default to true (expanded)."
+
+  renaming_element:
+    type: string
+    default: null
+    nullable: true
+    description: "ID of the element currently being renamed inline, or null"
+
+  drag_active:
+    type: bool
+    default: false
+    description: "Whether a drag operation is in progress"
+
+  solo_state:
+    type: object
+    default: null
+    nullable: true
+    description: "Saved sibling visibility states for solo/unsolo. Contains element_id of the soloed element and a map of sibling_id to saved visibility state. Null when not in solo mode."
+
+  next_layer_color_index:
+    type: number
+    default: 0
+    per_document: true
+    description: "Index into the 9-color preset cycle for auto-assigning layer colors"
+
+init:
+  panel_selection: "[]"
+  isolation_stack: "[]"
+
+menu:
+  - label: "New Layer..."
+    action: new_layer
+    description: "Open the Layer Options dialog to create a new layer"
+
+  - label: "New Group"
+    action: new_group
+    enabled_when: "active_document.layers_panel_selection_count > 0"
+    description: "Wrap the panel-selected elements in a new group"
+
+  - separator
+
+  - label: "{{if active_document.any_layer_visible then 'Hide All Layers' else 'Show All Layers'}}"
+    action: toggle_all_layers_visibility
+    description: "Toggle all layers between visible and invisible"
+
+  - label: "{{if active_document.any_layer_preview then 'Outline All Layers' else 'Preview All Layers'}}"
+    action: toggle_all_layers_outline
+    description: "Toggle all layers between preview and outline mode"
+
+  - label: "{{if active_document.any_layer_unlocked then 'Lock All Layers' else 'Unlock All Layers'}}"
+    action: toggle_all_layers_lock
+    description: "Toggle all layers between locked and unlocked"
+
+  - separator
+
+  - label: "Enter Isolation Mode"
+    action: enter_isolation_mode
+    enabled_when: "active_document.layers_panel_selection_count == 1 and active_document.layers_panel_selection_is_container"
+    description: "Isolate the selected container for focused editing"
+
+  - label: "Exit Isolation Mode"
+    action: exit_isolation_mode
+    enabled_when: "panel.isolation_stack.length > 0"
+    description: "Exit one level of isolation mode"
+
+  - separator
+
+  - label: "Flatten Artwork"
+    action: flatten_artwork
+    enabled_when: "active_document.layers_panel_selection_has_group"
+    description: "Recursively unpack all groups in the panel-selected items"
+
+  - label: "Collect in New Layer"
+    action: collect_in_new_layer
+    enabled_when: "active_document.layers_panel_selection_count > 0 and panel.isolation_stack.length == 0"
+    description: "Move panel-selected items into a new layer above all existing layers"
+
+  - separator
+
+  - label: "Close Layers"
+    action: close_panel
+    params: { panel: layers }
+
+content:
+  type: container
+  id: lp_root
+  layout: column
+  style: { padding: 0, gap: 0 }
+  children:
+
+    # ── Breadcrumb bar (isolation mode only) ──
+
+    - id: lp_breadcrumb
+      type: container
+      layout: row
+      style: { padding: "2 6", gap: 2, background: "{{theme.colors.pane_bg_dark}}" }
+      bind:
+        visible: "panel.isolation_stack.length > 0"
+      children:
+        - type: icon_button
+          icon: chevron_left
+          summary: "Exit all isolation"
+          style: { size: 14 }
+          behavior:
+            - event: click
+              action: exit_isolation_to_level
+              params: { level_index: 0 }
+        - type: container
+          layout: row
+          style: { gap: 2, flex: 1 }
+          foreach:
+            source: "panel.isolation_stack"
+            as: level
+          do:
+            type: container
+            layout: row
+            style: { gap: 2 }
+            children:
+              - type: text
+                content: ">"
+                style: { font_size: 9, color: "{{theme.colors.text_dim}}" }
+              - type: text
+                content: "{{level.container_name}}"
+                style: { font_size: 10, cursor: pointer }
+                behavior:
+                  - event: click
+                    action: exit_isolation_to_level
+                    params: { level_index: "level._index + 1" }
+
+    # ── Search and filter bar ──
+
+    - id: lp_search_bar
+      type: container
+      layout: row
+      style: { padding: "4 6", gap: 4, alignment: center }
+      children:
+        - type: icon_button
+          icon: search
+          style: { size: 14 }
+          bind:
+            disabled: "true"
+        - id: lp_search_input
+          type: text_input
+          summary: "Search layers"
+          description: >
+            Filter the tree by element name. Case-insensitive incremental
+            search. Ancestor nodes of matches are shown dimmed for context.
+          placeholder: "Search All"
+          style: { flex: 1 }
+          bind:
+            value: "panel.search_query"
+          behavior:
+            - event: input
+              action: set_layers_search
+              params: { query: "panel.search_query" }
+        - id: lp_filter_button
+          type: dropdown
+          icon: filter
+          summary: "Filter by element type"
+          description: >
+            Dropdown with checkboxes for each element type. Unchecking a
+            type hides all elements of that type from the tree. Filtering
+            composes with the search field.
+          style: { size: 20 }
+          items:
+            - { label: "Layer",     value: layer,     type: toggle }
+            - { label: "Group",     value: group,     type: toggle }
+            - { label: "Path",      value: path,      type: toggle }
+            - { label: "Rectangle", value: rectangle, type: toggle }
+            - { label: "Circle",    value: circle,    type: toggle }
+            - { label: "Ellipse",   value: ellipse,   type: toggle }
+            - { label: "Polyline",  value: polyline,  type: toggle }
+            - { label: "Polygon",   value: polygon,   type: toggle }
+            - { label: "Text",      value: text,      type: toggle }
+            - { label: "Text Path", value: text_path, type: toggle }
+            - { label: "Line",      value: line,      type: toggle }
+          behavior:
+            - event: toggle
+              action: toggle_layers_type_filter
+              params: { element_type: "item.value" }
+
+    # ── Separator ──
+
+    - type: separator
+      orientation: horizontal
+
+    # ── Tree view (main panel area) ──
+
+    - id: lp_tree
+      type: tree_view
+      summary: "Element hierarchy"
+      description: >
+        Recursive tree of document elements. Each row is rendered from
+        row_template with node.* variables in scope. Supports
+        drag-and-drop reordering, inline rename, keyboard navigation,
+        and context menus. See the panel-level description for full
+        behavioral specification.
+      style: { flex: 1, overflow_y: auto }
+      bind:
+        source: "active_document.element_tree"
+        panel_selection: "panel.panel_selection"
+        element_selection: "active_document.element_selection"
+        search_query: "panel.search_query"
+        type_filter: "panel.type_filter"
+        isolation_root: "if panel.isolation_stack.length > 0 then panel.isolation_stack[panel.isolation_stack.length - 1].container_id else null"
+        twirl_states: "panel.twirl_states"
+        renaming_element: "panel.renaming_element"
+        drag_active: "panel.drag_active"
+
+      row_template:
+        type: container
+        layout: row
+        style: { height: 24, padding: "0 4", gap: 2, alignment: center }
+        bind:
+          background: "if node.panel_selected then '{{theme.colors.selection}}' else 'transparent'"
+          opacity: "if node.search_ancestor_only then 0.5 else 1.0"
+        children:
+
+          # Indentation spacer
+          - type: spacer
+            style: { width: "{{node.depth * 16}}" }
+
+          # Eye button (visibility)
+          - id: lp_eye
+            type: icon_button
+            icon: "{{if node.visibility == 'preview' then 'eye_preview' else if node.visibility == 'outline' then 'eye_outline' else 'eye_invisible'}}"
+            summary: "Visibility"
+            style: { size: 16 }
+            behavior:
+              - event: click
+                condition: "not event.alt"
+                action: cycle_element_visibility
+                params: { element_id: "node.id" }
+              - event: click
+                condition: "event.alt"
+                action: solo_element_visibility
+                params: { element_id: "node.id" }
+
+          # Lock button
+          - id: lp_lock
+            type: icon_button
+            icon: "{{if node.locked then 'lock_locked' else 'lock_unlocked'}}"
+            summary: "Lock"
+            style: { size: 16 }
+            behavior:
+              - event: click
+                action: toggle_element_lock
+                params: { element_id: "node.id" }
+
+          # Twirl-down button (containers only) or alignment gap (leaves)
+          - id: lp_twirl
+            type: icon_button
+            icon: "{{if panel.twirl_states[node.id] != false then 'twirl_open' else 'twirl_closed'}}"
+            summary: "Expand/Collapse"
+            style: { size: 16 }
+            bind:
+              visible: "node.is_container"
+            behavior:
+              - event: click
+                action: toggle_element_twirl
+                params: { element_id: "node.id" }
+          - type: spacer
+            style: { width: 16 }
+            bind:
+              visible: "not node.is_container"
+
+          # Element preview thumbnail
+          - id: lp_preview
+            type: element_preview
+            summary: "Element preview"
+            description: >
+              32px square rasterized thumbnail of the element, scaled to
+              fit on a white background. Outline/invisible elements are
+              rendered as if in preview mode. Empty containers show blank.
+            style: { size: 32 }
+            bind:
+              element_id: "node.id"
+
+          # Element name (or inline rename field)
+          - id: lp_name
+            type: text
+            content: "{{if node.name != '' then node.name else '<' + node.type_label + '>'}}"
+            summary: "Element name"
+            style: { flex: 1, font_size: 11, overflow: hidden, text_overflow: ellipsis, white_space: nowrap }
+            bind:
+              visible: "panel.renaming_element != node.id"
+            behavior:
+              - event: double_click
+                action: rename_element
+                params: { element_id: "node.id" }
+          - id: lp_name_edit
+            type: text_input
+            style: { flex: 1, font_size: 11 }
+            bind:
+              visible: "panel.renaming_element == node.id"
+              value: "node.name"
+            behavior:
+              - event: keydown
+                condition: "event.key == 'Enter'"
+                action: confirm_rename
+              - event: keydown
+                condition: "event.key == 'Escape'"
+                action: cancel_rename
+              - event: blur
+                action: confirm_rename
+
+          # Select square (element selection indicator)
+          - id: lp_select
+            type: container
+            style:
+              width: 12
+              height: 12
+              background: "{{if node.element_selected then node.ancestor_layer_color else 'transparent'}}"
+              border: "1px solid {{theme.colors.border}}"
+            behavior:
+              - event: click
+                action: layers_element_select
+                params: { element_id: "node.id" }
+
+      # Row-level events (panel selection, isolation, drag)
+      behavior:
+        - event: click
+          description: "Panel-select on click (spacer, twirl-gap, preview, name areas)"
+          action: layers_panel_select
+          params: { element_id: "node.id" }
+        - event: double_click
+          condition: "node.is_container and event.target_id != 'lp_name'"
+          action: enter_isolation_mode
+          params: { container_id: "node.id" }
+        - event: drag_start
+          action: layers_panel_select
+          params: { element_id: "node.id" }
+        - event: drag_move
+          description: "Show drop indicator; auto-expand after 500ms hover on collapsed container"
+        - event: drag_end
+          description: "Validate constraints and reparent/reorder elements"
+
+      context_menu:
+        - label: "Options for Layer..."
+          action: open_layer_options
+          params: { mode: edit, layer_id: "node.id" }
+          enabled_when: "node.type == 'layer'"
+        - label: "Duplicate"
+          action: duplicate_layer_selection
+        - label: "Delete Selection"
+          action: delete_layer_selection
+        - separator
+        - label: "{{if panel.isolation_stack.length > 0 then 'Exit Isolation Mode' else 'Enter Isolation Mode'}}"
+          action: "{{if panel.isolation_stack.length > 0 then 'exit_isolation_mode' else 'enter_isolation_mode'}}"
+          params: { container_id: "node.id" }
+          enabled_when: "node.is_container or panel.isolation_stack.length > 0"
+        - separator
+        - label: "Flatten Artwork"
+          action: flatten_artwork
+          enabled_when: "active_document.layers_panel_selection_has_group"
+        - label: "Collect in New Layer"
+          action: collect_in_new_layer
+          enabled_when: "active_document.layers_panel_selection_count > 0 and panel.isolation_stack.length == 0"
+
+      keyboard:
+        - { key: "Delete",     action: delete_layer_selection }
+        - { key: "Backspace",  action: delete_layer_selection }
+        - { key: "F2",         action: rename_element, params: { element_id: "panel.panel_selection[0]" } }
+        - { key: "Enter",      action: rename_element, params: { element_id: "panel.panel_selection[0]" }, enabled_when: "panel.panel_selection.length == 1" }
+        - { key: "Meta+A",     action: layers_select_all }
+        - { key: "ArrowUp",    action: layers_nav_up }
+        - { key: "ArrowDown",  action: layers_nav_down }
+        - { key: "ArrowRight", action: layers_nav_right }
+        - { key: "ArrowLeft",  action: layers_nav_left }
+        - { key: "Escape",     action: "{{if panel.renaming_element != null then 'cancel_rename' else 'exit_isolation_mode'}}" }

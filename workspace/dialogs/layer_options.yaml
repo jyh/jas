@@ -1,0 +1,263 @@
+layer_options:
+  summary: "Layer Options"
+  description: >
+    Modal dialog for editing or creating a layer. Supports two modes,
+    determined by the param.mode parameter:
+
+    Edit mode (param.mode == "edit"): Opened by double-clicking a layer
+    row's options area or choosing "Options for Layer..." from the panel
+    menu or context menu. All fields are populated from the layer's
+    current properties. OK updates the layer in place.
+
+    Create mode (param.mode == "create"): Opened by choosing "New
+    Layer..." from the panel menu. Name defaults to "Layer N" (skipping
+    numbers already in use). Color defaults to the next color in the
+    nine-color preset cycle. OK creates a new layer inserted above the
+    topmost panel-selected layer, or at the top of the stack if nothing
+    is panel-selected.
+
+    Layout (top to bottom):
+    - Name: label (col-3) + text input (col-9)
+    - Color: label (col-3) + dropdown of 9 preset colors plus "Custom"
+      display-only label (col-6) + color swatch that opens Color Picker
+      (col-3). When a preset is selected, the swatch updates to match.
+      If the current color does not match any preset, the dropdown
+      displays "Custom." If a custom color matches a preset, the
+      dropdown switches to that preset name.
+    - Row: empty (col-3) + Template checkbox (col-3, disabled) + Lock
+      checkbox (col-3)
+    - Row: empty (col-3) + Show checkbox (col-3) + Print checkbox
+      (col-3, disabled)
+    - Row: empty (col-3) + Preview checkbox (col-3, disabled when Show
+      unchecked) + Dim Images to checkbox with percentage input (col-3)
+    - Bottom: Cancel button + OK button (right-aligned)
+
+    Visibility mapping: The Show and Preview checkboxes map to the
+    three-state visibility model:
+    - Show unchecked -> invisible (Preview is disabled)
+    - Show checked + Preview checked -> preview
+    - Show checked + Preview unchecked -> outline
+  modal: true
+  width: 340
+  params:
+    mode: { type: enum, values: [create, edit] }
+    layer_id: { type: string, nullable: true }
+  state:
+    name:
+      type: string
+      default: ""
+      description: "Layer name"
+    color:
+      type: color
+      default: "#4a90d9"
+      description: "Layer highlight color"
+    color_preset:
+      type: enum
+      values: [light_blue, red, green, blue, yellow, magenta, cyan, light_gray, dark_green, custom]
+      default: light_blue
+      description: "Selected color preset, or 'custom' if no preset matches"
+    template:
+      type: bool
+      default: false
+      description: "Template flag (not implemented)"
+    lock:
+      type: bool
+      default: false
+      description: "Locked state"
+    show:
+      type: bool
+      default: true
+      description: "Visible (true) or invisible (false)"
+    preview:
+      type: bool
+      default: true
+      description: "Preview mode (true) or outline mode (false). Disabled when show is false."
+    print:
+      type: bool
+      default: true
+      description: "Include in prints (not implemented)"
+    dim_images:
+      type: bool
+      default: false
+      description: "Dim raster images in this layer"
+    dim_percentage:
+      type: number
+      default: 50
+      min: 0
+      max: 100
+      description: "Opacity percentage for dimmed raster images"
+  init:
+    name: "param.name"
+    color: "param.color"
+    color_preset: "param.color_preset"
+    lock: "param.lock"
+    show: "param.show"
+    preview: "param.preview"
+    dim_images: "param.dim_images"
+    dim_percentage: "param.dim_percentage"
+  content:
+    type: container
+    layout: column
+    style: { gap: 10, padding: 16 }
+    children:
+
+      # Name
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children:
+              - { type: text, content: "Name:", style: { font_size: 11 } }
+          - type: col
+            col: 9
+            children:
+              - id: lo_name_input
+                type: text_input
+                placeholder: "Layer Name"
+                bind:
+                  value: "dialog.name"
+
+      # Color: dropdown + swatch
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children:
+              - { type: text, content: "Color:", style: { font_size: 11 } }
+          - type: col
+            col: 6
+            children:
+              - id: lo_color_preset
+                type: select
+                options:
+                  - { label: "Light Blue",  value: light_blue }
+                  - { label: "Red",         value: red }
+                  - { label: "Green",       value: green }
+                  - { label: "Blue",        value: blue }
+                  - { label: "Yellow",      value: yellow }
+                  - { label: "Magenta",     value: magenta }
+                  - { label: "Cyan",        value: cyan }
+                  - { label: "Light Gray",  value: light_gray }
+                  - { label: "Dark Green",  value: dark_green }
+                  - { label: "Custom",      value: custom }
+                bind:
+                  value: "dialog.color_preset"
+                behavior:
+                  - event: change
+                    description: >
+                      When a preset is selected, update dialog.color to
+                      the preset's hex value. The "Custom" option is
+                      display-only and cannot be selected by the user;
+                      it appears automatically when the swatch color
+                      does not match any preset.
+                    effects:
+                      - log: "color_preset_change"
+          - type: col
+            col: 3
+            children:
+              - id: lo_color_swatch
+                type: color_swatch
+                summary: "Layer color"
+                description: "Click to open the Color Picker to set a custom layer color."
+                style: { size: 28 }
+                bind:
+                  color: "dialog.color"
+                behavior:
+                  - event: click
+                    action: open_color_picker
+                    params: { target: "dialog.color" }
+
+      # Template + Lock
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children: []
+          - type: col
+            col: 3
+            children:
+              - id: lo_template
+                type: toggle
+                label: "Template"
+                bind:
+                  checked: "dialog.template"
+                  disabled: "true"
+          - type: col
+            col: 3
+            children:
+              - id: lo_lock
+                type: toggle
+                label: "Lock"
+                bind:
+                  checked: "dialog.lock"
+
+      # Show + Print
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children: []
+          - type: col
+            col: 3
+            children:
+              - id: lo_show
+                type: toggle
+                label: "Show"
+                bind:
+                  checked: "dialog.show"
+          - type: col
+            col: 3
+            children:
+              - id: lo_print
+                type: toggle
+                label: "Print"
+                bind:
+                  checked: "dialog.print"
+                  disabled: "true"
+
+      # Preview + Dim Images to
+      - type: row
+        children:
+          - type: col
+            col: 3
+            children: []
+          - type: col
+            col: 3
+            children:
+              - id: lo_preview
+                type: toggle
+                label: "Preview"
+                bind:
+                  checked: "dialog.preview"
+                  disabled: "not dialog.show"
+          - type: col
+            col: 3
+            children:
+              - type: container
+                layout: row
+                style: { gap: 4, alignment: center }
+                children:
+                  - id: lo_dim_images
+                    type: toggle
+                    label: "Dim Images to:"
+                    bind:
+                      checked: "dialog.dim_images"
+                  - id: lo_dim_percentage
+                    type: number_input
+                    min: 0
+                    max: 100
+                    style: { width: 40 }
+                    bind:
+                      value: "dialog.dim_percentage"
+                      disabled: "not dialog.dim_images"
+                  - { type: text, content: "%", style: { font_size: 10 } }
+
+      # Cancel + OK
+      - type: container
+        layout: row
+        style: { gap: 8, alignment: center, justify: end }
+        children:
+          - type: spacer
+            style: { flex: 1 }
+          - { type: button, label: "Cancel", action: dismiss_dialog }
+          - { type: button, label: "OK", action: layer_options_confirm, variant: primary }
