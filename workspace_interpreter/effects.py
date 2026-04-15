@@ -210,3 +210,88 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             if handler:
                 handler(effect[key], ctx, store)
                 return
+
+
+def apply_stroke_panel_to_selection(store: StateStore, controller) -> None:
+    """Read stroke state keys from the store and apply to selected elements.
+
+    This is a platform-level helper that bridges the YAML panel state
+    (stroke_width, stroke_color, etc.) to the document controller.
+    """
+    from geometry.element import (
+        Stroke, Color, RgbColor, LineCap, LineJoin,
+        StrokeAlign, Arrowhead, ArrowAlign,
+        StrokeWidthPoint, profile_to_width_points,
+    )
+
+    # Read stroke properties from store
+    width = store.get("stroke_width")
+    if width is None:
+        width = 1.0
+    width = float(width)
+
+    color_hex = store.get("stroke_color")
+    if color_hex and isinstance(color_hex, str):
+        c = Color.from_hex(color_hex)
+        color = c if c is not None else Color.BLACK
+    else:
+        color = Color.BLACK
+
+    opacity = store.get("stroke_opacity")
+    opacity = float(opacity) if opacity is not None else 1.0
+
+    cap_str = store.get("stroke_linecap") or "butt"
+    cap_map = {"butt": LineCap.BUTT, "round": LineCap.ROUND, "square": LineCap.SQUARE}
+    linecap = cap_map.get(cap_str, LineCap.BUTT)
+
+    join_str = store.get("stroke_linejoin") or "miter"
+    join_map = {"miter": LineJoin.MITER, "round": LineJoin.ROUND, "bevel": LineJoin.BEVEL}
+    linejoin = join_map.get(join_str, LineJoin.MITER)
+
+    miter_limit = store.get("stroke_miter_limit")
+    miter_limit = float(miter_limit) if miter_limit is not None else 10.0
+
+    align_str = store.get("stroke_align") or "center"
+    align_map = {"center": StrokeAlign.CENTER, "inside": StrokeAlign.INSIDE,
+                 "outside": StrokeAlign.OUTSIDE}
+    align = align_map.get(align_str, StrokeAlign.CENTER)
+
+    dash_str = store.get("stroke_dash_pattern") or ""
+    dash_pattern: tuple[float, ...] = ()
+    if dash_str and isinstance(dash_str, str):
+        try:
+            dash_pattern = tuple(float(x) for x in dash_str.split(",") if x.strip())
+        except ValueError:
+            pass
+    elif isinstance(dash_str, (list, tuple)):
+        dash_pattern = tuple(float(x) for x in dash_str)
+
+    start_arrow_str = store.get("stroke_start_arrow") or "none"
+    start_arrow = Arrowhead.from_string(start_arrow_str)
+    end_arrow_str = store.get("stroke_end_arrow") or "none"
+    end_arrow = Arrowhead.from_string(end_arrow_str)
+
+    start_arrow_scale = store.get("stroke_start_arrow_scale")
+    start_arrow_scale = float(start_arrow_scale) if start_arrow_scale is not None else 100.0
+    end_arrow_scale = store.get("stroke_end_arrow_scale")
+    end_arrow_scale = float(end_arrow_scale) if end_arrow_scale is not None else 100.0
+
+    arrow_align_str = store.get("stroke_arrow_align") or "tip_at_end"
+    arrow_align_map = {"tip_at_end": ArrowAlign.TIP_AT_END,
+                       "center_at_end": ArrowAlign.CENTER_AT_END}
+    arrow_align = arrow_align_map.get(arrow_align_str, ArrowAlign.TIP_AT_END)
+
+    stroke = Stroke(
+        color=color, width=width, linecap=linecap, linejoin=linejoin,
+        opacity=opacity, miter_limit=miter_limit, align=align,
+        dash_pattern=dash_pattern, start_arrow=start_arrow,
+        end_arrow=end_arrow, start_arrow_scale=start_arrow_scale,
+        end_arrow_scale=end_arrow_scale, arrow_align=arrow_align,
+    )
+    controller.set_selection_stroke(stroke)
+
+    # Apply width profile if set
+    profile = store.get("stroke_width_profile") or "uniform"
+    flipped = bool(store.get("stroke_width_profile_flipped"))
+    wp = profile_to_width_points(profile, width, flipped)
+    controller.set_selection_width_profile(wp)

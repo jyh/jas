@@ -255,3 +255,126 @@ private func runOne(
         return
     }
 }
+
+// MARK: - Stroke panel state binding
+
+/// Rendering-affecting stroke state keys.
+private let strokeRenderKeys: Set<String> = [
+    "stroke_cap", "stroke_join", "stroke_weight", "stroke_miter_limit",
+    "stroke_dashed", "stroke_dash_1", "stroke_gap_1",
+    "stroke_dash_2", "stroke_gap_2", "stroke_dash_3", "stroke_gap_3",
+    "stroke_align_stroke", "stroke_start_arrowhead", "stroke_end_arrowhead",
+    "stroke_start_arrowhead_scale", "stroke_end_arrowhead_scale",
+    "stroke_arrow_align", "stroke_profile", "stroke_profile_flipped",
+]
+
+/// Build a Stroke from the state store's stroke_* keys and apply to selection.
+func applyStrokePanelToSelection(store: StateStore, controller: Controller) {
+    let s = store.getAll()
+    let cap: LineCap
+    switch s["stroke_cap"] as? String {
+    case "round": cap = .round
+    case "square": cap = .square
+    default: cap = .butt
+    }
+    let join: LineJoin
+    switch s["stroke_join"] as? String {
+    case "round": join = .round
+    case "bevel": join = .bevel
+    default: join = .miter
+    }
+    let miterLimit = (s["stroke_miter_limit"] as? NSNumber)?.doubleValue ?? 10.0
+    let align: StrokeAlign
+    switch s["stroke_align_stroke"] as? String {
+    case "inside": align = .inside
+    case "outside": align = .outside
+    default: align = .center
+    }
+    let dashed = s["stroke_dashed"] as? Bool ?? false
+    var dashPattern: [Double] = []
+    if dashed {
+        let d1 = (s["stroke_dash_1"] as? NSNumber)?.doubleValue ?? 12.0
+        let g1 = (s["stroke_gap_1"] as? NSNumber)?.doubleValue ?? 12.0
+        dashPattern = [d1, g1]
+        if let d2 = s["stroke_dash_2"] as? NSNumber, let g2 = s["stroke_gap_2"] as? NSNumber {
+            dashPattern.append(contentsOf: [d2.doubleValue, g2.doubleValue])
+        }
+        if let d3 = s["stroke_dash_3"] as? NSNumber, let g3 = s["stroke_gap_3"] as? NSNumber {
+            dashPattern.append(contentsOf: [d3.doubleValue, g3.doubleValue])
+        }
+    }
+    let startArrow = Arrowhead(fromString: s["stroke_start_arrowhead"] as? String ?? "none")
+    let endArrow = Arrowhead(fromString: s["stroke_end_arrowhead"] as? String ?? "none")
+    let startArrowScale = (s["stroke_start_arrowhead_scale"] as? NSNumber)?.doubleValue ?? 100.0
+    let endArrowScale = (s["stroke_end_arrowhead_scale"] as? NSNumber)?.doubleValue ?? 100.0
+    let arrowAlign: ArrowAlign
+    switch s["stroke_arrow_align"] as? String {
+    case "center_at_end": arrowAlign = .centerAtEnd
+    default: arrowAlign = .tipAtEnd
+    }
+
+    // Get base stroke from selection or default
+    let doc = controller.model.document
+    let baseStroke: Stroke?
+    if let first = doc.selection.first {
+        baseStroke = doc.getElement(first.path).stroke
+    } else {
+        baseStroke = controller.model.defaultStroke
+    }
+    guard let base = baseStroke ?? controller.model.defaultStroke else { return }
+
+    let width = controller.model.defaultStroke?.width ?? base.width
+    let newStroke = Stroke(color: base.color, width: width, linecap: cap, linejoin: join,
+                           miterLimit: miterLimit, align: align, dashPattern: dashPattern,
+                           startArrow: startArrow, endArrow: endArrow,
+                           startArrowScale: startArrowScale, endArrowScale: endArrowScale,
+                           arrowAlign: arrowAlign, opacity: base.opacity)
+
+    controller.model.defaultStroke = newStroke
+    if !doc.selection.isEmpty {
+        controller.model.snapshot()
+        controller.setSelectionStroke(newStroke)
+        let profile = s["stroke_profile"] as? String ?? "uniform"
+        let flipped = s["stroke_profile_flipped"] as? Bool ?? false
+        let widthPts = profileToWidthPoints(profile: profile, width: width, flipped: flipped)
+        controller.setSelectionWidthProfile(widthPts)
+    }
+}
+
+/// Sync stroke panel state from the first selected element's stroke.
+func syncStrokePanelFromSelection(store: StateStore, controller: Controller) {
+    let doc = controller.model.document
+    guard let first = doc.selection.first else { return }
+    guard let s = doc.getElement(first.path).stroke else { return }
+
+    store.set("stroke_cap", s.linecap == .butt ? "butt" : s.linecap == .round ? "round" : "square")
+    store.set("stroke_join", s.linejoin == .miter ? "miter" : s.linejoin == .round ? "round" : "bevel")
+    store.set("stroke_weight", s.width)
+    store.set("stroke_miter_limit", s.miterLimit)
+    let alignStr: String
+    switch s.align { case .center: alignStr = "center"; case .inside: alignStr = "inside"; case .outside: alignStr = "outside" }
+    store.set("stroke_align_stroke", alignStr)
+    store.set("stroke_dashed", !s.dashPattern.isEmpty)
+    if s.dashPattern.count >= 2 {
+        store.set("stroke_dash_1", s.dashPattern[0])
+        store.set("stroke_gap_1", s.dashPattern[1])
+    }
+    if s.dashPattern.count >= 4 {
+        store.set("stroke_dash_2", s.dashPattern[2])
+        store.set("stroke_gap_2", s.dashPattern[3])
+    }
+    if s.dashPattern.count >= 6 {
+        store.set("stroke_dash_3", s.dashPattern[4])
+        store.set("stroke_gap_3", s.dashPattern[5])
+    }
+    store.set("stroke_start_arrowhead", s.startArrow.name)
+    store.set("stroke_end_arrowhead", s.endArrow.name)
+    store.set("stroke_start_arrowhead_scale", s.startArrowScale)
+    store.set("stroke_end_arrowhead_scale", s.endArrowScale)
+    store.set("stroke_arrow_align", s.arrowAlign == .tipAtEnd ? "tip_at_end" : "center_at_end")
+}
+
+/// Check if a state key is a rendering-affecting stroke key.
+func isStrokeRenderKey(_ key: String) -> Bool {
+    strokeRenderKeys.contains(key)
+}

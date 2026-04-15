@@ -117,6 +117,7 @@ final class AnchorPointTool: CanvasTool {
                                             pe: Path,
                                             newCmds: [PathCommand]) {
         let newElem = Element.path(Path(d: newCmds, fill: pe.fill, stroke: pe.stroke,
+                                        widthPoints: pe.widthPoints,
                                         opacity: pe.opacity, transform: pe.transform,
                                         locked: pe.locked, visibility: pe.visibility))
         let newDoc = ctx.document.replaceElement(path, with: newElem)
