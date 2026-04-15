@@ -79,3 +79,42 @@ pub fn eval_text(text: &str, ctx: &serde_json::Value) -> String {
     result.push_str(rest);
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_swatch_path_resolution() {
+        let ctx = serde_json::json!({
+            "swatch": {
+                "name": "Red",
+                "color": "#ff0000",
+                "color_mode": "rgb"
+            },
+            "lib": {
+                "id": "default"
+            }
+        });
+        assert_eq!(eval("swatch.name", &ctx), Value::Str("Red".into()));
+        assert_eq!(eval("swatch.color", &ctx), Value::Color("#ff0000".into()));
+        assert_eq!(eval("swatch.color_mode", &ctx), Value::Str("rgb".into()));
+        assert_eq!(eval("lib.id", &ctx), Value::Str("default".into()));
+    }
+
+    #[test]
+    fn test_param_resolution() {
+        let ctx = serde_json::json!({
+            "param": {
+                "mode": "edit",
+                "swatch_name": "Red",
+                "color": "#ff0000",
+                "color_mode": "rgb"
+            }
+        });
+        assert_eq!(eval("param.mode", &ctx), Value::Str("edit".into()));
+        assert_eq!(eval("param.swatch_name", &ctx), Value::Str("Red".into()));
+        assert_eq!(eval("param.color", &ctx), Value::Color("#ff0000".into()));
+        assert_eq!(eval("param.color_mode", &ctx), Value::Str("rgb".into()));
+    }
+}

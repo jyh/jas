@@ -83,11 +83,12 @@ pub fn tokenize(source: &str) -> Vec<Token> {
             continue;
         }
 
-        // String literal
-        if c == '"' {
+        // String literal (double or single quotes)
+        if c == '"' || c == '\'' {
+            let quote = c;
             let mut j = i + 1;
             let mut parts = String::new();
-            while j < n && chars[j] != '"' {
+            while j < n && chars[j] != quote {
                 if chars[j] == '\\' && j + 1 < n {
                     parts.push(chars[j + 1]);
                     j += 2;
@@ -96,7 +97,7 @@ pub fn tokenize(source: &str) -> Vec<Token> {
                     j += 1;
                 }
             }
-            if j < n { j += 1; } // consume closing "
+            if j < n { j += 1; } // consume closing quote
             tokens.push(Token { kind: TokenKind::Str(parts) });
             i = j;
             continue;

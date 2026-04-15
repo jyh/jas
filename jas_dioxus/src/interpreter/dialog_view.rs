@@ -156,13 +156,28 @@ pub fn open_dialog(
         }
     }
 
-    // Resolve param expressions against current state
+    // Resolve param expressions against current state.
+    // Values that look like expressions (contain dots, keywords, operators)
+    // are evaluated; plain literal strings are passed through as-is.
     let mut resolved_params = HashMap::new();
     let state_ctx = serde_json::json!({"state": serde_json::Value::Object(live_state.clone())});
     for (k, v) in raw_params {
         if let Some(expr_str) = v.as_str() {
-            let result = expr::eval(expr_str, &state_ctx);
-            resolved_params.insert(k.clone(), value_to_json(&result));
+            let looks_like_expr = expr_str.contains('.') || expr_str.contains('(')
+                || expr_str.contains(' ');
+            if looks_like_expr {
+                let result = expr::eval(expr_str, &state_ctx);
+                if matches!(result, super::expr_types::Value::Null) {
+                    // Expression evaluated to null — keep the original string
+                    // (it may have been a pre-resolved concrete value)
+                    resolved_params.insert(k.clone(), v.clone());
+                } else {
+                    resolved_params.insert(k.clone(), value_to_json(&result));
+                }
+            } else {
+                // Plain string literal — pass through directly
+                resolved_params.insert(k.clone(), v.clone());
+            }
         } else {
             resolved_params.insert(k.clone(), v.clone());
         }
@@ -187,6 +202,31 @@ pub fn open_dialog(
             let result = expr::eval(expr_str, &init_ctx);
             dialog_state.insert(key.clone(), value_to_json(&result));
         }
+    }
+
+    // Post-init: if _init_color was set, decompose it into color components
+    if let Some(color_val) = dialog_state.get("_init_color").cloned() {
+        if let Some(hex_str) = color_val.as_str() {
+            if !hex_str.is_empty() {
+                use super::color_util::*;
+                let (r, g, b) = parse_hex(hex_str);
+                let (h, s, bri) = rgb_to_hsb(r, g, b);
+                let (c, m, y, k) = rgb_to_cmyk(r, g, b);
+                let hex = hex_str.trim_start_matches('#').to_lowercase();
+                dialog_state.insert("h".into(), serde_json::json!(h));
+                dialog_state.insert("s".into(), serde_json::json!(s));
+                dialog_state.insert("b".into(), serde_json::json!(bri));
+                dialog_state.insert("r".into(), serde_json::json!(r as i32));
+                dialog_state.insert("g".into(), serde_json::json!(g as i32));
+                dialog_state.insert("bl".into(), serde_json::json!(b as i32));
+                dialog_state.insert("c".into(), serde_json::json!(c));
+                dialog_state.insert("m".into(), serde_json::json!(m));
+                dialog_state.insert("y".into(), serde_json::json!(y));
+                dialog_state.insert("k".into(), serde_json::json!(k));
+                dialog_state.insert("hex".into(), serde_json::json!(hex));
+            }
+        }
+        dialog_state.remove("_init_color");
     }
 
     dialog_signal.set(Some(DialogState {

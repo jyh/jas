@@ -64,20 +64,54 @@ swatch_options:
       values: [grayscale, rgb, hsb, cmyk, web_safe_rgb]
       default: rgb
       description: "Color mode for the swatch"
-    h:  { type: number, default: 0, description: "Working hue (0-360)" }
-    s:  { type: number, default: 0, description: "Working saturation (0-100)" }
-    b:  { type: number, default: 100, description: "Working brightness (0-100)" }
-    r:  { type: number, default: 255, description: "Working red (0-255)" }
-    g:  { type: number, default: 255, description: "Working green (0-255)" }
-    bl: { type: number, default: 255, description: "Working blue (0-255)" }
-    c:  { type: number, default: 0, description: "Working cyan (0-100)" }
-    m:  { type: number, default: 0, description: "Working magenta (0-100)" }
-    y:  { type: number, default: 0, description: "Working yellow (0-100)" }
-    k:  { type: number, default: 0, description: "Working key/black (0-100)" }
+    color:
+      type: color
+      default: "#ffffff"
+      description: "Canonical color value; all components derive from this"
+    h:
+      type: number
+      get: "hsb_h(color)"
+      set: "fun v -> color <- hsb(v, hsb_s(color), hsb_b(color))"
+    s:
+      type: number
+      get: "hsb_s(color)"
+      set: "fun v -> color <- hsb(hsb_h(color), v, hsb_b(color))"
+    b:
+      type: number
+      get: "hsb_b(color)"
+      set: "fun v -> color <- hsb(hsb_h(color), hsb_s(color), v)"
+    r:
+      type: number
+      get: "rgb_r(color)"
+      set: "fun v -> color <- rgb(v, rgb_g(color), rgb_b(color))"
+    g:
+      type: number
+      get: "rgb_g(color)"
+      set: "fun v -> color <- rgb(rgb_r(color), v, rgb_b(color))"
+    bl:
+      type: number
+      get: "rgb_b(color)"
+      set: "fun v -> color <- rgb(rgb_r(color), rgb_g(color), v)"
+    c:
+      type: number
+      get: "cmyk_c(color)"
+      set: "fun v -> color <- cmyk(v, cmyk_m(color), cmyk_y(color), cmyk_k(color))"
+    m:
+      type: number
+      get: "cmyk_m(color)"
+      set: "fun v -> color <- cmyk(cmyk_c(color), v, cmyk_y(color), cmyk_k(color))"
+    y:
+      type: number
+      get: "cmyk_y(color)"
+      set: "fun v -> color <- cmyk(cmyk_c(color), cmyk_m(color), v, cmyk_k(color))"
+    k:
+      type: number
+      get: "cmyk_k(color)"
+      set: "fun v -> color <- cmyk(cmyk_c(color), cmyk_m(color), cmyk_y(color), v)"
     hex:
       type: string
-      default: "ffffff"
-      description: "Working hex string (6 chars, no # prefix)"
+      get: "hex(color)"
+      set: "fun v -> color <- '#' + v"
     preview:
       type: bool
       default: true
@@ -85,7 +119,7 @@ swatch_options:
   init:
     swatch_name: "param.swatch_name"
     color_mode: "param.color_mode"
-    _init_color: "param.color"
+    color: "param.color"
   content:
     type: container
     layout: column
@@ -189,7 +223,7 @@ swatch_options:
                 layout: column
                 style: { gap: 2 }
                 bind:
-                  visible: "dialog.color_mode == grayscale"
+                  visible: "dialog.color_mode == 'grayscale'"
                 children:
                   - template: slider_row
                     params: { label: "K", id_prefix: so_k, max: 100, bind: "dialog.k" }
@@ -200,7 +234,7 @@ swatch_options:
                 layout: column
                 style: { gap: 2 }
                 bind:
-                  visible: "dialog.color_mode == hsb"
+                  visible: "dialog.color_mode == 'hsb'"
                 children:
                   - template: slider_row
                     params: { label: "H", id_prefix: so_h, max: 360, bind: "dialog.h" }
@@ -215,7 +249,7 @@ swatch_options:
                 layout: column
                 style: { gap: 2 }
                 bind:
-                  visible: "dialog.color_mode == rgb"
+                  visible: "dialog.color_mode == 'rgb'"
                 children:
                   - template: slider_row
                     params: { label: "R", id_prefix: so_r, max: 255, bind: "dialog.r" }
@@ -230,7 +264,7 @@ swatch_options:
                 layout: column
                 style: { gap: 2 }
                 bind:
-                  visible: "dialog.color_mode == cmyk"
+                  visible: "dialog.color_mode == 'cmyk'"
                 children:
                   - template: slider_row
                     params: { label: "C", id_prefix: so_c, max: 100, bind: "dialog.c" }
@@ -247,7 +281,7 @@ swatch_options:
                 layout: column
                 style: { gap: 2 }
                 bind:
-                  visible: "dialog.color_mode == web_safe_rgb"
+                  visible: "dialog.color_mode == 'web_safe_rgb'"
                 children:
                   - template: slider_row
                     params: { label: "R", id_prefix: so_r_ws, max: 255, step: 51, bind: "dialog.r" }

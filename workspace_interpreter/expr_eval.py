@@ -285,6 +285,29 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
         r, g, b = color_util.hsb_to_rgb(h, s, bv)
         return Value.color(color_util.rgb_to_hex(r, g, b))
 
+    # cmyk: (c, m, y, k) → color
+    if name == "cmyk":
+        if len(node.args) != 4:
+            return Value.null()
+        args = [eval_node(a, ctx) for a in node.args]
+        cv = float(args[0].value) / 100.0 if args[0].type == ValueType.NUMBER else 0
+        mv = float(args[1].value) / 100.0 if args[1].type == ValueType.NUMBER else 0
+        yv = float(args[2].value) / 100.0 if args[2].type == ValueType.NUMBER else 0
+        kv = float(args[3].value) / 100.0 if args[3].type == ValueType.NUMBER else 0
+        r = round((1 - cv) * (1 - kv) * 255)
+        g = round((1 - mv) * (1 - kv) * 255)
+        b = round((1 - yv) * (1 - kv) * 255)
+        return Value.color(color_util.rgb_to_hex(r, g, b))
+
+    # grayscale: (k) → color  (k is 0-100, 0=white, 100=black)
+    if name == "grayscale":
+        if len(node.args) != 1:
+            return Value.null()
+        arg = eval_node(node.args[0], ctx)
+        kv = float(arg.value) if arg.type == ValueType.NUMBER else 0
+        v = round((1 - kv / 100) * 255)
+        return Value.color(color_util.rgb_to_hex(v, v, v))
+
     # invert: color → color
     if name == "invert":
         if len(node.args) != 1:

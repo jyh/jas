@@ -443,6 +443,35 @@ fn eval_func(
             Value::color(&color_util::rgb_to_hex(r, g, b))
         }
 
+        // cmyk: (c, m, y, k) -> color
+        "cmyk" => {
+            if args.len() != 4 {
+                return Value::Null;
+            }
+            let vals: Vec<Value> = args
+                .iter()
+                .map(|a| eval_inner(a, ctx, scope, store_cb))
+                .collect();
+            let c = val_to_f64(&vals[0]) / 100.0;
+            let m = val_to_f64(&vals[1]) / 100.0;
+            let y = val_to_f64(&vals[2]) / 100.0;
+            let k = val_to_f64(&vals[3]) / 100.0;
+            let r = ((1.0 - c) * (1.0 - k) * 255.0).round() as u8;
+            let g = ((1.0 - m) * (1.0 - k) * 255.0).round() as u8;
+            let b = ((1.0 - y) * (1.0 - k) * 255.0).round() as u8;
+            Value::color(&color_util::rgb_to_hex(r, g, b))
+        }
+
+        // grayscale: (k) -> color  (k is 0-100, 0=white, 100=black)
+        "grayscale" => {
+            if args.len() != 1 {
+                return Value::Null;
+            }
+            let k = val_to_f64(&eval_inner(&args[0], ctx, scope, store_cb));
+            let v = ((1.0 - k / 100.0) * 255.0).round() as u8;
+            Value::color(&color_util::rgb_to_hex(v, v, v))
+        }
+
         // invert: color -> color
         "invert" => {
             if args.len() != 1 {

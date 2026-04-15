@@ -74,8 +74,10 @@ fn render_el(
         "button" => render_button(el, ctx, rctx),
         "icon_button" => render_icon_button(el, ctx, rctx),
         "slider" => render_slider(el, ctx, rctx),
-        "number_input" => render_number_input(el, ctx),
-        "text_input" => render_text_input(el, ctx),
+        "number_input" => render_number_input(el, ctx, rctx),
+        "text_input" => render_text_input(el, ctx, rctx),
+        "select" => render_select(el, ctx, rctx),
+        "toggle" => render_toggle(el, ctx, rctx),
         "color_swatch" => render_color_swatch(el, ctx, rctx),
         "fill_stroke_widget" => render_fill_stroke_widget(el, ctx, rctx),
         "color_bar" => render_color_bar(el, ctx, rctx),
@@ -181,8 +183,65 @@ fn eval_to_json(source: &str, ctx: &serde_json::Value) -> serde_json::Value {
 
 // ── Generic behavior dispatch ──────────────────────────────────
 
-/// Dispatch a named action with resolved params on AppState.
-fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) {
+/// Apply dialog state when a confirm action is dispatched.
+/// This handles swatch_options_confirm by updating or creating a swatch.
+fn apply_dialog_confirm(
+    action: &str,
+    dialog: &serde_json::Map<String, serde_json::Value>,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    match action {
+        "swatch_options_confirm" => {
+            let mode = dialog.get("_param_mode").and_then(|v| v.as_str()).unwrap_or("edit");
+            let library = dialog.get("_param_library").and_then(|v| v.as_str()).unwrap_or("");
+            let index = dialog.get("_param_index").and_then(|v| v.as_f64()).map(|n| n as usize);
+            let name = dialog.get("swatch_name").and_then(|v| v.as_str()).unwrap_or("");
+            let color_mode = dialog.get("color_mode").and_then(|v| v.as_str()).unwrap_or("rgb");
+            // Build hex color from the dialog's computed hex value
+            let hex = dialog.get("hex").and_then(|v| v.as_str()).unwrap_or("ffffff");
+            let color = format!("#{hex}");
+
+            let swatch = serde_json::json!({
+                "name": name,
+                "color": color,
+                "color_mode": color_mode,
+                "color_type": "process",
+                "global": false,
+            });
+
+            if mode == "edit" {
+                if let (Some(idx), Some(lib)) = (index, st.swatch_libraries.get_mut(library)) {
+                    if let Some(swatches) = lib.get_mut("swatches").and_then(|s| s.as_array_mut()) {
+                        if idx < swatches.len() {
+                            swatches[idx] = swatch;
+                        }
+                    }
+                }
+            } else if mode == "create" {
+                // Find a target library; use the first one if none specified
+                let lib_key = if !library.is_empty() {
+                    library.to_string()
+                } else {
+                    st.swatch_libraries.as_object()
+                        .and_then(|m| m.keys().next().cloned())
+                        .unwrap_or_default()
+                };
+                if let Some(lib) = st.swatch_libraries.get_mut(&lib_key) {
+                    if let Some(swatches) = lib.get_mut("swatches").and_then(|s| s.as_array_mut()) {
+                        swatches.push(swatch);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Dispatch a named action. Tries hardcoded handlers first, then falls
+/// through to the YAML actions catalog for open_dialog, dispatch, etc.
+/// Returns a list of deferred effects (open_dialog, close_dialog) that
+/// must be applied outside the AppState borrow.
+fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
     use crate::geometry::element::Color;
     match action {
         "set_active_color" => {
@@ -191,12 +250,75 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
                     st.set_active_color(c);
                 }
             }
+            return vec![];
         }
-        "set_active_color_none" => st.set_active_to_none(),
-        "swap_fill_stroke" => st.swap_fill_stroke(),
-        "reset_fill_stroke" => st.reset_fill_stroke_defaults(),
+        "set_active_color_none" => { st.set_active_to_none(); return vec![]; }
+        "swap_fill_stroke" => { st.swap_fill_stroke(); return vec![]; }
+        "reset_fill_stroke" => { st.reset_fill_stroke_defaults(); return vec![]; }
+        "select_tool" => {
+            if let Some(tool_name) = params.get("tool").and_then(|v| v.as_str()) {
+                if let Some(kind) = parse_tool_kind(tool_name) {
+                    st.set_tool(kind);
+                }
+            }
+            return vec![];
+        }
         _ => {}
     }
+    // Fall through to YAML actions catalog
+    let ws = crate::interpreter::workspace::Workspace::load();
+    if let Some(ws) = ws {
+        if let Some(action_def) = ws.actions().get(action) {
+            if let Some(serde_json::Value::Array(effects)) = action_def.get("effects") {
+                let mut deferred = Vec::new();
+                let mut ctx = serde_json::Map::new();
+                if !params.is_empty() {
+                    ctx.insert("param".to_string(), serde_json::Value::Object(params.clone()));
+                }
+                for eff in effects {
+                    if eff.get("open_dialog").is_some() || eff.get("close_dialog").is_some() {
+                        // Resolve param expressions in the effect
+                        let mut resolved_eff = eff.clone();
+                        if let Some(od) = eff.get("open_dialog").and_then(|o| o.as_object()) {
+                            if let Some(eff_params) = od.get("params").and_then(|p| p.as_object()) {
+                                let mut resolved_params = serde_json::Map::new();
+                                let eval_ctx = serde_json::json!({"param": serde_json::Value::Object(params.clone())});
+                                for (k, v) in eff_params {
+                                    if let Some(expr_str) = v.as_str() {
+                                        let result = super::expr::eval(expr_str, &eval_ctx);
+                                        resolved_params.insert(k.clone(), super::effects::value_to_json(&result));
+                                    } else {
+                                        resolved_params.insert(k.clone(), v.clone());
+                                    }
+                                }
+                                let mut new_od = od.clone();
+                                new_od.insert("params".to_string(), serde_json::Value::Object(resolved_params));
+                                resolved_eff = serde_json::json!({"open_dialog": new_od});
+                            }
+                        }
+                        deferred.push(resolved_eff);
+                    }
+                    // Handle set effects
+                    if let Some(set_map) = eff.get("set").and_then(|v| v.as_object()) {
+                        for (key, val) in set_map {
+                            match key.as_str() {
+                                "fill_on_top" => {
+                                    if let Some(b) = val.as_bool() {
+                                        st.fill_on_top = b;
+                                    } else if let Some(s) = val.as_str() {
+                                        st.fill_on_top = s == "true";
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                return deferred;
+            }
+        }
+    }
+    vec![]
 }
 
 /// Run effects (e.g., `set: { fill_on_top: true }`).
@@ -214,6 +336,8 @@ fn run_effects(
                     "fill_on_top" => {
                         if let Some(b) = val.as_bool() {
                             st.fill_on_top = b;
+                        } else if let Some(s) = val.as_str() {
+                            st.fill_on_top = s == "true";
                         }
                     }
                     _ => {}
@@ -235,9 +359,28 @@ fn build_click_handler(
     ctx: &serde_json::Value,
     rctx: &RenderCtx,
 ) -> Option<EventHandler<Event<MouseData>>> {
+    build_mouse_event_handler(el, ctx, rctx, "click")
+}
+
+/// Build an ondoubleclick handler from an element's behavior declarations.
+fn build_dblclick_handler(
+    el: &serde_json::Value,
+    ctx: &serde_json::Value,
+    rctx: &RenderCtx,
+) -> Option<EventHandler<Event<MouseData>>> {
+    build_mouse_event_handler(el, ctx, rctx, "double_click")
+}
+
+/// Build a mouse event handler for a specific event type.
+fn build_mouse_event_handler(
+    el: &serde_json::Value,
+    ctx: &serde_json::Value,
+    rctx: &RenderCtx,
+    event_name: &str,
+) -> Option<EventHandler<Event<MouseData>>> {
     let behaviors = el.get("behavior").and_then(|b| b.as_array())?;
     let click_behaviors: Vec<&serde_json::Value> = behaviors.iter()
-        .filter(|b| b.get("event").and_then(|e| e.as_str()).unwrap_or("click") == "click")
+        .filter(|b| b.get("event").and_then(|e| e.as_str()).unwrap_or("click") == event_name)
         .collect();
     if click_behaviors.is_empty() {
         return None;
@@ -261,7 +404,16 @@ fn build_click_handler(
                     Value::Str(s) => { resolved_params.insert(k.clone(), serde_json::Value::String(s)); }
                     Value::Number(n) => { resolved_params.insert(k.clone(), serde_json::json!(n)); }
                     Value::Bool(b) => { resolved_params.insert(k.clone(), serde_json::json!(b)); }
-                    Value::Null => { resolved_params.insert(k.clone(), serde_json::Value::Null); }
+                    Value::Null => {
+                        // If expression evaluated to null but the original was a bare
+                        // identifier (no dots/operators), treat it as a literal string.
+                        // YAML `{ tool: selection }` means param is the string "selection".
+                        if expr_str.chars().all(|c| c.is_alphanumeric() || c == '_') && !expr_str.is_empty() {
+                            resolved_params.insert(k.clone(), serde_json::Value::String(expr_str.to_string()));
+                        } else {
+                            resolved_params.insert(k.clone(), serde_json::Value::Null);
+                        }
+                    }
                     Value::List(l) => { resolved_params.insert(k.clone(), serde_json::Value::Array(l)); }
                     Value::Closure { .. } => { resolved_params.insert(k.clone(), serde_json::Value::Null); }
                 };
@@ -303,7 +455,8 @@ fn build_click_handler(
                         if action_name == "dismiss_dialog" {
                             deferred_dialog_effects.push(serde_json::json!({"close_dialog": null}));
                         } else {
-                            dispatch_action(action_name, params, &mut st);
+                            let action_deferred = dispatch_action(action_name, params, &mut st);
+                            deferred_dialog_effects.extend(action_deferred);
                         }
                     }
                 }
@@ -439,6 +592,32 @@ fn parse_hex_color(s: &str) -> Option<crate::geometry::element::Color> {
     Some(crate::geometry::element::Color::rgb(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0))
 }
 
+/// Parse a tool kind name from YAML (snake_case) to ToolKind.
+fn parse_tool_kind(name: &str) -> Option<crate::tools::tool::ToolKind> {
+    use crate::tools::tool::ToolKind;
+    match name {
+        "selection" => Some(ToolKind::Selection),
+        "partial_selection" => Some(ToolKind::PartialSelection),
+        "interior_selection" => Some(ToolKind::InteriorSelection),
+        "pen" => Some(ToolKind::Pen),
+        "add_anchor" => Some(ToolKind::AddAnchorPoint),
+        "delete_anchor" => Some(ToolKind::DeleteAnchorPoint),
+        "anchor_point" => Some(ToolKind::AnchorPoint),
+        "pencil" => Some(ToolKind::Pencil),
+        "path_eraser" => Some(ToolKind::PathEraser),
+        "smooth" => Some(ToolKind::Smooth),
+        "type" => Some(ToolKind::Type),
+        "type_on_path" => Some(ToolKind::TypeOnPath),
+        "line" => Some(ToolKind::Line),
+        "rect" => Some(ToolKind::Rect),
+        "rounded_rect" => Some(ToolKind::RoundedRect),
+        "polygon" => Some(ToolKind::Polygon),
+        "star" => Some(ToolKind::Star),
+        "lasso" => Some(ToolKind::Lasso),
+        _ => None,
+    }
+}
+
 /// Build a CSS style string from the element's style properties.
 fn build_style(el: &serde_json::Value, ctx: &serde_json::Value) -> String {
     let style = match el.get("style") {
@@ -564,6 +743,11 @@ fn get_id(el: &serde_json::Value) -> String {
     el.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string()
 }
 
+/// Extract the dialog state field name from a bind expression like "dialog.field".
+fn dialog_field(bind_expr: &str) -> String {
+    bind_expr.strip_prefix("dialog.").unwrap_or("").to_string()
+}
+
 // ── Element renderers ────────────────────────────────────────
 
 fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
@@ -664,7 +848,54 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     let id = get_id(el);
     let label = el.get("label").and_then(|l| l.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
-    let on_click = build_click_handler(el, ctx, rctx);
+
+    // Try behavior array first, then shorthand action property
+    let on_click = build_click_handler(el, ctx, rctx).or_else(|| {
+        let action = el.get("action").and_then(|a| a.as_str())?.to_string();
+        let app = rctx.app.clone();
+        let mut revision = rctx.revision;
+        let mut dialog_signal = rctx.dialog_ctx.0;
+        let params = el.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
+        Some(EventHandler::new(move |_evt: Event<MouseData>| {
+            let app = app.clone();
+            let action = action.clone();
+            let params = params.clone();
+            spawn(async move {
+                if action == "dismiss_dialog" {
+                    dialog_signal.set(None);
+                } else {
+                    // Snapshot dialog state before dispatching (for confirm actions)
+                    let dialog_snapshot = dialog_signal().map(|ds| {
+                        let mut snap = serde_json::Map::new();
+                        // Include computed values via eval_context
+                        for (k, v) in ds.eval_context() {
+                            snap.insert(k, v);
+                        }
+                        // Include dialog params (mode, library, index, etc.)
+                        for (k, v) in &ds.params {
+                            snap.insert(format!("_param_{k}"), v.clone());
+                        }
+                        snap
+                    });
+                    let mut deferred;
+                    {
+                        let mut st = app.borrow_mut();
+                        // For confirm actions, apply dialog state to app state
+                        if let Some(ref snap) = dialog_snapshot {
+                            apply_dialog_confirm(&action, snap, &mut st);
+                        }
+                        deferred = dispatch_action(&action, &params, &mut st);
+                    }
+                    for eff in &deferred {
+                        if eff.get("close_dialog").is_some() {
+                            dialog_signal.set(None);
+                        }
+                    }
+                }
+                revision += 1;
+            });
+        }))
+    });
 
     if let Some(handler) = on_click {
         rsx! { button { id: "{id}", style: "{style}", onclick: handler, "{label}" } }
@@ -677,6 +908,30 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let id = get_id(el);
     let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
+
+    // Evaluate bind.checked for active/highlighted state
+    let checked = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("checked")).and_then(|v| v.as_str()) {
+        expr::eval(expr_str, ctx).to_bool()
+    } else {
+        false
+    };
+
+    // Get checked_bg from style spec, resolve template expressions
+    let checked_bg = if let Some(raw) = el.get("style").and_then(|s| s.get("checked_bg")).and_then(|v| v.as_str()) {
+        let resolved = if raw.contains("{{") { expr::eval_text(raw, ctx) } else { raw.to_string() };
+        if resolved.is_empty() || resolved.contains("{{") {
+            "#505050".to_string()
+        } else {
+            resolved
+        }
+    } else {
+        "#505050".to_string()
+    };
+    let bg_style = if checked {
+        format!("background:{checked_bg};")
+    } else {
+        String::new()
+    };
 
     // Look up icon SVG from the icons map in ctx
     let icon_name = el.get("icon").and_then(|i| i.as_str()).unwrap_or("");
@@ -699,7 +954,7 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     rsx! {
         div {
             id: "{id}",
-            style: "cursor:pointer;{style}",
+            style: "cursor:pointer;{bg_style}{style}",
             title: "{summary}",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             onmousedown: move |evt| { if let Some(ref h) = on_mousedown { h.call(evt); } },
@@ -723,11 +978,11 @@ fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     let step = el.get("step").and_then(|s| s.as_i64()).unwrap_or(1);
     let style = build_style(el, ctx);
 
-    // Get bind field name (e.g. "panel.h" → "h")
     let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
-    let field = bind_expr.strip_prefix("panel.").or_else(|| {
+    let panel_field = bind_expr.strip_prefix("panel.").or_else(|| {
         bind_expr.strip_prefix("{{panel.").and_then(|s| s.strip_suffix("}}"))
     }).unwrap_or("").to_string();
+    let dlg_field = dialog_field(bind_expr);
 
     // Get initial value from bind
     let value = if !bind_expr.is_empty() {
@@ -748,6 +1003,7 @@ fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
 
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
+    let mut dialog_signal = rctx.dialog_ctx.0;
     let panel = ctx.get("panel").cloned().unwrap_or(serde_json::Value::Null);
 
     rsx! {
@@ -761,9 +1017,19 @@ fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             disabled: disabled,
             style: "flex:1;{style}",
             oninput: move |evt: Event<FormData>| {
-                if field.is_empty() { return; }
                 let new_val: f64 = evt.value().parse().unwrap_or(0.0);
-                let color = compute_color_from_panel(&field, new_val, &panel);
+                // Dialog binding
+                if !dlg_field.is_empty() {
+                    if let Some(mut ds) = dialog_signal() {
+                        ds.set_value(&dlg_field, serde_json::json!(new_val));
+                        dialog_signal.set(Some(ds));
+                    }
+                    revision += 1;
+                    return;
+                }
+                // Panel binding
+                if panel_field.is_empty() { return; }
+                let color = compute_color_from_panel(&panel_field, new_val, &panel);
                 if let Some(color) = color {
                     let app = app.clone();
                     spawn(async move {
@@ -815,14 +1081,15 @@ fn compute_color_from_panel(field: &str, new_val: f64, panel: &serde_json::Value
     Some(color)
 }
 
-fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
+fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let min = el.get("min").and_then(|m| m.as_i64()).unwrap_or(0);
     let max = el.get("max").and_then(|m| m.as_i64()).unwrap_or(100);
     let style = build_style(el, ctx);
 
-    let value = if let Some(bind_val) = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()) {
-        let result = expr::eval(bind_val, ctx);
+    let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
+    let value = if !bind_expr.is_empty() {
+        let result = expr::eval(bind_expr, ctx);
         match result {
             Value::Number(n) => n as i64,
             _ => min,
@@ -830,6 +1097,10 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value) -> Eleme
     } else {
         min
     };
+
+    let field = dialog_field(bind_expr);
+    let mut dialog_signal = rctx.dialog_ctx.0;
+    let mut revision = rctx.revision;
 
     rsx! {
         input {
@@ -839,21 +1110,179 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value) -> Eleme
             max: "{max}",
             value: "{value}",
             style: "width:45px;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
+            oninput: move |evt: Event<FormData>| {
+                if field.is_empty() { return; }
+                let new_val: f64 = evt.value().parse().unwrap_or(0.0);
+                if let Some(mut ds) = dialog_signal() {
+                    ds.set_value(&field, serde_json::json!(new_val));
+                    dialog_signal.set(Some(ds));
+                }
+                revision += 1;
+            },
         }
     }
 }
 
-fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
+fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let placeholder = el.get("placeholder").and_then(|p| p.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
+
+    let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
+    let value = if !bind_expr.is_empty() {
+        let result = expr::eval(bind_expr, ctx);
+        match result {
+            Value::Str(s) => s,
+            Value::Color(c) => c,
+            Value::Number(n) => format!("{n}"),
+            _ => String::new(),
+        }
+    } else {
+        String::new()
+    };
+
+    let field = dialog_field(bind_expr);
+    let mut dialog_signal = rctx.dialog_ctx.0;
+    let mut revision = rctx.revision;
 
     rsx! {
         input {
             id: "{id}",
             r#type: "text",
             placeholder: "{placeholder}",
+            initial_value: "{value}",
             style: "color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
+            oninput: move |evt: Event<FormData>| {
+                if field.is_empty() { return; }
+                let new_val = evt.value();
+                if let Some(mut ds) = dialog_signal() {
+                    ds.set_value(&field, serde_json::json!(new_val));
+                    dialog_signal.set(Some(ds));
+                }
+                revision += 1;
+            },
+        }
+    }
+}
+
+fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let style = build_style(el, ctx);
+    let options = el.get("options").and_then(|o| o.as_array()).cloned().unwrap_or_default();
+
+    let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
+    let current_value = if !bind_expr.is_empty() {
+        let result = expr::eval(bind_expr, ctx);
+        match result {
+            Value::Str(s) => s,
+            _ => String::new(),
+        }
+    } else {
+        String::new()
+    };
+
+    let disabled = if let Some(dis_expr) = el.get("bind").and_then(|b| b.get("disabled")).and_then(|v| v.as_str()) {
+        expr::eval(dis_expr, ctx).to_bool()
+    } else {
+        false
+    };
+
+    let field = dialog_field(bind_expr);
+    let mut dialog_signal = rctx.dialog_ctx.0;
+    let mut revision = rctx.revision;
+    let cv = current_value.clone();
+
+    rsx! {
+        select {
+            id: "{id}",
+            value: "{current_value}",
+            disabled: disabled,
+            style: "color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);font-size:11px;padding:2px 4px;{style}",
+            onchange: move |evt: Event<FormData>| {
+                if field.is_empty() { return; }
+                let new_val = evt.value();
+                if let Some(mut ds) = dialog_signal() {
+                    ds.set_value(&field, serde_json::json!(new_val));
+                    dialog_signal.set(Some(ds));
+                }
+                revision += 1;
+            },
+            for opt in options.iter() {
+                {render_select_option(opt, &cv)}
+            }
+        }
+    }
+}
+
+fn render_select_option(opt: &serde_json::Value, current_value: &str) -> Element {
+    if let Some(obj) = opt.as_object() {
+        let value = obj.get("value")
+            .and_then(|v| v.as_str())
+            .or_else(|| obj.get("id").and_then(|v| v.as_str()))
+            .unwrap_or("");
+        let label = obj.get("label").and_then(|v| v.as_str()).unwrap_or(value);
+        let selected = value == current_value;
+        rsx! {
+            option {
+                value: "{value}",
+                selected: selected,
+                "{label}"
+            }
+        }
+    } else {
+        let value = opt.as_str().unwrap_or("");
+        let selected = value == current_value;
+        rsx! {
+            option {
+                value: "{value}",
+                selected: selected,
+                "{value}"
+            }
+        }
+    }
+}
+
+fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let label_text = el.get("label").and_then(|l| l.as_str()).unwrap_or("");
+    let style = build_style(el, ctx);
+
+    let bind_expr = el.get("bind").and_then(|b| b.get("checked")).and_then(|v| v.as_str()).unwrap_or("");
+    let checked = if !bind_expr.is_empty() {
+        expr::eval(bind_expr, ctx).to_bool()
+    } else {
+        false
+    };
+
+    let disabled = if let Some(dis_expr) = el.get("bind").and_then(|b| b.get("disabled")).and_then(|v| v.as_str()) {
+        expr::eval(dis_expr, ctx).to_bool()
+    } else {
+        false
+    };
+
+    let field = dialog_field(bind_expr);
+    let mut dialog_signal = rctx.dialog_ctx.0;
+    let mut revision = rctx.revision;
+
+    rsx! {
+        label {
+            id: "{id}",
+            style: "display:flex;align-items:center;gap:4px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;{style}",
+            input {
+                r#type: "checkbox",
+                checked: checked,
+                disabled: disabled,
+                onchange: move |_evt: Event<FormData>| {
+                    if field.is_empty() { return; }
+                    let new_val = !checked;
+                    if let Some(mut ds) = dialog_signal() {
+                        ds.set_value(&field, serde_json::json!(new_val));
+                        dialog_signal.set(Some(ds));
+                    }
+                    revision += 1;
+                },
+            }
+            "{label_text}"
         }
     }
 }
@@ -866,11 +1295,22 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         .unwrap_or(16);
 
     let color = if let Some(bind_color) = el.get("bind").and_then(|b| b.get("color")).and_then(|v| v.as_str()) {
-        let result = expr::eval(bind_color, ctx);
-        match result {
-            Value::Color(c) => c,
-            Value::Str(s) if s.starts_with('#') => s,
-            _ => String::new(),
+        // Handle "#expr" pattern: "#dialog.hex" means "#" + eval("dialog.hex")
+        if bind_color.starts_with('#') && bind_color.contains('.') {
+            let inner = &bind_color[1..];
+            let result = expr::eval(inner, ctx);
+            match result {
+                Value::Str(s) => format!("#{s}"),
+                Value::Color(c) => c,
+                _ => String::new(),
+            }
+        } else {
+            let result = expr::eval(bind_color, ctx);
+            match result {
+                Value::Color(c) => c,
+                Value::Str(s) if s.starts_with('#') => s,
+                _ => String::new(),
+            }
         }
     } else {
         String::new()
@@ -883,28 +1323,34 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     // Build positioning from style (handles position: {x, y} → absolute)
     let extra_style = build_style(el, ctx);
 
+    // Evaluate bind.z_index for dynamic z-ordering (fill/stroke swap)
+    let z_style = el.get("bind")
+        .and_then(|b| b.get("z_index"))
+        .and_then(|v| v.as_str())
+        .map(|expr| {
+            let result = expr::eval(expr, ctx);
+            match result {
+                Value::Number(n) => format!("z-index:{};", n as i64),
+                _ => String::new(),
+            }
+        })
+        .unwrap_or_default();
+
     let style = if hollow {
-        format!("width:{size}px;height:{size}px;background:transparent;border:6px solid {bg};cursor:pointer;box-sizing:border-box;{extra_style}")
+        format!("width:{size}px;height:{size}px;background:transparent;border:6px solid {bg};cursor:pointer;box-sizing:border-box;{z_style}{extra_style}")
     } else {
-        format!("width:{size}px;height:{size}px;background:{bg};border:{border};cursor:pointer;box-sizing:border-box;{extra_style}")
+        format!("width:{size}px;height:{size}px;background:{bg};border:{border};cursor:pointer;box-sizing:border-box;{z_style}{extra_style}")
     };
 
     let on_click = build_click_handler(el, ctx, rctx);
+    let on_dblclick = build_dblclick_handler(el, ctx, rctx);
 
-    if let Some(handler) = on_click {
-        rsx! {
-            div {
-                id: "{id}",
-                style: "{style}",
-                onclick: handler,
-            }
-        }
-    } else {
-        rsx! {
-            div {
-                id: "{id}",
-                style: "{style}",
-            }
+    rsx! {
+        div {
+            id: "{id}",
+            style: "{style}",
+            onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
+            ondoubleclick: move |evt| { if let Some(ref h) = on_dblclick { h.call(evt); } },
         }
     }
 }
