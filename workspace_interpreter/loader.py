@@ -196,7 +196,7 @@ def resolve_templates(element: dict, templates: dict, _depth: int = 0) -> None:
         for i, child in enumerate(children):
             if not isinstance(child, dict):
                 continue
-            if "template" in child and "repeat" not in child:
+            if "template" in child and "foreach" not in child:
                 template_name = child.pop("template")
                 provided_params = child.pop("params", {})
                 template_def = templates.get(template_name)

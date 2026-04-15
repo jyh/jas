@@ -35,7 +35,7 @@ def render_element(el: dict, store: StateStore, ctx: dict,
         return None
 
     # Handle repeat directive
-    if "repeat" in el and "template" in el:
+    if "foreach" in el and "do" in el:
         return _render_repeat(el, store, ctx, dispatch_fn)
 
     etype = el.get("type", "placeholder")
@@ -263,8 +263,8 @@ def _render_repeat(el, store, ctx, dispatch_fn):
     resolves ``var.field`` naturally. The original template is rendered
     directly without deep-copy or string substitution.
     """
-    repeat = el["repeat"]
-    template = el["template"]
+    repeat = el["foreach"]
+    template = el["do"]
     source_expr = repeat.get("source", "")
     var_name = repeat.get("as", "item")
 

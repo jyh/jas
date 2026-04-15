@@ -44,7 +44,7 @@ def render_element(el: dict, theme: dict, state: dict, mode: str = "normal") -> 
     if mode == "wireframe":
         return _render_wireframe(el, theme, state, depth=0)
     # Handle repeat directive: expand template for each item in source
-    if "repeat" in el and "template" in el:
+    if "foreach" in el and "do" in el:
         return _render_repeat(el, theme, state)
     etype = el.get("type", "placeholder")
     renderer = _RENDERERS.get(etype, _render_unknown)
@@ -386,10 +386,10 @@ def _render_repeat(el, theme, state):
     """
     from workspace_interpreter.expr import evaluate as _eval
     from workspace_interpreter.scope import Scope
-    repeat_spec = el.get("repeat", {})
+    repeat_spec = el.get("foreach", {})
     source_expr = repeat_spec.get("source", "")
     var_name = repeat_spec.get("as", "item")
-    template = el.get("template", {})
+    template = el.get("do", {})
 
     # Build scope from the incoming state — the caller is responsible for
     # populating all namespaces (state, panel, data, etc.). The repeat

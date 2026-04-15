@@ -50,7 +50,7 @@ fn render_el(
     rctx: &RenderCtx,
 ) -> Element {
     // Handle repeat directive: expand template for each item in source
-    if el.get("repeat").is_some() && el.get("template").is_some() {
+    if el.get("foreach").is_some() && el.get("do").is_some() {
         return render_repeat(el, ctx, rctx);
     }
 
@@ -97,8 +97,8 @@ fn render_children(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rende
 /// Expand a repeat directive: evaluate the source, then render the template
 /// once per item with the loop variable injected via Scope.
 fn render_repeat(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
-    let repeat = el.get("repeat").unwrap();
-    let template = el.get("template").unwrap();
+    let repeat = el.get("foreach").unwrap();
+    let template = el.get("do").unwrap();
     let source_expr = repeat.get("source").and_then(|s| s.as_str()).unwrap_or("");
     let var_name = repeat.get("as").and_then(|s| s.as_str()).unwrap_or("item");
 

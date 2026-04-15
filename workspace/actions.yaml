@@ -446,7 +446,7 @@ actions:
       mode is unchanged. Disabled when the active attribute is none.
       Enabled only when the active color is non-null.
     category: fill_stroke
-    enabled_when: "state.fill_on_top ? state.fill_color != null : state.stroke_color != null"
+    enabled_when: "if state.fill_on_top then state.fill_color != null else state.stroke_color != null"
     effects:
       - if:
           condition: "state.fill_on_top"
@@ -465,7 +465,7 @@ actions:
       undefined and the operation is a silent no-op — the color is
       unchanged. Disabled when the active attribute is none.
     category: fill_stroke
-    enabled_when: "state.fill_on_top ? state.fill_color != null : state.stroke_color != null"
+    enabled_when: "if state.fill_on_top then state.fill_color != null else state.stroke_color != null"
     effects:
       - if:
           condition: "state.fill_on_top"
@@ -771,7 +771,7 @@ actions:
       Create a new swatch in the active library using the current fill/stroke color (per fill_on_top). Opens the Swatch Options dialog in create mode, initialized from the active color.
     category: swatches
     effects:
-      - open_dialog: { id: 'swatch_options', params: {'mode': 'create', 'color': 'state.fill_on_top ? state.fill_color : state.stroke_color', 'color_mode': 'rgb', 'swatch_name': ''} }
+      - open_dialog: { id: 'swatch_options', params: {'mode': 'create', 'color': 'if state.fill_on_top then state.fill_color else state.stroke_color', 'color_mode': 'rgb', 'swatch_name': ''} }
 
   duplicate_swatch:
     description: >
