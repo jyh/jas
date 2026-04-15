@@ -22,7 +22,21 @@ let panel_label = function
 
 (** Menu items for a panel kind. *)
 let panel_menu = function
-  | Layers -> [Action { label = "Close Layers"; command = "close_panel"; shortcut = "" }]
+  | Layers ->
+    [ Action { label = "New Layer..."; command = "new_layer"; shortcut = "" };
+      Action { label = "New Group"; command = "new_group"; shortcut = "" };
+      Separator;
+      Action { label = "Hide All Layers"; command = "toggle_all_layers_visibility"; shortcut = "" };
+      Action { label = "Outline All Layers"; command = "toggle_all_layers_outline"; shortcut = "" };
+      Action { label = "Lock All Layers"; command = "toggle_all_layers_lock"; shortcut = "" };
+      Separator;
+      Action { label = "Enter Isolation Mode"; command = "enter_isolation_mode"; shortcut = "" };
+      Action { label = "Exit Isolation Mode"; command = "exit_isolation_mode"; shortcut = "" };
+      Separator;
+      Action { label = "Flatten Artwork"; command = "flatten_artwork"; shortcut = "" };
+      Action { label = "Collect in New Layer"; command = "collect_in_new_layer"; shortcut = "" };
+      Separator;
+      Action { label = "Close Layers"; command = "close_panel"; shortcut = "" } ]
   | Color ->
     [ Radio { label = "Grayscale"; command = "mode_grayscale"; group = "color_mode" };
       Radio { label = "RGB"; command = "mode_rgb"; group = "color_mode" };
@@ -79,6 +93,12 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model =
    | None -> ());
   match cmd with
   | "close_panel" -> close_panel layout addr
+  | "new_layer" | "new_group"
+  | "toggle_all_layers_visibility" | "toggle_all_layers_outline"
+  | "toggle_all_layers_lock"
+  | "enter_isolation_mode" | "exit_isolation_mode"
+  | "flatten_artwork" | "collect_in_new_layer"
+    when kind = Layers -> ()  (* Tier-3 stubs *)
   | "invert_color" when kind = Color ->
     let m = get_model () in
     let color = if fill_on_top then
