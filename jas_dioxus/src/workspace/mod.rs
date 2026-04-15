@@ -13,6 +13,7 @@ pub mod menu_bar;
 #[allow(dead_code)]
 pub mod pane;
 // save_dialog.rs removed — workspace save-as uses YAML dialog system
+pub(crate) mod session;
 pub mod toolbar_grid;
 #[allow(dead_code)]
 pub mod test_json;

@@ -102,9 +102,22 @@ impl AppState {
     pub(crate) fn new() -> Self {
         let app_config = Self::load_app_config();
         let workspace_layout = Self::load_or_migrate_workspace(&app_config);
+        // Restore tabs from previous session, if any.
+        let (tabs, active_tab) =
+            if let Some((saved_active, restored)) = super::session::load_session() {
+                let tabs: Vec<TabState> = restored
+                    .into_iter()
+                    .map(|(filename, doc)| TabState::with_model(Model::new(doc, Some(filename))))
+                    .collect();
+                let active = saved_active.min(tabs.len().saturating_sub(1));
+                (tabs, active)
+            } else {
+                (vec![], 0)
+            };
+
         Self {
-            tabs: vec![],
-            active_tab: 0,
+            tabs,
+            active_tab,
             active_tool: ToolKind::Selection,
             app_config,
             workspace_layout,

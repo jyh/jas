@@ -153,6 +153,58 @@ pub fn App() -> Element {
         });
     }
 
+    // Session persistence: save all open documents before the page unloads.
+    {
+        let app_bu = app.clone();
+        use_hook(move || {
+            #[cfg(target_arch = "wasm32")]
+            {
+                use wasm_bindgen::closure::Closure;
+                let app_bu = app_bu.clone();
+                let cb = Closure::<dyn FnMut()>::new(move || {
+                    if let Ok(st) = app_bu.try_borrow() {
+                        super::session::save_session(&st.tabs, st.active_tab);
+                    }
+                });
+                if let Some(window) = web_sys::window() {
+                    let _ = window.add_event_listener_with_callback(
+                        "beforeunload",
+                        cb.as_ref().unchecked_ref(),
+                    );
+                }
+                cb.forget();
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            { let _ = &app_bu; }
+        });
+    }
+
+    // Periodic auto-save: save session every 30 seconds.
+    {
+        let app_as = app.clone();
+        use_hook(move || {
+            #[cfg(target_arch = "wasm32")]
+            {
+                use wasm_bindgen::closure::Closure;
+                let app_as = app_as.clone();
+                let cb = Closure::<dyn FnMut()>::new(move || {
+                    if let Ok(st) = app_as.try_borrow() {
+                        super::session::save_session(&st.tabs, st.active_tab);
+                    }
+                });
+                if let Some(window) = web_sys::window() {
+                    let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
+                        cb.as_ref().unchecked_ref(),
+                        30_000,
+                    );
+                }
+                cb.forget();
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            { let _ = &app_as; }
+        });
+    }
+
     // Macro-like helper: mutate state, then bump revision to trigger repaint.
     // Use `act` for state changes (color, tool, etc.) — panels re-render.
     // Use `layout_act` for pane drag/resize — only geometry re-renders.
