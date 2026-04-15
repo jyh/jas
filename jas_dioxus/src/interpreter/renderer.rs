@@ -62,7 +62,7 @@ fn render_el(
                 let col_style = el.get("col").and_then(|c| c.as_u64())
                     .map(|c| {
                         let pct = (c as f64 / 12.0 * 100.0).round();
-                        format!("flex:0 0 {pct}%;max-width:{pct}%;padding:0 4px;")
+                        format!("flex:0 0 {pct}%;max-width:{pct}%;min-width:0;position:relative;padding:0 4px;")
                     })
                     .unwrap_or_default();
                 let style = format!("{col_style}{base_style}");
@@ -585,13 +585,15 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let etype = el.get("type").and_then(|t| t.as_str()).unwrap_or("container");
     let dir = if layout == "row" || etype == "row" { "row" } else { "column" };
     let base_style = build_style(el, ctx);
-    // col: N → flex-basis percentage (12-column grid)
+    // col: N → flex-basis percentage (Bootstrap 12-column grid)
     let col_style = el.get("col").and_then(|c| c.as_u64())
         .map(|c| {
             let pct = (c as f64 / 12.0 * 100.0).round();
-            format!("flex:0 0 {pct}%;max-width:{pct}%;padding:0 4px;")
+            format!("flex:0 0 {pct}%;max-width:{pct}%;min-width:0;position:relative;padding:0 4px;")
         })
         .unwrap_or_default();
+    // type: row needs flex-wrap for Bootstrap grid compatibility
+    let wrap_style = if etype == "row" { "flex-wrap:wrap;" } else { "" };
     // Apply default text color if not explicitly set in the element's style
     let has_color = el.get("style")
         .and_then(|s| s.as_object())
@@ -599,9 +601,9 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let color_default = if has_color { "" } else { "color:var(--jas-text,#ccc);" };
     let visible = is_visible(el, ctx);
     let style = if visible {
-        format!("display:flex;flex-direction:{dir};{color_default}{col_style}{base_style}")
+        format!("display:flex;flex-direction:{dir};{wrap_style}{color_default}{col_style}{base_style}")
     } else {
-        format!("display:none;flex-direction:{dir};{color_default}{col_style}{base_style}")
+        format!("display:none;flex-direction:{dir};{wrap_style}{color_default}{col_style}{base_style}")
     };
     let children = render_children(el, ctx, rctx);
 
