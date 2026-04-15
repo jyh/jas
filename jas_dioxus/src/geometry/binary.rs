@@ -331,6 +331,11 @@ fn unpack_stroke(v: &Value) -> Option<Stroke> {
         align: StrokeAlign::Center,
         dash_pattern: [0.0; 6],
         dash_len: 0,
+        start_arrow: Arrowhead::None,
+        end_arrow: Arrowhead::None,
+        start_arrow_scale: 100.0,
+        end_arrow_scale: 100.0,
+        arrow_align: ArrowAlign::TipAtEnd,
         opacity: as_f64(&arr[4]),
     })
 }

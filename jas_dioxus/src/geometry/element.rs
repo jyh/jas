@@ -198,6 +198,77 @@ impl Default for Color {
     }
 }
 
+/// Arrowhead shape identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Arrowhead {
+    #[default]
+    None,
+    SimpleArrow,
+    OpenArrow,
+    ClosedArrow,
+    StealthArrow,
+    BarbedArrow,
+    HalfArrowUpper,
+    HalfArrowLower,
+    Circle,
+    OpenCircle,
+    Square,
+    OpenSquare,
+    Diamond,
+    OpenDiamond,
+    Slash,
+}
+
+impl Arrowhead {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "simple_arrow" => Self::SimpleArrow,
+            "open_arrow" => Self::OpenArrow,
+            "closed_arrow" => Self::ClosedArrow,
+            "stealth_arrow" => Self::StealthArrow,
+            "barbed_arrow" => Self::BarbedArrow,
+            "half_arrow_upper" => Self::HalfArrowUpper,
+            "half_arrow_lower" => Self::HalfArrowLower,
+            "circle" => Self::Circle,
+            "open_circle" => Self::OpenCircle,
+            "square" => Self::Square,
+            "open_square" => Self::OpenSquare,
+            "diamond" => Self::Diamond,
+            "open_diamond" => Self::OpenDiamond,
+            "slash" => Self::Slash,
+            _ => Self::None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::SimpleArrow => "simple_arrow",
+            Self::OpenArrow => "open_arrow",
+            Self::ClosedArrow => "closed_arrow",
+            Self::StealthArrow => "stealth_arrow",
+            Self::BarbedArrow => "barbed_arrow",
+            Self::HalfArrowUpper => "half_arrow_upper",
+            Self::HalfArrowLower => "half_arrow_lower",
+            Self::Circle => "circle",
+            Self::OpenCircle => "open_circle",
+            Self::Square => "square",
+            Self::OpenSquare => "open_square",
+            Self::Diamond => "diamond",
+            Self::OpenDiamond => "open_diamond",
+            Self::Slash => "slash",
+        }
+    }
+}
+
+/// Arrow alignment mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArrowAlign {
+    #[default]
+    TipAtEnd,
+    CenterAtEnd,
+}
+
 /// Stroke alignment relative to the path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StrokeAlign {
@@ -251,6 +322,11 @@ pub struct Stroke {
     /// Unused slots are 0.0. `dash_len` indicates how many values are active.
     pub dash_pattern: [f64; 6],
     pub dash_len: u8,
+    pub start_arrow: Arrowhead,
+    pub end_arrow: Arrowhead,
+    pub start_arrow_scale: f64,
+    pub end_arrow_scale: f64,
+    pub arrow_align: ArrowAlign,
     pub opacity: f64,
 }
 
@@ -265,6 +341,11 @@ impl Stroke {
             align: StrokeAlign::Center,
             dash_pattern: [0.0; 6],
             dash_len: 0,
+            start_arrow: Arrowhead::None,
+            end_arrow: Arrowhead::None,
+            start_arrow_scale: 100.0,
+            end_arrow_scale: 100.0,
+            arrow_align: ArrowAlign::TipAtEnd,
             opacity: 1.0,
         }
     }
