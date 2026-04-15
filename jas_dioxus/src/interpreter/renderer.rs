@@ -54,10 +54,25 @@ fn render_el(
         return render_repeat(el, ctx, rctx);
     }
 
-    // _template tag is available for native widget overrides.
-    // Currently all templates fall through to generic rendering.
-    // Native overrides can be added here when needed:
-    //   if let Some(tpl) = el.get("_template").and_then(|t| t.as_str()) { ... }
+    // Native widget override via _template tag — wrap in layout div
+    if let Some(tpl) = el.get("_template").and_then(|t| t.as_str()) {
+        match tpl {
+            "fill_stroke_widget" => {
+                let style = build_style(el, ctx);
+                let col = el.get("col").and_then(|c| c.as_u64());
+                let col_class = col.map(|c| format!("col-{c}")).unwrap_or_default();
+                let native = render_fill_stroke_widget(el, ctx, rctx);
+                return rsx! {
+                    div {
+                        class: "{col_class}",
+                        style: "{style}",
+                        {native}
+                    }
+                };
+            }
+            _ => {}
+        }
+    }
 
     let etype = el.get("type").and_then(|t| t.as_str()).unwrap_or("placeholder");
 
