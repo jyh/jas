@@ -2011,27 +2011,40 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
     }
 }
 
+/// A flattened row from the document tree, ready for rendering.
+#[derive(Clone)]
+struct TreeRow {
+    path: Vec<usize>,
+    depth: usize,
+    eye_icon_svg: String,
+    lock_icon_svg: String,
+    twirl_svg: String,     // empty for leaf elements
+    is_container: bool,
+    display_name: String,
+    is_named: bool,
+    is_selected: bool,
+    layer_color: String,
+    visibility_str: String, // "preview", "outline", "invisible"
+}
+
 /// Render a tree_view widget showing the live document element tree.
 ///
 /// Reads the active document from AppState and renders each element as
 /// an interactive row with visibility, lock, twirl-down, preview, name,
-/// and selection indicator.
+/// and selection indicator. Clicking the eye cycles visibility; clicking
+/// the lock toggles lock state.
 fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     use crate::geometry::element::{Element as GeoElement, Visibility};
-    use crate::document::document::ElementPath;
     use std::collections::HashSet;
-    use std::rc::Rc;
 
     let id = get_id(el);
     let style = build_style(el, ctx);
 
-    // Layer color presets (cycle index mod 9)
     const LAYER_COLORS: [&str; 9] = [
         "#4a90d9", "#d94a4a", "#4ad94a", "#4a4ad9", "#d9d94a",
         "#d94ad9", "#4ad9d9", "#b0b0b0", "#2a7a2a",
     ];
 
-    // Icon SVG lookup helper
     fn icon_svg(icon_name: &str) -> String {
         let ws = super::workspace::Workspace::load();
         if let Some(ws) = &ws {
@@ -2046,7 +2059,6 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         String::new()
     }
 
-    /// Human-readable type label for an element.
     fn type_label(elem: &GeoElement) -> &'static str {
         match elem {
             GeoElement::Line(_) => "Line",
@@ -2063,200 +2075,231 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         }
     }
 
-    /// Get the element's display name: layer name, or type in angle brackets.
-    fn display_name(elem: &GeoElement) -> (String, bool) {
+    fn elem_display_name(elem: &GeoElement) -> (String, bool) {
         if let GeoElement::Layer(le) = elem {
             if !le.name.is_empty() {
                 return (le.name.clone(), true);
             }
         }
-        (format!("&lt;{}&gt;", type_label(elem)), false)
+        (format!("<{}>", type_label(elem)), false)
     }
 
-    /// Flatten the element tree into HTML rows.
-    fn flatten_elements(
-        elements: &[GeoElement],
-        depth: usize,
-        path_prefix: &[usize],
-        layer_color: &str,
-        selected_paths: &HashSet<ElementPath>,
-        rows: &mut Vec<String>,
-    ) {
-        for (i, elem) in elements.iter().enumerate() {
-            let mut path = path_prefix.to_vec();
-            path.push(i);
-
-            let indent_px = depth * 16;
-            let is_container = elem.is_group_or_layer();
-            let is_selected = selected_paths.contains(&path);
-
-            // Current layer color: layers get their own color from the preset cycle
-            let current_layer_color = if let GeoElement::Layer(_) = elem {
-                // Top-level layer index determines color
-                if path.len() == 1 { LAYER_COLORS[i % LAYER_COLORS.len()] } else { layer_color }
-            } else {
-                layer_color
-            };
-
-            // Visibility icon
-            let eye_icon = match elem.visibility() {
-                Visibility::Preview => "eye_preview",
-                Visibility::Outline => "eye_outline",
-                Visibility::Invisible => "eye_invisible",
-            };
-            let eye_svg = icon_svg(eye_icon);
-
-            // Lock icon
-            let lock_icon = if elem.locked() { "lock_locked" } else { "lock_unlocked" };
-            let lock_svg = icon_svg(lock_icon);
-
-            // Twirl or gap
-            let twirl_html = if is_container {
-                let twirl_svg = icon_svg("twirl_open");
-                format!(
-                    r#"<div style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">{twirl_svg}</div>"#
-                )
-            } else {
-                r#"<div style="width:16px;flex-shrink:0"></div>"#.to_string()
-            };
-
-            // Name
-            let (name_html, is_named) = display_name(elem);
-            let name_style = if is_named {
-                "color:var(--jas-text,#ccc)"
-            } else {
-                "color:var(--jas-text-dim,#999)"
-            };
-
-            // Select square
-            let sq_bg = if is_selected { current_layer_color } else { "transparent" };
-
-            let btn_style = "width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer";
-            let row_html = format!(
-                concat!(
-                    r#"<div style="display:flex;align-items:center;height:24px;padding:0 4px;gap:2px;font-size:11px;color:var(--jas-text,#ccc);cursor:default;user-select:none">"#,
-                    r#"<span style="width:{indent}px;flex-shrink:0;display:inline-block"></span>"#,
-                    r#"<div style="{btn}">{eye}</div>"#,
-                    r#"<div style="{btn}">{lock}</div>"#,
-                    "{twirl}",
-                    r#"<div style="width:24px;height:24px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0"></div>"#,
-                    r#"<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;{ncls}">{name}</span>"#,
-                    r#"<div style="width:12px;height:12px;border:1px solid var(--jas-border,#555);flex-shrink:0;background:{sq}"></div>"#,
-                    "</div>",
-                ),
-                indent = indent_px,
-                btn = btn_style,
-                eye = eye_svg,
-                lock = lock_svg,
-                twirl = twirl_html,
-                ncls = name_style,
-                name = name_html,
-                sq = sq_bg,
-            );
-            rows.push(row_html);
-
-            // Recurse into children
-            if let Some(children) = elem.children() {
-                flatten_rc_children(children, depth + 1, &path, current_layer_color, selected_paths, rows);
-            }
-        }
-    }
-
-    /// Flatten Rc<Element> children (avoids borrowing issues with Rc).
     fn flatten_rc_children(
-        children: &[Rc<GeoElement>],
+        children: &[std::rc::Rc<GeoElement>],
         depth: usize,
         path_prefix: &[usize],
         layer_color: &str,
-        selected_paths: &HashSet<ElementPath>,
-        rows: &mut Vec<String>,
+        selected_paths: &HashSet<Vec<usize>>,
+        rows: &mut Vec<TreeRow>,
     ) {
         for (i, child_rc) in children.iter().enumerate() {
             let child = child_rc.as_ref();
             let mut path = path_prefix.to_vec();
             path.push(i);
 
-            let indent_px = depth * 16;
             let is_container = child.is_group_or_layer();
             let is_selected = selected_paths.contains(&path);
 
             let current_layer_color = if let GeoElement::Layer(_) = child {
-                if path.len() == 1 { LAYER_COLORS[i % LAYER_COLORS.len()] } else { layer_color }
+                if path.len() == 1 { LAYER_COLORS[i % LAYER_COLORS.len()].to_string() } else { layer_color.to_string() }
             } else {
-                layer_color
+                layer_color.to_string()
             };
 
+            let vis_str = match child.visibility() {
+                Visibility::Preview => "preview",
+                Visibility::Outline => "outline",
+                Visibility::Invisible => "invisible",
+            };
             let eye_icon = match child.visibility() {
                 Visibility::Preview => "eye_preview",
                 Visibility::Outline => "eye_outline",
                 Visibility::Invisible => "eye_invisible",
             };
-            let eye_svg = icon_svg(eye_icon);
             let lock_icon = if child.locked() { "lock_locked" } else { "lock_unlocked" };
-            let lock_svg = icon_svg(lock_icon);
 
-            let twirl_html = if is_container {
-                let twirl_svg = icon_svg("twirl_open");
-                format!(
-                    r#"<div style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">{twirl_svg}</div>"#
-                )
-            } else {
-                r#"<div style="width:16px;flex-shrink:0"></div>"#.to_string()
-            };
+            let twirl_svg = if is_container { icon_svg("twirl_open") } else { String::new() };
+            let (display_name, is_named) = elem_display_name(child);
 
-            let (name_html, is_named) = display_name(child);
-            let name_style = if is_named { "color:var(--jas-text,#ccc)" } else { "color:var(--jas-text-dim,#999)" };
-            let sq_bg = if is_selected { current_layer_color } else { "transparent" };
-
-            let btn_style = "width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer";
-            let row_html = format!(
-                concat!(
-                    r#"<div style="display:flex;align-items:center;height:24px;padding:0 4px;gap:2px;font-size:11px;color:var(--jas-text,#ccc);cursor:default;user-select:none">"#,
-                    r#"<span style="width:{indent}px;flex-shrink:0;display:inline-block"></span>"#,
-                    r#"<div style="{btn}">{eye}</div>"#,
-                    r#"<div style="{btn}">{lock}</div>"#,
-                    "{twirl}",
-                    r#"<div style="width:24px;height:24px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0"></div>"#,
-                    r#"<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;{ncls}">{name}</span>"#,
-                    r#"<div style="width:12px;height:12px;border:1px solid var(--jas-border,#555);flex-shrink:0;background:{sq}"></div>"#,
-                    "</div>",
-                ),
-                indent = indent_px,
-                btn = btn_style,
-                eye = eye_svg,
-                lock = lock_svg,
-                twirl = twirl_html,
-                ncls = name_style,
-                name = name_html,
-                sq = sq_bg,
-            );
-            rows.push(row_html);
+            rows.push(TreeRow {
+                path: path.clone(),
+                depth,
+                eye_icon_svg: icon_svg(eye_icon),
+                lock_icon_svg: icon_svg(lock_icon),
+                twirl_svg,
+                is_container,
+                display_name,
+                is_named,
+                is_selected,
+                layer_color: current_layer_color.clone(),
+                visibility_str: vis_str.to_string(),
+            });
 
             if let Some(grandchildren) = child.children() {
-                flatten_rc_children(grandchildren, depth + 1, &path, current_layer_color, selected_paths, rows);
+                flatten_rc_children(grandchildren, depth + 1, &path, &current_layer_color, selected_paths, rows);
             }
         }
     }
 
-    // Read the live document from AppState
-    let all_html = {
+    fn flatten_layers(
+        layers: &[GeoElement],
+        selected_paths: &HashSet<Vec<usize>>,
+    ) -> Vec<TreeRow> {
+        let mut rows = Vec::new();
+        for (i, elem) in layers.iter().enumerate() {
+            let path = vec![i];
+            let is_container = elem.is_group_or_layer();
+            let is_selected = selected_paths.contains(&path);
+            let layer_color = LAYER_COLORS[i % LAYER_COLORS.len()].to_string();
+
+            let vis_str = match elem.visibility() {
+                Visibility::Preview => "preview",
+                Visibility::Outline => "outline",
+                Visibility::Invisible => "invisible",
+            };
+            let eye_icon = match elem.visibility() {
+                Visibility::Preview => "eye_preview",
+                Visibility::Outline => "eye_outline",
+                Visibility::Invisible => "eye_invisible",
+            };
+            let lock_icon = if elem.locked() { "lock_locked" } else { "lock_unlocked" };
+            let twirl_svg = if is_container { icon_svg("twirl_open") } else { String::new() };
+            let (display_name, is_named) = elem_display_name(elem);
+
+            rows.push(TreeRow {
+                path: path.clone(),
+                depth: 0,
+                eye_icon_svg: icon_svg(eye_icon),
+                lock_icon_svg: icon_svg(lock_icon),
+                twirl_svg,
+                is_container,
+                display_name,
+                is_named,
+                is_selected,
+                layer_color: layer_color.clone(),
+                visibility_str: vis_str.to_string(),
+            });
+
+            if let Some(children) = elem.children() {
+                flatten_rc_children(children, 1, &path, &layer_color, selected_paths, &mut rows);
+            }
+        }
+        rows
+    }
+
+    // Build flat row list from the live document
+    let rows: Vec<TreeRow> = {
         let st = rctx.app.borrow();
         if let Some(tab) = st.tab() {
             let doc = tab.model.document();
             let selected_paths = doc.selected_paths();
-            let mut rows = Vec::new();
-            flatten_elements(&doc.layers, 0, &[], "#4a90d9", &selected_paths, &mut rows);
-            rows.join("")
+            flatten_layers(&doc.layers, &selected_paths)
         } else {
-            String::new()
+            Vec::new()
         }
     };
+
+    let app = rctx.app.clone();
+    let mut revision = rctx.revision;
+    let btn_style = "width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer";
 
     rsx! {
         div {
             id: "{id}",
             style: "overflow-y:auto;flex:1;min-height:0;{style}",
-            dangerous_inner_html: "{all_html}",
+            for row in rows.iter() {
+                {
+                    let indent_px = row.depth * 16;
+                    let indent_style = format!("width:{}px;flex-shrink:0;display:inline-block", indent_px);
+                    let name_color = if row.is_named { "var(--jas-text,#ccc)" } else { "var(--jas-text-dim,#999)" };
+                    let name_style = format!("flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;color:{name_color}");
+                    let sq_bg = if row.is_selected { &row.layer_color } else { "transparent" };
+                    let sq_style = format!("width:12px;height:12px;border:1px solid var(--jas-border,#555);flex-shrink:0;background:{sq_bg}");
+                    let eye_svg = row.eye_icon_svg.clone();
+                    let lock_svg = row.lock_icon_svg.clone();
+                    let twirl_svg = row.twirl_svg.clone();
+
+                    // Click handlers
+                    let eye_path = row.path.clone();
+                    let eye_app = app.clone();
+                    let mut eye_rev = revision;
+                    let on_eye_click = move |_: Event<MouseData>| {
+                        let p = eye_path.clone();
+                        let a = eye_app.clone();
+                        spawn(async move {
+                            let mut st = a.borrow_mut();
+                            if let Some(tab) = st.tab_mut() {
+                                tab.model.snapshot();
+                                let doc = tab.model.document_mut();
+                                if let Some(elem) = doc.get_element_mut(&p) {
+                                    let new_vis = match elem.visibility() {
+                                        crate::geometry::element::Visibility::Preview => crate::geometry::element::Visibility::Outline,
+                                        crate::geometry::element::Visibility::Outline => crate::geometry::element::Visibility::Invisible,
+                                        crate::geometry::element::Visibility::Invisible => crate::geometry::element::Visibility::Preview,
+                                    };
+                                    elem.common_mut().visibility = new_vis;
+                                }
+                            }
+                            eye_rev += 1;
+                        });
+                    };
+
+                    let lock_path = row.path.clone();
+                    let lock_app = app.clone();
+                    let mut lock_rev = revision;
+                    let on_lock_click = move |_: Event<MouseData>| {
+                        let p = lock_path.clone();
+                        let a = lock_app.clone();
+                        spawn(async move {
+                            let mut st = a.borrow_mut();
+                            if let Some(tab) = st.tab_mut() {
+                                tab.model.snapshot();
+                                let doc = tab.model.document_mut();
+                                if let Some(elem) = doc.get_element_mut(&p) {
+                                    let locked = elem.locked();
+                                    elem.common_mut().locked = !locked;
+                                }
+                            }
+                            lock_rev += 1;
+                        });
+                    };
+
+                    rsx! {
+                        div {
+                            style: "display:flex;align-items:center;height:24px;padding:0 4px;gap:2px;font-size:11px;color:var(--jas-text,#ccc);cursor:default;user-select:none",
+                            // Indent
+                            span { style: "{indent_style}" }
+                            // Eye button
+                            div {
+                                style: "{btn_style}",
+                                onclick: on_eye_click,
+                                div { style: "width:100%;height:100%", dangerous_inner_html: "{eye_svg}" }
+                            }
+                            // Lock button
+                            div {
+                                style: "{btn_style}",
+                                onclick: on_lock_click,
+                                div { style: "width:100%;height:100%", dangerous_inner_html: "{lock_svg}" }
+                            }
+                            // Twirl or gap
+                            if row.is_container {
+                                div {
+                                    style: "{btn_style}",
+                                    div { style: "width:100%;height:100%", dangerous_inner_html: "{twirl_svg}" }
+                                }
+                            } else {
+                                div { style: "width:16px;flex-shrink:0" }
+                            }
+                            // Preview placeholder
+                            div { style: "width:24px;height:24px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0" }
+                            // Name
+                            span { style: "{name_style}", "{row.display_name}" }
+                            // Select square
+                            div { style: "{sq_style}" }
+                        }
+                    }
+                }
+            }
         }
     }
 }
