@@ -9,6 +9,7 @@ import SwiftUI
 struct YamlElementView: View {
     let element: [String: Any]
     let context: [String: Any]
+    var model: Model?
 
     var body: some View {
         // Check bind.visible — if the expression evaluates to false, hide the element.
@@ -54,6 +55,10 @@ struct YamlElementView: View {
                 renderDisclosure()
             case "panel":
                 renderPanel()
+            case "tree_view":
+                renderTreeView()
+            case "element_preview":
+                renderElementPreview()
             default:
                 renderPlaceholder()
             }
@@ -95,21 +100,21 @@ struct YamlElementView: View {
             ) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict())
+                    YamlElementView(element: template, context: childScope.toDict(), model: model)
                 }
             }
         } else if layout == "row" {
             HStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict())
+                    YamlElementView(element: template, context: childScope.toDict(), model: model)
                 }
             }
         } else {
             VStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict())
+                    YamlElementView(element: template, context: childScope.toDict(), model: model)
                 }
             }
         }
@@ -199,7 +204,7 @@ struct YamlElementView: View {
             spacing: gap
         ) {
             ForEach(0..<children.count, id: \.self) { i in
-                YamlElementView(element: children[i], context: context)
+                YamlElementView(element: children[i], context: context, model: model)
             }
         }
     }
@@ -366,10 +371,34 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderPanel() -> some View {
         if let content = element["content"] as? [String: Any] {
-            YamlElementView(element: content, context: context)
+            YamlElementView(element: content, context: context, model: model)
         } else {
             renderPlaceholder()
         }
+    }
+
+    // MARK: - Tree View
+
+    @ViewBuilder
+    private func renderTreeView() -> some View {
+        if let model = model {
+            TreeViewContent(model: model)
+        } else {
+            SwiftUI.Text("[Element hierarchy]")
+                .foregroundColor(.gray)
+                .frame(minHeight: 30)
+        }
+    }
+
+    // MARK: - Element Preview
+
+    @ViewBuilder
+    private func renderElementPreview() -> some View {
+        let sz = (element["style"] as? [String: Any])?["size"] as? Int ?? 32
+        Rectangle()
+            .fill(SwiftUI.Color.white)
+            .overlay(Rectangle().stroke(SwiftUI.Color.gray, lineWidth: 1))
+            .frame(width: CGFloat(sz), height: CGFloat(sz))
     }
 
     // MARK: - Placeholder
@@ -461,7 +490,7 @@ struct YamlElementView: View {
     private func renderChildElements() -> some View {
         let children = element["children"] as? [[String: Any]] ?? []
         ForEach(0..<children.count, id: \.self) { i in
-            YamlElementView(element: children[i], context: context)
+            YamlElementView(element: children[i], context: context, model: model)
         }
     }
 }
@@ -476,13 +505,169 @@ private struct SliderView: View {
     }
 }
 
+// MARK: - Tree View Content (live document)
+
+private let layerColors = [
+    "#4a90d9", "#d94a4a", "#4ad94a", "#4a4ad9", "#d9d94a",
+    "#d94ad9", "#4ad9d9", "#b0b0b0", "#2a7a2a",
+]
+
+private func elementTypeLabel(_ elem: Element) -> String {
+    switch elem {
+    case .line: return "Line"
+    case .rect: return "Rectangle"
+    case .circle: return "Circle"
+    case .ellipse: return "Ellipse"
+    case .polyline: return "Polyline"
+    case .polygon: return "Polygon"
+    case .path: return "Path"
+    case .text: return "Text"
+    case .textPath: return "Text Path"
+    case .group: return "Group"
+    case .layer: return "Layer"
+    }
+}
+
+private func elementDisplayName(_ elem: Element) -> (String, Bool) {
+    if case .layer(let le) = elem, !le.name.isEmpty {
+        return (le.name, true)
+    }
+    return ("<\(elementTypeLabel(elem))>", false)
+}
+
+private func visIcon(_ vis: Visibility) -> String {
+    switch vis {
+    case .preview: return "\u{25C9}"
+    case .outline: return "\u{25D0}"
+    case .invisible: return "\u{25CB}"
+    }
+}
+
+private func cycleVisibility(_ vis: Visibility) -> Visibility {
+    switch vis {
+    case .preview: return .outline
+    case .outline: return .invisible
+    case .invisible: return .preview
+    }
+}
+
+struct TreeViewContent: View {
+    @ObservedObject var model: Model
+
+    var body: some View {
+        let doc = model.document
+        let selectedPaths = doc.selectedPaths
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(Array(doc.layers.indices.reversed()), id: \.self) { i in
+                    let layer = doc.layers[i]
+                    let elem = Element.layer(layer)
+                    let path: ElementPath = [i]
+                    let color = layerColors[i % layerColors.count]
+                    treeRows(elem: elem, path: path, depth: 0, layerColor: color, selectedPaths: selectedPaths)
+                }
+            }
+        }
+    }
+
+    private func elementChildren(_ elem: Element) -> [Element]? {
+        switch elem {
+        case .group(let g): return g.children
+        case .layer(let l): return l.children
+        default: return nil
+        }
+    }
+
+    private func isContainer(_ elem: Element) -> Bool {
+        switch elem {
+        case .group, .layer: return true
+        default: return false
+        }
+    }
+
+    @ViewBuilder
+    private func treeRows(elem: Element, path: ElementPath, depth: Int, layerColor: String, selectedPaths: Set<ElementPath>) -> some View {
+        let isSelected = selectedPaths.contains(path)
+        let (name, isNamed) = elementDisplayName(elem)
+        let vis = elem.visibility
+        let locked = elem.isLocked
+
+        HStack(spacing: 2) {
+            // Indent
+            if depth > 0 {
+                Spacer().frame(width: CGFloat(depth * 16))
+            }
+            // Eye
+            SwiftUI.Text(visIcon(vis))
+                .frame(width: 16, height: 16)
+                .onTapGesture {
+                    let e = model.document.getElement(path)
+                    let newE = e.withVisibility(cycleVisibility(e.visibility))
+                    model.snapshot()
+                    model.document = model.document.replaceElement(path, with: newE)
+                }
+            // Lock
+            SwiftUI.Text(locked ? "\u{1F512}" : "\u{1F513}")
+                .frame(width: 16, height: 16)
+                .onTapGesture {
+                    let e = model.document.getElement(path)
+                    let newE = e.withLocked(!e.isLocked)
+                    model.snapshot()
+                    model.document = model.document.replaceElement(path, with: newE)
+                }
+            // Twirl or gap
+            if isContainer(elem) {
+                SwiftUI.Text("\u{25BC}")
+                    .frame(width: 16, height: 16)
+            } else {
+                Spacer().frame(width: 16)
+            }
+            // Preview
+            Rectangle().fill(SwiftUI.Color.white)
+                .overlay(Rectangle().stroke(SwiftUI.Color.gray, lineWidth: 1))
+                .frame(width: 24, height: 24)
+            // Name
+            SwiftUI.Text(name)
+                .font(.system(size: 11))
+                .foregroundColor(isNamed ? SwiftUI.Color.white : SwiftUI.Color.gray)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            // Select square
+            Rectangle()
+                .fill(isSelected ? SwiftUI.Color.blue : SwiftUI.Color.clear)
+                .overlay(Rectangle().stroke(SwiftUI.Color.gray, lineWidth: 1))
+                .frame(width: 12, height: 12)
+                .onTapGesture {
+                    model.document = Document(
+                        layers: model.document.layers,
+                        selectedLayer: model.document.selectedLayer,
+                        selection: [ElementSelection.all(path)]
+                    )
+                }
+        }
+        .frame(height: 24)
+        .padding(.horizontal, 4)
+
+        // Children (reversed)
+        if let children = elementChildren(elem) {
+            ForEach(Array(children.indices.reversed()), id: \.self) { ci in
+                let child = children[ci]
+                let childPath = path + [ci]
+                treeRows(elem: child, path: childPath, depth: depth + 1, layerColor: layerColor, selectedPaths: selectedPaths)
+            }
+        }
+    }
+}
+
 /// Top-level view that renders a panel's YAML content.
 struct YamlPanelBodyView: View {
     let contentSpec: [String: Any]
     let context: [String: Any]
+    var model: Model?
 
     var body: some View {
-        YamlElementView(element: contentSpec, context: context)
+        YamlElementView(element: contentSpec, context: context, model: model)
             .padding(4)
     }
 }

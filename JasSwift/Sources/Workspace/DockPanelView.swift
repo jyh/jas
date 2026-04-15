@@ -171,7 +171,7 @@ public struct PanelGroupView: View {
                             "icons": icons,
                             "data": ["swatch_libraries": swatchLibs] as [String: Any]
                         ]
-                        YamlPanelBodyView(contentSpec: content, context: ctx)
+                        YamlPanelBodyView(contentSpec: content, context: ctx, model: model)
                     } else {
                         SwiftUI.Text(verbatim: panelLabel(kind))
                             .font(.system(size: 12))
