@@ -2011,78 +2011,25 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
     }
 }
 
-/// Render a tree_view widget with sample document data.
+/// Render a tree_view widget showing the live document element tree.
 ///
-/// Displays an interactive hierarchical tree with visibility, lock, and
-/// twirl-down controls per row. Uses sample data until a live document
-/// model is connected.
+/// Reads the active document from AppState and renders each element as
+/// an interactive row with visibility, lock, twirl-down, preview, name,
+/// and selection indicator.
 fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    use crate::geometry::element::{Element as GeoElement, Visibility};
+    use crate::document::document::ElementPath;
+    use std::collections::HashSet;
+    use std::rc::Rc;
+
     let id = get_id(el);
     let style = build_style(el, ctx);
 
-    // Sample tree data matching the Flask JS demo
-    struct TreeNode {
-        id: &'static str,
-        name: &'static str,
-        type_label: &'static str,
-        visibility: &'static str,
-        locked: bool,
-        element_selected: bool,
-        layer_color: &'static str,
-        is_container: bool,
-        children: Vec<TreeNode>,
-    }
-
-    fn build_sample_tree() -> Vec<TreeNode> {
-        vec![
-            TreeNode {
-                id: "layer1", name: "Layer 1", type_label: "Layer",
-                visibility: "preview", locked: false, element_selected: false,
-                layer_color: "#4a90d9", is_container: true,
-                children: vec![
-                    TreeNode {
-                        id: "group1", name: "", type_label: "Group",
-                        visibility: "preview", locked: false, element_selected: false,
-                        layer_color: "#4a90d9", is_container: true,
-                        children: vec![
-                            TreeNode {
-                                id: "path1", name: "", type_label: "Path",
-                                visibility: "preview", locked: false, element_selected: false,
-                                layer_color: "#4a90d9", is_container: false, children: vec![],
-                            },
-                            TreeNode {
-                                id: "rect1", name: "Background", type_label: "Rectangle",
-                                visibility: "preview", locked: true, element_selected: false,
-                                layer_color: "#4a90d9", is_container: false, children: vec![],
-                            },
-                            TreeNode {
-                                id: "text1", name: "Title", type_label: "Text",
-                                visibility: "outline", locked: false, element_selected: true,
-                                layer_color: "#4a90d9", is_container: false, children: vec![],
-                            },
-                        ],
-                    },
-                    TreeNode {
-                        id: "circle1", name: "", type_label: "Circle",
-                        visibility: "invisible", locked: false, element_selected: false,
-                        layer_color: "#4a90d9", is_container: false, children: vec![],
-                    },
-                ],
-            },
-            TreeNode {
-                id: "layer2", name: "Layer 2", type_label: "Layer",
-                visibility: "preview", locked: false, element_selected: false,
-                layer_color: "#d94a4a", is_container: true,
-                children: vec![
-                    TreeNode {
-                        id: "line1", name: "", type_label: "Line",
-                        visibility: "preview", locked: false, element_selected: true,
-                        layer_color: "#d94a4a", is_container: false, children: vec![],
-                    },
-                ],
-            },
-        ]
-    }
+    // Layer color presets (cycle index mod 9)
+    const LAYER_COLORS: [&str; 9] = [
+        "#4a90d9", "#d94a4a", "#4ad94a", "#4a4ad9", "#d9d94a",
+        "#d94ad9", "#4ad9d9", "#b0b0b0", "#2a7a2a",
+    ];
 
     // Icon SVG lookup helper
     fn icon_svg(icon_name: &str) -> String {
@@ -2099,29 +2046,72 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         String::new()
     }
 
-    // Flatten tree into visible rows
-    struct FlatRow {
-        node_html: String,
+    /// Human-readable type label for an element.
+    fn type_label(elem: &GeoElement) -> &'static str {
+        match elem {
+            GeoElement::Line(_) => "Line",
+            GeoElement::Rect(_) => "Rectangle",
+            GeoElement::Circle(_) => "Circle",
+            GeoElement::Ellipse(_) => "Ellipse",
+            GeoElement::Polyline(_) => "Polyline",
+            GeoElement::Polygon(_) => "Polygon",
+            GeoElement::Path(_) => "Path",
+            GeoElement::Text(_) => "Text",
+            GeoElement::TextPath(_) => "Text Path",
+            GeoElement::Group(_) => "Group",
+            GeoElement::Layer(_) => "Layer",
+        }
     }
 
-    fn flatten_to_html(nodes: &[TreeNode], depth: usize, rows: &mut Vec<FlatRow>) {
-        for node in nodes {
-            let indent_px = depth * 16;
+    /// Get the element's display name: layer name, or type in angle brackets.
+    fn display_name(elem: &GeoElement) -> (String, bool) {
+        if let GeoElement::Layer(le) = elem {
+            if !le.name.is_empty() {
+                return (le.name.clone(), true);
+            }
+        }
+        (format!("&lt;{}&gt;", type_label(elem)), false)
+    }
 
-            // Eye icon
-            let eye_icon_name = match node.visibility {
-                "outline" => "eye_outline",
-                "invisible" => "eye_invisible",
-                _ => "eye_preview",
+    /// Flatten the element tree into HTML rows.
+    fn flatten_elements(
+        elements: &[GeoElement],
+        depth: usize,
+        path_prefix: &[usize],
+        layer_color: &str,
+        selected_paths: &HashSet<ElementPath>,
+        rows: &mut Vec<String>,
+    ) {
+        for (i, elem) in elements.iter().enumerate() {
+            let mut path = path_prefix.to_vec();
+            path.push(i);
+
+            let indent_px = depth * 16;
+            let is_container = elem.is_group_or_layer();
+            let is_selected = selected_paths.contains(&path);
+
+            // Current layer color: layers get their own color from the preset cycle
+            let current_layer_color = if let GeoElement::Layer(_) = elem {
+                // Top-level layer index determines color
+                if path.len() == 1 { LAYER_COLORS[i % LAYER_COLORS.len()] } else { layer_color }
+            } else {
+                layer_color
             };
-            let eye_svg = icon_svg(eye_icon_name);
+
+            // Visibility icon
+            let eye_icon = match elem.visibility() {
+                Visibility::Preview => "eye_preview",
+                Visibility::Outline => "eye_outline",
+                Visibility::Invisible => "eye_invisible",
+            };
+            let eye_svg = icon_svg(eye_icon);
 
             // Lock icon
-            let lock_icon_name = if node.locked { "lock_locked" } else { "lock_unlocked" };
-            let lock_svg = icon_svg(lock_icon_name);
+            let lock_icon = if elem.locked() { "lock_locked" } else { "lock_unlocked" };
+            let lock_svg = icon_svg(lock_icon);
 
             // Twirl or gap
-            let twirl_html = if node.is_container {
+            let twirl_html = if is_container {
                 let twirl_svg = icon_svg("twirl_open");
                 format!(
                     r#"<div style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">{twirl_svg}</div>"#
@@ -2130,18 +2120,16 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                 r#"<div style="width:16px;flex-shrink:0"></div>"#.to_string()
             };
 
-            // Preview placeholder
-            let preview_html = r#"<div style="width:24px;height:24px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0"></div>"#;
-
             // Name
-            let (display_name, name_class) = if node.name.is_empty() {
-                (format!("&lt;{}&gt;", node.type_label), "color:var(--jas-text-dim,#999)")
+            let (name_html, is_named) = display_name(elem);
+            let name_style = if is_named {
+                "color:var(--jas-text,#ccc)"
             } else {
-                (node.name.to_string(), "color:var(--jas-text,#ccc)")
+                "color:var(--jas-text-dim,#999)"
             };
 
             // Select square
-            let sq_bg = if node.element_selected { node.layer_color } else { "transparent" };
+            let sq_bg = if is_selected { current_layer_color } else { "transparent" };
 
             let btn_style = "width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer";
             let row_html = format!(
@@ -2161,24 +2149,108 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                 eye = eye_svg,
                 lock = lock_svg,
                 twirl = twirl_html,
-                ncls = name_class,
-                name = display_name,
+                ncls = name_style,
+                name = name_html,
                 sq = sq_bg,
             );
+            rows.push(row_html);
 
-            rows.push(FlatRow { node_html: row_html });
-
-            if node.is_container {
-                flatten_to_html(&node.children, depth + 1, rows);
+            // Recurse into children
+            if let Some(children) = elem.children() {
+                flatten_rc_children(children, depth + 1, &path, current_layer_color, selected_paths, rows);
             }
         }
     }
 
-    let tree = build_sample_tree();
-    let mut rows = Vec::new();
-    flatten_to_html(&tree, 0, &mut rows);
+    /// Flatten Rc<Element> children (avoids borrowing issues with Rc).
+    fn flatten_rc_children(
+        children: &[Rc<GeoElement>],
+        depth: usize,
+        path_prefix: &[usize],
+        layer_color: &str,
+        selected_paths: &HashSet<ElementPath>,
+        rows: &mut Vec<String>,
+    ) {
+        for (i, child_rc) in children.iter().enumerate() {
+            let child = child_rc.as_ref();
+            let mut path = path_prefix.to_vec();
+            path.push(i);
 
-    let all_html = rows.into_iter().map(|r| r.node_html).collect::<String>();
+            let indent_px = depth * 16;
+            let is_container = child.is_group_or_layer();
+            let is_selected = selected_paths.contains(&path);
+
+            let current_layer_color = if let GeoElement::Layer(_) = child {
+                if path.len() == 1 { LAYER_COLORS[i % LAYER_COLORS.len()] } else { layer_color }
+            } else {
+                layer_color
+            };
+
+            let eye_icon = match child.visibility() {
+                Visibility::Preview => "eye_preview",
+                Visibility::Outline => "eye_outline",
+                Visibility::Invisible => "eye_invisible",
+            };
+            let eye_svg = icon_svg(eye_icon);
+            let lock_icon = if child.locked() { "lock_locked" } else { "lock_unlocked" };
+            let lock_svg = icon_svg(lock_icon);
+
+            let twirl_html = if is_container {
+                let twirl_svg = icon_svg("twirl_open");
+                format!(
+                    r#"<div style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">{twirl_svg}</div>"#
+                )
+            } else {
+                r#"<div style="width:16px;flex-shrink:0"></div>"#.to_string()
+            };
+
+            let (name_html, is_named) = display_name(child);
+            let name_style = if is_named { "color:var(--jas-text,#ccc)" } else { "color:var(--jas-text-dim,#999)" };
+            let sq_bg = if is_selected { current_layer_color } else { "transparent" };
+
+            let btn_style = "width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer";
+            let row_html = format!(
+                concat!(
+                    r#"<div style="display:flex;align-items:center;height:24px;padding:0 4px;gap:2px;font-size:11px;color:var(--jas-text,#ccc);cursor:default;user-select:none">"#,
+                    r#"<span style="width:{indent}px;flex-shrink:0;display:inline-block"></span>"#,
+                    r#"<div style="{btn}">{eye}</div>"#,
+                    r#"<div style="{btn}">{lock}</div>"#,
+                    "{twirl}",
+                    r#"<div style="width:24px;height:24px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0"></div>"#,
+                    r#"<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;{ncls}">{name}</span>"#,
+                    r#"<div style="width:12px;height:12px;border:1px solid var(--jas-border,#555);flex-shrink:0;background:{sq}"></div>"#,
+                    "</div>",
+                ),
+                indent = indent_px,
+                btn = btn_style,
+                eye = eye_svg,
+                lock = lock_svg,
+                twirl = twirl_html,
+                ncls = name_style,
+                name = name_html,
+                sq = sq_bg,
+            );
+            rows.push(row_html);
+
+            if let Some(grandchildren) = child.children() {
+                flatten_rc_children(grandchildren, depth + 1, &path, current_layer_color, selected_paths, rows);
+            }
+        }
+    }
+
+    // Read the live document from AppState
+    let all_html = {
+        let st = rctx.app.borrow();
+        if let Some(tab) = st.tab() {
+            let doc = tab.model.document();
+            let selected_paths = doc.selected_paths();
+            let mut rows = Vec::new();
+            flatten_elements(&doc.layers, 0, &[], "#4a90d9", &selected_paths, &mut rows);
+            rows.join("")
+        } else {
+            String::new()
+        }
+    };
 
     rsx! {
         div {
