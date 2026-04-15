@@ -261,6 +261,92 @@ def _render_panel(el, store, ctx, dispatch_fn):
     return _render_placeholder(el, store, ctx, dispatch_fn)
 
 
+def _render_tree_view(el, store, ctx, dispatch_fn):
+    """Render a tree_view widget with sample document data."""
+    widget = QWidget()
+    layout = QVBoxLayout(widget)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+
+    # Sample tree data matching the Flask/Rust implementations
+    rows = [
+        (0, "\u25c9", "\U0001F513", "\u25bc", "Layer 1",     True,  False),
+        (1, "\u25c9", "\U0001F513", "\u25bc", "<Group>",     False, False),
+        (2, "\u25c9", "\U0001F513", "",       "<Path>",      False, False),
+        (2, "\u25c9", "\U0001F512", "",       "Background",  True,  False),
+        (2, "\u25d0", "\U0001F513", "",       "Title",       True,  True),
+        (1, "\u25cb", "\U0001F513", "",       "<Circle>",    False, False),
+        (0, "\u25c9", "\U0001F513", "\u25bc", "Layer 2",     True,  False),
+        (1, "\u25c9", "\U0001F513", "",       "<Line>",      False, True),
+    ]
+
+    for depth, eye, lock, twirl, name, _is_named, selected in rows:
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(4, 0, 4, 0)
+        row_layout.setSpacing(2)
+        row.setFixedHeight(24)
+
+        # Indentation
+        if depth > 0:
+            spacer = QLabel("")
+            spacer.setFixedWidth(depth * 16)
+            row_layout.addWidget(spacer)
+
+        # Eye, Lock, Twirl
+        for icon_text in [eye, lock]:
+            lbl = QLabel(icon_text)
+            lbl.setFixedWidth(16)
+            lbl.setAlignment(Qt.AlignCenter)
+            row_layout.addWidget(lbl)
+
+        if twirl:
+            lbl = QLabel(twirl)
+            lbl.setFixedWidth(16)
+            lbl.setAlignment(Qt.AlignCenter)
+            row_layout.addWidget(lbl)
+        else:
+            gap = QLabel("")
+            gap.setFixedWidth(16)
+            row_layout.addWidget(gap)
+
+        # Preview placeholder
+        preview = QFrame()
+        preview.setFixedSize(24, 24)
+        preview.setFrameStyle(QFrame.Box)
+        preview.setStyleSheet("background: white;")
+        row_layout.addWidget(preview)
+
+        # Name
+        name_lbl = QLabel(name)
+        name_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        row_layout.addWidget(name_lbl)
+
+        # Select square
+        sq = QFrame()
+        sq.setFixedSize(12, 12)
+        sq.setFrameStyle(QFrame.Box)
+        if selected:
+            sq.setStyleSheet("background: #4a90d9;")
+        row_layout.addWidget(sq)
+
+        layout.addWidget(row)
+
+    layout.addStretch()
+    return widget
+
+
+def _render_element_preview(el, store, ctx, dispatch_fn):
+    """Render an element_preview widget as a placeholder thumbnail."""
+    style = el.get("style", {})
+    sz = style.get("size", 32)
+    frame = QFrame()
+    frame.setFixedSize(sz, sz)
+    frame.setFrameStyle(QFrame.Box)
+    frame.setStyleSheet("background: white;")
+    return frame
+
+
 def _render_placeholder(el, store, ctx, dispatch_fn):
     summary = el.get("summary", el.get("type", "?"))
     label = QLabel(f"[{summary}]")
@@ -558,5 +644,7 @@ _RENDERERS = {
     "disclosure": _render_disclosure,
     "panel": _render_panel,
     "fill_stroke_widget": _render_container,
+    "tree_view": _render_tree_view,
+    "element_preview": _render_element_preview,
     "placeholder": _render_placeholder,
 }

@@ -56,6 +56,8 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
   | "spacer" -> render_spacer ~packing ()
   | "disclosure" -> render_disclosure ~packing ~ctx el
   | "panel" -> render_panel ~packing ~ctx el
+  | "tree_view" -> render_tree_view ~packing ~ctx el
+  | "element_preview" -> render_element_preview ~packing el
   | _ -> render_placeholder ~packing el
 
 and render_container ~packing ~ctx el etype =
@@ -212,6 +214,51 @@ and render_panel ~packing ~ctx el =
   match el |> member "content" with
   | `Null -> render_placeholder ~packing el
   | content -> render_element ~packing ~ctx content
+
+and render_tree_view ~packing ~ctx:_ _el =
+  (* Sample tree data for demonstration. *)
+  let vbox = GPack.vbox ~spacing:0 ~packing () in
+  let rows = [
+    (0, "\xe2\x97\x89", "\xf0\x9f\x94\x93", "\xe2\x96\xbc", "Layer 1",     true,  false);
+    (1, "\xe2\x97\x89", "\xf0\x9f\x94\x93", "\xe2\x96\xbc", "<Group>",      false, false);
+    (2, "\xe2\x97\x89", "\xf0\x9f\x94\x93", "",              "<Path>",       false, false);
+    (2, "\xe2\x97\x89", "\xf0\x9f\x94\x92", "",              "Background",   true,  false);
+    (2, "\xe2\x97\x90", "\xf0\x9f\x94\x93", "",              "Title",        true,  true);
+    (1, "\xe2\x97\x8b", "\xf0\x9f\x94\x93", "",              "<Circle>",     false, false);
+    (0, "\xe2\x97\x89", "\xf0\x9f\x94\x93", "\xe2\x96\xbc", "Layer 2",      true,  false);
+    (1, "\xe2\x97\x89", "\xf0\x9f\x94\x93", "",              "<Line>",       false, true);
+  ] in
+  List.iter (fun (depth, eye, lock, twirl, name, _is_named, selected) ->
+    let hbox = GPack.hbox ~spacing:2 ~packing:(vbox#pack ~expand:false) () in
+    (* Indentation *)
+    if depth > 0 then begin
+      let spacer = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
+      spacer#misc#set_size_request ~width:(depth * 16) ()
+    end;
+    (* Eye, Lock, Twirl *)
+    ignore (GMisc.label ~text:eye ~packing:(hbox#pack ~expand:false) ());
+    ignore (GMisc.label ~text:lock ~packing:(hbox#pack ~expand:false) ());
+    if String.length twirl > 0 then
+      ignore (GMisc.label ~text:twirl ~packing:(hbox#pack ~expand:false) ())
+    else begin
+      let gap = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
+      gap#misc#set_size_request ~width:16 ()
+    end;
+    (* Preview placeholder *)
+    let preview = GBin.frame ~shadow_type:`ETCHED_IN ~packing:(hbox#pack ~expand:false) () in
+    preview#misc#set_size_request ~width:24 ~height:24 ();
+    (* Name *)
+    ignore (GMisc.label ~text:name ~packing:(hbox#pack ~expand:true) ());
+    (* Select square *)
+    let sq = GBin.frame ~shadow_type:`ETCHED_IN ~packing:(hbox#pack ~expand:false) () in
+    sq#misc#set_size_request ~width:12 ~height:12 ();
+    if selected then
+      sq#misc#modify_bg [`NORMAL, `NAME "blue"]
+  ) rows
+
+and render_element_preview ~packing _el =
+  let frame = GBin.frame ~shadow_type:`ETCHED_IN ~packing () in
+  frame#misc#set_size_request ~width:32 ~height:32 ()
 
 and render_placeholder ~packing el =
   let open Yojson.Safe.Util in
