@@ -58,13 +58,17 @@ fn render_el(
     if let Some(tpl) = el.get("_template").and_then(|t| t.as_str()) {
         match tpl {
             "fill_stroke_widget" => {
-                let style = build_style(el, ctx);
-                let col = el.get("col").and_then(|c| c.as_u64());
-                let col_class = col.map(|c| format!("col-{c}")).unwrap_or_default();
+                let base_style = build_style(el, ctx);
+                let col_style = el.get("col").and_then(|c| c.as_u64())
+                    .map(|c| {
+                        let pct = (c as f64 / 12.0 * 100.0).round();
+                        format!("flex:0 0 {pct}%;max-width:{pct}%;padding:0 4px;")
+                    })
+                    .unwrap_or_default();
+                let style = format!("{col_style}{base_style}");
                 let native = render_fill_stroke_widget(el, ctx, rctx);
                 return rsx! {
                     div {
-                        class: "{col_class}",
                         style: "{style}",
                         {native}
                     }
@@ -581,6 +585,13 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let etype = el.get("type").and_then(|t| t.as_str()).unwrap_or("container");
     let dir = if layout == "row" || etype == "row" { "row" } else { "column" };
     let base_style = build_style(el, ctx);
+    // col: N → flex-basis percentage (12-column grid)
+    let col_style = el.get("col").and_then(|c| c.as_u64())
+        .map(|c| {
+            let pct = (c as f64 / 12.0 * 100.0).round();
+            format!("flex:0 0 {pct}%;max-width:{pct}%;padding:0 4px;")
+        })
+        .unwrap_or_default();
     // Apply default text color if not explicitly set in the element's style
     let has_color = el.get("style")
         .and_then(|s| s.as_object())
@@ -588,9 +599,9 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let color_default = if has_color { "" } else { "color:var(--jas-text,#ccc);" };
     let visible = is_visible(el, ctx);
     let style = if visible {
-        format!("display:flex;flex-direction:{dir};{color_default}{base_style}")
+        format!("display:flex;flex-direction:{dir};{color_default}{col_style}{base_style}")
     } else {
-        format!("display:none;flex-direction:{dir};{color_default}{base_style}")
+        format!("display:none;flex-direction:{dir};{color_default}{col_style}{base_style}")
     };
     let children = render_children(el, ctx, rctx);
 
