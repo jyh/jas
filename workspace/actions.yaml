@@ -1270,7 +1270,9 @@ actions:
       container_id: { type: string }
     enabled_when: "active_document.layers_panel_selection_count == 1 and active_document.layers_panel_selection_is_container"
     effects:
-      - log: "enter_isolation_mode"
+      - list_push:
+          target: panel.isolation_stack
+          value: "path_from_id(param.container_id)"
 
   exit_isolation_mode:
     description: >

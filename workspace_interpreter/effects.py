@@ -399,7 +399,19 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         lp = effect["list_push"]
         target = lp.get("target", "")
         parts = target.split(".", 1)
-        value = _eval(lp.get("value", "null"), store, ctx)
+        # Evaluate value, preserving Path as __path__ marker so it
+        # round-trips through the panel state list (matches the shape
+        # of layers_panel_selection entries).
+        from workspace_interpreter.expr_types import Value as _V, ValueType
+        eval_ctx = store.eval_context(ctx)
+        result = evaluate(str(lp.get("value", "null")) if lp.get("value") is not None else "",
+                          eval_ctx)
+        if result.type == ValueType.PATH:
+            value = {"__path__": list(result.value)}
+        elif result.type == ValueType.CLOSURE:
+            value = result
+        else:
+            value = result.value
         unique = lp.get("unique", False)
         max_length = lp.get("max_length")
         if len(parts) == 2 and parts[0] == "panel":
