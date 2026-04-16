@@ -288,35 +288,99 @@ Not blocking — can be done in parallel with Category A implementation.
 
 ---
 
+## Phase 1 Step 1 — cross-language `set:` audit
+
+Executed as the first action of Phase 1. Audited the
+`apply_set_effects`-equivalent function in each of the other 4 languages
+to determine whether Bug A3 is a shared gap or a Rust-only issue.
+
+### Result: Rust is the outlier
+
+| Language | Location | Scope | Coercion |
+|---|---|---|---|
+| Rust | `jas_dioxus/src/interpreter/renderer.rs:739–755` | **Narrow** — `fill_on_top` + `stroke_*` only | In-handler, silent-drop |
+| Python | `workspace_interpreter/effects.py:47–52` | **Unbounded** | Deferred to render-time helpers |
+| OCaml | `jas_ocaml/lib/interpreter/effects.ml:62–69` | **Unbounded** | Deferred |
+| Swift | `JasSwift/Sources/Interpreter/Effects.swift:78–85` | **Unbounded** | Deferred |
+| Flask | — | No effects runtime | — |
+
+The three non-Rust implementations are structurally near-identical and
+appear to have been ported from a shared reference (likely
+`workspace_interpreter/`). Bug A3 is a Rust-only bug; YAML like
+`set: { fill_color: "#ff0000" }` works in Python/OCaml/Swift today.
+
+Corollary: Swift has no hardcoded arm for several Category A actions
+that Python/OCaml do have. Swift's YAML-only path likely already works
+end-to-end for those actions. Python/OCaml hardcoded arms may be
+legacy / redundant — worth a confirmation pass once the schema-driven
+design lands.
+
+### Architecture decision — Option B (schema-driven)
+
+Three options considered:
+
+- **A — Broaden Rust to match the other three's unbounded design.** Fast;
+  low error detection; state bag accepts typos silently.
+- **B — Standardize all four languages on schema-driven `set:`.** Engine
+  looks up each key's type from the schema and coerces per-type. Higher
+  upfront cost; best error detection; makes the schema authoritative.
+- **C — Keep current divergence, patch Rust's gaps only.** Defeats the
+  refactor's point.
+
+**Chosen: Option B.** Binds the engine contract to the schema, which
+constraint #5 of `PLAN.md` already requires the project to build.
+
+### Implications for Phase 1
+
+1. **Category A and Category B merge.** Under schema-driven `set:`,
+   typed coercion (hex→`Color`, string→`ToolKind`) is inherent to the
+   handler via schema lookup. No separate Category B phase needed.
+2. **Schema consolidation is now core Phase 1 work**, not parallel
+   cleanup. `workspace/runtime_contexts.yaml` + `workspace/state.yaml`
+   + any other declaration files must reconcile into a single
+   authoritative type-annotated source before the engine can be
+   rewritten.
+3. **Rust work shrinks; Python/OCaml/Swift work grows slightly.** Rust's
+   narrow handler is rewritten. Python/OCaml/Swift already accept any
+   key; they gain schema-lookup + typed coercion in place of raw
+   storage.
+4. **Bug A3 remains a Rust-only fix** but is subsumed by the new
+   architecture — the schema-driven `set:` by construction covers
+   every declared field.
+5. **Redundant arms audit moves up.** Once schema-driven `set:` lands,
+   confirm Swift's YAML-only path works end-to-end for Category A
+   actions, then delete redundant hardcoded arms in Python/OCaml.
+
 ## What happens next
 
-Phase 0 is complete. The audit expanded Phase 1's scope; the biggest
-shift is that `set:` engine support (Bug A3) is the core Phase 1 work,
-not a small prep task as originally planned.
+Revised Phase 1 ordering (reflects schema-driven decision):
 
-Recommended Phase 1 ordering:
-
-1. **Audit the Python/OCaml/Swift equivalents of `apply_set_effects`**
-   to find parallel A3-style gaps and any cross-language divergence.
-   This feeds the scope of step 3.
-2. **Fix Bug A1**: decide the scope of the `swap:` fix (generalize to
-   global state vs. rename + add a new global-state variant).
-   Implement in `workspace_interpreter/` spec first, then per language.
-3. **Fix Bug A3**: rewrite `apply_set_effects` across all 4 languages
-   so every top-level state field in `workspace/state.yaml` is
-   addressable via `set:`. Add null and string-passthrough support.
-   Typed coercion (Color, ToolKind) is deferred to Category B unless
-   needed during step 4.
-4. **Build other Category A primitives**: `pop:`, `reset:` (if not
-   subsumed by generalized `set:`).
-5. **Migrate actions to YAML**: `exit_isolation_mode`, `swap_fill_stroke`
-   first (simplest). `set_active_color_none`, `reset_fill_stroke`,
-   `set_active_color`, `select_tool` only after Category B lands the
-   typed coercion these depend on (so they'll actually work via YAML).
-6. **Fix Bug A2**: OCaml `new_layer` insertion position — must land
-   before Phase 3. Can happen in parallel with the above.
-7. **Schema gap fixes** (Part B findings): add the 5 missing
-   `active_document` properties; declare `event`, `node`, `prop`;
-   declare core namespaces `state`/`panel`/`theme` (biggest, deferable).
-8. **Investigate Swift/Python feature gaps** for tier-3 layer operations
-   — determines whether Phase 3 migration also adds new behavior.
+1. **Consolidate the state schema.** Reconcile `workspace/state.yaml`,
+   `workspace/runtime_contexts.yaml`, and any per-panel schemas into a
+   single authoritative type-annotated source. Every addressable state
+   field must have `type:` and `default:`. This becomes the engine's
+   lookup table.
+2. **Design the schema-driven `set:` contract.** Document: how the
+   engine looks up a key; what types are supported (bool, number,
+   string, Color, ToolKind, list, null); how coercion is defined per
+   type; how invalid values are reported; what happens for undeclared
+   keys.
+3. **Implement reference in `workspace_interpreter/`.** Per propagation
+   order in `PLAN.md` constraint #2. Tests first.
+4. **Port to Rust, Swift, OCaml, Python-app.** Each language rewrites
+   its `apply_set_effects` equivalent. Python/OCaml/Swift gain schema
+   lookup + coercion; Rust is rewritten from scratch.
+5. **Fix Bug A1 (swap:)** in the same pass — the `swap:` primitive
+   reuses the schema-lookup mechanism to target global state fields
+   vs. panel state correctly.
+6. **Add `pop:` primitive** for `exit_isolation_mode` (simplest
+   Category A target).
+7. **Migrate Category A actions** (`exit_isolation_mode`,
+   `swap_fill_stroke`, `set_active_color_none`, `reset_fill_stroke`,
+   `set_active_color`, `select_tool`) to pure YAML. Delete
+   corresponding hardcoded arms across all 4 apps.
+8. **Fix Bug A2 (OCaml `new_layer`)** — parallelizable; must land
+   before Phase 3.
+9. **Investigate Swift/Python Category C feature gaps** (tier-3 layer
+   operations) — determines whether Phase 3 migration adds new behavior
+   to those apps.

@@ -96,34 +96,44 @@ in YAML expressions against the set *declared* in `runtime_contexts.yaml`.
 **Exit criterion**: `AUDIT.md` committed with both parts. User reviews
 and agrees on which fixes happen in Phase 1 vs. which defer.
 
-### Phase 1 — Category A primitives (4 actions, low risk)
+### Phase 1 — Schema-driven `set:` engine + Category A migration (6 actions)
 
-**New YAML effect primitives needed**:
-- `pop: <list_state_key>` — e.g. `pop: layers_isolation_stack`
-- Generalize `set:` so it can target any top-level state or panel state
-  field (currently scoped narrowly)
-- `reset: [<keys>]` — or rely on generalized `set:` with default values
-- Fix `swap:` bug from Phase 0 (targets wrong state)
+Phase 0 + Phase 1-Step-1 discoveries reshaped this phase. See
+`AUDIT.md` for full findings. Summary:
+- Rust's `set:` is narrow (Bug A3); Python/OCaml/Swift are unbounded
+  but untyped.
+- Decision: schema-driven `set:` across all 4 languages. See Option B
+  in `AUDIT.md`.
+- Category A and Category B merge — typed coercion is inherent to
+  schema-driven `set:`.
 
-**Per language, per primitive**: test → implement → verify.
+**Work steps (per `AUDIT.md` "What happens next")**:
 
-**Migration**: move the 4 Category A actions from hardcoded arms to YAML
-`effects:` blocks. Delete the hardcoded arms.
+1. Consolidate state schema into an authoritative type-annotated
+   source. Every addressable field has `type:` and `default:`.
+2. Design the schema-driven `set:` contract (lookup, coercion rules,
+   error reporting, undeclared-key policy).
+3. Reference implementation in `workspace_interpreter/`, tests first.
+4. Port to Rust, Swift, OCaml, Python-app.
+5. Fix Bug A1 (`swap:`) using the same schema mechanism.
+6. Add `pop:` primitive for `exit_isolation_mode`.
+7. Migrate 6 Category A+B actions to pure YAML; delete hardcoded arms.
+8. Fix Bug A2 (OCaml `new_layer` insertion) — parallelizable.
+9. Investigate Swift/Python feature gaps for Category C actions.
 
-**Exit criterion**: 4 hardcoded arms removed × 4 languages = 16 deletions.
-All tests pass. Manual smoke test of each action in each running app.
+**Migrated actions (6)**: `exit_isolation_mode`, `swap_fill_stroke`,
+`set_active_color_none`, `reset_fill_stroke`, `set_active_color`,
+`select_tool`.
 
-### Phase 2 — Category B typed values (2 actions, low-medium risk)
+**Exit criterion**: 6 hardcoded arms removed × 4 languages = 24
+deletions. All tests pass. Schema is authoritative. Bugs A1, A2, A3
+fixed. Swift YAML-only path proven for these actions end-to-end.
 
-**Extension**: `set:` with typed coercion. The engine knows the target
-field's type (`Color`, `ToolKind`) and parses string values accordingly.
-Relies on state-schema metadata — needs design work.
+### Phase 2 — (retired, merged into Phase 1)
 
-**Per language**: add type coercion table in `set:` implementation.
-
-**Migration**: `set_active_color` and `select_tool` → YAML.
-
-**Exit criterion**: 2 arms removed × 4 languages = 8 deletions.
+Category B typed coercion is now inherent to the schema-driven `set:`
+engine built in Phase 1. No separate phase needed. Kept as a marker
+for continuity with earlier plan discussions.
 
 ### Phase 3 — Category C doc-mutation primitives (10 actions, high risk)
 
@@ -334,7 +344,17 @@ inside `foreach:` for shape consistency. Not blocking.
 ## Progress tracking
 
 - [x] Phase 0: Bug audit — `AUDIT.md` produced
-- [ ] Phase 1: Category A primitives — 4 actions (+ 2 bug fixes, + schema gaps)
-- [ ] Phase 2: Category B typed values — 2 actions
+- [ ] Phase 1: Schema-driven `set:` engine + Category A migration — 6 actions (+ Bug A1, A2, A3 fixes, + schema gaps)
+  - [x] Step 1: Cross-language `apply_set_effects` audit (Option B decision)
+  - [ ] Step 2: Consolidate state schema
+  - [ ] Step 3: Design schema-driven `set:` contract
+  - [ ] Step 4: Reference implementation in `workspace_interpreter/`
+  - [ ] Step 5: Port to Rust / Swift / OCaml / Python-app
+  - [ ] Step 6: Fix Bug A1 via new schema mechanism
+  - [ ] Step 7: Add `pop:` primitive
+  - [ ] Step 8: Migrate 6 actions to pure YAML
+  - [ ] Step 9: Fix Bug A2 (OCaml `new_layer`)
+  - [ ] Step 10: Investigate Swift/Python Category C feature gaps
+- [ ] ~~Phase 2: Category B typed values~~ — merged into Phase 1
 - [ ] Phase 3: Category C doc mutations — 11 actions
 - [ ] Phase 4: Category D expression reads — 1 action
