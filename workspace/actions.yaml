@@ -1103,37 +1103,78 @@ actions:
       Toggle all top-level layers between visible and invisible. If any
       layer is currently visible, all layers are set to invisible ("Hide
       All Layers"). If all layers are invisible, all layers are set to
-      preview mode ("Show All Layers").
+      preview mode ("Show All Layers"). Takes one undo snapshot for the
+      whole operation.
     category: layers
     tier: 3
     enabled_when: "state.tab_count > 0"
     effects:
-      - log: "toggle_all_layers_visibility"
+      - let:
+          target: >
+            if any(active_document.top_level_layers,
+                   fun l -> l.common.visibility != 'invisible')
+              then 'invisible'
+              else 'preview'
+      - snapshot
+      - foreach:
+          source: active_document.top_level_layer_paths
+          as: p
+        do:
+          - doc.set:
+              path: p
+              fields:
+                common.visibility: target
 
   toggle_all_layers_outline:
     description: >
       Toggle all top-level layers between preview and outline mode. If
       any layer is in preview mode, all layers are set to outline
       ("Outline All Layers"). If all layers are in outline mode, all
-      layers are set to preview ("Preview All Layers").
+      layers are set to preview ("Preview All Layers"). Takes one undo
+      snapshot for the whole operation.
     category: layers
     tier: 3
     enabled_when: "state.tab_count > 0"
     effects:
-      - log: "toggle_all_layers_outline"
+      - let:
+          target: >
+            if any(active_document.top_level_layers,
+                   fun l -> l.common.visibility == 'preview')
+              then 'outline'
+              else 'preview'
+      - snapshot
+      - foreach:
+          source: active_document.top_level_layer_paths
+          as: p
+        do:
+          - doc.set:
+              path: p
+              fields:
+                common.visibility: target
 
   toggle_all_layers_lock:
     description: >
       Toggle all top-level layers between locked and unlocked. If any
       layer is unlocked, all layers are locked ("Lock All Layers"). If
       all layers are locked, all layers are unlocked ("Unlock All
-      Layers"). Locking follows the container save/restore semantics:
-      each layer saves its direct children's lock states before locking.
+      Layers"). Takes one undo snapshot for the whole operation.
     category: layers
     tier: 3
     enabled_when: "state.tab_count > 0"
     effects:
-      - log: "toggle_all_layers_lock"
+      - let:
+          target: >
+            any(active_document.top_level_layers,
+                fun l -> l.common.locked == false)
+      - snapshot
+      - foreach:
+          source: active_document.top_level_layer_paths
+          as: p
+        do:
+          - doc.set:
+              path: p
+              fields:
+                common.locked: target
 
   # Per-element row operations
 

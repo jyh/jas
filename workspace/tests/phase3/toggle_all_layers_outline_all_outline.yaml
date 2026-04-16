@@ -1,0 +1,19 @@
+description: "toggle_all_layers_outline: all outline → all preview"
+action: toggle_all_layers_outline
+initial_doc:
+  layers:
+    - kind: Layer
+      name: "A"
+      common: { visibility: outline, locked: false }
+    - kind: Layer
+      name: "B"
+      common: { visibility: outline, locked: false }
+expected_doc:
+  layers:
+    - kind: Layer
+      name: "A"
+      common: { visibility: preview, locked: false }
+    - kind: Layer
+      name: "B"
+      common: { visibility: preview, locked: false }
+expected_snapshots: 1
