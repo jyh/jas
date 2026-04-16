@@ -43,10 +43,12 @@ let state_defaults (state_defs : Yojson.Safe.t) : (string * Yojson.Safe.t) list 
     ) pairs
   | _ -> []
 
-(** Platform-specific effect handler: (effect_value, ctx, store) -> unit.
+(** Platform-specific effect handler: (effect_value, ctx, store) -> return value.
     Registered by the calling app (e.g. panel_menu wires snapshot/doc.set
-    to the active Model). Key is the effect name like "snapshot". *)
-type platform_effect = Yojson.Safe.t -> (string * Yojson.Safe.t) list -> State_store.t -> unit
+    to the active Model). Key is the effect name like "snapshot". The
+    return value (if non-Null) is bound to the effect's optional
+    `as: <name>` field for subsequent effects in the same list. *)
+type platform_effect = Yojson.Safe.t -> (string * Yojson.Safe.t) list -> State_store.t -> Yojson.Safe.t
 
 let rec run_effects_inner
     (effects : Yojson.Safe.t list)
@@ -63,14 +65,27 @@ let rec run_effects_inner
   let try_platform (eff : Yojson.Safe.t) : bool =
     match eff with
     | `Assoc pairs ->
+      (* Extract optional as: <name> return-binding (PHASE3 §5.5).
+         Skip the "as" key when dispatching to a handler. *)
+      let as_name = match List.assoc_opt "as" pairs with
+        | Some (`String s) -> Some s | _ -> None
+      in
       List.exists (fun (key, value) ->
-        match List.assoc_opt key platform_effects with
-        | Some handler -> handler value !ctx_ref store; true
-        | None -> false
+        if key = "as" then false
+        else match List.assoc_opt key platform_effects with
+          | Some handler ->
+            let result = handler value !ctx_ref store in
+            (match as_name, result with
+             | Some name, v when v <> `Null ->
+               ctx_ref := (name, v) ::
+                 List.filter (fun (k, _) -> k <> name) !ctx_ref
+             | _ -> ());
+            true
+          | None -> false
       ) pairs
     | `String key ->
       (match List.assoc_opt key platform_effects with
-       | Some handler -> handler `Null !ctx_ref store; true
+       | Some handler -> ignore (handler `Null !ctx_ref store); true
        | None -> false)
     | _ -> false
   in
