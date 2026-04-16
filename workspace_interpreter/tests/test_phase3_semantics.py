@@ -504,6 +504,52 @@ class TestDocSetEffect:
 # ══════════════════════════════════════════════════════════════════
 
 
+class TestEnterIsolationModeAction:
+    """End-to-end: enter_isolation_mode YAML action pushes a path to
+    panel.isolation_stack."""
+
+    def _load_action(self, name):
+        import yaml as yl
+        path = os.path.join(os.path.dirname(__file__), "..", "..",
+                            "workspace", "actions.yaml")
+        with open(path) as f:
+            return yl.safe_load(f)["actions"][name]
+
+    def test_enter_pushes_path_from_layer_id(self):
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("enter_isolation_mode")["effects"]
+        store = StateStore()
+        store.init_panel("layers", {"isolation_stack": []})
+        store.set_active_panel("layers")
+        # Dispatch with param.layer_id = "0.2" → path(0, 2) pushed to stack
+        run_effects(effects, {"param": {"container_id": "0.2"}}, store,
+                    diagnostics=[])
+        stack = store.get_panel("layers", "isolation_stack")
+        assert len(stack) == 1
+        # Pushed value is a __path__ marker (matches layers_panel_selection
+        # storage convention so it round-trips through iteration).
+        assert stack[0] == {"__path__": [0, 2]}
+
+    def test_enter_then_exit_roundtrip(self):
+        import os as _os
+        global os
+        os = _os
+        enter = self._load_action("enter_isolation_mode")["effects"]
+        exit_ = self._load_action("exit_isolation_mode")["effects"]
+        store = StateStore()
+        store.init_panel("layers", {"isolation_stack": []})
+        store.set_active_panel("layers")
+        run_effects(enter, {"param": {"container_id": "1"}}, store,
+                    diagnostics=[])
+        run_effects(enter, {"param": {"container_id": "1.0"}}, store,
+                    diagnostics=[])
+        assert len(store.get_panel("layers", "isolation_stack")) == 2
+        run_effects(exit_, {}, store, diagnostics=[])
+        assert len(store.get_panel("layers", "isolation_stack")) == 1
+
+
 class TestDocCreateLayerEffect:
     """PHASE3.md sub-tollgate 2: doc.create_layer factory primitive."""
 
