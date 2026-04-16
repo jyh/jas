@@ -178,6 +178,22 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.set_panel(panel_id, key, value)
         return
 
+    # pop: panel.field_name  or  pop: global_field_name
+    if "pop" in effect:
+        target = effect["pop"]
+        parts = str(target).split(".", 1)
+        if len(parts) == 2 and parts[0] == "panel":
+            panel_id = store.get_active_panel_id()
+            if panel_id:
+                lst = store.get_panel(panel_id, parts[1])
+                if isinstance(lst, list) and lst:
+                    store.set_panel(panel_id, parts[1], lst[:-1])
+        else:
+            lst = store.get(target)
+            if isinstance(lst, list) and lst:
+                store.set(target, lst[:-1])
+        return
+
     # list_push: { target, value, unique, max_length }
     if "list_push" in effect:
         lp = effect["list_push"]

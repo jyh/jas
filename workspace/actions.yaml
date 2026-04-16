@@ -1224,7 +1224,7 @@ actions:
     tier: 3
     enabled_when: "panel.isolation_stack.length > 0"
     effects:
-      - log: "exit_isolation_mode"
+      - pop: panel.isolation_stack
 
   exit_isolation_to_level:
     description: >

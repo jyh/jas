@@ -112,6 +112,25 @@ private func runOne(
         return
     }
 
+    // pop: panel.field_name  or  pop: global_field_name
+    if let target = effect["pop"] as? String {
+        let parts = target.split(separator: ".", maxSplits: 1).map(String.init)
+        if parts.count == 2 && parts[0] == "panel" {
+            if let panelId = store.getActivePanelId() {
+                if var lst = store.getPanel(panelId, parts[1]) as? [Any], !lst.isEmpty {
+                    lst.removeLast()
+                    store.setPanel(panelId, parts[1], lst)
+                }
+            }
+        } else {
+            if var lst = store.get(target) as? [Any], !lst.isEmpty {
+                lst.removeLast()
+                store.set(target, lst)
+            }
+        }
+        return
+    }
+
     // toggle: state_key
     if let key = effect["toggle"] as? String {
         let current = store.get(key) as? Bool ?? false

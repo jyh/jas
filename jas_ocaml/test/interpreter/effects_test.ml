@@ -127,6 +127,28 @@ let dialog_tests = [
     assert (get s "fill_color" = `String "#aabbcc"));
 ]
 
+let pop_tests = [
+  Alcotest.test_case "pop_panel_removes_last" `Quick (fun () ->
+    let s = create () in
+    let items = `List [`Assoc [("id", `String "a")]; `Assoc [("id", `String "b")]] in
+    init_panel s "layers" [("isolation_stack", items)];
+    set_active_panel s (Some "layers");
+    run_effects [`Assoc [("pop", `String "panel.isolation_stack")]] [] s;
+    assert (get_panel s "layers" "isolation_stack" = `List [`Assoc [("id", `String "a")]]));
+
+  Alcotest.test_case "pop_panel_empty_is_noop" `Quick (fun () ->
+    let s = create () in
+    init_panel s "layers" [("isolation_stack", `List [])];
+    set_active_panel s (Some "layers");
+    run_effects [`Assoc [("pop", `String "panel.isolation_stack")]] [] s;
+    assert (get_panel s "layers" "isolation_stack" = `List []));
+
+  Alcotest.test_case "pop_global_list" `Quick (fun () ->
+    let s = create ~defaults:[("my_stack", `List [`Int 1; `Int 2; `Int 3])] () in
+    run_effects [`Assoc [("pop", `String "my_stack")]] [] s;
+    assert (get s "my_stack" = `List [`Int 1; `Int 2]));
+]
+
 let () =
   Alcotest.run "Effects" [
     "Set", set_tests;
@@ -136,4 +158,5 @@ let () =
     "If", if_tests;
     "Dispatch", dispatch_tests;
     "Dialog", dialog_tests;
+    "Pop", pop_tests;
   ]

@@ -668,6 +668,12 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
                             set_app_state_field(&b, &a_val, st);
                         }
                     }
+                    // Handle pop effects
+                    if let Some(target) = eff.get("pop").and_then(|v| v.as_str()) {
+                        if target == "panel.isolation_stack" {
+                            st.layers_isolation_stack.pop();
+                        }
+                    }
                     // Handle swap_panel_state effects
                     if let Some(serde_json::Value::Array(keys)) = eff.get("swap_panel_state") {
                         if keys.len() == 2 {
@@ -725,6 +731,12 @@ fn run_effects(
                 let b_val = get_app_state_field(&b, st);
                 set_app_state_field(&a, &b_val, st);
                 set_app_state_field(&b, &a_val, st);
+            }
+        }
+        // pop: panel.field_name
+        if let Some(target) = effect.get("pop").and_then(|v| v.as_str()) {
+            if target == "panel.isolation_stack" {
+                st.layers_isolation_stack.pop();
             }
         }
         // Defer dialog effects — they need the dialog signal, not AppState

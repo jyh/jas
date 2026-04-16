@@ -159,6 +159,34 @@ import Testing
     #expect(store.getDialog("x") == nil)
 }
 
+// MARK: - Pop effect
+
+@Test func popPanelRemovesLast() {
+    let store = StateStore()
+    store.initPanel("layers", defaults: ["isolation_stack": [["id": "a"], ["id": "b"]] as [[String: String]]])
+    store.setActivePanel("layers")
+    runEffects([["pop": "panel.isolation_stack"]], ctx: [:], store: store)
+    let result = store.getPanel("layers", "isolation_stack") as? [[String: String]]
+    #expect(result?.count == 1)
+    #expect(result?.first?["id"] == "a")
+}
+
+@Test func popPanelEmptyIsNoop() {
+    let store = StateStore()
+    store.initPanel("layers", defaults: ["isolation_stack": [] as [Any]])
+    store.setActivePanel("layers")
+    runEffects([["pop": "panel.isolation_stack"]], ctx: [:], store: store)
+    let result = store.getPanel("layers", "isolation_stack") as? [Any]
+    #expect(result?.count == 0)
+}
+
+@Test func popGlobalList() {
+    let store = StateStore(defaults: ["my_stack": [1, 2, 3] as [Int]])
+    runEffects([["pop": "my_stack"]], ctx: [:], store: store)
+    let result = store.get("my_stack") as? [Int]
+    #expect(result == [1, 2])
+}
+
 // MARK: - Dialog + global effects
 
 @Test func setFromDialogState() {
