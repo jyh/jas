@@ -359,38 +359,6 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
                 }
             })];
         }
-        "new_layer" => {
-            use crate::geometry::element::{Element as E, LayerElem, CommonProps};
-            let panel_sel = st.layers_panel_selection.clone();
-            if let Some(tab) = st.tab_mut() {
-                tab.model.snapshot();
-                let doc = tab.model.document().clone();
-                let used: std::collections::HashSet<String> = doc.layers.iter()
-                    .filter_map(|l| if let E::Layer(le) = l { Some(le.name.clone()) } else { None })
-                    .collect();
-                let mut n = 1;
-                let name = loop {
-                    let candidate = format!("Layer {n}");
-                    if !used.contains(&candidate) { break candidate; }
-                    n += 1;
-                };
-                let new_layer = E::Layer(LayerElem {
-                    name,
-                    children: Vec::new(),
-                    common: CommonProps::default(),
-                });
-                let insert_pos = panel_sel.iter()
-                    .filter(|p| p.len() == 1)
-                    .map(|p| p[0])
-                    .min()
-                    .map(|i| i + 1)
-                    .unwrap_or(doc.layers.len());
-                let mut new_doc = doc;
-                new_doc.layers.insert(insert_pos, new_layer);
-                tab.model.set_document(new_doc);
-            }
-            return vec![];
-        }
         "new_group" => {
             use crate::geometry::element::{Element as E, GroupElem, CommonProps};
             use std::rc::Rc;
@@ -901,19 +869,25 @@ fn build_appstate_ctx(
 
 /// Build the active_document ctx namespace (Phase 3 §7.2).
 /// Exposes top_level_layers (list of dicts with path, name, common, ...)
-/// and top_level_layer_paths (list of paths).
+/// and top_level_layer_paths (list of paths). Also computed properties
+/// used by new_layer: next_layer_name, new_layer_insert_index.
 fn build_active_document_view(
     st: &crate::workspace::app_state::AppState,
 ) -> serde_json::Value {
     use crate::geometry::element::{Element, Visibility};
+    use std::collections::HashSet;
     let Some(tab) = st.tabs.get(st.active_tab) else {
         return serde_json::json!({
             "top_level_layers": [],
             "top_level_layer_paths": [],
+            "next_layer_name": "Layer 1",
+            "new_layer_insert_index": 0,
+            "layers_panel_selection_count": 0,
         });
     };
     let mut top_level_layers = Vec::new();
     let mut top_level_layer_paths = Vec::new();
+    let mut layer_names: HashSet<String> = HashSet::new();
     for (i, elem) in tab.model.document().layers.iter().enumerate() {
         if let Element::Layer(le) = elem {
             let vis = match le.common.visibility {
@@ -921,7 +895,6 @@ fn build_active_document_view(
                 Visibility::Outline => "outline",
                 Visibility::Preview => "preview",
             };
-            // Path is encoded as {"__path__": [i]} for round-trip
             let path_json = serde_json::json!({"__path__": [i as u64]});
             top_level_layers.push(serde_json::json!({
                 "kind": "Layer",
@@ -934,11 +907,31 @@ fn build_active_document_view(
                 "path": path_json.clone(),
             }));
             top_level_layer_paths.push(path_json);
+            layer_names.insert(le.name.clone());
         }
     }
+    // next_layer_name: smallest "Layer N" not already taken
+    let mut n = 1usize;
+    loop {
+        let candidate = format!("Layer {n}");
+        if !layer_names.contains(&candidate) { break; }
+        n += 1;
+    }
+    let next_layer_name = format!("Layer {n}");
+    // new_layer_insert_index: min(selected top-level indices) + 1, else end
+    let top_level_selected: Vec<usize> = st.layers_panel_selection.iter()
+        .filter_map(|p| if p.len() == 1 { Some(p[0]) } else { None })
+        .collect();
+    let new_layer_insert_index = match top_level_selected.iter().min() {
+        Some(&i) => i + 1,
+        None => tab.model.document().layers.len(),
+    };
     serde_json::json!({
         "top_level_layers": top_level_layers,
         "top_level_layer_paths": top_level_layer_paths,
+        "next_layer_name": next_layer_name,
+        "new_layer_insert_index": new_layer_insert_index,
+        "layers_panel_selection_count": st.layers_panel_selection.len(),
     })
 }
 
@@ -1029,6 +1022,33 @@ fn run_yaml_effect(
                 m.insert("_index".to_string(), serde_json::json!(i));
             }
             deferred.extend(run_yaml_effects(&body, &iter_ctx, st));
+        }
+        return deferred;
+    }
+
+    // doc.create_layer: { name } — PHASE3 sub-tollgate 2
+    // Factory returning a new Layer element (as JSON) bound via `as:`.
+    if let Some(spec) = eff.get("doc.create_layer").and_then(|v| v.as_object()) {
+        let name_expr = spec.get("name").and_then(|v| v.as_str()).unwrap_or("'Layer'");
+        let name_val = super::expr::eval(name_expr, &*eval_ctx);
+        let name = match name_val {
+            super::expr_types::Value::Str(s) => s,
+            super::expr_types::Value::Color(c) => c,
+            _ => "Layer".to_string(),
+        };
+        let layer = crate::geometry::element::Element::Layer(
+            crate::geometry::element::LayerElem {
+                name,
+                children: Vec::new(),
+                common: crate::geometry::element::CommonProps::default(),
+            }
+        );
+        if let Some(as_n) = as_name {
+            if let Some(map) = eval_ctx.as_object_mut() {
+                if let Ok(json) = serde_json::to_value(&layer) {
+                    map.insert(as_n, json);
+                }
+            }
         }
         return deferred;
     }
@@ -4595,6 +4615,38 @@ mod tests {
         assert_eq!(layers.len(), 1);
         assert_eq!(tab_layer(&st, 0).name, "B");
         assert_eq!(st.layers_panel_selection.len(), 0);
+    }
+
+    #[test]
+    fn new_layer_action_via_yaml_no_selection() {
+        let mut st = make_state_with_layers(vec![
+            ("Layer 1".into(), Visibility::Preview, false),
+        ]);
+        st.layers_panel_selection = vec![];
+        let params = serde_json::Map::new();
+        dispatch_action("new_layer", &params, &mut st);
+        let layers = &st.tabs[st.active_tab].model.document().layers;
+        assert_eq!(layers.len(), 2);
+        // Auto-generated name skips Layer 1
+        assert_eq!(tab_layer(&st, 1).name, "Layer 2");
+    }
+
+    #[test]
+    fn new_layer_action_via_yaml_with_selection_inserts_above() {
+        let mut st = make_state_with_layers(vec![
+            ("Layer 1".into(), Visibility::Preview, false),
+            ("Layer 2".into(), Visibility::Preview, false),
+            ("Layer 3".into(), Visibility::Preview, false),
+        ]);
+        st.layers_panel_selection = vec![vec![1]];
+        let params = serde_json::Map::new();
+        dispatch_action("new_layer", &params, &mut st);
+        let layers = &st.tabs[st.active_tab].model.document().layers;
+        assert_eq!(layers.len(), 4);
+        // Inserted at index 2 (selection 1 + 1); next unused name is Layer 4
+        assert_eq!(tab_layer(&st, 2).name, "Layer 4");
+        // Layer 3 shifted to index 3
+        assert_eq!(tab_layer(&st, 3).name, "Layer 3");
     }
 
     #[test]
