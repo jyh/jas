@@ -355,13 +355,14 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
     doc = model.document
     selected_paths = doc.selected_paths()
 
-    # Track collapsed paths, panel-selected paths, renaming path, and
-    # drag state as closure state (persists across rebuilds).
+    # Track collapsed paths, panel-selected paths, renaming path, drag
+    # state, and search query as closure state (persists across rebuilds).
     collapsed = set()
     panel_selection = set()
     renaming_path = [None]
     drag_source = [None]
     drag_target = [None]
+    search_query = [""]
 
     def _flatten(elements, depth, path_prefix, layer_color, rows):
         for i in reversed(range(len(elements))):
@@ -377,8 +378,43 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
             if is_container and not is_collapsed and hasattr(elem, 'children'):
                 _flatten(elem.children, depth + 1, path, cur_color, rows)
 
+    def _apply_search_filter(rows):
+        """Keep rows whose name contains the search query (case-insensitive),
+        plus their ancestor rows for context."""
+        q = search_query[0].lower()
+        if not q:
+            return rows
+        matching = [r for r in rows if q in r[3].lower()]
+        matching_paths = {r[1] for r in matching}
+        # Include ancestor paths
+        keep = set(matching_paths)
+        for p in matching_paths:
+            for j in range(1, len(p)):
+                keep.add(p[:j])
+        return [r for r in rows if r[1] in keep]
+
+    # Read search query from panel state
+    try:
+        panel_state = store.get_active_panel_state()
+        search_query[0] = str(panel_state.get("search_query", "") or "")
+    except Exception:
+        pass
+
     rows = []
     _flatten(doc.layers, 0, (), "#4a90d9", rows)
+    rows = _apply_search_filter(rows)
+
+    # Subscribe to panel state changes (e.g. search query typing) so the
+    # tree rebuilds when the user types in the search input.
+    try:
+        panel_id = store.get_active_panel_id()
+        if panel_id:
+            def _on_panel_change(key, value):
+                if key == "search_query":
+                    _rebuild()
+            store.subscribe_panel(panel_id, _on_panel_change)
+    except Exception:
+        pass
 
     def _rebuild():
         """Rebuild the tree view after a document or UI state change."""
@@ -394,8 +430,15 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
         new_doc = new_model.document
         nonlocal selected_paths
         selected_paths = new_doc.selected_paths()
+        # Refresh search query from panel state
+        try:
+            panel_state = store.get_active_panel_state()
+            search_query[0] = str(panel_state.get("search_query", "") or "")
+        except Exception:
+            pass
         new_rows = []
         _flatten(new_doc.layers, 0, (), "#4a90d9", new_rows)
+        new_rows = _apply_search_filter(new_rows)
         for r in new_rows:
             _add_row(layout, *r)
         layout.addStretch()
