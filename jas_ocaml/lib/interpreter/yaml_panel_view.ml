@@ -99,6 +99,7 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
   | "panel" -> render_panel ~packing ~ctx el
   | "tree_view" -> render_tree_view ~packing ~ctx el
   | "element_preview" -> render_element_preview ~packing el
+  | "dropdown" -> render_layers_filter_dropdown ~packing el
   | _ -> render_placeholder ~packing el
 
 and render_container ~packing ~ctx el etype =
@@ -490,6 +491,42 @@ and open_layer_options_dialog path =
       dlg#destroy ()
     | _ -> ()
 
+(** Render the layers-panel type filter dropdown. Other dropdown widgets
+    (none currently exist) fall through to placeholder. *)
+and render_layers_filter_dropdown ~packing el =
+  let open Yojson.Safe.Util in
+  let id = el |> member "id" |> to_string_option |> Option.value ~default:"" in
+  if id <> "lp_filter_button" then
+    render_placeholder ~packing el
+  else begin
+    let btn = GButton.button ~label:"\xe2\x96\xbe" ~packing () in
+    btn#misc#set_size_request ~width:20 ~height:20 ();
+    let items = match el |> member "items" with
+      | `List arr ->
+        List.filter_map (fun item ->
+          let l = item |> member "label" |> to_string_option in
+          let v = item |> member "value" |> to_string_option in
+          match l, v with
+          | Some label, Some value -> Some (label, value)
+          | _ -> None) arr
+      | _ -> []
+    in
+    ignore (btn#connect#clicked ~callback:(fun () ->
+      let menu = GMenu.menu () in
+      List.iter (fun (label, value) ->
+        let checked = not (StrSet.mem value !_layers_hidden_types) in
+        let item = GMenu.check_menu_item ~label ~packing:menu#append () in
+        item#set_active checked;
+        ignore (item#connect#toggled ~callback:(fun () ->
+          if StrSet.mem value !_layers_hidden_types
+          then _layers_hidden_types := StrSet.remove value !_layers_hidden_types
+          else _layers_hidden_types := StrSet.add value !_layers_hidden_types;
+          !_rerender_layers ()))
+      ) items;
+      menu#misc#show_all ();
+      menu#popup ~button:1 ~time:(Int32.of_int 0)))
+  end
+
 (** Render a fitted-viewBox SVG of an element as a GTK widget.
     Writes the SVG to a temp file and loads it via GdkPixbuf at the
     requested size, falling back to an empty frame on error. *)
@@ -749,6 +786,13 @@ and render_tree_view ~packing ~ctx:_ _el =
           | _ -> false
         in
         let row_eb = GBin.event_box ~packing:(vbox#pack ~expand:false) () in
+        (* Auto-scroll: if this is the first element-selected path, queue a
+           grab_focus so the parent ScrolledWindow tries to keep it in view. *)
+        if is_selected then begin
+          let first_sel = Document.PathSet.min_elt_opt selected_paths in
+          if first_sel = Some path then
+            ignore (GMain.Idle.add (fun () -> row_eb#misc#grab_focus (); false))
+        end;
         if is_panel_selected then
           row_eb#misc#modify_bg [`NORMAL, `NAME "#3a4a6a"]
         else if is_drop_target then
@@ -821,7 +865,16 @@ and render_tree_view ~packing ~ctx:_ _el =
           (match !_layers_drag_source with
            | Some src when src <> row_path ->
              _layers_drag_target := Some row_path;
-             !_rerender_layers ()
+             !_rerender_layers ();
+             (* Auto-expand collapsed containers after 500ms hover during drag *)
+             let is_cont = match elem with Element.Group _ | Element.Layer _ -> true | _ -> false in
+             if is_cont && PathSet2.mem row_path !_layers_collapsed then
+               ignore (GMain.Timeout.add ~ms:500 ~callback:(fun () ->
+                 (if !_layers_drag_source <> None && !_layers_drag_target = Some row_path then begin
+                    _layers_collapsed := PathSet2.remove row_path !_layers_collapsed;
+                    !_rerender_layers ()
+                  end);
+                 false))
            | _ -> ());
           false));
         ignore (row_eb#event#connect#button_release ~callback:(fun _ ->
@@ -1052,7 +1105,15 @@ and render_tree_view ~packing ~ctx:_ _el =
         (match !_layers_drag_source with
          | Some src when src <> row_path ->
            _layers_drag_target := Some row_path;
-           !_rerender_layers ()
+           !_rerender_layers ();
+           let is_cont = match elem with Element.Group _ | Element.Layer _ -> true | _ -> false in
+           if is_cont && PathSet2.mem row_path !_layers_collapsed then
+             ignore (GMain.Timeout.add ~ms:500 ~callback:(fun () ->
+               (if !_layers_drag_source <> None && !_layers_drag_target = Some row_path then begin
+                  _layers_collapsed := PathSet2.remove row_path !_layers_collapsed;
+                  !_rerender_layers ()
+                end);
+               false))
          | _ -> ());
         false));
       ignore (row_eb#event#connect#button_release ~callback:(fun _ ->
