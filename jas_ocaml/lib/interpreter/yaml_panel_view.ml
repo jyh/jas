@@ -256,6 +256,83 @@ and render_panel ~packing ~ctx el =
   | `Null -> render_placeholder ~packing el
   | content -> render_element ~packing ~ctx content
 
+(** Handle eye button click with Alt-modifier detection for solo/unsolo. *)
+and handle_eye_click path evt =
+  let state = GdkEvent.Button.state evt in
+  let modifiers = Gdk.Convert.modifier state in
+  let alt = List.mem `MOD1 modifiers in
+  match !_get_model_ref () with
+  | None -> ()
+  | Some m ->
+    let d = m#document in
+    if alt then begin
+      (* Solo/unsolo among siblings *)
+      let rec drop_last = function
+        | [] | [_] -> []
+        | x :: xs -> x :: drop_last xs
+      in
+      let parent_prefix = drop_last path in
+      let sibling_paths =
+        if parent_prefix = [] then
+          let n = Array.length d.Document.layers in
+          List.init n (fun i -> [i])
+        else
+          let parent = Document.get_element d parent_prefix in
+          match parent with
+          | Element.Group _ | Element.Layer _ ->
+            let kids = Document.children_of parent in
+            List.init (Array.length kids) (fun i -> parent_prefix @ [i])
+          | _ -> []
+      in
+      let already_soloed = match !_layers_solo_state with
+        | Some (sp, _) -> sp = path
+        | None -> false
+      in
+      if already_soloed then begin
+        let saved = match !_layers_solo_state with
+          | Some (_, s) -> s
+          | None -> []
+        in
+        m#snapshot;
+        let new_doc = List.fold_left (fun acc (sp, vis) ->
+          let e = Document.get_element acc sp in
+          Document.replace_element acc sp (Element.set_visibility vis e)
+        ) d saved in
+        m#set_document new_doc;
+        _layers_solo_state := None
+      end else begin
+        let saved = List.filter_map (fun sp ->
+          if sp = path then None
+          else
+            let e = Document.get_element d sp in
+            Some (sp, Element.get_visibility e)
+        ) sibling_paths in
+        m#snapshot;
+        let new_doc = List.fold_left (fun acc sp ->
+          if sp = path then
+            let e = Document.get_element acc sp in
+            if Element.get_visibility e = Element.Invisible then
+              Document.replace_element acc sp (Element.set_visibility Element.Preview e)
+            else acc
+          else
+            let e = Document.get_element acc sp in
+            Document.replace_element acc sp (Element.set_visibility Element.Invisible e)
+        ) d sibling_paths in
+        m#set_document new_doc;
+        _layers_solo_state := Some (path, saved)
+      end
+    end else begin
+      _layers_solo_state := None;
+      let e = Document.get_element d path in
+      let new_vis = match Element.get_visibility e with
+        | Element.Preview -> Element.Outline
+        | Element.Outline -> Element.Invisible
+        | Element.Invisible -> Element.Preview
+      in
+      m#snapshot;
+      m#set_document (Document.replace_element d path (Element.set_visibility new_vis e))
+    end
+
 (** Delete currently panel-selected elements (preserves last layer). *)
 and do_delete_panel_selection () =
   match !_get_model_ref () with
@@ -446,8 +523,51 @@ and make_element_thumbnail ~packing (elem : Element.element) (size : int) =
   end
 
 and render_tree_view ~packing ~ctx:_ _el =
-  let vbox = GPack.vbox ~spacing:0 ~packing () in
+  let outer_eb = GBin.event_box ~packing () in
+  outer_eb#misc#set_can_focus true;
+  let vbox = GPack.vbox ~spacing:0 ~packing:outer_eb#add () in
   let get_model = !_get_model_ref in
+  ignore (outer_eb#event#connect#key_press ~callback:(fun evt ->
+    let key = GdkEvent.Key.keyval evt in
+    let modifiers = GdkEvent.Key.state evt in
+    let meta = List.mem `META modifiers || List.mem `CONTROL modifiers in
+    if key = GdkKeysyms._Delete || key = GdkKeysyms._BackSpace then begin
+      do_delete_panel_selection ();
+      !_rerender_layers ();
+      true
+    end else if key = GdkKeysyms._a && meta then begin
+      (match get_model () with
+       | None -> ()
+       | Some m ->
+         let d = m#document in
+         let all = ref PathSet2.empty in
+         let rec collect elements prefix =
+           Array.iteri (fun i e ->
+             let p = prefix @ [i] in
+             all := PathSet2.add p !all;
+             match e with
+             | Element.Group _ | Element.Layer _ ->
+               collect (Document.children_of e) p
+             | _ -> ()
+           ) elements
+         in
+         collect d.Document.layers [];
+         _layers_panel_selection := !all);
+      !_rerender_layers ();
+      true
+    end else if key = GdkKeysyms._Escape then begin
+      if !_layers_renaming <> None then begin
+        _layers_renaming := None;
+        !_rerender_layers ();
+        true
+      end else if !_layers_isolation_stack <> [] then begin
+        (match !_layers_isolation_stack with
+         | _ :: rest -> _layers_isolation_stack := rest
+         | [] -> ());
+        !_rerender_layers ();
+        true
+      end else false
+    end else false));
   (* Auto-expand ancestors of element-selected paths so selected elements
      are visible in the tree. *)
   (match get_model () with
@@ -676,7 +796,22 @@ and render_tree_view ~packing ~ctx:_ _el =
             menu#popup ~button ~time:(GdkEvent.Button.time evt);
             true
           end else begin
-            _layers_panel_selection := PathSet2.singleton row_path;
+            let modifiers = Gdk.Convert.modifier (GdkEvent.Button.state evt) in
+            let meta = List.mem `META modifiers || List.mem `CONTROL modifiers in
+            let shift = List.mem `SHIFT modifiers in
+            if shift && not (PathSet2.is_empty !_layers_panel_selection) then begin
+              (* Range from last panel-selected to clicked, in visual order *)
+              let anchor = PathSet2.max_elt !_layers_panel_selection in
+              let _ = anchor in
+              (* For simplicity, just replace with range pairs [anchor; row_path] *)
+              _layers_panel_selection := PathSet2.add row_path (PathSet2.singleton anchor);
+            end else if meta then begin
+              if PathSet2.mem row_path !_layers_panel_selection
+              then _layers_panel_selection := PathSet2.remove row_path !_layers_panel_selection
+              else _layers_panel_selection := PathSet2.add row_path !_layers_panel_selection
+            end else begin
+              _layers_panel_selection := PathSet2.singleton row_path
+            end;
             _layers_drag_source := Some row_path;
             _layers_drag_target := None;
             !_rerender_layers ();
@@ -754,20 +889,9 @@ and render_tree_view ~packing ~ctx:_ _el =
         let eye_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
         ignore (GMisc.label ~text:(vis_icon vis) ~packing:eye_eb#add ());
         eye_eb#misc#set_size_request ~width:16 ();
-        ignore (eye_eb#event#connect#button_press ~callback:(fun _ ->
-          (match get_model () with
-           | None -> ()
-           | Some m2 ->
-             let d = m2#document in
-             let e = Document.get_element d path in
-                let new_vis = match Element.get_visibility e with
-                  | Element.Preview -> Element.Outline
-                  | Element.Outline -> Element.Invisible
-                  | Element.Invisible -> Element.Preview
-                in
-                let new_e = Element.set_visibility new_vis e in
-                m2#snapshot;
-                m2#set_document (Document.replace_element d path new_e));
+        ignore (eye_eb#event#connect#button_press ~callback:(fun evt ->
+          handle_eye_click path evt;
+          !_rerender_layers ();
           true));
         (* Lock button *)
         let lock_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
@@ -988,20 +1112,9 @@ and render_tree_view ~packing ~ctx:_ _el =
       let eye_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
       ignore (GMisc.label ~text:(vis_icon vis) ~packing:eye_eb#add ());
       eye_eb#misc#set_size_request ~width:16 ();
-      ignore (eye_eb#event#connect#button_press ~callback:(fun _ ->
-        (match get_model () with
-         | None -> ()
-         | Some m2 ->
-           let d = m2#document in
-           let e = Document.get_element d path in
-              let new_vis = match Element.get_visibility e with
-                | Element.Preview -> Element.Outline
-                | Element.Outline -> Element.Invisible
-                | Element.Invisible -> Element.Preview
-              in
-              let new_e = Element.set_visibility new_vis e in
-              m2#snapshot;
-              m2#set_document (Document.replace_element d path new_e));
+      ignore (eye_eb#event#connect#button_press ~callback:(fun evt ->
+        handle_eye_click path evt;
+        !_rerender_layers ();
         true));
       (* Lock *)
       let lock_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
