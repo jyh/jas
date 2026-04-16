@@ -3981,6 +3981,24 @@
           "type": "list",
           "item_type": "string",
           "description": "List of IDs of elements currently selected on the canvas"
+        },
+        "top_level_layers": {
+          "type": "list",
+          "item_type": "object",
+          "description": "Top-level Layer elements as flat dicts with keys {kind, name, common: {visibility, locked}, path}. Used by bulk-toggle actions (toggle_all_layers_*) to iterate.\n"
+        },
+        "top_level_layer_paths": {
+          "type": "list",
+          "item_type": "path",
+          "description": "Paths of the top-level Layer elements, one entry per Layer in document order. Used as the source for bulk foreach loops.\n"
+        },
+        "next_layer_name": {
+          "type": "string",
+          "description": "Auto-generated layer name of the form \"Layer N\" where N is the smallest positive integer not already in use by another top-level layer.\n"
+        },
+        "new_layer_insert_index": {
+          "type": "number",
+          "description": "Index at which a newly created layer should be inserted \u2014 one above the topmost panel-selected layer, or the current layer count when nothing is selected.\n"
         }
       }
     },
@@ -3998,6 +4016,31 @@
         "active_layout_name": {
           "type": "string",
           "description": "Name of the currently active layout (empty if none)"
+        }
+      }
+    },
+    "panel": {
+      "description": "Active panel state. Resolves to the state of whichever panel is currently focused or is the target of the effect being evaluated. Properties map to keys stored in the StateStore's panel-scoped buckets; each panel contributes its own subset.\n",
+      "defaults": {
+        "layers_panel_selection": [],
+        "isolation_stack": [],
+        "recent_colors": []
+      },
+      "properties": {
+        "layers_panel_selection": {
+          "type": "list",
+          "item_type": "path",
+          "description": "Paths of items currently selected in the layers panel tree. Driven by panel-local selection state; serialized as __path__ markers so they round-trip through the expression evaluator.\n"
+        },
+        "isolation_stack": {
+          "type": "list",
+          "item_type": "path",
+          "description": "Stack of paths to isolated containers in the layers panel, innermost level last. Pushed by enter_isolation_mode, popped by exit_isolation_mode.\n"
+        },
+        "recent_colors": {
+          "type": "list",
+          "item_type": "color",
+          "description": "Per-document list of recently-committed colors, newest first, capped at 10 entries.\n"
         }
       }
     }

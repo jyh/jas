@@ -68,6 +68,36 @@ runtime_contexts:
         type: list
         item_type: string
         description: "List of IDs of elements currently selected on the canvas"
+      # Phase 3 rollups consumed by layers-panel YAML actions (new_layer,
+      # delete/duplicate_layer_selection, collect_in_new_layer, etc.).
+      # Populated by each platform's dispatch wrapper — see
+      # panel_menu.dispatch_yaml_action in jas_ocaml, jas, jas_dioxus, and
+      # LayersPanel.dispatchYamlAction in JasSwift.
+      top_level_layers:
+        type: list
+        item_type: object
+        description: >
+          Top-level Layer elements as flat dicts with keys
+          {kind, name, common: {visibility, locked}, path}. Used by
+          bulk-toggle actions (toggle_all_layers_*) to iterate.
+      top_level_layer_paths:
+        type: list
+        item_type: path
+        description: >
+          Paths of the top-level Layer elements, one entry per Layer
+          in document order. Used as the source for bulk foreach loops.
+      next_layer_name:
+        type: string
+        description: >
+          Auto-generated layer name of the form "Layer N" where N is
+          the smallest positive integer not already in use by another
+          top-level layer.
+      new_layer_insert_index:
+        type: number
+        description: >
+          Index at which a newly created layer should be inserted —
+          one above the topmost panel-selected layer, or the current
+          layer count when nothing is selected.
 
   workspace:
     description: >
@@ -83,6 +113,38 @@ runtime_contexts:
       active_layout_name:
         type: string
         description: "Name of the currently active layout (empty if none)"
+
+  panel:
+    description: >
+      Active panel state. Resolves to the state of whichever panel is
+      currently focused or is the target of the effect being
+      evaluated. Properties map to keys stored in the StateStore's
+      panel-scoped buckets; each panel contributes its own subset.
+    defaults:
+      layers_panel_selection: []
+      isolation_stack: []
+      recent_colors: []
+    properties:
+      layers_panel_selection:
+        type: list
+        item_type: path
+        description: >
+          Paths of items currently selected in the layers panel tree.
+          Driven by panel-local selection state; serialized as __path__
+          markers so they round-trip through the expression evaluator.
+      isolation_stack:
+        type: list
+        item_type: path
+        description: >
+          Stack of paths to isolated containers in the layers panel,
+          innermost level last. Pushed by enter_isolation_mode, popped
+          by exit_isolation_mode.
+      recent_colors:
+        type: list
+        item_type: color
+        description: >
+          Per-document list of recently-committed colors, newest first,
+          capped at 10 entries.
 
 # ──────────────────────────────────────────────────────────────────
 # Lexically-bound contexts
