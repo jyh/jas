@@ -158,6 +158,17 @@ mod tests {
             app_default_stroke: Some(crate::geometry::element::Stroke::new(crate::geometry::element::Color::BLACK, 1.0)),
             swatch_libraries: serde_json::json!({}),
             stroke_panel: crate::workspace::app_state::StrokePanelState::default(),
+            layers_renaming: None,
+            layers_collapsed: std::collections::HashSet::new(),
+            layers_panel_selection: Vec::new(),
+            layers_drag_target: None,
+            layers_context_menu: None,
+            layers_search_query: String::new(),
+            layers_isolation_stack: Vec::new(),
+            layers_solo_state: None,
+            layers_saved_lock_states: std::collections::HashMap::new(),
+            layers_hidden_types: std::collections::HashSet::new(),
+            layers_filter_dropdown_open: false,
         }
     }
 }
