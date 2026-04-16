@@ -357,13 +357,18 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
     selected_paths = doc.selected_paths()
 
     # Track collapsed paths, panel-selected paths, renaming path, drag
-    # state, and search query as closure state (persists across rebuilds).
+    # state, and advanced UI state as closure state (persists across rebuilds).
     collapsed = set()
     panel_selection = set()
+    panel_selection_order = []  # for shift-range selection anchor
     renaming_path = [None]
     drag_source = [None]
     drag_target = [None]
     search_query = [""]
+    isolation_stack = []  # list of container paths
+    solo_state = [None]  # (soloed_path, {sibling_path: saved_visibility}) or None
+    saved_lock_states = {}  # container_path -> list of child bool
+    hidden_types = set()  # element type names currently hidden
 
     def _flatten(elements, depth, path_prefix, layer_color, rows):
         for i in reversed(range(len(elements))):
@@ -387,12 +392,110 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
             return rows
         matching = [r for r in rows if q in r[3].lower()]
         matching_paths = {r[1] for r in matching}
-        # Include ancestor paths
         keep = set(matching_paths)
         for p in matching_paths:
             for j in range(1, len(p)):
                 keep.add(p[:j])
         return [r for r in rows if r[1] in keep]
+
+    def _type_value_from_elem(elem):
+        return type(elem).__name__.lower().replace("rect", "rectangle").replace("textpath", "text_path")
+
+    def _apply_type_filter(rows):
+        """Hide rows whose type is in hidden_types; keep ancestors for context."""
+        if not hidden_types:
+            return rows
+        # Index: path -> elem
+        path_to_elem = {r[1]: r[2] for r in rows}
+        visible = {r[1] for r in rows if _type_value_from_elem(r[2]) not in hidden_types}
+        keep = set(visible)
+        for p in visible:
+            for j in range(1, len(p)):
+                keep.add(p[:j])
+        return [r for r in rows if r[1] in keep]
+
+    def _apply_isolation_filter(rows):
+        """Keep only rows that are strict descendants of the deepest isolated
+        container, and reduce their depths so the subtree starts at 0."""
+        if not isolation_stack:
+            return rows
+        root = isolation_stack[-1]
+        out = []
+        for depth, path, elem, name, is_named, is_sel, is_psel, is_cont, is_coll, lcolor in rows:
+            if len(path) > len(root) and path[:len(root)] == root:
+                new_depth = depth - len(root)
+                out.append((new_depth, path, elem, name, is_named, is_sel, is_psel, is_cont, is_coll, lcolor))
+        return out
+
+    def _auto_expand_selected():
+        """Remove ancestors of selected paths from the collapsed set so the
+        selected element is visible."""
+        for p in selected_paths:
+            for j in range(1, len(p)):
+                collapsed.discard(p[:j])
+
+    _row_widgets = {}  # path -> QWidget for scroll-to
+    _current_visible_rows = [[]]  # captured rows list for shift-range selection
+
+    def _scroll_to_selected(rows):
+        """Scroll the first selected row into view."""
+        if not selected_paths:
+            return
+        first = sorted(selected_paths)[0]
+        w = _row_widgets.get(first)
+        if w is not None:
+            try:
+                # Ensure parent scroll area scrolls to this widget
+                parent = widget.parentWidget()
+                while parent is not None:
+                    from PySide6.QtWidgets import QScrollArea
+                    if isinstance(parent, QScrollArea):
+                        parent.ensureWidgetVisible(w)
+                        break
+                    parent = parent.parentWidget()
+            except Exception:
+                pass
+
+    def _add_breadcrumb_bar(parent_layout):
+        """Render breadcrumb path when in isolation mode."""
+        bar = QWidget()
+        bl = QHBoxLayout(bar)
+        bl.setContentsMargins(6, 2, 6, 2)
+        bl.setSpacing(4)
+        bar.setStyleSheet("background:#2a2a2a; border-bottom:1px solid #555;")
+
+        # Home button
+        home = QPushButton("⌂")
+        home.setFlat(True)
+        home.setStyleSheet("color:#ccc; font-size:10px; padding:0 4px;")
+        def _on_home():
+            isolation_stack.clear()
+            _rebuild()
+        home.clicked.connect(_on_home)
+        bl.addWidget(home)
+
+        m = get_model()
+        if m is not None:
+            for idx, p in enumerate(isolation_stack):
+                sep = QLabel(">")
+                sep.setStyleSheet("color:#999; font-size:10px;")
+                bl.addWidget(sep)
+                e = m.document.get_element(p)
+                if isinstance(e, Layer) and e.name:
+                    lbl_text = e.name
+                else:
+                    lbl_text = f"<{type(e).__name__}>"
+                btn = QPushButton(lbl_text)
+                btn.setFlat(True)
+                btn.setStyleSheet("color:#ccc; font-size:10px; padding:0 4px;")
+                target_idx = idx + 1
+                def _on_seg(checked=False, ti=target_idx):
+                    del isolation_stack[ti:]
+                    _rebuild()
+                btn.clicked.connect(_on_seg)
+                bl.addWidget(btn)
+        bl.addStretch()
+        parent_layout.addWidget(bar)
 
     # Read search query from panel state
     try:
@@ -401,9 +504,15 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
     except Exception:
         pass
 
+    _auto_expand_selected()
     rows = []
     _flatten(doc.layers, 0, (), "#4a90d9", rows)
+    rows = _apply_type_filter(rows)
+    rows = _apply_isolation_filter(rows)
     rows = _apply_search_filter(rows)
+    _current_visible_rows[0] = rows
+    if isolation_stack:
+        _add_breadcrumb_bar(layout)
 
     # Subscribe to panel state changes (e.g. search query typing) so the
     # tree rebuilds when the user types in the search input.
@@ -473,15 +582,23 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
             search_query[0] = str(panel_state.get("search_query", "") or "")
         except Exception:
             pass
+        _auto_expand_selected()
         new_rows = []
         _flatten(new_doc.layers, 0, (), "#4a90d9", new_rows)
+        new_rows = _apply_type_filter(new_rows)
+        new_rows = _apply_isolation_filter(new_rows)
         new_rows = _apply_search_filter(new_rows)
+        _current_visible_rows[0] = new_rows
+        if isolation_stack:
+            _add_breadcrumb_bar(layout)
         for r in new_rows:
             _add_row(layout, *r)
         layout.addStretch()
+        _scroll_to_selected(new_rows)
 
     def _add_row(parent_layout, depth, path, elem, name, is_named, is_selected, is_panel_sel, is_container, is_collapsed, layer_color):
         row = QWidget()
+        _row_widgets[path] = row
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(4, 0, 4, 0)
         row_layout.setSpacing(2)
@@ -496,8 +613,36 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
             row.setStyleSheet(" ".join(style_parts))
         # Row click for panel selection + drag start
         def _on_row_press(event, p=path):
-            panel_selection.clear()
-            panel_selection.add(p)
+            from PySide6.QtCore import Qt as QtMod
+            meta = bool(event.modifiers() & (QtMod.MetaModifier | QtMod.ControlModifier))
+            shift = bool(event.modifiers() & QtMod.ShiftModifier)
+            # All visible row paths (for shift-range)
+            visible_paths = [r[1] for r in _current_visible_rows[0]]
+            if shift and panel_selection_order:
+                anchor = panel_selection_order[-1]
+                try:
+                    a_idx = visible_paths.index(anchor)
+                    c_idx = visible_paths.index(p)
+                    lo, hi = (a_idx, c_idx) if a_idx <= c_idx else (c_idx, a_idx)
+                    panel_selection.clear()
+                    for pp in visible_paths[lo:hi+1]:
+                        panel_selection.add(pp)
+                except ValueError:
+                    panel_selection.clear()
+                    panel_selection.add(p)
+            elif meta:
+                if p in panel_selection:
+                    panel_selection.discard(p)
+                    if p in panel_selection_order:
+                        panel_selection_order.remove(p)
+                else:
+                    panel_selection.add(p)
+                    panel_selection_order.append(p)
+            else:
+                panel_selection.clear()
+                panel_selection.add(p)
+                panel_selection_order.clear()
+                panel_selection_order.append(p)
             drag_source[0] = p
             drag_target[0] = None
             _rebuild()
@@ -516,6 +661,19 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
                 m = get_model()
                 if m is not None:
                     d = m.document
+                    # Drag constraints: no drop into self/descendant, no drop into locked parent
+                    target_parent = p[:-1]
+                    is_cycle = len(p) >= len(src) and p[:len(src)] == src
+                    parent_locked = False
+                    if target_parent:
+                        parent_elem = d.get_element(target_parent)
+                        if parent_elem is not None:
+                            parent_locked = getattr(parent_elem, 'locked', False)
+                    if is_cycle or parent_locked:
+                        drag_source[0] = None
+                        drag_target[0] = None
+                        _rebuild()
+                        return
                     moved_elem = d.get_element(src)
                     m.snapshot()
                     new_doc = d.delete_element(src)
@@ -551,23 +709,71 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
         eye_btn.setFixedSize(16, 16)
         eye_btn.setFlat(True)
         eye_btn.setStyleSheet("font-size: 10px; padding: 0;")
-        def _on_eye(checked, p=path):
+        def _on_eye_mouse(event, p=path):
+            from PySide6.QtCore import Qt as QtMod
+            alt = bool(event.modifiers() & QtMod.AltModifier)
             m = get_model()
-            if m is None: return
-            d = m.document
-            e = d.get_element(p)
-            if e is None: return
-            new_vis = _cycle_visibility(getattr(e, 'visibility', Visibility.PREVIEW))
-            new_e = dc_replace(e, visibility=new_vis)
-            m.snapshot()
-            new_doc = d.replace_element(p, new_e)
-            if new_vis == Visibility.INVISIBLE:
-                new_doc = dc_replace(new_doc, selection=frozenset(
-                    es for es in new_doc.selection if not (es.path == p or es.path[:len(p)] == p)
-                ))
-            m.document = new_doc
+            if m is None:
+                return
+            if alt:
+                # Option-click: solo/unsolo among siblings
+                d = m.document
+                parent_prefix = p[:-1]
+                # Gather sibling paths
+                if not parent_prefix:
+                    siblings = [(i,) for i in range(len(d.layers))]
+                else:
+                    parent = d.get_element(parent_prefix)
+                    if not (isinstance(parent, Group) and hasattr(parent, 'children')):
+                        return
+                    siblings = [parent_prefix + (i,) for i in range(len(parent.children))]
+                if solo_state[0] and solo_state[0][0] == p:
+                    # Restore saved
+                    saved = solo_state[0][1]
+                    m.snapshot()
+                    new_doc = d
+                    for sp, sv in saved.items():
+                        e = new_doc.get_element(sp)
+                        if e is not None:
+                            new_doc = new_doc.replace_element(sp, dc_replace(e, visibility=sv))
+                    m.document = new_doc
+                    solo_state[0] = None
+                else:
+                    saved = {}
+                    for sp in siblings:
+                        if sp != p:
+                            e = d.get_element(sp)
+                            if e is not None:
+                                saved[sp] = e.visibility
+                    m.snapshot()
+                    new_doc = d
+                    e0 = new_doc.get_element(p)
+                    if e0 is not None and e0.visibility == Visibility.INVISIBLE:
+                        new_doc = new_doc.replace_element(p, dc_replace(e0, visibility=Visibility.PREVIEW))
+                    for sp in siblings:
+                        if sp != p:
+                            e = new_doc.get_element(sp)
+                            if e is not None:
+                                new_doc = new_doc.replace_element(sp, dc_replace(e, visibility=Visibility.INVISIBLE))
+                    m.document = new_doc
+                    solo_state[0] = (p, saved)
+            else:
+                solo_state[0] = None
+                d = m.document
+                e = d.get_element(p)
+                if e is None:
+                    return
+                new_vis = _cycle_visibility(getattr(e, 'visibility', Visibility.PREVIEW))
+                new_e = dc_replace(e, visibility=new_vis)
+                m.snapshot()
+                new_doc = d.replace_element(p, new_e)
+                if new_vis == Visibility.INVISIBLE:
+                    new_doc = dc_replace(new_doc, selection=frozenset(
+                        es for es in new_doc.selection if not (es.path == p or es.path[:len(p)] == p)
+                    ))
+                m.document = new_doc
             _rebuild()
-        eye_btn.clicked.connect(_on_eye)
+        eye_btn.mousePressEvent = _on_eye_mouse
         row_layout.addWidget(eye_btn)
 
         # Lock button
@@ -582,10 +788,30 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
             d = m.document
             e = d.get_element(p)
             if e is None: return
-            new_locked = not getattr(e, 'locked', False)
-            new_e = dc_replace(e, locked=new_locked)
+            was_locked = getattr(e, 'locked', False)
+            new_locked = not was_locked
+            is_cont = isinstance(e, Group)
             m.snapshot()
+            # Save/restore for containers
+            if is_cont and not was_locked and hasattr(e, 'children'):
+                # Save children's lock states before locking
+                saved_lock_states[p] = [getattr(c, 'locked', False) for c in e.children]
+            new_e = dc_replace(e, locked=new_locked)
             new_doc = d.replace_element(p, new_e)
+            if is_cont and new_locked and hasattr(e, 'children'):
+                # Lock all direct children
+                for i, child in enumerate(e.children):
+                    cp = p + (i,)
+                    new_doc = new_doc.replace_element(cp, dc_replace(child, locked=True))
+            if is_cont and not new_locked and p in saved_lock_states:
+                # Restore saved child lock states
+                saved = saved_lock_states.pop(p)
+                new_e2 = new_doc.get_element(p)
+                if hasattr(new_e2, 'children'):
+                    for i, child in enumerate(new_e2.children):
+                        if i < len(saved):
+                            cp = p + (i,)
+                            new_doc = new_doc.replace_element(cp, dc_replace(child, locked=saved[i]))
             if new_locked:
                 new_doc = dc_replace(new_doc, selection=frozenset(
                     es for es in new_doc.selection if not (es.path == p or es.path[:len(p)] == p)
