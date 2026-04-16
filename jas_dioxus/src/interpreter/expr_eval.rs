@@ -165,6 +165,11 @@ fn value_to_json(val: &Value) -> serde_json::Value {
         Value::Str(s) => serde_json::Value::String(s.clone()),
         Value::Color(c) => serde_json::Value::String(c.clone()),
         Value::List(arr) => serde_json::Value::Array(arr.clone()),
+        // Path is encoded with a reserved key so from_json round-trips
+        // it back to Value::Path. Users never see this JSON form.
+        Value::Path(indices) => serde_json::json!({
+            "__path__": indices.iter().map(|&i| i as u64).collect::<Vec<_>>()
+        }),
         Value::Closure { .. } => serde_json::Value::Null,
     }
 }
@@ -273,6 +278,32 @@ fn eval_dot_access(
     store_cb: Option<&StoreCb>,
 ) -> Value {
     let obj_val = eval_inner(obj_expr, ctx, scope, store_cb);
+
+    // Path computed properties (Phase 3 §6.2)
+    if let Value::Path(ref indices) = obj_val {
+        match member {
+            "depth" => return Value::Number(indices.len() as f64),
+            "parent" => {
+                if indices.is_empty() {
+                    return Value::Null;
+                }
+                let mut parent = indices.clone();
+                parent.pop();
+                return Value::Path(parent);
+            }
+            "id" => {
+                return Value::Str(
+                    indices.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(".")
+                );
+            }
+            "indices" => {
+                return Value::List(
+                    indices.iter().map(|&i| serde_json::json!(i)).collect()
+                );
+            }
+            _ => return Value::Null,
+        }
+    }
 
     // List .length
     if let Value::List(ref arr) = obj_val {
@@ -500,6 +531,100 @@ fn eval_func(
             Value::color(&color_util::rgb_to_hex(nr, ng, nb))
         }
 
+        // Higher-order functions (Phase 3 §6.1)
+        "any" | "all" | "map" | "filter" => {
+            if args.len() != 2 {
+                return match name {
+                    "map" | "filter" => Value::Null,
+                    "all" => Value::Bool(true),
+                    _ => Value::Bool(false),
+                };
+            }
+            let lst = eval_inner(&args[0], ctx, scope, store_cb);
+            let callable = eval_inner(&args[1], ctx, scope, store_cb);
+            let items = match lst {
+                Value::List(a) => a,
+                _ => return match name {
+                    "map" | "filter" => Value::Null,
+                    "all" => Value::Bool(true),
+                    _ => Value::Bool(false),
+                },
+            };
+            if !matches!(callable, Value::Closure { .. }) {
+                return match name {
+                    "map" | "filter" => Value::Null,
+                    "all" => Value::Bool(true),
+                    _ => Value::Bool(false),
+                };
+            }
+            let mut results: Vec<Value> = Vec::with_capacity(items.len());
+            for item in &items {
+                // Bind the item as an Expr::Literal wrapper. Since apply_closure
+                // takes Expr args, we use a pre-eval path: call apply_closure_values.
+                let arg_val = Value::from_json(item);
+                results.push(apply_closure_values(&callable, vec![arg_val], ctx, scope, store_cb));
+            }
+            match name {
+                "any" => Value::Bool(results.iter().any(|r| r.to_bool())),
+                "all" => Value::Bool(results.iter().all(|r| r.to_bool())),
+                "map" => Value::List(
+                    results.into_iter()
+                        .map(|r| value_to_json(&r))
+                        .collect()
+                ),
+                "filter" => Value::List(
+                    items.iter().zip(results.iter())
+                        .filter(|(_, r)| r.to_bool())
+                        .map(|(i, _)| i.clone())
+                        .collect()
+                ),
+                _ => Value::Null,
+            }
+        }
+
+        // Path functions (Phase 3 §6.2)
+        "path" => {
+            let mut idx: Vec<usize> = Vec::with_capacity(args.len());
+            for a in args {
+                let v = eval_inner(a, ctx, scope, store_cb);
+                match v {
+                    Value::Number(n) if n >= 0.0 => idx.push(n as usize),
+                    _ => return Value::Null,
+                }
+            }
+            Value::Path(idx)
+        }
+
+        "path_child" => {
+            if args.len() != 2 { return Value::Null; }
+            let p = eval_inner(&args[0], ctx, scope, store_cb);
+            let i = eval_inner(&args[1], ctx, scope, store_cb);
+            match (p, i) {
+                (Value::Path(mut indices), Value::Number(n)) if n >= 0.0 => {
+                    indices.push(n as usize);
+                    Value::Path(indices)
+                }
+                _ => Value::Null,
+            }
+        }
+
+        "path_from_id" => {
+            if args.len() != 1 { return Value::Null; }
+            let s = eval_inner(&args[0], ctx, scope, store_cb);
+            let s = match s { Value::Str(s) => s, _ => return Value::Null };
+            if s.is_empty() {
+                return Value::Path(Vec::new());
+            }
+            let mut parts: Vec<usize> = Vec::new();
+            for p in s.split('.') {
+                match p.parse::<usize>() {
+                    Ok(n) => parts.push(n),
+                    Err(_) => return Value::Null,
+                }
+            }
+            Value::Path(parts)
+        }
+
         // mem: (element, list) -> bool — list membership
         "mem" => {
             if args.len() != 2 {
@@ -531,6 +656,24 @@ fn apply_closure(
     scope: &Scope,
     store_cb: Option<&StoreCb>,
 ) -> Value {
+    let call_args: Vec<Value> = arg_exprs
+        .iter()
+        .map(|a| eval_inner(a, ctx, scope, store_cb))
+        .collect();
+    apply_closure_values(callee, call_args, ctx, scope, store_cb)
+}
+
+/// Apply a closure to already-evaluated Value arguments (used by HOFs).
+/// Lexical scoping: the captured scope wins over the caller's scope for
+/// user bindings. The caller's namespace ctx (state/panel/etc.) overrides
+/// the captured one so runtime-context reads are current.
+fn apply_closure_values(
+    callee: &Value,
+    call_args: Vec<Value>,
+    ctx: &serde_json::Value,
+    _caller_scope: &Scope,
+    store_cb: Option<&StoreCb>,
+) -> Value {
     if let Value::Closure {
         params,
         body,
@@ -538,27 +681,19 @@ fn apply_closure(
         captured_scope,
     } = callee
     {
-        let call_args: Vec<Value> = arg_exprs
-            .iter()
-            .map(|a| eval_inner(a, ctx, scope, store_cb))
-            .collect();
         if call_args.len() != params.len() {
             return Value::Null;
         }
 
-        // Build call context: merge captured ctx with current ctx
+        // Namespace ctx: caller overrides captured (fresh state/panel reads).
         let call_ctx = merge_contexts(captured_ctx, ctx);
 
-        // Build call scope: start with captured scope, overlay current scope, bind params
+        // User scope: captured only. Do NOT overlay caller's scope —
+        // that would be dynamic scoping (Phase 3 §4 closure-capture contract).
         let mut call_scope = Scope::new();
         if let Some(cs) = captured_scope {
             call_scope.bindings = *cs.clone();
         }
-        // Overlay current scope bindings
-        for (k, v) in &scope.bindings {
-            call_scope.bindings.insert(k.clone(), v.clone());
-        }
-        // Bind parameters
         for (p, a) in params.iter().zip(call_args.into_iter()) {
             call_scope.bindings.insert(p.clone(), a);
         }
@@ -1047,5 +1182,190 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "x");
         assert_eq!(entries[0].1, Value::Number(42.0));
+    }
+
+    // ── Phase 3: HOFs ─────────────────────────────────────────
+
+    #[test]
+    fn hof_any_true() {
+        assert_eq!(
+            eval("any([1, 2, 3], fun n -> n > 2)", &json!({})),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn hof_any_false() {
+        assert_eq!(
+            eval("any([1, 2, 3], fun n -> n > 10)", &json!({})),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn hof_any_empty() {
+        assert_eq!(
+            eval("any([], fun n -> true)", &json!({})),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn hof_all_true() {
+        assert_eq!(
+            eval("all([2, 4, 6], fun n -> n > 0)", &json!({})),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn hof_all_false() {
+        assert_eq!(
+            eval("all([2, 4, 5], fun n -> n > 3)", &json!({})),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn hof_all_empty() {
+        assert_eq!(eval("all([], fun n -> false)", &json!({})), Value::Bool(true));
+    }
+
+    #[test]
+    fn hof_map() {
+        let r = eval("map([1, 2, 3], fun n -> n * 10)", &json!({}));
+        match r {
+            Value::List(items) => {
+                assert_eq!(items.len(), 3);
+                assert_eq!(items[0].as_f64(), Some(10.0));
+                assert_eq!(items[1].as_f64(), Some(20.0));
+                assert_eq!(items[2].as_f64(), Some(30.0));
+            }
+            _ => panic!("expected list, got {:?}", r),
+        }
+    }
+
+    #[test]
+    fn hof_filter() {
+        let r = eval("filter([1, 2, 3, 4, 5], fun n -> n > 2)", &json!({}));
+        match r {
+            Value::List(items) => {
+                assert_eq!(items.len(), 3);
+                assert_eq!(items[0].as_f64(), Some(3.0));
+                assert_eq!(items[2].as_f64(), Some(5.0));
+            }
+            _ => panic!("expected list, got {:?}", r),
+        }
+    }
+
+    #[test]
+    fn hof_with_captured_variable() {
+        let r = eval(
+            "filter([1, 2, 3, 4], fun n -> n > threshold)",
+            &json!({"threshold": 2}),
+        );
+        match r {
+            Value::List(items) => {
+                assert_eq!(items.len(), 2);
+                assert_eq!(items[0].as_f64(), Some(3.0));
+                assert_eq!(items[1].as_f64(), Some(4.0));
+            }
+            _ => panic!("expected list"),
+        }
+    }
+
+    // ── Phase 3: path type ─────────────────────────────────────
+
+    #[test]
+    fn path_constructor() {
+        assert_eq!(eval("path(0, 2, 1)", &json!({})), Value::Path(vec![0, 2, 1]));
+    }
+
+    #[test]
+    fn path_empty() {
+        assert_eq!(eval("path()", &json!({})), Value::Path(vec![]));
+    }
+
+    #[test]
+    fn path_depth() {
+        assert_eq!(eval("path(0, 2, 1).depth", &json!({})), Value::Number(3.0));
+        assert_eq!(eval("path().depth", &json!({})), Value::Number(0.0));
+    }
+
+    #[test]
+    fn path_parent() {
+        assert_eq!(eval("path(0, 2, 1).parent", &json!({})), Value::Path(vec![0, 2]));
+        assert_eq!(eval("path().parent", &json!({})), Value::Null);
+    }
+
+    #[test]
+    fn path_id() {
+        assert_eq!(eval("path(0, 2, 1).id", &json!({})), Value::Str("0.2.1".to_string()));
+        assert_eq!(eval("path().id", &json!({})), Value::Str("".to_string()));
+    }
+
+    #[test]
+    fn path_indices() {
+        let r = eval("path(0, 2, 1).indices", &json!({}));
+        match r {
+            Value::List(items) => {
+                assert_eq!(items.len(), 3);
+                assert_eq!(items[0].as_u64(), Some(0));
+                assert_eq!(items[1].as_u64(), Some(2));
+                assert_eq!(items[2].as_u64(), Some(1));
+            }
+            _ => panic!("expected list"),
+        }
+    }
+
+    #[test]
+    fn path_equality() {
+        assert_eq!(eval("path(0, 2) == path(0, 2)", &json!({})), Value::Bool(true));
+        assert_eq!(eval("path(0, 2) == path(0, 3)", &json!({})), Value::Bool(false));
+        // Path vs List — distinct types
+        assert_eq!(eval("path(0, 2) == [0, 2]", &json!({})), Value::Bool(false));
+    }
+
+    #[test]
+    fn path_child_fn() {
+        assert_eq!(
+            eval("path_child(path(0, 2), 5)", &json!({})),
+            Value::Path(vec![0, 2, 5])
+        );
+    }
+
+    #[test]
+    fn path_from_id_fn() {
+        assert_eq!(eval("path_from_id('0.2.1')", &json!({})), Value::Path(vec![0, 2, 1]));
+        assert_eq!(eval("path_from_id('')", &json!({})), Value::Path(vec![]));
+        assert_eq!(eval("path_from_id('not-a-path')", &json!({})), Value::Null);
+    }
+
+    // ── Phase 3: lexical scoping — closure captures shadowed binding
+    //    (PHASE3.md §4.4)
+
+    #[test]
+    fn closure_captures_shadowed_binding() {
+        // After shadowing x, the closure f must still see the originally
+        // captured x (=1), not the new x (=2).
+        let r = eval(
+            "let x = 1 in let f = fun _ -> x in let x = 2 in f(null)",
+            &json!({}),
+        );
+        assert_eq!(r, Value::Number(1.0));
+    }
+
+    #[test]
+    fn closure_namespace_refreshed_at_call() {
+        // The closure is defined with state.x=5. Caller's ctx has state.x=9
+        // at call time. The closure should see 9 (runtime namespace is fresh)
+        // even though its captured_ctx had 5.
+        // Hard to test fully without a runtime context switch; at least
+        // verify that state reads through the closure hit the current ctx.
+        let r = eval(
+            "let f = fun _ -> state.x in f(null)",
+            &json!({"state": {"x": 42}}),
+        );
+        assert_eq!(r, Value::Number(42.0));
     }
 }

@@ -273,6 +273,9 @@ fn value_to_json(v: &Value) -> serde_json::Value {
         Value::Str(s) => serde_json::json!(s),
         Value::Color(c) => serde_json::json!(c),
         Value::List(l) => serde_json::Value::Array(l.clone()),
+        Value::Path(indices) => serde_json::json!({
+            "__path__": indices.iter().map(|&i| i as u64).collect::<Vec<_>>()
+        }),
         Value::Closure { .. } => serde_json::Value::Null,
     }
 }

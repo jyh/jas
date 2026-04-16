@@ -191,6 +191,9 @@ fn eval_to_json(source: &str, ctx: &serde_json::Value) -> serde_json::Value {
         Value::List(ref items) => {
             serde_json::Value::Array(items.clone())
         }
+        Value::Path(ref indices) => serde_json::json!({
+            "__path__": indices.iter().map(|&i| i as u64).collect::<Vec<_>>()
+        }),
         Value::Closure { .. } => serde_json::Value::Null,
     }
 }
@@ -1194,6 +1197,11 @@ fn build_mouse_event_handler(
                         }
                     }
                     Value::List(l) => { resolved_params.insert(k.clone(), serde_json::Value::Array(l)); }
+                    Value::Path(indices) => {
+                        resolved_params.insert(k.clone(), serde_json::json!({
+                            "__path__": indices.iter().map(|&i| i as u64).collect::<Vec<_>>()
+                        }));
+                    }
                     Value::Closure { .. } => { resolved_params.insert(k.clone(), serde_json::Value::Null); }
                 };
             } else {

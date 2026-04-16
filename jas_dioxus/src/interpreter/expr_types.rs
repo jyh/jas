@@ -13,6 +13,8 @@ pub enum Value {
     Str(String),
     Color(String), // normalized #rrggbb
     List(Vec<serde_json::Value>),
+    /// Opaque document path (Phase 3 §6.2). Non-negative indices.
+    Path(Vec<usize>),
     /// Closure: params, body, captured JSON context, and captured local scope.
     Closure {
         params: Vec<String>,
@@ -60,7 +62,24 @@ impl Value {
             serde_json::Value::Array(arr) => {
                 Value::List(arr.clone())
             }
-            serde_json::Value::Object(_) => {
+            serde_json::Value::Object(map) => {
+                // Path round-trip: recognize the {"__path__": [i, j, ...]}
+                // marker we emit in value_to_json for Value::Path.
+                if map.len() == 1 {
+                    if let Some(serde_json::Value::Array(arr)) = map.get("__path__") {
+                        let mut idx = Vec::with_capacity(arr.len());
+                        let mut ok = true;
+                        for n in arr {
+                            match n.as_u64() {
+                                Some(u) => idx.push(u as usize),
+                                None => { ok = false; break; }
+                            }
+                        }
+                        if ok {
+                            return Value::Path(idx);
+                        }
+                    }
+                }
                 // Keep as JSON for property access
                 Value::Str(v.to_string())
             }
@@ -76,6 +95,7 @@ impl Value {
             Value::Str(s) => !s.is_empty(),
             Value::Color(_) => true,
             Value::List(l) => !l.is_empty(),
+            Value::Path(p) => !p.is_empty(),
             Value::Closure { .. } => true,
         }
     }
@@ -95,6 +115,7 @@ impl Value {
             Value::Str(s) => s.clone(),
             Value::Color(c) => c.clone(),
             Value::List(_) => "[list]".to_string(),
+            Value::Path(p) => p.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("."),
             Value::Closure { .. } => "[closure]".to_string(),
         }
     }
@@ -114,6 +135,8 @@ impl Value {
             (Value::Color(a), Value::Color(b)) => {
                 normalize_color(a) == normalize_color(b)
             }
+            (Value::Path(a), Value::Path(b)) => a == b,
+            (Value::List(a), Value::List(b)) => a == b,
             _ => false, // different types → false
         }
     }
