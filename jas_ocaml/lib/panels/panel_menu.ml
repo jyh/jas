@@ -254,6 +254,143 @@ let dispatch_yaml_action
            Hashtbl.add element_stash stash_id new_layer;
            `Assoc [("__element_ref__", `String stash_id)]
          in
+         (* Helper: decode a JSON list of __path__ markers into int list list. *)
+         let decode_path_list (v : Yojson.Safe.t) : int list list =
+           match v with
+           | `List items ->
+             List.filter_map (fun item ->
+               match item with
+               | `Assoc pairs ->
+                 (match List.assoc_opt "__path__" pairs with
+                  | Some (`List idx_list) ->
+                    let idx = List.filter_map (function
+                      | `Int n when n >= 0 -> Some n
+                      | _ -> None) idx_list in
+                    if List.length idx = List.length idx_list then Some idx else None
+                  | _ -> None)
+               | _ -> None
+             ) items
+           | _ -> []
+         in
+         (* doc.wrap_in_group: { paths }. Wraps elements at given paths in
+            a new Group at the topmost source position. *)
+         let doc_wrap_in_group_h : Effects.platform_effect = fun spec call_ctx _ ->
+           let paths_expr = match spec with
+             | `Assoc pairs ->
+               (match List.assoc_opt "paths" pairs with
+                | Some (`String s) -> Some s | _ -> None)
+             | _ -> None
+           in
+           (match paths_expr with
+            | None -> ()
+            | Some e ->
+              let eval_ctx = `Assoc call_ctx in
+              let v = Expr_eval.evaluate e eval_ctx in
+              let paths = match v with
+                | Expr_eval.List items -> decode_path_list (`List items)
+                | _ -> []
+              in
+              if paths <> [] then begin
+                let sorted = List.sort compare paths in
+                let top_path = List.hd sorted in
+                (* Top-level only for now — nested wrap_in_group requires
+                   Document.insert_element_at which doesn't exist yet. *)
+                if List.length top_path = 1 then begin
+                  let insert_idx = List.hd top_path in
+                  let d = m#document in
+                  let children = List.filter_map (fun p ->
+                    try Some (Document.get_element d p) with _ -> None
+                  ) sorted in
+                  if children <> [] then begin
+                    let rev_sorted = List.rev sorted in
+                    let new_doc = List.fold_left (fun acc p ->
+                      Document.delete_element acc p
+                    ) d rev_sorted in
+                    let new_group = Element.make_group (Array.of_list children) in
+                    let layers = new_doc.Document.layers in
+                    let n = Array.length layers in
+                    let clamped = max 0 (min insert_idx n) in
+                    let new_layers = Array.init (n + 1) (fun i ->
+                      if i < clamped then layers.(i)
+                      else if i = clamped then new_group
+                      else layers.(i - 1)) in
+                    m#set_document { new_doc with Document.layers = new_layers }
+                  end
+                end
+              end);
+           `Null
+         in
+         (* doc.wrap_in_layer: { paths, name }. Appends a new top-level
+            Layer at the end of document.layers containing the source
+            elements. *)
+         let doc_wrap_in_layer_h : Effects.platform_effect = fun spec call_ctx _ ->
+           let paths_expr, name_expr = match spec with
+             | `Assoc pairs ->
+               let pe = match List.assoc_opt "paths" pairs with
+                 | Some (`String s) -> Some s | _ -> None
+               in
+               let ne = match List.assoc_opt "name" pairs with
+                 | Some (`String s) -> s | _ -> "'Layer'"
+               in
+               (pe, ne)
+             | _ -> (None, "'Layer'")
+           in
+           (match paths_expr with
+            | None -> ()
+            | Some e ->
+              let eval_ctx = `Assoc call_ctx in
+              let v = Expr_eval.evaluate e eval_ctx in
+              let paths = match v with
+                | Expr_eval.List items -> decode_path_list (`List items)
+                | _ -> []
+              in
+              if paths <> [] then begin
+                let sorted = List.sort compare paths in
+                let name = match Expr_eval.evaluate name_expr eval_ctx with
+                  | Expr_eval.Str s -> s
+                  | _ -> "Layer"
+                in
+                let d = m#document in
+                let children = List.filter_map (fun p ->
+                  try Some (Document.get_element d p) with _ -> None
+                ) sorted in
+                if children <> [] then begin
+                  let rev_sorted = List.rev sorted in
+                  let new_doc = List.fold_left (fun acc p ->
+                    Document.delete_element acc p
+                  ) d rev_sorted in
+                  let new_layer = Element.make_layer ~name (Array.of_list children) in
+                  let layers = new_doc.Document.layers in
+                  let new_layers = Array.append layers [|new_layer|] in
+                  m#set_document { new_doc with Document.layers = new_layers }
+                end
+              end);
+           `Null
+         in
+         (* doc.unpack_group_at: path. Replaces a Group with its
+            children in place. Top-level only for now. *)
+         let doc_unpack_group_at_h : Effects.platform_effect = fun value call_ctx _ ->
+           let path_expr = match value with `String s -> s | _ -> "" in
+           let eval_ctx = `Assoc call_ctx in
+           let path_val = Expr_eval.evaluate path_expr eval_ctx in
+           (match path_val with
+            | Expr_eval.Path [idx] when
+                idx >= 0 && idx < Array.length m#document.Document.layers ->
+              let d = m#document in
+              (match d.Document.layers.(idx) with
+               | Element.Group { children; _ } ->
+                 let n = Array.length d.Document.layers in
+                 let k = Array.length children in
+                 let new_layers = Array.init (n - 1 + k) (fun i ->
+                   if i < idx then d.Document.layers.(i)
+                   else if i < idx + k then children.(i - idx)
+                   else d.Document.layers.(i - k + 1))
+                 in
+                 m#set_document { d with Document.layers = new_layers }
+               | _ -> ())
+            | _ -> ());
+           `Null
+         in
          (* doc.insert_at: { parent_path, index, element }. *)
          let doc_insert_at_h : Effects.platform_effect = fun spec call_ctx _ ->
            let parent_expr, idx_expr, element_arg = match spec with
@@ -406,6 +543,9 @@ let dispatch_yaml_action
            ("doc.insert_after", doc_insert_after_h);
            ("doc.insert_at", doc_insert_at_h);
            ("doc.create_layer", doc_create_layer_h);
+           ("doc.wrap_in_group", doc_wrap_in_group_h);
+           ("doc.wrap_in_layer", doc_wrap_in_layer_h);
+           ("doc.unpack_group_at", doc_unpack_group_at_h);
            ("set_panel_state", set_panel_state_h);
          ] in
          let store = State_store.create () in
@@ -432,10 +572,11 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
   | ("toggle_all_layers_visibility" | "toggle_all_layers_outline"
      | "toggle_all_layers_lock") when kind = Layers ->
     dispatch_yaml_action cmd (get_model ())
-  | "new_group"
+  | ("new_group" | "flatten_artwork" | "collect_in_new_layer")
+    when kind = Layers ->
+    dispatch_yaml_action ~panel_selection:(get_panel_selection ()) cmd (get_model ())
   | "enter_isolation_mode" | "exit_isolation_mode"
-  | "flatten_artwork" | "collect_in_new_layer"
-    when kind = Layers -> ()  (* Tier-3 stubs for actions that need panel selection *)
+    when kind = Layers -> ()  (* Requires selection state still plumbed through yaml_panel_view *)
   | "invert_color" when kind = Color ->
     let m = get_model () in
     let color = if fill_on_top then
