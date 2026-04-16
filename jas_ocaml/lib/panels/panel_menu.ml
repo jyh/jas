@@ -134,10 +134,34 @@ let dispatch_yaml_action
            | Element.Layer _ -> Some (`Assoc [("__path__", `List [`Int i])])
            | _ -> None
          ) (Array.to_list layers) |> List.filter_map (fun x -> x) in
+         (* Phase 3 Group C: next_layer_name ("Layer N" for smallest
+            unused N) and new_layer_insert_index (min of selected
+            top-level indices + 1, else length). *)
+         let layer_names =
+           Array.to_list layers
+           |> List.filter_map (function
+             | Element.Layer le -> Some le.name
+             | _ -> None)
+         in
+         let rec find_n n =
+           let candidate = Printf.sprintf "Layer %d" n in
+           if List.mem candidate layer_names then find_n (n + 1)
+           else candidate
+         in
+         let next_layer_name = find_n 1 in
+         let top_level_selected = List.filter_map (function
+           | [i] -> Some i
+           | _ -> None) panel_selection in
+         let new_layer_insert_index = match List.sort compare top_level_selected with
+           | [] -> Array.length layers
+           | first :: _ -> first + 1
+         in
          let active_doc = `Assoc [
            ("top_level_layers", `List top_level_layers);
            ("top_level_layer_paths", `List top_level_layer_paths);
            ("layers_panel_selection_count", `Int (List.length panel_selection));
+           ("next_layer_name", `String next_layer_name);
+           ("new_layer_insert_index", `Int new_layer_insert_index);
          ] in
          (* panel.layers_panel_selection: inject as list of __path__
             markers for Group B actions to iterate via reverse(...). *)
@@ -206,6 +230,74 @@ let dispatch_yaml_action
                 in
                 new_layers.(idx) <- updated
               ) fields;
+              m#set_document { d with Document.layers = new_layers }
+            | _ -> ());
+           `Null
+         in
+         (* doc.create_layer: { name }. Factory returning a new Layer
+            Element stashed under __element_ref__. *)
+         let doc_create_layer_h : Effects.platform_effect = fun value call_ctx _ ->
+           let name_expr = match value with
+             | `Assoc pairs ->
+               (match List.assoc_opt "name" pairs with
+                | Some (`String s) -> s | _ -> "'Layer'")
+             | _ -> "'Layer'"
+           in
+           let eval_ctx = `Assoc call_ctx in
+           let name = match Expr_eval.evaluate name_expr eval_ctx with
+             | Expr_eval.Str s -> s
+             | _ -> "Layer"
+           in
+           let new_layer = Element.make_layer ~name [||] in
+           let stash_id = Printf.sprintf "__elem_%d__" !next_stash_id in
+           incr next_stash_id;
+           Hashtbl.add element_stash stash_id new_layer;
+           `Assoc [("__element_ref__", `String stash_id)]
+         in
+         (* doc.insert_at: { parent_path, index, element }. *)
+         let doc_insert_at_h : Effects.platform_effect = fun spec call_ctx _ ->
+           let parent_expr, idx_expr, element_arg = match spec with
+             | `Assoc pairs ->
+               let pe = match List.assoc_opt "parent_path" pairs with
+                 | Some (`String s) -> s | _ -> "path()"
+               in
+               let ie = List.assoc_opt "index" pairs in
+               let ea = List.assoc_opt "element" pairs in
+               (pe, ie, ea)
+             | _ -> ("path()", None, None)
+           in
+           let eval_ctx = `Assoc call_ctx in
+           let parent_val = Expr_eval.evaluate parent_expr eval_ctx in
+           let idx = match idx_expr with
+             | Some (`Int i) -> i
+             | Some (`String s) ->
+               (match Expr_eval.evaluate s eval_ctx with
+                | Expr_eval.Number n -> Float.to_int n
+                | _ -> 0)
+             | _ -> 0
+           in
+           let resolve_elem () =
+             let ref_json = match element_arg with
+               | Some (`Assoc _ as j) -> Some j
+               | Some (`String name) -> List.assoc_opt name call_ctx
+               | _ -> None
+             in
+             match ref_json with
+             | Some (`Assoc [("__element_ref__", `String id)]) ->
+               Hashtbl.find_opt element_stash id
+             | _ -> None
+           in
+           (match parent_val, resolve_elem () with
+            | Expr_eval.Path [], Some elem ->
+              (* Top-level insert *)
+              let d = m#document in
+              let n = Array.length d.Document.layers in
+              let insert_idx = max 0 (min idx n) in
+              let new_layers = Array.init (n + 1) (fun i ->
+                if i < insert_idx then d.Document.layers.(i)
+                else if i = insert_idx then elem
+                else d.Document.layers.(i - 1))
+              in
               m#set_document { d with Document.layers = new_layers }
             | _ -> ());
            `Null
@@ -312,6 +404,8 @@ let dispatch_yaml_action
            ("doc.delete_at", doc_delete_at_h);
            ("doc.clone_at", doc_clone_at_h);
            ("doc.insert_after", doc_insert_after_h);
+           ("doc.insert_at", doc_insert_at_h);
+           ("doc.create_layer", doc_create_layer_h);
            ("set_panel_state", set_panel_state_h);
          ] in
          let store = State_store.create () in
@@ -334,35 +428,7 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
   match cmd with
   | "close_panel" -> close_panel layout addr
   | "new_layer" when kind = Layers ->
-    let m = get_model () in
-    let d = m#document in
-    let used = Array.fold_left (fun acc e ->
-      match e with
-      | Element.Layer le -> le.name :: acc
-      | _ -> acc) [] d.Document.layers in
-    let rec find_name n =
-      let candidate = Printf.sprintf "Layer %d" n in
-      if List.mem candidate used then find_name (n + 1) else candidate
-    in
-    let name = find_name 1 in
-    let new_layer = Element.make_layer ~name [||] in
-    (* Insert above the topmost panel-selected top-level layer, or at end *)
-    let panel_sel = get_panel_selection () in
-    let top_level_indices = List.filter_map (function
-      | [i] -> Some i
-      | _ -> None) panel_sel in
-    let insert_pos = match List.sort compare top_level_indices with
-      | [] -> Array.length d.Document.layers
-      | first :: _ -> first + 1
-    in
-    let layers = d.Document.layers in
-    let n = Array.length layers in
-    let new_layers = Array.init (n + 1) (fun i ->
-      if i < insert_pos then layers.(i)
-      else if i = insert_pos then new_layer
-      else layers.(i - 1)) in
-    m#snapshot;
-    m#set_document { d with Document.layers = new_layers }
+    dispatch_yaml_action ~panel_selection:(get_panel_selection ()) "new_layer" (get_model ())
   | ("toggle_all_layers_visibility" | "toggle_all_layers_outline"
      | "toggle_all_layers_lock") when kind = Layers ->
     dispatch_yaml_action cmd (get_model ())
