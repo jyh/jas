@@ -90,6 +90,7 @@ fn render_el(
         "panel" => render_panel(el, ctx, rctx),
         "tree_view" => render_tree_view(el, ctx, rctx),
         "element_preview" => render_element_preview(el, ctx, rctx),
+        "dropdown" => render_layers_filter_dropdown(el, ctx, rctx),
         _ => render_placeholder(el, ctx),
     }
 }
@@ -2629,6 +2630,50 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         }
     };
 
+    // Apply type filter: hide rows whose element type is in hidden_types.
+    // Ancestor containers are preserved so descendants of visible types
+    // remain reachable.
+    let hidden_types: std::collections::HashSet<String> = rctx.app.borrow()
+        .layers_hidden_types.iter().cloned().collect();
+    if !hidden_types.is_empty() {
+        fn type_value(tl: &str) -> &'static str {
+            match tl {
+                "Line" => "line", "Rectangle" => "rectangle", "Circle" => "circle",
+                "Ellipse" => "ellipse", "Polyline" => "polyline", "Polygon" => "polygon",
+                "Path" => "path", "Text" => "text", "Text Path" => "text_path",
+                "Group" => "group", "Layer" => "layer", _ => "",
+            }
+        }
+        // Determine which paths to keep: rows whose type is not hidden,
+        // plus ancestor paths of those rows.
+        let visible_paths: std::collections::HashSet<Vec<usize>> = rows.iter()
+            .filter(|r| {
+                // Use the display_name's content to find the type label.
+                // display_name is either "<Layer>" or "Layer 1", so check both.
+                let type_hint = if r.is_layer { "layer" } else {
+                    // Extract from display_name if it's in angle brackets
+                    let n = &r.display_name;
+                    if n.starts_with('<') && n.ends_with('>') {
+                        let inner = &n[1..n.len()-1];
+                        type_value(inner)
+                    } else {
+                        // Named layer already checked
+                        ""
+                    }
+                };
+                !hidden_types.contains(type_hint)
+            })
+            .map(|r| r.path.clone())
+            .collect();
+        let mut keep = visible_paths.clone();
+        for p in &visible_paths {
+            for i in 1..p.len() {
+                keep.insert(p[..i].to_vec());
+            }
+        }
+        rows.retain(|r| keep.contains(&r.path));
+    }
+
     // Apply isolation filter: keep only rows that are strict descendants of
     // the isolated root (not the root itself).
     if let Some(ref root) = isolation_root {
@@ -3500,6 +3545,121 @@ fn render_element_preview(el: &serde_json::Value, ctx: &serde_json::Value, _rctx
         div {
             id: "{id}",
             style: "width:{sz}px;height:{sz}px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0;{style}",
+        }
+    }
+}
+
+/// Render the layers panel's type filter dropdown. For other dropdowns
+/// (none exist yet), falls through to placeholder.
+fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    if id != "lp_filter_button" {
+        return render_placeholder(el, ctx);
+    }
+
+    let style = build_style(el, ctx);
+    let icon_svg = {
+        let ws = super::workspace::Workspace::load();
+        ws.and_then(|ws| {
+            ws.icons().get("filter").map(|def| {
+                let viewbox = def.get("viewbox").and_then(|v| v.as_str()).unwrap_or("0 0 16 16");
+                let inner = def.get("svg").and_then(|v| v.as_str()).unwrap_or("");
+                format!(r#"<svg viewBox="{viewbox}" width="14" height="14" xmlns="http://www.w3.org/2000/svg">{inner}</svg>"#)
+            })
+        }).unwrap_or_default()
+    };
+
+    let is_open = rctx.app.borrow().layers_filter_dropdown_open;
+
+    let items: Vec<(String, String)> = el.get("items")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|item| {
+            let label = item.get("label").and_then(|v| v.as_str())?;
+            let value = item.get("value").and_then(|v| v.as_str())?;
+            Some((label.to_string(), value.to_string()))
+        }).collect())
+        .unwrap_or_default();
+
+    let toggle_app = rctx.app.clone();
+    let mut toggle_rev = rctx.revision;
+    let on_toggle_open = move |evt: Event<MouseData>| {
+        evt.stop_propagation();
+        let a = toggle_app.clone();
+        spawn(async move {
+            let mut st = a.borrow_mut();
+            st.layers_filter_dropdown_open = !st.layers_filter_dropdown_open;
+            toggle_rev += 1;
+        });
+    };
+
+    let hidden_types: std::collections::HashSet<String> = rctx.app.borrow()
+        .layers_hidden_types.iter().cloned().collect();
+
+    let close_app = rctx.app.clone();
+    let mut close_rev = rctx.revision;
+
+    rsx! {
+        div {
+            id: "{id}",
+            style: "position:relative;display:inline-flex;{style}",
+            div {
+                style: "width:20px;height:20px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--jas-text,#ccc);",
+                onclick: on_toggle_open,
+                div { style: "width:14px;height:14px;", dangerous_inner_html: "{icon_svg}" }
+            }
+            if is_open {
+                {
+                    // Backdrop
+                    let bd_app = close_app.clone();
+                    let mut bd_rev = close_rev;
+                    rsx! {
+                        div {
+                            style: "position:fixed;inset:0;z-index:9999;",
+                            onclick: move |_: Event<MouseData>| {
+                                let a = bd_app.clone();
+                                spawn(async move {
+                                    a.borrow_mut().layers_filter_dropdown_open = false;
+                                    bd_rev += 1;
+                                });
+                            },
+                        }
+                        div {
+                            style: "position:absolute;top:22px;right:0;background:var(--jas-pane-bg,#2a2a2a);border:1px solid var(--jas-border,#555);border-radius:2px;padding:4px 0;min-width:140px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
+                            for (label, value) in items.iter() {
+                                {
+                                    let item_app = rctx.app.clone();
+                                    let mut item_rev = close_rev;
+                                    let v = value.clone();
+                                    let checked = !hidden_types.contains(&v);
+                                    let check_mark = if checked { "☑" } else { "☐" };
+                                    rsx! {
+                                        div {
+                                            key: "{v}",
+                                            style: "padding:3px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;display:flex;align-items:center;gap:6px;",
+                                            onclick: move |evt: Event<MouseData>| {
+                                                evt.stop_propagation();
+                                                let a = item_app.clone();
+                                                let vv = v.clone();
+                                                spawn(async move {
+                                                    let mut st = a.borrow_mut();
+                                                    if st.layers_hidden_types.contains(&vv) {
+                                                        st.layers_hidden_types.remove(&vv);
+                                                    } else {
+                                                        st.layers_hidden_types.insert(vv);
+                                                    }
+                                                    item_rev += 1;
+                                                });
+                                            },
+                                            span { "{check_mark}" }
+                                            span { "{label}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
