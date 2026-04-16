@@ -461,12 +461,11 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
         "toggle_all_layers_visibility" => {
             use crate::geometry::element::{Element as E, Visibility};
             if let Some(tab) = st.tab_mut() {
-                let doc = tab.model.document();
-                let any_visible = doc.layers.iter()
+                let mut new_doc = tab.model.document().clone();
+                let any_visible = new_doc.layers.iter()
                     .any(|l| l.visibility() != Visibility::Invisible);
                 let target = if any_visible { Visibility::Invisible } else { Visibility::Preview };
                 tab.model.snapshot();
-                let mut new_doc = doc.clone();
                 for i in 0..new_doc.layers.len() {
                     if let E::Layer(_) = new_doc.layers[i] {
                         new_doc.layers[i].common_mut().visibility = target;
@@ -479,12 +478,11 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
         "toggle_all_layers_outline" => {
             use crate::geometry::element::{Element as E, Visibility};
             if let Some(tab) = st.tab_mut() {
-                let doc = tab.model.document();
-                let any_preview = doc.layers.iter()
+                let mut new_doc = tab.model.document().clone();
+                let any_preview = new_doc.layers.iter()
                     .any(|l| l.visibility() == Visibility::Preview);
                 let target = if any_preview { Visibility::Outline } else { Visibility::Preview };
                 tab.model.snapshot();
-                let mut new_doc = doc.clone();
                 for i in 0..new_doc.layers.len() {
                     if let E::Layer(_) = new_doc.layers[i] {
                         new_doc.layers[i].common_mut().visibility = target;
@@ -497,11 +495,10 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
         "toggle_all_layers_lock" => {
             use crate::geometry::element::Element as E;
             if let Some(tab) = st.tab_mut() {
-                let doc = tab.model.document();
-                let any_unlocked = doc.layers.iter().any(|l| !l.locked());
+                let mut new_doc = tab.model.document().clone();
+                let any_unlocked = new_doc.layers.iter().any(|l| !l.locked());
                 let target = any_unlocked;
                 tab.model.snapshot();
-                let mut new_doc = doc.clone();
                 for i in 0..new_doc.layers.len() {
                     if let E::Layer(_) = new_doc.layers[i] {
                         new_doc.layers[i].common_mut().locked = target;
@@ -1709,6 +1706,15 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
     let field = dialog_field(bind_expr);
     let mut dialog_signal = rctx.dialog_ctx.0;
     let mut revision = rctx.revision;
+    let app = rctx.app.clone();
+    // Special case: layers panel search binding
+    let is_search = bind_expr == "panel.search_query";
+    // Read live value from AppState if search
+    let value = if is_search {
+        app.borrow().layers_search_query.clone()
+    } else {
+        value
+    };
 
     rsx! {
         input {
@@ -1718,8 +1724,17 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
             initial_value: "{value}",
             style: "color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
             oninput: move |evt: Event<FormData>| {
-                if field.is_empty() { return; }
                 let new_val = evt.value();
+                if is_search {
+                    let a = app.clone();
+                    let v = new_val.clone();
+                    spawn(async move {
+                        a.borrow_mut().layers_search_query = v;
+                        revision += 1;
+                    });
+                    return;
+                }
+                if field.is_empty() { return; }
                 if let Some(mut ds) = dialog_signal() {
                     ds.set_value(&field, serde_json::json!(new_val));
                     dialog_signal.set(Some(ds));
@@ -2539,8 +2554,11 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         rows
     }
 
+    // Read search query from AppState (populated by the search input handler)
+    let search_query: String = rctx.app.borrow().layers_search_query.to_lowercase();
+
     // Build flat row list from the live document
-    let rows: Vec<TreeRow> = {
+    let mut rows: Vec<TreeRow> = {
         let st = rctx.app.borrow();
         if let Some(tab) = st.tab() {
             let doc = tab.model.document();
@@ -2553,6 +2571,22 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             Vec::new()
         }
     };
+
+    // Apply search filter: keep rows whose name matches, plus their ancestors.
+    if !search_query.is_empty() {
+        let matching_paths: std::collections::HashSet<Vec<usize>> = rows.iter()
+            .filter(|r| r.display_name.to_lowercase().contains(&search_query))
+            .map(|r| r.path.clone())
+            .collect();
+        // Include all ancestor paths of matching rows
+        let mut include: std::collections::HashSet<Vec<usize>> = matching_paths.clone();
+        for p in &matching_paths {
+            for i in 1..p.len() {
+                include.insert(p[..i].to_vec());
+            }
+        }
+        rows.retain(|r| include.contains(&r.path));
+    }
 
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
@@ -3078,15 +3112,10 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     let item_style = "padding:4px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;";
                     let item_style_disabled = "padding:4px 12px;font-size:11px;color:var(--jas-text-dim,#777);";
 
-                    let close_app = app.clone();
-                    let mut close_rev = revision;
-                    let close_menu = move || {
-                        let a = close_app.clone();
-                        spawn(async move {
-                            a.borrow_mut().layers_context_menu = None;
-                            close_rev += 1;
-                        });
-                    };
+                    let close_app1 = app.clone();
+                    let mut close_rev1 = revision;
+                    let close_app2 = app.clone();
+                    let mut close_rev2 = revision;
 
                     let cpath_for_action = cpath.clone();
                     let mut ctx_dialog_signal = rctx.dialog_ctx.0;
@@ -3126,10 +3155,20 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         // Backdrop to close menu on click
                         div {
                             style: "position:fixed;inset:0;z-index:9999;",
-                            onclick: move |_: Event<MouseData>| close_menu(),
+                            onclick: move |_: Event<MouseData>| {
+                                let a = close_app1.clone();
+                                spawn(async move {
+                                    a.borrow_mut().layers_context_menu = None;
+                                    close_rev1 += 1;
+                                });
+                            },
                             oncontextmenu: move |evt: Event<MouseData>| {
                                 evt.prevent_default();
-                                close_menu();
+                                let a = close_app2.clone();
+                                spawn(async move {
+                                    a.borrow_mut().layers_context_menu = None;
+                                    close_rev2 += 1;
+                                });
                             },
                         }
                         div {
