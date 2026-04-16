@@ -212,3 +212,33 @@ def test_toggle_all_layers_lock_via_yaml():
     panel_dispatch(PanelKind.LAYERS, "toggle_all_layers_lock",
                    addr, layout, model=model)
     assert model.document.layers[0].locked is True
+
+
+def test_enter_isolation_mode_via_yaml_pushes_selection():
+    from geometry.element import Visibility
+    from jas.panels import layers_panel_state as lps
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    lps.clear_isolation_stack()
+    model = _make_model_with_layers([
+        ("A", Visibility.PREVIEW, False),
+        ("B", Visibility.PREVIEW, False),
+    ])
+    _dispatch_yaml_layers_action("enter_isolation_mode", model,
+                                  panel_selection=[(1,)])
+    assert lps.get_isolation_stack() == [(1,)]
+
+
+def test_exit_isolation_mode_via_yaml_pops():
+    from geometry.element import Visibility
+    from jas.panels import layers_panel_state as lps
+    layout = WorkspaceLayout.default_layout()
+    dock = layout.anchored_dock(DockEdge.RIGHT)
+    addr = PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=2), panel_idx=0)
+    lps.clear_isolation_stack()
+    lps.push_isolation_level((0,))
+    model = _make_model_with_layers([
+        ("A", Visibility.PREVIEW, False),
+    ])
+    panel_dispatch(PanelKind.LAYERS, "exit_isolation_mode", addr, layout,
+                   model=model)
+    assert lps.get_isolation_stack() == []
