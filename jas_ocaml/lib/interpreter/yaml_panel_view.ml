@@ -256,6 +256,163 @@ and render_panel ~packing ~ctx el =
   | `Null -> render_placeholder ~packing el
   | content -> render_element ~packing ~ctx content
 
+(** Delete currently panel-selected elements (preserves last layer). *)
+and do_delete_panel_selection () =
+  match !_get_model_ref () with
+  | None -> ()
+  | Some m ->
+    let d = m#document in
+    let paths = PathSet2.elements !_layers_panel_selection in
+    if paths = [] then ()
+    else begin
+      let layer_count = Array.length d.Document.layers in
+      let top_deletes = List.length (List.filter (fun p -> List.length p = 1) paths) in
+      if top_deletes >= layer_count then ()
+      else begin
+        m#snapshot;
+        let sorted = List.sort (fun a b -> compare b a) paths in
+        let new_doc = List.fold_left (fun acc p ->
+          Document.delete_element acc p
+        ) d sorted in
+        m#set_document new_doc;
+        _layers_panel_selection := PathSet2.empty
+      end
+    end
+
+(** Duplicate each panel-selected element in place. *)
+and do_duplicate_panel_selection () =
+  match !_get_model_ref () with
+  | None -> ()
+  | Some m ->
+    let paths = PathSet2.elements !_layers_panel_selection in
+    if paths = [] then ()
+    else begin
+      m#snapshot;
+      let sorted = List.sort (fun a b -> compare b a) paths in
+      let new_doc = List.fold_left (fun acc p ->
+        let e = Document.get_element acc p in
+        Document.insert_element_after acc p e
+      ) m#document sorted in
+      m#set_document new_doc
+    end
+
+(** Flatten groups in panel selection by unpacking their children. *)
+and do_flatten_artwork () =
+  match !_get_model_ref () with
+  | None -> ()
+  | Some m ->
+    let paths = PathSet2.elements !_layers_panel_selection in
+    if paths = [] then ()
+    else begin
+      m#snapshot;
+      let sorted = List.sort (fun a b -> compare b a) paths in
+      let new_doc = List.fold_left (fun acc p ->
+        let e = Document.get_element acc p in
+        match e with
+        | Element.Group _ ->
+          let children = Document.children_of e in
+          let d1 = Document.delete_element acc p in
+          (* Insert children at original position *)
+          let rec drop_last = function
+            | [] | [_] -> []
+            | x :: xs -> x :: drop_last xs
+          in
+          let last_idx = List.nth p (List.length p - 1) in
+          let parent_path = drop_last p in
+          Array.fold_left (fun (acc_doc, offset) child ->
+            let ip = parent_path @ [last_idx + offset - 1] in
+            let acc_doc' =
+              if last_idx + offset - 1 < 0 then
+                (* Insert before first: insert after at idx -1 doesn't work.
+                   Instead, insert after and then the previous item shifts. *)
+                Document.insert_element_after acc_doc (parent_path @ [0]) child
+              else
+                Document.insert_element_after acc_doc ip child
+            in
+            (acc_doc', offset + 1)
+          ) (d1, 0) children |> fst
+        | _ -> acc
+      ) m#document sorted in
+      m#set_document new_doc;
+      _layers_panel_selection := PathSet2.empty
+    end
+
+(** Move panel-selected elements into a new layer. *)
+and do_collect_in_new_layer () =
+  match !_get_model_ref () with
+  | None -> ()
+  | Some m ->
+    let paths = PathSet2.elements !_layers_panel_selection in
+    if paths = [] then ()
+    else begin
+      let d = m#document in
+      let used = Array.fold_left (fun acc e ->
+        match e with
+        | Element.Layer le -> le.name :: acc
+        | _ -> acc) [] d.Document.layers in
+      let rec find_name n =
+        let candidate = Printf.sprintf "Layer %d" n in
+        if List.mem candidate used then find_name (n + 1) else candidate
+      in
+      let name = find_name 1 in
+      m#snapshot;
+      let sorted = List.sort compare paths in
+      let elems = List.map (fun p -> Document.get_element d p) sorted in
+      let new_doc_deleted =
+        let rev_sorted = List.rev sorted in
+        List.fold_left (fun acc p -> Document.delete_element acc p) d rev_sorted
+      in
+      let new_layer = Element.make_layer ~name (Array.of_list elems) in
+      let new_layers = Array.append new_doc_deleted.Document.layers [|new_layer|] in
+      m#set_document { new_doc_deleted with Document.layers = new_layers };
+      _layers_panel_selection := PathSet2.empty
+    end
+
+(** Open a Layer Options dialog to edit the layer at path. *)
+and open_layer_options_dialog path =
+  match !_get_model_ref () with
+  | None -> ()
+  | Some m ->
+    let d = m#document in
+    let e = Document.get_element d path in
+    match e with
+    | Element.Layer le ->
+      let dlg = GWindow.dialog ~title:"Layer Options" ~modal:true () in
+      let vbox = dlg#vbox in
+      let name_row = GPack.hbox ~spacing:8 ~packing:(vbox#pack ~expand:false) () in
+      ignore (GMisc.label ~text:"Name:" ~packing:(name_row#pack ~expand:false) ());
+      let name_entry = GEdit.entry ~text:le.name ~packing:(name_row#pack ~expand:true) () in
+      let lock_cb = GButton.check_button ~label:"Lock" ~packing:(vbox#pack ~expand:false) () in
+      lock_cb#set_active le.locked;
+      let show_cb = GButton.check_button ~label:"Show" ~packing:(vbox#pack ~expand:false) () in
+      show_cb#set_active (le.visibility <> Element.Invisible);
+      let preview_cb = GButton.check_button ~label:"Preview" ~packing:(vbox#pack ~expand:false) () in
+      preview_cb#set_active (le.visibility = Element.Preview);
+      preview_cb#misc#set_sensitive show_cb#active;
+      ignore (show_cb#connect#toggled ~callback:(fun () ->
+        preview_cb#misc#set_sensitive show_cb#active));
+      dlg#add_button_stock `CANCEL `CANCEL;
+      dlg#add_button_stock `OK `OK;
+      let result = dlg#run () in
+      if result = `OK then begin
+        let new_name = name_entry#text in
+        let new_lock = lock_cb#active in
+        let new_vis =
+          if not show_cb#active then Element.Invisible
+          else if preview_cb#active then Element.Preview
+          else Element.Outline
+        in
+        m#snapshot;
+        let new_e = Element.Layer { le with
+          name = new_name;
+          locked = new_lock;
+          visibility = new_vis;
+        } in
+        m#set_document (Document.replace_element d path new_e)
+      end;
+      dlg#destroy ()
+    | _ -> ()
+
 (** Render a fitted-viewBox SVG of an element as a GTK widget.
     Writes the SVG to a temp file and loads it via GdkPixbuf at the
     requested size, falling back to an empty frame on error. *)
@@ -291,6 +448,24 @@ and make_element_thumbnail ~packing (elem : Element.element) (size : int) =
 and render_tree_view ~packing ~ctx:_ _el =
   let vbox = GPack.vbox ~spacing:0 ~packing () in
   let get_model = !_get_model_ref in
+  (* Auto-expand ancestors of element-selected paths so selected elements
+     are visible in the tree. *)
+  (match get_model () with
+   | None -> ()
+   | Some m ->
+     let d = m#document in
+     let selected = Document.selected_paths d.Document.selection in
+     Document.PathSet.iter (fun p ->
+       let n = List.length p in
+       for i = 1 to n - 1 do
+         let rec take k lst = match k, lst with
+           | 0, _ | _, [] -> []
+           | k, h :: t -> h :: take (k - 1) t
+         in
+         let ancestor = take i p in
+         _layers_collapsed := PathSet2.remove ancestor !_layers_collapsed
+       done
+     ) selected);
   (* Render breadcrumb bar if in isolation mode *)
   (if !_layers_isolation_stack <> [] then begin
     let bar_eb = GBin.event_box ~packing:(vbox#pack ~expand:false) () in
@@ -394,6 +569,49 @@ and render_tree_view ~packing ~ctx:_ _el =
             let ch = Document.children_of elem in
             add_children ch (depth + 1) path layer_color)
         end else
+        (* Apply search filter: skip if name doesn't match and no descendant does *)
+        let passes_search =
+          let q = String.lowercase_ascii !_layers_search_query in
+          if q = "" then true
+          else
+            let (name_here, _) = display_name elem in
+            let n = String.lowercase_ascii name_here in
+            let rec find_sub s p si pi =
+              if pi >= String.length p then true
+              else if si >= String.length s then false
+              else if s.[si] = p.[pi] then find_sub s p (si+1) (pi+1)
+              else find_sub s p (si - pi + 1) 0
+            in
+            if find_sub n q 0 0 then true
+            else
+              (* Include ancestor if any descendant matches *)
+              let rec has_match ee =
+                let (ne, _) = display_name ee in
+                let nn = String.lowercase_ascii ne in
+                if find_sub nn q 0 0 then true
+                else match ee with
+                  | Element.Group _ | Element.Layer _ ->
+                    let kids = Document.children_of ee in
+                    Array.exists has_match kids
+                  | _ -> false
+              in has_match elem
+        in
+        (* Apply type filter *)
+        let type_v = match elem with
+          | Element.Line _ -> "line" | Element.Rect _ -> "rectangle"
+          | Element.Circle _ -> "circle" | Element.Ellipse _ -> "ellipse"
+          | Element.Polyline _ -> "polyline" | Element.Polygon _ -> "polygon"
+          | Element.Path _ -> "path" | Element.Text _ -> "text"
+          | Element.Text_path _ -> "text_path"
+          | Element.Group _ -> "group" | Element.Layer _ -> "layer"
+        in
+        let passes_type = not (StrSet.mem type_v !_layers_hidden_types) in
+        if not (passes_search && passes_type) then begin
+          (* Still recurse in case descendants pass *)
+          (if is_container elem && not (PathSet2.mem path !_layers_collapsed) then
+            let ch = Document.children_of elem in
+            add_children ch (depth + 1) path layer_color)
+        end else
         let is_container = is_container elem in
         let is_selected = Document.PathSet.mem path selected_paths in
         let cur_color =
@@ -416,12 +634,54 @@ and render_tree_view ~packing ~ctx:_ _el =
         else if is_drop_target then
           row_eb#misc#modify_bg [`NORMAL, `NAME "#3a7bd5"];
         let row_path = path in
-        ignore (row_eb#event#connect#button_press ~callback:(fun _ ->
-          _layers_panel_selection := PathSet2.singleton row_path;
-          _layers_drag_source := Some row_path;
-          _layers_drag_target := None;
-          !_rerender_layers ();
-          true));
+        ignore (row_eb#event#connect#button_press ~callback:(fun evt ->
+          let button = GdkEvent.Button.button evt in
+          if button = 3 then begin
+            (* Right-click: show context menu *)
+            if not (PathSet2.mem row_path !_layers_panel_selection) then begin
+              _layers_panel_selection := PathSet2.singleton row_path;
+              !_rerender_layers ()
+            end;
+            let menu = GMenu.menu () in
+            let add_item ~label ?(sensitive=true) action =
+              let item = GMenu.menu_item ~label ~packing:menu#append () in
+              item#misc#set_sensitive sensitive;
+              ignore (item#connect#activate ~callback:action)
+            in
+            let elem_at = match get_model () with
+              | Some m2 -> Some (Document.get_element m2#document row_path)
+              | None -> None
+            in
+            let is_layer_path = match elem_at with Some (Element.Layer _) -> true | _ -> false in
+            let is_cont_path = match elem_at with Some (Element.Group _ | Element.Layer _) -> true | _ -> false in
+            add_item ~label:"Options for Layer..." ~sensitive:is_layer_path (fun () ->
+              open_layer_options_dialog row_path);
+            add_item ~label:"Duplicate" (fun () -> do_duplicate_panel_selection ());
+            add_item ~label:"Delete Selection" (fun () -> do_delete_panel_selection ());
+            ignore (GMenu.separator_item ~packing:menu#append ());
+            if !_layers_isolation_stack = [] then
+              add_item ~label:"Enter Isolation Mode" ~sensitive:is_cont_path (fun () ->
+                _layers_isolation_stack := row_path :: !_layers_isolation_stack;
+                !_rerender_layers ())
+            else
+              add_item ~label:"Exit Isolation Mode" (fun () ->
+                (match !_layers_isolation_stack with
+                 | _ :: rest -> _layers_isolation_stack := rest
+                 | [] -> ());
+                !_rerender_layers ());
+            ignore (GMenu.separator_item ~packing:menu#append ());
+            add_item ~label:"Flatten Artwork" (fun () -> do_flatten_artwork ());
+            add_item ~label:"Collect in New Layer" (fun () -> do_collect_in_new_layer ());
+            menu#misc#show_all ();
+            menu#popup ~button ~time:(GdkEvent.Button.time evt);
+            true
+          end else begin
+            _layers_panel_selection := PathSet2.singleton row_path;
+            _layers_drag_source := Some row_path;
+            _layers_drag_target := None;
+            !_rerender_layers ();
+            true
+          end));
         ignore (row_eb#event#connect#enter_notify ~callback:(fun _ ->
           (match !_layers_drag_source with
            | Some src when src <> row_path ->
