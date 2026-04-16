@@ -196,6 +196,7 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
         m.insert("_layers_context_menu".into(), serde_json::Value::Bool(true));
     }
     m.insert("_layers_search_query".into(), serde_json::Value::String(st.layers_search_query.clone()));
+    m.insert("_layers_isolation_depth".into(), serde_json::Value::Number(st.layers_isolation_stack.len().into()));
 
     m
 }
@@ -210,7 +211,7 @@ fn build_panel_state_subset(
     let keys: &[&str] = match panel_name {
         "stroke" => &["stroke_width", "stroke_color"],
         "color" | "swatches" => &["fill_color", "stroke_color", "fill_on_top"],
-        "layers" => &["_doc_generation", "_layers_renaming", "_layers_collapsed_count", "_layers_panel_sel_count", "_layers_drag_target", "_layers_context_menu", "_layers_search_query"],
+        "layers" => &["_doc_generation", "_layers_renaming", "_layers_collapsed_count", "_layers_panel_sel_count", "_layers_drag_target", "_layers_context_menu", "_layers_search_query", "_layers_isolation_depth"],
         _ => &["fill_color", "stroke_color", "fill_on_top"],
     };
     let mut m = serde_json::Map::new();
