@@ -2795,25 +2795,102 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         evt.stop_propagation();
                         let p = eye_path.clone();
                         let a = eye_app.clone();
+                        let alt = evt.data().modifiers().alt();
                         spawn(async move {
+                            use crate::geometry::element::Visibility;
                             let mut st = a.borrow_mut();
-                            if let Some(tab) = st.tab_mut() {
-                                tab.model.snapshot();
-                                let doc = tab.model.document_mut();
-                                if let Some(elem) = doc.get_element_mut(&p) {
-                                    let new_vis = match elem.visibility() {
-                                        crate::geometry::element::Visibility::Preview => crate::geometry::element::Visibility::Outline,
-                                        crate::geometry::element::Visibility::Outline => crate::geometry::element::Visibility::Invisible,
-                                        crate::geometry::element::Visibility::Invisible => crate::geometry::element::Visibility::Preview,
-                                    };
-                                    elem.common_mut().visibility = new_vis;
-                                    // Remove invisible elements (and their descendants) from selection
-                                    if new_vis == crate::geometry::element::Visibility::Invisible {
-                                        let path = p.clone();
-                                        doc.selection.retain(|es| {
-                                            // Remove if path matches exactly or is a descendant
-                                            !(es.path == path || es.path.starts_with(&path))
-                                        });
+                            if alt {
+                                // Option-click: solo/unsolo among siblings
+                                let parent_prefix: Vec<usize> = p[..p.len()-1].to_vec();
+                                // Gather all sibling paths
+                                let sibling_paths: Vec<Vec<usize>> = if let Some(tab) = st.tab() {
+                                    let doc = tab.model.document();
+                                    if parent_prefix.is_empty() {
+                                        (0..doc.layers.len()).map(|i| vec![i]).collect()
+                                    } else if let Some(parent) = doc.get_element(&parent_prefix) {
+                                        if let Some(children) = parent.children() {
+                                            (0..children.len()).map(|i| {
+                                                let mut pp = parent_prefix.clone();
+                                                pp.push(i);
+                                                pp
+                                            }).collect()
+                                        } else { Vec::new() }
+                                    } else { Vec::new() }
+                                } else { Vec::new() };
+
+                                let is_already_soloed = matches!(
+                                    &st.layers_solo_state,
+                                    Some(s) if s.soloed_path == p
+                                );
+
+                                if is_already_soloed {
+                                    // Restore saved visibilities
+                                    let saved = st.layers_solo_state.as_ref().unwrap().saved.clone();
+                                    if let Some(tab) = st.tab_mut() {
+                                        tab.model.snapshot();
+                                        let doc = tab.model.document_mut();
+                                        for (sp, vis) in &saved {
+                                            if let Some(elem) = doc.get_element_mut(sp) {
+                                                elem.common_mut().visibility = *vis;
+                                            }
+                                        }
+                                    }
+                                    st.layers_solo_state = None;
+                                } else {
+                                    // Save current visibilities of siblings != p, then set them invisible
+                                    let mut saved = std::collections::HashMap::new();
+                                    let doc_read = st.tab().map(|t| t.model.document().clone());
+                                    if let Some(doc) = doc_read {
+                                        for sp in &sibling_paths {
+                                            if sp != &p {
+                                                if let Some(elem) = doc.get_element(sp) {
+                                                    saved.insert(sp.clone(), elem.visibility());
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if let Some(tab) = st.tab_mut() {
+                                        tab.model.snapshot();
+                                        let doc = tab.model.document_mut();
+                                        // Ensure soloed element is visible
+                                        if let Some(elem) = doc.get_element_mut(&p) {
+                                            if elem.visibility() == Visibility::Invisible {
+                                                elem.common_mut().visibility = Visibility::Preview;
+                                            }
+                                        }
+                                        for sp in &sibling_paths {
+                                            if sp != &p {
+                                                if let Some(elem) = doc.get_element_mut(sp) {
+                                                    elem.common_mut().visibility = Visibility::Invisible;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    st.layers_solo_state = Some(crate::workspace::app_state::LayerSoloState {
+                                        soloed_path: p.clone(),
+                                        saved,
+                                    });
+                                }
+                            } else {
+                                // Regular click: cycle visibility
+                                // Clicking normally discards any pending solo restore state
+                                st.layers_solo_state = None;
+                                if let Some(tab) = st.tab_mut() {
+                                    tab.model.snapshot();
+                                    let doc = tab.model.document_mut();
+                                    if let Some(elem) = doc.get_element_mut(&p) {
+                                        let new_vis = match elem.visibility() {
+                                            Visibility::Preview => Visibility::Outline,
+                                            Visibility::Outline => Visibility::Invisible,
+                                            Visibility::Invisible => Visibility::Preview,
+                                        };
+                                        elem.common_mut().visibility = new_vis;
+                                        if new_vis == Visibility::Invisible {
+                                            let path = p.clone();
+                                            doc.selection.retain(|es| {
+                                                !(es.path == path || es.path.starts_with(&path))
+                                            });
+                                        }
                                     }
                                 }
                             }

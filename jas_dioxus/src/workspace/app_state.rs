@@ -117,6 +117,20 @@ pub(crate) struct AppState {
     /// has been entered. Panel and canvas restrict interaction to
     /// descendants of the deepest (last) isolated container.
     pub(crate) layers_isolation_stack: Vec<Vec<usize>>,
+    /// Solo visibility state: when Option-clicking the eye button, the
+    /// clicked element's siblings get saved and hidden. Second Option-click
+    /// on the same element restores them. Map from sibling path to saved
+    /// visibility state. None when no solo is active.
+    pub(crate) layers_solo_state: Option<LayerSoloState>,
+}
+
+/// Solo/unsolo state for the layers panel.
+#[derive(Debug, Clone)]
+pub(crate) struct LayerSoloState {
+    /// Path of the element that was Option-clicked (the soloed sibling).
+    pub(crate) soloed_path: Vec<usize>,
+    /// Saved visibility of each sibling before solo.
+    pub(crate) saved: std::collections::HashMap<Vec<usize>, crate::geometry::element::Visibility>,
 }
 
 /// Stroke panel state fields that sync with global state and the selection.
@@ -207,6 +221,7 @@ impl AppState {
             layers_context_menu: None,
             layers_search_query: String::new(),
             layers_isolation_stack: Vec::new(),
+            layers_solo_state: None,
         }
     }
 
