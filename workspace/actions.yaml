@@ -1048,7 +1048,9 @@ actions:
     tier: 3
     enabled_when: "active_document.layers_panel_selection_count > 0"
     effects:
-      - log: "new_group"
+      - snapshot
+      - doc.wrap_in_group:
+          paths: "panel.layers_panel_selection"
 
   delete_layer_selection:
     description: >

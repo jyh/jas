@@ -1598,8 +1598,11 @@
       "tier": 3,
       "enabled_when": "active_document.layers_panel_selection_count > 0",
       "effects": [
+        "snapshot",
         {
-          "log": "new_group"
+          "doc.wrap_in_group": {
+            "paths": "panel.layers_panel_selection"
+          }
         }
       ]
     },

@@ -233,6 +233,70 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         store.insert_after(path_val.value, element)
         return None
 
+    # doc.wrap_in_group: { paths } — PHASE3 sub-tollgate 3
+    # Wraps a set of elements in a new Group at the position of the
+    # topmost source path. Children are ordered by their document
+    # position (not selection order). All paths must share the same
+    # parent — this check is the caller's responsibility (via
+    # enabled_when on the YAML action).
+    if "doc.wrap_in_group" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        spec = effect["doc.wrap_in_group"]
+        if not isinstance(spec, dict):
+            return None
+        eval_ctx = store.eval_context(ctx)
+        paths_expr = spec.get("paths", "[]")
+        if isinstance(paths_expr, list):
+            # Raw list of path-ish items (from YAML literal)
+            raw_paths = paths_expr
+        else:
+            val = evaluate(str(paths_expr), eval_ctx)
+            if val.type != ValueType.LIST:
+                return None
+            raw_paths = val.value
+        # Normalize paths: accept tuples, Value.PATH wrappers, or
+        # __path__-marker dicts.
+        normalized: list[tuple[int, ...]] = []
+        for p in raw_paths:
+            if hasattr(p, "type") and p.type == ValueType.PATH:
+                normalized.append(tuple(p.value))
+            elif isinstance(p, dict) and "__path__" in p:
+                normalized.append(tuple(p["__path__"]))
+            elif isinstance(p, (list, tuple)):
+                normalized.append(tuple(p))
+        if not normalized:
+            return None
+        # Sort by document order (ascending) for children; track
+        # topmost for insertion.
+        sorted_paths = sorted(normalized)
+        insert_path_parent = sorted_paths[0][:-1]
+        insert_index = sorted_paths[0][-1] if sorted_paths[0] else 0
+        # Collect element clones in document order
+        children = []
+        import copy
+        for p in sorted_paths:
+            elem = store.get_element(p)
+            if elem is not None:
+                children.append(copy.deepcopy(elem))
+        if not children:
+            return None
+        # Delete in reverse order so indices stay valid
+        for p in reversed(sorted_paths):
+            store.delete_element_at(p)
+        # Construct the group element
+        group = {
+            "kind": "Group",
+            "children": children,
+            "common": {
+                "visibility": "preview",
+                "locked": False,
+                "opacity": 1.0,
+            },
+        }
+        # Insert at the topmost-source position under the shared parent
+        store.insert_at(insert_path_parent, insert_index, group)
+        return None
+
     # doc.insert_at: { parent_path, index, element } — PHASE3 §5.5
     if "doc.insert_at" in effect:
         from workspace_interpreter.expr_types import ValueType

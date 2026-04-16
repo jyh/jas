@@ -504,6 +504,91 @@ class TestDocSetEffect:
 # ══════════════════════════════════════════════════════════════════
 
 
+class TestDocWrapInGroupEffect:
+    """PHASE3.md sub-tollgate 3: doc.wrap_in_group primitive."""
+
+    def test_wrap_two_adjacent_top_level_layers(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A"},
+            {"kind": "Layer", "name": "B"},
+            {"kind": "Layer", "name": "C"},
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.wrap_in_group": {
+                "paths": [
+                    {"__path__": [0]},
+                    {"__path__": [1]},
+                ],
+            }},
+        ], {}, store, diagnostics=[])
+        # After: new Group at index 0 containing {A, B}, then C
+        assert len(doc["layers"]) == 2
+        assert doc["layers"][0]["kind"] == "Group"
+        group = doc["layers"][0]
+        assert len(group["children"]) == 2
+        assert group["children"][0]["name"] == "A"
+        assert group["children"][1]["name"] == "B"
+        assert doc["layers"][1]["name"] == "C"
+
+    def test_wrap_preserves_order_of_selection_paths(self):
+        """Children appear in the source document's order, not selection order."""
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A"},
+            {"kind": "Layer", "name": "B"},
+            {"kind": "Layer", "name": "C"},
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.wrap_in_group": {
+                "paths": [
+                    {"__path__": [2]},   # C first in selection
+                    {"__path__": [0]},   # A second
+                ],
+            }},
+        ], {}, store, diagnostics=[])
+        assert len(doc["layers"]) == 2
+        group = doc["layers"][0]
+        # Children in document order: A, C
+        assert [c["name"] for c in group["children"]] == ["A", "C"]
+        # Middle layer B remains
+        assert doc["layers"][1]["name"] == "B"
+
+
+class TestNewGroupAction:
+    def _load_action(self, name):
+        import yaml as yl
+        path = os.path.join(os.path.dirname(__file__), "..", "..",
+                            "workspace", "actions.yaml")
+        with open(path) as f:
+            return yl.safe_load(f)["actions"][name]
+
+    def test_new_group_wraps_panel_selection(self):
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("new_group")["effects"]
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A"},
+            {"kind": "Layer", "name": "B"},
+            {"kind": "Layer", "name": "C"},
+        ])
+        store = StateStore(document=doc)
+        store.init_panel("layers", {
+            "layers_panel_selection": [
+                {"__path__": [0]},
+                {"__path__": [2]},
+            ],
+        })
+        store.set_active_panel("layers")
+        run_effects(effects, {}, store, diagnostics=[])
+        # Expect: Group(A,C) at index 0, B at index 1
+        assert len(doc["layers"]) == 2
+        assert doc["layers"][0]["kind"] == "Group"
+        assert [c["name"] for c in doc["layers"][0]["children"]] == ["A", "C"]
+        assert doc["layers"][1]["name"] == "B"
+
+
 class TestEnterIsolationModeAction:
     """End-to-end: enter_isolation_mode YAML action pushes a path to
     panel.isolation_stack."""
