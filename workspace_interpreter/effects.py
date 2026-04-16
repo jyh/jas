@@ -34,10 +34,15 @@ def run_effects(effects: list, ctx: dict, store: StateStore,
     """
     if not effects:
         return
+    # Thread ctx through the list: each `let:` produces a new ctx visible
+    # to subsequent effects in this list only. Inner lists (then/else/do)
+    # get their own threading in recursive calls.
     for effect in effects:
         if isinstance(effect, dict):
-            _run_one(effect, ctx, store, actions, platform_effects, dialogs,
-                     schema, diagnostics)
+            new_ctx = _run_one(effect, ctx, store, actions, platform_effects, dialogs,
+                               schema, diagnostics)
+            if new_ctx is not None:
+                ctx = new_ctx
 
 
 def _eval(expr, store: StateStore, ctx: dict):
@@ -99,6 +104,47 @@ def apply_set_schemadriven(
 def _run_one(effect: dict, ctx: dict, store: StateStore,
              actions: dict | None, platform_effects: dict | None,
              dialogs: dict | None, schema=None, diagnostics: list | None = None):
+    """Execute one effect. Returns a new ctx if the effect introduces a
+    binding (let:), else None. Callers in run_effects use the returned
+    ctx for subsequent effects in the same list."""
+
+    # let: { name: expr, ... } — PHASE3 §5.1
+    # Evaluates each expression against current ctx (earlier names visible
+    # to later ones in the same block), returns an extended ctx.
+    if "let" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        bindings = effect["let"]
+        new_ctx = dict(ctx)
+        for name, expr in bindings.items():
+            eval_ctx = store.eval_context(new_ctx)
+            result = evaluate(str(expr) if expr is not None else "", eval_ctx)
+            # Preserve closure wrapper; unwrap other value types (matches
+            # expr_eval.py _eval_node for Let)
+            if result.type == ValueType.CLOSURE:
+                new_ctx[name] = result
+            else:
+                new_ctx[name] = result.value
+        return new_ctx
+
+    # foreach: { source, as } do: [...] — PHASE3 §5.3
+    # Evaluates source once; each iteration runs do: in a fresh scope
+    # with `as:` bound to the item. Bindings inside do: do not leak
+    # across iterations or past the loop.
+    if "foreach" in effect and "do" in effect:
+        spec = effect["foreach"]
+        source_expr = spec.get("source", "")
+        var_name = spec.get("as", "item")
+        body = effect["do"]
+        items = _eval(source_expr, store, ctx)
+        if not isinstance(items, list):
+            return None
+        for i, item in enumerate(items):
+            iter_ctx = dict(ctx)
+            iter_ctx[var_name] = item
+            iter_ctx["_index"] = i
+            run_effects(body, iter_ctx, store, actions, platform_effects, dialogs,
+                        schema, diagnostics)
+        return None
 
     # set: { key: expr, ... }
     if "set" in effect:
