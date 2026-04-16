@@ -538,6 +538,7 @@ mod tests {
             ],
             fill: None,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         })
     }
@@ -552,6 +553,7 @@ mod tests {
             ],
             fill: None,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         })
     }
@@ -567,6 +569,7 @@ mod tests {
             ],
             fill: Some(Fill::new(Color::BLACK)),
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         })
     }
@@ -702,6 +705,7 @@ mod tests {
             ],
             fill: None,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         });
         crate::document::controller::Controller::add_element(&mut model, path);
@@ -741,6 +745,7 @@ mod tests {
             ],
             fill: None,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         });
         crate::document::controller::Controller::add_element(&mut model, path);
