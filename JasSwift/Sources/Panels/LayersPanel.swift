@@ -22,13 +22,17 @@ public enum LayersPanel {
         ]
     }
 
-    public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout) {
+    public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
         switch cmd {
         case "close_panel": layout.closePanel(addr)
+        case "toggle_all_layers_visibility",
+             "toggle_all_layers_outline",
+             "toggle_all_layers_lock":
+            if let m = model {
+                dispatchYamlAction(cmd, model: m)
+            }
         // Tier-3 stubs: log only until document model is implemented.
         case "new_layer", "new_group",
-             "toggle_all_layers_visibility", "toggle_all_layers_outline",
-             "toggle_all_layers_lock",
              "enter_isolation_mode", "exit_isolation_mode",
              "flatten_artwork", "collect_in_new_layer":
             #if DEBUG
@@ -36,6 +40,104 @@ public enum LayersPanel {
             #endif
         default: break
         }
+    }
+
+    /// Dispatch a layers action through the compiled YAML effects (Phase 3).
+    /// Wires snapshot + doc.set as platformEffects on the active Model,
+    /// and injects active_document.top_level_layers / top_level_layer_paths
+    /// into the evaluation context.
+    private static func dispatchYamlAction(_ actionName: String, model: Model) {
+        guard let ws = WorkspaceData.load(),
+              let actions = ws.data["actions"] as? [String: Any],
+              let actionDef = actions[actionName] as? [String: Any],
+              let effects = actionDef["effects"] as? [Any]
+        else { return }
+
+        // Build active_document view from model.document.layers
+        var topLevelLayers: [[String: Any]] = []
+        var topLevelLayerPaths: [[String: Any]] = []
+        for (i, layer) in model.document.layers.enumerated() {
+            let vis: String
+            switch layer.visibility {
+            case .invisible: vis = "invisible"
+            case .outline: vis = "outline"
+            case .preview: vis = "preview"
+            }
+            let pathJson: [String: Any] = ["__path__": [i]]
+            topLevelLayers.append([
+                "kind": "Layer",
+                "name": layer.name,
+                "common": [
+                    "visibility": vis,
+                    "locked": layer.locked,
+                ],
+                "path": pathJson,
+            ])
+            topLevelLayerPaths.append(pathJson)
+        }
+        let activeDoc: [String: Any] = [
+            "top_level_layers": topLevelLayers,
+            "top_level_layer_paths": topLevelLayerPaths,
+        ]
+        let ctx: [String: Any] = ["active_document": activeDoc]
+
+        // Platform handlers
+        let snapshotHandler: PlatformEffect = { _, _, _ in
+            model.snapshot()
+        }
+        let docSetHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any] else { return }
+            let pathExpr = (spec["path"] as? String) ?? ""
+            let fields = (spec["fields"] as? [String: Any]) ?? [:]
+            let pathVal = evaluate(pathExpr, context: callCtx)
+            guard case .path(let indices) = pathVal,
+                  indices.count == 1,
+                  indices[0] >= 0 && indices[0] < model.document.layers.count
+            else { return }
+            let idx = indices[0]
+            let layer = model.document.layers[idx]
+            var newVisibility = layer.visibility
+            var newLocked = layer.locked
+            var newName = layer.name
+            for (dotted, exprV) in fields {
+                let exprStr = (exprV as? String) ?? ""
+                let v = evaluate(exprStr, context: callCtx)
+                switch dotted {
+                case "common.visibility":
+                    if case .string(let s) = v {
+                        switch s {
+                        case "invisible": newVisibility = .invisible
+                        case "outline": newVisibility = .outline
+                        case "preview": newVisibility = .preview
+                        default: break
+                        }
+                    }
+                case "common.locked":
+                    if case .bool(let b) = v { newLocked = b }
+                case "name":
+                    if case .string(let s) = v { newName = s }
+                default: break
+                }
+            }
+            var newLayers = model.document.layers
+            newLayers[idx] = Layer(
+                name: newName, children: layer.children,
+                opacity: layer.opacity, transform: layer.transform,
+                locked: newLocked, visibility: newVisibility
+            )
+            model.document = Document(layers: newLayers,
+                                       selectedLayer: model.document.selectedLayer,
+                                       selection: model.document.selection)
+        }
+
+        let platformEffects: [String: PlatformEffect] = [
+            "snapshot": snapshotHandler,
+            "doc.set": docSetHandler,
+        ]
+
+        let store = StateStore()
+        runEffects(effects, ctx: ctx, store: store,
+                   actions: actions, platformEffects: platformEffects)
     }
 
     public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {

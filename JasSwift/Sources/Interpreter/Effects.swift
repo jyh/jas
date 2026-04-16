@@ -6,6 +6,12 @@
 
 import Foundation
 
+/// Platform-specific effect handler (Phase 3). Key is effect name
+/// (e.g. "snapshot"). Called with (effect_value, ctx, store). Registered
+/// by the calling app — e.g. LayersPanel wires snapshot/doc.set to the
+/// active Model.
+typealias PlatformEffect = (Any, [String: Any], StateStore) -> Void
+
 /// Execute a list of effects.
 ///
 /// - Parameters:
@@ -14,12 +20,15 @@ import Foundation
 ///   - store: The state store to read from and mutate.
 ///   - actions: The actions catalog for dispatch effects.
 ///   - dialogs: Dialog definitions dict for open_dialog effects.
+///   - platformEffects: Map of effect name to handler for app-specific
+///     primitives (snapshot, doc.set, etc.) that operate on the Model.
 func runEffects(
-    _ effects: [[String: Any]],
+    _ effects: [Any],
     ctx: [String: Any],
     store: StateStore,
     actions: [String: Any]? = nil,
     dialogs: [String: Any]? = nil,
+    platformEffects: [String: PlatformEffect] = [:],
     schema: Bool = false,
     diagnostics: inout [Diagnostic]
 ) {
@@ -27,7 +36,15 @@ func runEffects(
     // subsequent siblings; nested lists (then/else/do) recurse with
     // their own ctx so bindings don't leak back.
     var threadedCtx = ctx
-    for effect in effects {
+    for effectAny in effects {
+        // Bare-string effects (e.g. `- snapshot`) normalize to {name: nil}
+        if let effectStr = effectAny as? String {
+            if let handler = platformEffects[effectStr] {
+                handler(NSNull(), threadedCtx, store)
+            }
+            continue
+        }
+        guard let effect = effectAny as? [String: Any] else { continue }
         // let: { name: expr, ... } — PHASE3 §5.1
         if let bindings = effect["let"] as? [String: Any] {
             for (name, exprV) in bindings {
@@ -41,10 +58,10 @@ func runEffects(
             continue
         }
         // foreach: { source, as } do: [...] — PHASE3 §5.3
-        if let spec = effect["foreach"] as? [String: Any],
-           let body = effect["do"] as? [[String: Any]] {
+        if let spec = effect["foreach"] as? [String: Any] {
             let sourceExpr = spec["source"] ?? ""
             let varName = (spec["as"] as? String) ?? "item"
+            let body = (effect["do"] as? [Any]) ?? []
             let itemsVal = evalExpr(sourceExpr, store: store, ctx: threadedCtx)
             guard case .list(let items) = itemsVal else { continue }
             for (i, item) in items.enumerated() {
@@ -53,10 +70,21 @@ func runEffects(
                 iterCtx["_index"] = i
                 runEffects(body, ctx: iterCtx, store: store,
                            actions: actions, dialogs: dialogs,
+                           platformEffects: platformEffects,
                            schema: schema, diagnostics: &diagnostics)
             }
             continue
         }
+        // Platform-specific effects (snapshot, doc.set, etc.)
+        var handled = false
+        for (key, value) in effect {
+            if let handler = platformEffects[key] {
+                handler(value, threadedCtx, store)
+                handled = true
+                break
+            }
+        }
+        if handled { continue }
         runOne(effect, ctx: threadedCtx, store: store, actions: actions,
                dialogs: dialogs, schema: schema, diagnostics: &diagnostics)
     }
@@ -64,15 +92,16 @@ func runEffects(
 
 /// Convenience overload for callers that don't need diagnostics.
 func runEffects(
-    _ effects: [[String: Any]],
+    _ effects: [Any],
     ctx: [String: Any],
     store: StateStore,
     actions: [String: Any]? = nil,
-    dialogs: [String: Any]? = nil
+    dialogs: [String: Any]? = nil,
+    platformEffects: [String: PlatformEffect] = [:]
 ) {
     var diags: [Diagnostic] = []
     runEffects(effects, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
-               schema: false, diagnostics: &diags)
+               platformEffects: platformEffects, schema: false, diagnostics: &diags)
 }
 
 // MARK: - Internal

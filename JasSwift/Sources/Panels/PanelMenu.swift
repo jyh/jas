@@ -28,7 +28,7 @@ public func panelMenu(_ kind: PanelKind) -> [PanelMenuItem] {
 /// Dispatch a menu command for a panel kind.
 public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
     switch kind {
-    case .layers: LayersPanel.dispatch(cmd, addr: addr, layout: &layout)
+    case .layers: LayersPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .color: ColorPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .swatches: SwatchesPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .stroke: StrokePanel.dispatch(cmd, addr: addr, layout: &layout)
