@@ -589,6 +589,70 @@ class TestNewGroupAction:
         assert doc["layers"][1]["name"] == "B"
 
 
+class TestDocWrapInLayerEffect:
+    """PHASE3.md sub-tollgate 3: doc.wrap_in_layer primitive.
+
+    Parallel to doc.wrap_in_group but always inserts at top level and
+    takes a name for the new Layer."""
+
+    def test_wrap_in_layer_top_level(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A"},
+            {"kind": "Layer", "name": "B"},
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.wrap_in_layer": {
+                "paths": [{"__path__": [0]}, {"__path__": [1]}],
+                "name": "'Collected'",
+            }},
+        ], {}, store, diagnostics=[])
+        # After: single Layer at idx 0 containing A and B
+        assert len(doc["layers"]) == 1
+        assert doc["layers"][0]["kind"] == "Layer"
+        assert doc["layers"][0]["name"] == "Collected"
+        children = doc["layers"][0]["children"]
+        assert [c["name"] for c in children] == ["A", "B"]
+
+
+class TestCollectInNewLayerAction:
+    def _load_action(self, name):
+        import yaml as yl
+        path = os.path.join(os.path.dirname(__file__), "..", "..",
+                            "workspace", "actions.yaml")
+        with open(path) as f:
+            return yl.safe_load(f)["actions"][name]
+
+    def test_collect_panel_selection(self):
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("collect_in_new_layer")["effects"]
+        doc = _make_doc([
+            {"kind": "Layer", "name": "Layer 1"},
+            {"kind": "Layer", "name": "Layer 2"},
+            {"kind": "Layer", "name": "Layer 3"},
+        ])
+        store = StateStore(document=doc)
+        store.init_panel("layers", {
+            "layers_panel_selection": [
+                {"__path__": [0]},
+                {"__path__": [2]},
+            ],
+        })
+        store.set_active_panel("layers")
+        run_effects(effects, {}, store, diagnostics=[])
+        # After: new auto-named layer at idx 0 containing Layer 1 + Layer 3
+        # (selection gathered in document order), Layer 2 remains
+        assert len(doc["layers"]) == 2
+        new_layer = doc["layers"][0]
+        assert new_layer["kind"] == "Layer"
+        # Next-unused "Layer N" — Layer 1,2,3 already exist so Layer 4
+        assert new_layer["name"] == "Layer 4"
+        assert [c["name"] for c in new_layer["children"]] == ["Layer 1", "Layer 3"]
+        assert doc["layers"][1]["name"] == "Layer 2"
+
+
 class TestEnterIsolationModeAction:
     """End-to-end: enter_isolation_mode YAML action pushes a path to
     panel.isolation_stack."""
