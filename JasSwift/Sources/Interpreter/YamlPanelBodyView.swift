@@ -1026,16 +1026,14 @@ struct TreeViewContent: View {
     }
 
     private func performDeleteSelection() {
-        let doc = model.document
         guard !panelSelection.isEmpty else { return }
         let topDeletes = panelSelection.filter { $0.count == 1 }.count
-        if topDeletes >= doc.layers.count { return }
-        model.snapshot()
-        var d = doc
-        for p in panelSelection.sorted(by: { $0.lexicographicallyPrecedes($1) }).reversed() {
-            d = d.deleteElement(p)
-        }
-        model.document = d
+        if topDeletes >= model.document.layers.count { return }
+        LayersPanel.dispatchYamlAction(
+            "delete_layer_selection",
+            model: model,
+            panelSelection: panelSelection.map { Array($0) }
+        )
         panelSelection.removeAll()
     }
 
@@ -1256,27 +1254,23 @@ struct TreeViewContent: View {
 
     private func deleteSelection() {
         guard !panelSelection.isEmpty else { return }
-        let doc = model.document
         let topDeletes = panelSelection.filter { $0.count == 1 }.count
-        if topDeletes >= doc.layers.count { return }
-        model.snapshot()
-        var d = doc
-        for p in panelSelection.sorted(by: { $0.lexicographicallyPrecedes($1) }).reversed() {
-            d = d.deleteElement(p)
-        }
-        model.document = d
+        if topDeletes >= model.document.layers.count { return }
+        LayersPanel.dispatchYamlAction(
+            "delete_layer_selection",
+            model: model,
+            panelSelection: panelSelection.map { Array($0) }
+        )
         panelSelection.removeAll()
     }
 
     private func duplicateSelection() {
         guard !panelSelection.isEmpty else { return }
-        model.snapshot()
-        var d = model.document
-        for p in panelSelection.sorted(by: { $0.lexicographicallyPrecedes($1) }).reversed() {
-            let e = d.getElement(p)
-            d = d.insertElementAfter(p, element: e)
-        }
-        model.document = d
+        LayersPanel.dispatchYamlAction(
+            "duplicate_layer_selection",
+            model: model,
+            panelSelection: panelSelection.map { Array($0) }
+        )
     }
 
     private func flattenArtwork() {
@@ -1310,22 +1304,11 @@ struct TreeViewContent: View {
 
     private func collectInNewLayer() {
         guard !panelSelection.isEmpty else { return }
-        let doc = model.document
-        let used = Set(doc.layers.map { $0.name })
-        var n = 1
-        while used.contains("Layer \(n)") { n += 1 }
-        model.snapshot()
-        let sortedPaths = panelSelection.sorted(by: { $0.lexicographicallyPrecedes($1) })
-        let elements = sortedPaths.map { doc.getElement($0) }
-        var d = doc
-        for p in sortedPaths.reversed() {
-            d = d.deleteElement(p)
-        }
-        let newLayer = Layer(name: "Layer \(n)", children: elements)
-        d = Document(layers: d.layers + [newLayer],
-                     selectedLayer: d.selectedLayer,
-                     selection: d.selection)
-        model.document = d
+        LayersPanel.dispatchYamlAction(
+            "collect_in_new_layer",
+            model: model,
+            panelSelection: panelSelection.map { Array($0) }
+        )
         panelSelection.removeAll()
     }
 

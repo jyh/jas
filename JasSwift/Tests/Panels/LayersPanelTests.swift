@@ -198,6 +198,27 @@ private func runLayersEffects(_ effects: [Any], model: Model) {
     #expect(model.document.layers[0].name == "B")
 }
 
+@Test func deleteLayerSelectionHandlesNestedPath() {
+    // Nested selection: Layer → Group → Element. doc.delete_at's
+    // handler now walks the Element tree instead of being restricted
+    // to top-level, so deleting a nested path removes it in place.
+    let nested = Group(children: [
+        Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)),
+        Element.rect(Rect(x: 20, y: 0, width: 10, height: 10)),
+    ])
+    let topLayer = Layer(name: "A", children: [Element.group(nested)])
+    let model = Model(document: Document(layers: [topLayer]))
+    LayersPanel.dispatchYamlAction("delete_layer_selection",
+                                    model: model,
+                                    panelSelection: [[0, 0, 1]])
+    // After: the group at [0, 0] has one child left
+    let layer = model.document.layers[0]
+    guard case .group(let g) = layer.children[0] else {
+        Issue.record("expected group at [0,0]"); return
+    }
+    #expect(g.children.count == 1)
+}
+
 @Test func duplicateLayerSelectionViaYamlDispatch() {
     let model = Model(document: Document(layers: [
         Layer(name: "A", children: []),
