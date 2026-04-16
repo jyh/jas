@@ -335,41 +335,6 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
                 }
             })];
         }
-        "new_group" => {
-            use crate::geometry::element::{Element as E, GroupElem, CommonProps};
-            use std::rc::Rc;
-            let paths = st.layers_panel_selection.clone();
-            if paths.is_empty() { return vec![]; }
-            let parent_prefix: Vec<usize> = paths[0][..paths[0].len()-1].to_vec();
-            if !paths.iter().all(|p| p[..p.len()-1] == parent_prefix[..]) { return vec![]; }
-            if parent_prefix.is_empty() { return vec![]; }
-            if let Some(tab) = st.tab_mut() {
-                tab.model.snapshot();
-                let doc = tab.model.document().clone();
-                let mut children: Vec<Rc<E>> = Vec::new();
-                for path in &paths {
-                    if let Some(elem) = doc.get_element(path) {
-                        children.push(Rc::new(elem.clone()));
-                    }
-                }
-                let new_group = E::Group(GroupElem {
-                    children,
-                    common: CommonProps::default(),
-                });
-                let mut sorted_paths = paths.clone();
-                sorted_paths.sort();
-                let top_path = sorted_paths[0].clone();
-                sorted_paths.reverse();
-                let mut new_doc = doc;
-                for path in &sorted_paths {
-                    new_doc = new_doc.delete_element(path);
-                }
-                new_doc = new_doc.insert_element_at(&top_path, new_group);
-                tab.model.set_document(new_doc);
-                st.layers_panel_selection = vec![top_path];
-            }
-            return vec![];
-        }
         "flatten_artwork" => {
             use crate::geometry::element::Element as E;
             use std::rc::Rc;
@@ -1081,6 +1046,73 @@ fn run_yaml_effect(
         if let Some(e) = elem {
             insert_element_after(&indices, e, st);
         }
+        return deferred;
+    }
+
+    // doc.wrap_in_group: { paths } — PHASE3 sub-tollgate 3
+    // Wraps elements at the given paths in a new Group. Sorted in
+    // document order; deleted in reverse order; group inserted at the
+    // topmost-source position under the shared parent.
+    if let Some(spec) = eff.get("doc.wrap_in_group").and_then(|v| v.as_object()) {
+        let paths_expr = spec.get("paths").and_then(|v| v.as_str()).unwrap_or("[]");
+        let paths_val = super::expr::eval(paths_expr, &*eval_ctx);
+        let raw_paths = match paths_val {
+            super::expr_types::Value::List(items) => items,
+            _ => return deferred,
+        };
+        // Normalize: each item should be a __path__ marker JSON object
+        // (Value.PATH serialized). Decode to Vec<usize>.
+        let mut normalized: Vec<Vec<usize>> = Vec::new();
+        for item in &raw_paths {
+            if let Some(obj) = item.as_object() {
+                if let Some(arr) = obj.get("__path__").and_then(|v| v.as_array()) {
+                    let idx: Option<Vec<usize>> = arr.iter()
+                        .map(|n| n.as_u64().map(|u| u as usize))
+                        .collect();
+                    if let Some(idx) = idx {
+                        normalized.push(idx);
+                    }
+                }
+            }
+        }
+        if normalized.is_empty() {
+            return deferred;
+        }
+        normalized.sort();
+        // Split the topmost path into parent + final index
+        let first = &normalized[0];
+        if first.is_empty() { return deferred; }
+        let insert_parent: Vec<usize> = first[..first.len() - 1].to_vec();
+        let insert_index = first[first.len() - 1];
+        // Collect clones in document order
+        use crate::geometry::element::{Element, GroupElem, CommonProps};
+        use std::rc::Rc;
+        let mut children: Vec<Rc<Element>> = Vec::new();
+        if let Some(tab) = st.tabs.get(st.active_tab) {
+            for p in &normalized {
+                if let Some(elem) = tab.model.document().get_element(p) {
+                    children.push(Rc::new(elem.clone()));
+                }
+            }
+        }
+        if children.is_empty() {
+            return deferred;
+        }
+        // Delete in reverse order
+        {
+            let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+            let mut new_doc = tab.model.document().clone();
+            for p in normalized.iter().rev() {
+                new_doc = new_doc.delete_element(p);
+            }
+            tab.model.set_document(new_doc);
+        }
+        // Build and insert group
+        let group = Element::Group(GroupElem {
+            children,
+            common: CommonProps::default(),
+        });
+        insert_element_at(&insert_parent, insert_index, group, st);
         return deferred;
     }
 
@@ -4597,6 +4629,31 @@ mod tests {
         assert_eq!(layers.len(), 1);
         assert_eq!(tab_layer(&st, 0).name, "B");
         assert_eq!(st.layers_panel_selection.len(), 0);
+    }
+
+    #[test]
+    fn new_group_action_wraps_top_level_layers() {
+        // The YAML migration now allows wrapping top-level layers into
+        // a Group (which the pre-Phase-3 Rust arm disallowed).
+        use crate::geometry::element::{Element, GroupElem};
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Preview, false),
+            ("C".into(), Visibility::Preview, false),
+        ]);
+        st.layers_panel_selection = vec![vec![0], vec![2]];
+        let params = serde_json::Map::new();
+        dispatch_action("new_group", &params, &mut st);
+        let layers = &st.tabs[st.active_tab].model.document().layers;
+        assert_eq!(layers.len(), 2);
+        // New Group at idx 0 (topmost source), B remains at idx 1
+        match &layers[0] {
+            Element::Group(g) => {
+                assert_eq!(g.children.len(), 2);
+            }
+            other => panic!("expected Group at idx 0, got {:?}", other),
+        }
+        assert_eq!(tab_layer(&st, 1).name, "B");
     }
 
     #[test]
