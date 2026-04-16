@@ -1,0 +1,17 @@
+description: "set: null on a non-nullable field is rejected with an error; state unchanged"
+schema:
+  state:
+    stroke_width:
+      type: number
+      default: 1.0
+initial_state:
+  stroke_width: 1.0
+effect:
+  set:
+    stroke_width: null
+expected_state:
+  stroke_width: 1.0
+expected_diagnostics:
+  - level: error
+    key: stroke_width
+    reason: null_on_non_nullable

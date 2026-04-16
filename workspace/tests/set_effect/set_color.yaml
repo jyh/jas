@@ -1,0 +1,15 @@
+description: "set: with a valid hex color stores or coerces the value"
+schema:
+  state:
+    fill_color:
+      type: color
+      default: "#ffffff"
+      nullable: true
+initial_state:
+  fill_color: "#ffffff"
+effect:
+  set:
+    fill_color: "#ff0000"
+expected_state:
+  fill_color: "#ff0000"
+expected_diagnostics: []

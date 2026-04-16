@@ -43,30 +43,41 @@ let state_defaults (state_defs : Yojson.Safe.t) : (string * Yojson.Safe.t) list 
 
 (** Execute a list of effects.
 
-    [actions] and [dialogs] default to [`Null] if not provided. *)
+    [actions] and [dialogs] default to [`Null] if not provided.
+    When [schema] is true, the set: effect is validated and coerced
+    against the declared schema. [diagnostics] accumulates warnings/errors. *)
 let rec run_effects_inner
     (effects : Yojson.Safe.t list)
     (ctx : (string * Yojson.Safe.t) list)
     (store : State_store.t)
-    (actions : Yojson.Safe.t) (dialogs : Yojson.Safe.t) : unit =
+    (actions : Yojson.Safe.t) (dialogs : Yojson.Safe.t)
+    ?(schema = false) (diagnostics : Schema.diagnostic list ref) : unit =
   List.iter (function
-    | `Assoc _ as eff -> run_one eff ctx store actions dialogs
+    | `Assoc _ as eff -> run_one eff ctx store actions dialogs ~schema diagnostics
     | _ -> ()
   ) effects
 
 and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
     (store : State_store.t)
-    (actions : Yojson.Safe.t) (dialogs : Yojson.Safe.t) : unit =
+    (actions : Yojson.Safe.t) (dialogs : Yojson.Safe.t)
+    ?(schema = false) (diagnostics : Schema.diagnostic list ref) : unit =
   let mem key = Workspace_loader.json_member key eff in
 
   (* set: { key: expr, ... } *)
   (match mem "set" with
    | Some (`Assoc pairs) ->
-     List.iter (fun (key, expr) ->
-       let value = eval_expr expr store ctx in
-       State_store.set store key (value_to_json value)
-     ) pairs;
-     ()
+     if schema then begin
+       (* Schema-driven: evaluate then coerce+validate *)
+       let evaluated = List.map (fun (key, expr) ->
+         let value = eval_expr expr store ctx in
+         (key, value_to_json value)
+       ) pairs in
+       Schema.apply_set_schemadriven evaluated store diagnostics
+     end else
+       List.iter (fun (key, expr) ->
+         let value = eval_expr expr store ctx in
+         State_store.set store key (value_to_json value)
+       ) pairs
    | _ ->
 
   (* toggle: state_key *)
@@ -112,12 +123,12 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
     if Expr_eval.to_bool result then
       (match List.assoc_opt "then" cond with
        | Some (`List then_effects) ->
-         run_effects_inner then_effects ctx store actions dialogs
+         run_effects_inner then_effects ctx store actions dialogs ~schema diagnostics
        | _ -> ())
     else
       (match List.assoc_opt "else" cond with
        | Some (`List else_effects) ->
-         run_effects_inner else_effects ctx store actions dialogs
+         run_effects_inner else_effects ctx store actions dialogs ~schema diagnostics
        | _ -> ())
   | _ ->
 
@@ -161,7 +172,7 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
               ) params in
               ("param", `Assoc resolved) :: List.filter (fun (k, _) -> k <> "param") ctx
           in
-          run_effects_inner action_effects dispatch_ctx store actions dialogs
+          run_effects_inner action_effects dispatch_ctx store actions dialogs ~schema diagnostics
         | _ -> ())
      | _ -> ())
   | _ ->
@@ -229,8 +240,9 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
     let timer_id = (match List.assoc_opt "id" st with Some (`String s) -> s | _ -> "") in
     let delay_ms = (match List.assoc_opt "delay_ms" st with Some (`Int n) -> n | _ -> 250) in
     let nested = (match List.assoc_opt "effects" st with Some (`List e) -> e | _ -> []) in
+    let timer_diags = ref [] in
     Timer_manager.start_timer timer_id delay_ms (fun () ->
-      run_effects_inner nested ctx store actions dialogs
+      run_effects_inner nested ctx store actions dialogs ~schema timer_diags
     )
   | _ ->
 
@@ -247,10 +259,12 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
 let run_effects
     ?(actions : Yojson.Safe.t = `Null)
     ?(dialogs : Yojson.Safe.t = `Null)
+    ?(schema = false)
+    ?(diagnostics : Schema.diagnostic list ref = ref [])
     (effects : Yojson.Safe.t list)
     (ctx : (string * Yojson.Safe.t) list)
     (store : State_store.t) : unit =
-  run_effects_inner effects ctx store actions dialogs
+  run_effects_inner effects ctx store actions dialogs ~schema diagnostics
 
 (* ------------------------------------------------------------------ *)
 (* Stroke panel state binding                                          *)

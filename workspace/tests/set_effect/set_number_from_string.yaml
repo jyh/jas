@@ -1,0 +1,14 @@
+description: "set: coerces a numeric string to number"
+schema:
+  state:
+    stroke_width:
+      type: number
+      default: 1.0
+initial_state:
+  stroke_width: 1.0
+effect:
+  set:
+    stroke_width: "2.5"
+expected_state:
+  stroke_width: 2.5
+expected_diagnostics: []

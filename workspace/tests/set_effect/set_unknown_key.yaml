@@ -1,0 +1,18 @@
+description: "set: with a key not in the schema logs a warning and skips the write"
+schema:
+  state:
+    fill_color:
+      type: color
+      default: "#ffffff"
+      nullable: true
+initial_state:
+  fill_color: "#ffffff"
+effect:
+  set:
+    nonexistent_field: "#ff0000"
+expected_state:
+  fill_color: "#ffffff"
+expected_diagnostics:
+  - level: warning
+    key: nonexistent_field
+    reason: unknown_key

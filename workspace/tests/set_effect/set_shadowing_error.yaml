@@ -1,0 +1,27 @@
+description: "set: bare key that matches both global state and active panel state is an error; write is skipped"
+schema:
+  state:
+    fill_color:
+      type: color
+      default: "#ffffff"
+      nullable: true
+  panels:
+    color:
+      fill_color:
+        type: color
+        default: "#ffffff"
+        nullable: true
+active_panel: color
+initial_state:
+  fill_color: "#ffffff"
+  panel.color.fill_color: "#ffffff"
+effect:
+  set:
+    fill_color: "#ff0000"
+expected_state:
+  fill_color: "#ffffff"
+  panel.color.fill_color: "#ffffff"
+expected_diagnostics:
+  - level: error
+    key: fill_color
+    reason: ambiguous_key

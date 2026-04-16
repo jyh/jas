@@ -1,0 +1,16 @@
+description: "set: with a string field stores the value correctly"
+schema:
+  state:
+    _drag_pane:
+      type: string
+      default: null
+      nullable: true
+      writable: true
+initial_state:
+  _drag_pane: null
+effect:
+  set:
+    _drag_pane: "toolbar"
+expected_state:
+  _drag_pane: "toolbar"
+expected_diagnostics: []

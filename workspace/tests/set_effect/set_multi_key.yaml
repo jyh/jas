@@ -1,0 +1,28 @@
+description: "set: with multiple keys applies all writes as a batch; partial errors skip only the failing key"
+schema:
+  state:
+    fill_color:
+      type: color
+      default: "#ffffff"
+      nullable: true
+    stroke_color:
+      type: color
+      default: "#000000"
+      nullable: true
+    stroke_width:
+      type: number
+      default: 1.0
+initial_state:
+  fill_color: "#ffffff"
+  stroke_color: "#000000"
+  stroke_width: 1.0
+effect:
+  set:
+    fill_color: "#ff0000"
+    stroke_color: "#00ff00"
+    stroke_width: 2.0
+expected_state:
+  fill_color: "#ff0000"
+  stroke_color: "#00ff00"
+  stroke_width: 2.0
+expected_diagnostics: []

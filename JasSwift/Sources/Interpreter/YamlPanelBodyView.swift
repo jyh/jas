@@ -6,6 +6,12 @@
 import SwiftUI
 import AppKit
 
+private struct PickerEntry: Identifiable {
+    let id: Int
+    let val: String
+    let displayLabel: String
+}
+
 /// Renders a YAML element tree as a SwiftUI view.
 struct YamlElementView: View {
     let element: [String: Any]
@@ -428,11 +434,14 @@ struct YamlElementView: View {
             return ""
         }()
 
+        let entries = options.enumerated().map { i, opt -> PickerEntry in
+            let v = opt["value"].map { "\($0)" } ?? ""
+            let l = opt["label"] as? String ?? ""
+            return PickerEntry(id: i, val: v, displayLabel: l.isEmpty ? v : l)
+        }
         Picker("", selection: .constant(currentValue)) {
-            ForEach(Array(options.enumerated()), id: \.offset) { item in
-                let val = item.element["value"].map { "\($0)" } ?? ""
-                let label = item.element["label"] as? String ?? val
-                Text(label).tag(val)
+            ForEach(entries) { e in
+                SwiftUI.Text(e.displayLabel).tag(e.val)
             }
         }
         .labelsHidden()
@@ -475,11 +484,14 @@ struct YamlElementView: View {
 
         // SwiftUI doesn't have a native combo box with free entry;
         // use Picker as a dropdown with the current value displayed.
+        let entries = options.enumerated().map { i, opt -> PickerEntry in
+            let v = opt["value"].map { "\($0)" } ?? ""
+            let l = opt["label"] as? String ?? ""
+            return PickerEntry(id: i, val: v, displayLabel: l.isEmpty ? v : l)
+        }
         Picker("", selection: .constant(currentValue)) {
-            ForEach(Array(options.enumerated()), id: \.offset) { item in
-                let val = item.element["value"].map { "\($0)" } ?? ""
-                let label = item.element["label"] as? String ?? val
-                Text(label).tag(val)
+            ForEach(entries) { e in
+                SwiftUI.Text(e.displayLabel).tag(e.val)
             }
         }
         .labelsHidden()

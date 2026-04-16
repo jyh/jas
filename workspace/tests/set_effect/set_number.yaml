@@ -1,0 +1,14 @@
+description: "set: with a number field stores the value correctly"
+schema:
+  state:
+    stroke_width:
+      type: number
+      default: 1.0
+initial_state:
+  stroke_width: 1.0
+effect:
+  set:
+    stroke_width: 3.5
+expected_state:
+  stroke_width: 3.5
+expected_diagnostics: []

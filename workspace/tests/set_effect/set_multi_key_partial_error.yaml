@@ -1,0 +1,24 @@
+description: "set: batch with one bad key applies the good keys and skips the bad one"
+schema:
+  state:
+    fill_color:
+      type: color
+      default: "#ffffff"
+      nullable: true
+    stroke_width:
+      type: number
+      default: 1.0
+initial_state:
+  fill_color: "#ffffff"
+  stroke_width: 1.0
+effect:
+  set:
+    fill_color: "#ff0000"
+    stroke_width: "not-a-number"
+expected_state:
+  fill_color: "#ff0000"
+  stroke_width: 1.0
+expected_diagnostics:
+  - level: error
+    key: stroke_width
+    reason: type_mismatch
