@@ -391,46 +391,6 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
             }
             return vec![];
         }
-        "delete_layer_selection" => {
-            let paths = st.layers_panel_selection.clone();
-            if paths.is_empty() { return vec![]; }
-            if let Some(tab) = st.tab_mut() {
-                let doc = tab.model.document().clone();
-                let layer_count = doc.layers.len();
-                let top_level_deletes = paths.iter().filter(|p| p.len() == 1).count();
-                if top_level_deletes >= layer_count { return vec![]; }
-                tab.model.snapshot();
-                let mut sorted_paths = paths.clone();
-                sorted_paths.sort();
-                sorted_paths.reverse();
-                let mut new_doc = doc;
-                for path in &sorted_paths {
-                    new_doc = new_doc.delete_element(path);
-                }
-                tab.model.set_document(new_doc);
-            }
-            st.layers_panel_selection.clear();
-            return vec![];
-        }
-        "duplicate_layer_selection" => {
-            let paths = st.layers_panel_selection.clone();
-            if paths.is_empty() { return vec![]; }
-            if let Some(tab) = st.tab_mut() {
-                tab.model.snapshot();
-                let mut new_doc = tab.model.document().clone();
-                let mut sorted_paths = paths.clone();
-                sorted_paths.sort();
-                sorted_paths.reverse();
-                for path in &sorted_paths {
-                    if let Some(elem) = new_doc.get_element(path) {
-                        let dup = elem.clone();
-                        new_doc = new_doc.insert_element_after(path, dup);
-                    }
-                }
-                tab.model.set_document(new_doc);
-            }
-            return vec![];
-        }
         "new_group" => {
             use crate::geometry::element::{Element as E, GroupElem, CommonProps};
             use std::rc::Rc;
@@ -758,6 +718,23 @@ fn apply_set_panel_state(
     st: &mut crate::workspace::app_state::AppState,
 ) {
     let key = sps.get("key").and_then(|v| v.as_str()).unwrap_or("");
+    // Layers panel: layers_panel_selection lives on AppState, not the
+    // stroke panel. Handle here so YAML actions can clear it.
+    if key == "layers_panel_selection" {
+        let val = sps.get("value").unwrap_or(&serde_json::Value::Null);
+        let resolved = if let Some(expr_str) = val.as_str() {
+            let ctx = serde_json::json!({});
+            let result = super::expr::eval(expr_str, &ctx);
+            super::effects::value_to_json(&result)
+        } else {
+            val.clone()
+        };
+        // Only accept an empty list (clear); richer updates not supported yet.
+        if matches!(resolved, serde_json::Value::Array(ref a) if a.is_empty()) {
+            st.layers_panel_selection.clear();
+        }
+        return;
+    }
     let val = sps.get("value").unwrap_or(&serde_json::Value::Null);
     // Evaluate expression values
     let resolved = if let Some(expr_str) = val.as_str() {
@@ -901,8 +878,20 @@ fn build_appstate_ctx(
         "stroke_color": stroke_color,
         "active_tool": tool_name,
     });
+    // Panel namespace: expose layers_panel_selection as a list of path
+    // markers so YAML actions (delete/duplicate_layer_selection) can
+    // iterate it.
+    let sel_paths: Vec<serde_json::Value> = st.layers_panel_selection.iter()
+        .map(|p| serde_json::json!({
+            "__path__": p.iter().map(|&i| i as u64).collect::<Vec<_>>()
+        }))
+        .collect();
+    let panel = serde_json::json!({
+        "layers_panel_selection": sel_paths,
+    });
     let mut ctx = serde_json::Map::new();
     ctx.insert("state".to_string(), state);
+    ctx.insert("panel".to_string(), panel);
     ctx.insert("active_document".to_string(), build_active_document_view(st));
     if !params.is_empty() {
         ctx.insert("param".to_string(), serde_json::Value::Object(params.clone()));
@@ -4589,6 +4578,38 @@ mod tests {
         assert_eq!(layers.len(), 3);
         assert_eq!(tab_layer(&st, 0).name, "A");
         assert_eq!(tab_layer(&st, 1).name, "A");   // clone
+        assert_eq!(tab_layer(&st, 2).name, "B");
+    }
+
+    #[test]
+    fn delete_layer_selection_action_via_yaml() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Preview, false),
+            ("C".into(), Visibility::Preview, false),
+        ]);
+        st.layers_panel_selection = vec![vec![0], vec![2]];
+        let params = serde_json::Map::new();
+        dispatch_action("delete_layer_selection", &params, &mut st);
+        let layers = &st.tabs[st.active_tab].model.document().layers;
+        assert_eq!(layers.len(), 1);
+        assert_eq!(tab_layer(&st, 0).name, "B");
+        assert_eq!(st.layers_panel_selection.len(), 0);
+    }
+
+    #[test]
+    fn duplicate_layer_selection_action_via_yaml() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Preview, false),
+        ]);
+        st.layers_panel_selection = vec![vec![1]];
+        let params = serde_json::Map::new();
+        dispatch_action("duplicate_layer_selection", &params, &mut st);
+        let layers = &st.tabs[st.active_tab].model.document().layers;
+        assert_eq!(layers.len(), 3);
+        assert_eq!(tab_layer(&st, 0).name, "A");
+        assert_eq!(tab_layer(&st, 1).name, "B");
         assert_eq!(tab_layer(&st, 2).name, "B");
     }
 
