@@ -2483,6 +2483,9 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let mut revision = rctx.revision;
     let btn_style = "width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer";
 
+    // Read current context menu state from AppState
+    let context_menu_state = rctx.app.borrow().layers_context_menu.clone();
+
     let kb_app = app.clone();
     let mut kb_rev = revision;
     let on_keydown = move |evt: Event<KeyboardData>| {
@@ -2703,7 +2706,28 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             } else {
                                 st.layers_panel_selection = vec![p];
                             }
+                            st.layers_context_menu = None;
                             row_rev += 1;
+                        });
+                    };
+
+                    // Right-click: show context menu at cursor, select if not selected
+                    let ctx_path = row.path.clone();
+                    let ctx_app = app.clone();
+                    let mut ctx_rev = revision;
+                    let on_row_contextmenu = move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        evt.prevent_default();
+                        let coords = evt.data().client_coordinates();
+                        let p = ctx_path.clone();
+                        let a = ctx_app.clone();
+                        spawn(async move {
+                            let mut st = a.borrow_mut();
+                            if !st.layers_panel_selection.contains(&p) {
+                                st.layers_panel_selection = vec![p.clone()];
+                            }
+                            st.layers_context_menu = Some((coords.x, coords.y, p));
+                            ctx_rev += 1;
                         });
                     };
 
@@ -2811,6 +2835,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         div {
                             style: "display:flex;align-items:center;height:24px;padding:0 4px;gap:2px;font-size:11px;color:var(--jas-text,#ccc);cursor:default;user-select:none;{row_bg}{drop_indicator}",
                             onclick: on_row_click,
+                            oncontextmenu: on_row_contextmenu,
                             onmousedown: on_mousedown,
                             onmouseenter: on_mouseenter,
                             onmouseup: on_mouseup,
@@ -2953,6 +2978,99 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             div {
                                 style: "{sq_style};cursor:pointer",
                                 onclick: on_select_click,
+                            }
+                        }
+                    }
+                }
+            }
+            // Context menu overlay
+            if let Some((cx, cy, cpath)) = context_menu_state.clone() {
+                {
+                    let menu_style = format!(
+                        "position:fixed;left:{}px;top:{}px;background:var(--jas-pane-bg,#2a2a2a);border:1px solid var(--jas-border,#555);border-radius:2px;padding:2px 0;min-width:160px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
+                        cx, cy
+                    );
+                    let is_container = {
+                        let st = app.borrow();
+                        st.tab().and_then(|t| t.model.document().get_element(&cpath))
+                            .map(|e| e.is_group_or_layer()).unwrap_or(false)
+                    };
+                    let is_layer = {
+                        let st = app.borrow();
+                        st.tab().and_then(|t| t.model.document().get_element(&cpath))
+                            .map(|e| e.is_layer()).unwrap_or(false)
+                    };
+                    let item_style = "padding:4px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;";
+                    let item_style_disabled = "padding:4px 12px;font-size:11px;color:var(--jas-text-dim,#777);";
+
+                    let close_app = app.clone();
+                    let mut close_rev = revision;
+                    let close_menu = move || {
+                        let a = close_app.clone();
+                        spawn(async move {
+                            a.borrow_mut().layers_context_menu = None;
+                            close_rev += 1;
+                        });
+                    };
+
+                    let do_action = |action: &'static str| {
+                        let a = app.clone();
+                        let mut r = revision;
+                        move |_: Event<MouseData>| {
+                            let a2 = a.clone();
+                            spawn(async move {
+                                let mut st = a2.borrow_mut();
+                                let params = serde_json::Map::new();
+                                dispatch_action(action, &params, &mut st);
+                                st.layers_context_menu = None;
+                                r += 1;
+                            });
+                        }
+                    };
+
+                    rsx! {
+                        // Backdrop to close menu on click
+                        div {
+                            style: "position:fixed;inset:0;z-index:9999;",
+                            onclick: move |_: Event<MouseData>| close_menu(),
+                            oncontextmenu: move |evt: Event<MouseData>| {
+                                evt.prevent_default();
+                                close_menu();
+                            },
+                        }
+                        div {
+                            style: "{menu_style}",
+                            div {
+                                style: if is_layer { item_style } else { item_style_disabled },
+                                onclick: do_action("open_layer_options"),
+                                "Options for Layer..."
+                            }
+                            div {
+                                style: "{item_style}",
+                                onclick: do_action("duplicate_layer_selection"),
+                                "Duplicate"
+                            }
+                            div {
+                                style: "{item_style}",
+                                onclick: do_action("delete_layer_selection"),
+                                "Delete Selection"
+                            }
+                            div { style: "height:1px;background:var(--jas-border,#555);margin:2px 0;" }
+                            div {
+                                style: if is_container { item_style } else { item_style_disabled },
+                                onclick: do_action("enter_isolation_mode"),
+                                "Enter Isolation Mode"
+                            }
+                            div { style: "height:1px;background:var(--jas-border,#555);margin:2px 0;" }
+                            div {
+                                style: "{item_style}",
+                                onclick: do_action("flatten_artwork"),
+                                "Flatten Artwork"
+                            }
+                            div {
+                                style: "{item_style}",
+                                onclick: do_action("collect_in_new_layer"),
+                                "Collect in New Layer"
                             }
                         }
                     }
