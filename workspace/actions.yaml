@@ -1480,18 +1480,31 @@ actions:
     description: >
       Open the Layer Options dialog for an existing layer (edit mode)
       or for creating a new layer (create mode). In edit mode, the
-      dialog fields are populated from the layer's current properties.
+      target layer's current name / visibility / locked state are
+      resolved via element_at(path_from_id(layer_id)) and passed as
+      dialog params so the dialog's init: block populates the inputs.
+      In create mode, layer_id is null and the dialog's defaults take
+      effect (name "Layer N", color preset, visible+preview+unlocked).
     category: layers
     tier: 3
     params:
       mode: { type: enum, values: [create, edit] }
       layer_id: { type: string, nullable: true }
     effects:
+      - let:
+          layer_elem: >
+            if param.layer_id != null
+              then element_at(path_from_id(param.layer_id))
+              else null
       - open_dialog:
           id: layer_options
           params:
             mode: "param.mode"
             layer_id: "param.layer_id"
+            name: "if layer_elem != null then layer_elem.name else ''"
+            lock: "if layer_elem != null then layer_elem.common.locked else false"
+            show: "layer_elem == null or layer_elem.common.visibility != 'invisible'"
+            preview: "layer_elem == null or layer_elem.common.visibility == 'preview'"
 
   layer_options_confirm:
     description: >
