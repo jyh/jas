@@ -202,6 +202,40 @@ let menu_tests = [
     let after = m#document.Jas.Document.layers.(0) in
     assert (Jas.Element.is_locked after));
 
+  Alcotest.test_case "delete_layer_selection_via_yaml" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    let layer a = Jas.Element.Layer {
+      name = a; children = [||];
+      opacity = 1.0; transform = None;
+      locked = false; visibility = Jas.Element.Preview;
+    } in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"; layer "C"|] };
+    Jas.Panel_menu.dispatch_yaml_action
+      ~panel_selection:[[0]; [2]]
+      "delete_layer_selection" m;
+    let layers = m#document.Jas.Document.layers in
+    assert (Array.length layers = 1);
+    assert (match layers.(0) with Jas.Element.Layer le -> le.name = "B" | _ -> false));
+
+  Alcotest.test_case "duplicate_layer_selection_via_yaml" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    let layer a = Jas.Element.Layer {
+      name = a; children = [||];
+      opacity = 1.0; transform = None;
+      locked = false; visibility = Jas.Element.Preview;
+    } in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"|] };
+    Jas.Panel_menu.dispatch_yaml_action
+      ~panel_selection:[[1]]
+      "duplicate_layer_selection" m;
+    let layers = m#document.Jas.Document.layers in
+    assert (Array.length layers = 3);
+    assert (match layers.(0) with Jas.Element.Layer le -> le.name = "A" | _ -> false);
+    assert (match layers.(1) with Jas.Element.Layer le -> le.name = "B" | _ -> false);
+    assert (match layers.(2) with Jas.Element.Layer le -> le.name = "B" | _ -> false));
+
   Alcotest.test_case "layers_dispatch_tier3_no_crash" `Quick (fun () ->
     let l = default_layout () in
     let did = right_dock_id l in
