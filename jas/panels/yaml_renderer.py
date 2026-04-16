@@ -497,10 +497,14 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
         bl.addStretch()
         parent_layout.addWidget(bar)
 
-    # Read search query from panel state
+    # Read search query and hidden types from panel state
     try:
         panel_state = store.get_active_panel_state()
         search_query[0] = str(panel_state.get("search_query", "") or "")
+        ht = panel_state.get("_hidden_types", None)
+        if ht is not None:
+            hidden_types.clear()
+            hidden_types.update(ht)
     except Exception:
         pass
 
@@ -666,7 +670,7 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
         panel_id = store.get_active_panel_id()
         if panel_id:
             def _on_panel_change(key, value):
-                if key == "search_query":
+                if key in ("search_query", "_hidden_types"):
                     _rebuild()
             store.subscribe_panel(panel_id, _on_panel_change)
     except Exception:
@@ -722,10 +726,14 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
         new_doc = new_model.document
         nonlocal selected_paths
         selected_paths = new_doc.selected_paths()
-        # Refresh search query from panel state
+        # Refresh search query and hidden types from panel state
         try:
             panel_state = store.get_active_panel_state()
             search_query[0] = str(panel_state.get("search_query", "") or "")
+            ht = panel_state.get("_hidden_types", None)
+            if ht is not None:
+                hidden_types.clear()
+                hidden_types.update(ht)
         except Exception:
             pass
         _auto_expand_selected()
@@ -1106,6 +1114,53 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
     return widget
 
 
+def _render_dropdown(el, store, ctx, dispatch_fn):
+    """Render a dropdown widget. Currently only handles the layers panel
+    type filter dropdown (id == 'lp_filter_button'); other dropdowns fall
+    through to placeholder."""
+    widget_id = el.get("id", "")
+    if widget_id != "lp_filter_button":
+        return _render_placeholder(el, store, ctx, dispatch_fn)
+    from PySide6.QtWidgets import QToolButton, QMenu
+    from PySide6.QtGui import QAction
+    btn = QToolButton()
+    btn.setText("🔽")
+    btn.setPopupMode(QToolButton.InstantPopup)
+    btn.setFixedSize(20, 20)
+    btn.setStyleSheet("background:transparent;border:none;color:#ccc;")
+
+    items = el.get("items", [])
+
+    def _open_menu():
+        menu = QMenu(btn)
+        panel_id = store.get_active_panel_id()
+        hidden = set()
+        if panel_id:
+            ps = store.get_panel_state(panel_id)
+            hidden = set(ps.get("_hidden_types", ()) or ())
+        for item in items:
+            label = item.get("label", "")
+            value = item.get("value", "")
+            action = QAction(label, menu)
+            action.setCheckable(True)
+            action.setChecked(value not in hidden)
+            def _toggle(checked, v=value, pid=panel_id):
+                if pid is None:
+                    return
+                ps = store.get_panel_state(pid)
+                current = set(ps.get("_hidden_types", ()) or ())
+                if checked:
+                    current.discard(v)
+                else:
+                    current.add(v)
+                store.set_panel(pid, "_hidden_types", tuple(sorted(current)))
+            action.toggled.connect(_toggle)
+            menu.addAction(action)
+        menu.exec_(btn.mapToGlobal(btn.rect().bottomLeft()))
+    btn.clicked.connect(_open_menu)
+    return btn
+
+
 def _render_element_preview(el, store, ctx, dispatch_fn):
     """Render an element_preview widget as a placeholder thumbnail."""
     style = el.get("style", {})
@@ -1416,5 +1471,6 @@ _RENDERERS = {
     "fill_stroke_widget": _render_container,
     "tree_view": _render_tree_view,
     "element_preview": _render_element_preview,
+    "dropdown": _render_dropdown,
     "placeholder": _render_placeholder,
 }
