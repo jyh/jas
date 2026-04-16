@@ -156,6 +156,30 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         store.snapshot()
         return None
 
+    # doc.create_layer: { name } — PHASE3 sub-tollgate 2
+    # Factory returning a Layer element dict with sane defaults. Bind
+    # via `as:` and then insert with doc.insert_at / doc.insert_after.
+    if "doc.create_layer" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        spec = effect["doc.create_layer"]
+        if not isinstance(spec, dict):
+            return None, None
+        name_expr = spec.get("name", "'Layer'")
+        eval_ctx = store.eval_context(ctx)
+        name_val = evaluate(str(name_expr), eval_ctx)
+        name = name_val.value if name_val.type == ValueType.STRING else "Layer"
+        layer = {
+            "kind": "Layer",
+            "name": name,
+            "children": [],
+            "common": {
+                "visibility": "preview",
+                "locked": False,
+                "opacity": 1.0,
+            },
+        }
+        return None, layer
+
     # doc.delete_at: path_expr — PHASE3 §5.5
     # Deletes the element at the given path. Returns the deleted
     # element (native form) for binding via `as:`.

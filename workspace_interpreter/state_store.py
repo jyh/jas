@@ -353,16 +353,22 @@ class StateStore:
 
     def _active_document_view(self) -> dict:
         """Build the active_document namespace from the document tree.
-        Includes top_level_layers and top_level_layer_paths (Phase 3 §7.2)."""
+        Includes top_level_layers and top_level_layer_paths (Phase 3 §7.2).
+        Also exposes computed properties for new_layer: next_layer_name and
+        new_layer_insert_index — derived from current layers + panel state.
+        """
         from workspace_interpreter.expr_types import Value
         if self._document is None:
             return {
                 "top_level_layers": [],
                 "top_level_layer_paths": [],
+                "next_layer_name": "Layer 1",
+                "new_layer_insert_index": 0,
             }
         layers = self._document.get("layers", [])
         top_level_layers = []
         top_level_layer_paths = []
+        layer_names = set()
         for i, elem in enumerate(layers):
             if isinstance(elem, dict) and elem.get("kind") == "Layer":
                 # Expose layer with its path for HOF predicates
@@ -370,7 +376,40 @@ class StateStore:
                 view["path"] = Value.path((i,))
                 top_level_layers.append(view)
                 top_level_layer_paths.append(Value.path((i,)))
+                name = elem.get("name")
+                if isinstance(name, str):
+                    layer_names.add(name)
+        # Next unused "Layer N" name
+        n = 1
+        while f"Layer {n}" in layer_names:
+            n += 1
+        next_layer_name = f"Layer {n}"
+        # Insertion index: min of selected top-level indices + 1, else end.
+        # Selection lives on the layers panel; read if active.
+        insert_idx = len(layers)
+        if self._active_panel == "layers":
+            panel = self._panels.get("layers", {})
+            sel = panel.get("layers_panel_selection", [])
+            if isinstance(sel, list):
+                top_level_indices = []
+                for p in sel:
+                    # Path might be a Value.path, a __path__ marker dict, or
+                    # a list of ints. Handle all three.
+                    if isinstance(p, Value) and p.type.name == "PATH":
+                        idx = p.value
+                    elif isinstance(p, dict) and "__path__" in p:
+                        idx = tuple(p["__path__"])
+                    elif isinstance(p, (list, tuple)):
+                        idx = tuple(p)
+                    else:
+                        continue
+                    if len(idx) == 1:
+                        top_level_indices.append(idx[0])
+                if top_level_indices:
+                    insert_idx = min(top_level_indices) + 1
         return {
             "top_level_layers": top_level_layers,
             "top_level_layer_paths": top_level_layer_paths,
+            "next_layer_name": next_layer_name,
+            "new_layer_insert_index": insert_idx,
         }

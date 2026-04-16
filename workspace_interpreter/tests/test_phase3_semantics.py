@@ -504,6 +504,90 @@ class TestDocSetEffect:
 # ══════════════════════════════════════════════════════════════════
 
 
+class TestDocCreateLayerEffect:
+    """PHASE3.md sub-tollgate 2: doc.create_layer factory primitive."""
+
+    def test_create_layer_then_insert_at(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "preview"}},
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.create_layer": {"name": "'Layer 2'"}, "as": "new_layer"},
+            {"doc.insert_at": {"parent_path": "path()",
+                                "index": "1", "element": "new_layer"}},
+        ], {}, store, diagnostics=[])
+        assert len(doc["layers"]) == 2
+        assert doc["layers"][1]["name"] == "Layer 2"
+        assert doc["layers"][1]["kind"] == "Layer"
+
+    def test_create_layer_default_fields(self):
+        doc = _make_doc([])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.create_layer": {"name": "'Solo'"}, "as": "l"},
+            {"doc.insert_at": {"parent_path": "path()",
+                                "index": "0", "element": "l"}},
+        ], {}, store, diagnostics=[])
+        layer = doc["layers"][0]
+        assert layer["kind"] == "Layer"
+        assert layer["name"] == "Solo"
+        assert layer.get("common", {}).get("visibility") == "preview"
+        assert layer.get("common", {}).get("locked") is False
+        assert layer.get("children") == []
+
+
+class TestNewLayerAction:
+    """End-to-end: new_layer YAML action."""
+
+    def _load_action(self, name):
+        import yaml as yl
+        path = os.path.join(os.path.dirname(__file__), "..", "..",
+                            "workspace", "actions.yaml")
+        with open(path) as f:
+            return yl.safe_load(f)["actions"][name]
+
+    def test_new_layer_no_selection_appends(self):
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("new_layer")["effects"]
+        doc = _make_doc([
+            {"kind": "Layer", "name": "Layer 1"},
+        ])
+        store = StateStore(document=doc)
+        store.init_panel("layers", {"layers_panel_selection": []})
+        store.set_active_panel("layers")
+        run_effects(effects, {}, store, diagnostics=[])
+        assert len(doc["layers"]) == 2
+        # Auto-generated name skips "Layer 1"
+        assert doc["layers"][1]["name"] == "Layer 2"
+
+    def test_new_layer_with_selection_inserts_above(self):
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("new_layer")["effects"]
+        doc = _make_doc([
+            {"kind": "Layer", "name": "Layer 1"},
+            {"kind": "Layer", "name": "Layer 2"},
+            {"kind": "Layer", "name": "Layer 3"},
+        ])
+        store = StateStore(document=doc)
+        # Select layer at index 1 (middle)
+        store.init_panel("layers", {
+            "layers_panel_selection": [{"__path__": [1]}],
+        })
+        store.set_active_panel("layers")
+        run_effects(effects, {}, store, diagnostics=[])
+        assert len(doc["layers"]) == 4
+        # Insert at index 1+1 = 2
+        # Names taken: {Layer 1, Layer 2, Layer 3}, next unused: Layer 4
+        assert doc["layers"][2]["name"] == "Layer 4"
+        # Old Layer 3 shifted to index 3
+        assert doc["layers"][3]["name"] == "Layer 3"
+
+
 class TestActiveDocumentRollups:
     def test_top_level_layers(self):
         doc = _make_doc([
