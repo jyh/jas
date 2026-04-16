@@ -639,20 +639,23 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
         bb.rejected.connect(dlg.reject)
         dv.addWidget(bb)
         if dlg.exec_() == QDialog.Accepted:
-            new_name = name_edit.text()
-            new_lock = lock_cb.isChecked()
-            new_show = show_cb.isChecked()
-            new_preview = preview_cb.isChecked()
-            if not new_show:
-                new_vis = Visibility.INVISIBLE
-            elif new_preview:
-                new_vis = Visibility.PREVIEW
-            else:
-                new_vis = Visibility.OUTLINE
-            m.snapshot()
-            new_e = dc_replace(e, name=new_name, locked=new_lock, visibility=new_vis)
-            m.document = m.document.replace_element(p, new_e)
-            _rebuild()
+            # Route through the YAML layer_options_confirm action so
+            # jas Python shares the commit logic with the spec. The
+            # dialog's state is packed as params; close_dialog is the
+            # no-op terminator since the dialog already dismissed.
+            from jas.panels.panel_menu import _dispatch_yaml_layers_action
+            layer_id = ".".join(str(i) for i in p)
+            _dispatch_yaml_layers_action(
+                "layer_options_confirm", m,
+                params={
+                    "layer_id": layer_id,
+                    "name": name_edit.text(),
+                    "lock": lock_cb.isChecked(),
+                    "show": show_cb.isChecked(),
+                    "preview": preview_cb.isChecked(),
+                },
+                on_close_dialog=_rebuild,
+            )
 
     _auto_expand_selected()
     rows = []
