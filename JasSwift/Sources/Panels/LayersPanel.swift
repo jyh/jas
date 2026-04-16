@@ -51,7 +51,9 @@ public enum LayersPanel {
     /// active_document rollups and (if supplied) panel.layers_panel_selection
     /// into the evaluation context — needed by Group B actions.
     public static func dispatchYamlAction(_ actionName: String, model: Model,
-                                           panelSelection: [[Int]] = []) {
+                                           panelSelection: [[Int]] = [],
+                                           params: [String: Any] = [:],
+                                           onCloseDialog: (() -> Void)? = nil) {
         guard let ws = WorkspaceData.load(),
               let actions = ws.data["actions"] as? [String: Any],
               let actionDef = actions[actionName] as? [String: Any],
@@ -109,7 +111,7 @@ public enum LayersPanel {
         let ctx: [String: Any] = [
             "active_document": activeDoc,
             "panel": panel,
-            "param": [String: Any](),
+            "param": params,
         ]
 
         // Platform handlers
@@ -341,7 +343,16 @@ public enum LayersPanel {
             return nil
         }
 
-        let platformEffects: [String: PlatformEffect] = [
+        // close_dialog: invoke the onCloseDialog callback if supplied.
+        // Layer Options uses this to dismiss the SwiftUI sheet after
+        // layer_options_confirm commits its changes. No-op when the
+        // caller didn't provide a handler.
+        let closeDialogHandler: PlatformEffect = { _, _, _ in
+            onCloseDialog?()
+            return nil
+        }
+
+        var platformEffects: [String: PlatformEffect] = [
             "snapshot": snapshotHandler,
             "doc.set": docSetHandler,
             "doc.delete_at": docDeleteAtHandler,
@@ -353,6 +364,9 @@ public enum LayersPanel {
             "list_push": listPushHandler,
             "pop": popHandler,
         ]
+        if onCloseDialog != nil {
+            platformEffects["close_dialog"] = closeDialogHandler
+        }
 
         let store = StateStore()
         runEffects(effects, ctx: ctx, store: store,
