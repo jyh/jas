@@ -4,6 +4,7 @@
 /// text → Text, slider → Slider, color_swatch → colored Rectangle, etc.
 
 import SwiftUI
+import AppKit
 
 /// Renders a YAML element tree as a SwiftUI view.
 struct YamlElementView: View {
@@ -555,6 +556,42 @@ private func cycleVisibility(_ vis: Visibility) -> Visibility {
     }
 }
 
+/// Build a fitted-viewBox SVG fragment for a single element.
+private func buildPreviewSvg(_ elem: Element) -> String {
+    let b = elem.bounds
+    let w = b.width, h = b.height
+    if !w.isFinite || !h.isFinite || w <= 0 || h <= 0 {
+        return ""
+    }
+    let pad = max(max(w, h) * 0.02, 0.5)
+    let vb = "\(b.x - pad) \(b.y - pad) \(w + 2 * pad) \(h + 2 * pad)"
+    let inner = elementSvg(elem, indent: "")
+    return #"<svg xmlns="http://www.w3.org/2000/svg" viewBox=""# + vb + #"" preserveAspectRatio="xMidYMid meet">"# + inner + "</svg>"
+}
+
+/// SwiftUI view that renders an element as a fitted SVG thumbnail.
+/// NSImage natively parses SVG data on recent macOS.
+struct ElementThumbnail: View {
+    let elem: Element
+    let size: CGFloat
+
+    var body: some View {
+        let svg = buildPreviewSvg(elem)
+        ZStack {
+            Rectangle().fill(SwiftUI.Color.white)
+            if let data = svg.data(using: .utf8),
+               let img = NSImage(data: data) {
+                Image(nsImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .padding(1)
+            }
+        }
+        .frame(width: size, height: size)
+        .overlay(Rectangle().stroke(SwiftUI.Color.gray, lineWidth: 1))
+    }
+}
+
 struct TreeViewContent: View {
     @ObservedObject var model: Model
     @State private var collapsed: Set<ElementPath> = []
@@ -641,10 +678,8 @@ struct TreeViewContent: View {
             } else {
                 Spacer().frame(width: 16)
             }
-            // Preview
-            Rectangle().fill(SwiftUI.Color.white)
-                .overlay(Rectangle().stroke(SwiftUI.Color.gray, lineWidth: 1))
-                .frame(width: 24, height: 24)
+            // Preview — fitted-viewBox SVG thumbnail of the element
+            ElementThumbnail(elem: elem, size: 24)
             // Name — inline TextField when renaming, Text otherwise
             if renamingPath == path {
                 TextField("", text: $editingName, onCommit: {
