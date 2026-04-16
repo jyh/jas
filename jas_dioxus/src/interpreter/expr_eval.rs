@@ -303,6 +303,9 @@ fn eval_path(segments: &[String], ctx: &serde_json::Value, scope: &Scope) -> Val
     }
 
     let mut current = obj;
+    // Temp storage for serialized-JSON strings we parse along the way —
+    // keeps references valid across loop iterations.
+    let mut parsed: Option<serde_json::Value> = None;
     for seg in &segments[1..] {
         match current {
             serde_json::Value::Object(map) => match map.get(seg.as_str()) {
@@ -326,7 +329,35 @@ fn eval_path(segments: &[String], ctx: &serde_json::Value, scope: &Scope) -> Val
                 if seg == "length" {
                     return Value::Number(s.len() as f64);
                 }
-                return Value::Null;
+                // A String may be a serialized-JSON dict (from
+                // Value::from_json's object-stringification path, or
+                // from element_at). Try parsing and continue drilling.
+                match serde_json::from_str::<serde_json::Value>(s) {
+                    Ok(v @ serde_json::Value::Object(_))
+                    | Ok(v @ serde_json::Value::Array(_)) => {
+                        parsed = Some(v);
+                        current = parsed.as_ref().unwrap();
+                        match current {
+                            serde_json::Value::Object(map) => match map.get(seg.as_str()) {
+                                Some(v) => current = v,
+                                None => return Value::Null,
+                            },
+                            serde_json::Value::Array(arr) => {
+                                if let Ok(idx) = seg.parse::<usize>() {
+                                    if idx < arr.len() {
+                                        current = &arr[idx];
+                                    } else {
+                                        return Value::Null;
+                                    }
+                                } else {
+                                    return Value::Null;
+                                }
+                            }
+                            _ => return Value::Null,
+                        }
+                    }
+                    _ => return Value::Null,
+                }
             }
             _ => return Value::Null,
         }
@@ -690,6 +721,44 @@ fn eval_func(
                 }
             }
             Value::Path(parts)
+        }
+
+        // element_at(path) — resolve a path against active_document's
+        // layer tree. For a single-element path returns the matching
+        // top-level layer view; for deeper paths descends through the
+        // layer's .children. Returns Null for non-path args, out-of-range
+        // indices, or empty paths (Phase 4).
+        "element_at" => {
+            if args.len() != 1 { return Value::Null; }
+            let p = eval_inner(&args[0], ctx, scope, store_cb);
+            let indices = match p {
+                Value::Path(v) => v,
+                _ => return Value::Null,
+            };
+            if indices.is_empty() { return Value::Null; }
+            let top = match ctx.get("active_document")
+                .and_then(|ad| ad.get("top_level_layers"))
+                .and_then(|t| t.as_array())
+            {
+                Some(arr) => arr,
+                None => return Value::Null,
+            };
+            let first = indices[0];
+            let mut cur = match top.get(first) {
+                Some(v) => v,
+                None => return Value::Null,
+            };
+            for &idx in &indices[1..] {
+                let children = match cur.get("children").and_then(|c| c.as_array()) {
+                    Some(a) => a,
+                    None => return Value::Null,
+                };
+                cur = match children.get(idx) {
+                    Some(v) => v,
+                    None => return Value::Null,
+                };
+            }
+            Value::from_json(cur)
         }
 
         // reverse: list -> list

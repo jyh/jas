@@ -259,50 +259,9 @@ fn apply_dialog_confirm(
 /// Returns a list of deferred effects (open_dialog, close_dialog) that
 /// must be applied outside the AppState borrow.
 fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
-    match action {
-        "open_layer_options" => {
-            use crate::geometry::element::Element as E;
-            let layer_id = params.get("layer_id").and_then(|v| v.as_str()).map(String::from);
-            // layer_id is a dotted path ("0.1") — matches path_from_id's
-            // grammar so the YAML layer_options_confirm action can decode
-            // it back to a Path value.
-            let path: Option<Vec<usize>> = layer_id.as_ref().and_then(|s| {
-                s.split('.').map(|p| p.parse::<usize>().ok()).collect()
-            });
-            // Build dialog params from the layer's properties
-            let mut dlg_params = serde_json::Map::new();
-            dlg_params.insert("mode".into(), serde_json::Value::String("edit".into()));
-            if let Some(ref p) = path {
-                dlg_params.insert("layer_id".into(), serde_json::Value::String(
-                    p.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(".")
-                ));
-                if let Some(tab) = st.tab() {
-                    if let Some(elem) = tab.model.document().get_element(p) {
-                        if let E::Layer(le) = elem {
-                            dlg_params.insert("name".into(), serde_json::Value::String(le.name.clone()));
-                            dlg_params.insert("color".into(), serde_json::Value::String("#4a90d9".into()));
-                            dlg_params.insert("color_preset".into(), serde_json::Value::String("light_blue".into()));
-                            dlg_params.insert("lock".into(), serde_json::Value::Bool(le.common.locked));
-                            use crate::geometry::element::Visibility;
-                            let show = le.common.visibility != Visibility::Invisible;
-                            let preview = le.common.visibility == Visibility::Preview;
-                            dlg_params.insert("show".into(), serde_json::Value::Bool(show));
-                            dlg_params.insert("preview".into(), serde_json::Value::Bool(preview));
-                            dlg_params.insert("dim_images".into(), serde_json::Value::Bool(false));
-                            dlg_params.insert("dim_percentage".into(), serde_json::Value::from(50));
-                        }
-                    }
-                }
-            }
-            return vec![serde_json::json!({
-                "open_dialog": {
-                    "id": "layer_options",
-                    "params": dlg_params
-                }
-            })];
-        }
-        _ => {}
-    }
+    // Phase 4: open_layer_options is now pure YAML. It resolves the
+    // target layer via element_at(path_from_id(param.layer_id)) and
+    // packs its current state as open_dialog params.
     // Fall through to YAML actions catalog
     let ws = crate::interpreter::workspace::Workspace::load();
     if let Some(ws) = ws {
@@ -4795,6 +4754,53 @@ mod tests {
         assert_eq!(tab_layer(&st, 0).name, "A");
         assert_eq!(tab_layer(&st, 1).name, "B");
         assert_eq!(tab_layer(&st, 2).name, "B");
+    }
+
+    #[test]
+    fn open_layer_options_edit_mode_passes_layer_state() {
+        let mut st = make_state_with_layers(vec![
+            ("Target".into(), Visibility::Outline, true),
+        ]);
+        let mut params = serde_json::Map::new();
+        params.insert("mode".into(), serde_json::Value::String("edit".into()));
+        params.insert("layer_id".into(), serde_json::Value::String("0".into()));
+        let deferred = dispatch_action("open_layer_options", &params, &mut st);
+        // open_dialog is deferred with dialog params derived from the layer.
+        let od = deferred.iter()
+            .find_map(|e| e.get("open_dialog"))
+            .and_then(|v| v.as_object())
+            .expect("expected deferred open_dialog");
+        let dlg_params = od.get("params").and_then(|p| p.as_object())
+            .expect("open_dialog with params");
+        assert_eq!(dlg_params.get("mode").and_then(|v| v.as_str()), Some("edit"));
+        assert_eq!(dlg_params.get("layer_id").and_then(|v| v.as_str()), Some("0"));
+        assert_eq!(dlg_params.get("name").and_then(|v| v.as_str()), Some("Target"));
+        assert_eq!(dlg_params.get("lock").and_then(|v| v.as_bool()), Some(true));
+        // visibility=outline → show=true (not invisible), preview=false
+        assert_eq!(dlg_params.get("show").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(dlg_params.get("preview").and_then(|v| v.as_bool()), Some(false));
+    }
+
+    #[test]
+    fn open_layer_options_create_mode_passes_defaults() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+        ]);
+        let mut params = serde_json::Map::new();
+        params.insert("mode".into(), serde_json::Value::String("create".into()));
+        params.insert("layer_id".into(), serde_json::Value::Null);
+        let deferred = dispatch_action("open_layer_options", &params, &mut st);
+        let od = deferred.iter()
+            .find_map(|e| e.get("open_dialog"))
+            .and_then(|v| v.as_object())
+            .expect("expected deferred open_dialog");
+        let dlg_params = od.get("params").and_then(|p| p.as_object()).unwrap();
+        // Create mode: layer_elem is null, so name defaults to empty,
+        // lock to false, show/preview to true.
+        assert_eq!(dlg_params.get("name").and_then(|v| v.as_str()), Some(""));
+        assert_eq!(dlg_params.get("lock").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(dlg_params.get("show").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(dlg_params.get("preview").and_then(|v| v.as_bool()), Some(true));
     }
 
     #[test]
