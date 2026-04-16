@@ -93,7 +93,8 @@ func runEffects(
         }
         if handled { continue }
         runOne(effect, ctx: threadedCtx, store: store, actions: actions,
-               dialogs: dialogs, schema: schema, diagnostics: &diagnostics)
+               dialogs: dialogs, platformEffects: platformEffects,
+               schema: schema, diagnostics: &diagnostics)
     }
 }
 
@@ -160,6 +161,7 @@ private func runOne(
     store: StateStore,
     actions: [String: Any]?,
     dialogs: [String: Any]?,
+    platformEffects: [String: PlatformEffect] = [:],
     schema: Bool = false,
     diagnostics: inout [Diagnostic]
 ) {
@@ -241,12 +243,14 @@ private func runOne(
         let evalCtx = store.evalContext(extra: ctx)
         let result = evaluate(condExpr, context: evalCtx)
         if result.toBool() {
-            if let thenEffects = cond["then"] as? [[String: Any]] {
+            if let thenEffects = cond["then"] as? [Any] {
                 runEffects(thenEffects, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
+                           platformEffects: platformEffects,
                            schema: schema, diagnostics: &diagnostics)
             }
-        } else if let elseEffects = cond["else"] as? [[String: Any]] {
+        } else if let elseEffects = cond["else"] as? [Any] {
             runEffects(elseEffects, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
+                       platformEffects: platformEffects,
                        schema: schema, diagnostics: &diagnostics)
         }
         return
@@ -288,6 +292,7 @@ private func runOne(
                 dispatchCtx["param"] = resolved
             }
             runEffects(actionEffects, ctx: dispatchCtx, store: store, actions: actions, dialogs: dialogs,
+                       platformEffects: platformEffects,
                        schema: schema, diagnostics: &diagnostics)
         }
         return
@@ -356,10 +361,11 @@ private func runOne(
     if let st = effect["start_timer"] as? [String: Any] {
         let timerId = st["id"] as? String ?? ""
         let delayMs = (st["delay_ms"] as? NSNumber)?.intValue ?? 250
-        let nestedEffects = st["effects"] as? [[String: Any]] ?? []
+        let nestedEffects = st["effects"] as? [Any] ?? []
         TimerManager.shared.startTimer(id: timerId, delayMs: delayMs) {
             var timerDiags: [Diagnostic] = []
             runEffects(nestedEffects, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
+                       platformEffects: platformEffects,
                        schema: schema, diagnostics: &timerDiags)
         }
         return

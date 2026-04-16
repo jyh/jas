@@ -29,13 +29,14 @@ public enum LayersPanel {
              "toggle_all_layers_outline",
              "toggle_all_layers_lock",
              "new_layer",
-             "collect_in_new_layer":
+             "collect_in_new_layer",
+             "enter_isolation_mode",
+             "exit_isolation_mode":
             if let m = model {
                 dispatchYamlAction(cmd, model: m)
             }
         // Tier-3 stubs: log only until document model is implemented.
         case "new_group",
-             "enter_isolation_mode", "exit_isolation_mode",
              "flatten_artwork":
             #if DEBUG
             print("[LayersPanel] dispatch: \(cmd)")
@@ -108,6 +109,7 @@ public enum LayersPanel {
         let ctx: [String: Any] = [
             "active_document": activeDoc,
             "panel": panel,
+            "param": [String: Any](),
         ]
 
         // Platform handlers
@@ -314,6 +316,31 @@ public enum LayersPanel {
             return nil
         }
 
+        // list_push: { target, value } — Phase 3 Group D: enter_isolation_mode.
+        // Only target=panel.isolation_stack is handled here; writes the
+        // evaluated Path value to model.layersIsolationStack.
+        let listPushHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any] else { return nil }
+            let target = (spec["target"] as? String) ?? ""
+            guard target == "panel.isolation_stack" else { return nil }
+            let valueExpr: String
+            if let s = spec["value"] as? String { valueExpr = s }
+            else { return nil }
+            let val = evaluate(valueExpr, context: callCtx)
+            guard case .path(let indices) = val else { return nil }
+            model.layersIsolationStack.append(indices)
+            return nil
+        }
+        // pop: "panel.isolation_stack" — Phase 3 Group D: exit_isolation_mode.
+        let popHandler: PlatformEffect = { value, _, _ in
+            guard let target = value as? String else { return nil }
+            guard target == "panel.isolation_stack" else { return nil }
+            if !model.layersIsolationStack.isEmpty {
+                _ = model.layersIsolationStack.removeLast()
+            }
+            return nil
+        }
+
         let platformEffects: [String: PlatformEffect] = [
             "snapshot": snapshotHandler,
             "doc.set": docSetHandler,
@@ -323,6 +350,8 @@ public enum LayersPanel {
             "doc.insert_at": docInsertAtHandler,
             "doc.create_layer": docCreateLayerHandler,
             "doc.wrap_in_layer": docWrapInLayerHandler,
+            "list_push": listPushHandler,
+            "pop": popHandler,
         ]
 
         let store = StateStore()

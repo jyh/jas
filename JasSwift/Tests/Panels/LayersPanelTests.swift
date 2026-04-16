@@ -228,5 +228,104 @@ private func runLayersEffects(_ effects: [Any], model: Model) {
     #expect(model.document.layers[1].children.count == 2)
 }
 
+@Test func enterIsolationModePushesPanelSelection() {
+    let model = Model(document: Document(layers: [
+        Layer(name: "A", children: []),
+        Layer(name: "B", children: []),
+    ]))
+    #expect(model.layersIsolationStack.isEmpty)
+    LayersPanel.dispatchYamlAction("enter_isolation_mode",
+                                    model: model,
+                                    panelSelection: [[1]])
+    #expect(model.layersIsolationStack.count == 1)
+    #expect(model.layersIsolationStack[0] == [1])
+}
+
+@Test func listPushInsideIfThen() {
+    // list_push nested inside if-then. Tests that runOne's if handler
+    // propagates threadedCtx into the nested runEffects invocation.
+    var calls = 0
+    let handler: PlatformEffect = { _, _, _ in calls += 1; return nil }
+    let effects: [Any] = [
+        ["if": ["condition": "true",
+                "then": [
+                    ["list_push": ["target": "panel.isolation_stack",
+                                    "value": "path(1)"]]
+                ]]],
+    ]
+    runEffects(effects, ctx: [:], store: StateStore(),
+               platformEffects: ["list_push": handler])
+    #expect(calls == 1)
+}
+
+@Test func listPushHandlerInvokedAtTopLevel() {
+    // Minimal: list_push at the top of an effect list (no let, no if).
+    // Isolates the handler dispatch from every other effect.
+    var handlerCalled = false
+    var seenTarget = ""
+    var seenValue: Value = .null
+    let handler: PlatformEffect = { value, callCtx, _ in
+        handlerCalled = true
+        if let spec = value as? [String: Any] {
+            seenTarget = (spec["target"] as? String) ?? ""
+            if let vexp = spec["value"] as? String {
+                seenValue = evaluate(vexp, context: callCtx)
+            }
+        }
+        return nil
+    }
+    let effects: [Any] = [
+        ["list_push": ["target": "panel.isolation_stack",
+                        "value": "path(1)"]],
+    ]
+    runEffects(effects, ctx: [:], store: StateStore(),
+               platformEffects: ["list_push": handler])
+    #expect(handlerCalled)
+    #expect(seenTarget == "panel.isolation_stack")
+    if case .path(let p) = seenValue { #expect(p == [1]) }
+    else { Issue.record("expected .path value, got \(seenValue)") }
+}
+
+@Test func listPushPlatformHandlerDirect() {
+    // Verify the list_push platform handler path fires with a
+    // bare-metal effect (no YAML loading). Isolates the
+    // let/if/list_push pipeline from yaml parsing.
+    var stackCalls: [[Int]] = []
+    let listPushHandler: PlatformEffect = { value, callCtx, _ in
+        guard let spec = value as? [String: Any] else { return nil }
+        let target = (spec["target"] as? String) ?? ""
+        guard target == "panel.isolation_stack" else { return nil }
+        let valueExpr = (spec["value"] as? String) ?? "null"
+        let val = evaluate(valueExpr, context: callCtx)
+        if case .path(let idx) = val { stackCalls.append(idx) }
+        return nil
+    }
+    let effects: [Any] = [
+        ["let": ["target": "panel.layers_panel_selection[0]"]],
+        ["if": ["condition": "target != null",
+                "then": [
+                    ["list_push": ["target": "panel.isolation_stack",
+                                    "value": "target"]]
+                ]]],
+    ]
+    let ctx: [String: Any] = [
+        "panel": [
+            "layers_panel_selection": [["__path__": [1]]],
+        ],
+    ]
+    runEffects(effects, ctx: ctx, store: StateStore(),
+               platformEffects: ["list_push": listPushHandler])
+    #expect(stackCalls == [[1]])
+}
+
+@Test func exitIsolationModePopsStack() {
+    let model = Model(document: Document(layers: [
+        Layer(name: "A", children: []),
+    ]))
+    model.layersIsolationStack = [[0]]
+    LayersPanel.dispatchYamlAction("exit_isolation_mode", model: model)
+    #expect(model.layersIsolationStack.isEmpty)
+}
+
 // Shared mutable layout for tests — not exercised by dispatch here.
 private var defaultLayout: WorkspaceLayout = WorkspaceLayout.defaultLayout()
