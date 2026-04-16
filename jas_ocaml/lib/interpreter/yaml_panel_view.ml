@@ -256,6 +256,38 @@ and render_panel ~packing ~ctx el =
   | `Null -> render_placeholder ~packing el
   | content -> render_element ~packing ~ctx content
 
+(** Render a fitted-viewBox SVG of an element as a GTK widget.
+    Writes the SVG to a temp file and loads it via GdkPixbuf at the
+    requested size, falling back to an empty frame on error. *)
+and make_element_thumbnail ~packing (elem : Element.element) (size : int) =
+  let (x, y, w, h) = Element.bounds elem in
+  if not (Float.is_finite w && Float.is_finite h) || w <= 0.0 || h <= 0.0 then begin
+    let frame = GBin.frame ~shadow_type:`ETCHED_IN ~packing () in
+    frame#misc#set_size_request ~width:size ~height:size ();
+    frame#misc#modify_bg [`NORMAL, `NAME "white"]
+  end else begin
+    let pad = max (Float.max w h *. 0.02) 0.5 in
+    let vb = Printf.sprintf "%f %f %f %f" (x -. pad) (y -. pad) (w +. 2.0 *. pad) (h +. 2.0 *. pad) in
+    let inner = Svg.element_svg "" elem in
+    let svg_str = Printf.sprintf
+      "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"%s\" preserveAspectRatio=\"xMidYMid meet\">%s</svg>"
+      vb inner in
+    let tmp = Filename.temp_file "jas_thumb" ".svg" in
+    try
+      let oc = open_out tmp in
+      output_string oc svg_str;
+      close_out oc;
+      let pixbuf = GdkPixbuf.from_file_at_size tmp ~width:size ~height:size in
+      (try Sys.remove tmp with _ -> ());
+      let img = GMisc.image ~pixbuf ~packing () in
+      img#misc#set_size_request ~width:size ~height:size ()
+    with _ ->
+      (try Sys.remove tmp with _ -> ());
+      let frame = GBin.frame ~shadow_type:`ETCHED_IN ~packing () in
+      frame#misc#set_size_request ~width:size ~height:size ();
+      frame#misc#modify_bg [`NORMAL, `NAME "white"]
+  end
+
 and render_tree_view ~packing ~ctx:_ _el =
   let vbox = GPack.vbox ~spacing:0 ~packing () in
   let get_model = !_get_model_ref in
@@ -540,9 +572,8 @@ and render_tree_view ~packing ~ctx:_ _el =
           let gap = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
           gap#misc#set_size_request ~width:16 ()
         end;
-        (* Preview *)
-        let preview = GBin.frame ~shadow_type:`ETCHED_IN ~packing:(hbox#pack ~expand:false) () in
-        preview#misc#set_size_request ~width:24 ~height:24 ();
+        (* Preview thumbnail — fitted SVG of the element *)
+        make_element_thumbnail ~packing:(hbox#pack ~expand:false) elem 24;
         (* Name — inline GEntry when renaming, GMisc.label otherwise *)
         (match !_layers_renaming with
          | Some rp when rp = path ->
@@ -772,9 +803,8 @@ and render_tree_view ~packing ~ctx:_ _el =
         let gap = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
         gap#misc#set_size_request ~width:16 ()
       end;
-      (* Preview *)
-      let preview = GBin.frame ~shadow_type:`ETCHED_IN ~packing:(hbox#pack ~expand:false) () in
-      preview#misc#set_size_request ~width:24 ~height:24 ();
+      (* Preview thumbnail — fitted SVG of the element *)
+      make_element_thumbnail ~packing:(hbox#pack ~expand:false) elem 24;
       (* Name — inline GEntry when renaming, GMisc.label otherwise *)
       (match !_layers_renaming with
        | Some rp when rp = path ->
