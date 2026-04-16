@@ -17,7 +17,10 @@ end
 module PathSet2 = Set.Make(PathKey)
 let _layers_collapsed : PathSet2.t ref = ref PathSet2.empty
 
-(** Callback to trigger re-render when collapsed state changes. *)
+(** Module-level set of panel-selected element paths. *)
+let _layers_panel_selection : PathSet2.t ref = ref PathSet2.empty
+
+(** Callback to trigger re-render when UI state changes. *)
 let _rerender_layers : (unit -> unit) ref = ref (fun () -> ())
 
 (** Safely access a nested JSON member path (e.g. "style" -> "gap").
@@ -277,7 +280,16 @@ and render_tree_view ~packing ~ctx:_ _el =
         let (name, _is_named) = display_name elem in
         let vis = Element.get_visibility elem in
         let locked = Element.is_locked elem in
-        let hbox = GPack.hbox ~spacing:2 ~packing:(vbox#pack ~expand:false) () in
+        let is_panel_selected = PathSet2.mem path !_layers_panel_selection in
+        let row_eb = GBin.event_box ~packing:(vbox#pack ~expand:false) () in
+        if is_panel_selected then
+          row_eb#misc#modify_bg [`NORMAL, `NAME "#3a4a6a"];
+        let row_path = path in
+        ignore (row_eb#event#connect#button_press ~callback:(fun _ ->
+          _layers_panel_selection := PathSet2.singleton row_path;
+          !_rerender_layers ();
+          true));
+        let hbox = GPack.hbox ~spacing:2 ~packing:row_eb#add () in
         if depth > 0 then begin
           let spacer = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
           spacer#misc#set_size_request ~width:(depth * 16) ()
@@ -371,7 +383,16 @@ and render_tree_view ~packing ~ctx:_ _el =
       let (name, _is_named) = display_name elem in
       let vis = Element.get_visibility elem in
       let locked = Element.is_locked elem in
-      let hbox = GPack.hbox ~spacing:2 ~packing:(vbox#pack ~expand:false) () in
+      let is_panel_selected = PathSet2.mem path !_layers_panel_selection in
+      let row_eb = GBin.event_box ~packing:(vbox#pack ~expand:false) () in
+      if is_panel_selected then
+        row_eb#misc#modify_bg [`NORMAL, `NAME "#3a4a6a"];
+      let row_path = path in
+      ignore (row_eb#event#connect#button_press ~callback:(fun _ ->
+        _layers_panel_selection := PathSet2.singleton row_path;
+        !_rerender_layers ();
+        true));
+      let hbox = GPack.hbox ~spacing:2 ~packing:row_eb#add () in
       (* Eye *)
       let eye_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
       ignore (GMisc.label ~text:(vis_icon vis) ~packing:eye_eb#add ());

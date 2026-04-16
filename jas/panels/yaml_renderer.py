@@ -318,9 +318,10 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
     doc = model.document
     selected_paths = doc.selected_paths()
 
-    # Track collapsed paths as a widget attribute (persists across rebuilds
-    # as long as the widget instance lives).
+    # Track collapsed paths and panel-selected paths as closure state
+    # (persists across rebuilds as long as the widget instance lives).
     collapsed = set()
+    panel_selection = set()
 
     def _flatten(elements, depth, path_prefix, layer_color, rows):
         for i in reversed(range(len(elements))):
@@ -329,9 +330,10 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
             is_container = isinstance(elem, Group)
             is_selected = path in selected_paths
             is_collapsed = path in collapsed
+            is_panel_sel = path in panel_selection
             cur_color = _LAYER_COLORS[i % len(_LAYER_COLORS)] if isinstance(elem, Layer) and len(path) == 1 else layer_color
             name, is_named = _element_display_name(elem)
-            rows.append((depth, path, elem, name, is_named, is_selected, is_container, is_collapsed, cur_color))
+            rows.append((depth, path, elem, name, is_named, is_selected, is_panel_sel, is_container, is_collapsed, cur_color))
             if is_container and not is_collapsed and hasattr(elem, 'children'):
                 _flatten(elem.children, depth + 1, path, cur_color, rows)
 
@@ -358,12 +360,20 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
             _add_row(layout, *r)
         layout.addStretch()
 
-    def _add_row(parent_layout, depth, path, elem, name, is_named, is_selected, is_container, is_collapsed, layer_color):
+    def _add_row(parent_layout, depth, path, elem, name, is_named, is_selected, is_panel_sel, is_container, is_collapsed, layer_color):
         row = QWidget()
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(4, 0, 4, 0)
         row_layout.setSpacing(2)
         row.setFixedHeight(24)
+        if is_panel_sel:
+            row.setStyleSheet("background: rgba(58, 123, 213, 0.4);")
+        # Row click for panel selection
+        def _on_row_press(event, p=path):
+            panel_selection.clear()
+            panel_selection.add(p)
+            _rebuild()
+        row.mousePressEvent = _on_row_press
 
         if depth > 0:
             spacer = QLabel("")

@@ -554,6 +554,7 @@ private func cycleVisibility(_ vis: Visibility) -> Visibility {
 struct TreeViewContent: View {
     @ObservedObject var model: Model
     @State private var collapsed: Set<ElementPath> = []
+    @State private var panelSelection: Set<ElementPath> = []
 
     var body: some View {
         let doc = model.document
@@ -589,6 +590,7 @@ struct TreeViewContent: View {
     @ViewBuilder
     private func treeRows(elem: Element, path: ElementPath, depth: Int, layerColor: String, selectedPaths: Set<ElementPath>) -> some View {
         let isSelected = selectedPaths.contains(path)
+        let isPanelSelected = panelSelection.contains(path)
         let (name, isNamed) = elementDisplayName(elem)
         let vis = elem.visibility
         let locked = elem.isLocked
@@ -657,6 +659,11 @@ struct TreeViewContent: View {
         }
         .frame(height: 24)
         .padding(.horizontal, 4)
+        .background(isPanelSelected ? SwiftUI.Color.blue.opacity(0.3) : SwiftUI.Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            panelSelection = [path]
+        }
 
         // Children (reversed) — skip if collapsed
         if !collapsed.contains(path), let children = elementChildren(elem) {
