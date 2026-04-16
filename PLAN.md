@@ -410,7 +410,7 @@ inside `foreach:` for shape consistency. Not blocking.
 - [x] Phase 0: Bug audit — `AUDIT.md` produced
 - [ ] Phase 1: Schema-driven `set:` engine + Category A migration — 6 actions (+ Bug A1, A2, A3 fixes, + schema gaps)
   - [x] Step 1: Cross-language `apply_set_effects` audit (Option B decision)
-  - [ ] Step 2: Consolidate state schema
+  - [x] Step 2: Consolidate state schema — gaps filled, `writable: false` marker added
   - [ ] Step 3: Design schema-driven `set:` contract
   - [ ] Step 4: Reference implementation in `workspace_interpreter/`
   - [ ] Step 5: Port to Rust / Swift / OCaml / Python-app

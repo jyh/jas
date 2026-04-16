@@ -14,6 +14,11 @@ runtime_contexts:
       can_undo: false
       can_redo: false
       zoom_level: 1.0
+      layers_panel_selection_count: 0
+      layers_panel_selection_is_container: false
+      layers_panel_selection_has_group: false
+      element_tree: null
+      element_selection: []
     properties:
       is_modified:
         type: bool
@@ -42,6 +47,27 @@ runtime_contexts:
       zoom_level:
         type: number
         description: "Current zoom factor (1.0 = 100%)"
+      # Layers-panel rollups. These are read-only and arguably belong on
+      # a panel.* namespace; they live here because `active_document` was
+      # historically the only namespace with computed-property machinery.
+      # Candidate for relocation once path-navigation lands (Phase 4).
+      layers_panel_selection_count:
+        type: number
+        description: "Number of items selected in the layers panel"
+      layers_panel_selection_is_container:
+        type: bool
+        description: "True when the sole selected layer item is a container (group or layer)"
+      layers_panel_selection_has_group:
+        type: bool
+        description: "True when at least one selected layer item is a group"
+      element_tree:
+        type: object
+        nullable: true
+        description: "Hierarchical tree of document elements for panel rendering (tree_view source)"
+      element_selection:
+        type: list
+        item_type: string
+        description: "List of IDs of elements currently selected on the canvas"
 
   workspace:
     description: >
@@ -57,3 +83,113 @@ runtime_contexts:
       active_layout_name:
         type: string
         description: "Name of the currently active layout (empty if none)"
+
+# ──────────────────────────────────────────────────────────────────
+# Lexically-bound contexts
+#
+# Unlike runtime_contexts (which are always accessible from any
+# expression), these variables are bound only inside specific language
+# constructs. They appear as free identifiers in expressions but only
+# resolve to values when evaluated in the correct scope.
+#
+# Also note: `foreach as: <name>` lexically binds <name> to each item
+# in the source list inside the loop body. Every foreach item also
+# exposes an implicit `_index` property giving its 0-based position.
+# These are language features of `foreach`, not declared contexts —
+# the binding name is chosen by the YAML author at each foreach site.
+
+lexical_contexts:
+
+  event:
+    description: >
+      UI event context bound inside event handler attributes
+      (onclick, onmousemove, onkeydown, etc.). Properties reflect the
+      triggering DOM/UI event. Not available outside event handlers.
+    scope: "Inside event handler attribute expressions"
+    properties:
+      alt:
+        type: bool
+        description: "Whether the Alt/Option key was pressed"
+      key:
+        type: string
+        description: "Pressed key name (for keyboard events)"
+      target_id:
+        type: string
+        description: "id attribute of the event target element"
+      target_class:
+        type: string
+        description: "class attribute of the event target element"
+      client_x:
+        type: number
+        description: "Cursor X position in client viewport coordinates"
+      client_y:
+        type: number
+        description: "Cursor Y position in client viewport coordinates"
+      offset_x:
+        type: number
+        description: "Cursor X position relative to the event target"
+      offset_y:
+        type: number
+        description: "Cursor Y position relative to the event target"
+      edge:
+        type: string
+        description: "Edge identifier for resize events (left, right, top, bottom)"
+      resize_cursor:
+        type: string
+        description: "CSS cursor style for the active resize edge"
+
+  node:
+    description: >
+      Tree node context bound per-row during tree_view rendering.
+      Properties describe the element at the current row. Used by the
+      layers panel tree template.
+    scope: "Inside tree_view row templates"
+    properties:
+      id:
+        type: string
+        description: "Element identifier (dot-joined path, e.g. '0.2.1')"
+      name:
+        type: string
+        description: "Display name of the element"
+      type:
+        type: string
+        description: "Element type token (line, rect, group, layer, etc.)"
+      type_label:
+        type: string
+        description: "Human-readable type label for display"
+      is_container:
+        type: bool
+        description: "Whether the element is a container (group or layer)"
+      locked:
+        type: bool
+        description: "Whether the element is locked from editing"
+      visibility:
+        type: enum
+        values: [visible, invisible, preview, outline]
+        description: "Visibility state of the element"
+      element_selected:
+        type: bool
+        description: "Whether the element is selected on the canvas"
+      panel_selected:
+        type: bool
+        description: "Whether the element is selected in the layers panel"
+      ancestor_layer_color:
+        type: color
+        description: "Color of the nearest ancestor Layer (inherited visual cue)"
+      depth:
+        type: number
+        description: "Nesting depth from the document root (0 = top level)"
+      search_ancestor_only:
+        type: bool
+        description: "True when visible in search results only because a descendant matched"
+
+  prop:
+    description: >
+      Template instantiation context bound when a parameterized template
+      is expanded. Properties come from the instantiation site.
+      Currently used for tab-creation templates.
+    scope: "Inside template bodies"
+    properties:
+      index:
+        type: number
+        description: "Numeric index from the instantiation site (e.g. tab number)"
