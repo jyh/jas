@@ -276,6 +276,113 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
             }
             return vec![];
         }
+        "new_layer" => {
+            use crate::geometry::element::{Element as E, LayerElem, CommonProps};
+            let panel_sel = st.layers_panel_selection.clone();
+            if let Some(tab) = st.tab_mut() {
+                tab.model.snapshot();
+                let doc = tab.model.document().clone();
+                let used: std::collections::HashSet<String> = doc.layers.iter()
+                    .filter_map(|l| if let E::Layer(le) = l { Some(le.name.clone()) } else { None })
+                    .collect();
+                let mut n = 1;
+                let name = loop {
+                    let candidate = format!("Layer {n}");
+                    if !used.contains(&candidate) { break candidate; }
+                    n += 1;
+                };
+                let new_layer = E::Layer(LayerElem {
+                    name,
+                    children: Vec::new(),
+                    common: CommonProps::default(),
+                });
+                let insert_pos = panel_sel.iter()
+                    .filter(|p| p.len() == 1)
+                    .map(|p| p[0])
+                    .min()
+                    .map(|i| i + 1)
+                    .unwrap_or(doc.layers.len());
+                let mut new_doc = doc;
+                new_doc.layers.insert(insert_pos, new_layer);
+                tab.model.set_document(new_doc);
+            }
+            return vec![];
+        }
+        "delete_layer_selection" => {
+            let paths = st.layers_panel_selection.clone();
+            if paths.is_empty() { return vec![]; }
+            if let Some(tab) = st.tab_mut() {
+                let doc = tab.model.document().clone();
+                let layer_count = doc.layers.len();
+                let top_level_deletes = paths.iter().filter(|p| p.len() == 1).count();
+                if top_level_deletes >= layer_count { return vec![]; }
+                tab.model.snapshot();
+                let mut sorted_paths = paths.clone();
+                sorted_paths.sort();
+                sorted_paths.reverse();
+                let mut new_doc = doc;
+                for path in &sorted_paths {
+                    new_doc = new_doc.delete_element(path);
+                }
+                tab.model.set_document(new_doc);
+            }
+            st.layers_panel_selection.clear();
+            return vec![];
+        }
+        "duplicate_layer_selection" => {
+            let paths = st.layers_panel_selection.clone();
+            if paths.is_empty() { return vec![]; }
+            if let Some(tab) = st.tab_mut() {
+                tab.model.snapshot();
+                let mut new_doc = tab.model.document().clone();
+                let mut sorted_paths = paths.clone();
+                sorted_paths.sort();
+                sorted_paths.reverse();
+                for path in &sorted_paths {
+                    if let Some(elem) = new_doc.get_element(path) {
+                        let dup = elem.clone();
+                        new_doc = new_doc.insert_element_after(path, dup);
+                    }
+                }
+                tab.model.set_document(new_doc);
+            }
+            return vec![];
+        }
+        "new_group" => {
+            use crate::geometry::element::{Element as E, GroupElem, CommonProps};
+            use std::rc::Rc;
+            let paths = st.layers_panel_selection.clone();
+            if paths.is_empty() { return vec![]; }
+            let parent_prefix: Vec<usize> = paths[0][..paths[0].len()-1].to_vec();
+            if !paths.iter().all(|p| p[..p.len()-1] == parent_prefix[..]) { return vec![]; }
+            if parent_prefix.is_empty() { return vec![]; }
+            if let Some(tab) = st.tab_mut() {
+                tab.model.snapshot();
+                let doc = tab.model.document().clone();
+                let mut children: Vec<Rc<E>> = Vec::new();
+                for path in &paths {
+                    if let Some(elem) = doc.get_element(path) {
+                        children.push(Rc::new(elem.clone()));
+                    }
+                }
+                let new_group = E::Group(GroupElem {
+                    children,
+                    common: CommonProps::default(),
+                });
+                let mut sorted_paths = paths.clone();
+                sorted_paths.sort();
+                let top_path = sorted_paths[0].clone();
+                sorted_paths.reverse();
+                let mut new_doc = doc;
+                for path in &sorted_paths {
+                    new_doc = new_doc.delete_element(path);
+                }
+                new_doc = new_doc.insert_element_at(&top_path, new_group);
+                tab.model.set_document(new_doc);
+                st.layers_panel_selection = vec![top_path];
+            }
+            return vec![];
+        }
         _ => {}
     }
     // Fall through to YAML actions catalog
