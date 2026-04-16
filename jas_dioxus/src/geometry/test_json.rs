@@ -678,6 +678,7 @@ mod tests {
             x2: 72.0,
             y2: 36.0,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         });
         let json = element_json(&line);

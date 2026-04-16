@@ -88,6 +88,9 @@ fn render_el(
         "spacer" => render_spacer(el, ctx),
         "disclosure" => render_disclosure(el, ctx, rctx),
         "panel" => render_panel(el, ctx, rctx),
+        "tree_view" => render_tree_view(el, ctx, rctx),
+        "element_preview" => render_element_preview(el, ctx, rctx),
+        "dropdown" => render_layers_filter_dropdown(el, ctx, rctx),
         _ => render_placeholder(el, ctx),
     }
 }
@@ -271,6 +274,343 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
                 if let Some(kind) = parse_tool_kind(tool_name) {
                     st.set_tool(kind);
                 }
+            }
+            return vec![];
+        }
+        "enter_isolation_mode" => {
+            let layer_id = params.get("layer_id").and_then(|v| v.as_str()).map(String::from);
+            let path: Option<Vec<usize>> = layer_id.as_ref().and_then(|s| {
+                s.split(',').map(|p| p.parse::<usize>().ok()).collect()
+            });
+            let target_path = path.or_else(|| {
+                // Fall back to the single panel-selected container
+                if st.layers_panel_selection.len() == 1 {
+                    let p = &st.layers_panel_selection[0];
+                    if let Some(tab) = st.tab() {
+                        if let Some(elem) = tab.model.document().get_element(p) {
+                            if elem.is_group_or_layer() {
+                                return Some(p.clone());
+                            }
+                        }
+                    }
+                }
+                None
+            });
+            if let Some(p) = target_path {
+                st.layers_isolation_stack.push(p);
+            }
+            return vec![];
+        }
+        "exit_isolation_mode" => {
+            st.layers_isolation_stack.pop();
+            return vec![];
+        }
+        "layer_options_confirm" => {
+            use crate::geometry::element::{Element as E, LayerElem, Visibility};
+            // Read dialog state from params (passed by the confirm button)
+            let layer_id = params.get("layer_id").and_then(|v| v.as_str()).map(String::from);
+            let path: Option<Vec<usize>> = layer_id.as_ref().and_then(|s| {
+                s.split(',').map(|p| p.parse::<usize>().ok()).collect()
+            });
+            let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("Layer").to_string();
+            let lock = params.get("lock").and_then(|v| v.as_bool()).unwrap_or(false);
+            let show = params.get("show").and_then(|v| v.as_bool()).unwrap_or(true);
+            let preview = params.get("preview").and_then(|v| v.as_bool()).unwrap_or(true);
+            let vis = if !show { Visibility::Invisible }
+                else if preview { Visibility::Preview }
+                else { Visibility::Outline };
+            if let Some(p) = path {
+                if let Some(tab) = st.tab_mut() {
+                    tab.model.snapshot();
+                    let mut new_doc = tab.model.document().clone();
+                    if let Some(elem) = new_doc.get_element_mut(&p) {
+                        if let E::Layer(le) = elem {
+                            *le = LayerElem {
+                                name,
+                                children: le.children.clone(),
+                                common: crate::geometry::element::CommonProps {
+                                    locked: lock,
+                                    visibility: vis,
+                                    ..le.common.clone()
+                                },
+                            };
+                        }
+                    }
+                    tab.model.set_document(new_doc);
+                }
+            }
+            return vec![serde_json::json!({"close_dialog": null})];
+        }
+        "open_layer_options" => {
+            use crate::geometry::element::Element as E;
+            let layer_id = params.get("layer_id").and_then(|v| v.as_str()).map(String::from);
+            // Parse layer_id as path e.g. "0,1" or just "0"
+            let path: Option<Vec<usize>> = layer_id.as_ref().and_then(|s| {
+                s.split(',').map(|p| p.parse::<usize>().ok()).collect()
+            });
+            // Build dialog params from the layer's properties
+            let mut dlg_params = serde_json::Map::new();
+            dlg_params.insert("mode".into(), serde_json::Value::String("edit".into()));
+            if let Some(ref p) = path {
+                dlg_params.insert("layer_id".into(), serde_json::Value::String(
+                    p.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+                ));
+                if let Some(tab) = st.tab() {
+                    if let Some(elem) = tab.model.document().get_element(p) {
+                        if let E::Layer(le) = elem {
+                            dlg_params.insert("name".into(), serde_json::Value::String(le.name.clone()));
+                            dlg_params.insert("color".into(), serde_json::Value::String("#4a90d9".into()));
+                            dlg_params.insert("color_preset".into(), serde_json::Value::String("light_blue".into()));
+                            dlg_params.insert("lock".into(), serde_json::Value::Bool(le.common.locked));
+                            use crate::geometry::element::Visibility;
+                            let show = le.common.visibility != Visibility::Invisible;
+                            let preview = le.common.visibility == Visibility::Preview;
+                            dlg_params.insert("show".into(), serde_json::Value::Bool(show));
+                            dlg_params.insert("preview".into(), serde_json::Value::Bool(preview));
+                            dlg_params.insert("dim_images".into(), serde_json::Value::Bool(false));
+                            dlg_params.insert("dim_percentage".into(), serde_json::Value::from(50));
+                        }
+                    }
+                }
+            }
+            return vec![serde_json::json!({
+                "open_dialog": {
+                    "id": "layer_options",
+                    "params": dlg_params
+                }
+            })];
+        }
+        "new_layer" => {
+            use crate::geometry::element::{Element as E, LayerElem, CommonProps};
+            let panel_sel = st.layers_panel_selection.clone();
+            if let Some(tab) = st.tab_mut() {
+                tab.model.snapshot();
+                let doc = tab.model.document().clone();
+                let used: std::collections::HashSet<String> = doc.layers.iter()
+                    .filter_map(|l| if let E::Layer(le) = l { Some(le.name.clone()) } else { None })
+                    .collect();
+                let mut n = 1;
+                let name = loop {
+                    let candidate = format!("Layer {n}");
+                    if !used.contains(&candidate) { break candidate; }
+                    n += 1;
+                };
+                let new_layer = E::Layer(LayerElem {
+                    name,
+                    children: Vec::new(),
+                    common: CommonProps::default(),
+                });
+                let insert_pos = panel_sel.iter()
+                    .filter(|p| p.len() == 1)
+                    .map(|p| p[0])
+                    .min()
+                    .map(|i| i + 1)
+                    .unwrap_or(doc.layers.len());
+                let mut new_doc = doc;
+                new_doc.layers.insert(insert_pos, new_layer);
+                tab.model.set_document(new_doc);
+            }
+            return vec![];
+        }
+        "delete_layer_selection" => {
+            let paths = st.layers_panel_selection.clone();
+            if paths.is_empty() { return vec![]; }
+            if let Some(tab) = st.tab_mut() {
+                let doc = tab.model.document().clone();
+                let layer_count = doc.layers.len();
+                let top_level_deletes = paths.iter().filter(|p| p.len() == 1).count();
+                if top_level_deletes >= layer_count { return vec![]; }
+                tab.model.snapshot();
+                let mut sorted_paths = paths.clone();
+                sorted_paths.sort();
+                sorted_paths.reverse();
+                let mut new_doc = doc;
+                for path in &sorted_paths {
+                    new_doc = new_doc.delete_element(path);
+                }
+                tab.model.set_document(new_doc);
+            }
+            st.layers_panel_selection.clear();
+            return vec![];
+        }
+        "duplicate_layer_selection" => {
+            let paths = st.layers_panel_selection.clone();
+            if paths.is_empty() { return vec![]; }
+            if let Some(tab) = st.tab_mut() {
+                tab.model.snapshot();
+                let mut new_doc = tab.model.document().clone();
+                let mut sorted_paths = paths.clone();
+                sorted_paths.sort();
+                sorted_paths.reverse();
+                for path in &sorted_paths {
+                    if let Some(elem) = new_doc.get_element(path) {
+                        let dup = elem.clone();
+                        new_doc = new_doc.insert_element_after(path, dup);
+                    }
+                }
+                tab.model.set_document(new_doc);
+            }
+            return vec![];
+        }
+        "new_group" => {
+            use crate::geometry::element::{Element as E, GroupElem, CommonProps};
+            use std::rc::Rc;
+            let paths = st.layers_panel_selection.clone();
+            if paths.is_empty() { return vec![]; }
+            let parent_prefix: Vec<usize> = paths[0][..paths[0].len()-1].to_vec();
+            if !paths.iter().all(|p| p[..p.len()-1] == parent_prefix[..]) { return vec![]; }
+            if parent_prefix.is_empty() { return vec![]; }
+            if let Some(tab) = st.tab_mut() {
+                tab.model.snapshot();
+                let doc = tab.model.document().clone();
+                let mut children: Vec<Rc<E>> = Vec::new();
+                for path in &paths {
+                    if let Some(elem) = doc.get_element(path) {
+                        children.push(Rc::new(elem.clone()));
+                    }
+                }
+                let new_group = E::Group(GroupElem {
+                    children,
+                    common: CommonProps::default(),
+                });
+                let mut sorted_paths = paths.clone();
+                sorted_paths.sort();
+                let top_path = sorted_paths[0].clone();
+                sorted_paths.reverse();
+                let mut new_doc = doc;
+                for path in &sorted_paths {
+                    new_doc = new_doc.delete_element(path);
+                }
+                new_doc = new_doc.insert_element_at(&top_path, new_group);
+                tab.model.set_document(new_doc);
+                st.layers_panel_selection = vec![top_path];
+            }
+            return vec![];
+        }
+        "toggle_all_layers_visibility" => {
+            use crate::geometry::element::{Element as E, Visibility};
+            if let Some(tab) = st.tab_mut() {
+                let mut new_doc = tab.model.document().clone();
+                let any_visible = new_doc.layers.iter()
+                    .any(|l| l.visibility() != Visibility::Invisible);
+                let target = if any_visible { Visibility::Invisible } else { Visibility::Preview };
+                tab.model.snapshot();
+                for i in 0..new_doc.layers.len() {
+                    if let E::Layer(_) = new_doc.layers[i] {
+                        new_doc.layers[i].common_mut().visibility = target;
+                    }
+                }
+                tab.model.set_document(new_doc);
+            }
+            return vec![];
+        }
+        "toggle_all_layers_outline" => {
+            use crate::geometry::element::{Element as E, Visibility};
+            if let Some(tab) = st.tab_mut() {
+                let mut new_doc = tab.model.document().clone();
+                let any_preview = new_doc.layers.iter()
+                    .any(|l| l.visibility() == Visibility::Preview);
+                let target = if any_preview { Visibility::Outline } else { Visibility::Preview };
+                tab.model.snapshot();
+                for i in 0..new_doc.layers.len() {
+                    if let E::Layer(_) = new_doc.layers[i] {
+                        new_doc.layers[i].common_mut().visibility = target;
+                    }
+                }
+                tab.model.set_document(new_doc);
+            }
+            return vec![];
+        }
+        "toggle_all_layers_lock" => {
+            use crate::geometry::element::Element as E;
+            if let Some(tab) = st.tab_mut() {
+                let mut new_doc = tab.model.document().clone();
+                let any_unlocked = new_doc.layers.iter().any(|l| !l.locked());
+                let target = any_unlocked;
+                tab.model.snapshot();
+                for i in 0..new_doc.layers.len() {
+                    if let E::Layer(_) = new_doc.layers[i] {
+                        new_doc.layers[i].common_mut().locked = target;
+                    }
+                }
+                tab.model.set_document(new_doc);
+            }
+            return vec![];
+        }
+        "flatten_artwork" => {
+            use crate::geometry::element::Element as E;
+            use std::rc::Rc;
+            let paths = st.layers_panel_selection.clone();
+            if paths.is_empty() { return vec![]; }
+            if let Some(tab) = st.tab_mut() {
+                tab.model.snapshot();
+                let doc = tab.model.document().clone();
+                // Recursively unpack groups: for each panel-selected path,
+                // if it's a Group, replace it with its children in place.
+                let mut new_doc = doc;
+                // Process in reverse so earlier paths stay valid
+                let mut sorted = paths.clone();
+                sorted.sort();
+                sorted.reverse();
+                for path in &sorted {
+                    if let Some(E::Group(g)) = new_doc.get_element(path).cloned().as_ref() {
+                        let children: Vec<E> = g.children.iter().map(|rc| (**rc).clone()).collect();
+                        new_doc = new_doc.delete_element(path);
+                        let mut insert_path = path.clone();
+                        for child in children.into_iter().rev() {
+                            new_doc = new_doc.insert_element_at(&insert_path, child);
+                            let last = insert_path.len() - 1;
+                            insert_path[last] += 1;
+                        }
+                    }
+                }
+                tab.model.set_document(new_doc);
+            }
+            st.layers_panel_selection.clear();
+            return vec![];
+        }
+        "collect_in_new_layer" => {
+            use crate::geometry::element::{Element as E, LayerElem, CommonProps};
+            let paths = st.layers_panel_selection.clone();
+            if paths.is_empty() { return vec![]; }
+            if let Some(tab) = st.tab_mut() {
+                tab.model.snapshot();
+                let doc = tab.model.document().clone();
+                let used: std::collections::HashSet<String> = doc.layers.iter()
+                    .filter_map(|l| if let E::Layer(le) = l { Some(le.name.clone()) } else { None })
+                    .collect();
+                let mut n = 1;
+                let name = loop {
+                    let candidate = format!("Layer {n}");
+                    if !used.contains(&candidate) { break candidate; }
+                    n += 1;
+                };
+                // Collect elements in document order
+                let mut sorted_paths = paths.clone();
+                sorted_paths.sort();
+                let mut elems: Vec<E> = Vec::new();
+                for path in &sorted_paths {
+                    if let Some(e) = doc.get_element(path) {
+                        elems.push(e.clone());
+                    }
+                }
+                // Delete originals in reverse
+                let mut new_doc = doc;
+                let mut rev_paths = sorted_paths.clone();
+                rev_paths.reverse();
+                for path in &rev_paths {
+                    new_doc = new_doc.delete_element(path);
+                }
+                let children = elems.into_iter().map(std::rc::Rc::new).collect();
+                let new_layer = E::Layer(LayerElem {
+                    name,
+                    children,
+                    common: CommonProps::default(),
+                });
+                new_doc.layers.push(new_layer);
+                tab.model.set_document(new_doc);
+                let new_path = vec![st.tab().map(|t| t.model.document().layers.len() - 1).unwrap_or(0)];
+                st.layers_panel_selection = vec![new_path];
             }
             return vec![];
         }
@@ -1395,6 +1735,15 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
     let field = dialog_field(bind_expr);
     let mut dialog_signal = rctx.dialog_ctx.0;
     let mut revision = rctx.revision;
+    let app = rctx.app.clone();
+    // Special case: layers panel search binding
+    let is_search = bind_expr == "panel.search_query";
+    // Read live value from AppState if search
+    let value = if is_search {
+        app.borrow().layers_search_query.clone()
+    } else {
+        value
+    };
 
     rsx! {
         input {
@@ -1404,8 +1753,17 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
             initial_value: "{value}",
             style: "color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
             oninput: move |evt: Event<FormData>| {
-                if field.is_empty() { return; }
                 let new_val = evt.value();
+                if is_search {
+                    let a = app.clone();
+                    let v = new_val.clone();
+                    spawn(async move {
+                        a.borrow_mut().layers_search_query = v;
+                        revision += 1;
+                    });
+                    return;
+                }
+                if field.is_empty() { return; }
                 if let Some(mut ds) = dialog_signal() {
                     ds.set_value(&field, serde_json::json!(new_val));
                     dialog_signal.set(Some(ds));
@@ -2006,6 +2364,1424 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
         render_el(content, ctx, rctx)
     } else {
         render_placeholder(el, ctx)
+    }
+}
+
+/// A flattened row from the document tree, ready for rendering.
+#[derive(Clone)]
+struct TreeRow {
+    path: Vec<usize>,
+    depth: usize,
+    eye_icon_svg: String,
+    lock_icon_svg: String,
+    twirl_svg: String,     // empty for leaf elements
+    preview_svg: String,   // fitted-viewBox SVG fragment for the thumbnail
+    is_container: bool,
+    display_name: String,
+    is_named: bool,
+    is_selected: bool,
+    is_renaming: bool,
+    is_layer: bool,
+    is_collapsed: bool,
+    is_panel_selected: bool,
+    layer_color: String,
+    visibility_str: String, // "preview", "outline", "invisible"
+}
+
+/// Render a tree_view widget showing the live document element tree.
+///
+/// Reads the active document from AppState and renders each element as
+/// an interactive row with visibility, lock, twirl-down, preview, name,
+/// and selection indicator. Clicking the eye cycles visibility; clicking
+/// the lock toggles lock state.
+fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    use crate::geometry::element::{Element as GeoElement, Visibility};
+    use std::collections::HashSet;
+
+    let id = get_id(el);
+    let style = build_style(el, ctx);
+
+    const LAYER_COLORS: [&str; 9] = [
+        "#4a90d9", "#d94a4a", "#4ad94a", "#4a4ad9", "#d9d94a",
+        "#d94ad9", "#4ad9d9", "#b0b0b0", "#2a7a2a",
+    ];
+
+    fn icon_svg(icon_name: &str) -> String {
+        let ws = super::workspace::Workspace::load();
+        if let Some(ws) = &ws {
+            if let Some(icon_def) = ws.icons().get(icon_name) {
+                let viewbox = icon_def.get("viewbox").and_then(|v| v.as_str()).unwrap_or("0 0 16 16");
+                let svg_inner = icon_def.get("svg").and_then(|v| v.as_str()).unwrap_or("");
+                return format!(
+                    r#"<svg viewBox="{viewbox}" width="14" height="14" xmlns="http://www.w3.org/2000/svg">{svg_inner}</svg>"#
+                );
+            }
+        }
+        String::new()
+    }
+
+    fn type_label(elem: &GeoElement) -> &'static str {
+        match elem {
+            GeoElement::Line(_) => "Line",
+            GeoElement::Rect(_) => "Rectangle",
+            GeoElement::Circle(_) => "Circle",
+            GeoElement::Ellipse(_) => "Ellipse",
+            GeoElement::Polyline(_) => "Polyline",
+            GeoElement::Polygon(_) => "Polygon",
+            GeoElement::Path(_) => "Path",
+            GeoElement::Text(_) => "Text",
+            GeoElement::TextPath(_) => "Text Path",
+            GeoElement::Group(_) => "Group",
+            GeoElement::Layer(_) => "Layer",
+        }
+    }
+
+    /// Build a fitted-viewBox SVG thumbnail for a single element.
+    /// Returns an empty string for zero-extent or degenerate bounds.
+    fn build_preview_svg(elem: &GeoElement) -> String {
+        let (x, y, w, h) = elem.bounds();
+        if !(w.is_finite() && h.is_finite()) || w <= 0.0 || h <= 0.0 {
+            return String::new();
+        }
+        let pad = (w.max(h) * 0.02).max(0.5);
+        let vb = format!("{} {} {} {}", x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad);
+        let inner = crate::geometry::svg::element_svg(elem, "");
+        format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">{inner}</svg>"#
+        )
+    }
+
+    fn elem_display_name(elem: &GeoElement) -> (String, bool) {
+        if let GeoElement::Layer(le) = elem {
+            if !le.name.is_empty() {
+                return (le.name.clone(), true);
+            }
+        }
+        (format!("<{}>", type_label(elem)), false)
+    }
+
+    fn flatten_rc_children(
+        children: &[std::rc::Rc<GeoElement>],
+        depth: usize,
+        path_prefix: &[usize],
+        layer_color: &str,
+        selected_paths: &HashSet<Vec<usize>>,
+        collapsed_paths: &HashSet<Vec<usize>>,
+        panel_selection: &[Vec<usize>],
+        renaming_path: &Option<Vec<usize>>,
+        rows: &mut Vec<TreeRow>,
+    ) {
+        for (i, child_rc) in children.iter().enumerate().rev() {
+            let child = child_rc.as_ref();
+            let mut path = path_prefix.to_vec();
+            path.push(i);
+
+            let is_container = child.is_group_or_layer();
+            let is_selected = selected_paths.contains(&path);
+            let is_renaming = renaming_path.as_ref() == Some(&path);
+            let is_layer = child.is_layer();
+            let is_collapsed = collapsed_paths.contains(&path);
+            let is_panel_selected = panel_selection.contains(&path);
+
+            let current_layer_color = if is_layer {
+                if path.len() == 1 { LAYER_COLORS[i % LAYER_COLORS.len()].to_string() } else { layer_color.to_string() }
+            } else {
+                layer_color.to_string()
+            };
+
+            let vis_str = match child.visibility() {
+                Visibility::Preview => "preview",
+                Visibility::Outline => "outline",
+                Visibility::Invisible => "invisible",
+            };
+            let eye_icon = match child.visibility() {
+                Visibility::Preview => "eye_preview",
+                Visibility::Outline => "eye_outline",
+                Visibility::Invisible => "eye_invisible",
+            };
+            let lock_icon = if child.locked() { "lock_locked" } else { "lock_unlocked" };
+
+            let twirl_svg = if is_container {
+                icon_svg(if is_collapsed { "twirl_closed" } else { "twirl_open" })
+            } else {
+                String::new()
+            };
+            let (display_name, is_named) = elem_display_name(child);
+
+            let preview_svg = build_preview_svg(child);
+            rows.push(TreeRow {
+                path: path.clone(),
+                depth,
+                eye_icon_svg: icon_svg(eye_icon),
+                lock_icon_svg: icon_svg(lock_icon),
+                twirl_svg,
+                preview_svg,
+                is_container,
+                display_name,
+                is_named,
+                is_selected,
+                is_renaming,
+                is_layer,
+                is_collapsed,
+                is_panel_selected,
+                layer_color: current_layer_color.clone(),
+                visibility_str: vis_str.to_string(),
+            });
+
+            // Only recurse if expanded
+            if !is_collapsed {
+                if let Some(grandchildren) = child.children() {
+                    flatten_rc_children(grandchildren, depth + 1, &path, &current_layer_color, selected_paths, collapsed_paths, panel_selection, renaming_path, rows);
+                }
+            }
+        }
+    }
+
+    fn flatten_layers(
+        layers: &[GeoElement],
+        selected_paths: &HashSet<Vec<usize>>,
+        collapsed_paths: &HashSet<Vec<usize>>,
+        panel_selection: &[Vec<usize>],
+        renaming_path: &Option<Vec<usize>>,
+    ) -> Vec<TreeRow> {
+        let mut rows = Vec::new();
+        for (i, elem) in layers.iter().enumerate().rev() {
+            let path = vec![i];
+            let is_container = elem.is_group_or_layer();
+            let is_selected = selected_paths.contains(&path);
+            let is_renaming = renaming_path.as_ref() == Some(&path);
+            let is_layer = elem.is_layer();
+            let is_collapsed = collapsed_paths.contains(&path);
+            let is_panel_selected = panel_selection.contains(&path);
+            let layer_color = LAYER_COLORS[i % LAYER_COLORS.len()].to_string();
+
+            let vis_str = match elem.visibility() {
+                Visibility::Preview => "preview",
+                Visibility::Outline => "outline",
+                Visibility::Invisible => "invisible",
+            };
+            let eye_icon = match elem.visibility() {
+                Visibility::Preview => "eye_preview",
+                Visibility::Outline => "eye_outline",
+                Visibility::Invisible => "eye_invisible",
+            };
+            let lock_icon = if elem.locked() { "lock_locked" } else { "lock_unlocked" };
+            let twirl_svg = if is_container {
+                icon_svg(if is_collapsed { "twirl_closed" } else { "twirl_open" })
+            } else {
+                String::new()
+            };
+            let (display_name, is_named) = elem_display_name(elem);
+
+            let preview_svg = build_preview_svg(elem);
+            rows.push(TreeRow {
+                path: path.clone(),
+                depth: 0,
+                eye_icon_svg: icon_svg(eye_icon),
+                lock_icon_svg: icon_svg(lock_icon),
+                twirl_svg,
+                preview_svg,
+                is_container,
+                display_name,
+                is_named,
+                is_selected,
+                is_renaming,
+                is_layer,
+                is_collapsed,
+                is_panel_selected,
+                layer_color: layer_color.clone(),
+                visibility_str: vis_str.to_string(),
+            });
+
+            // Only recurse if expanded
+            if !is_collapsed {
+                if let Some(children) = elem.children() {
+                    flatten_rc_children(children, 1, &path, &layer_color, selected_paths, collapsed_paths, panel_selection, renaming_path, &mut rows);
+                }
+            }
+        }
+        rows
+    }
+
+    // Read search query from AppState (populated by the search input handler)
+    let search_query: String = rctx.app.borrow().layers_search_query.to_lowercase();
+
+    // Read isolation stack — if non-empty, only show rows that are descendants
+    // of the deepest isolated container.
+    let isolation_root: Option<Vec<usize>> = rctx.app.borrow()
+        .layers_isolation_stack.last().cloned();
+
+    // Build breadcrumb data for the isolation header
+    let breadcrumb: Vec<(Vec<usize>, String)> = {
+        let st = rctx.app.borrow();
+        let stack = st.layers_isolation_stack.clone();
+        let doc = st.tab().map(|t| t.model.document().clone());
+        let mut out = Vec::new();
+        if let Some(doc) = doc {
+            for p in &stack {
+                if let Some(elem) = doc.get_element(p) {
+                    let label = match elem {
+                        crate::geometry::element::Element::Layer(le) if !le.name.is_empty() => le.name.clone(),
+                        _ => format!("<{}>", match elem {
+                            crate::geometry::element::Element::Group(_) => "Group",
+                            crate::geometry::element::Element::Layer(_) => "Layer",
+                            _ => "?",
+                        }),
+                    };
+                    out.push((p.clone(), label));
+                }
+            }
+        }
+        out
+    };
+
+    // Auto-expand ancestors of element-selected paths so selected elements
+    // are always visible in the tree (without this, selecting an element
+    // on the canvas inside a collapsed group would hide it).
+    let first_selected_path: Option<Vec<usize>> = {
+        let mut st = rctx.app.borrow_mut();
+        let selected_paths: Vec<Vec<usize>> = st.tab()
+            .map(|t| {
+                let doc = t.model.document();
+                let mut paths: Vec<Vec<usize>> = doc.selection.iter().map(|es| es.path.clone()).collect();
+                paths.sort();
+                paths
+            })
+            .unwrap_or_default();
+        for p in &selected_paths {
+            for i in 1..p.len() {
+                let ancestor = p[..i].to_vec();
+                st.layers_collapsed.remove(&ancestor);
+            }
+        }
+        selected_paths.into_iter().next()
+    };
+
+    // Schedule a scroll-into-view for the first selected row after render
+    #[cfg(target_arch = "wasm32")]
+    if let Some(ref p) = first_selected_path {
+        let row_id = format!("lp_row_{}", p.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("_"));
+        spawn(async move {
+            // Small delay to let the DOM settle
+            if let Some(win) = web_sys::window() {
+                if let Some(doc) = win.document() {
+                    if let Some(el) = doc.get_element_by_id(&row_id) {
+                        let opts = web_sys::ScrollIntoViewOptions::new();
+                        opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
+                        el.scroll_into_view_with_scroll_into_view_options(&opts);
+                    }
+                }
+            }
+        });
+    }
+    let _ = &first_selected_path; // suppress unused warning on non-wasm
+
+    // Build flat row list from the live document
+    let mut rows: Vec<TreeRow> = {
+        let st = rctx.app.borrow();
+        if let Some(tab) = st.tab() {
+            let doc = tab.model.document();
+            let selected_paths = doc.selected_paths();
+            let renaming_path = st.layers_renaming.clone();
+            let collapsed_paths = &st.layers_collapsed;
+            let panel_selection = &st.layers_panel_selection;
+            flatten_layers(&doc.layers, &selected_paths, collapsed_paths, panel_selection, &renaming_path)
+        } else {
+            Vec::new()
+        }
+    };
+
+    // Apply type filter: hide rows whose element type is in hidden_types.
+    // Ancestor containers are preserved so descendants of visible types
+    // remain reachable.
+    let hidden_types: std::collections::HashSet<String> = rctx.app.borrow()
+        .layers_hidden_types.iter().cloned().collect();
+    if !hidden_types.is_empty() {
+        fn type_value(tl: &str) -> &'static str {
+            match tl {
+                "Line" => "line", "Rectangle" => "rectangle", "Circle" => "circle",
+                "Ellipse" => "ellipse", "Polyline" => "polyline", "Polygon" => "polygon",
+                "Path" => "path", "Text" => "text", "Text Path" => "text_path",
+                "Group" => "group", "Layer" => "layer", _ => "",
+            }
+        }
+        // Determine which paths to keep: rows whose type is not hidden,
+        // plus ancestor paths of those rows.
+        let visible_paths: std::collections::HashSet<Vec<usize>> = rows.iter()
+            .filter(|r| {
+                // Use the display_name's content to find the type label.
+                // display_name is either "<Layer>" or "Layer 1", so check both.
+                let type_hint = if r.is_layer { "layer" } else {
+                    // Extract from display_name if it's in angle brackets
+                    let n = &r.display_name;
+                    if n.starts_with('<') && n.ends_with('>') {
+                        let inner = &n[1..n.len()-1];
+                        type_value(inner)
+                    } else {
+                        // Named layer already checked
+                        ""
+                    }
+                };
+                !hidden_types.contains(type_hint)
+            })
+            .map(|r| r.path.clone())
+            .collect();
+        let mut keep = visible_paths.clone();
+        for p in &visible_paths {
+            for i in 1..p.len() {
+                keep.insert(p[..i].to_vec());
+            }
+        }
+        rows.retain(|r| keep.contains(&r.path));
+    }
+
+    // Apply isolation filter: keep only rows that are strict descendants of
+    // the isolated root (not the root itself).
+    if let Some(ref root) = isolation_root {
+        rows.retain(|r| r.path.len() > root.len() && r.path.starts_with(root));
+        // Decrement depth so isolated content starts at depth 0
+        let d = root.len();
+        for r in rows.iter_mut() {
+            r.depth = r.depth.saturating_sub(d);
+        }
+    }
+
+    // Apply search filter: keep rows whose name matches, plus their ancestors.
+    if !search_query.is_empty() {
+        let matching_paths: std::collections::HashSet<Vec<usize>> = rows.iter()
+            .filter(|r| r.display_name.to_lowercase().contains(&search_query))
+            .map(|r| r.path.clone())
+            .collect();
+        // Include all ancestor paths of matching rows
+        let mut include: std::collections::HashSet<Vec<usize>> = matching_paths.clone();
+        for p in &matching_paths {
+            for i in 1..p.len() {
+                include.insert(p[..i].to_vec());
+            }
+        }
+        rows.retain(|r| include.contains(&r.path));
+    }
+
+    let app = rctx.app.clone();
+    let mut revision = rctx.revision;
+    let btn_style = "width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer";
+
+    // Read current context menu state from AppState
+    let context_menu_state = rctx.app.borrow().layers_context_menu.clone();
+
+    let kb_app = app.clone();
+    let mut kb_rev = revision;
+    let on_keydown = move |evt: Event<KeyboardData>| {
+        let key = evt.data().key();
+        let a = kb_app.clone();
+        match key {
+            dioxus::prelude::Key::Delete | dioxus::prelude::Key::Backspace => {
+                spawn(async move {
+                    let mut st = a.borrow_mut();
+                    let params = serde_json::Map::new();
+                    dispatch_action("delete_layer_selection", &params, &mut st);
+                    kb_rev += 1;
+                });
+            }
+            dioxus::prelude::Key::Character(c) if c == "a" || c == "A" => {
+                if evt.data().modifiers().meta() || evt.data().modifiers().ctrl() {
+                    spawn(async move {
+                        let mut st = a.borrow_mut();
+                        // Collect all element paths in the document
+                        if let Some(tab) = st.tab() {
+                            let doc = tab.model.document();
+                            let mut all_paths = Vec::new();
+                            fn collect(elements: &[crate::geometry::element::Element], prefix: &[usize], out: &mut Vec<Vec<usize>>) {
+                                for (i, elem) in elements.iter().enumerate() {
+                                    let mut p = prefix.to_vec();
+                                    p.push(i);
+                                    out.push(p.clone());
+                                    if let Some(children) = elem.children() {
+                                        fn collect_rc(children: &[std::rc::Rc<crate::geometry::element::Element>], prefix: &[usize], out: &mut Vec<Vec<usize>>) {
+                                            for (i, c) in children.iter().enumerate() {
+                                                let mut p = prefix.to_vec();
+                                                p.push(i);
+                                                out.push(p.clone());
+                                                if let Some(gc) = c.children() {
+                                                    collect_rc(gc, &p, out);
+                                                }
+                                            }
+                                        }
+                                        collect_rc(children, &p, out);
+                                    }
+                                }
+                            }
+                            collect(&doc.layers, &[], &mut all_paths);
+                            st.layers_panel_selection = all_paths;
+                        }
+                        kb_rev += 1;
+                    });
+                }
+            }
+            _ => {}
+        }
+    };
+
+    rsx! {
+        div {
+            id: "{id}",
+            style: "display:flex;flex-direction:column;flex:1;min-height:0;outline:none;{style}",
+            tabindex: 0,
+            onkeydown: on_keydown,
+
+            // Breadcrumb bar (isolation mode only)
+            if !breadcrumb.is_empty() {
+                {
+                    let home_app = app.clone();
+                    let mut home_rev = revision;
+                    rsx! {
+                        div {
+                            style: "display:flex;align-items:center;gap:4px;padding:2px 6px;background:var(--jas-pane-bg-dark,#2a2a2a);border-bottom:1px solid var(--jas-border,#555);font-size:10px;color:var(--jas-text-dim,#999);flex-shrink:0;",
+                            span {
+                                style: "cursor:pointer;color:var(--jas-text,#ccc);",
+                                onclick: move |_: Event<MouseData>| {
+                                    let a = home_app.clone();
+                                    spawn(async move {
+                                        a.borrow_mut().layers_isolation_stack.clear();
+                                        home_rev += 1;
+                                    });
+                                },
+                                "⌂"
+                            }
+                            for (idx, (bp, bl)) in breadcrumb.iter().enumerate() {
+                                {
+                                    let bp = bp.clone();
+                                    let bl = bl.clone();
+                                    let exit_to = idx + 1;
+                                    let b_app = app.clone();
+                                    let mut b_rev = revision;
+                                    rsx! {
+                                        span { "> " }
+                                        span {
+                                            key: "{bp:?}",
+                                            style: "cursor:pointer;color:var(--jas-text,#ccc);",
+                                            onclick: move |_: Event<MouseData>| {
+                                                let a = b_app.clone();
+                                                let target = exit_to;
+                                                spawn(async move {
+                                                    let mut st = a.borrow_mut();
+                                                    st.layers_isolation_stack.truncate(target);
+                                                    b_rev += 1;
+                                                });
+                                            },
+                                            "{bl}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            div {
+                style: "overflow-y:auto;flex:1;min-height:0;",
+            for row in rows.iter() {
+                {
+                    let indent_px = row.depth * 16;
+                    let indent_style = format!("width:{}px;flex-shrink:0;display:inline-block", indent_px);
+                    let name_color = if row.is_named { "var(--jas-text,#ccc)" } else { "var(--jas-text-dim,#999)" };
+                    let name_style = format!("flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;color:{name_color}");
+                    let sq_bg = if row.is_selected { &row.layer_color } else { "transparent" };
+                    let sq_style = format!("width:12px;height:12px;border:1px solid var(--jas-border,#555);flex-shrink:0;background:{sq_bg}");
+                    let eye_svg = row.eye_icon_svg.clone();
+                    let lock_svg = row.lock_icon_svg.clone();
+                    let twirl_svg = row.twirl_svg.clone();
+
+                    // Click handlers
+                    let eye_path = row.path.clone();
+                    let eye_app = app.clone();
+                    let mut eye_rev = revision;
+                    let on_eye_click = move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        let p = eye_path.clone();
+                        let a = eye_app.clone();
+                        let alt = evt.data().modifiers().alt();
+                        spawn(async move {
+                            use crate::geometry::element::Visibility;
+                            let mut st = a.borrow_mut();
+                            if alt {
+                                // Option-click: solo/unsolo among siblings
+                                let parent_prefix: Vec<usize> = p[..p.len()-1].to_vec();
+                                // Gather all sibling paths
+                                let sibling_paths: Vec<Vec<usize>> = if let Some(tab) = st.tab() {
+                                    let doc = tab.model.document();
+                                    if parent_prefix.is_empty() {
+                                        (0..doc.layers.len()).map(|i| vec![i]).collect()
+                                    } else if let Some(parent) = doc.get_element(&parent_prefix) {
+                                        if let Some(children) = parent.children() {
+                                            (0..children.len()).map(|i| {
+                                                let mut pp = parent_prefix.clone();
+                                                pp.push(i);
+                                                pp
+                                            }).collect()
+                                        } else { Vec::new() }
+                                    } else { Vec::new() }
+                                } else { Vec::new() };
+
+                                let is_already_soloed = matches!(
+                                    &st.layers_solo_state,
+                                    Some(s) if s.soloed_path == p
+                                );
+
+                                if is_already_soloed {
+                                    // Restore saved visibilities
+                                    let saved = st.layers_solo_state.as_ref().unwrap().saved.clone();
+                                    if let Some(tab) = st.tab_mut() {
+                                        tab.model.snapshot();
+                                        let doc = tab.model.document_mut();
+                                        for (sp, vis) in &saved {
+                                            if let Some(elem) = doc.get_element_mut(sp) {
+                                                elem.common_mut().visibility = *vis;
+                                            }
+                                        }
+                                    }
+                                    st.layers_solo_state = None;
+                                } else {
+                                    // Save current visibilities of siblings != p, then set them invisible
+                                    let mut saved = std::collections::HashMap::new();
+                                    let doc_read = st.tab().map(|t| t.model.document().clone());
+                                    if let Some(doc) = doc_read {
+                                        for sp in &sibling_paths {
+                                            if sp != &p {
+                                                if let Some(elem) = doc.get_element(sp) {
+                                                    saved.insert(sp.clone(), elem.visibility());
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if let Some(tab) = st.tab_mut() {
+                                        tab.model.snapshot();
+                                        let doc = tab.model.document_mut();
+                                        // Ensure soloed element is visible
+                                        if let Some(elem) = doc.get_element_mut(&p) {
+                                            if elem.visibility() == Visibility::Invisible {
+                                                elem.common_mut().visibility = Visibility::Preview;
+                                            }
+                                        }
+                                        for sp in &sibling_paths {
+                                            if sp != &p {
+                                                if let Some(elem) = doc.get_element_mut(sp) {
+                                                    elem.common_mut().visibility = Visibility::Invisible;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    st.layers_solo_state = Some(crate::workspace::app_state::LayerSoloState {
+                                        soloed_path: p.clone(),
+                                        saved,
+                                    });
+                                }
+                            } else {
+                                // Regular click: cycle visibility
+                                // Clicking normally discards any pending solo restore state
+                                st.layers_solo_state = None;
+                                if let Some(tab) = st.tab_mut() {
+                                    tab.model.snapshot();
+                                    let doc = tab.model.document_mut();
+                                    if let Some(elem) = doc.get_element_mut(&p) {
+                                        let new_vis = match elem.visibility() {
+                                            Visibility::Preview => Visibility::Outline,
+                                            Visibility::Outline => Visibility::Invisible,
+                                            Visibility::Invisible => Visibility::Preview,
+                                        };
+                                        elem.common_mut().visibility = new_vis;
+                                        if new_vis == Visibility::Invisible {
+                                            let path = p.clone();
+                                            doc.selection.retain(|es| {
+                                                !(es.path == path || es.path.starts_with(&path))
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            eye_rev += 1;
+                        });
+                    };
+
+                    let lock_path = row.path.clone();
+                    let lock_app = app.clone();
+                    let mut lock_rev = revision;
+                    let on_lock_click = move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        let p = lock_path.clone();
+                        let a = lock_app.clone();
+                        spawn(async move {
+                            let mut st = a.borrow_mut();
+                            // Read current lock + container info from doc
+                            let (was_unlocked, is_container, child_count) = {
+                                if let Some(tab) = st.tab() {
+                                    let doc = tab.model.document();
+                                    if let Some(elem) = doc.get_element(&p) {
+                                        let child_count = elem.children().map(|c| c.len()).unwrap_or(0);
+                                        (!elem.locked(), elem.is_group_or_layer(), child_count)
+                                    } else { (false, false, 0) }
+                                } else { (false, false, 0) }
+                            };
+
+                            if is_container && was_unlocked {
+                                // Save direct children's lock states before locking container
+                                let mut saved = Vec::with_capacity(child_count);
+                                if let Some(tab) = st.tab() {
+                                    let doc = tab.model.document();
+                                    if let Some(elem) = doc.get_element(&p) {
+                                        if let Some(children) = elem.children() {
+                                            for c in children {
+                                                saved.push(c.locked());
+                                            }
+                                        }
+                                    }
+                                }
+                                st.layers_saved_lock_states.insert(p.clone(), saved);
+                            }
+
+                            // Take the saved state out before the tab borrow so we can use
+                            // it inside the tab_mut block without a second borrow of st.
+                            let saved_to_restore = if is_container && !was_unlocked {
+                                st.layers_saved_lock_states.remove(&p)
+                            } else {
+                                None
+                            };
+
+                            if let Some(tab) = st.tab_mut() {
+                                tab.model.snapshot();
+                                let doc = tab.model.document_mut();
+                                if let Some(elem) = doc.get_element_mut(&p) {
+                                    elem.common_mut().locked = was_unlocked;
+                                    // When locking a container, also lock all direct children
+                                    if is_container && was_unlocked {
+                                        if let Some(children) = elem.children_mut() {
+                                            for c in children.iter_mut() {
+                                                std::rc::Rc::make_mut(c).common_mut().locked = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                // Restore saved child lock states on unlock
+                                if let Some(saved) = saved_to_restore {
+                                    let doc = tab.model.document_mut();
+                                    if let Some(elem) = doc.get_element_mut(&p) {
+                                        if let Some(children) = elem.children_mut() {
+                                            for (i, c) in children.iter_mut().enumerate() {
+                                                if let Some(&saved_locked) = saved.get(i) {
+                                                    std::rc::Rc::make_mut(c).common_mut().locked = saved_locked;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // Locking an element removes it and its descendants from selection
+                                if was_unlocked {
+                                    let path = p.clone();
+                                    let doc = tab.model.document_mut();
+                                    doc.selection.retain(|es| {
+                                        !(es.path == path || es.path.starts_with(&path))
+                                    });
+                                }
+                            }
+                            lock_rev += 1;
+                        });
+                    };
+
+                    let sel_path = row.path.clone();
+                    let sel_app = app.clone();
+                    let mut sel_rev = revision;
+                    let on_select_click = move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        let p = sel_path.clone();
+                        let a = sel_app.clone();
+                        let meta = evt.data().modifiers().meta();
+                        spawn(async move {
+                            use crate::document::document::ElementSelection;
+
+                            /// Collect all descendant paths of a container element.
+                            fn collect_descendants(
+                                elem: &crate::geometry::element::Element,
+                                path: &[usize],
+                                out: &mut Vec<Vec<usize>>,
+                            ) {
+                                if let Some(children) = elem.children() {
+                                    for (i, child) in children.iter().enumerate() {
+                                        let mut child_path = path.to_vec();
+                                        child_path.push(i);
+                                        out.push(child_path.clone());
+                                        collect_descendants(child, &child_path, out);
+                                    }
+                                }
+                            }
+
+                            let mut st = a.borrow_mut();
+                            if let Some(tab) = st.tab_mut() {
+                                let doc = tab.model.document_mut();
+                                // Build the list of paths to select: the element itself
+                                // plus all descendants if it's a container.
+                                let mut paths_to_select = vec![p.clone()];
+                                if let Some(elem) = doc.get_element(&p) {
+                                    if elem.is_group_or_layer() {
+                                        collect_descendants(elem, &p, &mut paths_to_select);
+                                    }
+                                }
+                                if meta {
+                                    // Cmd-click: toggle all paths in/out of selection
+                                    let any_selected = paths_to_select.iter()
+                                        .any(|pp| doc.selection.iter().any(|es| &es.path == pp));
+                                    if any_selected {
+                                        let path_set: std::collections::HashSet<&Vec<usize>> =
+                                            paths_to_select.iter().collect();
+                                        doc.selection.retain(|es| !path_set.contains(&es.path));
+                                    } else {
+                                        for pp in paths_to_select {
+                                            if !doc.selection.iter().any(|es| es.path == pp) {
+                                                doc.selection.push(ElementSelection::all(pp));
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Click: select these elements, deselect all others
+                                    doc.selection = paths_to_select.into_iter()
+                                        .map(ElementSelection::all)
+                                        .collect();
+                                }
+                            }
+                            sel_rev += 1;
+                        });
+                    };
+
+                    let row_path = row.path.clone();
+                    let row_app = app.clone();
+                    let mut row_rev = revision;
+                    let row_bg = if row.is_panel_selected {
+                        "background:rgba(51,122,183,0.4);"
+                    } else {
+                        ""
+                    };
+                    // Snapshot the current rows' ordered paths for shift-range selection
+                    let row_all_paths: Vec<Vec<usize>> = rows.iter().map(|r| r.path.clone()).collect();
+                    let on_row_click = move |evt: Event<MouseData>| {
+                        let p = row_path.clone();
+                        let a = row_app.clone();
+                        let meta = evt.data().modifiers().meta();
+                        let shift = evt.data().modifiers().shift();
+                        let all_paths = row_all_paths.clone();
+                        spawn(async move {
+                            let mut st = a.borrow_mut();
+                            if shift && !st.layers_panel_selection.is_empty() {
+                                // Range-select in visual order from the last panel-selected
+                                // to the clicked row.
+                                let anchor = st.layers_panel_selection.last().unwrap().clone();
+                                let anchor_idx = all_paths.iter().position(|pp| *pp == anchor);
+                                let clicked_idx = all_paths.iter().position(|pp| *pp == p);
+                                if let (Some(a_idx), Some(c_idx)) = (anchor_idx, clicked_idx) {
+                                    let (lo, hi) = if a_idx <= c_idx { (a_idx, c_idx) } else { (c_idx, a_idx) };
+                                    st.layers_panel_selection = all_paths[lo..=hi].to_vec();
+                                }
+                            } else if meta {
+                                if let Some(idx) = st.layers_panel_selection.iter().position(|pp| *pp == p) {
+                                    st.layers_panel_selection.remove(idx);
+                                } else {
+                                    st.layers_panel_selection.push(p);
+                                }
+                            } else {
+                                st.layers_panel_selection = vec![p];
+                            }
+                            st.layers_context_menu = None;
+                            row_rev += 1;
+                        });
+                    };
+
+                    // Right-click: show context menu at cursor, select if not selected
+                    let ctx_path = row.path.clone();
+                    let ctx_app = app.clone();
+                    let mut ctx_rev = revision;
+                    let on_row_contextmenu = move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        evt.prevent_default();
+                        let coords = evt.data().client_coordinates();
+                        let p = ctx_path.clone();
+                        let a = ctx_app.clone();
+                        spawn(async move {
+                            let mut st = a.borrow_mut();
+                            if !st.layers_panel_selection.contains(&p) {
+                                st.layers_panel_selection = vec![p.clone()];
+                            }
+                            st.layers_context_menu = Some((coords.x, coords.y, p));
+                            ctx_rev += 1;
+                        });
+                    };
+
+                    // Drag handlers
+                    let drag_down_path = row.path.clone();
+                    let drag_down_app = app.clone();
+                    let drag_down_selected = row.is_panel_selected;
+                    let on_mousedown = move |evt: Event<MouseData>| {
+                        if drag_down_selected {
+                            evt.stop_propagation();
+                            let a = drag_down_app.clone();
+                            let p = drag_down_path.clone();
+                            spawn(async move {
+                                // Mark drag as active by setting target to the source path initially
+                                a.borrow_mut().layers_drag_target = Some(p);
+                            });
+                        }
+                    };
+
+                    let drag_enter_path = row.path.clone();
+                    let drag_enter_app = app.clone();
+                    let mut drag_enter_rev = revision;
+                    let drag_enter_is_container = row.is_container;
+                    let drag_enter_is_collapsed = row.is_collapsed;
+                    let on_mouseenter = move |_: Event<MouseData>| {
+                        let a = drag_enter_app.clone();
+                        let p = drag_enter_path.clone();
+                        let is_container = drag_enter_is_container;
+                        let is_collapsed = drag_enter_is_collapsed;
+                        spawn(async move {
+                            let mut st = a.borrow_mut();
+                            if st.layers_drag_target.is_some() {
+                                st.layers_drag_target = Some(p.clone());
+                                drag_enter_rev += 1;
+                            } else {
+                                return;
+                            }
+                            drop(st);
+
+                            // If hovering a collapsed container during drag, schedule
+                            // an auto-expand after 500ms of continuous hover.
+                            if is_container && is_collapsed {
+                                #[cfg(target_arch = "wasm32")]
+                                {
+                                    use wasm_bindgen::prelude::*;
+                                    use wasm_bindgen::JsCast;
+                                    let a_for_cb = a.clone();
+                                    let p_for_cb = p.clone();
+                                    let mut rev_for_cb = drag_enter_rev;
+                                    let cb = Closure::once(move || {
+                                        let mut st = a_for_cb.borrow_mut();
+                                        // Only expand if still hovering the same row during drag
+                                        if st.layers_drag_target.as_ref() == Some(&p_for_cb) {
+                                            st.layers_collapsed.remove(&p_for_cb);
+                                            rev_for_cb += 1;
+                                        }
+                                    });
+                                    if let Some(win) = web_sys::window() {
+                                        let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                            cb.as_ref().unchecked_ref(),
+                                            500,
+                                        );
+                                        cb.forget();
+                                    }
+                                }
+                            }
+                        });
+                    };
+
+                    let drag_up_path = row.path.clone();
+                    let drag_up_app = app.clone();
+                    let mut drag_up_rev = revision;
+                    let on_mouseup = move |_: Event<MouseData>| {
+                        let a = drag_up_app.clone();
+                        let target = drag_up_path.clone();
+                        spawn(async move {
+                            let mut st = a.borrow_mut();
+                            if let Some(_drag_target) = st.layers_drag_target.take() {
+                                // Move all panel-selected elements to before the target
+                                let sources = st.layers_panel_selection.clone();
+                                // Validate drag constraints
+                                let target_parent: Vec<usize> = target[..target.len()-1].to_vec();
+                                let allowed = {
+                                    if sources.is_empty() || sources.contains(&target) {
+                                        false
+                                    } else if let Some(tab) = st.tab() {
+                                        let doc = tab.model.document();
+                                        // Check: no source is an ancestor of target (no drop into self/descendant)
+                                        let no_cycle = !sources.iter().any(|src| {
+                                            target.len() >= src.len() && target.starts_with(src)
+                                        });
+                                        // Check: target's parent isn't locked (can't drop into locked)
+                                        let parent_unlocked = if target_parent.is_empty() {
+                                            true
+                                        } else {
+                                            doc.get_element(&target_parent)
+                                                .map(|e| !e.locked())
+                                                .unwrap_or(true)
+                                        };
+                                        no_cycle && parent_unlocked
+                                    } else {
+                                        false
+                                    }
+                                };
+                                if allowed {
+                                    if let Some(tab) = st.tab_mut() {
+                                        tab.model.snapshot();
+                                        // Collect elements, delete from old positions (reverse order),
+                                        // then insert at target position
+                                        let mut elements: Vec<(Vec<usize>, crate::geometry::element::Element)> = Vec::new();
+                                        let doc = tab.model.document();
+                                        for src in &sources {
+                                            if let Some(elem) = doc.get_element(src) {
+                                                elements.push((src.clone(), elem.clone()));
+                                            }
+                                        }
+                                        // Delete in reverse order to preserve indices
+                                        let mut sorted_sources = sources.clone();
+                                        sorted_sources.sort();
+                                        sorted_sources.reverse();
+                                        let mut doc = tab.model.document().clone();
+                                        for src in &sorted_sources {
+                                            doc = doc.delete_element(src);
+                                        }
+                                        // Insert at target — adjust target path for deleted elements
+                                        let mut insert_path = target.clone();
+                                        let mut new_paths = Vec::new();
+                                        for (_, elem) in elements {
+                                            doc = doc.insert_element_at(&insert_path, elem);
+                                            new_paths.push(insert_path.clone());
+                                            // Next element goes after this one
+                                            let last = insert_path.len() - 1;
+                                            insert_path[last] += 1;
+                                        }
+                                        // Update element selection to track moved elements
+                                        doc.selection = new_paths.iter()
+                                            .map(|p| crate::document::document::ElementSelection::all(p.clone()))
+                                            .collect();
+                                        tab.model.set_document(doc);
+                                        // Update panel selection to new positions
+                                        st.layers_panel_selection = new_paths;
+                                    }
+                                } else {
+                                    st.layers_panel_selection.clear();
+                                }
+                            }
+                            drag_up_rev += 1;
+                        });
+                    };
+
+                    // Drop indicator
+                    let is_drag_target = {
+                        let st = rctx.app.borrow();
+                        st.layers_drag_target.as_ref() == Some(&row.path) &&
+                        !st.layers_panel_selection.contains(&row.path)
+                    };
+                    let drop_indicator = if is_drag_target {
+                        "border-top:2px solid var(--jas-accent,#3a7bd5);"
+                    } else {
+                        ""
+                    };
+
+                    let row_dom_id = format!("lp_row_{}", row.path.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("_"));
+                    rsx! {
+                        div {
+                            id: "{row_dom_id}",
+                            style: "display:flex;align-items:center;height:24px;padding:0 4px;gap:2px;font-size:11px;color:var(--jas-text,#ccc);cursor:default;user-select:none;{row_bg}{drop_indicator}",
+                            onclick: on_row_click,
+                            oncontextmenu: on_row_contextmenu,
+                            onmousedown: on_mousedown,
+                            onmouseenter: on_mouseenter,
+                            onmouseup: on_mouseup,
+                            // Indent
+                            span { style: "{indent_style}" }
+                            // Eye button
+                            div {
+                                style: "{btn_style}",
+                                onclick: on_eye_click,
+                                div { style: "width:100%;height:100%", dangerous_inner_html: "{eye_svg}" }
+                            }
+                            // Lock button
+                            div {
+                                style: "{btn_style}",
+                                onclick: on_lock_click,
+                                div { style: "width:100%;height:100%", dangerous_inner_html: "{lock_svg}" }
+                            }
+                            // Twirl or gap
+                            if row.is_container {
+                                {
+                                    let twirl_path = row.path.clone();
+                                    let twirl_app = app.clone();
+                                    let mut twirl_rev = revision;
+                                    rsx! {
+                                        div {
+                                            style: "{btn_style}",
+                                            onclick: move |evt: Event<MouseData>| {
+                                                evt.stop_propagation();
+                                                let p = twirl_path.clone();
+                                                let a = twirl_app.clone();
+                                                spawn(async move {
+                                                    let mut st = a.borrow_mut();
+                                                    if st.layers_collapsed.contains(&p) {
+                                                        st.layers_collapsed.remove(&p);
+                                                    } else {
+                                                        st.layers_collapsed.insert(p);
+                                                    }
+                                                    twirl_rev += 1;
+                                                });
+                                            },
+                                            div { style: "width:100%;height:100%", dangerous_inner_html: "{twirl_svg}" }
+                                        }
+                                    }
+                                }
+                            } else {
+                                div { style: "width:16px;flex-shrink:0" }
+                            }
+                            // Preview thumbnail — fitted SVG of the element
+                            {
+                                let preview_svg = row.preview_svg.clone();
+                                rsx! {
+                                    div {
+                                        style: "width:24px;height:24px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0;overflow:hidden;",
+                                        dangerous_inner_html: "{preview_svg}",
+                                    }
+                                }
+                            }
+                            // Name — inline input when renaming, otherwise span with double-click
+                            if row.is_renaming {
+                                {
+                                    let confirm_path = row.path.clone();
+                                    let confirm_app = app.clone();
+                                    let mut confirm_rev = revision;
+                                    let cancel_app = app.clone();
+                                    let mut cancel_rev = revision;
+                                    let initial_name = if row.is_named { row.display_name.clone() } else { String::new() };
+                                    rsx! {
+                                        input {
+                                            r#type: "text",
+                                            value: "{initial_name}",
+                                            style: "flex:1;font-size:11px;background:var(--jas-input-bg,#333);color:var(--jas-text,#ccc);border:1px solid var(--jas-accent,#3a7bd5);outline:none;padding:0 2px;min-width:0",
+                                            autofocus: true,
+                                            onkeydown: move |evt: Event<KeyboardData>| {
+                                                let key = evt.data().key();
+                                                if key == dioxus::prelude::Key::Enter {
+                                                    // Read value from DOM and commit rename
+                                                    #[cfg(target_arch = "wasm32")]
+                                                    {
+                                                        let p = confirm_path.clone();
+                                                        let a = confirm_app.clone();
+                                                        if let Some(el) = web_sys::window()
+                                                            .and_then(|w| w.document())
+                                                            .and_then(|d| d.active_element())
+                                                        {
+                                                            let val = el.get_attribute("value").unwrap_or_default();
+                                                            let val_inner: String = js_sys::Reflect::get(&el, &"value".into())
+                                                                .ok()
+                                                                .and_then(|v| v.as_string())
+                                                                .unwrap_or(val);
+                                                            spawn(async move {
+                                                                let mut st = a.borrow_mut();
+                                                                if let Some(tab) = st.tab_mut() {
+                                                                    tab.model.snapshot();
+                                                                    let doc = tab.model.document_mut();
+                                                                    if let Some(crate::geometry::element::Element::Layer(le)) = doc.get_element_mut(&p) {
+                                                                        le.name = val_inner;
+                                                                    }
+                                                                }
+                                                                st.layers_renaming = None;
+                                                                confirm_rev += 1;
+                                                            });
+                                                        }
+                                                    }
+                                                    #[cfg(not(target_arch = "wasm32"))]
+                                                    {
+                                                        let a = confirm_app.clone();
+                                                        spawn(async move {
+                                                            a.borrow_mut().layers_renaming = None;
+                                                            confirm_rev += 1;
+                                                        });
+                                                    }
+                                                } else if key == dioxus::prelude::Key::Escape {
+                                                    let a = cancel_app.clone();
+                                                    spawn(async move {
+                                                        a.borrow_mut().layers_renaming = None;
+                                                        cancel_rev += 1;
+                                                    });
+                                                }
+                                            },
+                                        }
+                                    }
+                                }
+                            } else {
+                                {
+                                    let name_path = row.path.clone();
+                                    let name_app = app.clone();
+                                    let mut name_rev = revision;
+                                    let can_rename = row.is_layer;
+                                    rsx! {
+                                        span {
+                                            style: "{name_style}",
+                                            ondoubleclick: move |_: Event<MouseData>| {
+                                                if can_rename {
+                                                    let p = name_path.clone();
+                                                    let a = name_app.clone();
+                                                    spawn(async move {
+                                                        a.borrow_mut().layers_renaming = Some(p);
+                                                        name_rev += 1;
+                                                    });
+                                                }
+                                            },
+                                            "{row.display_name}"
+                                        }
+                                    }
+                                }
+                            }
+                            // Select square
+                            div {
+                                style: "{sq_style};cursor:pointer",
+                                onclick: on_select_click,
+                            }
+                        }
+                    }
+                }
+            }
+            } // close inner scrolling div
+            // Context menu overlay
+            if let Some((cx, cy, cpath)) = context_menu_state.clone() {
+                {
+                    let menu_style = format!(
+                        "position:fixed;left:{}px;top:{}px;background:var(--jas-pane-bg,#2a2a2a);border:1px solid var(--jas-border,#555);border-radius:2px;padding:2px 0;min-width:160px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
+                        cx, cy
+                    );
+                    let is_container = {
+                        let st = app.borrow();
+                        st.tab().and_then(|t| t.model.document().get_element(&cpath))
+                            .map(|e| e.is_group_or_layer()).unwrap_or(false)
+                    };
+                    let is_layer = {
+                        let st = app.borrow();
+                        st.tab().and_then(|t| t.model.document().get_element(&cpath))
+                            .map(|e| e.is_layer()).unwrap_or(false)
+                    };
+                    let item_style = "padding:4px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;";
+                    let item_style_disabled = "padding:4px 12px;font-size:11px;color:var(--jas-text-dim,#777);";
+
+                    let close_app1 = app.clone();
+                    let mut close_rev1 = revision;
+                    let close_app2 = app.clone();
+                    let mut close_rev2 = revision;
+
+                    let cpath_for_action = cpath.clone();
+                    let mut ctx_dialog_signal = rctx.dialog_ctx.0;
+                    let do_action = |action: &'static str| {
+                        let a = app.clone();
+                        let mut r = revision;
+                        let path_str = cpath_for_action.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+                        move |_: Event<MouseData>| {
+                            let a2 = a.clone();
+                            let ps = path_str.clone();
+                            spawn(async move {
+                                let deferred = {
+                                    let mut st = a2.borrow_mut();
+                                    let mut params = serde_json::Map::new();
+                                    params.insert("layer_id".into(), serde_json::Value::String(ps));
+                                    let d = dispatch_action(action, &params, &mut st);
+                                    st.layers_context_menu = None;
+                                    d
+                                };
+                                for eff in deferred {
+                                    if let Some(od) = eff.get("open_dialog") {
+                                        let dlg_id = od.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                        let raw_params = od.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
+                                        let live_state = {
+                                            let st = a2.borrow();
+                                            crate::workspace::dock_panel::build_live_state_map(&st)
+                                        };
+                                        super::dialog_view::open_dialog(&mut ctx_dialog_signal, &dlg_id, &raw_params, &live_state);
+                                    }
+                                }
+                                r += 1;
+                            });
+                        }
+                    };
+
+                    rsx! {
+                        // Backdrop to close menu on click
+                        div {
+                            style: "position:fixed;inset:0;z-index:9999;",
+                            onclick: move |_: Event<MouseData>| {
+                                let a = close_app1.clone();
+                                spawn(async move {
+                                    a.borrow_mut().layers_context_menu = None;
+                                    close_rev1 += 1;
+                                });
+                            },
+                            oncontextmenu: move |evt: Event<MouseData>| {
+                                evt.prevent_default();
+                                let a = close_app2.clone();
+                                spawn(async move {
+                                    a.borrow_mut().layers_context_menu = None;
+                                    close_rev2 += 1;
+                                });
+                            },
+                        }
+                        div {
+                            style: "{menu_style}",
+                            div {
+                                style: if is_layer { item_style } else { item_style_disabled },
+                                onclick: do_action("open_layer_options"),
+                                "Options for Layer..."
+                            }
+                            div {
+                                style: "{item_style}",
+                                onclick: do_action("duplicate_layer_selection"),
+                                "Duplicate"
+                            }
+                            div {
+                                style: "{item_style}",
+                                onclick: do_action("delete_layer_selection"),
+                                "Delete Selection"
+                            }
+                            div { style: "height:1px;background:var(--jas-border,#555);margin:2px 0;" }
+                            div {
+                                style: if is_container { item_style } else { item_style_disabled },
+                                onclick: do_action("enter_isolation_mode"),
+                                "Enter Isolation Mode"
+                            }
+                            div { style: "height:1px;background:var(--jas-border,#555);margin:2px 0;" }
+                            div {
+                                style: "{item_style}",
+                                onclick: do_action("flatten_artwork"),
+                                "Flatten Artwork"
+                            }
+                            div {
+                                style: "{item_style}",
+                                onclick: do_action("collect_in_new_layer"),
+                                "Collect in New Layer"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render an element_preview widget as a placeholder thumbnail square.
+fn render_element_preview(el: &serde_json::Value, ctx: &serde_json::Value, _rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let sz = el.get("style").and_then(|s| s.get("size")).and_then(|v| v.as_u64()).unwrap_or(32);
+    let style = build_style(el, ctx);
+    rsx! {
+        div {
+            id: "{id}",
+            style: "width:{sz}px;height:{sz}px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0;{style}",
+        }
+    }
+}
+
+/// Render the layers panel's type filter dropdown. For other dropdowns
+/// (none exist yet), falls through to placeholder.
+fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    if id != "lp_filter_button" {
+        return render_placeholder(el, ctx);
+    }
+
+    let style = build_style(el, ctx);
+    let icon_svg = {
+        let ws = super::workspace::Workspace::load();
+        ws.and_then(|ws| {
+            ws.icons().get("filter").map(|def| {
+                let viewbox = def.get("viewbox").and_then(|v| v.as_str()).unwrap_or("0 0 16 16");
+                let inner = def.get("svg").and_then(|v| v.as_str()).unwrap_or("");
+                format!(r#"<svg viewBox="{viewbox}" width="14" height="14" xmlns="http://www.w3.org/2000/svg">{inner}</svg>"#)
+            })
+        }).unwrap_or_default()
+    };
+
+    let is_open = rctx.app.borrow().layers_filter_dropdown_open;
+
+    let items: Vec<(String, String)> = el.get("items")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|item| {
+            let label = item.get("label").and_then(|v| v.as_str())?;
+            let value = item.get("value").and_then(|v| v.as_str())?;
+            Some((label.to_string(), value.to_string()))
+        }).collect())
+        .unwrap_or_default();
+
+    let toggle_app = rctx.app.clone();
+    let mut toggle_rev = rctx.revision;
+    let on_toggle_open = move |evt: Event<MouseData>| {
+        evt.stop_propagation();
+        let a = toggle_app.clone();
+        spawn(async move {
+            let mut st = a.borrow_mut();
+            st.layers_filter_dropdown_open = !st.layers_filter_dropdown_open;
+            toggle_rev += 1;
+        });
+    };
+
+    let hidden_types: std::collections::HashSet<String> = rctx.app.borrow()
+        .layers_hidden_types.iter().cloned().collect();
+
+    let close_app = rctx.app.clone();
+    let mut close_rev = rctx.revision;
+
+    rsx! {
+        div {
+            id: "{id}",
+            style: "position:relative;display:inline-flex;{style}",
+            div {
+                style: "width:20px;height:20px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--jas-text,#ccc);",
+                onclick: on_toggle_open,
+                div { style: "width:14px;height:14px;", dangerous_inner_html: "{icon_svg}" }
+            }
+            if is_open {
+                {
+                    // Backdrop
+                    let bd_app = close_app.clone();
+                    let mut bd_rev = close_rev;
+                    rsx! {
+                        div {
+                            style: "position:fixed;inset:0;z-index:9999;",
+                            onclick: move |_: Event<MouseData>| {
+                                let a = bd_app.clone();
+                                spawn(async move {
+                                    a.borrow_mut().layers_filter_dropdown_open = false;
+                                    bd_rev += 1;
+                                });
+                            },
+                        }
+                        div {
+                            style: "position:absolute;top:22px;right:0;background:var(--jas-pane-bg,#2a2a2a);border:1px solid var(--jas-border,#555);border-radius:2px;padding:4px 0;min-width:140px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
+                            for (label, value) in items.iter() {
+                                {
+                                    let item_app = rctx.app.clone();
+                                    let mut item_rev = close_rev;
+                                    let v = value.clone();
+                                    let checked = !hidden_types.contains(&v);
+                                    let check_mark = if checked { "☑" } else { "☐" };
+                                    rsx! {
+                                        div {
+                                            key: "{v}",
+                                            style: "padding:3px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;display:flex;align-items:center;gap:6px;",
+                                            onclick: move |evt: Event<MouseData>| {
+                                                evt.stop_propagation();
+                                                let a = item_app.clone();
+                                                let vv = v.clone();
+                                                spawn(async move {
+                                                    let mut st = a.borrow_mut();
+                                                    if st.layers_hidden_types.contains(&vv) {
+                                                        st.layers_hidden_types.remove(&vv);
+                                                    } else {
+                                                        st.layers_hidden_types.insert(vv);
+                                                    }
+                                                    item_rev += 1;
+                                                });
+                                            },
+                                            span { "{check_mark}" }
+                                            span { "{label}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

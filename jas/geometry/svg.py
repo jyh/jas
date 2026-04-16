@@ -111,6 +111,11 @@ def _path_data(commands: tuple[PathCommand, ...]) -> str:
     return " ".join(parts)
 
 
+def element_svg(elem: Element, indent: str = "") -> str:
+    """Public: Render a single element as an SVG fragment (recursive for groups/layers)."""
+    return _element_svg(elem, indent)
+
+
 def _element_svg(elem: Element, indent: str) -> str:
     """Render an element as SVG XML."""
     match elem:

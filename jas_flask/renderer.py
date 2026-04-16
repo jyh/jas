@@ -937,6 +937,50 @@ def _render_dropdown(el, theme, state):
     )
 
 
+def _render_tree_view(el, theme, state):
+    """Render a tree_view widget as a scrollable container.
+
+    The tree_view is a client-side component: the server emits a container
+    div with data attributes carrying the row template spec, context menu,
+    and keyboard bindings.  JavaScript (initTreeViews) populates it with
+    rows from either a live data source or sample data.
+    """
+    row_tpl = el.get("row_template", {})
+    ctx_menu = el.get("context_menu", [])
+    keyboard = el.get("keyboard", [])
+    bind = el.get("bind", {})
+
+    # Encode specs as JSON data attributes for the JS tree renderer
+    data = (
+        f' data-type="tree-view"'
+        f' data-row-template="{escape(json.dumps(row_tpl))}"'
+        f' data-context-menu="{escape(json.dumps(ctx_menu))}"'
+        f' data-keyboard="{escape(json.dumps(keyboard))}"'
+        f' data-bind-source="{escape(str(bind.get("source", "")))}"'
+    )
+    return Markup(
+        f'<div{_id_attr(el)} class="jas-tree-view"'
+        f'{_style_str(el, theme, state)}{data}{_data_attrs(el)}>'
+        f'</div>'
+    )
+
+
+def _render_element_preview(el, theme, state):
+    """Render an element_preview widget as a placeholder thumbnail square."""
+    bind = el.get("bind", {})
+    style = el.get("style", {})
+    sz = style.get("size", 32)
+    eid = bind.get("element_id", "")
+    return Markup(
+        f'<div{_id_attr(el)} class="jas-element-preview"'
+        f' data-type="element-preview" data-element-id="{escape(str(eid))}"'
+        f' style="width:{sz}px;height:{sz}px;background:#fff;'
+        f'border:1px solid var(--jas-border,#555);border-radius:1px;'
+        f'flex-shrink:0"'
+        f'{_data_attrs(el)}></div>'
+    )
+
+
 def _render_unknown(el, theme, state):
     etype = escape(el.get("type", "unknown"))
     summary = escape(el.get("summary", etype))
@@ -1234,4 +1278,6 @@ _RENDERERS = {
     "color_hue_bar": _render_color_hue_bar,
     "brand_logo": _render_brand_logo,
     "fill_stroke_widget": _render_col,
+    "tree_view": _render_tree_view,
+    "element_preview": _render_element_preview,
 }

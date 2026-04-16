@@ -237,7 +237,7 @@ mod tests {
     fn base64_roundtrip_empty() {
         let encoded = base64_encode(&[]);
         let decoded = base64_decode(&encoded).unwrap();
-        assert_eq!(decoded, vec![]);
+        assert_eq!(decoded, Vec::<u8>::new());
     }
 
     #[test]

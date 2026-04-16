@@ -1833,3 +1833,8 @@ format. On restart, reload them. Give me your suggestions.
   - PREVIEW_CHECKBOX is checked if the visibility mode is "preview" (otherwise "outline"). Disabled when SHOW is unchecked.
   - DIM_IMAGES_TO_CHECKBOX is checked if raster images in the layer are dimmed to the specified percentage. When checked, the percentage input is
   enabled. Default off, 50%.
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. What are the benefits? What are the
+downsides? Be ready for a deep dive into any of the suggestions.

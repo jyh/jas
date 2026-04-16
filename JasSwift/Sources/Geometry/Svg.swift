@@ -95,7 +95,7 @@ private func pathData(_ commands: [PathCommand]) -> String {
     }.joined(separator: " ")
 }
 
-private func elementSvg(_ elem: Element, indent: String) -> String {
+public func elementSvg(_ elem: Element, indent: String) -> String {
     switch elem {
     case .line(let v):
         return "\(indent)<line x1=\"\(fmt(px(v.x1)))\" y1=\"\(fmt(px(v.y1)))\"" +

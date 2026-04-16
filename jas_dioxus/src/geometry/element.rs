@@ -1905,6 +1905,7 @@ mod tests {
         Element::Line(LineElem {
             x1, y1, x2, y2,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         })
     }
@@ -1928,6 +1929,7 @@ mod tests {
     fn path_elem(d: Vec<PathCommand>) -> Element {
         Element::Path(PathElem {
             d, fill: None, stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         })
     }
@@ -1950,7 +1952,7 @@ mod tests {
     fn line_bounds_no_stroke() {
         let e = Element::Line(LineElem {
             x1: 0.0, y1: 0.0, x2: 50.0, y2: 50.0,
-            stroke: None, common: CommonProps::default(),
+            stroke: None, width_points: Vec::new(), common: CommonProps::default(),
         });
         assert_eq!(e.bounds(), (0.0, 0.0, 50.0, 50.0));
     }
@@ -2511,6 +2513,7 @@ mod tests {
         let line = Element::Line(LineElem {
             x1: 0.0, y1: 0.0, x2: 100.0, y2: 100.0,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         });
         let red_fill = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
@@ -2525,6 +2528,7 @@ mod tests {
             d: vec![],
             fill: None,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         });
         let blue_stroke = Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 2.0));

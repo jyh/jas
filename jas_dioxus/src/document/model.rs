@@ -82,6 +82,19 @@ impl Model {
         &self.document
     }
 
+    /// Monotonically increasing counter bumped on every document mutation.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Mutably borrow the current document. Bumps the modification
+    /// generation so the UI re-renders. Callers that want this change
+    /// to be undoable should call [`snapshot`] first.
+    pub fn document_mut(&mut self) -> &mut Document {
+        self.generation += 1;
+        &mut self.document
+    }
+
     /// Replace the current document and bump the modification generation.
     /// Callers that want this change to be undoable should call
     /// [`snapshot`] first; `set_document` itself does not push onto the

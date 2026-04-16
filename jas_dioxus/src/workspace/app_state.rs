@@ -98,6 +98,51 @@ pub(crate) struct AppState {
     pub(crate) swatch_libraries: serde_json::Value,
     /// Stroke panel state — mirrored to/from global state for selection sync.
     pub(crate) stroke_panel: StrokePanelState,
+    /// Element path currently being renamed in the layers panel, or None.
+    pub(crate) layers_renaming: Option<Vec<usize>>,
+    /// Collapsed element paths in the layers panel. Elements not in this
+    /// set are expanded (open) by default.
+    pub(crate) layers_collapsed: std::collections::HashSet<Vec<usize>>,
+    /// Panel-selected element paths in the layers panel. Independent of
+    /// element selection (select square). Used for menu operations and drag.
+    pub(crate) layers_panel_selection: Vec<Vec<usize>>,
+    /// Active drag in the layers panel: drop target path and position.
+    /// The drop inserts before the element at this path.
+    pub(crate) layers_drag_target: Option<Vec<usize>>,
+    /// Context menu state: (screen_x, screen_y, right-clicked element path).
+    pub(crate) layers_context_menu: Option<(f64, f64, Vec<usize>)>,
+    /// Layers panel search query (case-insensitive name filter).
+    pub(crate) layers_search_query: String,
+    /// Isolation mode stack. Each entry is the path of a container that
+    /// has been entered. Panel and canvas restrict interaction to
+    /// descendants of the deepest (last) isolated container.
+    pub(crate) layers_isolation_stack: Vec<Vec<usize>>,
+    /// Solo visibility state: when Option-clicking the eye button, the
+    /// clicked element's siblings get saved and hidden. Second Option-click
+    /// on the same element restores them. Map from sibling path to saved
+    /// visibility state. None when no solo is active.
+    pub(crate) layers_solo_state: Option<LayerSoloState>,
+    /// Saved lock states for unlock-on-container. When a container is
+    /// locked, each direct child's current lock state is saved here so
+    /// unlocking restores them. Outer key: container path. Inner Vec:
+    /// one entry per direct child.
+    pub(crate) layers_saved_lock_states: std::collections::HashMap<Vec<usize>, Vec<bool>>,
+    /// Set of element types currently hidden by the layers type filter.
+    /// Type names: layer, group, path, rect, circle, ellipse, polyline,
+    /// polygon, text, textpath, line. When empty (default), all types
+    /// are shown. When non-empty, matching element types are hidden.
+    pub(crate) layers_hidden_types: std::collections::HashSet<String>,
+    /// Whether the type filter dropdown is open.
+    pub(crate) layers_filter_dropdown_open: bool,
+}
+
+/// Solo/unsolo state for the layers panel.
+#[derive(Debug, Clone)]
+pub(crate) struct LayerSoloState {
+    /// Path of the element that was Option-clicked (the soloed sibling).
+    pub(crate) soloed_path: Vec<usize>,
+    /// Saved visibility of each sibling before solo.
+    pub(crate) saved: std::collections::HashMap<Vec<usize>, crate::geometry::element::Visibility>,
 }
 
 /// Stroke panel state fields that sync with global state and the selection.
@@ -181,6 +226,17 @@ impl AppState {
                 .map(|ws| ws.data().get("swatch_libraries").cloned().unwrap_or(serde_json::json!({})))
                 .unwrap_or(serde_json::json!({})),
             stroke_panel: StrokePanelState::default(),
+            layers_renaming: None,
+            layers_collapsed: std::collections::HashSet::new(),
+            layers_panel_selection: Vec::new(),
+            layers_drag_target: None,
+            layers_context_menu: None,
+            layers_search_query: String::new(),
+            layers_isolation_stack: Vec::new(),
+            layers_solo_state: None,
+            layers_saved_lock_states: std::collections::HashMap::new(),
+            layers_hidden_types: std::collections::HashSet::new(),
+            layers_filter_dropdown_open: false,
         }
     }
 

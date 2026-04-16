@@ -71,3 +71,48 @@ def test_is_checked_defaults_false():
     layout = WorkspaceLayout.default_layout()
     for kind in ALL_PANEL_KINDS:
         assert not panel_is_checked(kind, "anything", layout)
+
+
+def test_layers_menu_has_new_layer():
+    items = panel_menu(PanelKind.LAYERS)
+    has = any(i.kind == PanelMenuItemKind.ACTION and i.command == "new_layer" for i in items)
+    assert has, "Layers menu missing new_layer"
+
+
+def test_layers_menu_has_new_group():
+    items = panel_menu(PanelKind.LAYERS)
+    has = any(i.kind == PanelMenuItemKind.ACTION and i.command == "new_group" for i in items)
+    assert has, "Layers menu missing new_group"
+
+
+def test_layers_menu_has_visibility_toggles():
+    items = panel_menu(PanelKind.LAYERS)
+    for cmd in ("toggle_all_layers_visibility", "toggle_all_layers_outline",
+                "toggle_all_layers_lock"):
+        has = any(i.kind == PanelMenuItemKind.ACTION and i.command == cmd for i in items)
+        assert has, f"Layers menu missing {cmd}"
+
+
+def test_layers_menu_has_isolation_mode():
+    items = panel_menu(PanelKind.LAYERS)
+    for cmd in ("enter_isolation_mode", "exit_isolation_mode"):
+        has = any(i.kind == PanelMenuItemKind.ACTION and i.command == cmd for i in items)
+        assert has, f"Layers menu missing {cmd}"
+
+
+def test_layers_menu_has_flatten_and_collect():
+    items = panel_menu(PanelKind.LAYERS)
+    for cmd in ("flatten_artwork", "collect_in_new_layer"):
+        has = any(i.kind == PanelMenuItemKind.ACTION and i.command == cmd for i in items)
+        assert has, f"Layers menu missing {cmd}"
+
+
+def test_layers_dispatch_tier3_no_error():
+    layout = WorkspaceLayout.default_layout()
+    dock = layout.anchored_dock(DockEdge.RIGHT)
+    addr = PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=2), panel_idx=0)
+    for cmd in ("new_layer", "new_group", "toggle_all_layers_visibility",
+                "toggle_all_layers_outline", "toggle_all_layers_lock",
+                "enter_isolation_mode", "exit_isolation_mode",
+                "flatten_artwork", "collect_in_new_layer"):
+        panel_dispatch(PanelKind.LAYERS, cmd, addr, layout)
