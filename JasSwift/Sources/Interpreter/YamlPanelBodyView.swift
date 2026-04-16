@@ -553,6 +553,7 @@ private func cycleVisibility(_ vis: Visibility) -> Visibility {
 
 struct TreeViewContent: View {
     @ObservedObject var model: Model
+    @State private var collapsed: Set<ElementPath> = []
 
     var body: some View {
         let doc = model.document
@@ -617,8 +618,16 @@ struct TreeViewContent: View {
                 }
             // Twirl or gap
             if isContainer(elem) {
-                SwiftUI.Text("\u{25BC}")
+                let isCollapsed = collapsed.contains(path)
+                SwiftUI.Text(isCollapsed ? "\u{25B6}" : "\u{25BC}")
                     .frame(width: 16, height: 16)
+                    .onTapGesture {
+                        if collapsed.contains(path) {
+                            collapsed.remove(path)
+                        } else {
+                            collapsed.insert(path)
+                        }
+                    }
             } else {
                 Spacer().frame(width: 16)
             }
@@ -649,8 +658,8 @@ struct TreeViewContent: View {
         .frame(height: 24)
         .padding(.horizontal, 4)
 
-        // Children (reversed)
-        if let children = elementChildren(elem) {
+        // Children (reversed) — skip if collapsed
+        if !collapsed.contains(path), let children = elementChildren(elem) {
             ForEach(Array(children.indices.reversed()), id: \.self) { ci in
                 let child = children[ci]
                 let childPath = path + [ci]

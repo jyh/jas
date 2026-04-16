@@ -9,6 +9,17 @@ open Workspace_layout
 (** Module-level ref to the model accessor, set by create_panel_body. *)
 let _get_model_ref : (unit -> Model.model option) ref = ref (fun () -> None)
 
+(** Module-level set of collapsed element paths in the layers panel. *)
+module PathKey = struct
+  type t = int list
+  let compare = compare
+end
+module PathSet2 = Set.Make(PathKey)
+let _layers_collapsed : PathSet2.t ref = ref PathSet2.empty
+
+(** Callback to trigger re-render when collapsed state changes. *)
+let _rerender_layers : (unit -> unit) ref = ref (fun () -> ())
+
 (** Safely access a nested JSON member path (e.g. "style" -> "gap").
     Returns `Null if any intermediate value is not an object. *)
 let safe_member (key : string) (j : Yojson.Safe.t) : Yojson.Safe.t =
@@ -306,9 +317,20 @@ and render_tree_view ~packing ~ctx:_ _el =
                 m2#set_document (Document.replace_element d path new_e));
           true));
         (* Twirl or gap *)
-        if is_container then
-          ignore (GMisc.label ~text:"\xe2\x96\xbc" ~packing:(hbox#pack ~expand:false) ())
-        else begin
+        let is_collapsed = PathSet2.mem path !_layers_collapsed in
+        if is_container then begin
+          let twirl_text = if is_collapsed then "\xe2\x96\xb6" else "\xe2\x96\xbc" in
+          let twirl_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
+          ignore (GMisc.label ~text:twirl_text ~packing:twirl_eb#add ());
+          twirl_eb#misc#set_size_request ~width:16 ();
+          let tp = path in
+          ignore (twirl_eb#event#connect#button_press ~callback:(fun _ ->
+            if PathSet2.mem tp !_layers_collapsed
+            then _layers_collapsed := PathSet2.remove tp !_layers_collapsed
+            else _layers_collapsed := PathSet2.add tp !_layers_collapsed;
+            !_rerender_layers ();
+            true))
+        end else begin
           let gap = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
           gap#misc#set_size_request ~width:16 ()
         end;
@@ -331,8 +353,8 @@ and render_tree_view ~packing ~ctx:_ _el =
              let new_sel = Document.PathMap.singleton path (Document.element_selection_all path) in
              m2#set_document { d with Document.selection = new_sel });
           true));
-        (* Recurse into children *)
-        if is_container then begin
+        (* Recurse into children (skip if collapsed) *)
+        if is_container && not is_collapsed then begin
           let ch = Document.children_of elem in
           add_children ch (depth + 1) path cur_color
         end
@@ -385,9 +407,20 @@ and render_tree_view ~packing ~ctx:_ _el =
               m2#set_document (Document.replace_element d path new_e));
         true));
       (* Twirl or gap *)
-      if is_container then
-        ignore (GMisc.label ~text:"\xe2\x96\xbc" ~packing:(hbox#pack ~expand:false) ())
-      else begin
+      let is_collapsed = PathSet2.mem path !_layers_collapsed in
+      if is_container then begin
+        let twirl_text = if is_collapsed then "\xe2\x96\xb6" else "\xe2\x96\xbc" in
+        let twirl_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
+        ignore (GMisc.label ~text:twirl_text ~packing:twirl_eb#add ());
+        twirl_eb#misc#set_size_request ~width:16 ();
+        let tp = path in
+        ignore (twirl_eb#event#connect#button_press ~callback:(fun _ ->
+          if PathSet2.mem tp !_layers_collapsed
+          then _layers_collapsed := PathSet2.remove tp !_layers_collapsed
+          else _layers_collapsed := PathSet2.add tp !_layers_collapsed;
+          !_rerender_layers ();
+          true))
+      end else begin
         let gap = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
         gap#misc#set_size_request ~width:16 ()
       end;
@@ -410,8 +443,8 @@ and render_tree_view ~packing ~ctx:_ _el =
            let new_sel = Document.PathMap.singleton path (Document.element_selection_all path) in
            m2#set_document { d with Document.selection = new_sel });
         true));
-      (* Recurse *)
-      if is_container then begin
+      (* Recurse (skip if collapsed) *)
+      if is_container && not is_collapsed then begin
         let ch = Document.children_of elem in
         add_children ch 1 path layer_color
       end
