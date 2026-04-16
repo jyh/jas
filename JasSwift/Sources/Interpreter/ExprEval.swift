@@ -1155,6 +1155,29 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         }
         return .path(parts)
 
+    // element_at(path) — resolve against active_document's layer tree
+    // (Phase 4). Walks top_level_layers[i0] and descends through
+    // .children[i1][i2]... Returns Null for non-path args, empty
+    // paths, or out-of-range indices.
+    case "element_at":
+        guard args.count == 1 else { return .null }
+        let p = evalNode(args[0], ctx)
+        guard case .path(let indices) = p else { return .null }
+        if indices.isEmpty { return .null }
+        guard let ad = ctx["active_document"] as? [String: Any],
+              let top = ad["top_level_layers"] as? [Any],
+              indices[0] >= 0 && indices[0] < top.count
+        else { return .null }
+        var cur: Any = top[indices[0]]
+        for idx in indices.dropFirst() {
+            guard let dict = cur as? [String: Any],
+                  let kids = dict["children"] as? [Any],
+                  idx >= 0 && idx < kids.count
+            else { return .null }
+            cur = kids[idx]
+        }
+        return Value.fromJson(cur)
+
     // reverse: list -> list
     case "reverse":
         guard args.count == 1 else { return .null }
