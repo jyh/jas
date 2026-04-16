@@ -164,60 +164,78 @@ public enum LayersPanel {
                                        selection: model.document.selection)
             return nil
         }
-        // Phase 3 Group B: delete/clone/insert. Returned Layer flows
+        // Phase 3 Group B: delete/clone/insert. The returned Element (top-
+        // level Layer wrapped via Element.layer or a nested element) flows
         // through ctx via as:-binding. Swift's [String: Any] ctx holds
-        // Layer values directly (no serde roundtrip needed).
+        // Element values directly (no serde roundtrip needed).
         let docDeleteAtHandler: PlatformEffect = { value, callCtx, _ in
             guard let pathExpr = value as? String else { return nil }
             let pathVal = evaluate(pathExpr, context: callCtx)
-            guard case .path(let indices) = pathVal,
-                  indices.count == 1,
-                  indices[0] >= 0 && indices[0] < model.document.layers.count
+            guard case .path(let indices) = pathVal, !indices.isEmpty
             else { return nil }
-            let idx = indices[0]
-            let removed = model.document.layers[idx]
-            var newLayers = model.document.layers
-            newLayers.remove(at: idx)
-            model.document = Document(layers: newLayers,
-                                       selectedLayer: model.document.selectedLayer,
-                                       selection: model.document.selection)
+            let doc = model.document
+            // Top-level: delete from [Layer]; deeper: walk Element tree
+            // via Document.deleteElement / getElement.
+            if indices.count == 1 {
+                guard indices[0] >= 0 && indices[0] < doc.layers.count
+                else { return nil }
+                let removed = Element.layer(doc.layers[indices[0]])
+                var newLayers = doc.layers
+                newLayers.remove(at: indices[0])
+                model.document = Document(layers: newLayers,
+                                           selectedLayer: doc.selectedLayer,
+                                           selection: doc.selection)
+                return removed
+            }
+            let removed = doc.getElement(indices)
+            model.document = doc.deleteElement(indices)
             return removed
         }
         let docCloneAtHandler: PlatformEffect = { value, callCtx, _ in
             guard let pathExpr = value as? String else { return nil }
             let pathVal = evaluate(pathExpr, context: callCtx)
-            guard case .path(let indices) = pathVal,
-                  indices.count == 1,
-                  indices[0] >= 0 && indices[0] < model.document.layers.count
+            guard case .path(let indices) = pathVal, !indices.isEmpty
             else { return nil }
-            // Swift Layer is a value type; copy is implicit
-            return model.document.layers[indices[0]]
+            let doc = model.document
+            if indices.count == 1 {
+                guard indices[0] >= 0 && indices[0] < doc.layers.count
+                else { return nil }
+                return Element.layer(doc.layers[indices[0]])
+            }
+            return doc.getElement(indices)
         }
         let docInsertAfterHandler: PlatformEffect = { value, callCtx, _ in
             guard let spec = value as? [String: Any] else { return nil }
             let pathExpr = (spec["path"] as? String) ?? ""
             let pathVal = evaluate(pathExpr, context: callCtx)
-            guard case .path(let indices) = pathVal,
-                  indices.count == 1
+            guard case .path(let indices) = pathVal, !indices.isEmpty
             else { return nil }
-            // element: may be a raw Layer (from clone_at) or a bare
-            // identifier referring to a ctx-bound Layer.
-            let newElement: Layer?
-            if let layer = spec["element"] as? Layer {
-                newElement = layer
+            // element: may be a raw Element (from clone_at/delete_at) or a
+            // bare identifier referring to a ctx-bound Element.
+            let newElement: Element?
+            if let e = spec["element"] as? Element {
+                newElement = e
             } else if let name = spec["element"] as? String,
-                      let layer = callCtx[name] as? Layer {
-                newElement = layer
+                      let e = callCtx[name] as? Element {
+                newElement = e
             } else {
                 newElement = nil
             }
             guard let elem = newElement else { return nil }
-            let insertIdx = min(indices[0] + 1, model.document.layers.count)
-            var newLayers = model.document.layers
-            newLayers.insert(elem, at: insertIdx)
-            model.document = Document(layers: newLayers,
-                                       selectedLayer: model.document.selectedLayer,
-                                       selection: model.document.selection)
+            let doc = model.document
+            // Top-level: insert into [Layer]; deeper: insert into the
+            // Element tree via Document.insertElementAfter.
+            if indices.count == 1 {
+                guard case .layer(let layer) = elem else { return nil }
+                let insertIdx = min(indices[0] + 1, doc.layers.count)
+                var newLayers = doc.layers
+                newLayers.insert(layer, at: insertIdx)
+                model.document = Document(layers: newLayers,
+                                           selectedLayer: doc.selectedLayer,
+                                           selection: doc.selection)
+            } else {
+                model.document = doc.insertElementAfter(indices, element: elem)
+            }
             return nil
         }
 
