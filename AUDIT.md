@@ -458,44 +458,42 @@ This survey is sufficient to unblock Phase 3 planning. No code changes.
 
 ---
 
-## Phase 3 Group A / Group B status (as of 2026-04-16)
+## Phase 3 / Phase 4 completion status (as of 2026-04-16)
+
+Phase 3 (Groups A through E) and Phase 4 (element_at + open_layer_options)
+are complete across all 5 apps: the workspace_interpreter Python
+reference, jas_dioxus Rust, JasSwift, jas_ocaml, and jas Python.
 
 ### Group A — toggle_all_layers_{visibility,outline,lock}
 
-Fully migrated to YAML and verified end-to-end in all 5 apps. Hardcoded
-arms deleted where they existed. 15 actions × apps = 9 hardcoded arms
-removed (3 in Rust, 3 in OCaml panel_menu, 3 in Python jas/panel_menu;
-Swift had 0 — they were log-only stubs).
+Fully migrated to YAML and verified end-to-end in all 5 apps.
+15 hardcoded arms removed (3 in Rust, 3 in OCaml panel_menu, 3 in
+Python jas/panel_menu; Swift had 0).
 
 ### Group B — delete_layer_selection, duplicate_layer_selection
 
-- **YAML migrated**: workspace/actions.yaml uses reverse(panel.
-  layers_panel_selection) + foreach + doc.delete_at / doc.clone_at /
-  doc.insert_after.
-- **Primitives ported**: all 4 language evaluators have the Group B
-  primitives (doc.delete_at, doc.clone_at, doc.insert_after,
-  doc.insert_at) + `as:` return-binding + reverse() HOF.
-- **Python reference + jas/**: verified via fixture tests in
-  workspace/tests/phase3/.
-- **Rust**: migrated end-to-end; 2 hardcoded arms deleted from
-  dispatch_action; integration tests verify YAML path.
-- **Swift**: primitives registered as platformEffects in LayersPanel
-  (tested in isolation); LayersPanel.dispatch wiring to route
-  delete/duplicate through YAML is pending because the panel selection
-  lives in YamlPanelBodyView's SwiftUI `@State` rather than being
-  threaded to LayersPanel.dispatch. Behavior-unchanged refactor.
-- **OCaml**: primitives registered as platform_effects in panel_menu
-  (tested end-to-end for Group A toggles); the existing
-  do_delete_panel_selection / do_duplicate_panel_selection callbacks in
-  yaml_panel_view.ml still call Document.delete_element / insert_element_after
-  directly. They behave identically to the YAML spec (verified by
-  reading both) but are not wired through dispatch_yaml_action yet.
-  Behavior-unchanged refactor.
+All apps now route through the YAML pipeline end-to-end:
+- Rust: 2 hardcoded arms deleted; integration tests in renderer.rs.
+- OCaml: `do_delete_panel_selection` / `do_duplicate_panel_selection`
+  in yaml_panel_view.ml dispatch via `Panel_menu.dispatch_yaml_action`.
+- Swift: tree-view context menu and Delete/Backspace shortcut call
+  `LayersPanel.dispatchYamlAction`; platform handlers widened to
+  accept nested paths via Document's element-tree APIs.
+- jas Python: yaml_renderer's `_do_delete` / `_do_duplicate` delegate
+  to `_dispatch_yaml_layers_action`.
 
-### What's blocking Swift + OCaml full Group B end-to-end
+### Groups C, D, E
 
-Threading the layers panel selection (`PathSet2.t` in OCaml,
-`[ElementPath]` in Swift) from where it lives (YamlPanelBodyView /
-yaml_panel_view) to where the YAML dispatch fires (LayersPanel.dispatch
-/ panel_menu.dispatch_yaml_action). Straightforward plumbing, ~50
-lines each, does not change observable behavior. Deferred.
+`new_layer`, `new_group`, `collect_in_new_layer`, `flatten_artwork`,
+`enter_isolation_mode`, `exit_isolation_mode`, and
+`layer_options_confirm` are migrated in all 5 apps. Group E resolved
+sub-tollgate 4 by reusing the existing `param.*` namespace: the OK
+button forwards dialog state as dispatch params.
+
+### Phase 4 — element_at + open_layer_options
+
+`element_at(path)` is a first-class expression function in all four
+evaluators + Python reference. `open_layer_options` resolves the
+target layer's current state via `element_at(path_from_id(...))` and
+passes it as dialog init params; Rust's hardcoded open_layer_options
+arm is deleted.
