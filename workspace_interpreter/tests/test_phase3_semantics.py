@@ -375,6 +375,67 @@ class TestDocDeleteAtEffect:
         assert len(doc["layers"]) == 1
 
 
+class TestDocCloneAtEffect:
+    def test_clone_at_returns_copy(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.clone_at": "path(0)", "as": "clone"},
+            {"set": {"cloned_name": "clone.name"}},
+        ], {}, store, diagnostics=[])
+        # Original layer untouched
+        assert len(doc["layers"]) == 1
+        assert doc["layers"][0]["name"] == "A"
+        assert store.get("cloned_name") == "A"
+
+    def test_clone_is_deep_copy(self):
+        """Inserting the clone and mutating it does not affect the original."""
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.clone_at": "path(0)", "as": "clone"},
+            {"doc.insert_after": {"path": "path(0)", "element": "clone"}},
+            {"doc.set": {"path": "path(1)",
+                         "fields": {"common.visibility": "'invisible'"}}},
+        ], {}, store, diagnostics=[])
+        # Inserted clone at idx 1; mutated that; original at idx 0 untouched
+        assert doc["layers"][0]["common"]["visibility"] == "visible"
+        assert doc["layers"][1]["common"]["visibility"] == "invisible"
+
+
+class TestDocInsertAfterEffect:
+    def test_insert_after_top_level(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A"},
+            {"kind": "Layer", "name": "C"},
+        ])
+        store = StateStore(document=doc)
+        new_layer = {"kind": "Layer", "name": "B"}
+        run_effects([
+            {"doc.insert_after": {"path": "path(0)", "element": new_layer}},
+        ], {}, store, diagnostics=[])
+        names = [l["name"] for l in doc["layers"]]
+        assert names == ["A", "B", "C"]
+
+    def test_duplicate_via_clone_and_insert_after(self):
+        """End-to-end: duplicate layer 0 at position 1."""
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "preview"}},
+            {"kind": "Layer", "name": "B"},
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.clone_at": "path(0)", "as": "clone"},
+            {"doc.insert_after": {"path": "path(0)", "element": "clone"}},
+        ], {}, store, diagnostics=[])
+        names = [l["name"] for l in doc["layers"]]
+        assert names == ["A", "A", "B"]
+
+
 class TestDocSetEffect:
     def test_doc_set_writes_dotted_field(self):
         doc = _make_doc([

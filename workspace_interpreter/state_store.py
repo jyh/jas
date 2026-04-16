@@ -241,6 +241,56 @@ class StateStore:
             elem = children[idx]
         return elem
 
+    def clone_element_at(self, path: tuple[int, ...]):
+        """Deep-copy the element at path. Returns the clone, or None."""
+        elem = self.get_element(path)
+        if elem is None:
+            return None
+        return copy.deepcopy(elem)
+
+    def insert_after(self, path: tuple[int, ...], element) -> bool:
+        """Insert element at index path[-1]+1 under the parent of path."""
+        if self._document is None or len(path) == 0:
+            return False
+        if len(path) == 1:
+            layers = self._document.get("layers")
+            if not isinstance(layers, list):
+                return False
+            insert_idx = min(path[0] + 1, len(layers))
+            layers.insert(insert_idx, element)
+            return True
+        parent = self.get_element(path[:-1])
+        if parent is None or not isinstance(parent, dict):
+            return False
+        children = parent.setdefault("children", [])
+        if not isinstance(children, list):
+            return False
+        insert_idx = min(path[-1] + 1, len(children))
+        children.insert(insert_idx, element)
+        return True
+
+    def insert_at(self, parent_path: tuple[int, ...], index: int, element) -> bool:
+        """Insert element at parent_path[index]."""
+        if self._document is None:
+            return False
+        if len(parent_path) == 0:
+            # Parent is the document root; insert into top-level layers
+            layers = self._document.setdefault("layers", [])
+            if not isinstance(layers, list):
+                return False
+            index = max(0, min(index, len(layers)))
+            layers.insert(index, element)
+            return True
+        parent = self.get_element(parent_path)
+        if parent is None or not isinstance(parent, dict):
+            return False
+        children = parent.setdefault("children", [])
+        if not isinstance(children, list):
+            return False
+        index = max(0, min(index, len(children)))
+        children.insert(index, element)
+        return True
+
     def delete_element_at(self, path: tuple[int, ...]):
         """Delete the element at path. Returns the deleted element, or None."""
         if self._document is None or len(path) == 0:

@@ -169,6 +169,68 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         deleted = store.delete_element_at(path_val.value)
         return None, deleted
 
+    # doc.clone_at: path_expr — PHASE3 §5.5
+    # Deep-copies the element at path. Returns the clone for `as:`.
+    if "doc.clone_at" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        path_expr = effect["doc.clone_at"]
+        eval_ctx = store.eval_context(ctx)
+        path_val = evaluate(str(path_expr) if path_expr is not None else "", eval_ctx)
+        if path_val.type != ValueType.PATH:
+            return None, None
+        clone = store.clone_element_at(path_val.value)
+        return None, clone
+
+    # doc.insert_after: { path, element } — PHASE3 §5.5
+    # Inserts element immediately after the element at path.
+    if "doc.insert_after" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        spec = effect["doc.insert_after"]
+        if not isinstance(spec, dict):
+            return None
+        path_expr = spec.get("path", "")
+        elem_expr = spec.get("element")
+        eval_ctx = store.eval_context(ctx)
+        path_val = evaluate(str(path_expr), eval_ctx)
+        if path_val.type != ValueType.PATH:
+            return None
+        # Element: if a string, treat as expression; else raw dict
+        if isinstance(elem_expr, str):
+            elem_val = evaluate(elem_expr, eval_ctx)
+            element = elem_val.value if elem_val.type != ValueType.CLOSURE else None
+        else:
+            element = elem_expr
+        if element is None:
+            return None
+        store.insert_after(path_val.value, element)
+        return None
+
+    # doc.insert_at: { parent_path, index, element } — PHASE3 §5.5
+    if "doc.insert_at" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        spec = effect["doc.insert_at"]
+        if not isinstance(spec, dict):
+            return None
+        parent_expr = spec.get("parent_path", "path()")
+        idx_expr = spec.get("index", 0)
+        elem_expr = spec.get("element")
+        eval_ctx = store.eval_context(ctx)
+        parent_val = evaluate(str(parent_expr), eval_ctx)
+        idx_val = evaluate(str(idx_expr), eval_ctx) if isinstance(idx_expr, str) else None
+        idx = int(idx_val.value) if idx_val and idx_val.type == ValueType.NUMBER else (
+            int(idx_expr) if isinstance(idx_expr, (int, float)) else 0)
+        if parent_val.type != ValueType.PATH:
+            return None
+        if isinstance(elem_expr, str):
+            elem_val = evaluate(elem_expr, eval_ctx)
+            element = elem_val.value if elem_val.type != ValueType.CLOSURE else None
+        else:
+            element = elem_expr
+        if element is None:
+            return None
+        store.insert_at(parent_val.value, idx, element)
+        return None
+
     # doc.set: { path, fields } — PHASE3 §5.4
     # Schema-driven write on the element at `path`. Each field is a
     # dotted path relative to the element root. Expressions in fields
