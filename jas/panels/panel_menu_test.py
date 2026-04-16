@@ -134,6 +134,29 @@ def _make_model_with_layers(layer_specs):
     return Model(document=doc)
 
 
+def test_new_layer_via_yaml_no_existing():
+    from geometry.element import Layer
+    layout = WorkspaceLayout.default_layout()
+    dock = layout.anchored_dock(DockEdge.RIGHT)
+    addr = PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=2), panel_idx=0)
+    model = _make_model_with_layers([])
+    panel_dispatch(PanelKind.LAYERS, "new_layer", addr, layout, model=model)
+    assert len(model.document.layers) == 1
+    assert isinstance(model.document.layers[0], Layer)
+    assert model.document.layers[0].name == "Layer 1"
+
+
+def test_new_layer_via_yaml_skips_existing_name():
+    from geometry.element import Layer, Visibility
+    layout = WorkspaceLayout.default_layout()
+    dock = layout.anchored_dock(DockEdge.RIGHT)
+    addr = PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=2), panel_idx=0)
+    model = _make_model_with_layers([("Layer 1", Visibility.PREVIEW, False)])
+    panel_dispatch(PanelKind.LAYERS, "new_layer", addr, layout, model=model)
+    assert len(model.document.layers) == 2
+    assert model.document.layers[1].name == "Layer 2"
+
+
 def test_toggle_all_layers_visibility_via_yaml():
     from geometry.element import Visibility
     layout = WorkspaceLayout.default_layout()
