@@ -543,6 +543,10 @@ private func visIcon(_ vis: Visibility) -> String {
     }
 }
 
+private func pathToString(_ path: ElementPath) -> String {
+    path.map(String.init).joined(separator: ",")
+}
+
 private func cycleVisibility(_ vis: Visibility) -> Visibility {
     switch vis {
     case .preview: return .outline
@@ -557,6 +561,8 @@ struct TreeViewContent: View {
     @State private var panelSelection: Set<ElementPath> = []
     @State private var renamingPath: ElementPath? = nil
     @State private var editingName: String = ""
+    @State private var dragSource: ElementPath? = nil
+    @State private var dragTarget: ElementPath? = nil
 
     var body: some View {
         let doc = model.document
@@ -688,9 +694,54 @@ struct TreeViewContent: View {
         .frame(height: 24)
         .padding(.horizontal, 4)
         .background(isPanelSelected ? SwiftUI.Color.blue.opacity(0.3) : SwiftUI.Color.clear)
+        .overlay(
+            dragTarget == path && dragSource != nil && dragSource != path
+                ? Rectangle().fill(SwiftUI.Color.blue).frame(height: 2)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                : nil
+        )
         .contentShape(Rectangle())
         .onTapGesture {
             panelSelection = [path]
+        }
+        .onDrag {
+            dragSource = path
+            return NSItemProvider(object: pathToString(path) as NSString)
+        }
+        .onDrop(of: ["public.text"], isTargeted: Binding(
+            get: { dragTarget == path },
+            set: { isOver in
+                if isOver && dragSource != nil && dragSource != path {
+                    dragTarget = path
+                } else if !isOver && dragTarget == path {
+                    dragTarget = nil
+                }
+            }
+        )) { providers in
+            guard let src = dragSource, src != path else {
+                dragSource = nil; dragTarget = nil
+                return false
+            }
+            let moved = model.document.getElement(src)
+            model.snapshot()
+            var doc = model.document.deleteElement(src)
+            // Adjust target if src was at same level and before
+            var target = path
+            if src.count == target.count, Array(src.dropLast()) == Array(target.dropLast()),
+               let sl = src.last, let tl = target.last, sl < tl {
+                target[target.count - 1] = tl - 1
+            }
+            // Insert before target: use insertElementAfter at target-1 or prepend
+            if let tl = target.last, tl > 0 {
+                var insertAfter = target
+                insertAfter[insertAfter.count - 1] = tl - 1
+                doc = doc.insertElementAfter(insertAfter, element: moved)
+            } else {
+                doc = doc.insertElementAfter(target, element: moved)
+            }
+            model.document = doc
+            dragSource = nil; dragTarget = nil
+            return true
         }
 
         // Children (reversed) — skip if collapsed
