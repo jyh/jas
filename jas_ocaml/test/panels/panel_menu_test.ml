@@ -166,6 +166,42 @@ let menu_tests = [
     (* Layer 2 shifted to index 3 *)
     assert (match layers.(3) with Jas.Element.Layer le -> le.name = "Layer 2" | _ -> false));
 
+  Alcotest.test_case "toggle_all_layers_visibility_via_yaml" `Quick (fun () ->
+    let l = default_layout () in
+    let did = right_dock_id l in
+    let addr = pa did 2 0 in
+    let m = Jas.Model.create () in
+    let layer0 = Jas.Element.Layer {
+      name = "A"; children = [||];
+      opacity = 1.0; transform = None;
+      locked = false; visibility = Jas.Element.Preview;
+    } in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers = [|layer0|] };
+    (* Run toggle_all_layers_visibility via YAML dispatch *)
+    panel_dispatch Layers "toggle_all_layers_visibility" addr l
+      ~fill_on_top:true ~get_model:(fun () -> m) ();
+    (* Layer 0 was Preview → any_visible=true → target=invisible *)
+    let after = m#document.Jas.Document.layers.(0) in
+    assert (Jas.Element.get_visibility after = Jas.Element.Invisible));
+
+  Alcotest.test_case "toggle_all_layers_lock_via_yaml" `Quick (fun () ->
+    let l = default_layout () in
+    let did = right_dock_id l in
+    let addr = pa did 2 0 in
+    let m = Jas.Model.create () in
+    let layer0 = Jas.Element.Layer {
+      name = "A"; children = [||];
+      opacity = 1.0; transform = None;
+      locked = false; visibility = Jas.Element.Preview;
+    } in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers = [|layer0|] };
+    panel_dispatch Layers "toggle_all_layers_lock" addr l
+      ~fill_on_top:true ~get_model:(fun () -> m) ();
+    let after = m#document.Jas.Document.layers.(0) in
+    assert (Jas.Element.is_locked after));
+
   Alcotest.test_case "layers_dispatch_tier3_no_crash" `Quick (fun () ->
     let l = default_layout () in
     let did = right_dock_id l in

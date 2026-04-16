@@ -85,6 +85,112 @@ let set_active_color_live color ~fill_on_top (m : Model.model) =
     m#set_default_stroke (Some (Element.make_stroke ~width color))
   end
 
+(** Dispatch a layers action through the compiled YAML effects (Phase 3).
+    Wires snapshot and doc.set to operate on the active Model, and
+    injects active_document.top_level_layer_paths / top_level_layers
+    into the evaluation context. *)
+let dispatch_yaml_action (action_name : string) (m : Model.model) : unit =
+  match Workspace_loader.load () with
+  | None -> ()
+  | Some ws ->
+    match Workspace_loader.json_member "actions" ws.data with
+    | Some (`Assoc actions_map) ->
+      (match List.assoc_opt action_name actions_map with
+       | Some (`Assoc action_def) ->
+         let effects = match List.assoc_opt "effects" action_def with
+           | Some (`List e) -> e | _ -> []
+         in
+         (* Build active_document view from model.document *)
+         let layers = m#document.Document.layers in
+         let top_level_layers = Array.to_list layers
+           |> List.mapi (fun i e -> (i, e))
+           |> List.filter_map (fun (i, e) ->
+             match e with
+             | Element.Layer le ->
+               let vis = match Element.get_visibility e with
+                 | Element.Invisible -> "invisible"
+                 | Element.Outline -> "outline"
+                 | Element.Preview -> "preview"
+               in
+               let path_json = `Assoc [("__path__", `List [`Int i])] in
+               Some (`Assoc [
+                 ("kind", `String "Layer");
+                 ("name", `String le.name);
+                 ("common", `Assoc [
+                   ("visibility", `String vis);
+                   ("locked", `Bool (Element.is_locked e));
+                 ]);
+                 ("path", path_json);
+               ])
+             | _ -> None)
+         in
+         let top_level_layer_paths = List.mapi (fun i e ->
+           match e with
+           | Element.Layer _ -> Some (`Assoc [("__path__", `List [`Int i])])
+           | _ -> None
+         ) (Array.to_list layers) |> List.filter_map (fun x -> x) in
+         let active_doc = `Assoc [
+           ("top_level_layers", `List top_level_layers);
+           ("top_level_layer_paths", `List top_level_layer_paths);
+         ] in
+         let ctx = [("active_document", active_doc)] in
+         (* Platform handlers: snapshot → model snapshot; doc.set → element mutation *)
+         let snapshot_h : Effects.platform_effect = fun _ _ _ -> m#snapshot in
+         let doc_set_h : Effects.platform_effect = fun spec call_ctx _ ->
+           let path_expr = match spec with
+             | `Assoc pairs ->
+               (match List.assoc_opt "path" pairs with
+                | Some (`String s) -> s | _ -> "")
+             | _ -> ""
+           in
+           let fields = match spec with
+             | `Assoc pairs ->
+               (match List.assoc_opt "fields" pairs with
+                | Some (`Assoc fs) -> fs | _ -> [])
+             | _ -> []
+           in
+           (* Evaluate against call-time ctx (which includes foreach's
+              `p` and let's `target`), NOT the outer registration ctx. *)
+           let eval_ctx = `Assoc call_ctx in
+           let path_val = Expr_eval.evaluate path_expr eval_ctx in
+           let indices = match path_val with Expr_eval.Path p -> p | _ -> [] in
+           (* Support only top-level paths for now *)
+           (match indices with
+            | [idx] when idx >= 0 && idx < Array.length m#document.Document.layers ->
+              let d = m#document in
+              let new_layers = Array.copy d.Document.layers in
+              let elem = new_layers.(idx) in
+              List.iter (fun (dotted, expr_v) ->
+                let expr_str = match expr_v with `String s -> s | _ -> "" in
+                let v = Expr_eval.evaluate expr_str eval_ctx in
+                let updated = match dotted, v with
+                  | "common.visibility", Expr_eval.Str s ->
+                    let vis = match s with
+                      | "invisible" -> Element.Invisible
+                      | "outline" -> Element.Outline
+                      | "preview" -> Element.Preview
+                      | _ -> Element.get_visibility elem
+                    in
+                    Element.set_visibility vis elem
+                  | "common.locked", Expr_eval.Bool b ->
+                    Element.set_locked b elem
+                  | _ -> elem
+                in
+                new_layers.(idx) <- updated
+              ) fields;
+              m#set_document { d with Document.layers = new_layers }
+            | _ -> ())
+         in
+         let platform_effects = [
+           ("snapshot", snapshot_h);
+           ("doc.set", doc_set_h);
+         ] in
+         (* Snapshot once before the batch mutation *)
+         let store = State_store.create () in
+         Effects.run_effects ~platform_effects effects ctx store
+       | _ -> ())
+    | _ -> ()
+
 (** Dispatch a menu command for a panel kind. *)
 let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
     ?(get_panel_selection = fun () -> []) () =
@@ -124,41 +230,9 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
       else layers.(i - 1)) in
     m#snapshot;
     m#set_document { d with Document.layers = new_layers }
-  | "toggle_all_layers_visibility" when kind = Layers ->
-    let m = get_model () in
-    let d = m#document in
-    let any_visible = Array.exists (fun e ->
-      Element.get_visibility e <> Element.Invisible) d.Document.layers in
-    let target = if any_visible then Element.Invisible else Element.Preview in
-    let new_layers = Array.map (fun e ->
-      match e with
-      | Element.Layer _ -> Element.set_visibility target e
-      | _ -> e) d.Document.layers in
-    m#snapshot;
-    m#set_document { d with Document.layers = new_layers }
-  | "toggle_all_layers_outline" when kind = Layers ->
-    let m = get_model () in
-    let d = m#document in
-    let any_preview = Array.exists (fun e ->
-      Element.get_visibility e = Element.Preview) d.Document.layers in
-    let target = if any_preview then Element.Outline else Element.Preview in
-    let new_layers = Array.map (fun e ->
-      match e with
-      | Element.Layer _ -> Element.set_visibility target e
-      | _ -> e) d.Document.layers in
-    m#snapshot;
-    m#set_document { d with Document.layers = new_layers }
-  | "toggle_all_layers_lock" when kind = Layers ->
-    let m = get_model () in
-    let d = m#document in
-    let any_unlocked = Array.exists (fun e ->
-      not (Element.is_locked e)) d.Document.layers in
-    let new_layers = Array.map (fun e ->
-      match e with
-      | Element.Layer _ -> Element.set_locked any_unlocked e
-      | _ -> e) d.Document.layers in
-    m#snapshot;
-    m#set_document { d with Document.layers = new_layers }
+  | ("toggle_all_layers_visibility" | "toggle_all_layers_outline"
+     | "toggle_all_layers_lock") when kind = Layers ->
+    dispatch_yaml_action cmd (get_model ())
   | "new_group"
   | "enter_isolation_mode" | "exit_isolation_mode"
   | "flatten_artwork" | "collect_in_new_layer"

@@ -564,7 +564,25 @@ let parse (source : string) : ast option =
 (* Evaluator                                                           *)
 (* ================================================================== *)
 
-(** Resolve a dot-separated path through a JSON context. *)
+(* Drill into a scope-bound value using a sequence of segments.
+   Handles Path properties (.depth/.parent/.id/.indices). *)
+let drill_value_by_segs (v : value) (segs : string list) : value =
+  match v, segs with
+  | Path indices, [member] ->
+    (match member with
+     | "depth" -> Number (float_of_int (List.length indices))
+     | "parent" ->
+       if indices = [] then Null
+       else
+         let rec drop_last = function
+           | [] | [_] -> []
+           | x :: xs -> x :: drop_last xs
+         in Path (drop_last indices)
+     | "id" -> Str (String.concat "." (List.map string_of_int indices))
+     | "indices" -> List (List.map (fun i -> `Int i) indices)
+     | _ -> Null)
+  | _ -> Null
+
 let resolve_path (segments : string list) (ctx : Yojson.Safe.t) : value =
   match segments with
   | [] -> Null
@@ -637,13 +655,16 @@ let rec eval_node ?(local_env : env = []) ?(store_cb : store_cb option)
   match node with
   | Ast_literal v -> v
   | Ast_path segs ->
-    (* First check local env for single-segment paths *)
+    (* Check local env first — single-segment or multi-segment (drill into
+       a scope-bound value, e.g. lambda param `l` bound to a JSON dict). *)
     (match segs with
-     | [name] ->
-       (match List.assoc_opt name local_env with
-        | Some v -> v
-        | None -> resolve_path segs ctx)
-     | _ -> resolve_path segs ctx)
+     | [] -> Null
+     | name :: rest ->
+       match List.assoc_opt name local_env with
+       | Some v ->
+         if rest = [] then v
+         else drill_value_by_segs v rest
+       | None -> resolve_path segs ctx)
   | Ast_func_call (name, args) -> eval_func ~local_env ?store_cb name args ctx
   | Ast_dot_access (obj, member) -> eval_dot_access ~local_env ?store_cb obj member ctx
   | Ast_index_access (obj, index) -> eval_index_access ~local_env ?store_cb obj index ctx
@@ -785,8 +806,15 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
          | List items, Closure (params, body, captured_env) when List.length params = 1 ->
            let param = List.hd params in
            let results = List.map (fun item ->
-             let call_env = (param, value_of_json item) :: captured_env in
-             eval_node ~local_env:call_env ?store_cb body ctx
+             (* Inject item into ctx as a top-level namespace so that
+                multi-segment paths like `l.common.locked` resolve via
+                JSON drilling. Lexical closure preserved via captured_env. *)
+             let new_ctx = match ctx with
+               | `Assoc pairs ->
+                 `Assoc ((param, item) :: List.filter (fun (k,_) -> k <> param) pairs)
+               | _ -> `Assoc [(param, item)]
+             in
+             eval_node ~local_env:captured_env ?store_cb body new_ctx
            ) items in
            (match name with
             | "any" -> Bool (List.exists to_bool results)
