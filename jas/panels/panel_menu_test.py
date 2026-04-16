@@ -261,6 +261,58 @@ def test_layer_options_confirm_create_mode():
     assert new_layer.visibility == Visibility.PREVIEW
 
 
+def test_delete_layer_selection_via_yaml_dispatch():
+    from geometry.element import Visibility
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    model = _make_model_with_layers([
+        ("A", Visibility.PREVIEW, False),
+        ("B", Visibility.PREVIEW, False),
+        ("C", Visibility.PREVIEW, False),
+    ])
+    _dispatch_yaml_layers_action(
+        "delete_layer_selection", model,
+        panel_selection=[(0,), (2,)],
+    )
+    assert len(model.document.layers) == 1
+    assert model.document.layers[0].name == "B"
+
+
+def test_duplicate_layer_selection_via_yaml_dispatch():
+    from geometry.element import Visibility
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    model = _make_model_with_layers([
+        ("A", Visibility.PREVIEW, False),
+        ("B", Visibility.PREVIEW, False),
+    ])
+    _dispatch_yaml_layers_action(
+        "duplicate_layer_selection", model,
+        panel_selection=[(1,)],
+    )
+    assert len(model.document.layers) == 3
+    names = [l.name for l in model.document.layers]
+    assert names == ["A", "B", "B"]
+
+
+def test_collect_in_new_layer_via_yaml_dispatch():
+    from geometry.element import Visibility
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    model = _make_model_with_layers([
+        ("Layer 1", Visibility.PREVIEW, False),
+        ("Layer 2", Visibility.PREVIEW, False),
+        ("Layer 3", Visibility.PREVIEW, False),
+    ])
+    _dispatch_yaml_layers_action(
+        "collect_in_new_layer", model,
+        panel_selection=[(0,), (2,)],
+    )
+    assert len(model.document.layers) == 2
+    assert model.document.layers[0].name == "Layer 2"
+    # Next unused name after Layer 1/2/3 is Layer 4, with two children.
+    new_layer = model.document.layers[1]
+    assert new_layer.name == "Layer 4"
+    assert len(new_layer.children) == 2
+
+
 def test_enter_isolation_mode_via_yaml_pushes_selection():
     from geometry.element import Visibility
     from jas.panels import layers_panel_state as lps

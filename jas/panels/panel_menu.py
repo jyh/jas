@@ -282,6 +282,132 @@ def _dispatch_yaml_layers_action(action_name: str, model,
         )
         return None
 
+    # doc.delete_at: "path(...)". Deletes the element at the given path
+    # (supports arbitrary depth) and returns the removed element so
+    # duplicate_layer_selection's clone-then-insert chain can thread it
+    # through the as:-binding ctx.
+    def doc_delete_at_handler(value, call_ctx, _store):
+        path_expr = value if isinstance(value, str) else ""
+        v = evaluate(path_expr, call_ctx)
+        if v.type.name != "PATH":
+            return None
+        indices = tuple(v.value)
+        if not indices:
+            return None
+        doc = model.document
+        try:
+            elem = doc.get_element(indices)
+        except Exception:
+            return None
+        model.document = doc.delete_element(indices)
+        return elem
+
+    def doc_clone_at_handler(value, call_ctx, _store):
+        path_expr = value if isinstance(value, str) else ""
+        v = evaluate(path_expr, call_ctx)
+        if v.type.name != "PATH":
+            return None
+        indices = tuple(v.value)
+        if not indices:
+            return None
+        try:
+            return model.document.get_element(indices)
+        except Exception:
+            return None
+
+    def doc_insert_after_handler(spec, call_ctx, _store):
+        if not isinstance(spec, dict):
+            return None
+        path_expr = spec.get("path", "")
+        v = evaluate(str(path_expr), call_ctx)
+        if v.type.name != "PATH":
+            return None
+        indices = tuple(v.value)
+        if not indices:
+            return None
+        # element: raw element or a ctx-bound name from as:.
+        el_spec = spec.get("element")
+        elem = None
+        if isinstance(el_spec, str):
+            # Identifier lookup: ctx value set by an earlier as:-binding.
+            ctx_val = call_ctx.get(el_spec)
+            if ctx_val is not None and not isinstance(ctx_val, (str, int, float, bool, dict, list)):
+                elem = ctx_val
+        if elem is None and el_spec is not None and not isinstance(el_spec, (str, int, float, bool, dict, list)):
+            elem = el_spec
+        if elem is None:
+            return None
+        model.document = model.document.insert_element_after(indices, elem)
+        return None
+
+    def doc_unpack_group_at_handler(value, call_ctx, _store):
+        from geometry.element import Group as _Group
+        path_expr = value if isinstance(value, str) else ""
+        v = evaluate(path_expr, call_ctx)
+        if v.type.name != "PATH":
+            return None
+        indices = tuple(v.value)
+        if not indices:
+            return None
+        doc = model.document
+        try:
+            elem = doc.get_element(indices)
+        except Exception:
+            return None
+        if not isinstance(elem, _Group):
+            return None
+        children = list(elem.children)
+        new_doc = doc.delete_element(indices)
+        # Insert each child at the group's position in reverse order so
+        # they end up in the original child order at the parent site.
+        for child in reversed(children):
+            new_doc = new_doc.insert_element_after(
+                indices[:-1] + (indices[-1] - 1,) if indices[-1] > 0 else indices,
+                child,
+            ) if indices[-1] == 0 else new_doc.insert_element_after(
+                indices[:-1] + (indices[-1] - 1,), child
+            )
+        model.document = new_doc
+        return None
+
+    def doc_wrap_in_layer_handler(spec, call_ctx, _store):
+        import dataclasses as _dc
+        from geometry.element import Layer as _Layer
+        if not isinstance(spec, dict):
+            return None
+        paths_expr = spec.get("paths", "[]")
+        v = evaluate(str(paths_expr), call_ctx)
+        if v.type.name != "LIST":
+            return None
+        # Decode list of __path__ markers into index tuples.
+        paths = []
+        for item in v.value:
+            if isinstance(item, dict) and "__path__" in item:
+                indices = item["__path__"]
+                if isinstance(indices, (list, tuple)):
+                    paths.append(tuple(int(i) for i in indices))
+        if not paths:
+            return None
+        # Resolve name expression (defaults to "'Layer'").
+        name_expr = spec.get("name", "'Layer'")
+        nm = evaluate(str(name_expr), call_ctx)
+        name = nm.value if nm.type.name == "STRING" else "Layer"
+        # Collect elements in document order, then remove sources from
+        # bottom-up so earlier indices stay valid.
+        sorted_paths = sorted(paths)
+        try:
+            elems = tuple(model.document.get_element(pp) for pp in sorted_paths)
+        except Exception:
+            return None
+        new_doc = model.document
+        for pp in sorted(sorted_paths, reverse=True):
+            new_doc = new_doc.delete_element(pp)
+        new_layer = _Layer(name=name, children=elems)
+        model.document = _dc.replace(
+            new_doc, layers=new_doc.layers + (new_layer,)
+        )
+        return None
+
     # list_push: {target, value}. Phase 3 Group D (enter_isolation_mode).
     # Only target=panel.isolation_stack is handled here; writes the
     # evaluated Path value to layers_panel_state.
@@ -317,6 +443,11 @@ def _dispatch_yaml_layers_action(action_name: str, model,
         "doc.set": doc_set_handler,
         "doc.create_layer": doc_create_layer_handler,
         "doc.insert_at": doc_insert_at_handler,
+        "doc.delete_at": doc_delete_at_handler,
+        "doc.clone_at": doc_clone_at_handler,
+        "doc.insert_after": doc_insert_after_handler,
+        "doc.unpack_group_at": doc_unpack_group_at_handler,
+        "doc.wrap_in_layer": doc_wrap_in_layer_handler,
         "list_push": list_push_handler,
         "pop": pop_handler,
     }
@@ -343,13 +474,17 @@ def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
                  "toggle_all_layers_lock",
                  "exit_isolation_mode") and kind == PanelKind.LAYERS and model is not None:
         _dispatch_yaml_layers_action(cmd, model)
-    elif cmd == "enter_isolation_mode" and kind == PanelKind.LAYERS and model is not None:
-        # Needs panel selection; callers that track panel selection
-        # should invoke _dispatch_yaml_layers_action directly with it.
+    elif cmd in ("enter_isolation_mode",
+                  "delete_layer_selection",
+                  "duplicate_layer_selection",
+                  "new_group",
+                  "flatten_artwork",
+                  "collect_in_new_layer") and kind == PanelKind.LAYERS and model is not None:
+        # Selection-aware commands. The menu-bar callsite has no handle
+        # on the current tree selection, so routing here acts as a
+        # no-op unless the caller plumbs one in via
+        # _dispatch_yaml_layers_action directly (yaml_renderer does).
         _dispatch_yaml_layers_action(cmd, model)
-    elif cmd in ("new_group",
-                 "flatten_artwork", "collect_in_new_layer") and kind == PanelKind.LAYERS:
-        pass  # Tier-3 stubs for actions that need panel selection
     elif cmd == "invert_color" and kind == PanelKind.COLOR and model is not None:
         color = model.default_fill.color if model.fill_on_top and model.default_fill else (
             model.default_stroke.color if not model.fill_on_top and model.default_stroke else None)
