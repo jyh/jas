@@ -241,6 +241,30 @@ class StateStore:
             elem = children[idx]
         return elem
 
+    def delete_element_at(self, path: tuple[int, ...]):
+        """Delete the element at path. Returns the deleted element, or None."""
+        if self._document is None or len(path) == 0:
+            return None
+        layers = self._document.get("layers")
+        if not isinstance(layers, list):
+            return None
+        if len(path) == 1:
+            idx = path[0]
+            if idx < 0 or idx >= len(layers):
+                return None
+            return layers.pop(idx)
+        # Nested: walk to parent, then pop child
+        parent = self.get_element(path[:-1])
+        if parent is None or not isinstance(parent, dict):
+            return None
+        children = parent.get("children")
+        if not isinstance(children, list):
+            return None
+        last = path[-1]
+        if last < 0 or last >= len(children):
+            return None
+        return children.pop(last)
+
     def set_element_field(self, path: tuple[int, ...], dotted_field: str, value) -> bool:
         """Write value to the element at path under dotted_field.
         Creates intermediate dicts as needed. Returns True on success."""

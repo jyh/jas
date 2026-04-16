@@ -84,8 +84,16 @@ def _eval_literal(node: Literal, ctx: dict = None) -> Value:
     if node.kind == "bool":
         return Value.bool_(node.value)
     if node.kind == "list":
-        # List literal: items are AST nodes that need evaluation
-        items = [eval_node(item, ctx or {}).value for item in node.value]
+        # List literal: items are AST nodes that need evaluation.
+        # PATH values must retain their Value wrapper so they round-trip
+        # through foreach/list-literal transit (Phase 3 §6.2).
+        items = []
+        for item in node.value:
+            v = eval_node(item, ctx or {})
+            if v.type == ValueType.PATH:
+                items.append(v)
+            else:
+                items.append(v.value)
         return Value.list_(items)
     return Value.null()
 
