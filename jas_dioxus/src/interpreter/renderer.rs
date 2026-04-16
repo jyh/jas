@@ -2483,10 +2483,65 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let mut revision = rctx.revision;
     let btn_style = "width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer";
 
+    let kb_app = app.clone();
+    let mut kb_rev = revision;
+    let on_keydown = move |evt: Event<KeyboardData>| {
+        let key = evt.data().key();
+        let a = kb_app.clone();
+        match key {
+            dioxus::prelude::Key::Delete | dioxus::prelude::Key::Backspace => {
+                spawn(async move {
+                    let mut st = a.borrow_mut();
+                    let params = serde_json::Map::new();
+                    dispatch_action("delete_layer_selection", &params, &mut st);
+                    kb_rev += 1;
+                });
+            }
+            dioxus::prelude::Key::Character(c) if c == "a" || c == "A" => {
+                if evt.data().modifiers().meta() || evt.data().modifiers().ctrl() {
+                    spawn(async move {
+                        let mut st = a.borrow_mut();
+                        // Collect all element paths in the document
+                        if let Some(tab) = st.tab() {
+                            let doc = tab.model.document();
+                            let mut all_paths = Vec::new();
+                            fn collect(elements: &[crate::geometry::element::Element], prefix: &[usize], out: &mut Vec<Vec<usize>>) {
+                                for (i, elem) in elements.iter().enumerate() {
+                                    let mut p = prefix.to_vec();
+                                    p.push(i);
+                                    out.push(p.clone());
+                                    if let Some(children) = elem.children() {
+                                        fn collect_rc(children: &[std::rc::Rc<crate::geometry::element::Element>], prefix: &[usize], out: &mut Vec<Vec<usize>>) {
+                                            for (i, c) in children.iter().enumerate() {
+                                                let mut p = prefix.to_vec();
+                                                p.push(i);
+                                                out.push(p.clone());
+                                                if let Some(gc) = c.children() {
+                                                    collect_rc(gc, &p, out);
+                                                }
+                                            }
+                                        }
+                                        collect_rc(children, &p, out);
+                                    }
+                                }
+                            }
+                            collect(&doc.layers, &[], &mut all_paths);
+                            st.layers_panel_selection = all_paths;
+                        }
+                        kb_rev += 1;
+                    });
+                }
+            }
+            _ => {}
+        }
+    };
+
     rsx! {
         div {
             id: "{id}",
-            style: "overflow-y:auto;flex:1;min-height:0;{style}",
+            style: "overflow-y:auto;flex:1;min-height:0;outline:none;{style}",
+            tabindex: 0,
+            onkeydown: on_keydown,
             for row in rows.iter() {
                 {
                     let indent_px = row.depth * 16;
