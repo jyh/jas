@@ -84,16 +84,17 @@ public enum LayersPanel {
         // Platform handlers
         let snapshotHandler: PlatformEffect = { _, _, _ in
             model.snapshot()
+            return nil
         }
         let docSetHandler: PlatformEffect = { value, callCtx, _ in
-            guard let spec = value as? [String: Any] else { return }
+            guard let spec = value as? [String: Any] else { return nil }
             let pathExpr = (spec["path"] as? String) ?? ""
             let fields = (spec["fields"] as? [String: Any]) ?? [:]
             let pathVal = evaluate(pathExpr, context: callCtx)
             guard case .path(let indices) = pathVal,
                   indices.count == 1,
                   indices[0] >= 0 && indices[0] < model.document.layers.count
-            else { return }
+            else { return nil }
             let idx = indices[0]
             let layer = model.document.layers[idx]
             var newVisibility = layer.visibility
@@ -128,11 +129,71 @@ public enum LayersPanel {
             model.document = Document(layers: newLayers,
                                        selectedLayer: model.document.selectedLayer,
                                        selection: model.document.selection)
+            return nil
+        }
+        // Phase 3 Group B: delete/clone/insert. Returned Layer flows
+        // through ctx via as:-binding. Swift's [String: Any] ctx holds
+        // Layer values directly (no serde roundtrip needed).
+        let docDeleteAtHandler: PlatformEffect = { value, callCtx, _ in
+            guard let pathExpr = value as? String else { return nil }
+            let pathVal = evaluate(pathExpr, context: callCtx)
+            guard case .path(let indices) = pathVal,
+                  indices.count == 1,
+                  indices[0] >= 0 && indices[0] < model.document.layers.count
+            else { return nil }
+            let idx = indices[0]
+            let removed = model.document.layers[idx]
+            var newLayers = model.document.layers
+            newLayers.remove(at: idx)
+            model.document = Document(layers: newLayers,
+                                       selectedLayer: model.document.selectedLayer,
+                                       selection: model.document.selection)
+            return removed
+        }
+        let docCloneAtHandler: PlatformEffect = { value, callCtx, _ in
+            guard let pathExpr = value as? String else { return nil }
+            let pathVal = evaluate(pathExpr, context: callCtx)
+            guard case .path(let indices) = pathVal,
+                  indices.count == 1,
+                  indices[0] >= 0 && indices[0] < model.document.layers.count
+            else { return nil }
+            // Swift Layer is a value type; copy is implicit
+            return model.document.layers[indices[0]]
+        }
+        let docInsertAfterHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any] else { return nil }
+            let pathExpr = (spec["path"] as? String) ?? ""
+            let pathVal = evaluate(pathExpr, context: callCtx)
+            guard case .path(let indices) = pathVal,
+                  indices.count == 1
+            else { return nil }
+            // element: may be a raw Layer (from clone_at) or a bare
+            // identifier referring to a ctx-bound Layer.
+            let newElement: Layer?
+            if let layer = spec["element"] as? Layer {
+                newElement = layer
+            } else if let name = spec["element"] as? String,
+                      let layer = callCtx[name] as? Layer {
+                newElement = layer
+            } else {
+                newElement = nil
+            }
+            guard let elem = newElement else { return nil }
+            let insertIdx = min(indices[0] + 1, model.document.layers.count)
+            var newLayers = model.document.layers
+            newLayers.insert(elem, at: insertIdx)
+            model.document = Document(layers: newLayers,
+                                       selectedLayer: model.document.selectedLayer,
+                                       selection: model.document.selection)
+            return nil
         }
 
         let platformEffects: [String: PlatformEffect] = [
             "snapshot": snapshotHandler,
             "doc.set": docSetHandler,
+            "doc.delete_at": docDeleteAtHandler,
+            "doc.clone_at": docCloneAtHandler,
+            "doc.insert_after": docInsertAfterHandler,
         ]
 
         let store = StateStore()

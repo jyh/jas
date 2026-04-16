@@ -9,8 +9,9 @@ import Foundation
 /// Platform-specific effect handler (Phase 3). Key is effect name
 /// (e.g. "snapshot"). Called with (effect_value, ctx, store). Registered
 /// by the calling app — e.g. LayersPanel wires snapshot/doc.set to the
-/// active Model.
-typealias PlatformEffect = (Any, [String: Any], StateStore) -> Void
+/// active Model. Return value (if non-nil) is bound to the effect's
+/// optional `as: <name>` field for subsequent effects in the same list.
+typealias PlatformEffect = (Any, [String: Any], StateStore) -> Any?
 
 /// Execute a list of effects.
 ///
@@ -76,10 +77,16 @@ func runEffects(
             continue
         }
         // Platform-specific effects (snapshot, doc.set, etc.)
+        // `as: <name>` binds the handler's return value in threadedCtx.
+        let asName = effect["as"] as? String
         var handled = false
         for (key, value) in effect {
+            if key == "as" { continue }
             if let handler = platformEffects[key] {
-                handler(value, threadedCtx, store)
+                let returned = handler(value, threadedCtx, store)
+                if let name = asName, let r = returned {
+                    threadedCtx[name] = r
+                }
                 handled = true
                 break
             }
