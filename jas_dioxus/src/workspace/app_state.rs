@@ -122,6 +122,11 @@ pub(crate) struct AppState {
     /// on the same element restores them. Map from sibling path to saved
     /// visibility state. None when no solo is active.
     pub(crate) layers_solo_state: Option<LayerSoloState>,
+    /// Saved lock states for unlock-on-container. When a container is
+    /// locked, each direct child's current lock state is saved here so
+    /// unlocking restores them. Outer key: container path. Inner Vec:
+    /// one entry per direct child.
+    pub(crate) layers_saved_lock_states: std::collections::HashMap<Vec<usize>, Vec<bool>>,
 }
 
 /// Solo/unsolo state for the layers panel.
@@ -222,6 +227,7 @@ impl AppState {
             layers_search_query: String::new(),
             layers_isolation_stack: Vec::new(),
             layers_solo_state: None,
+            layers_saved_lock_states: std::collections::HashMap::new(),
         }
     }
 

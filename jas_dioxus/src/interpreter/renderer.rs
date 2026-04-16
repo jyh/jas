@@ -2907,19 +2907,74 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         let a = lock_app.clone();
                         spawn(async move {
                             let mut st = a.borrow_mut();
+                            // Read current lock + container info from doc
+                            let (was_unlocked, is_container, child_count) = {
+                                if let Some(tab) = st.tab() {
+                                    let doc = tab.model.document();
+                                    if let Some(elem) = doc.get_element(&p) {
+                                        let child_count = elem.children().map(|c| c.len()).unwrap_or(0);
+                                        (!elem.locked(), elem.is_group_or_layer(), child_count)
+                                    } else { (false, false, 0) }
+                                } else { (false, false, 0) }
+                            };
+
+                            if is_container && was_unlocked {
+                                // Save direct children's lock states before locking container
+                                let mut saved = Vec::with_capacity(child_count);
+                                if let Some(tab) = st.tab() {
+                                    let doc = tab.model.document();
+                                    if let Some(elem) = doc.get_element(&p) {
+                                        if let Some(children) = elem.children() {
+                                            for c in children {
+                                                saved.push(c.locked());
+                                            }
+                                        }
+                                    }
+                                }
+                                st.layers_saved_lock_states.insert(p.clone(), saved);
+                            }
+
                             if let Some(tab) = st.tab_mut() {
                                 tab.model.snapshot();
                                 let doc = tab.model.document_mut();
                                 if let Some(elem) = doc.get_element_mut(&p) {
-                                    let was_unlocked = !elem.locked();
                                     elem.common_mut().locked = was_unlocked;
-                                    // Locking an element removes it and its descendants from selection
-                                    if was_unlocked {
-                                        let path = p.clone();
-                                        doc.selection.retain(|es| {
-                                            !(es.path == path || es.path.starts_with(&path))
-                                        });
+                                    // When locking a container, also lock all direct children
+                                    if is_container && was_unlocked {
+                                        if let Some(children) = elem.children_mut() {
+                                            for c in children.iter_mut() {
+                                                std::rc::Rc::make_mut(c).common_mut().locked = true;
+                                            }
+                                        }
                                     }
+                                    // When unlocking a container, restore children's saved states
+                                    if is_container && !was_unlocked {
+                                        // `was_unlocked` was false before flip, meaning elem was locked.
+                                        // Now we unlocked it. Restore children from saved state.
+                                    }
+                                }
+                                // Restore saved child lock states on unlock
+                                if is_container && !was_unlocked {
+                                    if let Some(saved) = st.layers_saved_lock_states.remove(&p) {
+                                        let doc = tab.model.document_mut();
+                                        if let Some(elem) = doc.get_element_mut(&p) {
+                                            if let Some(children) = elem.children_mut() {
+                                                for (i, c) in children.iter_mut().enumerate() {
+                                                    if let Some(&saved_locked) = saved.get(i) {
+                                                        std::rc::Rc::make_mut(c).common_mut().locked = saved_locked;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // Locking an element removes it and its descendants from selection
+                                if was_unlocked {
+                                    let path = p.clone();
+                                    let doc = tab.model.document_mut();
+                                    doc.selection.retain(|es| {
+                                        !(es.path == path || es.path.starts_with(&path))
+                                    });
                                 }
                             }
                             lock_rev += 1;
