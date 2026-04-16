@@ -1267,12 +1267,24 @@ actions:
     category: layers
     tier: 3
     params:
-      container_id: { type: string }
+      container_id: { type: string, nullable: true }
     enabled_when: "active_document.layers_panel_selection_count == 1 and active_document.layers_panel_selection_is_container"
     effects:
-      - list_push:
-          target: panel.isolation_stack
-          value: "path_from_id(param.container_id)"
+      # Resolve the target path: explicit container_id param takes
+      # priority; otherwise fall back to the sole panel-selected path.
+      - let:
+          target: >
+            if param.container_id != null
+              then path_from_id(param.container_id)
+            else if active_document.layers_panel_selection_count == 1
+              then panel.layers_panel_selection[0]
+            else null
+      - if:
+          condition: "target != null"
+          then:
+            - list_push:
+                target: panel.isolation_stack
+                value: target
 
   exit_isolation_mode:
     description: >

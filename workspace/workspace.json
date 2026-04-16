@@ -1834,15 +1834,28 @@
       "tier": 3,
       "params": {
         "container_id": {
-          "type": "string"
+          "type": "string",
+          "nullable": true
         }
       },
       "enabled_when": "active_document.layers_panel_selection_count == 1 and active_document.layers_panel_selection_is_container",
       "effects": [
         {
-          "list_push": {
-            "target": "panel.isolation_stack",
-            "value": "path_from_id(param.container_id)"
+          "let": {
+            "target": "if param.container_id != null\n  then path_from_id(param.container_id)\nelse if active_document.layers_panel_selection_count == 1\n  then panel.layers_panel_selection[0]\nelse null\n"
+          }
+        },
+        {
+          "if": {
+            "condition": "target != null",
+            "then": [
+              {
+                "list_push": {
+                  "target": "panel.isolation_stack",
+                  "value": "target"
+                }
+              }
+            ]
           }
         }
       ]

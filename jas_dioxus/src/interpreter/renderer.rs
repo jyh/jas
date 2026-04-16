@@ -1202,7 +1202,6 @@ fn run_yaml_effect(
     }
 
     // list_push: { target, value, unique, max_length }
-    // Handles panel.recent_colors → tab.model.recent_colors
     if let Some(lp) = eff.get("list_push").and_then(|v| v.as_object()) {
         let target = lp.get("target").and_then(|v| v.as_str()).unwrap_or("");
         if target == "panel.recent_colors" {
@@ -1222,6 +1221,13 @@ fn run_yaml_effect(
                         tab.model.recent_colors.truncate(max);
                     }
                 }
+            }
+        } else if target == "panel.isolation_stack" {
+            // Push a Path value onto the layers isolation stack.
+            let value_expr = lp.get("value").and_then(|v| v.as_str()).unwrap_or("null");
+            let val = super::expr::eval(value_expr, eval_ctx);
+            if let super::expr_types::Value::Path(indices) = val {
+                st.layers_isolation_stack.push(indices);
             }
         }
         return deferred;
