@@ -455,3 +455,47 @@ proven by the first few migrations.
 ### Exit criterion for Step 9
 
 This survey is sufficient to unblock Phase 3 planning. No code changes.
+
+---
+
+## Phase 3 Group A / Group B status (as of 2026-04-16)
+
+### Group A — toggle_all_layers_{visibility,outline,lock}
+
+Fully migrated to YAML and verified end-to-end in all 5 apps. Hardcoded
+arms deleted where they existed. 15 actions × apps = 9 hardcoded arms
+removed (3 in Rust, 3 in OCaml panel_menu, 3 in Python jas/panel_menu;
+Swift had 0 — they were log-only stubs).
+
+### Group B — delete_layer_selection, duplicate_layer_selection
+
+- **YAML migrated**: workspace/actions.yaml uses reverse(panel.
+  layers_panel_selection) + foreach + doc.delete_at / doc.clone_at /
+  doc.insert_after.
+- **Primitives ported**: all 4 language evaluators have the Group B
+  primitives (doc.delete_at, doc.clone_at, doc.insert_after,
+  doc.insert_at) + `as:` return-binding + reverse() HOF.
+- **Python reference + jas/**: verified via fixture tests in
+  workspace/tests/phase3/.
+- **Rust**: migrated end-to-end; 2 hardcoded arms deleted from
+  dispatch_action; integration tests verify YAML path.
+- **Swift**: primitives registered as platformEffects in LayersPanel
+  (tested in isolation); LayersPanel.dispatch wiring to route
+  delete/duplicate through YAML is pending because the panel selection
+  lives in YamlPanelBodyView's SwiftUI `@State` rather than being
+  threaded to LayersPanel.dispatch. Behavior-unchanged refactor.
+- **OCaml**: primitives registered as platform_effects in panel_menu
+  (tested end-to-end for Group A toggles); the existing
+  do_delete_panel_selection / do_duplicate_panel_selection callbacks in
+  yaml_panel_view.ml still call Document.delete_element / insert_element_after
+  directly. They behave identically to the YAML spec (verified by
+  reading both) but are not wired through dispatch_yaml_action yet.
+  Behavior-unchanged refactor.
+
+### What's blocking Swift + OCaml full Group B end-to-end
+
+Threading the layers panel selection (`PathSet2.t` in OCaml,
+`[ElementPath]` in Swift) from where it lives (YamlPanelBodyView /
+yaml_panel_view) to where the YAML dispatch fires (LayersPanel.dispatch
+/ panel_menu.dispatch_yaml_action). Straightforward plumbing, ~50
+lines each, does not change observable behavior. Deferred.
