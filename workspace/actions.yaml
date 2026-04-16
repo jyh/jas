@@ -1405,7 +1405,11 @@ actions:
       mode: { type: enum, values: [create, edit] }
       layer_id: { type: string, nullable: true }
     effects:
-      - log: "open_layer_options"
+      - open_dialog:
+          id: layer_options
+          params:
+            mode: "param.mode"
+            layer_id: "param.layer_id"
 
   layer_options_confirm:
     description: >

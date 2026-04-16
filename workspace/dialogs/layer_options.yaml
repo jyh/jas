@@ -260,4 +260,13 @@ layer_options:
           - type: spacer
             style: { flex: 1 }
           - { type: button, label: "Cancel", action: dismiss_dialog }
-          - { type: button, label: "OK", action: layer_options_confirm, variant: primary }
+          - type: button
+            label: "OK"
+            action: layer_options_confirm
+            variant: primary
+            params:
+              layer_id: "param.layer_id"
+              name: "dialog.name"
+              lock: "dialog.lock"
+              show: "dialog.show"
+              preview: "dialog.preview"
