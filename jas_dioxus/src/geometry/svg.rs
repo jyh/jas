@@ -155,7 +155,7 @@ fn escape_xml(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn element_svg(elem: &Element, indent: &str) -> String {
+pub fn element_svg(elem: &Element, indent: &str) -> String {
     match elem {
         Element::Line(e) => {
             format!(
