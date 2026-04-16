@@ -260,55 +260,21 @@ fn apply_dialog_confirm(
 /// must be applied outside the AppState borrow.
 fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
     match action {
-        "layer_options_confirm" => {
-            use crate::geometry::element::{Element as E, LayerElem, Visibility};
-            // Read dialog state from params (passed by the confirm button)
-            let layer_id = params.get("layer_id").and_then(|v| v.as_str()).map(String::from);
-            let path: Option<Vec<usize>> = layer_id.as_ref().and_then(|s| {
-                s.split(',').map(|p| p.parse::<usize>().ok()).collect()
-            });
-            let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("Layer").to_string();
-            let lock = params.get("lock").and_then(|v| v.as_bool()).unwrap_or(false);
-            let show = params.get("show").and_then(|v| v.as_bool()).unwrap_or(true);
-            let preview = params.get("preview").and_then(|v| v.as_bool()).unwrap_or(true);
-            let vis = if !show { Visibility::Invisible }
-                else if preview { Visibility::Preview }
-                else { Visibility::Outline };
-            if let Some(p) = path {
-                if let Some(tab) = st.tab_mut() {
-                    tab.model.snapshot();
-                    let mut new_doc = tab.model.document().clone();
-                    if let Some(elem) = new_doc.get_element_mut(&p) {
-                        if let E::Layer(le) = elem {
-                            *le = LayerElem {
-                                name,
-                                children: le.children.clone(),
-                                common: crate::geometry::element::CommonProps {
-                                    locked: lock,
-                                    visibility: vis,
-                                    ..le.common.clone()
-                                },
-                            };
-                        }
-                    }
-                    tab.model.set_document(new_doc);
-                }
-            }
-            return vec![serde_json::json!({"close_dialog": null})];
-        }
         "open_layer_options" => {
             use crate::geometry::element::Element as E;
             let layer_id = params.get("layer_id").and_then(|v| v.as_str()).map(String::from);
-            // Parse layer_id as path e.g. "0,1" or just "0"
+            // layer_id is a dotted path ("0.1") — matches path_from_id's
+            // grammar so the YAML layer_options_confirm action can decode
+            // it back to a Path value.
             let path: Option<Vec<usize>> = layer_id.as_ref().and_then(|s| {
-                s.split(',').map(|p| p.parse::<usize>().ok()).collect()
+                s.split('.').map(|p| p.parse::<usize>().ok()).collect()
             });
             // Build dialog params from the layer's properties
             let mut dlg_params = serde_json::Map::new();
             dlg_params.insert("mode".into(), serde_json::Value::String("edit".into()));
             if let Some(ref p) = path {
                 dlg_params.insert("layer_id".into(), serde_json::Value::String(
-                    p.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+                    p.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(".")
                 ));
                 if let Some(tab) = st.tab() {
                     if let Some(elem) = tab.model.document().get_element(p) {
@@ -836,6 +802,9 @@ fn run_yaml_effect(
             if let Some(tab) = st.tabs.get_mut(st.active_tab) {
                 tab.model.snapshot();
             }
+        } else if name == "close_dialog" {
+            // Dialog effects are applied outside the AppState borrow.
+            deferred.push(serde_json::json!({"close_dialog": null}));
         }
         return deferred;
     }
@@ -4826,6 +4795,45 @@ mod tests {
         assert_eq!(tab_layer(&st, 0).name, "A");
         assert_eq!(tab_layer(&st, 1).name, "B");
         assert_eq!(tab_layer(&st, 2).name, "B");
+    }
+
+    #[test]
+    fn layer_options_confirm_edit_mode_updates_layer() {
+        let mut st = make_state_with_layers(vec![
+            ("Old".into(), Visibility::Preview, false),
+        ]);
+        let mut params = serde_json::Map::new();
+        params.insert("layer_id".into(), serde_json::Value::String("0".into()));
+        params.insert("name".into(), serde_json::Value::String("Renamed".into()));
+        params.insert("lock".into(), serde_json::Value::Bool(true));
+        params.insert("show".into(), serde_json::Value::Bool(true));
+        params.insert("preview".into(), serde_json::Value::Bool(false));
+        let deferred = dispatch_action("layer_options_confirm", &params, &mut st);
+        // Edit-mode YAML ends with close_dialog which is deferred.
+        assert!(deferred.iter().any(|e| e.get("close_dialog").is_some()));
+        let layer = tab_layer(&st, 0);
+        assert_eq!(layer.name, "Renamed");
+        assert!(layer.common.locked);
+        assert_eq!(layer.common.visibility, Visibility::Outline);
+    }
+
+    #[test]
+    fn layer_options_confirm_create_mode_inserts_layer() {
+        let mut st = make_state_with_layers(vec![
+            ("Existing".into(), Visibility::Preview, false),
+        ]);
+        st.layers_panel_selection = vec![];
+        let mut params = serde_json::Map::new();
+        params.insert("layer_id".into(), serde_json::Value::Null);
+        params.insert("name".into(), serde_json::Value::String("Brand New".into()));
+        params.insert("lock".into(), serde_json::Value::Bool(false));
+        params.insert("show".into(), serde_json::Value::Bool(true));
+        params.insert("preview".into(), serde_json::Value::Bool(true));
+        dispatch_action("layer_options_confirm", &params, &mut st);
+        let layers = &st.tabs[st.active_tab].model.document().layers;
+        assert_eq!(layers.len(), 2);
+        assert_eq!(tab_layer(&st, 1).name, "Brand New");
+        assert_eq!(tab_layer(&st, 1).common.visibility, Visibility::Preview);
     }
 
     #[test]
