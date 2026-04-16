@@ -492,11 +492,19 @@ used by `let:`.
 4. `delete_layer_selection`
 5. `duplicate_layer_selection`
 
-### Sub-tollgate 2 — Factory primitive
+### Sub-tollgate 2 — Factory primitive *(absorbed into implementation)*
 
 Introduce:
 
 - `doc.create_layer: { name, children?, common? }` → element
+
+Shipped without a separate design doc. `doc.create_layer` takes a
+`name` (required, string) and returns a new Layer element whose
+`common` defaults to the schema's defaults (`visibility: preview`,
+`locked: false`, `opacity: 1.0`). The element flows through
+effect-level `as:` binding and is installed via a follow-up
+`doc.insert_at`. `children` and `common` overrides aren't wired yet;
+they're only needed by Phase 5+ compositional actions.
 
 ### Group C — Creation
 
@@ -504,24 +512,44 @@ Introduce:
 7. `new_group`
 8. `collect_in_new_layer`
 
-### Sub-tollgate 3 — Structural
+### Sub-tollgate 3 — Structural *(absorbed into implementation)*
 
 Introduce:
 
 - `doc.wrap_in_group: { paths }` → unit
 - `doc.unpack_group_at: path` → unit
+- `doc.wrap_in_layer: { paths, name }` → unit (added during Group C)
+
+Shipped without a separate design doc. `doc.wrap_in_group` and
+`doc.wrap_in_layer` take a `paths` expression (list of Path values)
+and remove the elements at those paths, wrapping them in a new
+Group/Layer. `wrap_in_layer` also takes a `name` expression;
+`wrap_in_group` leaves the Group unnamed. `doc.unpack_group_at`
+replaces a Group with its children in place.
+
+Swift's typed `Document.layers: [Layer]` constrains
+`doc.wrap_in_group` to top-level containers only; Rust/OCaml/Python
+support nested wrapping via their Element-tree APIs.
 
 ### Group D — Structural
 
 9. `flatten_artwork`
 
-### Sub-tollgate 4 — Dialog return-value
+### Sub-tollgate 4 — Dialog return-value *(resolved: reused param namespace)*
 
-Introduce:
+Originally planned:
 
 - Mechanism for `layer_options_confirm` to read its dialog's `prop:`
-  values inside an expression. (May reduce to "dialog state is already
-  a runtime context" — design inside the sub-tollgate.)
+  values inside an expression.
+
+Resolved without new machinery: the dialog's OK button forwards
+dialog state (`dialog.name`, `dialog.lock`, `dialog.show`,
+`dialog.preview`) as dispatch `params:`. `layer_options_confirm` then
+reads them as `param.name` / `param.lock` / etc. — the same namespace
+every action already uses for dispatch arguments. A latent bug in the
+`open_dialog` effect handler (outer-action `param` overlaying the
+dialog's own `_dialog_params` during init evaluation) was fixed by
+dropping `param` from the init eval-ctx extras.
 
 ### Group E — Dialog commit
 
@@ -592,21 +620,23 @@ action produces `expected_doc`.
 
 ### 10.2 Semantics fixtures
 
-`workspace/tests/phase3_semantics/`: small YAML programs that exercise
-the closure / foreach / scope rules from §4. Example fixture for §4.4:
+Originally planned as `workspace/tests/phase3_semantics/`. In practice,
+the semantics contracts (closure capture §4.4, iteration capture §4.5,
+HOF round-tripping §6.3) shipped as in-language test suites rather
+than a cross-language YAML-fixture harness:
 
-```yaml
-name: "closure_captures_shadowed_binding"
-effects:
-  - let: { x: 1 }
-  - let: { f: "fun _ -> x" }
-  - let: { x: 2 }
-  - assert: "x == 2"
-  - assert: "f(null) == 1"
-```
+- Python reference: `workspace_interpreter/tests/test_phase3_semantics.py`
+- Rust: `jas_dioxus/src/interpreter/expr_eval.rs` and `renderer.rs`
+  unit tests.
+- Swift: `JasSwift/Tests/Interpreter/ExprEvalPhase3Tests.swift`.
+- OCaml: `jas_ocaml/test/interpreter/expr_eval_test.ml`.
 
-Run in all four languages. Any language that fails is broken and
-blocks Phase 3 merge.
+Each language's suite covers the same semantic contracts with test
+bodies translated into native test tooling. A YAML fixture harness
+would give better drift-resistance, but was skipped because each
+language's expression evaluator already has native fixture harness
+support and the in-language translations were less friction than
+adding a new YAML-driven harness to 4 test runners.
 
 ### 10.3 Schema tests
 
@@ -617,24 +647,27 @@ coercion rejects non-path values for `path`-typed fields.
 
 ---
 
-## 11. Exit criterion
+## 11. Exit criterion — STATUS: COMPLETE
 
-Phase 3 is complete when:
+Phase 3 exit criteria:
 
-1. All 11 Category C actions have their YAML `log:` placeholder
-   replaced with a real `effects:` block using only primitives defined
-   in §5 / sub-tollgates.
-2. The 11 × 4 = 44 hardcoded arms are **deleted** (Swift had 0 arms
-   pre-Phase-3; 11 behaviors are new to it, 33 arms are removed from
-   the other 3 languages).
-3. `workspace/tests/phase3/` fixtures pass in all 4 languages.
-4. `workspace/tests/phase3_semantics/` fixtures pass in all 4
-   languages.
-5. The closure-capture test in §4.4 and iteration-capture test in
-   §4.5 pass in all 4 languages.
-6. `AUDIT.md` Category C rows are struck through with "Migrated in
-   Phase 3".
+1. ✅ All 11 Category C actions have their YAML `log:` placeholder
+   replaced with real `effects:` blocks built from the primitives in
+   §5 / sub-tollgates.
+2. ✅ Hardcoded arms deleted where they existed (Rust
+   `dispatch_action`, OCaml/Python `panel_menu` dispatches).
+3. ✅ `workspace/tests/phase3/` fixtures pass in all 4 languages.
+4. ✅ Semantics contracts pass in all 4 languages via in-language
+   test suites (see §10.2 — the planned YAML fixture harness was
+   replaced by per-language tests).
+5. ✅ Closure-capture §4.4 and iteration-capture §4.5 contracts
+   pass in every evaluator.
+6. ✅ `AUDIT.md` reflects Phase 3/4 completion (see "Phase 3 / Phase
+   4 completion status" section).
 
-Phase 4 (Category D — 1 action, `open_layer_options`) can begin in
-parallel with Group E; it depends on path navigation being a first-
-class expression, which Phase 3 delivers as D4.
+Phase 4 (`open_layer_options` + `element_at`) is complete. The
+`active_document.at(path)` navigation primitive shipped as the free
+function `element_at(path)` — the expression parser already supports
+zero-arg property chains (`p.depth`, `p.parent`) but not one-arg
+methods (`obj.at(x)`), so a free function stays consistent with the
+existing conventions (`path_from_id`, `path_child`).
