@@ -187,41 +187,52 @@ state:
   # panel_group.collapsed, panel presence in any group).
 
   # ── Internal (managed by the renderer, not user-facing) ──
+  # These fields are imperative-only: the engine maintains them
+  # during drag/resize interactions. `writable: false` prevents
+  # YAML `set:` effects from targeting them; writes evaluate to
+  # unit and log a warning. Reads via expressions are unaffected.
 
   _drag_pane:
     type: string
     default: null
     nullable: true
+    writable: false
     description: "Internal: element id of the pane currently being dragged"
 
   _drag_offset_x:
     type: number
     default: 0
+    writable: false
     description: "Internal: cursor X offset from pane origin at drag start"
 
   _drag_offset_y:
     type: number
     default: 0
+    writable: false
     description: "Internal: cursor Y offset from pane origin at drag start"
 
   _resize_pane:
     type: string
     default: null
     nullable: true
+    writable: false
     description: "Internal: element id of the pane currently being resized"
 
   _resize_edge:
     type: string
     default: null
     nullable: true
+    writable: false
     description: "Internal: which edge is being resized (left, right, top, bottom)"
 
   _resize_start_x:
     type: number
     default: 0
+    writable: false
     description: "Internal: cursor X position at resize start"
 
   _resize_start_y:
     type: number
     default: 0
+    writable: false
     description: "Internal: cursor Y position at resize start"
