@@ -1571,13 +1571,24 @@
       ]
     },
     "new_layer": {
-      "description": "Open the Layer Options dialog in create mode to create a new layer. The layer is inserted above the topmost panel-selected layer. If nothing is panel-selected, the layer is inserted at the top of the layer stack. The default name is auto-generated as \"Layer N\", skipping numbers already in use. The default color cycles through the nine preset colors (Light Blue, Red, Green, Blue, Yellow, Magenta, Cyan, Light Gray, Dark Green) so adjacent layers get different colors.\n",
+      "description": "Create a new layer and insert it immediately above the topmost panel-selected layer (or at the end if nothing is selected). The name is auto-generated as \"Layer N\", skipping numbers already in use. The new layer starts with default visibility (preview) and unlocked; one undo snapshot covers the operation.\n",
       "category": "layers",
       "tier": 3,
       "enabled_when": "state.tab_count > 0",
       "effects": [
+        "snapshot",
         {
-          "log": "new_layer"
+          "doc.create_layer": {
+            "name": "active_document.next_layer_name"
+          },
+          "as": "new_layer"
+        },
+        {
+          "doc.insert_at": {
+            "parent_path": "path()",
+            "index": "active_document.new_layer_insert_index",
+            "element": "new_layer"
+          }
         }
       ]
     },

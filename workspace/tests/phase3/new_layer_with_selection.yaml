@@ -1,0 +1,39 @@
+description: "new_layer: inserts above topmost panel-selected layer with next unused name"
+action: new_layer
+initial_panel_state:
+  panel: layers
+  layers_panel_selection:
+    - { __path__: [1] }
+initial_doc:
+  layers:
+    - kind: Layer
+      name: "Layer 1"
+      common: { visibility: preview, locked: false, opacity: 1.0 }
+      children: []
+    - kind: Layer
+      name: "Layer 2"
+      common: { visibility: preview, locked: false, opacity: 1.0 }
+      children: []
+    - kind: Layer
+      name: "Layer 3"
+      common: { visibility: preview, locked: false, opacity: 1.0 }
+      children: []
+expected_doc:
+  layers:
+    - kind: Layer
+      name: "Layer 1"
+      common: { visibility: preview, locked: false, opacity: 1.0 }
+      children: []
+    - kind: Layer
+      name: "Layer 2"
+      common: { visibility: preview, locked: false, opacity: 1.0 }
+      children: []
+    - kind: Layer
+      name: "Layer 4"
+      common: { visibility: preview, locked: false, opacity: 1.0 }
+      children: []
+    - kind: Layer
+      name: "Layer 3"
+      common: { visibility: preview, locked: false, opacity: 1.0 }
+      children: []
+expected_snapshots: 1
