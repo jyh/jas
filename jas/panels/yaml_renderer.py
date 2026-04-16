@@ -318,23 +318,28 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
     doc = model.document
     selected_paths = doc.selected_paths()
 
+    # Track collapsed paths as a widget attribute (persists across rebuilds
+    # as long as the widget instance lives).
+    collapsed = set()
+
     def _flatten(elements, depth, path_prefix, layer_color, rows):
         for i in reversed(range(len(elements))):
             elem = elements[i]
             path = path_prefix + (i,)
             is_container = isinstance(elem, Group)
             is_selected = path in selected_paths
+            is_collapsed = path in collapsed
             cur_color = _LAYER_COLORS[i % len(_LAYER_COLORS)] if isinstance(elem, Layer) and len(path) == 1 else layer_color
             name, is_named = _element_display_name(elem)
-            rows.append((depth, path, elem, name, is_named, is_selected, is_container, cur_color))
-            if is_container and hasattr(elem, 'children'):
+            rows.append((depth, path, elem, name, is_named, is_selected, is_container, is_collapsed, cur_color))
+            if is_container and not is_collapsed and hasattr(elem, 'children'):
                 _flatten(elem.children, depth + 1, path, cur_color, rows)
 
     rows = []
     _flatten(doc.layers, 0, (), "#4a90d9", rows)
 
     def _rebuild():
-        """Rebuild the tree view after a document change."""
+        """Rebuild the tree view after a document or UI state change."""
         # Clear existing widgets
         while layout.count():
             item = layout.takeAt(0)
@@ -345,14 +350,15 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
         if new_model is None:
             return
         new_doc = new_model.document
-        new_selected = new_doc.selected_paths()
+        nonlocal selected_paths
+        selected_paths = new_doc.selected_paths()
         new_rows = []
         _flatten(new_doc.layers, 0, (), "#4a90d9", new_rows)
-        for depth, path, elem, name, is_named, is_sel, is_cont, lcolor in new_rows:
-            _add_row(layout, depth, path, elem, name, is_named, is_sel, is_cont, lcolor)
+        for r in new_rows:
+            _add_row(layout, *r)
         layout.addStretch()
 
-    def _add_row(parent_layout, depth, path, elem, name, is_named, is_selected, is_container, layer_color):
+    def _add_row(parent_layout, depth, path, elem, name, is_named, is_selected, is_container, is_collapsed, layer_color):
         row = QWidget()
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(4, 0, 4, 0)
@@ -416,10 +422,18 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
 
         # Twirl or gap
         if is_container:
-            twirl_lbl = QLabel("\u25bc")
-            twirl_lbl.setFixedWidth(16)
-            twirl_lbl.setAlignment(Qt.AlignCenter)
-            row_layout.addWidget(twirl_lbl)
+            twirl_btn = QPushButton("\u25b6" if is_collapsed else "\u25bc")
+            twirl_btn.setFixedSize(16, 16)
+            twirl_btn.setFlat(True)
+            twirl_btn.setStyleSheet("font-size: 10px; padding: 0;")
+            def _on_twirl(checked, p=path):
+                if p in collapsed:
+                    collapsed.discard(p)
+                else:
+                    collapsed.add(p)
+                _rebuild()
+            twirl_btn.clicked.connect(_on_twirl)
+            row_layout.addWidget(twirl_btn)
         else:
             gap = QLabel("")
             gap.setFixedWidth(16)
@@ -457,8 +471,8 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
 
         parent_layout.addWidget(row)
 
-    for depth, path, elem, name, is_named, is_selected, is_container, layer_color in rows:
-        _add_row(layout, depth, path, elem, name, is_named, is_selected, is_container, layer_color)
+    for r in rows:
+        _add_row(layout, *r)
 
     layout.addStretch()
     return widget
