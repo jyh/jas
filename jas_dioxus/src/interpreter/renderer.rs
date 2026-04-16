@@ -335,38 +335,6 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
                 }
             })];
         }
-        "flatten_artwork" => {
-            use crate::geometry::element::Element as E;
-            use std::rc::Rc;
-            let paths = st.layers_panel_selection.clone();
-            if paths.is_empty() { return vec![]; }
-            if let Some(tab) = st.tab_mut() {
-                tab.model.snapshot();
-                let doc = tab.model.document().clone();
-                // Recursively unpack groups: for each panel-selected path,
-                // if it's a Group, replace it with its children in place.
-                let mut new_doc = doc;
-                // Process in reverse so earlier paths stay valid
-                let mut sorted = paths.clone();
-                sorted.sort();
-                sorted.reverse();
-                for path in &sorted {
-                    if let Some(E::Group(g)) = new_doc.get_element(path).cloned().as_ref() {
-                        let children: Vec<E> = g.children.iter().map(|rc| (**rc).clone()).collect();
-                        new_doc = new_doc.delete_element(path);
-                        let mut insert_path = path.clone();
-                        for child in children.into_iter().rev() {
-                            new_doc = new_doc.insert_element_at(&insert_path, child);
-                            let last = insert_path.len() - 1;
-                            insert_path[last] += 1;
-                        }
-                    }
-                }
-                tab.model.set_document(new_doc);
-            }
-            st.layers_panel_selection.clear();
-            return vec![];
-        }
         _ => {}
     }
     // Fall through to YAML actions catalog
@@ -1000,6 +968,44 @@ fn run_yaml_effect(
         let elem = resolve_element_arg(spec.get("element"), &*eval_ctx);
         if let Some(e) = elem {
             insert_element_after(&indices, e, st);
+        }
+        return deferred;
+    }
+
+    // doc.unpack_group_at: path_expr — PHASE3 sub-tollgate 3
+    // Replace a Group at path with its children in place. Non-Group
+    // targets no-op.
+    if let Some(path_expr_v) = eff.get("doc.unpack_group_at") {
+        use crate::geometry::element::Element;
+        let path_expr = path_expr_v.as_str().unwrap_or("");
+        let path_val = super::expr::eval(path_expr, &*eval_ctx);
+        let indices = match path_val {
+            super::expr_types::Value::Path(p) => p,
+            _ => return deferred,
+        };
+        // Check the target is a Group
+        let group_children: Option<Vec<Element>> = {
+            let Some(tab) = st.tabs.get(st.active_tab) else { return deferred; };
+            match tab.model.document().get_element(&indices) {
+                Some(Element::Group(g)) => {
+                    Some(g.children.iter().map(|rc| (**rc).clone()).collect())
+                }
+                _ => None,
+            }
+        };
+        let Some(children) = group_children else { return deferred; };
+        {
+            let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+            let mut new_doc = tab.model.document().clone();
+            new_doc = new_doc.delete_element(&indices);
+            // Insert children at the vacated position, ascending indices
+            let mut insert_path = indices.clone();
+            for child in children {
+                new_doc = new_doc.insert_element_at(&insert_path, child);
+                let last = insert_path.len() - 1;
+                insert_path[last] += 1;
+            }
+            tab.model.set_document(new_doc);
         }
         return deferred;
     }
@@ -4648,6 +4654,54 @@ mod tests {
         assert_eq!(layers.len(), 1);
         assert_eq!(tab_layer(&st, 0).name, "B");
         assert_eq!(st.layers_panel_selection.len(), 0);
+    }
+
+    #[test]
+    fn flatten_artwork_unpacks_panel_selected_groups() {
+        use crate::geometry::element::{Element, GroupElem, LayerElem, CommonProps};
+        use std::rc::Rc;
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            use crate::workspace::app_state::TabState;
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        // Construct a doc: [Layer A, Group G(child1, child2), Layer B]
+        let layer_a = Element::Layer(LayerElem {
+            name: "A".into(), children: Vec::new(),
+            common: CommonProps::default(),
+        });
+        let child1 = Element::Layer(LayerElem {
+            name: "c1".into(), children: Vec::new(),
+            common: CommonProps::default(),
+        });
+        let child2 = Element::Layer(LayerElem {
+            name: "c2".into(), children: Vec::new(),
+            common: CommonProps::default(),
+        });
+        let group = Element::Group(GroupElem {
+            children: vec![Rc::new(child1), Rc::new(child2)],
+            common: CommonProps::default(),
+        });
+        let layer_b = Element::Layer(LayerElem {
+            name: "B".into(), children: Vec::new(),
+            common: CommonProps::default(),
+        });
+        let mut new_doc = st.tabs[st.active_tab].model.document().clone();
+        new_doc.layers = vec![layer_a, group, layer_b];
+        st.tabs[st.active_tab].model.set_document(new_doc);
+        st.layers_panel_selection = vec![vec![1]];
+        let params = serde_json::Map::new();
+        dispatch_action("flatten_artwork", &params, &mut st);
+        let layers = &st.tabs[st.active_tab].model.document().layers;
+        assert_eq!(layers.len(), 4);
+        // Children c1 and c2 are NOT Layers but are held as Rc<Element>;
+        // the unpacker dereferences. After unpack: A, c1, c2, B.
+        let names: Vec<String> = layers.iter().map(|e| match e {
+            Element::Layer(le) => le.name.clone(),
+            _ => format!("{:?}", e),
+        }).collect();
+        assert_eq!(names, vec!["A", "c1", "c2", "B"]);
     }
 
     #[test]
