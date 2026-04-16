@@ -297,6 +297,68 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         store.insert_at(insert_path_parent, insert_index, group)
         return None
 
+    # doc.wrap_in_layer: { paths, name } — PHASE3 sub-tollgate 3
+    # Same as wrap_in_group but always produces a top-level Layer
+    # with the given name. Selected elements are removed and become
+    # the new layer's children (in document order).
+    if "doc.wrap_in_layer" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        spec = effect["doc.wrap_in_layer"]
+        if not isinstance(spec, dict):
+            return None
+        eval_ctx = store.eval_context(ctx)
+        paths_expr = spec.get("paths", "[]")
+        if isinstance(paths_expr, list):
+            raw_paths = paths_expr
+        else:
+            val = evaluate(str(paths_expr), eval_ctx)
+            if val.type != ValueType.LIST:
+                return None
+            raw_paths = val.value
+        # Normalize paths
+        normalized: list[tuple[int, ...]] = []
+        for p in raw_paths:
+            if hasattr(p, "type") and p.type == ValueType.PATH:
+                normalized.append(tuple(p.value))
+            elif isinstance(p, dict) and "__path__" in p:
+                normalized.append(tuple(p["__path__"]))
+            elif isinstance(p, (list, tuple)):
+                normalized.append(tuple(p))
+        if not normalized:
+            return None
+        sorted_paths = sorted(normalized)
+        # Layer name
+        name_expr = spec.get("name", "'Layer'")
+        name_val = evaluate(str(name_expr), eval_ctx)
+        name = name_val.value if name_val.type == ValueType.STRING else "Layer"
+        # Collect deep clones
+        import copy
+        children = []
+        for p in sorted_paths:
+            elem = store.get_element(p)
+            if elem is not None:
+                children.append(copy.deepcopy(elem))
+        if not children:
+            return None
+        # Insertion index: min top-level index among selected paths
+        top_level_indices = [p[0] for p in sorted_paths if len(p) == 1]
+        insert_index = min(top_level_indices) if top_level_indices else 0
+        # Delete in reverse
+        for p in reversed(sorted_paths):
+            store.delete_element_at(p)
+        new_layer = {
+            "kind": "Layer",
+            "name": name,
+            "children": children,
+            "common": {
+                "visibility": "preview",
+                "locked": False,
+                "opacity": 1.0,
+            },
+        }
+        store.insert_at((), insert_index, new_layer)
+        return None
+
     # doc.insert_at: { parent_path, index, element } — PHASE3 §5.5
     if "doc.insert_at" in effect:
         from workspace_interpreter.expr_types import ValueType

@@ -1665,8 +1665,12 @@
       "tier": 3,
       "enabled_when": "active_document.layers_panel_selection_count > 0 and panel.isolation_stack.length == 0",
       "effects": [
+        "snapshot",
         {
-          "log": "collect_in_new_layer"
+          "doc.wrap_in_layer": {
+            "paths": "panel.layers_panel_selection",
+            "name": "active_document.next_layer_name"
+          }
         }
       ]
     },
