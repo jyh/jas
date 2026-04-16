@@ -404,6 +404,29 @@ and render_tree_view ~packing ~ctx:_ _el =
               | None -> ()
               | Some m2 ->
                 let d = m2#document in
+                (* Drag constraints: no cycle (target inside src), no drop
+                   into a locked parent. *)
+                let is_cycle =
+                  List.length row_path >= List.length src &&
+                  (let rec starts_with a b = match a, b with
+                    | _, [] -> true | [], _ -> false
+                    | ah :: at, bh :: bt -> ah = bh && starts_with at bt
+                  in starts_with row_path src)
+                in
+                let parent_locked =
+                  match row_path with
+                  | [] | [_] -> false
+                  | _ ->
+                    let rec drop_last = function
+                      | [] | [_] -> []
+                      | x :: xs -> x :: drop_last xs
+                    in
+                    let parent_path = drop_last row_path in
+                    let pe = Document.get_element d parent_path in
+                    Element.is_locked pe
+                in
+                if is_cycle || parent_locked then ()
+                else begin
                 let moved = Document.get_element d src in
                 m2#snapshot;
                 let d1 = Document.delete_element d src in
@@ -423,7 +446,8 @@ and render_tree_view ~packing ~ctx:_ _el =
                   | ti :: rest when ti > 0 -> List.rev (ti - 1 :: rest)
                   | _ -> target  (* First-child: degrade to insert_after target *)
                 in
-                m2#set_document (Document.insert_element_after d1 insert_path moved))
+                m2#set_document (Document.insert_element_after d1 insert_path moved)
+                end)
            | _ -> ());
           _layers_drag_source := None;
           _layers_drag_target := None;
@@ -593,6 +617,27 @@ and render_tree_view ~packing ~ctx:_ _el =
             | None -> ()
             | Some m2 ->
               let d = m2#document in
+              let is_cycle =
+                List.length row_path >= List.length src &&
+                (let rec starts_with a b = match a, b with
+                  | _, [] -> true | [], _ -> false
+                  | ah :: at, bh :: bt -> ah = bh && starts_with at bt
+                in starts_with row_path src)
+              in
+              let parent_locked =
+                match row_path with
+                | [] | [_] -> false
+                | _ ->
+                  let rec drop_last = function
+                    | [] | [_] -> []
+                    | x :: xs -> x :: drop_last xs
+                  in
+                  let parent_path = drop_last row_path in
+                  let pe = Document.get_element d parent_path in
+                  Element.is_locked pe
+              in
+              if is_cycle || parent_locked then ()
+              else begin
               let moved = Document.get_element d src in
               m2#snapshot;
               let d1 = Document.delete_element d src in
@@ -610,7 +655,8 @@ and render_tree_view ~packing ~ctx:_ _el =
                 | ti :: rest when ti > 0 -> List.rev (ti - 1 :: rest)
                 | _ -> target
               in
-              m2#set_document (Document.insert_element_after d1 insert_path moved))
+              m2#set_document (Document.insert_element_after d1 insert_path moved)
+              end)
          | _ -> ());
         _layers_drag_source := None;
         _layers_drag_target := None;
