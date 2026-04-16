@@ -735,22 +735,144 @@ fn run_effects(
     dialog_effects
 }
 
-/// Apply `set: { key: value, ... }` effects to AppState.
+/// Apply `set: { key: value, ... }` effects to AppState (schema-driven).
+///
+/// Validates each key against the schema, coerces the value, and dispatches
+/// to the appropriate AppState setter. Writes are applied as a batch — all
+/// coercions run before any writes are committed.
 fn apply_set_effects(
     set_map: &serde_json::Map<String, serde_json::Value>,
     st: &mut crate::workspace::app_state::AppState,
 ) {
+    use super::schema::{get_entry, coerce_value, Diagnostic};
+
+    let mut pending: Vec<(String, serde_json::Value)> = Vec::new();
+    let mut diagnostics: Vec<Diagnostic> = Vec::new();
+
     for (key, val) in set_map {
-        match key.as_str() {
-            "fill_on_top" => {
-                if let Some(b) = val.as_bool() { st.fill_on_top = b; }
-                else if let Some(s) = val.as_str() { st.fill_on_top = s == "true"; }
+        match get_entry(key.as_str()) {
+            None => {
+                diagnostics.push(Diagnostic::warning(key, "unknown_key"));
             }
-            k if k.starts_with("stroke_") => {
-                set_stroke_state_field(&mut st.stroke_panel, k, val);
+            Some(entry) => {
+                if !entry.writable {
+                    diagnostics.push(Diagnostic::warning(key, "field_not_writable"));
+                    continue;
+                }
+                match coerce_value(val, &entry) {
+                    Err(reason) => {
+                        diagnostics.push(Diagnostic::error(key, reason));
+                    }
+                    Ok(coerced) => {
+                        pending.push((key.clone(), coerced));
+                    }
+                }
             }
-            _ => {}
         }
+    }
+
+    // Log diagnostics (use web_sys::console::warn_1 in web context, else eprintln)
+    for d in &diagnostics {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let msg = format!("[set:] {} key={:?} reason={}", d.level, d.key, d.reason);
+            web_sys::console::warn_1(&msg.into());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            eprintln!("[set:] {} key={:?} reason={}", d.level, d.key, d.reason);
+        }
+    }
+
+    // Apply all successful writes as a batch
+    for (key, val) in pending {
+        set_app_state_field(key.as_str(), &val, st);
+    }
+}
+
+/// Write a single validated+coerced value to the appropriate AppState field.
+fn set_app_state_field(
+    key: &str,
+    val: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    use crate::geometry::element::{Color, Fill, Stroke};
+    use crate::tools::tool::ToolKind;
+
+    match key {
+        "fill_on_top" => {
+            if let Some(b) = val.as_bool() { st.fill_on_top = b; }
+        }
+        "active_tool" => {
+            if let Some(kind) = val.as_str().and_then(parse_tool_kind) {
+                st.active_tool = kind;
+            }
+        }
+        "fill_color" => {
+            let new_fill = if val.is_null() {
+                None
+            } else {
+                val.as_str().and_then(Color::from_hex).map(Fill::new)
+            };
+            st.app_default_fill = new_fill;
+            if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                tab.model.default_fill = new_fill;
+            }
+        }
+        "stroke_color" => {
+            if val.is_null() {
+                st.app_default_stroke = None;
+                if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                    tab.model.default_stroke = None;
+                }
+            } else if let Some(color) = val.as_str().and_then(Color::from_hex) {
+                let width = st.app_default_stroke.map(|s| s.width).unwrap_or(1.0);
+                let new_stroke = Some(Stroke::new(color, width));
+                st.app_default_stroke = new_stroke;
+                if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                    let tab_width = tab.model.default_stroke.map(|s| s.width).unwrap_or(width);
+                    tab.model.default_stroke = Some(Stroke::new(color, tab_width));
+                }
+            }
+        }
+        "stroke_width" => {
+            if let Some(w) = val.as_f64() {
+                if let Some(ref mut s) = st.app_default_stroke {
+                    s.width = w;
+                }
+                if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                    if let Some(ref mut s) = tab.model.default_stroke {
+                        s.width = w;
+                    }
+                }
+            }
+        }
+        // Stroke panel fields
+        "stroke_cap" => { if let Some(s) = val.as_str() { st.stroke_panel.cap = s.into(); } }
+        "stroke_join" => { if let Some(s) = val.as_str() { st.stroke_panel.join = s.into(); } }
+        "stroke_miter_limit" => { if let Some(n) = val.as_f64() { st.stroke_panel.miter_limit = n; } }
+        "stroke_align" => { if let Some(s) = val.as_str() { st.stroke_panel.align = s.into(); } }
+        "stroke_dashed" => { if let Some(b) = val.as_bool() { st.stroke_panel.dashed = b; } }
+        "stroke_dash_1" => { if let Some(n) = val.as_f64() { st.stroke_panel.dash_1 = n; } }
+        "stroke_gap_1" => { if let Some(n) = val.as_f64() { st.stroke_panel.gap_1 = n; } }
+        "stroke_dash_2" => { st.stroke_panel.dash_2 = val.as_f64(); }
+        "stroke_gap_2" => { st.stroke_panel.gap_2 = val.as_f64(); }
+        "stroke_dash_3" => { st.stroke_panel.dash_3 = val.as_f64(); }
+        "stroke_gap_3" => { st.stroke_panel.gap_3 = val.as_f64(); }
+        "stroke_start_arrowhead" => { if let Some(s) = val.as_str() { st.stroke_panel.start_arrowhead = s.into(); } }
+        "stroke_end_arrowhead" => { if let Some(s) = val.as_str() { st.stroke_panel.end_arrowhead = s.into(); } }
+        "stroke_start_arrowhead_scale" => { if let Some(n) = val.as_f64() { st.stroke_panel.start_arrowhead_scale = n; } }
+        "stroke_end_arrowhead_scale" => { if let Some(n) = val.as_f64() { st.stroke_panel.end_arrowhead_scale = n; } }
+        "stroke_link_arrowhead_scale" => { if let Some(b) = val.as_bool() { st.stroke_panel.link_arrowhead_scale = b; } }
+        "stroke_arrow_align" => { if let Some(s) = val.as_str() { st.stroke_panel.arrow_align = s.into(); } }
+        "stroke_profile" => { if let Some(s) = val.as_str() { st.stroke_panel.profile = s.into(); } }
+        "stroke_profile_flipped" => { if let Some(b) = val.as_bool() { st.stroke_panel.profile_flipped = b; } }
+        // Workspace layout visibility fields are managed by the generic StateStore,
+        // not directly by AppState. A set: on these keys has no effect here.
+        "toolbar_visible" | "canvas_visible" | "dock_visible"
+        | "canvas_maximized" | "dock_collapsed"
+        | "active_tab" | "tab_count" => {}
+        _ => {}
     }
 }
 

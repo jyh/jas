@@ -1,0 +1,14 @@
+description: "set: coerces string 'true'/'false' to bool"
+schema:
+  state:
+    fill_on_top:
+      type: bool
+      default: true
+initial_state:
+  fill_on_top: true
+effect:
+  set:
+    fill_on_top: "false"
+expected_state:
+  fill_on_top: false
+expected_diagnostics: []

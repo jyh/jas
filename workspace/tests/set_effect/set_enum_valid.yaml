@@ -1,0 +1,15 @@
+description: "set: with a valid enum value is accepted"
+schema:
+  state:
+    stroke_cap:
+      type: enum
+      values: [butt, round, square]
+      default: butt
+initial_state:
+  stroke_cap: butt
+effect:
+  set:
+    stroke_cap: round
+expected_state:
+  stroke_cap: round
+expected_diagnostics: []

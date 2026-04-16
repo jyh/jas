@@ -1,0 +1,18 @@
+description: "set: with a value not in the enum's values list is rejected; state unchanged"
+schema:
+  state:
+    stroke_cap:
+      type: enum
+      values: [butt, round, square]
+      default: butt
+initial_state:
+  stroke_cap: butt
+effect:
+  set:
+    stroke_cap: triangle
+expected_state:
+  stroke_cap: butt
+expected_diagnostics:
+  - level: error
+    key: stroke_cap
+    reason: enum_value_not_in_values

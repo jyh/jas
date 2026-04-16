@@ -1,0 +1,18 @@
+description: "set: bare key not in global state resolves to the active panel's field"
+schema:
+  state: {}
+  panels:
+    color:
+      recent_colors:
+        type: list
+        item_type: color
+        default: []
+active_panel: color
+initial_state:
+  panel.color.recent_colors: []
+effect:
+  set:
+    recent_colors: ["#ff0000"]
+expected_state:
+  panel.color.recent_colors: ["#ff0000"]
+expected_diagnostics: []

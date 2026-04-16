@@ -19,11 +19,27 @@ func runEffects(
     ctx: [String: Any],
     store: StateStore,
     actions: [String: Any]? = nil,
-    dialogs: [String: Any]? = nil
+    dialogs: [String: Any]? = nil,
+    schema: Bool = false,
+    diagnostics: inout [Diagnostic]
 ) {
     for effect in effects {
-        runOne(effect, ctx: ctx, store: store, actions: actions, dialogs: dialogs)
+        runOne(effect, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
+               schema: schema, diagnostics: &diagnostics)
     }
+}
+
+/// Convenience overload for callers that don't need diagnostics.
+func runEffects(
+    _ effects: [[String: Any]],
+    ctx: [String: Any],
+    store: StateStore,
+    actions: [String: Any]? = nil,
+    dialogs: [String: Any]? = nil
+) {
+    var diags: [Diagnostic] = []
+    runEffects(effects, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
+               schema: false, diagnostics: &diags)
 }
 
 // MARK: - Internal
@@ -73,13 +89,25 @@ private func runOne(
     ctx: [String: Any],
     store: StateStore,
     actions: [String: Any]?,
-    dialogs: [String: Any]?
+    dialogs: [String: Any]?,
+    schema: Bool = false,
+    diagnostics: inout [Diagnostic]
 ) {
     // set: { key: expr, ... }
     if let pairs = effect["set"] as? [String: Any] {
-        for (key, expr) in pairs {
-            let value = evalExpr(expr, store: store, ctx: ctx)
-            store.set(key, valueToAny(value))
+        if schema {
+            // Schema-driven: evaluate expressions first, then coerce+validate
+            var evaluated: [String: Any] = [:]
+            for (key, expr) in pairs {
+                let val = evalExpr(expr, store: store, ctx: ctx)
+                evaluated[key] = valueToAny(val)
+            }
+            applySetSchemadriven(evaluated, store: store, diagnostics: &diagnostics)
+        } else {
+            for (key, expr) in pairs {
+                let value = evalExpr(expr, store: store, ctx: ctx)
+                store.set(key, valueToAny(value))
+            }
         }
         return
     }
@@ -125,10 +153,12 @@ private func runOne(
         let result = evaluate(condExpr, context: evalCtx)
         if result.toBool() {
             if let thenEffects = cond["then"] as? [[String: Any]] {
-                runEffects(thenEffects, ctx: ctx, store: store, actions: actions, dialogs: dialogs)
+                runEffects(thenEffects, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
+                           schema: schema, diagnostics: &diagnostics)
             }
         } else if let elseEffects = cond["else"] as? [[String: Any]] {
-            runEffects(elseEffects, ctx: ctx, store: store, actions: actions, dialogs: dialogs)
+            runEffects(elseEffects, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
+                       schema: schema, diagnostics: &diagnostics)
         }
         return
     }
@@ -168,7 +198,8 @@ private func runOne(
                 }
                 dispatchCtx["param"] = resolved
             }
-            runEffects(actionEffects, ctx: dispatchCtx, store: store, actions: actions, dialogs: dialogs)
+            runEffects(actionEffects, ctx: dispatchCtx, store: store, actions: actions, dialogs: dialogs,
+                       schema: schema, diagnostics: &diagnostics)
         }
         return
     }
@@ -238,7 +269,9 @@ private func runOne(
         let delayMs = (st["delay_ms"] as? NSNumber)?.intValue ?? 250
         let nestedEffects = st["effects"] as? [[String: Any]] ?? []
         TimerManager.shared.startTimer(id: timerId, delayMs: delayMs) {
-            runEffects(nestedEffects, ctx: ctx, store: store, actions: actions, dialogs: dialogs)
+            var timerDiags: [Diagnostic] = []
+            runEffects(nestedEffects, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
+                       schema: schema, diagnostics: &timerDiags)
         }
         return
     }

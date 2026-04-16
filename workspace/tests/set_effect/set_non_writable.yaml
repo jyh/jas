@@ -1,0 +1,19 @@
+description: "set: on a writable:false field logs a warning and skips the write"
+schema:
+  state:
+    _drag_pane:
+      type: string
+      default: null
+      nullable: true
+      writable: false
+initial_state:
+  _drag_pane: null
+effect:
+  set:
+    _drag_pane: "toolbar"
+expected_state:
+  _drag_pane: null
+expected_diagnostics:
+  - level: warning
+    key: _drag_pane
+    reason: field_not_writable

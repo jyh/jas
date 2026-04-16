@@ -12,3 +12,8 @@
  (name expr_eval_test)
  (modules expr_eval_test)
  (libraries jas alcotest))
+
+(test
+ (name schema_test)
+ (modules schema_test)
+ (libraries jas alcotest))

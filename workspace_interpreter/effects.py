@@ -14,7 +14,9 @@ from workspace_interpreter.state_store import StateStore
 def run_effects(effects: list, ctx: dict, store: StateStore,
                 actions: dict | None = None,
                 platform_effects: dict | None = None,
-                dialogs: dict | None = None):
+                dialogs: dict | None = None,
+                schema=None,
+                diagnostics: list | None = None):
     """Execute a list of effects.
 
     Args:
@@ -25,12 +27,17 @@ def run_effects(effects: list, ctx: dict, store: StateStore,
         platform_effects: Registry of platform-specific effect handlers
             keyed by effect name. Each handler receives (effect_data, ctx, store).
         dialogs: Dialog definitions dict for open_dialog effects.
+        schema: Optional SchemaTable for schema-driven set: coercion.
+            When None, set: uses the legacy untyped path.
+        diagnostics: Mutable list to which diagnostic dicts are appended.
+            Each dict has {level, key, reason}. Ignored when schema is None.
     """
     if not effects:
         return
     for effect in effects:
         if isinstance(effect, dict):
-            _run_one(effect, ctx, store, actions, platform_effects, dialogs)
+            _run_one(effect, ctx, store, actions, platform_effects, dialogs,
+                     schema, diagnostics)
 
 
 def _eval(expr, store: StateStore, ctx: dict):
@@ -40,15 +47,72 @@ def _eval(expr, store: StateStore, ctx: dict):
     return result.value
 
 
+def apply_set_schemadriven(
+    set_map: dict,
+    store: StateStore,
+    schema,
+    diagnostics: list,
+    active_panel: str | None = None,
+) -> None:
+    """Apply a schema-driven set: effect from already-evaluated values.
+
+    set_map values are Python native types (the result of expression evaluation,
+    or raw YAML values from test fixtures).  Coercion and scope resolution happen
+    here; expression evaluation is the caller's responsibility.
+    """
+    from workspace_interpreter.schema import coerce_value
+
+    pending: list[tuple[str, str, object]] = []
+
+    for key, value in set_map.items():
+        resolved = schema.resolve(key, active_panel)
+
+        if resolved is None:
+            diagnostics.append({"level": "warning", "key": key, "reason": "unknown_key"})
+            continue
+        if resolved == "ambiguous":
+            diagnostics.append({"level": "error", "key": key, "reason": "ambiguous_key"})
+            continue
+
+        scope, field_name, entry = resolved
+
+        if not entry.writable:
+            diagnostics.append({"level": "warning", "key": key, "reason": "field_not_writable"})
+            continue
+
+        coerced, error = coerce_value(value, entry)
+        if error:
+            diagnostics.append({"level": "error", "key": key, "reason": error})
+            continue
+
+        pending.append((scope, field_name, coerced))
+
+    # Apply all successful writes as a batch
+    for scope, field_name, value in pending:
+        if scope == "state":
+            store.set(field_name, value)
+        else:
+            panel_id = scope[len("panel:"):]
+            store.set_panel(panel_id, field_name, value)
+
+
 def _run_one(effect: dict, ctx: dict, store: StateStore,
              actions: dict | None, platform_effects: dict | None,
-             dialogs: dict | None):
+             dialogs: dict | None, schema=None, diagnostics: list | None = None):
 
     # set: { key: expr, ... }
     if "set" in effect:
-        for key, expr in effect["set"].items():
-            value = _eval(expr, store, ctx)
-            store.set(key, value)
+        if schema is not None:
+            evaluated = {k: _eval(v, store, ctx) for k, v in effect["set"].items()}
+            apply_set_schemadriven(
+                evaluated, store, schema,
+                diagnostics if diagnostics is not None else [],
+                active_panel=store.get_active_panel_id(),
+            )
+        else:
+            for key, expr in effect["set"].items():
+                value = _eval(expr, store, ctx)
+                store.set(key, value)
         return
 
     # toggle: state_key_name
@@ -97,9 +161,11 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         eval_ctx = store.eval_context(ctx)
         result = evaluate(str(cond_expr), eval_ctx)
         if result.to_bool():
-            run_effects(cond.get("then", []), ctx, store, actions, platform_effects, dialogs)
+            run_effects(cond.get("then", []), ctx, store, actions, platform_effects, dialogs,
+                        schema, diagnostics)
         elif "else" in cond:
-            run_effects(cond["else"], ctx, store, actions, platform_effects, dialogs)
+            run_effects(cond["else"], ctx, store, actions, platform_effects, dialogs,
+                        schema, diagnostics)
         return
 
     # set_panel_state: { key, value, panel? }
@@ -145,7 +211,8 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 for k, v in params.items():
                     resolved_params[k] = _eval(v, store, ctx)
                 dispatch_ctx["param"] = resolved_params
-            run_effects(action_effects, dispatch_ctx, store, actions, platform_effects, dialogs)
+            run_effects(action_effects, dispatch_ctx, store, actions, platform_effects, dialogs,
+                        schema, diagnostics)
         return
 
     # open_dialog: { id, params }
