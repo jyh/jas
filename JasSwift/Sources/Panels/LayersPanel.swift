@@ -27,12 +27,13 @@ public enum LayersPanel {
         case "close_panel": layout.closePanel(addr)
         case "toggle_all_layers_visibility",
              "toggle_all_layers_outline",
-             "toggle_all_layers_lock":
+             "toggle_all_layers_lock",
+             "new_layer":
             if let m = model {
                 dispatchYamlAction(cmd, model: m)
             }
         // Tier-3 stubs: log only until document model is implemented.
-        case "new_layer", "new_group",
+        case "new_group",
              "enter_isolation_mode", "exit_isolation_mode",
              "flatten_artwork", "collect_in_new_layer":
             #if DEBUG
@@ -58,6 +59,7 @@ public enum LayersPanel {
         // Build active_document view from model.document.layers
         var topLevelLayers: [[String: Any]] = []
         var topLevelLayerPaths: [[String: Any]] = []
+        var layerNames: Set<String> = []
         for (i, layer) in model.document.layers.enumerated() {
             let vis: String
             switch layer.visibility {
@@ -76,11 +78,23 @@ public enum LayersPanel {
                 "path": pathJson,
             ])
             topLevelLayerPaths.append(pathJson)
+            layerNames.insert(layer.name)
         }
+        // Phase 3 Group C: next_layer_name + new_layer_insert_index for new_layer
+        var n = 1
+        while layerNames.contains("Layer \(n)") { n += 1 }
+        let nextLayerName = "Layer \(n)"
+        let topLevelSelected = panelSelection
+            .filter { $0.count == 1 }
+            .map { $0[0] }
+        let newLayerInsertIndex = topLevelSelected.min().map { $0 + 1 }
+            ?? model.document.layers.count
         let activeDoc: [String: Any] = [
             "top_level_layers": topLevelLayers,
             "top_level_layer_paths": topLevelLayerPaths,
             "layers_panel_selection_count": panelSelection.count,
+            "next_layer_name": nextLayerName,
+            "new_layer_insert_index": newLayerInsertIndex,
         ]
         // Inject panel.layers_panel_selection as list of __path__ markers
         // for Group B actions (delete/duplicate_layer_selection).
@@ -202,12 +216,58 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.create_layer: { name } — factory returning a new Layer
+        // value. Bind via as: and insert with doc.insert_at.
+        let docCreateLayerHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any] else { return nil }
+            let nameExpr = (spec["name"] as? String) ?? "'Layer'"
+            let nameVal = evaluate(nameExpr, context: callCtx)
+            let name: String
+            if case .string(let s) = nameVal { name = s } else { name = "Layer" }
+            return Layer(name: name, children: [])
+        }
+        // doc.insert_at: { parent_path, index, element } — top-level insert
+        // for now (nested insertion deferred to a later sub-tollgate).
+        let docInsertAtHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any] else { return nil }
+            let parentExpr = (spec["parent_path"] as? String) ?? "path()"
+            let parentVal = evaluate(parentExpr, context: callCtx)
+            guard case .path(let parentIndices) = parentVal,
+                  parentIndices.isEmpty
+            else { return nil }
+            // Resolve index — may be a plain number or an expression string.
+            var index = 0
+            if let s = spec["index"] as? String {
+                if case .number(let n) = evaluate(s, context: callCtx) {
+                    index = Int(n)
+                }
+            } else if let n = spec["index"] as? Int {
+                index = n
+            }
+            // Resolve element — raw Layer or ctx-bound identifier.
+            let layer: Layer?
+            if let l = spec["element"] as? Layer { layer = l }
+            else if let name = spec["element"] as? String,
+                    let l = callCtx[name] as? Layer { layer = l }
+            else { layer = nil }
+            guard let elem = layer else { return nil }
+            let insertIdx = max(0, min(index, model.document.layers.count))
+            var newLayers = model.document.layers
+            newLayers.insert(elem, at: insertIdx)
+            model.document = Document(layers: newLayers,
+                                       selectedLayer: model.document.selectedLayer,
+                                       selection: model.document.selection)
+            return nil
+        }
+
         let platformEffects: [String: PlatformEffect] = [
             "snapshot": snapshotHandler,
             "doc.set": docSetHandler,
             "doc.delete_at": docDeleteAtHandler,
             "doc.clone_at": docCloneAtHandler,
             "doc.insert_after": docInsertAfterHandler,
+            "doc.insert_at": docInsertAtHandler,
+            "doc.create_layer": docCreateLayerHandler,
         ]
 
         let store = StateStore()
