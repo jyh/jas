@@ -30,8 +30,8 @@ let _layers_drag_target : int list option ref = ref None
 (** Search query for filtering the layers tree by name. *)
 let _layers_search_query : string ref = ref ""
 
-(** Isolation mode stack — descendants of the deepest entry are shown. *)
-let _layers_isolation_stack : int list list ref = ref []
+(** Isolation mode stack — descendants of the deepest entry are shown.
+    Lives in Layers_panel_state to avoid a dep cycle with panel_menu. *)
 
 (** Set of element type names (lowercase) currently hidden by the filter. *)
 module StrSet = Set.Make(String)
@@ -553,10 +553,8 @@ and render_tree_view ~packing ~ctx:_ _el =
         _layers_renaming := None;
         !_rerender_layers ();
         true
-      end else if !_layers_isolation_stack <> [] then begin
-        (match !_layers_isolation_stack with
-         | _ :: rest -> _layers_isolation_stack := rest
-         | [] -> ());
+      end else if Layers_panel_state.get_isolation_stack () <> [] then begin
+        Layers_panel_state.pop_isolation_level ();
         !_rerender_layers ();
         true
       end else false
@@ -580,16 +578,17 @@ and render_tree_view ~packing ~ctx:_ _el =
        done
      ) selected);
   (* Render breadcrumb bar if in isolation mode *)
-  (if !_layers_isolation_stack <> [] then begin
+  (if Layers_panel_state.get_isolation_stack () <> [] then begin
     let bar_eb = GBin.event_box ~packing:(vbox#pack ~expand:false) () in
     bar_eb#misc#modify_bg [`NORMAL, `NAME "#2a2a2a"];
     let bar = GPack.hbox ~spacing:4 ~packing:bar_eb#add () in
     let home_eb = GBin.event_box ~packing:(bar#pack ~expand:false) () in
     ignore (GMisc.label ~text:"\xe2\x8c\x82" ~packing:home_eb#add ());
     ignore (home_eb#event#connect#button_press ~callback:(fun _ ->
-      _layers_isolation_stack := [];
+      Layers_panel_state.clear_isolation_stack ();
       !_rerender_layers ();
       true));
+    let stack = Layers_panel_state.get_isolation_stack () in
     List.iteri (fun idx p ->
       ignore (GMisc.label ~text:">" ~packing:(bar#pack ~expand:false) ());
       match get_model () with
@@ -604,14 +603,14 @@ and render_tree_view ~packing ~ctx:_ _el =
         ignore (GMisc.label ~text:label ~packing:seg_eb#add ());
         let target_idx = idx + 1 in
         ignore (seg_eb#event#connect#button_press ~callback:(fun _ ->
-          _layers_isolation_stack := (
+          Layers_panel_state.set_isolation_stack (
             let rec take n lst = match n, lst with
               | 0, _ | _, [] -> []
               | n, h :: t -> h :: take (n - 1) t
-            in take target_idx !_layers_isolation_stack);
+            in take target_idx (Layers_panel_state.get_isolation_stack ()));
           !_rerender_layers ();
           true))
-    ) !_layers_isolation_stack
+    ) stack
   end);
   (* Isolation logic is applied inline in the rendering loop. *)
   (* Helper: does element name contain the search query (case-insensitive) *)
@@ -666,7 +665,7 @@ and render_tree_view ~packing ~ctx:_ _el =
         (* Apply isolation filter: skip rows that aren't descendants of the
            deepest isolated container. Note we still recurse so descendants
            that do pass the filter are rendered. *)
-        let passes_iso = match !_layers_isolation_stack with
+        let passes_iso = match Layers_panel_state.get_isolation_stack () with
           | [] -> true
           | root :: _ ->
             List.length path > List.length root &&
@@ -779,15 +778,13 @@ and render_tree_view ~packing ~ctx:_ _el =
             add_item ~label:"Duplicate" (fun () -> do_duplicate_panel_selection ());
             add_item ~label:"Delete Selection" (fun () -> do_delete_panel_selection ());
             ignore (GMenu.separator_item ~packing:menu#append ());
-            if !_layers_isolation_stack = [] then
+            if Layers_panel_state.get_isolation_stack () = [] then
               add_item ~label:"Enter Isolation Mode" ~sensitive:is_cont_path (fun () ->
-                _layers_isolation_stack := row_path :: !_layers_isolation_stack;
+                Layers_panel_state.push_isolation_level row_path;
                 !_rerender_layers ())
             else
               add_item ~label:"Exit Isolation Mode" (fun () ->
-                (match !_layers_isolation_stack with
-                 | _ :: rest -> _layers_isolation_stack := rest
-                 | [] -> ());
+                Layers_panel_state.pop_isolation_level ();
                 !_rerender_layers ());
             ignore (GMenu.separator_item ~packing:menu#append ());
             add_item ~label:"Flatten Artwork" (fun () -> do_flatten_artwork ());

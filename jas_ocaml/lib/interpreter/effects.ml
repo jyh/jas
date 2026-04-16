@@ -127,7 +127,8 @@ let rec run_effects_inner
            ) items
          | _ ->
            if not (try_platform eff) then
-             run_one eff !ctx_ref store actions dialogs ~schema diagnostics)
+             run_one eff !ctx_ref store actions dialogs
+               ~platform_effects ~schema diagnostics)
     | `String _ ->
       (* Bare-string effects — platform handlers may catch snapshot etc. *)
       ignore (try_platform eff)
@@ -137,7 +138,9 @@ let rec run_effects_inner
 and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
     (store : State_store.t)
     (actions : Yojson.Safe.t) (dialogs : Yojson.Safe.t)
-    ?(schema = false) (diagnostics : Schema.diagnostic list ref) : unit =
+    ?(schema = false)
+    ?(platform_effects : (string * platform_effect) list = [])
+    (diagnostics : Schema.diagnostic list ref) : unit =
   let mem key = Workspace_loader.json_member key eff in
 
   (* set: { key: expr, ... } *)
@@ -225,12 +228,14 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
     if Expr_eval.to_bool result then
       (match List.assoc_opt "then" cond with
        | Some (`List then_effects) ->
-         run_effects_inner then_effects ctx store actions dialogs ~schema diagnostics
+         run_effects_inner then_effects ctx store actions dialogs
+           ~platform_effects ~schema diagnostics
        | _ -> ())
     else
       (match List.assoc_opt "else" cond with
        | Some (`List else_effects) ->
-         run_effects_inner else_effects ctx store actions dialogs ~schema diagnostics
+         run_effects_inner else_effects ctx store actions dialogs
+           ~platform_effects ~schema diagnostics
        | _ -> ())
   | _ ->
 
@@ -274,7 +279,8 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
               ) params in
               ("param", `Assoc resolved) :: List.filter (fun (k, _) -> k <> "param") ctx
           in
-          run_effects_inner action_effects dispatch_ctx store actions dialogs ~schema diagnostics
+          run_effects_inner action_effects dispatch_ctx store actions dialogs
+            ~platform_effects ~schema diagnostics
         | _ -> ())
      | _ -> ())
   | _ ->
@@ -344,7 +350,8 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
     let nested = (match List.assoc_opt "effects" st with Some (`List e) -> e | _ -> []) in
     let timer_diags = ref [] in
     Timer_manager.start_timer timer_id delay_ms (fun () ->
-      run_effects_inner nested ctx store actions dialogs ~schema timer_diags
+      run_effects_inner nested ctx store actions dialogs
+        ~platform_effects ~schema timer_diags
     )
   | _ ->
 

@@ -174,6 +174,7 @@ let dispatch_yaml_action
          let ctx = [
            ("active_document", active_doc);
            ("panel", panel_json);
+           ("param", `Assoc []);
          ] in
          (* Cleared selection (settable by set_panel_state: {key:
             layers_panel_selection, value: []}) — used by
@@ -535,6 +536,38 @@ let dispatch_yaml_action
             | _ -> ());
            `Null
          in
+         (* list_push: {target: panel.isolation_stack, value: <path-expr>}.
+            Phase 3 Group D (enter_isolation_mode) — pushes the evaluated
+            path onto yaml_panel_view's isolation stack. Other targets
+            are ignored. *)
+         let list_push_h : Effects.platform_effect = fun spec call_ctx _ ->
+           (match spec with
+            | `Assoc pairs ->
+              let target = match List.assoc_opt "target" pairs with
+                | Some (`String s) -> s | _ -> ""
+              in
+              if target = "panel.isolation_stack" then begin
+                let value_expr = match List.assoc_opt "value" pairs with
+                  | Some (`String s) -> s | _ -> "null"
+                in
+                let eval_ctx = `Assoc call_ctx in
+                match Expr_eval.evaluate value_expr eval_ctx with
+                | Expr_eval.Path p ->
+                  Layers_panel_state.push_isolation_level p
+                | _ -> ()
+              end
+            | _ -> ());
+           `Null
+         in
+         (* pop: "panel.isolation_stack" — Phase 3 Group D
+            (exit_isolation_mode). *)
+         let pop_h : Effects.platform_effect = fun value _ _ ->
+           (match value with
+            | `String "panel.isolation_stack" ->
+              Layers_panel_state.pop_isolation_level ()
+            | _ -> ());
+           `Null
+         in
          let platform_effects = [
            ("snapshot", snapshot_h);
            ("doc.set", doc_set_h);
@@ -547,6 +580,8 @@ let dispatch_yaml_action
            ("doc.wrap_in_layer", doc_wrap_in_layer_h);
            ("doc.unpack_group_at", doc_unpack_group_at_h);
            ("set_panel_state", set_panel_state_h);
+           ("list_push", list_push_h);
+           ("pop", pop_h);
          ] in
          let store = State_store.create () in
          Effects.run_effects ~platform_effects effects ctx store;
@@ -575,8 +610,11 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
   | ("new_group" | "flatten_artwork" | "collect_in_new_layer")
     when kind = Layers ->
     dispatch_yaml_action ~panel_selection:(get_panel_selection ()) cmd (get_model ())
-  | "enter_isolation_mode" | "exit_isolation_mode"
-    when kind = Layers -> ()  (* Requires selection state still plumbed through yaml_panel_view *)
+  | "enter_isolation_mode" when kind = Layers ->
+    dispatch_yaml_action ~panel_selection:(get_panel_selection ())
+      "enter_isolation_mode" (get_model ())
+  | "exit_isolation_mode" when kind = Layers ->
+    dispatch_yaml_action "exit_isolation_mode" (get_model ())
   | "invert_color" when kind = Color ->
     let m = get_model () in
     let color = if fill_on_top then

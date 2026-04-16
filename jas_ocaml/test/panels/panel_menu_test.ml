@@ -341,6 +341,30 @@ let menu_tests = [
     assert (match layers.(2) with Jas.Element.Layer le -> le.name = "c2" | _ -> false);
     assert (match layers.(3) with Jas.Element.Layer le -> le.name = "B" | _ -> false));
 
+  Alcotest.test_case "enter_isolation_mode_via_yaml" `Quick (fun () ->
+    Jas.Layers_panel_state.clear_isolation_stack ();
+    let m = Jas.Model.create () in
+    let layer a = Jas.Element.Layer {
+      name = a; children = [||];
+      opacity = 1.0; transform = None;
+      locked = false; visibility = Jas.Element.Preview;
+    } in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"|] };
+    assert (Jas.Layers_panel_state.get_isolation_stack () = []);
+    Jas.Panel_menu.dispatch_yaml_action
+      ~panel_selection:[[1]]
+      "enter_isolation_mode" m;
+    let stack = Jas.Layers_panel_state.get_isolation_stack () in
+    assert (stack = [[1]]));
+
+  Alcotest.test_case "exit_isolation_mode_via_yaml" `Quick (fun () ->
+    Jas.Layers_panel_state.clear_isolation_stack ();
+    Jas.Layers_panel_state.push_isolation_level [0];
+    let m = Jas.Model.create () in
+    Jas.Panel_menu.dispatch_yaml_action "exit_isolation_mode" m;
+    assert (Jas.Layers_panel_state.get_isolation_stack () = []));
+
   Alcotest.test_case "layers_dispatch_tier3_no_crash" `Quick (fun () ->
     let l = default_layout () in
     let did = right_dock_id l in
