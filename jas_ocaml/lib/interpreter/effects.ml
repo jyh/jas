@@ -87,6 +87,31 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
     State_store.set store key (`Bool (not current))
   | _ ->
 
+  (* pop: panel.field_name  or  global_field_name *)
+  match mem "pop" with
+  | Some (`String target) ->
+    let dot = String.index_opt target '.' in
+    (match dot with
+     | Some i when String.sub target 0 i = "panel" ->
+       let field = String.sub target (i + 1) (String.length target - i - 1) in
+       (match State_store.get_active_panel_id store with
+        | Some pid ->
+          let lst = State_store.get_panel store pid field in
+          (match lst with
+           | `List (_ :: _ as items) ->
+             let without_last = List.filteri (fun i _ -> i < List.length items - 1) items in
+             State_store.set_panel store pid field (`List without_last)
+           | _ -> ())
+        | None -> ())
+     | _ ->
+       let lst = State_store.get store target in
+       (match lst with
+        | `List (_ :: _ as items) ->
+          let without_last = List.filteri (fun i _ -> i < List.length items - 1) items in
+          State_store.set store target (`List without_last)
+        | _ -> ()))
+  | _ ->
+
   (* swap: [key_a, key_b] *)
   match mem "swap" with
   | Some (`List [`String a; `String b]) ->

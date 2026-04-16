@@ -131,6 +131,34 @@ class TestListPushEffect:
         assert store.get_panel("color", "recent") == ["c", "a", "b"]
 
 
+class TestListPopEffect:
+    def test_pop_removes_last_element(self):
+        store = StateStore()
+        store.init_panel("layers", {"isolation_stack": [{"id": "a"}, {"id": "b"}]})
+        store.set_active_panel("layers")
+        run_effects([{"pop": "panel.isolation_stack"}], {}, store)
+        assert store.get_panel("layers", "isolation_stack") == [{"id": "a"}]
+
+    def test_pop_empty_list_is_noop(self):
+        store = StateStore()
+        store.init_panel("layers", {"isolation_stack": []})
+        store.set_active_panel("layers")
+        run_effects([{"pop": "panel.isolation_stack"}], {}, store)
+        assert store.get_panel("layers", "isolation_stack") == []
+
+    def test_pop_single_element_leaves_empty(self):
+        store = StateStore()
+        store.init_panel("layers", {"isolation_stack": [{"id": "x"}]})
+        store.set_active_panel("layers")
+        run_effects([{"pop": "panel.isolation_stack"}], {}, store)
+        assert store.get_panel("layers", "isolation_stack") == []
+
+    def test_pop_global_list(self):
+        store = StateStore({"my_stack": [1, 2, 3]})
+        run_effects([{"pop": "my_stack"}], {}, store)
+        assert store.get("my_stack") == [1, 2]
+
+
 class TestDispatchEffect:
     def test_dispatch_runs_action_effects(self):
         store = StateStore({"x": 0})
