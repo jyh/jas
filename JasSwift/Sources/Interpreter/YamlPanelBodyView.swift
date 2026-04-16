@@ -678,6 +678,10 @@ struct TreeViewContent: View {
     @State private var savedLockStates: [ElementPath: [Bool]] = [:]
     @State private var hiddenTypes: Set<String> = []
     @State private var showLayerOptionsFor: ElementPath? = nil
+    @State private var showFilterMenu: Bool = false
+    @FocusState private var treeFocused: Bool
+    // Tracks current modifier keys from an NSEvent monitor (macOS).
+    @State private var modifierFlags: NSEvent.ModifierFlags = []
 
     private func elementChildrenStatic(_ elem: Element) -> [Element]? {
         switch elem {
@@ -793,16 +797,88 @@ struct TreeViewContent: View {
             }
         }
         let rows = applyFilters(flatten(doc))
+        let firstSelected = selectedPaths.sorted(by: { $0.lexicographicallyPrecedes($1) }).first
         return VStack(spacing: 0) {
+            // Search/filter bar
+            HStack(spacing: 4) {
+                TextField("Search...", text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11))
+                    .padding(.horizontal, 4)
+                Menu {
+                    let types: [(String, String)] = [
+                        ("Layer", "layer"), ("Group", "group"),
+                        ("Path", "path"), ("Rectangle", "rectangle"),
+                        ("Circle", "circle"), ("Ellipse", "ellipse"),
+                        ("Polyline", "polyline"), ("Polygon", "polygon"),
+                        ("Text", "text"), ("Text Path", "text_path"),
+                        ("Line", "line"),
+                    ]
+                    ForEach(types, id: \.1) { (label, value) in
+                        Button(action: {
+                            if hiddenTypes.contains(value) { hiddenTypes.remove(value) }
+                            else { hiddenTypes.insert(value) }
+                        }) {
+                            if hiddenTypes.contains(value) {
+                                SwiftUI.Text(label)
+                            } else {
+                                SwiftUI.Text("✓ \(label)")
+                            }
+                        }
+                    }
+                } label: {
+                    SwiftUI.Text("▾").font(.system(size: 11))
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 20)
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(SwiftUI.Color(white: 0.14))
+
             if !isolationStack.isEmpty {
                 breadcrumbBar
             }
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(rows) { row in
-                        rowView(row: row, selectedPaths: selectedPaths)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(rows) { row in
+                            rowView(row: row, selectedPaths: selectedPaths)
+                                .id(row.id)
+                        }
                     }
                 }
+                .onChange(of: firstSelected) { newVal in
+                    if let p = newVal {
+                        let rowId = p.map(String.init).joined(separator: "_")
+                        withAnimation { proxy.scrollTo(rowId, anchor: .center) }
+                    }
+                }
+            }
+        }
+        .focusable()
+        .focused($treeFocused)
+        .onAppear {
+            // NSEvent local monitor to capture modifier keys during mouse events.
+            // Also handles Delete/Cmd-A/Escape key shortcuts when the tree is focused.
+            NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .leftMouseDown, .keyDown]) { evt in
+                modifierFlags = evt.modifierFlags
+                if evt.type == .keyDown && treeFocused {
+                    if evt.keyCode == 51 || evt.keyCode == 117 {
+                        // 51 = Delete (backspace), 117 = Forward Delete
+                        performDeleteSelection()
+                        return nil
+                    } else if evt.keyCode == 0 && evt.modifierFlags.contains(.command) {
+                        // 0 = 'a' — Cmd-A selects all
+                        selectAll()
+                        return nil
+                    } else if evt.keyCode == 53 {
+                        // 53 = Escape
+                        if renamingPath != nil { renamingPath = nil; return nil }
+                        if !isolationStack.isEmpty { isolationStack.removeLast(); return nil }
+                    }
+                }
+                return evt
             }
         }
         .sheet(item: Binding<IdentifiablePath?>(
@@ -811,6 +887,154 @@ struct TreeViewContent: View {
         )) { ip in
             LayerOptionsSheet(model: model, path: ip.path, onClose: { showLayerOptionsFor = nil })
         }
+    }
+
+    private func performDrop(onto target: ElementPath) -> Bool {
+        guard let src = dragSource, src != target else {
+            dragSource = nil; dragTarget = nil
+            return false
+        }
+        // Constraints
+        let isCycle = target.count >= src.count && Array(target.prefix(src.count)) == src
+        let parentPath = Array(target.dropLast())
+        var parentLocked = false
+        if !parentPath.isEmpty {
+            parentLocked = model.document.getElement(parentPath).isLocked
+        }
+        if isCycle || parentLocked {
+            dragSource = nil; dragTarget = nil
+            return false
+        }
+        let moved = model.document.getElement(src)
+        model.snapshot()
+        var doc = model.document.deleteElement(src)
+        var tgt = target
+        let sameLevel = (src.count == tgt.count) && (Array(src.dropLast()) == Array(tgt.dropLast()))
+        let srcLast = src.last ?? 0
+        let tgtLast = tgt.last ?? 0
+        if sameLevel && srcLast < tgtLast {
+            tgt[tgt.count - 1] = tgtLast - 1
+        }
+        let tl = tgt.last ?? 0
+        if tl > 0 {
+            var insertAfter = tgt
+            insertAfter[insertAfter.count - 1] = tl - 1
+            doc = doc.insertElementAfter(insertAfter, element: moved)
+        } else {
+            doc = doc.insertElementAfter(tgt, element: moved)
+        }
+        model.document = doc
+        dragSource = nil; dragTarget = nil
+        return true
+    }
+
+    private func handleRowTap(path: ElementPath) {
+        let shift = modifierFlags.contains(.shift)
+        let cmd = modifierFlags.contains(.command)
+        if shift, let anchor = panelSelectionAnchor {
+            // Range selection in visual order (flat row list).
+            let rows = applyFilters(flatten(model.document))
+            let allPaths = rows.map { $0.path }
+            if let a = allPaths.firstIndex(of: anchor),
+               let c = allPaths.firstIndex(of: path) {
+                let (lo, hi) = a <= c ? (a, c) : (c, a)
+                panelSelection = Set(allPaths[lo...hi])
+            } else {
+                panelSelection = [path]
+            }
+        } else if cmd {
+            if panelSelection.contains(path) { panelSelection.remove(path) }
+            else { panelSelection.insert(path) }
+            panelSelectionAnchor = path
+        } else {
+            panelSelection = [path]
+            panelSelectionAnchor = path
+        }
+    }
+
+    private func handleEyeTap(path: ElementPath) {
+        let opt = modifierFlags.contains(.option)
+        let e = model.document.getElement(path)
+        if opt {
+            // Option-click: solo/unsolo among siblings
+            let parentPrefix = Array(path.dropLast())
+            let siblings: [ElementPath] = {
+                if parentPrefix.isEmpty {
+                    return (0..<model.document.layers.count).map { [$0] }
+                }
+                let parent = model.document.getElement(parentPrefix)
+                let kids: [Element]
+                switch parent {
+                case .group(let g): kids = g.children
+                case .layer(let l): kids = l.children
+                default: return []
+                }
+                return (0..<kids.count).map { parentPrefix + [$0] }
+            }()
+            if let s = soloState, s.path == path {
+                // Unsolo: restore
+                model.snapshot()
+                var d = model.document
+                for (sp, vis) in s.saved {
+                    let e2 = d.getElement(sp)
+                    d = d.replaceElement(sp, with: e2.withVisibility(vis))
+                }
+                model.document = d
+                soloState = nil
+            } else {
+                var saved: [ElementPath: Visibility] = [:]
+                for sp in siblings where sp != path {
+                    saved[sp] = model.document.getElement(sp).visibility
+                }
+                model.snapshot()
+                var d = model.document
+                if e.visibility == .invisible {
+                    d = d.replaceElement(path, with: e.withVisibility(.preview))
+                }
+                for sp in siblings where sp != path {
+                    let e2 = d.getElement(sp)
+                    d = d.replaceElement(sp, with: e2.withVisibility(.invisible))
+                }
+                model.document = d
+                soloState = (path: path, saved: saved)
+            }
+        } else {
+            soloState = nil
+            let newVis = cycleVisibility(e.visibility)
+            model.snapshot()
+            model.document = model.document.replaceElement(path, with: e.withVisibility(newVis))
+        }
+    }
+
+    private func performDeleteSelection() {
+        let doc = model.document
+        guard !panelSelection.isEmpty else { return }
+        let topDeletes = panelSelection.filter { $0.count == 1 }.count
+        if topDeletes >= doc.layers.count { return }
+        model.snapshot()
+        var d = doc
+        for p in panelSelection.sorted(by: { $0.lexicographicallyPrecedes($1) }).reversed() {
+            d = d.deleteElement(p)
+        }
+        model.document = d
+        panelSelection.removeAll()
+    }
+
+    private func selectAll() {
+        panelSelection.removeAll()
+        func collect(_ children: [Element], prefix: ElementPath) {
+            for (i, e) in children.enumerated() {
+                let p = prefix + [i]
+                panelSelection.insert(p)
+                switch e {
+                case .group(let g): collect(g.children, prefix: p)
+                case .layer(let l): collect(l.children, prefix: p)
+                default: break
+                }
+            }
+        }
+        let tops = model.document.layers.map { Element.layer($0) }
+        collect(tops, prefix: [])
     }
 
     @ViewBuilder
@@ -852,20 +1076,10 @@ struct TreeViewContent: View {
             if row.depth > 0 {
                 Spacer().frame(width: CGFloat(row.depth * 16))
             }
-            // Eye
+            // Eye — supports Option-click for solo/unsolo
             SwiftUI.Text(visIcon(vis))
                 .frame(width: 16, height: 16)
-                .onTapGesture {
-                    // Regular click: cycle visibility
-                    soloState = nil
-                    let e = model.document.getElement(path)
-                    let newVis = cycleVisibility(e.visibility)
-                    model.snapshot()
-                    model.document = model.document.replaceElement(path, with: e.withVisibility(newVis))
-                }
-                .onTapGesture(count: 1, coordinateSpace: .local) { _ in }
-            // (SwiftUI's plain .onTapGesture doesn't report modifier flags;
-            // solo via Option-click is hard without an NSEvent monitor. Omit.)
+                .onTapGesture { handleEyeTap(path: path) }
             // Lock
             SwiftUI.Text(locked ? "\u{1F512}" : "\u{1F513}")
                 .frame(width: 16, height: 16)
@@ -968,8 +1182,7 @@ struct TreeViewContent: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            panelSelection = [path]
-            panelSelectionAnchor = path
+            handleRowTap(path: path)
         }
         .contextMenu {
             if case .layer = elem {
@@ -999,45 +1212,24 @@ struct TreeViewContent: View {
             set: { isOver in
                 if isOver && dragSource != nil && dragSource != path {
                     dragTarget = path
+                    // Auto-expand collapsed containers after 500ms hover
+                    let isCont = row.isContainer
+                    let isColl = row.isCollapsed
+                    if isCont && isColl {
+                        let p = path
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            let still = (dragTarget == p) && (dragSource != nil)
+                            if still {
+                                collapsed.remove(p)
+                            }
+                        }
+                    }
                 } else if !isOver && dragTarget == path {
                     dragTarget = nil
                 }
             }
-        )) { providers in
-            guard let src = dragSource, src != path else {
-                dragSource = nil; dragTarget = nil
-                return false
-            }
-            // Drag constraints: no cycle, no drop into locked parent
-            let isCycle = path.count >= src.count && Array(path.prefix(src.count)) == src
-            let parentPath = Array(path.dropLast())
-            let parentLocked: Bool = {
-                if parentPath.isEmpty { return false }
-                let p = model.document.getElement(parentPath)
-                return p.isLocked
-            }()
-            if isCycle || parentLocked {
-                dragSource = nil; dragTarget = nil
-                return false
-            }
-            let moved = model.document.getElement(src)
-            model.snapshot()
-            var doc = model.document.deleteElement(src)
-            var target = path
-            if src.count == target.count, Array(src.dropLast()) == Array(target.dropLast()),
-               let sl = src.last, let tl = target.last, sl < tl {
-                target[target.count - 1] = tl - 1
-            }
-            if let tl = target.last, tl > 0 {
-                var insertAfter = target
-                insertAfter[insertAfter.count - 1] = tl - 1
-                doc = doc.insertElementAfter(insertAfter, element: moved)
-            } else {
-                doc = doc.insertElementAfter(target, element: moved)
-            }
-            model.document = doc
-            dragSource = nil; dragTarget = nil
-            return true
+        )) { _ in
+            return performDrop(onto: path)
         }
     }
 
