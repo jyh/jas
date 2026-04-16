@@ -114,13 +114,15 @@ def panel_menu(kind: PanelKind) -> list[PanelMenuItem]:
     return [PanelMenuItem.action(f"Close {panel_label(kind)}", "close_panel")]
 
 
-def _dispatch_yaml_layers_action(action_name: str, model) -> None:
+def _dispatch_yaml_layers_action(action_name: str, model,
+                                  panel_selection=None) -> None:
     """Phase 3: dispatch a layers action through the compiled YAML effects.
 
     Builds active_document.top_level_layers / top_level_layer_paths from
     model.document.layers and registers snapshot + doc.set as platform
     effect handlers that operate on the Model.
     """
+    panel_selection = panel_selection or []
     import dataclasses
     from geometry.element import Layer, Visibility
     from workspace_interpreter.loader import load_workspace
@@ -168,20 +170,27 @@ def _dispatch_yaml_layers_action(action_name: str, model) -> None:
     while f"Layer {n}" in used_names:
         n += 1
     next_layer_name = f"Layer {n}"
-    top_level_selected_indices = []
-    # Note: this code path doesn't currently receive selection state from
-    # the caller; we treat selection as empty here. When jas starts
-    # routing panel selection through this dispatch, extend to use it.
+    top_level_selected_indices = [
+        p[0] for p in panel_selection if len(p) == 1
+    ]
     new_layer_insert_index = (min(top_level_selected_indices) + 1
                                if top_level_selected_indices
                                else len(model.document.layers))
-    ctx = {"active_document": {
-        "top_level_layers": top_level_layers,
-        "top_level_layer_paths": top_level_layer_paths,
-        "next_layer_name": next_layer_name,
-        "new_layer_insert_index": new_layer_insert_index,
-        "layers_panel_selection_count": 0,
-    }}
+    # Inject panel.layers_panel_selection as list of __path__ marker
+    # dicts — matches the shape used by other apps so YAML expressions
+    # like panel.layers_panel_selection[0] decode back to a Path value.
+    selection_markers = [{"__path__": list(p)} for p in panel_selection]
+    ctx = {
+        "active_document": {
+            "top_level_layers": top_level_layers,
+            "top_level_layer_paths": top_level_layer_paths,
+            "next_layer_name": next_layer_name,
+            "new_layer_insert_index": new_layer_insert_index,
+            "layers_panel_selection_count": len(panel_selection),
+        },
+        "panel": {"layers_panel_selection": selection_markers},
+        "param": {},
+    }
 
     # Platform handlers
     def snapshot_handler(_value, _ctx, _store):
@@ -270,11 +279,35 @@ def _dispatch_yaml_layers_action(action_name: str, model) -> None:
         )
         return None
 
+    # list_push: {target, value}. Phase 3 Group D (enter_isolation_mode).
+    # Only target=panel.isolation_stack is handled here; writes the
+    # evaluated Path value to layers_panel_state.
+    from jas.panels import layers_panel_state as _lps
+
+    def list_push_handler(spec, call_ctx, _store):
+        if not isinstance(spec, dict):
+            return None
+        if spec.get("target") != "panel.isolation_stack":
+            return None
+        value_expr = spec.get("value", "null")
+        v = evaluate(str(value_expr), call_ctx)
+        if v.type.name == "PATH":
+            _lps.push_isolation_level(tuple(v.value))
+        return None
+
+    # pop: "panel.isolation_stack" (Phase 3 Group D, exit_isolation_mode).
+    def pop_handler(value, _ctx, _store):
+        if value == "panel.isolation_stack":
+            _lps.pop_isolation_level()
+        return None
+
     platform_effects = {
         "snapshot": snapshot_handler,
         "doc.set": doc_set_handler,
         "doc.create_layer": doc_create_layer_handler,
         "doc.insert_at": doc_insert_at_handler,
+        "list_push": list_push_handler,
+        "pop": pop_handler,
     }
 
     store = StateStore()
@@ -294,9 +327,14 @@ def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
     elif cmd in ("new_layer",
                  "toggle_all_layers_visibility",
                  "toggle_all_layers_outline",
-                 "toggle_all_layers_lock") and kind == PanelKind.LAYERS and model is not None:
+                 "toggle_all_layers_lock",
+                 "exit_isolation_mode") and kind == PanelKind.LAYERS and model is not None:
         _dispatch_yaml_layers_action(cmd, model)
-    elif cmd in ("new_group", "enter_isolation_mode", "exit_isolation_mode",
+    elif cmd == "enter_isolation_mode" and kind == PanelKind.LAYERS and model is not None:
+        # Needs panel selection; callers that track panel selection
+        # should invoke _dispatch_yaml_layers_action directly with it.
+        _dispatch_yaml_layers_action(cmd, model)
+    elif cmd in ("new_group",
                  "flatten_artwork", "collect_in_new_layer") and kind == PanelKind.LAYERS:
         pass  # Tier-3 stubs for actions that need panel selection
     elif cmd == "invert_color" and kind == PanelKind.COLOR and model is not None:
