@@ -1838,3 +1838,14 @@ Please read and understand these requirements. Analyze them for inconsistencies
 and completeness. Make suggestions for improvements, ranking them in priority
 from high to low, and giving each a number. What are the benefits? What are the
 downsides? Be ready for a deep dive into any of the suggestions.
+
+# Byte Code
+
+I'd like to compile expressions to byte-code. This will give a compact
+representation that is efficient to evaluate. I'm thinking we should use the
+ZINC abstract machine.
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. What are the benefits? What are the
+downsides? Be ready for a deep dive into any of the suggestions.
