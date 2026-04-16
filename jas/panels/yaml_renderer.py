@@ -518,86 +518,43 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
             isolation_stack.pop()
         _rebuild()
 
+    def _dispatch_with_selection(action_name, clear_selection=True):
+        """Route a layers action through the YAML dispatch with the
+        current panel selection, then refresh the tree."""
+        m = get_model()
+        if m is None or not panel_selection:
+            return
+        from jas.panels.panel_menu import _dispatch_yaml_layers_action
+        _dispatch_yaml_layers_action(
+            action_name, m,
+            panel_selection=list(panel_selection),
+        )
+        if clear_selection:
+            panel_selection.clear()
+            panel_selection_order.clear()
+        _rebuild()
+
     def _do_delete():
         m = get_model()
         if m is None or not panel_selection:
             return
-        dd = m.document
-        paths = sorted(panel_selection, reverse=True)
-        top_deletes = sum(1 for pp in paths if len(pp) == 1)
-        if top_deletes >= len(dd.layers):
+        # Guard: refuse to delete every top-level layer.
+        top_deletes = sum(1 for pp in panel_selection if len(pp) == 1)
+        if top_deletes >= len(m.document.layers):
             return
-        m.snapshot()
-        new_doc = dd
-        for pp in paths:
-            new_doc = new_doc.delete_element(pp)
-        m.document = new_doc
-        panel_selection.clear()
-        panel_selection_order.clear()
-        _rebuild()
+        _dispatch_with_selection("delete_layer_selection")
 
     def _do_duplicate():
-        m = get_model()
-        if m is None or not panel_selection:
-            return
-        m.snapshot()
-        new_doc = m.document
-        for pp in sorted(panel_selection, reverse=True):
-            e = new_doc.get_element(pp)
-            if e is not None:
-                new_doc = new_doc.insert_element_after(pp, e)
-        m.document = new_doc
-        _rebuild()
+        # duplicate_layer_selection keeps the caller's selection intact
+        # so the user can continue operating on the original paths.
+        _dispatch_with_selection("duplicate_layer_selection",
+                                  clear_selection=False)
 
     def _do_flatten():
-        from geometry.element import Group as GroupCls
-        m = get_model()
-        if m is None or not panel_selection:
-            return
-        m.snapshot()
-        new_doc = m.document
-        for pp in sorted(panel_selection, reverse=True):
-            e = new_doc.get_element(pp)
-            if isinstance(e, GroupCls) and hasattr(e, 'children'):
-                children = list(e.children)
-                new_doc = new_doc.delete_element(pp)
-                insert_path = pp
-                for child in children:
-                    # insert each at insert_path position
-                    if insert_path[-1] == 0:
-                        new_doc = new_doc.insert_element_after(insert_path, child)
-                    else:
-                        insert_path = insert_path[:-1] + (insert_path[-1] - 1,)
-                        new_doc = new_doc.insert_element_after(insert_path, child)
-                    insert_path = insert_path[:-1] + (insert_path[-1] + 1,)
-        m.document = new_doc
-        panel_selection.clear()
-        panel_selection_order.clear()
-        _rebuild()
+        _dispatch_with_selection("flatten_artwork")
 
     def _do_collect():
-        from dataclasses import replace as dcr
-        from geometry.element import Layer as LayerCls
-        m = get_model()
-        if m is None or not panel_selection:
-            return
-        dd = m.document
-        used = {l.name for l in dd.layers if isinstance(l, LayerCls)}
-        n = 1
-        while f"Layer {n}" in used:
-            n += 1
-        m.snapshot()
-        new_doc = dd
-        sorted_paths = sorted(panel_selection)
-        elems = tuple(new_doc.get_element(pp) for pp in sorted_paths)
-        for pp in sorted(sorted_paths, reverse=True):
-            new_doc = new_doc.delete_element(pp)
-        new_layer = LayerCls(name=f"Layer {n}", children=elems)
-        new_doc = dcr(new_doc, layers=new_doc.layers + (new_layer,))
-        m.document = new_doc
-        panel_selection.clear()
-        panel_selection_order.clear()
-        _rebuild()
+        _dispatch_with_selection("collect_in_new_layer")
 
     def _open_layer_options(p):
         # Minimal dialog: edit name + lock + visibility
