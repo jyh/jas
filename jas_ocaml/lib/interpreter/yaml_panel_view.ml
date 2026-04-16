@@ -429,20 +429,19 @@ and open_layer_options_dialog path =
       dlg#add_button_stock `OK `OK;
       let result = dlg#run () in
       if result = `OK then begin
-        let new_name = name_entry#text in
-        let new_lock = lock_cb#active in
-        let new_vis =
-          if not show_cb#active then Element.Invisible
-          else if preview_cb#active then Element.Preview
-          else Element.Outline
+        let layer_id =
+          String.concat "." (List.map string_of_int path)
         in
-        m#snapshot;
-        let new_e = Element.Layer { le with
-          name = new_name;
-          locked = new_lock;
-          visibility = new_vis;
-        } in
-        m#set_document (Document.replace_element d path new_e)
+        let params = [
+          ("layer_id", `String layer_id);
+          ("name", `String name_entry#text);
+          ("lock", `Bool lock_cb#active);
+          ("show", `Bool show_cb#active);
+          ("preview", `Bool preview_cb#active);
+        ] in
+        (* Route through the YAML layer_options_confirm action so the
+           dialog commit logic lives in actions.yaml. *)
+        Panel_menu.dispatch_yaml_action ~params "layer_options_confirm" m
       end;
       dlg#destroy ()
     | _ -> ()
