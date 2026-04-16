@@ -168,6 +168,36 @@ let let_tests = [
     assert (get s "x" = `Int 2));
 ]
 
+let platform_effects_tests = [
+  Alcotest.test_case "bare_string_snapshot_dispatches_to_handler" `Quick (fun () ->
+    let called = ref 0 in
+    let handler _ _ _ = incr called in
+    let s = create () in
+    run_effects ~platform_effects:[("snapshot", handler)]
+      [`String "snapshot"] [] s;
+    assert (!called = 1));
+
+  Alcotest.test_case "map_snapshot_dispatches_to_handler" `Quick (fun () ->
+    let called = ref 0 in
+    let handler _ _ _ = incr called in
+    let s = create () in
+    run_effects ~platform_effects:[("snapshot", handler)]
+      [`Assoc [("snapshot", `Null)]] [] s;
+    assert (!called = 1));
+
+  Alcotest.test_case "doc_set_dispatches_with_spec" `Quick (fun () ->
+    let captured = ref `Null in
+    let handler value _ _ = captured := value in
+    let s = create () in
+    let spec = `Assoc [
+      ("path", `String "p");
+      ("fields", `Assoc [("common.visibility", `String "'invisible'")]);
+    ] in
+    run_effects ~platform_effects:[("doc.set", handler)]
+      [`Assoc [("doc.set", spec)]] [] s;
+    assert (!captured = spec));
+]
+
 let foreach_tests = [
   Alcotest.test_case "foreach_iterates" `Quick (fun () ->
     let s = create ~defaults:[("sum", `Int 0)] () in
@@ -198,4 +228,5 @@ let () =
     "Pop", pop_tests;
     "Phase3 Let", let_tests;
     "Phase3 Foreach", foreach_tests;
+    "Phase3 PlatformEffects", platform_effects_tests;
   ]

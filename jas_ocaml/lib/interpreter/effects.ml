@@ -43,21 +43,37 @@ let state_defaults (state_defs : Yojson.Safe.t) : (string * Yojson.Safe.t) list 
     ) pairs
   | _ -> []
 
-(** Execute a list of effects.
+(** Platform-specific effect handler: (effect_value, ctx, store) -> unit.
+    Registered by the calling app (e.g. panel_menu wires snapshot/doc.set
+    to the active Model). Key is the effect name like "snapshot". *)
+type platform_effect = Yojson.Safe.t -> (string * Yojson.Safe.t) list -> State_store.t -> unit
 
-    [actions] and [dialogs] default to [`Null] if not provided.
-    When [schema] is true, the set: effect is validated and coerced
-    against the declared schema. [diagnostics] accumulates warnings/errors. *)
 let rec run_effects_inner
     (effects : Yojson.Safe.t list)
     (ctx : (string * Yojson.Safe.t) list)
     (store : State_store.t)
     (actions : Yojson.Safe.t) (dialogs : Yojson.Safe.t)
-    ?(schema = false) (diagnostics : Schema.diagnostic list ref) : unit =
+    ?(schema = false)
+    ?(platform_effects : (string * platform_effect) list = [])
+    (diagnostics : Schema.diagnostic list ref) : unit =
   (* Thread ctx through sibling effects: `let:` at position N extends
      ctx for positions N+1..end. Nested lists (then/else/do) get their
      own threading via recursive calls and don't leak bindings back. *)
   let ctx_ref = ref ctx in
+  let try_platform (eff : Yojson.Safe.t) : bool =
+    match eff with
+    | `Assoc pairs ->
+      List.exists (fun (key, value) ->
+        match List.assoc_opt key platform_effects with
+        | Some handler -> handler value !ctx_ref store; true
+        | None -> false
+      ) pairs
+    | `String key ->
+      (match List.assoc_opt key platform_effects with
+       | Some handler -> handler `Null !ctx_ref store; true
+       | None -> false)
+    | _ -> false
+  in
   List.iter (fun eff ->
     match eff with
     | `Assoc _ ->
@@ -91,15 +107,15 @@ let rec run_effects_inner
                  k <> var_name && k <> "_index"
                ) !ctx_ref
              in
-             run_effects_inner body iter_ctx store actions dialogs ~schema diagnostics
+             run_effects_inner body iter_ctx store actions dialogs
+               ~schema ~platform_effects diagnostics
            ) items
          | _ ->
-           run_one eff !ctx_ref store actions dialogs ~schema diagnostics)
-    | `String "snapshot" ->
-      (* Bare-string snapshot effect. OCaml's State_store doesn't own
-         the document; snapshot is a no-op here and will be wired to
-         the Model via panel_menu integration. *)
-      ()
+           if not (try_platform eff) then
+             run_one eff !ctx_ref store actions dialogs ~schema diagnostics)
+    | `String _ ->
+      (* Bare-string effects — platform handlers may catch snapshot etc. *)
+      ignore (try_platform eff)
     | _ -> ()
   ) effects
 
@@ -331,11 +347,13 @@ let run_effects
     ?(actions : Yojson.Safe.t = `Null)
     ?(dialogs : Yojson.Safe.t = `Null)
     ?(schema = false)
+    ?(platform_effects : (string * platform_effect) list = [])
     ?(diagnostics : Schema.diagnostic list ref = ref [])
     (effects : Yojson.Safe.t list)
     (ctx : (string * Yojson.Safe.t) list)
     (store : State_store.t) : unit =
-  run_effects_inner effects ctx store actions dialogs ~schema diagnostics
+  run_effects_inner effects ctx store actions dialogs
+    ~schema ~platform_effects diagnostics
 
 (* ------------------------------------------------------------------ *)
 (* Stroke panel state binding                                          *)
