@@ -384,3 +384,74 @@ Revised Phase 1 ordering (reflects schema-driven decision):
 9. **Investigate Swift/Python Category C feature gaps** (tier-3 layer
    operations) — determines whether Phase 3 migration adds new behavior
    to those apps.
+
+---
+
+## Phase 1 Step 9 — Category C feature-gap survey across Swift and Python
+
+Executed as the last Phase 1 action. Surveyed Swift (`JasSwift/`) and
+Python (`jas/`) for tier-3 layer operation support, to determine whether
+Phase 3 YAML migration will add new behavior to those apps.
+
+### Per-action status (Category C, 11 actions)
+
+Legend: ✅ real impl · ⚠ partial · ❌ stub (`log:` / no-op).
+Rust / OCaml columns carry forward from Part A for reference.
+
+| # | Action | Rust | OCaml | Swift | Python |
+|---|---|---|---|---|---|
+| 1 | `new_layer` | ✅ | ✅ (post-Bug A2) | ❌ | ⚠ appends to end |
+| 2 | `new_group` | ✅ | ❌ | ❌ | ❌ |
+| 3 | `delete_layer_selection` | ✅ | ✅ | ❌ | ❌ |
+| 4 | `duplicate_layer_selection` | ✅ | ✅ | ❌ | ❌ |
+| 5 | `toggle_all_layers_visibility` | ✅ | ✅ | ❌ | ✅ |
+| 6 | `toggle_all_layers_outline` | ✅ | ✅ | ❌ | ✅ |
+| 7 | `toggle_all_layers_lock` | ✅ | ✅ | ❌ | ✅ |
+| 8 | `flatten_artwork` | ✅ | ❌ | ❌ | ❌ |
+| 9 | `collect_in_new_layer` | ✅ | ⚠ appends, no delete | ❌ | ❌ |
+| 10 | `enter_isolation_mode` | ✅ | UI-only | ❌ | ❌ |
+| 11 | `layer_options_confirm` | ✅ | ❌ | ❌ | ❌ |
+
+### Findings
+
+- **Swift: zero tier-3 support.** `LayersPanel.swift:29-36` lumps all 11
+  actions into a single `log:` case. Phase 3 YAML migration will add
+  real behavior for 11 actions in Swift.
+- **Python: partial support.** 4 of 11 actions work (`new_layer`,
+  `toggle_all_layers_{visibility,outline,lock}`); 7 are `pass` stubs.
+  `new_layer` appends instead of inserting — same bug as OCaml had
+  (Bug A2); won't block Phase 3 because YAML migration will replace it.
+- **OCaml: 7 of 11 work.** Stubs for `new_group`, `flatten_artwork`,
+  `enter_isolation_mode` (the stored-state variant), `layer_options_confirm`.
+- **Rust: all 11 work.** Reference implementation.
+
+### Phase 3 prerequisites (per app)
+
+- **Swift**: needs document-model plumbing before any YAML-driven
+  tier-3 action can produce a visible result. The panel selection set
+  (`isolationStack`, etc.) lives in `YamlPanelBodyView.swift` as `@State`,
+  not in a store. Phase 3 will need a store-backed selection, snapshot
+  invocation, and document mutation helpers — not just the YAML engine.
+- **Python**: `jas/panels/panel_menu.py` already knows how to mutate
+  `model.document`; Phase 3 mostly removes hardcoded arms and trusts the
+  YAML engine. Lowest migration cost.
+- **OCaml**: similar to Python; most of the machinery is there. Four
+  actions need net-new implementation before or during YAML migration.
+- **Rust**: behavior already correct — Phase 3 is primarily a deletion
+  exercise with parity verification.
+
+### Implication for Phase 3 migration order
+
+Phase 3's design-tollgate action is `toggle_all_layers_visibility`. That
+action is already working in Rust / OCaml / Python; only Swift needs new
+plumbing. Good choice as a first target — it exercises doc mutation and
+snapshot without requiring selection or insertion logic.
+
+Riskier actions (`new_group`, `flatten_artwork`, `collect_in_new_layer`,
+`layer_options_confirm`) have 3+ apps with no implementation today.
+These should migrate later in Phase 3 so they can reuse primitives
+proven by the first few migrations.
+
+### Exit criterion for Step 9
+
+This survey is sufficient to unblock Phase 3 planning. No code changes.
