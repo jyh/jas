@@ -3040,6 +3040,14 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 st.layers_saved_lock_states.insert(p.clone(), saved);
                             }
 
+                            // Take the saved state out before the tab borrow so we can use
+                            // it inside the tab_mut block without a second borrow of st.
+                            let saved_to_restore = if is_container && !was_unlocked {
+                                st.layers_saved_lock_states.remove(&p)
+                            } else {
+                                None
+                            };
+
                             if let Some(tab) = st.tab_mut() {
                                 tab.model.snapshot();
                                 let doc = tab.model.document_mut();
@@ -3053,22 +3061,15 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                             }
                                         }
                                     }
-                                    // When unlocking a container, restore children's saved states
-                                    if is_container && !was_unlocked {
-                                        // `was_unlocked` was false before flip, meaning elem was locked.
-                                        // Now we unlocked it. Restore children from saved state.
-                                    }
                                 }
                                 // Restore saved child lock states on unlock
-                                if is_container && !was_unlocked {
-                                    if let Some(saved) = st.layers_saved_lock_states.remove(&p) {
-                                        let doc = tab.model.document_mut();
-                                        if let Some(elem) = doc.get_element_mut(&p) {
-                                            if let Some(children) = elem.children_mut() {
-                                                for (i, c) in children.iter_mut().enumerate() {
-                                                    if let Some(&saved_locked) = saved.get(i) {
-                                                        std::rc::Rc::make_mut(c).common_mut().locked = saved_locked;
-                                                    }
+                                if let Some(saved) = saved_to_restore {
+                                    let doc = tab.model.document_mut();
+                                    if let Some(elem) = doc.get_element_mut(&p) {
+                                        if let Some(children) = elem.children_mut() {
+                                            for (i, c) in children.iter_mut().enumerate() {
+                                                if let Some(&saved_locked) = saved.get(i) {
+                                                    std::rc::Rc::make_mut(c).common_mut().locked = saved_locked;
                                                 }
                                             }
                                         }
