@@ -338,45 +338,41 @@ and handle_eye_click path evt =
       m#set_document (Document.replace_element d path (Element.set_visibility new_vis e))
     end
 
-(** Delete currently panel-selected elements (preserves last layer). *)
+(** Delete currently panel-selected elements via YAML dispatch (Phase 3).
+    The workspace/actions.yaml definition of delete_layer_selection is
+    authoritative; this function just supplies the current selection. *)
 and do_delete_panel_selection () =
   match !_get_model_ref () with
   | None -> ()
   | Some m ->
-    let d = m#document in
     let paths = PathSet2.elements !_layers_panel_selection in
     if paths = [] then ()
     else begin
+      (* Guard against deleting the last layer at dispatch-boundary level —
+         the YAML doesn't encode this policy yet. *)
+      let d = m#document in
       let layer_count = Array.length d.Document.layers in
       let top_deletes = List.length (List.filter (fun p -> List.length p = 1) paths) in
       if top_deletes >= layer_count then ()
-      else begin
-        m#snapshot;
-        let sorted = List.sort (fun a b -> compare b a) paths in
-        let new_doc = List.fold_left (fun acc p ->
-          Document.delete_element acc p
-        ) d sorted in
-        m#set_document new_doc;
-        _layers_panel_selection := PathSet2.empty
-      end
+      else
+        Panel_menu.dispatch_yaml_action
+          ~panel_selection:paths
+          ~on_selection_changed:(Some (fun _ ->
+            _layers_panel_selection := PathSet2.empty))
+          "delete_layer_selection" m
     end
 
-(** Duplicate each panel-selected element in place. *)
+(** Duplicate each panel-selected element in place via YAML dispatch. *)
 and do_duplicate_panel_selection () =
   match !_get_model_ref () with
   | None -> ()
   | Some m ->
     let paths = PathSet2.elements !_layers_panel_selection in
     if paths = [] then ()
-    else begin
-      m#snapshot;
-      let sorted = List.sort (fun a b -> compare b a) paths in
-      let new_doc = List.fold_left (fun acc p ->
-        let e = Document.get_element acc p in
-        Document.insert_element_after acc p e
-      ) m#document sorted in
-      m#set_document new_doc
-    end
+    else
+      Panel_menu.dispatch_yaml_action
+        ~panel_selection:paths
+        "duplicate_layer_selection" m
 
 (** Flatten groups in panel selection by unpacking their children. *)
 and do_flatten_artwork () =

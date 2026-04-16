@@ -86,10 +86,15 @@ let set_active_color_live color ~fill_on_top (m : Model.model) =
   end
 
 (** Dispatch a layers action through the compiled YAML effects (Phase 3).
-    Wires snapshot and doc.set to operate on the active Model, and
-    injects active_document.top_level_layer_paths / top_level_layers
-    into the evaluation context. *)
-let dispatch_yaml_action (action_name : string) (m : Model.model) : unit =
+    Wires snapshot, doc.set, doc.delete_at, doc.clone_at, doc.insert_after
+    to operate on the active Model. Injects active_document rollups and
+    (optionally) panel.layers_panel_selection from the caller — needed by
+    Group B actions (delete_layer_selection, duplicate_layer_selection). *)
+let dispatch_yaml_action
+    ?(panel_selection : int list list = [])
+    ?(on_selection_changed : (int list list -> unit) option = None)
+    (action_name : string) (m : Model.model) : unit =
+  ignore on_selection_changed;  (* reserved for future bidirectional sync *)
   match Workspace_loader.load () with
   | None -> ()
   | Some ws ->
@@ -132,8 +137,25 @@ let dispatch_yaml_action (action_name : string) (m : Model.model) : unit =
          let active_doc = `Assoc [
            ("top_level_layers", `List top_level_layers);
            ("top_level_layer_paths", `List top_level_layer_paths);
+           ("layers_panel_selection_count", `Int (List.length panel_selection));
          ] in
-         let ctx = [("active_document", active_doc)] in
+         (* panel.layers_panel_selection: inject as list of __path__
+            markers for Group B actions to iterate via reverse(...). *)
+         let selection_json = `List (List.map (fun p ->
+           `Assoc [("__path__", `List (List.map (fun i -> `Int i) p))]
+         ) panel_selection) in
+         let panel_json = `Assoc [
+           ("layers_panel_selection", selection_json);
+         ] in
+         let ctx = [
+           ("active_document", active_doc);
+           ("panel", panel_json);
+         ] in
+         (* Cleared selection (settable by set_panel_state: {key:
+            layers_panel_selection, value: []}) — used by
+            delete_layer_selection to signal empty selection after
+            batch delete. *)
+         let cleared_selection = ref false in
          (* Platform handlers: snapshot → model snapshot; doc.set → element mutation *)
          (* Element stash — Phase 3 Group B doc.clone_at / doc.delete_at
             return Elements; we store them here keyed by their `as:` name
@@ -269,16 +291,36 @@ let dispatch_yaml_action (action_name : string) (m : Model.model) : unit =
             | _ -> ());
            `Null
          in
+         (* set_panel_state: {key: layers_panel_selection, value: "[]"}
+            signals that the action cleared the panel selection. We
+            record the fact so the caller can empty its own selection
+            state after dispatch returns. *)
+         let set_panel_state_h : Effects.platform_effect = fun spec _ _ ->
+           (match spec with
+            | `Assoc pairs ->
+              let key = match List.assoc_opt "key" pairs with
+                | Some (`String s) -> s | _ -> ""
+              in
+              if key = "layers_panel_selection" then
+                cleared_selection := true
+            | _ -> ());
+           `Null
+         in
          let platform_effects = [
            ("snapshot", snapshot_h);
            ("doc.set", doc_set_h);
            ("doc.delete_at", doc_delete_at_h);
            ("doc.clone_at", doc_clone_at_h);
            ("doc.insert_after", doc_insert_after_h);
+           ("set_panel_state", set_panel_state_h);
          ] in
-         (* Snapshot once before the batch mutation *)
          let store = State_store.create () in
-         Effects.run_effects ~platform_effects effects ctx store
+         Effects.run_effects ~platform_effects effects ctx store;
+         (* If the action cleared the selection, tell the caller. *)
+         if !cleared_selection then
+           (match on_selection_changed with
+            | Some cb -> cb []
+            | None -> ())
        | _ -> ())
     | _ -> ()
 

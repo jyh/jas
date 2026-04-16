@@ -163,5 +163,9 @@ let eval_context ?(extra = []) (store : t) : Yojson.Safe.t =
       base @ [dlg] @ params
     | None -> base
   in
-  let merged = with_dialog @ extra in
+  (* extra overrides store defaults: put extra first so List.assoc_opt
+     returns caller-supplied values (e.g. panel.layers_panel_selection
+     from panel_menu.dispatch_yaml_action) rather than the empty store
+     default. *)
+  let merged = extra @ with_dialog in
   `Assoc merged
