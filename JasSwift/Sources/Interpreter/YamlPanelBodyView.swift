@@ -592,32 +592,94 @@ struct ElementThumbnail: View {
     }
 }
 
+/// Wrapper that makes an ElementPath Identifiable for use with .sheet(item:).
+struct IdentifiablePath: Identifiable {
+    let id: String
+    let path: ElementPath
+}
+
+/// Modal sheet for editing a layer's name, lock state, and visibility.
+struct LayerOptionsSheet: View {
+    @ObservedObject var model: Model
+    let path: ElementPath
+    let onClose: () -> Void
+
+    @State private var name: String = ""
+    @State private var lock: Bool = false
+    @State private var show: Bool = true
+    @State private var preview: Bool = true
+
+    var body: some View {
+        let e = model.document.getElement(path)
+        VStack(alignment: .leading, spacing: 10) {
+            SwiftUI.Text("Layer Options").font(.headline)
+            HStack {
+                SwiftUI.Text("Name:")
+                TextField("", text: $name)
+            }
+            Toggle("Lock", isOn: $lock)
+            Toggle("Show", isOn: $show)
+            Toggle("Preview", isOn: $preview).disabled(!show)
+            HStack {
+                Spacer()
+                Button("Cancel") { onClose() }
+                Button("OK") {
+                    if case .layer(let le) = e {
+                        let vis: Visibility = !show ? .invisible : (preview ? .preview : .outline)
+                        let newLayer = Layer(name: name, children: le.children,
+                                             opacity: le.opacity, transform: le.transform,
+                                             locked: lock, visibility: vis)
+                        model.snapshot()
+                        model.document = model.document.replaceElement(path, with: .layer(newLayer))
+                    }
+                    onClose()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 320)
+        .onAppear {
+            if case .layer(let le) = e {
+                name = le.name
+                lock = le.locked
+                show = le.visibility != .invisible
+                preview = le.visibility == .preview
+            }
+        }
+    }
+}
+
+/// Flat row descriptor used when rendering the tree. Pre-computing this
+/// list lets us apply filters (search, type, isolation) without recursive
+/// SwiftUI views.
+struct FlatRow: Identifiable {
+    let id: String
+    let path: ElementPath
+    let elem: Element
+    let depth: Int
+    let isContainer: Bool
+    let isCollapsed: Bool
+    let layerColor: String
+}
+
 struct TreeViewContent: View {
     @ObservedObject var model: Model
     @State private var collapsed: Set<ElementPath> = []
     @State private var panelSelection: Set<ElementPath> = []
+    @State private var panelSelectionAnchor: ElementPath? = nil
     @State private var renamingPath: ElementPath? = nil
     @State private var editingName: String = ""
     @State private var dragSource: ElementPath? = nil
     @State private var dragTarget: ElementPath? = nil
+    @State private var searchQuery: String = ""
+    @State private var isolationStack: [ElementPath] = []
+    @State private var soloState: (path: ElementPath, saved: [ElementPath: Visibility])? = nil
+    @State private var savedLockStates: [ElementPath: [Bool]] = [:]
+    @State private var hiddenTypes: Set<String> = []
+    @State private var showLayerOptionsFor: ElementPath? = nil
 
-    var body: some View {
-        let doc = model.document
-        let selectedPaths = doc.selectedPaths
-        ScrollView {
-            VStack(spacing: 0) {
-                ForEach(Array(doc.layers.indices.reversed()), id: \.self) { i in
-                    let layer = doc.layers[i]
-                    let elem = Element.layer(layer)
-                    let path: ElementPath = [i]
-                    let color = layerColors[i % layerColors.count]
-                    treeRows(elem: elem, path: path, depth: 0, layerColor: color, selectedPaths: selectedPaths)
-                }
-            }
-        }
-    }
-
-    private func elementChildren(_ elem: Element) -> [Element]? {
+    private func elementChildrenStatic(_ elem: Element) -> [Element]? {
         switch elem {
         case .group(let g): return g.children
         case .layer(let l): return l.children
@@ -625,15 +687,445 @@ struct TreeViewContent: View {
         }
     }
 
-    private func isContainer(_ elem: Element) -> Bool {
+    private func isContainerElem(_ elem: Element) -> Bool {
         switch elem {
         case .group, .layer: return true
         default: return false
         }
     }
 
+    private func typeValue(_ elem: Element) -> String {
+        switch elem {
+        case .line: return "line"
+        case .rect: return "rectangle"
+        case .circle: return "circle"
+        case .ellipse: return "ellipse"
+        case .polyline: return "polyline"
+        case .polygon: return "polygon"
+        case .path: return "path"
+        case .text: return "text"
+        case .textPath: return "text_path"
+        case .group: return "group"
+        case .layer: return "layer"
+        }
+    }
+
+    private func flatten(_ doc: Document) -> [FlatRow] {
+        var out: [FlatRow] = []
+        func walk(_ children: [Element], depth: Int, prefix: ElementPath, color: String) {
+            for i in children.indices.reversed() {
+                let elem = children[i]
+                let path = prefix + [i]
+                let isCont = isContainerElem(elem)
+                let isColl = collapsed.contains(path)
+                let myColor: String = {
+                    if case .layer = elem, path.count == 1 {
+                        return layerColors[i % layerColors.count]
+                    }
+                    return color
+                }()
+                let id = path.map(String.init).joined(separator: "_")
+                out.append(FlatRow(id: id, path: path, elem: elem, depth: depth,
+                                   isContainer: isCont, isCollapsed: isColl, layerColor: myColor))
+                if isCont && !isColl, let kids = elementChildrenStatic(elem) {
+                    walk(kids, depth: depth + 1, prefix: path, color: myColor)
+                }
+            }
+        }
+        // Top-level layers as Element.layer
+        let topElements = doc.layers.map { Element.layer($0) }
+        walk(topElements, depth: 0, prefix: [], color: "#4a90d9")
+        return out
+    }
+
+    private func applyFilters(_ rows: [FlatRow]) -> [FlatRow] {
+        var result = rows
+        // Type filter
+        if !hiddenTypes.isEmpty {
+            let visible = Set(result.filter { !hiddenTypes.contains(typeValue($0.elem)) }.map { $0.path })
+            var keep = visible
+            for p in visible {
+                for i in 1..<p.count { keep.insert(Array(p.prefix(i))) }
+            }
+            result = result.filter { keep.contains($0.path) }
+        }
+        // Isolation filter
+        if let root = isolationStack.last {
+            result = result.compactMap { r in
+                guard r.path.count > root.count,
+                      Array(r.path.prefix(root.count)) == root else { return nil }
+                return FlatRow(id: r.id, path: r.path, elem: r.elem,
+                               depth: r.depth - root.count,
+                               isContainer: r.isContainer, isCollapsed: r.isCollapsed,
+                               layerColor: r.layerColor)
+            }
+        }
+        // Search filter
+        let q = searchQuery.lowercased()
+        if !q.isEmpty {
+            let matching = Set(result.filter {
+                let (n, _) = elementDisplayName($0.elem)
+                return n.lowercased().contains(q)
+            }.map { $0.path })
+            var keep = matching
+            for p in matching {
+                for i in 1..<p.count { keep.insert(Array(p.prefix(i))) }
+            }
+            result = result.filter { keep.contains($0.path) }
+        }
+        return result
+    }
+
+    var body: some View {
+        let doc = model.document
+        let selectedPaths = doc.selectedPaths
+        // Auto-expand ancestors of selected paths
+        for p in selectedPaths where p.count > 1 {
+            for i in 1..<p.count {
+                let anc = Array(p.prefix(i))
+                if collapsed.contains(anc) {
+                    // Note: mutating @State during body is discouraged; use a
+                    // DispatchQueue hop to defer the change
+                    DispatchQueue.main.async {
+                        collapsed.remove(anc)
+                    }
+                }
+            }
+        }
+        let rows = applyFilters(flatten(doc))
+        return VStack(spacing: 0) {
+            if !isolationStack.isEmpty {
+                breadcrumbBar
+            }
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(rows) { row in
+                        rowView(row: row, selectedPaths: selectedPaths)
+                    }
+                }
+            }
+        }
+        .sheet(item: Binding<IdentifiablePath?>(
+            get: { showLayerOptionsFor.map { IdentifiablePath(id: $0.map(String.init).joined(separator: "_"), path: $0) } },
+            set: { showLayerOptionsFor = $0?.path }
+        )) { ip in
+            LayerOptionsSheet(model: model, path: ip.path, onClose: { showLayerOptionsFor = nil })
+        }
+    }
+
     @ViewBuilder
-    private func treeRows(elem: Element, path: ElementPath, depth: Int, layerColor: String, selectedPaths: Set<ElementPath>) -> some View {
+    private var breadcrumbBar: some View {
+        HStack(spacing: 4) {
+            SwiftUI.Text("⌂")
+                .font(.system(size: 11))
+                .onTapGesture { isolationStack.removeAll() }
+            ForEach(Array(isolationStack.enumerated()), id: \.offset) { idx, p in
+                SwiftUI.Text(">")
+                    .font(.system(size: 9))
+                    .foregroundColor(.gray)
+                let label: String = {
+                    let e = model.document.getElement(p)
+                    let (n, _) = elementDisplayName(e)
+                    return n
+                }()
+                SwiftUI.Text(label)
+                    .font(.system(size: 11))
+                    .onTapGesture { isolationStack = Array(isolationStack.prefix(idx + 1)) }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(SwiftUI.Color(white: 0.16))
+    }
+
+    @ViewBuilder
+    private func rowView(row: FlatRow, selectedPaths: Set<ElementPath>) -> some View {
+        let elem = row.elem
+        let path = row.path
+        let isSelected = selectedPaths.contains(path)
+        let isPanelSelected = panelSelection.contains(path)
+        let (name, isNamed) = elementDisplayName(elem)
+        let vis = elem.visibility
+        let locked = elem.isLocked
+        HStack(spacing: 2) {
+            if row.depth > 0 {
+                Spacer().frame(width: CGFloat(row.depth * 16))
+            }
+            // Eye
+            SwiftUI.Text(visIcon(vis))
+                .frame(width: 16, height: 16)
+                .onTapGesture {
+                    // Regular click: cycle visibility
+                    soloState = nil
+                    let e = model.document.getElement(path)
+                    let newVis = cycleVisibility(e.visibility)
+                    model.snapshot()
+                    model.document = model.document.replaceElement(path, with: e.withVisibility(newVis))
+                }
+                .onTapGesture(count: 1, coordinateSpace: .local) { _ in }
+            // (SwiftUI's plain .onTapGesture doesn't report modifier flags;
+            // solo via Option-click is hard without an NSEvent monitor. Omit.)
+            // Lock
+            SwiftUI.Text(locked ? "\u{1F512}" : "\u{1F513}")
+                .frame(width: 16, height: 16)
+                .onTapGesture {
+                    let e = model.document.getElement(path)
+                    let wasUnlocked = !e.isLocked
+                    let isCont = isContainerElem(e)
+                    model.snapshot()
+                    var doc = model.document
+                    // Save child states when locking a container
+                    if isCont && wasUnlocked, let kids = elementChildrenStatic(e) {
+                        savedLockStates[path] = kids.map { $0.isLocked }
+                    }
+                    doc = doc.replaceElement(path, with: e.withLocked(wasUnlocked))
+                    // Lock all children when container locked
+                    if isCont && wasUnlocked, let kids = elementChildrenStatic(e) {
+                        for (i, c) in kids.enumerated() {
+                            let cp = path + [i]
+                            doc = doc.replaceElement(cp, with: c.withLocked(true))
+                        }
+                    }
+                    // Restore children on unlock
+                    if isCont && !wasUnlocked, let saved = savedLockStates.removeValue(forKey: path) {
+                        let e2 = doc.getElement(path)
+                        if let kids2 = elementChildrenStatic(e2) {
+                            for (i, c) in kids2.enumerated() where i < saved.count {
+                                let cp = path + [i]
+                                doc = doc.replaceElement(cp, with: c.withLocked(saved[i]))
+                            }
+                        }
+                    }
+                    model.document = doc
+                }
+            // Twirl or gap
+            if row.isContainer {
+                let isColl = collapsed.contains(path)
+                SwiftUI.Text(isColl ? "\u{25B6}" : "\u{25BC}")
+                    .frame(width: 16, height: 16)
+                    .onTapGesture {
+                        if collapsed.contains(path) { collapsed.remove(path) }
+                        else { collapsed.insert(path) }
+                    }
+            } else {
+                Spacer().frame(width: 16)
+            }
+            // Preview thumbnail
+            ElementThumbnail(elem: elem, size: 24)
+            // Name — inline TextField when renaming, Text otherwise
+            if renamingPath == path {
+                TextField("", text: $editingName, onCommit: {
+                    let e = model.document.getElement(path)
+                    if case .layer(let le) = e {
+                        let newLayer = Layer(name: editingName, children: le.children,
+                                             opacity: le.opacity, transform: le.transform,
+                                             locked: le.locked, visibility: le.visibility)
+                        model.snapshot()
+                        model.document = model.document.replaceElement(path, with: .layer(newLayer))
+                    }
+                    renamingPath = nil
+                })
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onExitCommand { renamingPath = nil }
+            } else {
+                SwiftUI.Text(name)
+                    .font(.system(size: 11))
+                    .foregroundColor(isNamed ? SwiftUI.Color.white : SwiftUI.Color.gray)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .onTapGesture(count: 2) {
+                        if case .layer(let le) = elem {
+                            editingName = le.name
+                            renamingPath = path
+                        }
+                    }
+            }
+            // Select square
+            Rectangle()
+                .fill(isSelected ? SwiftUI.Color.blue : SwiftUI.Color.clear)
+                .overlay(Rectangle().stroke(SwiftUI.Color.gray, lineWidth: 1))
+                .frame(width: 12, height: 12)
+                .onTapGesture {
+                    model.document = Document(
+                        layers: model.document.layers,
+                        selectedLayer: model.document.selectedLayer,
+                        selection: [ElementSelection.all(path)]
+                    )
+                }
+        }
+        .frame(height: 24)
+        .padding(.horizontal, 4)
+        .background(isPanelSelected ? SwiftUI.Color.blue.opacity(0.3) : SwiftUI.Color.clear)
+        .overlay(
+            dragTarget == path && dragSource != nil && dragSource != path
+                ? Rectangle().fill(SwiftUI.Color.blue).frame(height: 2)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                : nil
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            panelSelection = [path]
+            panelSelectionAnchor = path
+        }
+        .contextMenu {
+            if case .layer = elem {
+                Button("Options for Layer...") { showLayerOptionsFor = path }
+            } else {
+                Button("Options for Layer...") {}.disabled(true)
+            }
+            Button("Duplicate") { duplicateSelection() }
+            Button("Delete Selection") { deleteSelection() }
+            Divider()
+            if isolationStack.isEmpty {
+                Button("Enter Isolation Mode") { isolationStack.append(path) }
+                    .disabled(!row.isContainer)
+            } else {
+                Button("Exit Isolation Mode") { isolationStack.removeLast() }
+            }
+            Divider()
+            Button("Flatten Artwork") { flattenArtwork() }
+            Button("Collect in New Layer") { collectInNewLayer() }
+        }
+        .onDrag {
+            dragSource = path
+            return NSItemProvider(object: pathToString(path) as NSString)
+        }
+        .onDrop(of: ["public.text"], isTargeted: Binding(
+            get: { dragTarget == path },
+            set: { isOver in
+                if isOver && dragSource != nil && dragSource != path {
+                    dragTarget = path
+                } else if !isOver && dragTarget == path {
+                    dragTarget = nil
+                }
+            }
+        )) { providers in
+            guard let src = dragSource, src != path else {
+                dragSource = nil; dragTarget = nil
+                return false
+            }
+            // Drag constraints: no cycle, no drop into locked parent
+            let isCycle = path.count >= src.count && Array(path.prefix(src.count)) == src
+            let parentPath = Array(path.dropLast())
+            let parentLocked: Bool = {
+                if parentPath.isEmpty { return false }
+                let p = model.document.getElement(parentPath)
+                return p.isLocked
+            }()
+            if isCycle || parentLocked {
+                dragSource = nil; dragTarget = nil
+                return false
+            }
+            let moved = model.document.getElement(src)
+            model.snapshot()
+            var doc = model.document.deleteElement(src)
+            var target = path
+            if src.count == target.count, Array(src.dropLast()) == Array(target.dropLast()),
+               let sl = src.last, let tl = target.last, sl < tl {
+                target[target.count - 1] = tl - 1
+            }
+            if let tl = target.last, tl > 0 {
+                var insertAfter = target
+                insertAfter[insertAfter.count - 1] = tl - 1
+                doc = doc.insertElementAfter(insertAfter, element: moved)
+            } else {
+                doc = doc.insertElementAfter(target, element: moved)
+            }
+            model.document = doc
+            dragSource = nil; dragTarget = nil
+            return true
+        }
+    }
+
+    // MARK: - Context menu actions
+
+    private func deleteSelection() {
+        guard !panelSelection.isEmpty else { return }
+        let doc = model.document
+        let topDeletes = panelSelection.filter { $0.count == 1 }.count
+        if topDeletes >= doc.layers.count { return }
+        model.snapshot()
+        var d = doc
+        for p in panelSelection.sorted(by: { $0.lexicographicallyPrecedes($1) }).reversed() {
+            d = d.deleteElement(p)
+        }
+        model.document = d
+        panelSelection.removeAll()
+    }
+
+    private func duplicateSelection() {
+        guard !panelSelection.isEmpty else { return }
+        model.snapshot()
+        var d = model.document
+        for p in panelSelection.sorted(by: { $0.lexicographicallyPrecedes($1) }).reversed() {
+            let e = d.getElement(p)
+            d = d.insertElementAfter(p, element: e)
+        }
+        model.document = d
+    }
+
+    private func flattenArtwork() {
+        guard !panelSelection.isEmpty else { return }
+        model.snapshot()
+        var d = model.document
+        for p in panelSelection.sorted(by: { $0.lexicographicallyPrecedes($1) }).reversed() {
+            let e = d.getElement(p)
+            if case .group(let g) = e {
+                d = d.deleteElement(p)
+                var insertPath = p
+                var firstInsert = true
+                for child in g.children {
+                    if firstInsert && (insertPath.last ?? 0) == 0 {
+                        d = d.insertElementAfter(insertPath, element: child)
+                    } else if firstInsert {
+                        var ia = insertPath
+                        ia[ia.count - 1] = (ia.last ?? 1) - 1
+                        d = d.insertElementAfter(ia, element: child)
+                    } else {
+                        d = d.insertElementAfter(insertPath, element: child)
+                    }
+                    firstInsert = false
+                    insertPath[insertPath.count - 1] += 1
+                }
+            }
+        }
+        model.document = d
+        panelSelection.removeAll()
+    }
+
+    private func collectInNewLayer() {
+        guard !panelSelection.isEmpty else { return }
+        let doc = model.document
+        let used = Set(doc.layers.map { $0.name })
+        var n = 1
+        while used.contains("Layer \(n)") { n += 1 }
+        model.snapshot()
+        let sortedPaths = panelSelection.sorted(by: { $0.lexicographicallyPrecedes($1) })
+        let elements = sortedPaths.map { doc.getElement($0) }
+        var d = doc
+        for p in sortedPaths.reversed() {
+            d = d.deleteElement(p)
+        }
+        let newLayer = Layer(name: "Layer \(n)", children: elements)
+        d = Document(layers: d.layers + [newLayer],
+                     selectedLayer: d.selectedLayer,
+                     selection: d.selection)
+        model.document = d
+        panelSelection.removeAll()
+    }
+
+    @available(*, deprecated, message: "unused, kept as stub")
+    @ViewBuilder
+    private func treeRows_DEPRECATED() -> some View {
+        EmptyView()
+    }
+
+    /* OLD BODY REMOVED:
+    private func treeRows_OLD(elem: Element, path: ElementPath, depth: Int, layerColor: String, selectedPaths: Set<ElementPath>) -> some View {
         let isSelected = selectedPaths.contains(path)
         let isPanelSelected = panelSelection.contains(path)
         let (name, isNamed) = elementDisplayName(elem)
@@ -788,6 +1280,7 @@ struct TreeViewContent: View {
             }
         }
     }
+    */
 }
 
 /// Top-level view that renders a panel's YAML content.
