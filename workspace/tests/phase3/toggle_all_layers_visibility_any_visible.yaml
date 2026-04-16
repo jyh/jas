@@ -1,0 +1,25 @@
+description: "toggle_all_layers_visibility: at least one layer visible → all invisible"
+action: toggle_all_layers_visibility
+initial_doc:
+  layers:
+    - kind: Layer
+      name: "A"
+      common: { visibility: visible, locked: false }
+    - kind: Layer
+      name: "B"
+      common: { visibility: invisible, locked: false }
+    - kind: Layer
+      name: "C"
+      common: { visibility: preview, locked: false }
+expected_doc:
+  layers:
+    - kind: Layer
+      name: "A"
+      common: { visibility: invisible, locked: false }
+    - kind: Layer
+      name: "B"
+      common: { visibility: invisible, locked: false }
+    - kind: Layer
+      name: "C"
+      common: { visibility: invisible, locked: false }
+expected_snapshots: 1

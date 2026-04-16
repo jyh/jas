@@ -83,8 +83,9 @@ def tokenize(source: str) -> list[Token]:
     while i < n:
         c = source[i]
 
-        # Whitespace
-        if c in " \t":
+        # Whitespace (including newlines — YAML > and | folds may
+        # produce embedded newlines in expression strings)
+        if c in " \t\n\r":
             i += 1
             continue
 

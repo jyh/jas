@@ -1,0 +1,19 @@
+description: "toggle_all_layers_lock: at least one unlocked → all locked"
+action: toggle_all_layers_lock
+initial_doc:
+  layers:
+    - kind: Layer
+      name: "A"
+      common: { visibility: visible, locked: false }
+    - kind: Layer
+      name: "B"
+      common: { visibility: visible, locked: true }
+expected_doc:
+  layers:
+    - kind: Layer
+      name: "A"
+      common: { visibility: visible, locked: true }
+    - kind: Layer
+      name: "B"
+      common: { visibility: visible, locked: true }
+expected_snapshots: 1

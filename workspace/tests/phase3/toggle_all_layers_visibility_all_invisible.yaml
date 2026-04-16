@@ -1,0 +1,19 @@
+description: "toggle_all_layers_visibility: all invisible → all preview"
+action: toggle_all_layers_visibility
+initial_doc:
+  layers:
+    - kind: Layer
+      name: "A"
+      common: { visibility: invisible, locked: false }
+    - kind: Layer
+      name: "B"
+      common: { visibility: invisible, locked: false }
+expected_doc:
+  layers:
+    - kind: Layer
+      name: "A"
+      common: { visibility: preview, locked: false }
+    - kind: Layer
+      name: "B"
+      common: { visibility: preview, locked: false }
+expected_snapshots: 1

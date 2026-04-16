@@ -38,6 +38,10 @@ def run_effects(effects: list, ctx: dict, store: StateStore,
     # to subsequent effects in this list only. Inner lists (then/else/do)
     # get their own threading in recursive calls.
     for effect in effects:
+        # Bare-string effects (e.g. `- snapshot` in YAML) normalize to
+        # a single-key mapping with null value.
+        if isinstance(effect, str):
+            effect = {effect: None}
         if isinstance(effect, dict):
             new_ctx = _run_one(effect, ctx, store, actions, platform_effects, dialogs,
                                schema, diagnostics)
