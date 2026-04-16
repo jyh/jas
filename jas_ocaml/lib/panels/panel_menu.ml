@@ -135,7 +135,13 @@ let dispatch_yaml_action (action_name : string) (m : Model.model) : unit =
          ] in
          let ctx = [("active_document", active_doc)] in
          (* Platform handlers: snapshot → model snapshot; doc.set → element mutation *)
-         let snapshot_h : Effects.platform_effect = fun _ _ _ -> m#snapshot in
+         (* Element stash — Phase 3 Group B doc.clone_at / doc.delete_at
+            return Elements; we store them here keyed by their `as:` name
+            (or for clones, by a marker in the returned JSON). *)
+         let element_stash : (string, Element.element) Hashtbl.t = Hashtbl.create 4 in
+         let next_stash_id = ref 0 in
+         let snapshot_h : Effects.platform_effect = fun _ _ _ ->
+           m#snapshot; `Null in
          let doc_set_h : Effects.platform_effect = fun spec call_ctx _ ->
            let path_expr = match spec with
              | `Assoc pairs ->
@@ -179,11 +185,96 @@ let dispatch_yaml_action (action_name : string) (m : Model.model) : unit =
                 new_layers.(idx) <- updated
               ) fields;
               m#set_document { d with Document.layers = new_layers }
-            | _ -> ())
+            | _ -> ());
+           `Null
+         in
+         (* doc.delete_at: deletes element at path, stashes + returns a ref. *)
+         let doc_delete_at_h : Effects.platform_effect = fun value call_ctx _ ->
+           let path_expr = match value with `String s -> s | _ -> "" in
+           let eval_ctx = `Assoc call_ctx in
+           let path_val = Expr_eval.evaluate path_expr eval_ctx in
+           match path_val with
+           | Expr_eval.Path [idx] when idx >= 0
+              && idx < Array.length m#document.Document.layers ->
+             let d = m#document in
+             let elem = d.Document.layers.(idx) in
+             let new_layers = Array.init (Array.length d.Document.layers - 1) (fun i ->
+               if i < idx then d.Document.layers.(i)
+               else d.Document.layers.(i + 1))
+             in
+             m#set_document { d with Document.layers = new_layers };
+             let stash_id = Printf.sprintf "__elem_%d__" !next_stash_id in
+             incr next_stash_id;
+             Hashtbl.add element_stash stash_id elem;
+             `Assoc [("__element_ref__", `String stash_id)]
+           | _ -> `Null
+         in
+         (* doc.clone_at: deep-copies element at path, stashes + returns ref. *)
+         let doc_clone_at_h : Effects.platform_effect = fun value call_ctx _ ->
+           let path_expr = match value with `String s -> s | _ -> "" in
+           let eval_ctx = `Assoc call_ctx in
+           let path_val = Expr_eval.evaluate path_expr eval_ctx in
+           match path_val with
+           | Expr_eval.Path [idx] when idx >= 0
+              && idx < Array.length m#document.Document.layers ->
+             (* Element is a variant; deep-copy via re-construction. For
+                now, just copy the record reference since Layer is
+                functional (all fields copied on update). *)
+             let elem = m#document.Document.layers.(idx) in
+             let stash_id = Printf.sprintf "__elem_%d__" !next_stash_id in
+             incr next_stash_id;
+             Hashtbl.add element_stash stash_id elem;
+             `Assoc [("__element_ref__", `String stash_id)]
+           | _ -> `Null
+         in
+         (* doc.insert_after: resolves element arg (raw ref or ctx name)
+            and inserts after path. *)
+         let doc_insert_after_h : Effects.platform_effect = fun spec call_ctx _ ->
+           let path_expr, element_arg = match spec with
+             | `Assoc pairs ->
+               let pe = match List.assoc_opt "path" pairs with
+                 | Some (`String s) -> s | _ -> ""
+               in
+               let ea = List.assoc_opt "element" pairs in
+               (pe, ea)
+             | _ -> ("", None)
+           in
+           let eval_ctx = `Assoc call_ctx in
+           let path_val = Expr_eval.evaluate path_expr eval_ctx in
+           (* Resolve element: a raw __element_ref__ JSON, or an
+              identifier pointing to such a JSON in call_ctx. *)
+           let resolve_elem () : Element.element option =
+             let ref_json = match element_arg with
+               | Some (`Assoc _ as j) -> Some j
+               | Some (`String name) ->
+                 List.assoc_opt name call_ctx
+               | _ -> None
+             in
+             match ref_json with
+             | Some (`Assoc [("__element_ref__", `String id)]) ->
+               Hashtbl.find_opt element_stash id
+             | _ -> None
+           in
+           (match path_val, resolve_elem () with
+            | Expr_eval.Path [idx], Some elem when idx >= 0 ->
+              let d = m#document in
+              let n = Array.length d.Document.layers in
+              let insert_pos = min (idx + 1) n in
+              let new_layers = Array.init (n + 1) (fun i ->
+                if i < insert_pos then d.Document.layers.(i)
+                else if i = insert_pos then elem
+                else d.Document.layers.(i - 1))
+              in
+              m#set_document { d with Document.layers = new_layers }
+            | _ -> ());
+           `Null
          in
          let platform_effects = [
            ("snapshot", snapshot_h);
            ("doc.set", doc_set_h);
+           ("doc.delete_at", doc_delete_at_h);
+           ("doc.clone_at", doc_clone_at_h);
+           ("doc.insert_after", doc_insert_after_h);
          ] in
          (* Snapshot once before the batch mutation *)
          let store = State_store.create () in

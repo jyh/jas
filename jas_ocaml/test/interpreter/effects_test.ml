@@ -171,7 +171,7 @@ let let_tests = [
 let platform_effects_tests = [
   Alcotest.test_case "bare_string_snapshot_dispatches_to_handler" `Quick (fun () ->
     let called = ref 0 in
-    let handler _ _ _ = incr called in
+    let handler _ _ _ = incr called; `Null in
     let s = create () in
     run_effects ~platform_effects:[("snapshot", handler)]
       [`String "snapshot"] [] s;
@@ -179,15 +179,26 @@ let platform_effects_tests = [
 
   Alcotest.test_case "map_snapshot_dispatches_to_handler" `Quick (fun () ->
     let called = ref 0 in
-    let handler _ _ _ = incr called in
+    let handler _ _ _ = incr called; `Null in
     let s = create () in
     run_effects ~platform_effects:[("snapshot", handler)]
       [`Assoc [("snapshot", `Null)]] [] s;
     assert (!called = 1));
 
+  Alcotest.test_case "platform_handler_return_value_bound_via_as" `Quick (fun () ->
+    (* Handler returns a JSON value; subsequent set: reads it from ctx. *)
+    let handler _ _ _ = `String "clone_result" in
+    let s = create ~defaults:[("out", `String "")] () in
+    run_effects ~platform_effects:[("doc.clone_at", handler)]
+      [
+        `Assoc [("doc.clone_at", `String "path(0)"); ("as", `String "c")];
+        `Assoc [("set", `Assoc [("out", `String "c")])];
+      ] [] s;
+    assert (get s "out" = `String "clone_result"));
+
   Alcotest.test_case "doc_set_dispatches_with_spec" `Quick (fun () ->
     let captured = ref `Null in
-    let handler value _ _ = captured := value in
+    let handler value _ _ = captured := value; `Null in
     let s = create () in
     let spec = `Assoc [
       ("path", `String "p");
