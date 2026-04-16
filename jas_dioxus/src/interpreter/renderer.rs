@@ -660,12 +660,12 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
                     // Handle swap effects
                     if let Some(serde_json::Value::Array(keys)) = eff.get("swap") {
                         if keys.len() == 2 {
-                            let a = keys[0].as_str().unwrap_or("");
-                            let b = keys[1].as_str().unwrap_or("");
-                            let a_val = get_stroke_state_field(&st.stroke_panel, a);
-                            let b_val = get_stroke_state_field(&st.stroke_panel, b);
-                            set_stroke_state_field(&mut st.stroke_panel, a, &b_val);
-                            set_stroke_state_field(&mut st.stroke_panel, b, &a_val);
+                            let a = keys[0].as_str().unwrap_or("").to_string();
+                            let b = keys[1].as_str().unwrap_or("").to_string();
+                            let a_val = get_app_state_field(&a, st);
+                            let b_val = get_app_state_field(&b, st);
+                            set_app_state_field(&a, &b_val, st);
+                            set_app_state_field(&b, &a_val, st);
                         }
                     }
                     // Handle swap_panel_state effects
@@ -719,12 +719,12 @@ fn run_effects(
         // swap: [state_key_a, state_key_b]
         if let Some(serde_json::Value::Array(keys)) = effect.get("swap") {
             if keys.len() == 2 {
-                let a = keys[0].as_str().unwrap_or("");
-                let b = keys[1].as_str().unwrap_or("");
-                let a_val = get_stroke_state_field(&st.stroke_panel, a);
-                let b_val = get_stroke_state_field(&st.stroke_panel, b);
-                set_stroke_state_field(&mut st.stroke_panel, a, &b_val);
-                set_stroke_state_field(&mut st.stroke_panel, b, &a_val);
+                let a = keys[0].as_str().unwrap_or("").to_string();
+                let b = keys[1].as_str().unwrap_or("").to_string();
+                let a_val = get_app_state_field(&a, st);
+                let b_val = get_app_state_field(&b, st);
+                set_app_state_field(&a, &b_val, st);
+                set_app_state_field(&b, &a_val, st);
             }
         }
         // Defer dialog effects — they need the dialog signal, not AppState
@@ -985,7 +985,51 @@ fn set_stroke_field(sp: &mut crate::workspace::app_state::StrokePanelState, key:
     }
 }
 
-/// Get/set stroke state fields using the `state.stroke_*` naming convention.
+/// Read a top-level AppState field as a JSON value (for use with swap:).
+fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) -> serde_json::Value {
+    use crate::tools::tool::ToolKind;
+    match key {
+        "fill_color" => match st.app_default_fill {
+            None => serde_json::Value::Null,
+            Some(f) => serde_json::Value::String(format!("#{}", f.color.to_hex())),
+        },
+        "stroke_color" => match st.app_default_stroke {
+            None => serde_json::Value::Null,
+            Some(s) => serde_json::Value::String(format!("#{}", s.color.to_hex())),
+        },
+        "fill_on_top" => serde_json::Value::Bool(st.fill_on_top),
+        "active_tool" => {
+            let name = match st.active_tool {
+                ToolKind::Selection => "selection",
+                ToolKind::PartialSelection => "partial_selection",
+                ToolKind::InteriorSelection => "interior_selection",
+                ToolKind::Pen => "pen",
+                ToolKind::AddAnchorPoint => "add_anchor",
+                ToolKind::DeleteAnchorPoint => "delete_anchor",
+                ToolKind::AnchorPoint => "anchor_point",
+                ToolKind::Pencil => "pencil",
+                ToolKind::PathEraser => "path_eraser",
+                ToolKind::Smooth => "smooth",
+                ToolKind::Type => "type",
+                ToolKind::TypeOnPath => "type_on_path",
+                ToolKind::Line => "line",
+                ToolKind::Rect => "rect",
+                ToolKind::RoundedRect => "rounded_rect",
+                ToolKind::Polygon => "polygon",
+                ToolKind::Star => "star",
+                ToolKind::Lasso => "lasso",
+            };
+            serde_json::Value::String(name.to_string())
+        }
+        _ => {
+            // Delegate stroke panel fields (stroke_cap, stroke_join, etc.)
+            let panel_key = key.strip_prefix("stroke_").unwrap_or(key);
+            get_stroke_field(&st.stroke_panel, panel_key)
+        }
+    }
+}
+
+/// Get/set stroke state fields using the `state.stroke_*` naming convention (legacy, unused).
 fn get_stroke_state_field(sp: &crate::workspace::app_state::StrokePanelState, key: &str) -> serde_json::Value {
     let panel_key = key.strip_prefix("stroke_").unwrap_or(key);
     get_stroke_field(sp, panel_key)
@@ -3927,4 +3971,67 @@ fn render_placeholder(el: &serde_json::Value, _ctx: &serde_json::Value) -> Eleme
 #[component]
 pub fn YamlPanelBody(content: serde_json::Value, eval_ctx: serde_json::Value) -> Element {
     render_element(&content, &eval_ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::element::{Color, Fill, Stroke};
+    use crate::workspace::app_state::AppState;
+
+    fn make_state_with_colors(fill_hex: &str, stroke_hex: &str) -> AppState {
+        let mut st = AppState::new();
+        st.app_default_fill = Color::from_hex(fill_hex).map(Fill::new);
+        st.app_default_stroke = Color::from_hex(stroke_hex).map(|c| Stroke::new(c, 1.0));
+        st
+    }
+
+    #[test]
+    fn get_app_state_field_fill_color() {
+        let st = make_state_with_colors("ff0000", "0000ff");
+        assert_eq!(
+            get_app_state_field("fill_color", &st),
+            serde_json::Value::String("#ff0000".to_string())
+        );
+    }
+
+    #[test]
+    fn get_app_state_field_stroke_color() {
+        let st = make_state_with_colors("ff0000", "0000ff");
+        assert_eq!(
+            get_app_state_field("stroke_color", &st),
+            serde_json::Value::String("#0000ff".to_string())
+        );
+    }
+
+    #[test]
+    fn get_app_state_field_null_fill() {
+        let mut st = AppState::new();
+        st.app_default_fill = None;
+        assert_eq!(get_app_state_field("fill_color", &st), serde_json::Value::Null);
+    }
+
+    #[test]
+    fn swap_fill_stroke_via_run_effects() {
+        let mut st = make_state_with_colors("ff0000", "0000ff");
+        let effects = vec![serde_json::json!({"swap": ["fill_color", "stroke_color"]})];
+        run_effects(&effects, &mut st);
+        // After swap: fill should be the old stroke color, stroke should be old fill color
+        let fill_hex = st.app_default_fill.map(|f| format!("#{}", f.color.to_hex()));
+        let stroke_hex = st.app_default_stroke.map(|s| format!("#{}", s.color.to_hex()));
+        assert_eq!(fill_hex, Some("#0000ff".to_string()));
+        assert_eq!(stroke_hex, Some("#ff0000".to_string()));
+    }
+
+    #[test]
+    fn swap_fill_stroke_null_fill() {
+        let mut st = AppState::new();
+        st.app_default_fill = None;
+        st.app_default_stroke = Color::from_hex("0000ff").map(|c| Stroke::new(c, 2.0));
+        let effects = vec![serde_json::json!({"swap": ["fill_color", "stroke_color"]})];
+        run_effects(&effects, &mut st);
+        let fill_hex = st.app_default_fill.map(|f| format!("#{}", f.color.to_hex()));
+        assert_eq!(fill_hex, Some("#0000ff".to_string()));
+        assert!(st.app_default_stroke.is_none());
+    }
 }
