@@ -162,9 +162,25 @@ def _dispatch_yaml_layers_action(action_name: str, model) -> None:
                 "path": path_val,
             })
             top_level_layer_paths.append(path_val)
+    # Phase 3 Group C: next_layer_name + new_layer_insert_index.
+    used_names = {l.name for l in model.document.layers if isinstance(l, Layer)}
+    n = 1
+    while f"Layer {n}" in used_names:
+        n += 1
+    next_layer_name = f"Layer {n}"
+    top_level_selected_indices = []
+    # Note: this code path doesn't currently receive selection state from
+    # the caller; we treat selection as empty here. When jas starts
+    # routing panel selection through this dispatch, extend to use it.
+    new_layer_insert_index = (min(top_level_selected_indices) + 1
+                               if top_level_selected_indices
+                               else len(model.document.layers))
     ctx = {"active_document": {
         "top_level_layers": top_level_layers,
         "top_level_layer_paths": top_level_layer_paths,
+        "next_layer_name": next_layer_name,
+        "new_layer_insert_index": new_layer_insert_index,
+        "layers_panel_selection_count": 0,
     }}
 
     # Platform handlers
@@ -211,9 +227,54 @@ def _dispatch_yaml_layers_action(action_name: str, model) -> None:
                 model.document, layers=new_layers
             )
 
+    # doc.create_layer: factory returning a Layer dataclass.
+    def doc_create_layer_handler(spec, call_ctx, _store):
+        if not isinstance(spec, dict):
+            return None
+        name_expr = spec.get("name", "'Layer'")
+        v = evaluate(str(name_expr), call_ctx)
+        name = v.value if v.type.name == "STRING" else "Layer"
+        return Layer(name=name, children=())
+
+    # doc.insert_at: top-level insertion for jas's Document dataclass.
+    def doc_insert_at_handler(spec, call_ctx, _store):
+        if not isinstance(spec, dict):
+            return None
+        parent_expr = spec.get("parent_path", "path()")
+        parent_val = evaluate(str(parent_expr), call_ctx)
+        if parent_val.type.name != "PATH" or parent_val.value != ():
+            # Only top-level insertion supported here
+            return None
+        idx_raw = spec.get("index", 0)
+        if isinstance(idx_raw, str):
+            idx_v = evaluate(idx_raw, call_ctx)
+            idx = int(idx_v.value) if idx_v.type.name == "NUMBER" else 0
+        else:
+            idx = int(idx_raw) if isinstance(idx_raw, (int, float)) else 0
+        # Resolve element: raw Layer or ctx-bound name
+        elem = None
+        el_spec = spec.get("element")
+        if isinstance(el_spec, Layer):
+            elem = el_spec
+        elif isinstance(el_spec, str):
+            ctx_val = call_ctx.get(el_spec)
+            if isinstance(ctx_val, Layer):
+                elem = ctx_val
+        if elem is None:
+            return None
+        layers = list(model.document.layers)
+        insert_idx = max(0, min(idx, len(layers)))
+        layers.insert(insert_idx, elem)
+        model.document = dataclasses.replace(
+            model.document, layers=tuple(layers)
+        )
+        return None
+
     platform_effects = {
         "snapshot": snapshot_handler,
         "doc.set": doc_set_handler,
+        "doc.create_layer": doc_create_layer_handler,
+        "doc.insert_at": doc_insert_at_handler,
     }
 
     store = StateStore()
@@ -230,18 +291,8 @@ def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
         return
     if cmd == "close_panel":
         layout.close_panel(addr)
-    elif cmd == "new_layer" and kind == PanelKind.LAYERS and model is not None:
-        import dataclasses
-        from geometry.element import Layer
-        doc = model.document
-        used = {l.name for l in doc.layers if isinstance(l, Layer)}
-        n = 1
-        while f"Layer {n}" in used:
-            n += 1
-        new_layer = Layer(name=f"Layer {n}", children=())
-        model.snapshot()
-        model.document = dataclasses.replace(doc, layers=doc.layers + (new_layer,))
-    elif cmd in ("toggle_all_layers_visibility",
+    elif cmd in ("new_layer",
+                 "toggle_all_layers_visibility",
                  "toggle_all_layers_outline",
                  "toggle_all_layers_lock") and kind == PanelKind.LAYERS and model is not None:
         _dispatch_yaml_layers_action(cmd, model)

@@ -125,13 +125,17 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
     ctx for subsequent effects in the same list."""
 
     # Platform-specific handlers take priority over built-ins so apps
-    # can override snapshot/doc.set with Model-based versions.
+    # can override snapshot/doc.set with Model-based versions. The
+    # handler's return value is propagated as the effect's return value
+    # (bound via `as:` when present).
     if platform_effects:
         for key in effect:
+            if key == "as":
+                continue
             handler = platform_effects.get(key)
             if handler:
-                handler(effect[key], ctx, store)
-                return None
+                result = handler(effect[key], ctx, store)
+                return None, result
 
     # let: { name: expr, ... } — PHASE3 §5.1
     # Evaluates each expression against current ctx (earlier names visible
