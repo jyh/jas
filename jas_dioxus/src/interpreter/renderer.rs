@@ -977,6 +977,13 @@ fn run_yaml_effect(
 ) -> Vec<serde_json::Value> {
     let mut deferred = Vec::new();
 
+    // Extract optional `as: <name>` return-binding (PHASE3 §5.5). Effects
+    // that return a value (doc.delete_at, doc.clone_at) store it in ctx
+    // under this name; subsequent effects can reference it by identifier.
+    let as_name: Option<String> = eff.get("as")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
     // Bare-string effects: `- snapshot` → {snapshot: null}
     if let Some(name) = eff.as_str() {
         if name == "snapshot" {
@@ -1033,6 +1040,85 @@ fn run_yaml_effect(
                 m.insert("_index".to_string(), serde_json::json!(i));
             }
             deferred.extend(run_yaml_effects(&body, &iter_ctx, st));
+        }
+        return deferred;
+    }
+
+    // doc.delete_at: path_expr — PHASE3 §5.5
+    // Deletes the element at path; if `as:` is set, binds the deleted
+    // element as JSON in ctx for subsequent effects.
+    if let Some(path_expr_v) = eff.get("doc.delete_at") {
+        let path_expr = path_expr_v.as_str().unwrap_or("");
+        let path_val = super::expr::eval(path_expr, &*eval_ctx);
+        if let super::expr_types::Value::Path(indices) = path_val {
+            let removed = delete_element_at(&indices, st);
+            if let Some(name) = as_name {
+                if let Some(map) = eval_ctx.as_object_mut() {
+                    let json = removed
+                        .and_then(|e| serde_json::to_value(&e).ok())
+                        .unwrap_or(serde_json::Value::Null);
+                    map.insert(name, json);
+                }
+            }
+        }
+        return deferred;
+    }
+
+    // doc.clone_at: path_expr — PHASE3 §5.5
+    // Deep-clones the element at path (without mutating the doc) and
+    // binds it as JSON in ctx under `as:` name.
+    if let Some(path_expr_v) = eff.get("doc.clone_at") {
+        let path_expr = path_expr_v.as_str().unwrap_or("");
+        let path_val = super::expr::eval(path_expr, &*eval_ctx);
+        if let super::expr_types::Value::Path(indices) = path_val {
+            if let Some(name) = as_name {
+                let cloned = clone_element_at(&indices, st);
+                if let Some(map) = eval_ctx.as_object_mut() {
+                    let json = cloned
+                        .and_then(|e| serde_json::to_value(&e).ok())
+                        .unwrap_or(serde_json::Value::Null);
+                    map.insert(name, json);
+                }
+            }
+        }
+        return deferred;
+    }
+
+    // doc.insert_after: { path, element } — PHASE3 §5.5
+    if let Some(spec) = eff.get("doc.insert_after").and_then(|v| v.as_object()) {
+        let path_expr = spec.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        let path_val = super::expr::eval(path_expr, &*eval_ctx);
+        let indices = match path_val {
+            super::expr_types::Value::Path(idx) => idx,
+            _ => return deferred,
+        };
+        let elem = resolve_element_arg(spec.get("element"), &*eval_ctx);
+        if let Some(e) = elem {
+            insert_element_after(&indices, e, st);
+        }
+        return deferred;
+    }
+
+    // doc.insert_at: { parent_path, index, element } — PHASE3 §5.5
+    if let Some(spec) = eff.get("doc.insert_at").and_then(|v| v.as_object()) {
+        let parent_expr = spec.get("parent_path").and_then(|v| v.as_str()).unwrap_or("path()");
+        let parent_val = super::expr::eval(parent_expr, &*eval_ctx);
+        let parent_indices = match parent_val {
+            super::expr_types::Value::Path(idx) => idx,
+            _ => return deferred,
+        };
+        let idx = match spec.get("index") {
+            Some(serde_json::Value::String(s)) => {
+                if let super::expr_types::Value::Number(n) = super::expr::eval(s, &*eval_ctx) {
+                    n as usize
+                } else { 0 }
+            }
+            Some(serde_json::Value::Number(n)) => n.as_u64().unwrap_or(0) as usize,
+            _ => 0,
+        };
+        let elem = resolve_element_arg(spec.get("element"), &*eval_ctx);
+        if let Some(e) = elem {
+            insert_element_at(&parent_indices, idx, e, st);
         }
         return deferred;
     }
@@ -1173,6 +1259,92 @@ fn run_yaml_effect(
     }
 
     deferred
+}
+
+/// Resolve a doc.* effect's `element:` argument to an Element.
+/// Accepts either a raw JSON object (serialized Element) or a bare
+/// identifier referring to a ctx-bound Element (from doc.clone_at/
+/// delete_at's `as:`). Bypasses the Value-wrapping roundtrip that would
+/// otherwise stringify a ctx'd JSON object.
+fn resolve_element_arg(
+    arg: Option<&serde_json::Value>,
+    eval_ctx: &serde_json::Value,
+) -> Option<crate::geometry::element::Element> {
+    use crate::geometry::element::Element;
+    match arg? {
+        serde_json::Value::String(s) => {
+            // Try direct ctx lookup for bare identifier
+            if let Some(direct) = eval_ctx.get(s) {
+                if let Ok(elem) = serde_json::from_value::<Element>(direct.clone()) {
+                    return Some(elem);
+                }
+            }
+            // Fallback: treat as an expression
+            let val = super::expr::eval(s, eval_ctx);
+            let json = super::effects::value_to_json(&val);
+            serde_json::from_value::<Element>(json).ok()
+        }
+        other => serde_json::from_value::<Element>(other.clone()).ok(),
+    }
+}
+
+/// Delete the element at path from the active tab's document.
+/// Returns the removed element.
+fn delete_element_at(
+    path: &[usize],
+    st: &mut crate::workspace::app_state::AppState,
+) -> Option<crate::geometry::element::Element> {
+    let tab = st.tabs.get_mut(st.active_tab)?;
+    let doc = tab.model.document().clone();
+    let path_vec = path.to_vec();
+    let removed = doc.get_element(&path_vec).cloned();
+    let new_doc = doc.delete_element(&path_vec);
+    tab.model.set_document(new_doc);
+    removed
+}
+
+/// Deep-clone the element at path without mutating the document.
+fn clone_element_at(
+    path: &[usize],
+    st: &crate::workspace::app_state::AppState,
+) -> Option<crate::geometry::element::Element> {
+    let tab = st.tabs.get(st.active_tab)?;
+    let path_vec = path.to_vec();
+    tab.model.document().get_element(&path_vec).cloned()
+}
+
+/// Insert element immediately after the element at path.
+fn insert_element_after(
+    path: &[usize],
+    element: crate::geometry::element::Element,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    let Some(tab) = st.tabs.get_mut(st.active_tab) else { return; };
+    let path_vec = path.to_vec();
+    let new_doc = tab.model.document().clone().insert_element_after(&path_vec, element);
+    tab.model.set_document(new_doc);
+}
+
+/// Insert element at a position under a parent path.
+fn insert_element_at(
+    parent_path: &[usize],
+    index: usize,
+    element: crate::geometry::element::Element,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    let Some(tab) = st.tabs.get_mut(st.active_tab) else { return; };
+    let mut new_doc = tab.model.document().clone();
+    if parent_path.is_empty() {
+        // Top-level: insert into layers array at index
+        let idx = index.min(new_doc.layers.len());
+        new_doc.layers.insert(idx, element);
+    } else {
+        // Nested: build insertion path = parent_path + [index]
+        let mut insert_path = parent_path.to_vec();
+        insert_path.push(index);
+        new_doc = new_doc.insert_element_at(&insert_path, element);
+    }
+    tab.model.set_document(new_doc);
 }
 
 /// Write a dotted-field value to the element at the given path (Phase 3 §5.4).
@@ -4381,5 +4553,62 @@ mod tests {
         dispatch_action("toggle_all_layers_lock", &params, &mut st);
         assert!(!tab_layer(&st, 0).common.locked);
         assert!(!tab_layer(&st, 1).common.locked);
+    }
+
+    // ── Phase 3 Group B: doc.delete_at / doc.clone_at / doc.insert_after
+
+    #[test]
+    fn doc_delete_at_top_level() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Preview, false),
+            ("C".into(), Visibility::Preview, false),
+        ]);
+        let eval_ctx = serde_json::json!({});
+        let effects = vec![serde_json::json!({"doc.delete_at": "path(1)"})];
+        run_yaml_effects(&effects, &eval_ctx, &mut st);
+        let layers = &st.tabs[st.active_tab].model.document().layers;
+        assert_eq!(layers.len(), 2);
+        assert_eq!(tab_layer(&st, 0).name, "A");
+        assert_eq!(tab_layer(&st, 1).name, "C");
+    }
+
+    #[test]
+    fn doc_clone_at_then_insert_after_duplicates() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Preview, false),
+        ]);
+        let eval_ctx = serde_json::json!({});
+        let effects = vec![
+            serde_json::json!({"doc.clone_at": "path(0)", "as": "clone"}),
+            serde_json::json!({"doc.insert_after": {"path": "path(0)", "element": "clone"}}),
+        ];
+        run_yaml_effects(&effects, &eval_ctx, &mut st);
+        let layers = &st.tabs[st.active_tab].model.document().layers;
+        assert_eq!(layers.len(), 3);
+        assert_eq!(tab_layer(&st, 0).name, "A");
+        assert_eq!(tab_layer(&st, 1).name, "A");   // clone
+        assert_eq!(tab_layer(&st, 2).name, "B");
+    }
+
+    #[test]
+    fn doc_delete_at_reverse_order_via_foreach() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Preview, false),
+            ("C".into(), Visibility::Preview, false),
+            ("D".into(), Visibility::Preview, false),
+        ]);
+        let eval_ctx = serde_json::json!({});
+        let effects = vec![serde_json::json!({
+            "foreach": {"source": "[path(2), path(0)]", "as": "p"},
+            "do": [{"doc.delete_at": "p"}]
+        })];
+        run_yaml_effects(&effects, &eval_ctx, &mut st);
+        let layers = &st.tabs[st.active_tab].model.document().layers;
+        assert_eq!(layers.len(), 2);
+        assert_eq!(tab_layer(&st, 0).name, "B");
+        assert_eq!(tab_layer(&st, 1).name, "D");
     }
 }
