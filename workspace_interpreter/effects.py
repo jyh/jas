@@ -147,9 +147,9 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         for name, expr in bindings.items():
             eval_ctx = store.eval_context(new_ctx)
             result = evaluate(str(expr) if expr is not None else "", eval_ctx)
-            # Preserve closure wrapper; unwrap other value types (matches
-            # expr_eval.py _eval_node for Let)
-            if result.type == ValueType.CLOSURE:
+            # Preserve Value wrapper for types that can't round-trip
+            # through their .value (CLOSURE, PATH). Other types unwrap.
+            if result.type in (ValueType.CLOSURE, ValueType.PATH):
                 new_ctx[name] = result
             else:
                 new_ctx[name] = result.value

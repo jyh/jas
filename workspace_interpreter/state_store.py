@@ -359,11 +359,18 @@ class StateStore:
         """
         from workspace_interpreter.expr_types import Value
         if self._document is None:
+            sel_count = 0
+            if self._active_panel == "layers":
+                panel = self._panels.get("layers", {})
+                sel = panel.get("layers_panel_selection", [])
+                if isinstance(sel, list):
+                    sel_count = len(sel)
             return {
                 "top_level_layers": [],
                 "top_level_layer_paths": [],
                 "next_layer_name": "Layer 1",
                 "new_layer_insert_index": 0,
+                "layers_panel_selection_count": sel_count,
             }
         layers = self._document.get("layers", [])
         top_level_layers = []
@@ -407,9 +414,18 @@ class StateStore:
                         top_level_indices.append(idx[0])
                 if top_level_indices:
                     insert_idx = min(top_level_indices) + 1
+        # Panel-selection rollup for enabled_when predicates and fallback
+        # logic in actions like enter_isolation_mode.
+        sel_count = 0
+        if self._active_panel == "layers":
+            panel = self._panels.get("layers", {})
+            sel = panel.get("layers_panel_selection", [])
+            if isinstance(sel, list):
+                sel_count = len(sel)
         return {
             "top_level_layers": top_level_layers,
             "top_level_layer_paths": top_level_layer_paths,
             "next_layer_name": next_layer_name,
             "new_layer_insert_index": insert_idx,
+            "layers_panel_selection_count": sel_count,
         }

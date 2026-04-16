@@ -532,6 +532,42 @@ class TestEnterIsolationModeAction:
         # storage convention so it round-trips through iteration).
         assert stack[0] == {"__path__": [0, 2]}
 
+    def test_enter_falls_back_to_panel_selection(self):
+        """If container_id is null but exactly one layer is panel-selected,
+        that layer's path gets isolated."""
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("enter_isolation_mode")["effects"]
+        store = StateStore()
+        store.init_panel("layers", {
+            "isolation_stack": [],
+            "layers_panel_selection": [{"__path__": [2]}],
+        })
+        store.set_active_panel("layers")
+        # No container_id — fall back to the single selected path
+        run_effects(effects, {"param": {"container_id": None}}, store,
+                    diagnostics=[])
+        stack = store.get_panel("layers", "isolation_stack")
+        assert stack == [{"__path__": [2]}]
+
+    def test_enter_noop_when_no_selection_or_param(self):
+        """If no container_id and selection isn't exactly one, nothing
+        is pushed."""
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("enter_isolation_mode")["effects"]
+        store = StateStore()
+        store.init_panel("layers", {
+            "isolation_stack": [],
+            "layers_panel_selection": [],
+        })
+        store.set_active_panel("layers")
+        run_effects(effects, {"param": {"container_id": None}}, store,
+                    diagnostics=[])
+        assert store.get_panel("layers", "isolation_stack") == []
+
     def test_enter_then_exit_roundtrip(self):
         import os as _os
         global os
