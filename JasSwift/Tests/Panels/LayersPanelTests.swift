@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import JasLib
 
 // MARK: - Phase 3: Group A toggle actions via YAML dispatch
@@ -316,6 +317,52 @@ private func runLayersEffects(_ effects: [Any], model: Model) {
     runEffects(effects, ctx: ctx, store: StateStore(),
                platformEffects: ["list_push": listPushHandler])
     #expect(stackCalls == [[1]])
+}
+
+@Test func layerOptionsConfirmEditModeUpdatesLayer() {
+    let model = Model(document: Document(layers: [
+        Layer(name: "Old", children: [], visibility: .preview),
+    ]))
+    var closed = false
+    LayersPanel.dispatchYamlAction(
+        "layer_options_confirm",
+        model: model,
+        params: [
+            "layer_id": "0",
+            "name": "Renamed",
+            "lock": true,
+            "show": true,
+            "preview": false,   // show=true + preview=false → outline
+        ],
+        onCloseDialog: { closed = true }
+    )
+    #expect(closed)
+    #expect(model.document.layers[0].name == "Renamed")
+    #expect(model.document.layers[0].locked == true)
+    #expect(model.document.layers[0].visibility == .outline)
+}
+
+@Test func layerOptionsConfirmCreateModeAppendsLayer() {
+    let model = Model(document: Document(layers: [
+        Layer(name: "Existing", children: []),
+    ]))
+    var closed = false
+    LayersPanel.dispatchYamlAction(
+        "layer_options_confirm",
+        model: model,
+        params: [
+            "layer_id": NSNull(),
+            "name": "Brand New",
+            "lock": false,
+            "show": true,
+            "preview": true,
+        ],
+        onCloseDialog: { closed = true }
+    )
+    #expect(closed)
+    #expect(model.document.layers.count == 2)
+    #expect(model.document.layers[1].name == "Brand New")
+    #expect(model.document.layers[1].visibility == .preview)
 }
 
 @Test func exitIsolationModePopsStack() {

@@ -636,15 +636,22 @@ struct LayerOptionsSheet: View {
                 Spacer()
                 Button("Cancel") { onClose() }
                 Button("OK") {
-                    if case .layer(let le) = e {
-                        let vis: Visibility = !show ? .invisible : (preview ? .preview : .outline)
-                        let newLayer = Layer(name: name, children: le.children,
-                                             opacity: le.opacity, transform: le.transform,
-                                             locked: lock, visibility: vis)
-                        model.snapshot()
-                        model.document = model.document.replaceElement(path, with: .layer(newLayer))
-                    }
-                    onClose()
+                    // Route through the YAML layer_options_confirm action
+                    // so Swift shares the commit logic with the spec.
+                    let layerIdStr = path.map(String.init)
+                        .joined(separator: ".")
+                    LayersPanel.dispatchYamlAction(
+                        "layer_options_confirm",
+                        model: model,
+                        params: [
+                            "layer_id": layerIdStr,
+                            "name": name,
+                            "lock": lock,
+                            "show": show,
+                            "preview": preview,
+                        ],
+                        onCloseDialog: onClose
+                    )
                 }
                 .keyboardShortcut(.defaultAction)
             }
