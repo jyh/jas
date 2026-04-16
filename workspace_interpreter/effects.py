@@ -43,10 +43,22 @@ def run_effects(effects: list, ctx: dict, store: StateStore,
         if isinstance(effect, str):
             effect = {effect: None}
         if isinstance(effect, dict):
-            new_ctx = _run_one(effect, ctx, store, actions, platform_effects, dialogs,
-                               schema, diagnostics)
+            # Extract optional `as: <name>` return-binding (PHASE3 §5.5)
+            as_name = effect.get("as") if isinstance(effect.get("as"), str) else None
+            result = _run_one(effect, ctx, store, actions, platform_effects, dialogs,
+                              schema, diagnostics)
+            # _run_one may return a new_ctx (from let:) OR a (new_ctx, return_value)
+            # tuple. Normalize.
+            new_ctx = None
+            return_value = None
+            if isinstance(result, tuple):
+                new_ctx, return_value = result
+            else:
+                new_ctx = result
             if new_ctx is not None:
                 ctx = new_ctx
+            if as_name is not None and return_value is not None:
+                ctx = {**ctx, as_name: return_value}
 
 
 def _eval(expr, store: StateStore, ctx: dict):
@@ -143,6 +155,19 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
     if "snapshot" in effect:
         store.snapshot()
         return None
+
+    # doc.delete_at: path_expr — PHASE3 §5.5
+    # Deletes the element at the given path. Returns the deleted
+    # element (native form) for binding via `as:`.
+    if "doc.delete_at" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        path_expr = effect["doc.delete_at"]
+        eval_ctx = store.eval_context(ctx)
+        path_val = evaluate(str(path_expr) if path_expr is not None else "", eval_ctx)
+        if path_val.type != ValueType.PATH:
+            return None, None
+        deleted = store.delete_element_at(path_val.value)
+        return None, deleted
 
     # doc.set: { path, fields } — PHASE3 §5.4
     # Schema-driven write on the element at `path`. Each field is a

@@ -318,6 +318,63 @@ class TestSnapshotEffect:
 # ══════════════════════════════════════════════════════════════════
 
 
+class TestAsReturnBinding:
+    """PHASE3.md §5.5: effects that return values can bind via as:"""
+
+    def test_doc_delete_at_returns_deleted_element(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
+            {"kind": "Layer", "name": "B", "common": {"visibility": "visible"}},
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.delete_at": "path(0)", "as": "removed"},
+            {"set": {"deleted_name": "removed.name"}},
+        ], {}, store, diagnostics=[])
+        # Layer B shifted to index 0, A removed
+        assert len(doc["layers"]) == 1
+        assert doc["layers"][0]["name"] == "B"
+        assert store.get("deleted_name") == "A"
+
+
+class TestDocDeleteAtEffect:
+    """PHASE3.md §5.5: doc.delete_at primitive."""
+
+    def test_delete_top_level_layer(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A"},
+            {"kind": "Layer", "name": "B"},
+            {"kind": "Layer", "name": "C"},
+        ])
+        store = StateStore(document=doc)
+        run_effects([{"doc.delete_at": "path(1)"}], {}, store, diagnostics=[])
+        names = [l["name"] for l in doc["layers"]]
+        assert names == ["A", "C"]
+
+    def test_delete_reverse_order_via_foreach(self):
+        """Deleting [0,1,2] in reverse order keeps indices valid."""
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A"},
+            {"kind": "Layer", "name": "B"},
+            {"kind": "Layer", "name": "C"},
+            {"kind": "Layer", "name": "D"},
+        ])
+        store = StateStore(document=doc)
+        # Use an explicit reverse-sorted path list
+        run_effects([
+            {"foreach": {"source": "[path(2), path(0)]", "as": "p"},
+             "do": [{"doc.delete_at": "p"}]},
+        ], {}, store, diagnostics=[])
+        names = [l["name"] for l in doc["layers"]]
+        assert names == ["B", "D"]
+
+    def test_delete_invalid_path_is_noop(self):
+        doc = _make_doc([{"kind": "Layer", "name": "A"}])
+        store = StateStore(document=doc)
+        run_effects([{"doc.delete_at": "path(5)"}], {}, store, diagnostics=[])
+        assert len(doc["layers"]) == 1
+
+
 class TestDocSetEffect:
     def test_doc_set_writes_dotted_field(self):
         doc = _make_doc([
