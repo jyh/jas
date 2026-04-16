@@ -159,6 +159,45 @@ import Testing
     #expect(store.getDialog("x") == nil)
 }
 
+// MARK: - Phase 3: let and foreach effects
+
+@Test func letBindsForSubsequentEffect() {
+    let store = StateStore(defaults: ["x": 0])
+    runEffects([
+        ["let": ["n": "5"]],
+        ["set": ["x": "n"]],
+    ], ctx: [:], store: store)
+    #expect(store.get("x") as? Int == 5)
+}
+
+@Test func letShadowsOuterScope() {
+    let store = StateStore(defaults: ["x": 0])
+    runEffects([
+        ["let": ["v": "1"]],
+        ["let": ["v": "2"]],
+        ["set": ["x": "v"]],
+    ], ctx: [:], store: store)
+    #expect(store.get("x") as? Int == 2)
+}
+
+@Test func foreachIteratesOverList() {
+    let store = StateStore(defaults: ["sum": 0])
+    runEffects([
+        ["foreach": ["source": "[1, 2, 3]", "as": "n"],
+         "do": [["set": ["sum": "state.sum + n"]]]],
+    ], ctx: [:], store: store)
+    #expect(store.get("sum") as? Int == 6)
+}
+
+@Test func foreachEmptyListDoesNothing() {
+    let store = StateStore(defaults: ["touched": false])
+    runEffects([
+        ["foreach": ["source": "[]", "as": "x"],
+         "do": [["set": ["touched": "true"]]]],
+    ], ctx: [:], store: store)
+    #expect(store.get("touched") as? Bool == false)
+}
+
 // MARK: - Pop effect
 
 @Test func popPanelRemovesLast() {
