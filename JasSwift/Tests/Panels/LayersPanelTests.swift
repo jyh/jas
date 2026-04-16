@@ -211,5 +211,22 @@ private func runLayersEffects(_ effects: [Any], model: Model) {
     #expect(model.document.layers[2].name == "B")
 }
 
+@Test func collectInNewLayerViaYamlDispatch() {
+    let model = Model(document: Document(layers: [
+        Layer(name: "Layer 1", children: []),
+        Layer(name: "Layer 2", children: []),
+        Layer(name: "Layer 3", children: []),
+    ]))
+    LayersPanel.dispatchYamlAction("collect_in_new_layer",
+                                    model: model,
+                                    panelSelection: [[0], [2]])
+    #expect(model.document.layers.count == 2)
+    #expect(model.document.layers[0].name == "Layer 2")
+    // Next unused name after Layer 1/2/3 is Layer 4; contains the two
+    // wrapped source layers as Element.layer children.
+    #expect(model.document.layers[1].name == "Layer 4")
+    #expect(model.document.layers[1].children.count == 2)
+}
+
 // Shared mutable layout for tests — not exercised by dispatch here.
 private var defaultLayout: WorkspaceLayout = WorkspaceLayout.defaultLayout()

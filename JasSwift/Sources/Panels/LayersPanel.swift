@@ -28,14 +28,15 @@ public enum LayersPanel {
         case "toggle_all_layers_visibility",
              "toggle_all_layers_outline",
              "toggle_all_layers_lock",
-             "new_layer":
+             "new_layer",
+             "collect_in_new_layer":
             if let m = model {
                 dispatchYamlAction(cmd, model: m)
             }
         // Tier-3 stubs: log only until document model is implemented.
         case "new_group",
              "enter_isolation_mode", "exit_isolation_mode",
-             "flatten_artwork", "collect_in_new_layer":
+             "flatten_artwork":
             #if DEBUG
             print("[LayersPanel] dispatch: \(cmd)")
             #endif
@@ -216,6 +217,59 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.wrap_in_layer: { paths, name } — append a new top-level
+        // Layer containing the selected elements. Swift's Document.layers
+        // is [Layer] (top-level Layers only), so this only supports a
+        // top-level selection.
+        let docWrapInLayerHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any] else { return nil }
+            let pathsExpr = (spec["paths"] as? String) ?? "[]"
+            let pathsVal = evaluate(pathsExpr, context: callCtx)
+            guard case .list(let items) = pathsVal else { return nil }
+            var normalized: [[Int]] = []
+            for item in items {
+                if let obj = item.value as? [String: Any],
+                   let arr = obj["__path__"] as? [Int] {
+                    normalized.append(arr)
+                }
+            }
+            if normalized.isEmpty { return nil }
+            normalized.sort { $0.lexicographicallyPrecedes($1) }
+            // Top-level only
+            let topLevelIndices = normalized.compactMap { p -> Int? in
+                p.count == 1 ? p[0] : nil
+            }
+            if topLevelIndices.count != normalized.count { return nil }
+            // Evaluate name expression
+            let nameExpr = (spec["name"] as? String) ?? "'Layer'"
+            let nameVal = evaluate(nameExpr, context: callCtx)
+            let name: String
+            if case .string(let s) = nameVal { name = s } else { name = "Layer" }
+            // Collect children in document order
+            let originalLayers = model.document.layers
+            let childLayers = topLevelIndices.map { originalLayers[$0] }
+            // Promote Layer -> Element (Layer's children are Elements;
+            // collecting Layers into a layer means wrapping them as
+            // inner structure). For now, wrap them as children using
+            // Element.layer(inner).
+            var children: [Element] = []
+            for c in childLayers {
+                children.append(Element.layer(c))
+            }
+            // Remove sources in descending order
+            let sortedIndices = topLevelIndices.sorted(by: >)
+            var newLayers = originalLayers
+            for idx in sortedIndices {
+                newLayers.remove(at: idx)
+            }
+            let newLayer = Layer(name: name, children: children)
+            newLayers.append(newLayer)
+            model.document = Document(layers: newLayers,
+                                       selectedLayer: model.document.selectedLayer,
+                                       selection: model.document.selection)
+            return nil
+        }
+
         // doc.create_layer: { name } — factory returning a new Layer
         // value. Bind via as: and insert with doc.insert_at.
         let docCreateLayerHandler: PlatformEffect = { value, callCtx, _ in
@@ -268,6 +322,7 @@ public enum LayersPanel {
             "doc.insert_after": docInsertAfterHandler,
             "doc.insert_at": docInsertAtHandler,
             "doc.create_layer": docCreateLayerHandler,
+            "doc.wrap_in_layer": docWrapInLayerHandler,
         ]
 
         let store = StateStore()
