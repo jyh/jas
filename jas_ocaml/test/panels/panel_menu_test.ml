@@ -79,7 +79,7 @@ let menu_tests = [
     (* Color is at group 0, panel index 0 *)
     let addr = pa did 0 0 in
     assert (is_panel_visible l Color);
-    panel_dispatch Color "close_panel" addr l ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ());
+    panel_dispatch Color "close_panel" addr l ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ()) ();
     assert (not (is_panel_visible l Color)));
 
   Alcotest.test_case "is_checked_defaults_false" `Quick (fun () ->
@@ -128,6 +128,44 @@ let menu_tests = [
       assert has
     ) cmds);
 
+  Alcotest.test_case "new_layer_no_selection_appends_to_end" `Quick (fun () ->
+    let l = default_layout () in
+    let did = right_dock_id l in
+    let addr = pa did 2 0 in
+    let m = Jas.Model.create () in
+    (* Add two existing layers *)
+    let layer0 = Jas.Element.make_layer ~name:"Layer 0" [||] in
+    let layer1 = Jas.Element.make_layer ~name:"Layer 1" [||] in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers = [|layer0; layer1|] };
+    panel_dispatch Layers "new_layer" addr l ~fill_on_top:true ~get_model:(fun () -> m)
+      ~get_panel_selection:(fun () -> []) ();
+    let layers = m#document.Jas.Document.layers in
+    assert (Array.length layers = 3);
+    (* No selection: new layer appended at end *)
+    assert (match layers.(2) with Jas.Element.Layer le -> le.name <> "Layer 0" && le.name <> "Layer 1" | _ -> false));
+
+  Alcotest.test_case "new_layer_with_selection_inserts_above" `Quick (fun () ->
+    let l = default_layout () in
+    let did = right_dock_id l in
+    let addr = pa did 2 0 in
+    let m = Jas.Model.create () in
+    let layer0 = Jas.Element.make_layer ~name:"Layer 0" [||] in
+    let layer1 = Jas.Element.make_layer ~name:"Layer 1" [||] in
+    let layer2 = Jas.Element.make_layer ~name:"Layer 2" [||] in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers = [|layer0; layer1; layer2|] };
+    (* Select layer at index 1 (Layer 1) *)
+    panel_dispatch Layers "new_layer" addr l ~fill_on_top:true ~get_model:(fun () -> m)
+      ~get_panel_selection:(fun () -> [[1]]) ();
+    let layers = m#document.Jas.Document.layers in
+    assert (Array.length layers = 4);
+    (* insert_pos = 1 + 1 = 2, new layer at index 2 *)
+    assert (match layers.(2) with Jas.Element.Layer le ->
+      le.name <> "Layer 0" && le.name <> "Layer 1" && le.name <> "Layer 2" | _ -> false);
+    (* Layer 2 shifted to index 3 *)
+    assert (match layers.(3) with Jas.Element.Layer le -> le.name = "Layer 2" | _ -> false));
+
   Alcotest.test_case "layers_dispatch_tier3_no_crash" `Quick (fun () ->
     let l = default_layout () in
     let did = right_dock_id l in
@@ -137,7 +175,7 @@ let menu_tests = [
                 "enter_isolation_mode"; "exit_isolation_mode";
                 "flatten_artwork"; "collect_in_new_layer"] in
     List.iter (fun cmd ->
-      panel_dispatch Layers cmd addr l ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ())
+      panel_dispatch Layers cmd addr l ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ()) ()
     ) cmds);
 ]
 

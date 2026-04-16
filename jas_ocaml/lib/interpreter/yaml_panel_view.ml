@@ -47,6 +47,10 @@ let _layers_solo_state : (int list * (int list * Element.visibility) list) optio
 (** Callback to trigger re-render when UI state changes. *)
 let _rerender_layers : (unit -> unit) ref = ref (fun () -> ())
 
+(** Return the current layers panel selection as a list of paths. *)
+let get_layers_panel_selection () : int list list =
+  PathSet2.elements !_layers_panel_selection
+
 (** Safely access a nested JSON member path (e.g. "style" -> "gap").
     Returns `Null if any intermediate value is not an object. *)
 let safe_member (key : string) (j : Yojson.Safe.t) : Yojson.Safe.t =

@@ -86,7 +86,8 @@ let set_active_color_live color ~fill_on_top (m : Model.model) =
   end
 
 (** Dispatch a menu command for a panel kind. *)
-let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model =
+let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
+    ?(get_panel_selection = fun () -> []) () =
   (* Mode changes *)
   (match color_panel_mode_of_command cmd with
    | Some mode -> layout.color_panel_mode <- mode
@@ -106,7 +107,21 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model =
     in
     let name = find_name 1 in
     let new_layer = Element.make_layer ~name [||] in
-    let new_layers = Array.append d.Document.layers [|new_layer|] in
+    (* Insert above the topmost panel-selected top-level layer, or at end *)
+    let panel_sel = get_panel_selection () in
+    let top_level_indices = List.filter_map (function
+      | [i] -> Some i
+      | _ -> None) panel_sel in
+    let insert_pos = match List.sort compare top_level_indices with
+      | [] -> Array.length d.Document.layers
+      | first :: _ -> first + 1
+    in
+    let layers = d.Document.layers in
+    let n = Array.length layers in
+    let new_layers = Array.init (n + 1) (fun i ->
+      if i < insert_pos then layers.(i)
+      else if i = insert_pos then new_layer
+      else layers.(i - 1)) in
     m#snapshot;
     m#set_document { d with Document.layers = new_layers }
   | "toggle_all_layers_visibility" when kind = Layers ->
