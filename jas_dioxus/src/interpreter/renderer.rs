@@ -3212,14 +3212,49 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     let drag_enter_path = row.path.clone();
                     let drag_enter_app = app.clone();
                     let mut drag_enter_rev = revision;
+                    let drag_enter_is_container = row.is_container;
+                    let drag_enter_is_collapsed = row.is_collapsed;
                     let on_mouseenter = move |_: Event<MouseData>| {
                         let a = drag_enter_app.clone();
                         let p = drag_enter_path.clone();
+                        let is_container = drag_enter_is_container;
+                        let is_collapsed = drag_enter_is_collapsed;
                         spawn(async move {
                             let mut st = a.borrow_mut();
                             if st.layers_drag_target.is_some() {
-                                st.layers_drag_target = Some(p);
+                                st.layers_drag_target = Some(p.clone());
                                 drag_enter_rev += 1;
+                            } else {
+                                return;
+                            }
+                            drop(st);
+
+                            // If hovering a collapsed container during drag, schedule
+                            // an auto-expand after 500ms of continuous hover.
+                            if is_container && is_collapsed {
+                                #[cfg(target_arch = "wasm32")]
+                                {
+                                    use wasm_bindgen::prelude::*;
+                                    use wasm_bindgen::JsCast;
+                                    let a_for_cb = a.clone();
+                                    let p_for_cb = p.clone();
+                                    let mut rev_for_cb = drag_enter_rev;
+                                    let cb = Closure::once(move || {
+                                        let mut st = a_for_cb.borrow_mut();
+                                        // Only expand if still hovering the same row during drag
+                                        if st.layers_drag_target.as_ref() == Some(&p_for_cb) {
+                                            st.layers_collapsed.remove(&p_for_cb);
+                                            rev_for_cb += 1;
+                                        }
+                                    });
+                                    if let Some(win) = web_sys::window() {
+                                        let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                            cb.as_ref().unchecked_ref(),
+                                            500,
+                                        );
+                                        cb.forget();
+                                    }
+                                }
                             }
                         });
                     };
