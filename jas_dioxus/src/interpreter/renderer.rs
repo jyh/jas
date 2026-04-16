@@ -276,6 +276,81 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
             }
             return vec![];
         }
+        "layer_options_confirm" => {
+            use crate::geometry::element::{Element as E, LayerElem, Visibility};
+            // Read dialog state from params (passed by the confirm button)
+            let layer_id = params.get("layer_id").and_then(|v| v.as_str()).map(String::from);
+            let path: Option<Vec<usize>> = layer_id.as_ref().and_then(|s| {
+                s.split(',').map(|p| p.parse::<usize>().ok()).collect()
+            });
+            let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("Layer").to_string();
+            let lock = params.get("lock").and_then(|v| v.as_bool()).unwrap_or(false);
+            let show = params.get("show").and_then(|v| v.as_bool()).unwrap_or(true);
+            let preview = params.get("preview").and_then(|v| v.as_bool()).unwrap_or(true);
+            let vis = if !show { Visibility::Invisible }
+                else if preview { Visibility::Preview }
+                else { Visibility::Outline };
+            if let Some(p) = path {
+                if let Some(tab) = st.tab_mut() {
+                    tab.model.snapshot();
+                    let mut new_doc = tab.model.document().clone();
+                    if let Some(elem) = new_doc.get_element_mut(&p) {
+                        if let E::Layer(le) = elem {
+                            *le = LayerElem {
+                                name,
+                                children: le.children.clone(),
+                                common: crate::geometry::element::CommonProps {
+                                    locked: lock,
+                                    visibility: vis,
+                                    ..le.common.clone()
+                                },
+                            };
+                        }
+                    }
+                    tab.model.set_document(new_doc);
+                }
+            }
+            return vec![serde_json::json!({"close_dialog": null})];
+        }
+        "open_layer_options" => {
+            use crate::geometry::element::Element as E;
+            let layer_id = params.get("layer_id").and_then(|v| v.as_str()).map(String::from);
+            // Parse layer_id as path e.g. "0,1" or just "0"
+            let path: Option<Vec<usize>> = layer_id.as_ref().and_then(|s| {
+                s.split(',').map(|p| p.parse::<usize>().ok()).collect()
+            });
+            // Build dialog params from the layer's properties
+            let mut dlg_params = serde_json::Map::new();
+            dlg_params.insert("mode".into(), serde_json::Value::String("edit".into()));
+            if let Some(ref p) = path {
+                dlg_params.insert("layer_id".into(), serde_json::Value::String(
+                    p.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+                ));
+                if let Some(tab) = st.tab() {
+                    if let Some(elem) = tab.model.document().get_element(p) {
+                        if let E::Layer(le) = elem {
+                            dlg_params.insert("name".into(), serde_json::Value::String(le.name.clone()));
+                            dlg_params.insert("color".into(), serde_json::Value::String("#4a90d9".into()));
+                            dlg_params.insert("color_preset".into(), serde_json::Value::String("light_blue".into()));
+                            dlg_params.insert("lock".into(), serde_json::Value::Bool(le.common.locked));
+                            use crate::geometry::element::Visibility;
+                            let show = le.common.visibility != Visibility::Invisible;
+                            let preview = le.common.visibility == Visibility::Preview;
+                            dlg_params.insert("show".into(), serde_json::Value::Bool(show));
+                            dlg_params.insert("preview".into(), serde_json::Value::Bool(preview));
+                            dlg_params.insert("dim_images".into(), serde_json::Value::Bool(false));
+                            dlg_params.insert("dim_percentage".into(), serde_json::Value::from(50));
+                        }
+                    }
+                }
+            }
+            return vec![serde_json::json!({
+                "open_dialog": {
+                    "id": "layer_options",
+                    "params": dlg_params
+                }
+            })];
+        }
         "new_layer" => {
             use crate::geometry::element::{Element as E, LayerElem, CommonProps};
             let panel_sel = st.layers_panel_selection.clone();
@@ -3013,16 +3088,35 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         });
                     };
 
+                    let cpath_for_action = cpath.clone();
+                    let mut ctx_dialog_signal = rctx.dialog_ctx.0;
                     let do_action = |action: &'static str| {
                         let a = app.clone();
                         let mut r = revision;
+                        let path_str = cpath_for_action.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
                         move |_: Event<MouseData>| {
                             let a2 = a.clone();
+                            let ps = path_str.clone();
                             spawn(async move {
-                                let mut st = a2.borrow_mut();
-                                let params = serde_json::Map::new();
-                                dispatch_action(action, &params, &mut st);
-                                st.layers_context_menu = None;
+                                let deferred = {
+                                    let mut st = a2.borrow_mut();
+                                    let mut params = serde_json::Map::new();
+                                    params.insert("layer_id".into(), serde_json::Value::String(ps));
+                                    let d = dispatch_action(action, &params, &mut st);
+                                    st.layers_context_menu = None;
+                                    d
+                                };
+                                for eff in deferred {
+                                    if let Some(od) = eff.get("open_dialog") {
+                                        let dlg_id = od.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                        let raw_params = od.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
+                                        let live_state = {
+                                            let st = a2.borrow();
+                                            crate::workspace::dock_panel::build_live_state_map(&st)
+                                        };
+                                        super::dialog_view::open_dialog(&mut ctx_dialog_signal, &dlg_id, &raw_params, &live_state);
+                                    }
+                                }
                                 r += 1;
                             });
                         }
