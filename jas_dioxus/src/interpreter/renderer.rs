@@ -3080,7 +3080,31 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             if let Some(_drag_target) = st.layers_drag_target.take() {
                                 // Move all panel-selected elements to before the target
                                 let sources = st.layers_panel_selection.clone();
-                                if !sources.is_empty() && !sources.contains(&target) {
+                                // Validate drag constraints
+                                let target_parent: Vec<usize> = target[..target.len()-1].to_vec();
+                                let allowed = {
+                                    if sources.is_empty() || sources.contains(&target) {
+                                        false
+                                    } else if let Some(tab) = st.tab() {
+                                        let doc = tab.model.document();
+                                        // Check: no source is an ancestor of target (no drop into self/descendant)
+                                        let no_cycle = !sources.iter().any(|src| {
+                                            target.len() >= src.len() && target.starts_with(src)
+                                        });
+                                        // Check: target's parent isn't locked (can't drop into locked)
+                                        let parent_unlocked = if target_parent.is_empty() {
+                                            true
+                                        } else {
+                                            doc.get_element(&target_parent)
+                                                .map(|e| !e.locked())
+                                                .unwrap_or(true)
+                                        };
+                                        no_cycle && parent_unlocked
+                                    } else {
+                                        false
+                                    }
+                                };
+                                if allowed {
                                     if let Some(tab) = st.tab_mut() {
                                         tab.model.snapshot();
                                         // Collect elements, delete from old positions (reverse order),
