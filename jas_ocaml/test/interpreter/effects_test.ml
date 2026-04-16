@@ -149,6 +149,43 @@ let pop_tests = [
     assert (get s "my_stack" = `List [`Int 1; `Int 2]));
 ]
 
+let let_tests = [
+  Alcotest.test_case "let_binds_for_subsequent_effect" `Quick (fun () ->
+    let s = create ~defaults:[("x", `Int 0)] () in
+    run_effects [
+      `Assoc [("let", `Assoc [("n", `String "5")])];
+      `Assoc [("set", `Assoc [("x", `String "n")])]
+    ] [] s;
+    assert (get s "x" = `Int 5));
+
+  Alcotest.test_case "let_shadows_outer_scope" `Quick (fun () ->
+    let s = create ~defaults:[("x", `Int 0)] () in
+    run_effects [
+      `Assoc [("let", `Assoc [("v", `String "1")])];
+      `Assoc [("let", `Assoc [("v", `String "2")])];
+      `Assoc [("set", `Assoc [("x", `String "v")])]
+    ] [] s;
+    assert (get s "x" = `Int 2));
+]
+
+let foreach_tests = [
+  Alcotest.test_case "foreach_iterates" `Quick (fun () ->
+    let s = create ~defaults:[("sum", `Int 0)] () in
+    run_effects [
+      `Assoc [("foreach", `Assoc [("source", `String "[1, 2, 3]"); ("as", `String "n")]);
+              ("do", `List [`Assoc [("set", `Assoc [("x", `String "state.sum + n")])]])]
+    ] [] s;
+    ignore s);
+
+  Alcotest.test_case "foreach_empty_list_noop" `Quick (fun () ->
+    let s = create ~defaults:[("touched", `Bool false)] () in
+    run_effects [
+      `Assoc [("foreach", `Assoc [("source", `String "[]"); ("as", `String "x")]);
+              ("do", `List [`Assoc [("set", `Assoc [("touched", `String "true")])]])]
+    ] [] s;
+    assert (get s "touched" = `Bool false));
+]
+
 let () =
   Alcotest.run "Effects" [
     "Set", set_tests;
@@ -159,4 +196,6 @@ let () =
     "Dispatch", dispatch_tests;
     "Dialog", dialog_tests;
     "Pop", pop_tests;
+    "Phase3 Let", let_tests;
+    "Phase3 Foreach", foreach_tests;
   ]

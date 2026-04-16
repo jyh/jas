@@ -54,8 +54,52 @@ let rec run_effects_inner
     (store : State_store.t)
     (actions : Yojson.Safe.t) (dialogs : Yojson.Safe.t)
     ?(schema = false) (diagnostics : Schema.diagnostic list ref) : unit =
-  List.iter (function
-    | `Assoc _ as eff -> run_one eff ctx store actions dialogs ~schema diagnostics
+  (* Thread ctx through sibling effects: `let:` at position N extends
+     ctx for positions N+1..end. Nested lists (then/else/do) get their
+     own threading via recursive calls and don't leak bindings back. *)
+  let ctx_ref = ref ctx in
+  List.iter (fun eff ->
+    match eff with
+    | `Assoc _ ->
+      let mem key = Workspace_loader.json_member key eff in
+      (* let: { name: expr, ... } — PHASE3 §5.1 *)
+      (match mem "let" with
+       | Some (`Assoc pairs) ->
+         ctx_ref := List.fold_left (fun acc (name, expr) ->
+           let value = eval_expr expr store acc in
+           (name, value_to_json value) :: List.filter (fun (k, _) -> k <> name) acc
+         ) !ctx_ref pairs
+       | _ ->
+         (* foreach: { source, as } do: [...] — PHASE3 §5.3 *)
+         match mem "foreach", mem "do" with
+         | Some (`Assoc spec), Some (`List body) ->
+           let source_expr = (match List.assoc_opt "source" spec with
+             | Some v -> v | None -> `String "[]") in
+           let var_name = (match List.assoc_opt "as" spec with
+             | Some (`String s) -> s | _ -> "item") in
+           let items = match eval_expr source_expr store !ctx_ref with
+             | Expr_eval.List lst -> lst
+             | _ -> []
+           in
+           List.iteri (fun i item ->
+             (* Fresh iteration scope: outer ctx + iteration variable.
+                Bindings made inside do: do not leak between iterations. *)
+             let iter_ctx =
+               (var_name, item) ::
+               ("_index", `Int i) ::
+               List.filter (fun (k, _) ->
+                 k <> var_name && k <> "_index"
+               ) !ctx_ref
+             in
+             run_effects_inner body iter_ctx store actions dialogs ~schema diagnostics
+           ) items
+         | _ ->
+           run_one eff !ctx_ref store actions dialogs ~schema diagnostics)
+    | `String "snapshot" ->
+      (* Bare-string snapshot effect. OCaml's State_store doesn't own
+         the document; snapshot is a no-op here and will be wired to
+         the Model via panel_menu integration. *)
+      ()
     | _ -> ()
   ) effects
 
