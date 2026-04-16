@@ -14,6 +14,7 @@ type value =
   | Str of string
   | Color of string  (** normalized #rrggbb *)
   | List of Yojson.Safe.t list
+  | Path of int list  (** Phase 3 §6.2: opaque document path *)
   | Closure of string list * ast * env  (** params, body, captured environment *)
 
 (** Local environment for let bindings and closures.
@@ -64,6 +65,14 @@ let value_of_json (j : Yojson.Safe.t) : value =
     else
       Str s
   | `List lst -> List lst
+  | `Assoc [("__path__", `List idx_list)] ->
+    (* Round-trip path from JSON (Phase 3 §6.2) *)
+    let idx_opt = List.fold_right (fun jv acc ->
+      match acc, jv with
+      | Some lst, `Int i when i >= 0 -> Some (i :: lst)
+      | _ -> None
+    ) idx_list (Some []) in
+    (match idx_opt with Some lst -> Path lst | None -> Str (Yojson.Safe.to_string j))
   | `Assoc _ -> Str "__dict__"  (* keep reference via special marker *)
   | `Intlit s -> (try Number (float_of_string s) with _ -> Null)
 
@@ -75,6 +84,7 @@ let to_bool (v : value) : bool =
   | Str s -> String.length s > 0
   | Color _ -> true
   | List l -> List.length l > 0
+  | Path p -> p <> []
   | Closure _ -> true
 
 let to_string_coerce (v : value) : string =
@@ -88,6 +98,7 @@ let to_string_coerce (v : value) : string =
   | Str s -> s
   | Color c -> c
   | List _ -> "[list]"
+  | Path p -> String.concat "." (List.map string_of_int p)
   | Closure _ -> "[closure]"
 
 let strict_eq (a : value) (b : value) : bool =
@@ -105,10 +116,12 @@ let strict_eq (a : value) (b : value) : bool =
       else c
     in
     normalize a = normalize b
+  | Path a, Path b -> a = b
   | Closure _, Closure _ -> false  (* closures are never equal *)
   | _ -> false
 
-(** Convert a value to JSON for storing in context. *)
+(** Convert a value to JSON for storing in context. Path uses a reserved
+    __path__ key so it can round-trip through JSON and back to Value.Path. *)
 let value_to_json (v : value) : Yojson.Safe.t =
   match v with
   | Null -> `Null
@@ -118,6 +131,8 @@ let value_to_json (v : value) : Yojson.Safe.t =
   | Str s -> `String s
   | Color c -> `String c
   | List items -> `List items
+  | Path indices ->
+    `Assoc [("__path__", `List (List.map (fun i -> `Int i) indices))]
   | Closure _ -> `Null  (* closures cannot be serialized to JSON *)
 
 (* ================================================================== *)
@@ -174,7 +189,7 @@ let tokenize (source : string) : token array =
   let i = ref 0 in
   while !i < n do
     let c = source.[!i] in
-    if c = ' ' || c = '\t' then
+    if c = ' ' || c = '\t' || c = '\n' || c = '\r' then
       incr i
     else if c = '#' then begin
       (* Color literal *)
@@ -188,11 +203,12 @@ let tokenize (source : string) : token array =
         add_token (mk_tok_s Tk_error (String.sub source !i (!j - !i)));
         i := !j
       end
-    end else if c = '"' then begin
-      (* String literal *)
+    end else if c = '"' || c = '\'' then begin
+      (* String literal: double or single quotes — matches Python/Rust/Swift *)
+      let quote = c in
       let j = ref (!i + 1) in
       let buf = Buffer.create 16 in
-      while !j < n && source.[!j] <> '"' do
+      while !j < n && source.[!j] <> quote do
         if source.[!j] = '\\' && !j + 1 < n then begin
           Buffer.add_char buf source.[!j + 1];
           j := !j + 2
@@ -758,6 +774,78 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
           Color (Color_util.rgb_to_hex nr ng nb)
     end
 
+    (* Higher-order functions (Phase 3 §6.1) *)
+    else if name = "any" || name = "all" || name = "map" || name = "filter" then begin
+      if List.length args <> 2 then
+        (match name with "map" | "filter" -> Null | "all" -> Bool true | _ -> Bool false)
+      else
+        let lst = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
+        let callable = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
+        (match lst, callable with
+         | List items, Closure (params, body, captured_env) when List.length params = 1 ->
+           let param = List.hd params in
+           let results = List.map (fun item ->
+             let call_env = (param, value_of_json item) :: captured_env in
+             eval_node ~local_env:call_env ?store_cb body ctx
+           ) items in
+           (match name with
+            | "any" -> Bool (List.exists to_bool results)
+            | "all" -> Bool (List.for_all to_bool results)
+            | "map" -> List (List.map value_to_json results)
+            | "filter" ->
+              let kept = List.filter_map (fun (item, r) ->
+                if to_bool r then Some item else None
+              ) (List.combine items results) in
+              List kept
+            | _ -> Null)
+         | _ ->
+           (match name with "map" | "filter" -> Null | "all" -> Bool true | _ -> Bool false))
+    end
+
+    (* Path functions (Phase 3 §6.2) *)
+    else if name = "path" then begin
+      let result = List.fold_left (fun acc a ->
+        match acc with
+        | None -> None
+        | Some lst ->
+          (match eval_node ~local_env ?store_cb a ctx with
+           | Number n when n >= 0.0 -> Some (lst @ [Float.to_int n])
+           | _ -> None)
+      ) (Some []) args in
+      match result with Some indices -> Path indices | None -> Null
+    end
+
+    else if name = "path_child" then begin
+      if List.length args <> 2 then Null
+      else
+        let p = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
+        let i = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
+        match p, i with
+        | Path indices, Number n when n >= 0.0 ->
+          Path (indices @ [Float.to_int n])
+        | _ -> Null
+    end
+
+    else if name = "path_from_id" then begin
+      if List.length args <> 1 then Null
+      else
+        let s = eval_node ~local_env ?store_cb (List.hd args) ctx in
+        match s with
+        | Str "" -> Path []
+        | Str str ->
+          let parts = String.split_on_char '.' str in
+          let idx_opt = List.fold_right (fun part acc ->
+            match acc with
+            | None -> None
+            | Some lst ->
+              match int_of_string_opt part with
+              | Some n when n >= 0 -> Some (n :: lst)
+              | _ -> None
+          ) parts (Some []) in
+          (match idx_opt with Some lst -> Path lst | None -> Null)
+        | _ -> Null
+    end
+
     (* mem: (element, list) -> bool — list membership *)
     else if name = "mem" then begin
       if List.length args <> 2 then Bool false
@@ -841,6 +929,25 @@ and eval_node_json_inner (node : ast) (ctx : Yojson.Safe.t) : Yojson.Safe.t =
 
 and eval_dot_access ?(local_env : env = []) ?(store_cb : store_cb option)
     (obj_node : ast) (member : string) (ctx : Yojson.Safe.t) : value =
+  (* Check for Path value first — pre-eval so we catch path-producing
+     expressions (path(...), path_child(...), foreach-bound paths). *)
+  let obj_val_for_path = eval_node ~local_env ?store_cb obj_node ctx in
+  (match obj_val_for_path with
+   | Path indices ->
+     (match member with
+      | "depth" -> Number (float_of_int (List.length indices))
+      | "parent" ->
+        if indices = [] then Null
+        else
+          let rec drop_last = function
+            | [] | [_] -> []
+            | x :: xs -> x :: drop_last xs
+          in
+          Path (drop_last indices)
+      | "id" -> Str (String.concat "." (List.map string_of_int indices))
+      | "indices" -> List (List.map (fun i -> `Int i) indices)
+      | _ -> Null)
+   | _ ->
   (* Try JSON-preserving path first for path/accessor chains *)
   let obj_json = eval_node_json_inner obj_node ctx in
   (match obj_json with
@@ -874,7 +981,7 @@ and eval_dot_access ?(local_env : env = []) ?(store_cb : store_cb option)
       | Str s ->
         if member = "length" then Number (float_of_int (String.length s))
         else Null
-      | _ -> Null))
+      | _ -> Null)))
 
 and eval_index_access ?(local_env : env = []) ?(store_cb : store_cb option)
     (obj_node : ast) (index_node : ast) (ctx : Yojson.Safe.t) : value =

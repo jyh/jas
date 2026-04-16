@@ -213,6 +213,84 @@ let regression_tests = [
          "data.libs[state.key].name"));
 ]
 
+(* Phase 3 §6.1: HOFs *)
+
+let assert_path expected v =
+  match v with
+  | Path p ->
+    if p <> expected then
+      Alcotest.fail (Printf.sprintf "Expected Path %s, got different path"
+                       (String.concat "," (List.map string_of_int expected)))
+  | _ -> Alcotest.fail "Expected Path"
+
+let hof_tests = [
+  Alcotest.test_case "any_true" `Quick (fun () ->
+    assert_bool true (eval "any([1, 2, 3], fun n -> n > 2)"));
+  Alcotest.test_case "any_false" `Quick (fun () ->
+    assert_bool false (eval "any([1, 2, 3], fun n -> n > 10)"));
+  Alcotest.test_case "any_empty" `Quick (fun () ->
+    assert_bool false (eval "any([], fun n -> true)"));
+  Alcotest.test_case "all_true" `Quick (fun () ->
+    assert_bool true (eval "all([2, 4, 6], fun n -> n > 0)"));
+  Alcotest.test_case "all_false" `Quick (fun () ->
+    assert_bool false (eval "all([2, 4, 5], fun n -> n > 3)"));
+  Alcotest.test_case "all_empty" `Quick (fun () ->
+    assert_bool true (eval "all([], fun n -> false)"));
+  Alcotest.test_case "map" `Quick (fun () ->
+    match eval "map([1, 2, 3], fun n -> n * 10)" with
+    | List items -> assert (List.length items = 3)
+    | _ -> Alcotest.fail "expected list");
+  Alcotest.test_case "filter" `Quick (fun () ->
+    match eval "filter([1, 2, 3, 4, 5], fun n -> n > 2)" with
+    | List items -> assert (List.length items = 3)
+    | _ -> Alcotest.fail "expected list");
+]
+
+(* Phase 3 §6.2: path type *)
+
+let path_tests = [
+  Alcotest.test_case "path_constructor" `Quick (fun () ->
+    assert_path [0; 2; 1] (eval "path(0, 2, 1)"));
+  Alcotest.test_case "path_empty" `Quick (fun () ->
+    assert_path [] (eval "path()"));
+  Alcotest.test_case "path_depth" `Quick (fun () ->
+    assert_number 3.0 (eval "path(0, 2, 1).depth"));
+  Alcotest.test_case "path_depth_empty" `Quick (fun () ->
+    assert_number 0.0 (eval "path().depth"));
+  Alcotest.test_case "path_parent" `Quick (fun () ->
+    assert_path [0; 2] (eval "path(0, 2, 1).parent"));
+  Alcotest.test_case "path_parent_empty_is_null" `Quick (fun () ->
+    assert_null (eval "path().parent"));
+  Alcotest.test_case "path_id" `Quick (fun () ->
+    assert_string "0.2.1" (eval "path(0, 2, 1).id"));
+  Alcotest.test_case "path_id_empty" `Quick (fun () ->
+    assert_string "" (eval "path().id"));
+  Alcotest.test_case "path_equality" `Quick (fun () ->
+    assert_bool true (eval "path(0, 2) == path(0, 2)");
+    assert_bool false (eval "path(0, 2) == path(0, 3)"));
+  Alcotest.test_case "path_not_equal_to_list" `Quick (fun () ->
+    assert_bool false (eval "path(0, 2) == [0, 2]"));
+  Alcotest.test_case "path_child" `Quick (fun () ->
+    assert_path [0; 2; 5] (eval "path_child(path(0, 2), 5)"));
+  Alcotest.test_case "path_from_id" `Quick (fun () ->
+    assert_path [0; 2; 1] (eval "path_from_id('0.2.1')"));
+  Alcotest.test_case "path_from_id_empty" `Quick (fun () ->
+    assert_path [] (eval "path_from_id('')"));
+  Alcotest.test_case "path_from_id_malformed" `Quick (fun () ->
+    assert_null (eval "path_from_id('not-a-path')"));
+]
+
+(* Phase 3 §4.4: closure captures shadowed binding (lexical scoping) *)
+
+let closure_lexical_tests = [
+  Alcotest.test_case "closure_captures_shadowed_binding" `Quick (fun () ->
+    assert_number 1.0
+      (eval "let x = 1 in let f = fun _ -> x in let x = 2 in f(null)"));
+  Alcotest.test_case "closure_namespace_refreshed" `Quick (fun () ->
+    assert_number 42.0
+      (eval ~state:[("x", `Int 42)] "let f = fun _ -> state.x in f(null)"));
+]
+
 let () =
   Alcotest.run "Expr_eval" [
     "Arithmetic", arithmetic_tests;
@@ -223,4 +301,7 @@ let () =
     "Let", let_tests;
     "Sequence", sequence_tests;
     "Regression", regression_tests;
+    "Phase3 HOF", hof_tests;
+    "Phase3 Path", path_tests;
+    "Phase3 LexicalClosure", closure_lexical_tests;
   ]

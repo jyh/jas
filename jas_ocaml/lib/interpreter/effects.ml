@@ -25,6 +25,8 @@ let value_to_json (v : Expr_eval.value) : Yojson.Safe.t =
   | Str s -> `String s
   | Color c -> `String c
   | List l -> `List l
+  | Path indices ->
+    `Assoc [("__path__", `List (List.map (fun i -> `Int i) indices))]
   | Closure _ -> `Null
 
 (** Extract default values from a dialog state definition. *)
