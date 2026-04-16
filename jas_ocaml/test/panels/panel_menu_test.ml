@@ -341,6 +341,82 @@ let menu_tests = [
     assert (match layers.(2) with Jas.Element.Layer le -> le.name = "c2" | _ -> false);
     assert (match layers.(3) with Jas.Element.Layer le -> le.name = "B" | _ -> false));
 
+  Alcotest.test_case "layer_options_confirm_edit_mode" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers = [|
+      Jas.Element.Layer {
+        name = "Old"; children = [||];
+        opacity = 1.0; transform = None;
+        locked = false; visibility = Jas.Element.Preview;
+      }
+    |] };
+    let params = [
+      ("layer_id", `String "0");
+      ("name", `String "Renamed");
+      ("lock", `Bool true);
+      ("show", `Bool true);
+      ("preview", `Bool false);   (* show=true, preview=false → outline *)
+    ] in
+    Jas.Panel_menu.dispatch_yaml_action ~params
+      "layer_options_confirm" m;
+    let layer = m#document.Jas.Document.layers.(0) in
+    assert (match layer with
+            | Jas.Element.Layer le ->
+              le.name = "Renamed" && le.locked = true
+              && le.visibility = Jas.Element.Outline
+            | _ -> false));
+
+  Alcotest.test_case "layer_options_confirm_create_mode" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers = [|
+      Jas.Element.Layer {
+        name = "Existing"; children = [||];
+        opacity = 1.0; transform = None;
+        locked = false; visibility = Jas.Element.Preview;
+      }
+    |] };
+    let params = [
+      ("layer_id", `Null);
+      ("name", `String "Brand New");
+      ("lock", `Bool false);
+      ("show", `Bool true);
+      ("preview", `Bool true);
+    ] in
+    Jas.Panel_menu.dispatch_yaml_action ~params
+      "layer_options_confirm" m;
+    let layers = m#document.Jas.Document.layers in
+    assert (Array.length layers = 2);
+    assert (match layers.(1) with
+            | Jas.Element.Layer le ->
+              le.name = "Brand New"
+              && le.visibility = Jas.Element.Preview
+            | _ -> false));
+
+  Alcotest.test_case "layer_options_confirm_invokes_close_dialog_cb" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers = [|
+      Jas.Element.Layer {
+        name = "A"; children = [||];
+        opacity = 1.0; transform = None;
+        locked = false; visibility = Jas.Element.Preview;
+      }
+    |] };
+    let closed = ref false in
+    let params = [
+      ("layer_id", `String "0");
+      ("name", `String "A");
+      ("lock", `Bool false);
+      ("show", `Bool true);
+      ("preview", `Bool true);
+    ] in
+    Jas.Panel_menu.dispatch_yaml_action ~params
+      ~on_close_dialog:(Some (fun () -> closed := true))
+      "layer_options_confirm" m;
+    assert !closed);
+
   Alcotest.test_case "enter_isolation_mode_via_yaml" `Quick (fun () ->
     Jas.Layers_panel_state.clear_isolation_stack ();
     let m = Jas.Model.create () in

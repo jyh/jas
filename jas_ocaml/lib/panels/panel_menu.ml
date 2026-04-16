@@ -93,6 +93,8 @@ let set_active_color_live color ~fill_on_top (m : Model.model) =
 let dispatch_yaml_action
     ?(panel_selection : int list list = [])
     ?(on_selection_changed : (int list list -> unit) option = None)
+    ?(params : (string * Yojson.Safe.t) list = [])
+    ?(on_close_dialog : (unit -> unit) option = None)
     (action_name : string) (m : Model.model) : unit =
   ignore on_selection_changed;  (* reserved for future bidirectional sync *)
   match Workspace_loader.load () with
@@ -174,7 +176,7 @@ let dispatch_yaml_action
          let ctx = [
            ("active_document", active_doc);
            ("panel", panel_json);
-           ("param", `Assoc []);
+           ("param", `Assoc params);
          ] in
          (* Cleared selection (settable by set_panel_state: {key:
             layers_panel_selection, value: []}) — used by
@@ -212,10 +214,13 @@ let dispatch_yaml_action
             | [idx] when idx >= 0 && idx < Array.length m#document.Document.layers ->
               let d = m#document in
               let new_layers = Array.copy d.Document.layers in
-              let elem = new_layers.(idx) in
               List.iter (fun (dotted, expr_v) ->
                 let expr_str = match expr_v with `String s -> s | _ -> "" in
                 let v = Expr_eval.evaluate expr_str eval_ctx in
+                (* Read the current elem from the working array so
+                   successive field updates compose instead of each
+                   overwriting the element from scratch. *)
+                let elem = new_layers.(idx) in
                 let updated = match dotted, v with
                   | "common.visibility", Expr_eval.Str s ->
                     let vis = match s with
@@ -227,6 +232,10 @@ let dispatch_yaml_action
                     Element.set_visibility vis elem
                   | "common.locked", Expr_eval.Bool b ->
                     Element.set_locked b elem
+                  | "name", Expr_eval.Str s ->
+                    (match elem with
+                     | Element.Layer le -> Element.Layer { le with name = s }
+                     | _ -> elem)
                   | _ -> elem
                 in
                 new_layers.(idx) <- updated
@@ -568,7 +577,16 @@ let dispatch_yaml_action
             | _ -> ());
            `Null
          in
-         let platform_effects = [
+         (* close_dialog: invoke the ~on_close_dialog callback if the
+            caller supplied one (used by Layer Options sheet dismiss).
+            Matches both bare `- close_dialog` and `- close_dialog: null`. *)
+         let close_dialog_h : Effects.platform_effect = fun _ _ _ ->
+           (match on_close_dialog with
+            | Some cb -> cb ()
+            | None -> ());
+           `Null
+         in
+         let base_platform_effects = [
            ("snapshot", snapshot_h);
            ("doc.set", doc_set_h);
            ("doc.delete_at", doc_delete_at_h);
@@ -583,6 +601,10 @@ let dispatch_yaml_action
            ("list_push", list_push_h);
            ("pop", pop_h);
          ] in
+         let platform_effects = match on_close_dialog with
+           | Some _ -> ("close_dialog", close_dialog_h) :: base_platform_effects
+           | None -> base_platform_effects
+         in
          let store = State_store.create () in
          Effects.run_effects ~platform_effects effects ctx store;
          (* If the action cleared the selection, tell the caller. *)
