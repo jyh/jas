@@ -87,6 +87,58 @@ let menu_tests = [
     Array.iter (fun kind ->
       assert (not (panel_is_checked kind "anything" l))
     ) all_panel_kinds);
+
+  Alcotest.test_case "layers_menu_has_new_layer" `Quick (fun () ->
+    let items = panel_menu Layers in
+    let has = List.exists (function
+      | Action { command = "new_layer"; _ } -> true | _ -> false) items in
+    assert has);
+
+  Alcotest.test_case "layers_menu_has_new_group" `Quick (fun () ->
+    let items = panel_menu Layers in
+    let has = List.exists (function
+      | Action { command = "new_group"; _ } -> true | _ -> false) items in
+    assert has);
+
+  Alcotest.test_case "layers_menu_has_visibility_toggles" `Quick (fun () ->
+    let items = panel_menu Layers in
+    let cmds = ["toggle_all_layers_visibility"; "toggle_all_layers_outline";
+                "toggle_all_layers_lock"] in
+    List.iter (fun cmd ->
+      let has = List.exists (function
+        | Action { command = c; _ } -> c = cmd | _ -> false) items in
+      assert has
+    ) cmds);
+
+  Alcotest.test_case "layers_menu_has_isolation_mode" `Quick (fun () ->
+    let items = panel_menu Layers in
+    let cmds = ["enter_isolation_mode"; "exit_isolation_mode"] in
+    List.iter (fun cmd ->
+      let has = List.exists (function
+        | Action { command = c; _ } -> c = cmd | _ -> false) items in
+      assert has
+    ) cmds);
+
+  Alcotest.test_case "layers_menu_has_flatten_and_collect" `Quick (fun () ->
+    let items = panel_menu Layers in
+    let cmds = ["flatten_artwork"; "collect_in_new_layer"] in
+    List.iter (fun cmd ->
+      let has = List.exists (function
+        | Action { command = c; _ } -> c = cmd | _ -> false) items in
+      assert has
+    ) cmds);
+
+  Alcotest.test_case "layers_dispatch_tier3_no_crash" `Quick (fun () ->
+    let l = default_layout () in
+    let did = right_dock_id l in
+    let addr = pa did 2 0 in
+    let cmds = ["new_layer"; "new_group"; "toggle_all_layers_visibility";
+                "toggle_all_layers_outline"; "toggle_all_layers_lock";
+                "enter_isolation_mode"; "exit_isolation_mode";
+                "flatten_artwork"; "collect_in_new_layer"] in
+    List.iter (fun cmd ->
+      panel_dispatch Layers cmd addr l ~fill_on_top:true ~get_model:(fun () -> Jas.Model.create ())
+    ) cmds);
 ]
 
 (* ================================================================== *)

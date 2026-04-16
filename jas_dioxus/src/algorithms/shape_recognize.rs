@@ -1799,6 +1799,7 @@ mod tests {
             d: vec![],
             fill: None,
             stroke: Some(Stroke::new(Color::BLACK, 2.5)),
+            width_points: Vec::new(),
             common: CommonProps {
                 opacity: 0.7,
                 transform: None,
@@ -1832,6 +1833,7 @@ mod tests {
             d: vec![],
             fill: None,
             stroke: None,
+            width_points: Vec::new(),
             common: CommonProps::default(),
         });
         let shape = RecognizedShape::RoundRect {
@@ -1856,6 +1858,7 @@ mod tests {
             d: vec![],
             fill: None,
             stroke: None,
+            width_points: Vec::new(),
             common: CommonProps::default(),
         });
         let shape = RecognizedShape::Arrow {
@@ -1957,6 +1960,7 @@ mod tests {
             d: vec![],
             fill: None,
             stroke: None,
+            width_points: Vec::new(),
             common: CommonProps::default(),
         });
         let shape = RecognizedShape::Scribble {
@@ -1978,7 +1982,7 @@ mod tests {
     fn recognize_element_skips_line() {
         let elem = Element::Line(LineElem {
             x1: 0.0, y1: 0.0, x2: 100.0, y2: 0.0,
-            stroke: None, common: CommonProps::default(),
+            stroke: None, width_points: Vec::new(), common: CommonProps::default(),
         });
         assert!(recognize_element(&elem, &RecognizeConfig::default()).is_none());
     }
@@ -2019,7 +2023,7 @@ mod tests {
             else { PathCommand::LineTo { x, y } }
         }).collect();
         let elem = Element::Path(PathElem {
-            d, fill: None, stroke: None, common: CommonProps::default(),
+            d, fill: None, stroke: None, width_points: Vec::new(), common: CommonProps::default(),
         });
         match recognize_element(&elem, &RecognizeConfig::default()) {
             Some((kind, Element::Circle(_))) => {
@@ -2037,7 +2041,7 @@ mod tests {
             else { PathCommand::LineTo { x, y } }
         }).collect();
         let elem = Element::Path(PathElem {
-            d, fill: None, stroke: None, common: CommonProps::default(),
+            d, fill: None, stroke: None, width_points: Vec::new(), common: CommonProps::default(),
         });
         match recognize_element(&elem, &RecognizeConfig::default()) {
             Some((kind, Element::Rect(_))) => {

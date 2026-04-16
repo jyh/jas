@@ -1011,3 +1011,426 @@ actions:
       - set_panel_state: { panel: stroke, key: profile, value: '"uniform"' }
       - set_panel_state: { panel: stroke, key: profile_flipped, value: false }
       - set: { stroke_profile: '"uniform"', stroke_profile_flipped: false }
+
+  # ── Layers Panel ─────────────────────────────────────────────
+
+  # Layer management
+
+  new_layer:
+    description: >
+      Open the Layer Options dialog in create mode to create a new layer.
+      The layer is inserted above the topmost panel-selected layer. If
+      nothing is panel-selected, the layer is inserted at the top of the
+      layer stack. The default name is auto-generated as "Layer N",
+      skipping numbers already in use. The default color cycles through
+      the nine preset colors (Light Blue, Red, Green, Blue, Yellow,
+      Magenta, Cyan, Light Gray, Dark Green) so adjacent layers get
+      different colors.
+    category: layers
+    tier: 3
+    enabled_when: "state.tab_count > 0"
+    effects:
+      - log: "new_layer"
+
+  new_group:
+    description: >
+      Wrap the panel-selected elements in a new group at the position of
+      the topmost panel-selected element. All panel-selected elements
+      must share the same immediate parent container; the action is
+      disabled otherwise. The new group is unnamed and inherits the
+      parent container's properties. The panel selection changes to the
+      new group.
+    category: layers
+    tier: 3
+    enabled_when: "active_document.layers_panel_selection_count > 0"
+    effects:
+      - log: "new_group"
+
+  delete_layer_selection:
+    description: >
+      Delete the panel-selected elements from the document. If deletion
+      would remove the last remaining layer, the action is prevented
+      (the last layer cannot be deleted). Deleted elements are placed on
+      the undo stack. After deletion, the panel selection becomes empty.
+    category: layers
+    tier: 3
+    enabled_when: "active_document.layers_panel_selection_count > 0"
+    effects:
+      - log: "delete_layer_selection"
+
+  duplicate_layer_selection:
+    description: >
+      Duplicate the panel-selected elements in place. Each duplicate is
+      inserted immediately above its original in the same parent
+      container. Duplicated layers receive auto-generated names following
+      the "Layer N" convention. The panel selection changes to the
+      duplicated elements.
+    category: layers
+    tier: 3
+    enabled_when: "active_document.layers_panel_selection_count > 0"
+    effects:
+      - log: "duplicate_layer_selection"
+
+  collect_in_new_layer:
+    description: >
+      Move all panel-selected items into a new layer placed above all
+      existing layers. The items are removed from their original
+      locations and maintain their relative order. The new layer's name
+      and color follow the same auto-generation rules as new_layer.
+      Disabled during isolation mode.
+    category: layers
+    tier: 3
+    enabled_when: "active_document.layers_panel_selection_count > 0 and panel.isolation_stack.length == 0"
+    effects:
+      - log: "collect_in_new_layer"
+
+  flatten_artwork:
+    description: >
+      Recursively unpack all groups in the panel-selected items until no
+      groups remain. The children of each dissolved group take its
+      position in the parent container. Enabled when the panel-selected
+      items contain at least one group.
+    category: layers
+    tier: 3
+    enabled_when: "active_document.layers_panel_selection_has_group"
+    effects:
+      - log: "flatten_artwork"
+
+  # Bulk visibility and lock toggles
+
+  toggle_all_layers_visibility:
+    description: >
+      Toggle all top-level layers between visible and invisible. If any
+      layer is currently visible, all layers are set to invisible ("Hide
+      All Layers"). If all layers are invisible, all layers are set to
+      preview mode ("Show All Layers").
+    category: layers
+    tier: 3
+    enabled_when: "state.tab_count > 0"
+    effects:
+      - log: "toggle_all_layers_visibility"
+
+  toggle_all_layers_outline:
+    description: >
+      Toggle all top-level layers between preview and outline mode. If
+      any layer is in preview mode, all layers are set to outline
+      ("Outline All Layers"). If all layers are in outline mode, all
+      layers are set to preview ("Preview All Layers").
+    category: layers
+    tier: 3
+    enabled_when: "state.tab_count > 0"
+    effects:
+      - log: "toggle_all_layers_outline"
+
+  toggle_all_layers_lock:
+    description: >
+      Toggle all top-level layers between locked and unlocked. If any
+      layer is unlocked, all layers are locked ("Lock All Layers"). If
+      all layers are locked, all layers are unlocked ("Unlock All
+      Layers"). Locking follows the container save/restore semantics:
+      each layer saves its direct children's lock states before locking.
+    category: layers
+    tier: 3
+    enabled_when: "state.tab_count > 0"
+    effects:
+      - log: "toggle_all_layers_lock"
+
+  # Per-element row operations
+
+  cycle_element_visibility:
+    description: >
+      Cycle the visibility of a single element through the three states:
+      preview -> outline -> invisible -> preview. When applied to a
+      container (layer or group), the visibility change affects all
+      descendants.
+    category: layers
+    tier: 3
+    params:
+      element_id: { type: string }
+    effects:
+      - log: "cycle_element_visibility"
+
+  solo_element_visibility:
+    description: >
+      Solo/unsolo an element's visibility among its siblings (triggered
+      by Option-click on the eye button). On first Option-click, the
+      clicked element becomes the only visible sibling; all other
+      siblings at the same level are set to invisible, and their
+      previous visibility states are saved. On second Option-click of
+      the same element, all siblings are restored to their saved
+      visibility states. If the user manually changes any sibling's
+      visibility between the two Option-clicks, the saved state is
+      discarded.
+    category: layers
+    tier: 3
+    params:
+      element_id: { type: string }
+    effects:
+      - log: "solo_element_visibility"
+
+  toggle_element_lock:
+    description: >
+      Toggle the lock state of a single element. When locking a
+      container, the container's direct children's current lock states
+      are saved, then all children are locked. When unlocking a
+      container, each direct child's lock state is restored to its
+      saved value. Locked elements cannot be selected or edited on
+      the canvas, but can be dragged/reparented in the layers panel.
+    category: layers
+    tier: 3
+    params:
+      element_id: { type: string }
+    effects:
+      - log: "toggle_element_lock"
+
+  toggle_element_twirl:
+    description: >
+      Toggle the twirl-down (expand/collapse) state of a container
+      element (layer or group). The twirl state persists across
+      sessions. Expanding reveals the container's children in the tree;
+      collapsing hides them. Leaf elements do not have a twirl button.
+    category: layers
+    tier: 3
+    params:
+      element_id: { type: string }
+    effects:
+      - log: "toggle_element_twirl"
+
+  # Isolation mode
+
+  enter_isolation_mode:
+    description: >
+      Enter isolation mode for a container (layer or group). All content
+      outside the isolated container is dimmed to 10% opacity and becomes
+      non-interactive. The current visibility state of every element is
+      saved before entering. Isolation is a stack: entering isolation
+      while already in isolation pushes a new level. Panel selection and
+      element selection are constrained to descendants of the isolated
+      container. New Layer and Collect in New Layer are disabled.
+    category: layers
+    tier: 3
+    params:
+      container_id: { type: string }
+    enabled_when: "active_document.layers_panel_selection_count == 1 and active_document.layers_panel_selection_is_container"
+    effects:
+      - log: "enter_isolation_mode"
+
+  exit_isolation_mode:
+    description: >
+      Exit one level of isolation mode. The visibility states saved on
+      entry to the current level are restored. If at the outermost
+      isolation level, isolation mode is fully exited.
+    category: layers
+    tier: 3
+    enabled_when: "panel.isolation_stack.length > 0"
+    effects:
+      - log: "exit_isolation_mode"
+
+  exit_isolation_to_level:
+    description: >
+      Exit isolation mode to a specific level, as triggered by clicking
+      a breadcrumb segment. Pops all isolation levels above the target
+      level, restoring saved visibility states for each popped level.
+      A level_index of 0 exits isolation entirely.
+    category: layers
+    tier: 3
+    params:
+      level_index: { type: number }
+    enabled_when: "panel.isolation_stack.length > 0"
+    effects:
+      - log: "exit_isolation_to_level"
+
+  # Panel selection and element selection
+
+  layers_panel_select:
+    description: >
+      Panel-select an element in the layers panel by clicking on its
+      spacer, twirl-down gap, preview, or name area. Click selects the
+      element and deselects all others. Shift-click extends the
+      selection in visual (flattened) row order from the last-clicked
+      element; selecting a collapsed group includes all its descendants.
+      Command-click toggles the element in or out of the current
+      selection. Panel selection is independent of element selection.
+      In isolation mode, constrained to the isolated subtree.
+    category: layers
+    tier: 3
+    params:
+      element_id: { type: string }
+    effects:
+      - log: "layers_panel_select"
+
+  layers_element_select:
+    description: >
+      Element-select via clicking the SELECT_SQUARE in the layers panel.
+      Click selects the element and deselects all others. Shift-click
+      extends the selection in visual row order; selecting a collapsed
+      group includes all its descendants. Command-click toggles the
+      element. Elements can be selected across layers. The SELECT_SQUARE
+      is filled with the color of the element's nearest ancestor layer
+      when selected, otherwise empty.
+    category: layers
+    tier: 3
+    params:
+      element_id: { type: string }
+    effects:
+      - log: "layers_element_select"
+
+  layers_select_all:
+    description: >
+      Select all visible elements in the layers panel (Command-A).
+      In isolation mode, selects all visible elements within the
+      isolated subtree. Applies to panel selection.
+    category: layers
+    tier: 3
+    effects:
+      - log: "layers_select_all"
+
+  layers_nav_up:
+    description: >
+      Move the panel-selection focus to the previous visible row in the
+      layers panel. If at the first row, no-op.
+    category: layers
+    tier: 3
+    effects:
+      - log: "layers_nav_up"
+
+  layers_nav_down:
+    description: >
+      Move the panel-selection focus to the next visible row in the
+      layers panel. If at the last row, no-op.
+    category: layers
+    tier: 3
+    effects:
+      - log: "layers_nav_down"
+
+  layers_nav_right:
+    description: >
+      If the focused row is a collapsed container, expand it. If it is
+      an expanded container, move focus to its first child. If it is a
+      leaf, no-op.
+    category: layers
+    tier: 3
+    effects:
+      - log: "layers_nav_right"
+
+  layers_nav_left:
+    description: >
+      If the focused row is an expanded container, collapse it. If it
+      is a collapsed container or a leaf, move focus to its parent.
+      If already at a top-level layer, no-op.
+    category: layers
+    tier: 3
+    effects:
+      - log: "layers_nav_left"
+
+  # Rename
+
+  rename_element:
+    description: >
+      Begin inline renaming of the panel-selected element. Only
+      available when exactly one element is panel-selected. The element
+      name becomes an editable text field in place. Also triggered by
+      double-clicking on the element name text.
+    category: layers
+    tier: 3
+    params:
+      element_id: { type: string }
+    enabled_when: "active_document.layers_panel_selection_count == 1"
+    effects:
+      - log: "rename_element"
+
+  confirm_rename:
+    description: >
+      Confirm the inline rename (triggered by Enter or click-outside).
+      If the name is empty, the element reverts to its auto-generated
+      type name. Duplicate names are allowed. The rename is a single
+      undoable action.
+    category: layers
+    tier: 3
+    effects:
+      - log: "confirm_rename"
+
+  cancel_rename:
+    description: >
+      Cancel the inline rename (triggered by Escape). The name reverts
+      to its value before editing began.
+    category: layers
+    tier: 3
+    effects:
+      - log: "cancel_rename"
+
+  # Search and filter
+
+  set_layers_search:
+    description: >
+      Update the search query string for the layers panel. The tree is
+      incrementally filtered to show elements whose name (or
+      auto-generated type name) contains the query string,
+      case-insensitive. Ancestor nodes of matching elements are shown
+      for context but dimmed. Collapsed nodes are searched and
+      auto-expanded to reveal matches. Drag-and-drop is disabled while
+      a search string is active.
+    category: layers
+    tier: 3
+    params:
+      query: { type: string }
+    effects:
+      - set_panel_state: { panel: layers, key: search_query, value: "param.query" }
+
+  toggle_layers_type_filter:
+    description: >
+      Toggle an element type in the layers panel type filter. The filter
+      dropdown has checkboxes for each element type (Layer, Group, Path,
+      Rectangle, Circle, Ellipse, Polyline, Polygon, Text, Text Path,
+      Line). Unchecking a type hides all elements of that type.
+      Filtering composes with the search field. Ancestor nodes are
+      still shown for context.
+    category: layers
+    tier: 3
+    params:
+      element_type: { type: string }
+    effects:
+      - log: "toggle_layers_type_filter"
+
+  # Layer Options dialog
+
+  open_layer_options:
+    description: >
+      Open the Layer Options dialog for an existing layer (edit mode)
+      or for creating a new layer (create mode). In edit mode, the
+      dialog fields are populated from the layer's current properties.
+    category: layers
+    tier: 3
+    params:
+      mode: { type: enum, values: [create, edit] }
+      layer_id: { type: string, nullable: true }
+    effects:
+      - open_dialog:
+          id: layer_options
+          params:
+            mode: "param.mode"
+            layer_id: "param.layer_id"
+
+  layer_options_confirm:
+    description: >
+      Confirm the Layer Options dialog. In create mode, creates a new
+      layer with the specified properties. In edit mode, updates the
+      existing layer's properties. The action is undoable.
+    category: layers
+    tier: 3
+    effects:
+      - log: "layer_options_confirm"
+
+  # Scrolling
+
+  scroll_to_selected:
+    description: >
+      Auto-scroll the layers panel to reveal the element currently
+      selected on the canvas. If the element is inside a collapsed
+      group, the group and all ancestor groups are auto-expanded first.
+      If multiple elements are selected, scrolls to the first selected
+      element in document order.
+    category: layers
+    tier: 3
+    effects:
+      - log: "scroll_to_selected"

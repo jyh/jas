@@ -22,7 +22,21 @@ let panel_label = function
 
 (** Menu items for a panel kind. *)
 let panel_menu = function
-  | Layers -> [Action { label = "Close Layers"; command = "close_panel"; shortcut = "" }]
+  | Layers ->
+    [ Action { label = "New Layer..."; command = "new_layer"; shortcut = "" };
+      Action { label = "New Group"; command = "new_group"; shortcut = "" };
+      Separator;
+      Action { label = "Hide All Layers"; command = "toggle_all_layers_visibility"; shortcut = "" };
+      Action { label = "Outline All Layers"; command = "toggle_all_layers_outline"; shortcut = "" };
+      Action { label = "Lock All Layers"; command = "toggle_all_layers_lock"; shortcut = "" };
+      Separator;
+      Action { label = "Enter Isolation Mode"; command = "enter_isolation_mode"; shortcut = "" };
+      Action { label = "Exit Isolation Mode"; command = "exit_isolation_mode"; shortcut = "" };
+      Separator;
+      Action { label = "Flatten Artwork"; command = "flatten_artwork"; shortcut = "" };
+      Action { label = "Collect in New Layer"; command = "collect_in_new_layer"; shortcut = "" };
+      Separator;
+      Action { label = "Close Layers"; command = "close_panel"; shortcut = "" } ]
   | Color ->
     [ Radio { label = "Grayscale"; command = "mode_grayscale"; group = "color_mode" };
       Radio { label = "RGB"; command = "mode_rgb"; group = "color_mode" };
@@ -79,6 +93,61 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model =
    | None -> ());
   match cmd with
   | "close_panel" -> close_panel layout addr
+  | "new_layer" when kind = Layers ->
+    let m = get_model () in
+    let d = m#document in
+    let used = Array.fold_left (fun acc e ->
+      match e with
+      | Element.Layer le -> le.name :: acc
+      | _ -> acc) [] d.Document.layers in
+    let rec find_name n =
+      let candidate = Printf.sprintf "Layer %d" n in
+      if List.mem candidate used then find_name (n + 1) else candidate
+    in
+    let name = find_name 1 in
+    let new_layer = Element.make_layer ~name [||] in
+    let new_layers = Array.append d.Document.layers [|new_layer|] in
+    m#snapshot;
+    m#set_document { d with Document.layers = new_layers }
+  | "toggle_all_layers_visibility" when kind = Layers ->
+    let m = get_model () in
+    let d = m#document in
+    let any_visible = Array.exists (fun e ->
+      Element.get_visibility e <> Element.Invisible) d.Document.layers in
+    let target = if any_visible then Element.Invisible else Element.Preview in
+    let new_layers = Array.map (fun e ->
+      match e with
+      | Element.Layer _ -> Element.set_visibility target e
+      | _ -> e) d.Document.layers in
+    m#snapshot;
+    m#set_document { d with Document.layers = new_layers }
+  | "toggle_all_layers_outline" when kind = Layers ->
+    let m = get_model () in
+    let d = m#document in
+    let any_preview = Array.exists (fun e ->
+      Element.get_visibility e = Element.Preview) d.Document.layers in
+    let target = if any_preview then Element.Outline else Element.Preview in
+    let new_layers = Array.map (fun e ->
+      match e with
+      | Element.Layer _ -> Element.set_visibility target e
+      | _ -> e) d.Document.layers in
+    m#snapshot;
+    m#set_document { d with Document.layers = new_layers }
+  | "toggle_all_layers_lock" when kind = Layers ->
+    let m = get_model () in
+    let d = m#document in
+    let any_unlocked = Array.exists (fun e ->
+      not (Element.is_locked e)) d.Document.layers in
+    let new_layers = Array.map (fun e ->
+      match e with
+      | Element.Layer _ -> Element.set_locked any_unlocked e
+      | _ -> e) d.Document.layers in
+    m#snapshot;
+    m#set_document { d with Document.layers = new_layers }
+  | "new_group"
+  | "enter_isolation_mode" | "exit_isolation_mode"
+  | "flatten_artwork" | "collect_in_new_layer"
+    when kind = Layers -> ()  (* Tier-3 stubs for actions that need panel selection *)
   | "invert_color" when kind = Color ->
     let m = get_model () in
     let color = if fill_on_top then

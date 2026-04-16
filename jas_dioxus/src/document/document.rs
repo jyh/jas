@@ -266,6 +266,19 @@ impl Document {
         Some(node)
     }
 
+    /// Return a mutable reference to the element at `path`.
+    pub fn get_element_mut(&mut self, path: &ElementPath) -> Option<&mut Element> {
+        if path.is_empty() {
+            return None;
+        }
+        let mut node: &mut Element = self.layers.get_mut(path[0])?;
+        for &idx in &path[1..] {
+            let children = node.children_mut()?;
+            node = Rc::make_mut(children.get_mut(idx)?);
+        }
+        Some(node)
+    }
+
     /// Return the effective visibility of the element at `path`,
     /// computed as the minimum of the visibilities of every element
     /// along the path from the root layer down to the target. A

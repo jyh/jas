@@ -432,6 +432,7 @@ mod tests {
             d: cmds,
             fill: None,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         })
     }
@@ -455,6 +456,7 @@ mod tests {
             d: cmds,
             fill: None,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         })
     }
@@ -788,6 +790,7 @@ mod tests {
             d: cmds,
             fill: None,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         });
 

@@ -155,7 +155,7 @@ fn escape_xml(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn element_svg(elem: &Element, indent: &str) -> String {
+pub fn element_svg(elem: &Element, indent: &str) -> String {
     match elem {
         Element::Line(e) => {
             format!(
@@ -1219,6 +1219,7 @@ mod tests {
         Element::Line(LineElem {
             x1, y1, x2, y2,
             stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         })
     }
@@ -1512,7 +1513,7 @@ mod tests {
         let doc = make_doc(vec![Element::Rect(RectElem {
             x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
             fill: None,
-            stroke: Some(Stroke { color: Color::BLACK, width: 1.0, linecap: LineCap::Butt, linejoin: LineJoin::Miter, opacity: 0.4 }),
+            stroke: Some(Stroke { opacity: 0.4, ..Stroke::new(Color::BLACK, 1.0) }),
             common: CommonProps::default(),
         })]);
         let svg = document_to_svg(&doc);
@@ -1574,7 +1575,8 @@ mod tests {
         use crate::geometry::normalize::normalize_document;
         let doc = make_doc(vec![Element::Line(LineElem {
             x1: 0.0, y1: 0.0, x2: 10.0, y2: 10.0,
-            stroke: Some(Stroke { color: Color::new(0.0, 0.0, 0.0, 0.25), width: 1.0, linecap: LineCap::Butt, linejoin: LineJoin::Miter, opacity: 1.0 }),
+            stroke: Some(Stroke::new(Color::new(0.0, 0.0, 0.0, 0.25), 1.0)),
+            width_points: Vec::new(),
             common: CommonProps::default(),
         })]);
         let doc2 = normalize_document(&doc);

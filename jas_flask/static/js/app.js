@@ -2873,3 +2873,329 @@
   });
 
 })();
+
+
+// ── Tree View (layers panel) ──────────────────────────────────
+(function () {
+  "use strict";
+
+  // Sample document tree for demonstration
+  var SAMPLE_TREE = [
+    {
+      id: "layer1", name: "Layer 1", type: "layer", type_label: "Layer",
+      visibility: "preview", locked: false, element_selected: false,
+      ancestor_layer_color: "#4a90d9",
+      children: [
+        {
+          id: "group1", name: "", type: "group", type_label: "Group",
+          visibility: "preview", locked: false, element_selected: false,
+          ancestor_layer_color: "#4a90d9",
+          children: [
+            {
+              id: "path1", name: "", type: "path", type_label: "Path",
+              visibility: "preview", locked: false, element_selected: false,
+              ancestor_layer_color: "#4a90d9", children: []
+            },
+            {
+              id: "rect1", name: "Background", type: "rect", type_label: "Rectangle",
+              visibility: "preview", locked: true, element_selected: false,
+              ancestor_layer_color: "#4a90d9", children: []
+            },
+            {
+              id: "text1", name: "Title", type: "text", type_label: "Text",
+              visibility: "outline", locked: false, element_selected: true,
+              ancestor_layer_color: "#4a90d9", children: []
+            }
+          ]
+        },
+        {
+          id: "circle1", name: "", type: "circle", type_label: "Circle",
+          visibility: "invisible", locked: false, element_selected: false,
+          ancestor_layer_color: "#4a90d9", children: []
+        }
+      ]
+    },
+    {
+      id: "layer2", name: "Layer 2", type: "layer", type_label: "Layer",
+      visibility: "preview", locked: false, element_selected: false,
+      ancestor_layer_color: "#d94a4a",
+      children: [
+        {
+          id: "line1", name: "", type: "line", type_label: "Line",
+          visibility: "preview", locked: false, element_selected: true,
+          ancestor_layer_color: "#d94a4a", children: []
+        }
+      ]
+    }
+  ];
+
+  // Icon SVG lookup helper
+  function iconSvg(name, size) {
+    size = size || 16;
+    var def = (typeof JAS_ICONS !== "undefined") ? JAS_ICONS[name] : null;
+    if (!def) return '<span style="width:' + size + 'px;height:' + size + 'px;display:inline-block"></span>';
+    var vb = def.viewbox || "0 0 16 16";
+    return '<svg viewBox="' + vb + '" width="' + size + '" height="' + size + '" style="display:block">' +
+           (def.svg || "") + '</svg>';
+  }
+
+  // Visibility icon name from state
+  function visIcon(vis) {
+    if (vis === "outline") return "eye_outline";
+    if (vis === "invisible") return "eye_invisible";
+    return "eye_preview";
+  }
+
+  // State per tree-view instance
+  var treeStates = {};
+
+  function getTreeState(container) {
+    var id = container.id || "default";
+    if (!treeStates[id]) {
+      treeStates[id] = {
+        panelSelection: [],
+        twirls: {},     // id -> bool (true=expanded); missing = expanded
+        data: SAMPLE_TREE
+      };
+    }
+    return treeStates[id];
+  }
+
+  function isExpanded(ts, id) {
+    return ts.twirls[id] !== false;
+  }
+
+  function isPanelSelected(ts, id) {
+    return ts.panelSelection.indexOf(id) >= 0;
+  }
+
+  // Build flat visible row list from tree
+  function flattenVisible(nodes, depth, ts) {
+    var rows = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      rows.push({ node: node, depth: depth });
+      var isContainer = node.children && node.children.length > 0 ||
+                        node.type === "layer" || node.type === "group";
+      if (isContainer && isExpanded(ts, node.id) && node.children) {
+        rows = rows.concat(flattenVisible(node.children, depth + 1, ts));
+      }
+    }
+    return rows;
+  }
+
+  // Render one tree row as HTML
+  function renderRow(entry, ts) {
+    var node = entry.node;
+    var depth = entry.depth;
+    var isContainer = node.type === "layer" || node.type === "group";
+    var selected = isPanelSelected(ts, node.id);
+
+    var indent = '<span style="width:' + (depth * 16) + 'px;flex-shrink:0;display:inline-block"></span>';
+
+    // Eye button
+    var eyeIcon = iconSvg(visIcon(node.visibility), 14);
+    var eyeBtn = '<button class="tree-btn" data-tree-action="eye" data-node-id="' +
+                 node.id + '" title="Visibility">' + eyeIcon + '</button>';
+
+    // Lock button
+    var lockName = node.locked ? "lock_locked" : "lock_unlocked";
+    var lockIcon = iconSvg(lockName, 14);
+    var lockBtn = '<button class="tree-btn" data-tree-action="lock" data-node-id="' +
+                  node.id + '" title="Lock">' + lockIcon + '</button>';
+
+    // Twirl button or gap
+    var twirlHtml;
+    if (isContainer) {
+      var twirlName = isExpanded(ts, node.id) ? "twirl_open" : "twirl_closed";
+      var twirlIcon = iconSvg(twirlName, 14);
+      twirlHtml = '<button class="tree-btn" data-tree-action="twirl" data-node-id="' +
+                  node.id + '" title="Expand/Collapse">' + twirlIcon + '</button>';
+    } else {
+      twirlHtml = '<span class="tree-gap"></span>';
+    }
+
+    // Preview placeholder
+    var preview = '<div class="jas-element-preview" style="width:24px;height:24px;' +
+                  'background:#fff;border:1px solid var(--jas-border,#555);' +
+                  'border-radius:1px;flex-shrink:0"></div>';
+
+    // Name
+    var displayName = node.name || ("<" + node.type_label + ">");
+    var nameClass = node.name ? "tree-name" : "tree-name unnamed";
+    var nameHtml = '<span class="' + nameClass + '" data-tree-action="name" data-node-id="' +
+                   node.id + '">' + displayName + '</span>';
+
+    // Select square
+    var sqBg = node.element_selected ? node.ancestor_layer_color : "transparent";
+    var selectSq = '<div class="select-square" data-tree-action="select" data-node-id="' +
+                   node.id + '" style="background:' + sqBg + '"></div>';
+
+    var rowClass = "jas-tree-row" + (selected ? " panel-selected" : "");
+    return '<div class="' + rowClass + '" data-node-id="' + node.id + '">' +
+           indent + eyeBtn + lockBtn + twirlHtml + preview + nameHtml + selectSq +
+           '</div>';
+  }
+
+  // Full render of tree into container
+  function renderTree(container) {
+    var ts = getTreeState(container);
+    var rows = flattenVisible(ts.data, 0, ts);
+    var html = [];
+    for (var i = 0; i < rows.length; i++) {
+      html.push(renderRow(rows[i], ts));
+    }
+    container.innerHTML = html.join("");
+  }
+
+  // Find a node in the tree by id
+  function findNode(nodes, id) {
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].id === id) return nodes[i];
+      if (nodes[i].children) {
+        var found = findNode(nodes[i].children, id);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  // Cycle visibility: preview -> outline -> invisible -> preview
+  function cycleVisibility(vis) {
+    if (vis === "preview") return "outline";
+    if (vis === "outline") return "invisible";
+    return "preview";
+  }
+
+  // Apply visibility recursively to children
+  function setVisibilityRecursive(node, vis) {
+    node.visibility = vis;
+    if (node.children) {
+      for (var i = 0; i < node.children.length; i++) {
+        setVisibilityRecursive(node.children[i], vis);
+      }
+    }
+  }
+
+  // Handle tree actions via event delegation
+  function wireTreeEvents(container) {
+    container.addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-tree-action]");
+      if (!btn) {
+        // Click on the row itself — panel select
+        var row = e.target.closest(".jas-tree-row");
+        if (row) {
+          var ts = getTreeState(container);
+          var nid = row.getAttribute("data-node-id");
+          if (e.metaKey || e.ctrlKey) {
+            var idx = ts.panelSelection.indexOf(nid);
+            if (idx >= 0) ts.panelSelection.splice(idx, 1);
+            else ts.panelSelection.push(nid);
+          } else {
+            ts.panelSelection = [nid];
+          }
+          renderTree(container);
+        }
+        return;
+      }
+      var action = btn.getAttribute("data-tree-action");
+      var nodeId = btn.getAttribute("data-node-id");
+      var ts = getTreeState(container);
+      var node = findNode(ts.data, nodeId);
+      if (!node) return;
+
+      if (action === "eye") {
+        var newVis = cycleVisibility(node.visibility);
+        setVisibilityRecursive(node, newVis);
+        renderTree(container);
+      } else if (action === "lock") {
+        node.locked = !node.locked;
+        renderTree(container);
+      } else if (action === "twirl") {
+        ts.twirls[nodeId] = !isExpanded(ts, nodeId);
+        renderTree(container);
+      } else if (action === "select") {
+        // Element selection via select square
+        node.element_selected = !node.element_selected;
+        renderTree(container);
+      } else if (action === "name") {
+        // Panel select on name click
+        if (e.metaKey || e.ctrlKey) {
+          var idx = ts.panelSelection.indexOf(nodeId);
+          if (idx >= 0) ts.panelSelection.splice(idx, 1);
+          else ts.panelSelection.push(nodeId);
+        } else {
+          ts.panelSelection = [nodeId];
+        }
+        renderTree(container);
+      }
+    });
+
+    // Keyboard navigation
+    container.setAttribute("tabindex", "0");
+    container.addEventListener("keydown", function (e) {
+      var ts = getTreeState(container);
+      var rows = flattenVisible(ts.data, 0, ts);
+      if (rows.length === 0) return;
+
+      // Find current focused row index
+      var focusId = ts.panelSelection.length > 0 ? ts.panelSelection[ts.panelSelection.length - 1] : null;
+      var focusIdx = -1;
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].node.id === focusId) { focusIdx = i; break; }
+      }
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (focusIdx < rows.length - 1) {
+          ts.panelSelection = [rows[focusIdx + 1].node.id];
+          renderTree(container);
+        }
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (focusIdx > 0) {
+          ts.panelSelection = [rows[focusIdx - 1].node.id];
+          renderTree(container);
+        }
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        if (focusIdx >= 0) {
+          var node = rows[focusIdx].node;
+          var isContainer = node.type === "layer" || node.type === "group";
+          if (isContainer && !isExpanded(ts, node.id)) {
+            ts.twirls[node.id] = true;
+            renderTree(container);
+          } else if (isContainer && node.children && node.children.length > 0) {
+            ts.panelSelection = [node.children[0].id];
+            renderTree(container);
+          }
+        }
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        if (focusIdx >= 0) {
+          var node = rows[focusIdx].node;
+          var isContainer = node.type === "layer" || node.type === "group";
+          if (isContainer && isExpanded(ts, node.id)) {
+            ts.twirls[node.id] = false;
+            renderTree(container);
+          }
+          // Move to parent not implemented (would need parent tracking)
+        }
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        // Log only in demo mode
+        console.log("Delete panel-selected:", ts.panelSelection);
+      }
+    });
+  }
+
+  // Initialize all tree views on the page
+  function initTreeViews() {
+    document.querySelectorAll('[data-type="tree-view"]').forEach(function (el) {
+      renderTree(el);
+      wireTreeEvents(el);
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", initTreeViews);
+})();
