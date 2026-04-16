@@ -282,3 +282,203 @@ class TestPathType:
     def test_path_from_id_malformed_is_null(self):
         r = evaluate("path_from_id('not-a-path')", {})
         assert r.type == ValueType.NULL
+
+
+# ══════════════════════════════════════════════════════════════════
+# snapshot effect (PHASE3.md §5.2)
+# ══════════════════════════════════════════════════════════════════
+
+
+def _make_doc(layers):
+    """Build a minimal document tree. Layers is a list of dicts like
+    {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}}."""
+    return {"layers": layers}
+
+
+class TestSnapshotEffect:
+    def test_snapshot_captures_tree(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
+        ])
+        store = StateStore(document=doc)
+        run_effects([{"snapshot": None}], {}, store)
+        assert len(store.snapshots()) == 1
+        # Mutating the live tree doesn't affect the snapshot
+        doc["layers"][0]["common"]["visibility"] = "invisible"
+        assert store.snapshots()[0]["layers"][0]["common"]["visibility"] == "visible"
+
+    def test_snapshot_noop_when_no_document(self):
+        store = StateStore()
+        run_effects([{"snapshot": None}], {}, store)
+        assert store.snapshots() == []
+
+
+# ══════════════════════════════════════════════════════════════════
+# doc.set effect (PHASE3.md §5.4)
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestDocSetEffect:
+    def test_doc_set_writes_dotted_field(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "visible", "locked": False}},
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.set": {
+                "path": "path(0)",
+                "fields": {"common.visibility": "'invisible'"},
+            }},
+        ], {}, store)
+        assert doc["layers"][0]["common"]["visibility"] == "invisible"
+        # Sibling fields untouched
+        assert doc["layers"][0]["common"]["locked"] is False
+        assert doc["layers"][0]["name"] == "A"
+
+    def test_doc_set_multiple_fields(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "visible", "locked": False}},
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.set": {
+                "path": "path(0)",
+                "fields": {
+                    "common.visibility": "'outline'",
+                    "common.locked": "true",
+                    "name": "'Renamed'",
+                },
+            }},
+        ], {}, store)
+        assert doc["layers"][0]["common"]["visibility"] == "outline"
+        assert doc["layers"][0]["common"]["locked"] is True
+        assert doc["layers"][0]["name"] == "Renamed"
+
+    def test_doc_set_creates_nested_dict_if_missing(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A"},   # no common dict
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.set": {
+                "path": "path(0)",
+                "fields": {"common.visibility": "'invisible'"},
+            }},
+        ], {}, store)
+        assert doc["layers"][0]["common"]["visibility"] == "invisible"
+
+    def test_doc_set_invalid_path_is_noop(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.set": {
+                "path": "path(5)",  # out of range
+                "fields": {"common.visibility": "'invisible'"},
+            }},
+        ], {}, store)
+        assert doc["layers"][0]["common"]["visibility"] == "visible"
+
+
+# ══════════════════════════════════════════════════════════════════
+# active_document computed properties (PHASE3.md §7.2)
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestActiveDocumentRollups:
+    def test_top_level_layers(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
+            {"kind": "Layer", "name": "B", "common": {"visibility": "invisible"}},
+            {"kind": "Group", "name": "G"},   # not a Layer — excluded
+        ])
+        store = StateStore(document=doc)
+        ctx = store.eval_context()
+        assert "top_level_layers" in ctx["active_document"]
+        layers = ctx["active_document"]["top_level_layers"]
+        assert len(layers) == 2
+        assert layers[0]["name"] == "A"
+        assert layers[1]["name"] == "B"
+
+    def test_top_level_layer_paths(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A"},
+            {"kind": "Group", "name": "G"},
+            {"kind": "Layer", "name": "B"},
+        ])
+        store = StateStore(document=doc)
+        # Paths: A is at index 0, B is at index 2
+        ctx = store.eval_context()
+        paths = ctx["active_document"]["top_level_layer_paths"]
+        # paths should be a list of PATH-typed values; check through expression
+        r = evaluate("active_document.top_level_layer_paths.length", ctx)
+        assert r.value == 2
+
+    def test_any_on_top_level_layers(self):
+        """Integration: HOF over top_level_layers reads live fields."""
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
+            {"kind": "Layer", "name": "B", "common": {"visibility": "invisible"}},
+        ])
+        store = StateStore(document=doc)
+        ctx = store.eval_context()
+        r = evaluate(
+            "any(active_document.top_level_layers, "
+            "fun l -> l.common.visibility == 'visible')",
+            ctx,
+        )
+        assert r.value is True
+
+
+# ══════════════════════════════════════════════════════════════════
+# End-to-end: the toggle_all_layers_visibility YAML from PHASE3.md §2
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestToggleAllLayersVisibility:
+    EFFECTS = [
+        {"let": {
+            "target": "if any(active_document.top_level_layers, "
+                      "fun l -> l.common.visibility != 'invisible') "
+                      "then 'invisible' else 'preview'",
+        }},
+        {"snapshot": None},
+        {"foreach": {"source": "active_document.top_level_layer_paths", "as": "p"},
+         "do": [
+             {"doc.set": {"path": "p", "fields": {"common.visibility": "target"}}},
+         ]},
+    ]
+
+    def test_toggle_when_any_visible_all_become_invisible(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
+            {"kind": "Layer", "name": "B", "common": {"visibility": "invisible"}},
+        ])
+        store = StateStore(document=doc)
+        run_effects(self.EFFECTS, {}, store)
+        assert doc["layers"][0]["common"]["visibility"] == "invisible"
+        assert doc["layers"][1]["common"]["visibility"] == "invisible"
+        assert len(store.snapshots()) == 1
+
+    def test_toggle_when_all_invisible_all_become_preview(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "invisible"}},
+            {"kind": "Layer", "name": "B", "common": {"visibility": "invisible"}},
+        ])
+        store = StateStore(document=doc)
+        run_effects(self.EFFECTS, {}, store)
+        assert doc["layers"][0]["common"]["visibility"] == "preview"
+        assert doc["layers"][1]["common"]["visibility"] == "preview"
+
+    def test_toggle_skips_non_layer_elements(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
+            {"kind": "Group", "name": "G", "common": {"visibility": "visible"}},
+        ])
+        store = StateStore(document=doc)
+        run_effects(self.EFFECTS, {}, store)
+        # Layer toggled
+        assert doc["layers"][0]["common"]["visibility"] == "invisible"
+        # Group was not in top_level_layer_paths, left alone
+        assert doc["layers"][1]["common"]["visibility"] == "visible"

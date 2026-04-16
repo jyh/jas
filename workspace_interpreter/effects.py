@@ -126,6 +126,32 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 new_ctx[name] = result.value
         return new_ctx
 
+    # snapshot — PHASE3 §5.2 — push undo checkpoint on active document
+    if "snapshot" in effect:
+        store.snapshot()
+        return None
+
+    # doc.set: { path, fields } — PHASE3 §5.4
+    # Schema-driven write on the element at `path`. Each field is a
+    # dotted path relative to the element root. Expressions in fields
+    # are evaluated in the current ctx before being written.
+    if "doc.set" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        spec = effect["doc.set"]
+        path_expr = spec.get("path", "")
+        fields = spec.get("fields", {}) or {}
+        # Evaluate path expression; must resolve to a PATH value
+        eval_ctx = store.eval_context(ctx)
+        path_val = evaluate(str(path_expr) if path_expr is not None else "", eval_ctx)
+        if path_val.type != ValueType.PATH:
+            return None
+        # Evaluate each field's value expression and write
+        for dotted_field, expr in fields.items():
+            val_result = evaluate(str(expr) if expr is not None else "", eval_ctx)
+            value = val_result.value if val_result.type != ValueType.CLOSURE else val_result
+            store.set_element_field(path_val.value, dotted_field, value)
+        return None
+
     # foreach: { source, as } do: [...] — PHASE3 §5.3
     # Evaluates source once; each iteration runs do: in a fresh scope
     # with `as:` bound to the item. Bindings inside do: do not leak

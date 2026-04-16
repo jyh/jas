@@ -6,13 +6,14 @@ to the subscribe mechanism.
 """
 
 from __future__ import annotations
+import copy
 from typing import Callable
 
 
 class StateStore:
     """Manages global state, panel-scoped state, and reactive subscriptions."""
 
-    def __init__(self, defaults: dict | None = None):
+    def __init__(self, defaults: dict | None = None, document: dict | None = None):
         self._state: dict = dict(defaults) if defaults else {}
         self._panels: dict[str, dict] = {}
         self._active_panel: str | None = None
@@ -22,6 +23,12 @@ class StateStore:
         self._dialog_props: dict = {}  # {key: {"get": expr, "set": expr}}
         self._subscribers: list[tuple[set | None, Callable]] = []
         self._panel_subscribers: dict[str, list[Callable]] = {}
+        # Phase 3: optional document tree for doc.set / snapshot effects.
+        # Shape: {"layers": [<element>, ...]} where <element> is a dict
+        # with at least {"kind": str, "name": str}. Real apps use a
+        # native Model; tests use plain dicts.
+        self._document: dict | None = document
+        self._snapshots: list[dict] = []
 
     # ── Global state ─────────────────────────────────────────
 
@@ -198,12 +205,62 @@ class StateStore:
         for callback in self._panel_subscribers.get(panel_id, []):
             callback(key, value)
 
+    # ── Document (Phase 3) ───────────────────────────────────
+
+    def document(self) -> dict | None:
+        """Return the live document tree, or None."""
+        return self._document
+
+    def snapshot(self) -> None:
+        """Deep-copy the current document into the snapshots stack.
+        No-op when there is no document."""
+        if self._document is not None:
+            self._snapshots.append(copy.deepcopy(self._document))
+
+    def snapshots(self) -> list[dict]:
+        """Return the snapshots list (for tests / inspection)."""
+        return self._snapshots
+
+    def get_element(self, path: tuple[int, ...]) -> dict | None:
+        """Resolve a path tuple to an element dict. None if invalid."""
+        if self._document is None:
+            return None
+        layers = self._document.get("layers")
+        if not isinstance(layers, list):
+            return None
+        if len(path) == 0:
+            # Root path refers to the document itself
+            return self._document
+        if path[0] < 0 or path[0] >= len(layers):
+            return None
+        elem = layers[path[0]]
+        for idx in path[1:]:
+            children = elem.get("children") if isinstance(elem, dict) else None
+            if not isinstance(children, list) or idx < 0 or idx >= len(children):
+                return None
+            elem = children[idx]
+        return elem
+
+    def set_element_field(self, path: tuple[int, ...], dotted_field: str, value) -> bool:
+        """Write value to the element at path under dotted_field.
+        Creates intermediate dicts as needed. Returns True on success."""
+        elem = self.get_element(path)
+        if elem is None or not isinstance(elem, dict):
+            return False
+        keys = dotted_field.split(".")
+        for k in keys[:-1]:
+            if k not in elem or not isinstance(elem[k], dict):
+                elem[k] = {}
+            elem = elem[k]
+        elem[keys[-1]] = value
+        return True
+
     # ── Context for expression evaluation ────────────────────
 
     def eval_context(self, extra: dict | None = None) -> dict:
         """Build an evaluation context dict for the expression evaluator.
 
-        Returns {"state": {...}, "panel": {...}, ...}.
+        Returns {"state": {...}, "panel": {...}, "active_document": {...}, ...}.
         When a dialog is open, also includes "dialog" and "param" keys.
         """
         ctx = {"state": dict(self._state)}
@@ -215,6 +272,31 @@ class StateStore:
             ctx["dialog"] = dict(self._dialog)
             if self._dialog_params is not None:
                 ctx["param"] = dict(self._dialog_params)
+        ctx["active_document"] = self._active_document_view()
         if extra:
             ctx.update(extra)
         return ctx
+
+    def _active_document_view(self) -> dict:
+        """Build the active_document namespace from the document tree.
+        Includes top_level_layers and top_level_layer_paths (Phase 3 §7.2)."""
+        from workspace_interpreter.expr_types import Value
+        if self._document is None:
+            return {
+                "top_level_layers": [],
+                "top_level_layer_paths": [],
+            }
+        layers = self._document.get("layers", [])
+        top_level_layers = []
+        top_level_layer_paths = []
+        for i, elem in enumerate(layers):
+            if isinstance(elem, dict) and elem.get("kind") == "Layer":
+                # Expose layer with its path for HOF predicates
+                view = dict(elem)
+                view["path"] = Value.path((i,))
+                top_level_layers.append(view)
+                top_level_layer_paths.append(Value.path((i,)))
+        return {
+            "top_level_layers": top_level_layers,
+            "top_level_layer_paths": top_level_layer_paths,
+        }
