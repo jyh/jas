@@ -874,6 +874,50 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
         | _ -> Null
     end
 
+    (* element_at(path) — Phase 4. Resolves a path against the
+       active_document.top_level_layers tree and returns the element
+       at that location. Descends through .children for nested paths.
+       Returns Null for non-path args, empty paths, or out-of-range
+       indices. *)
+    else if name = "element_at" then begin
+      if List.length args <> 1 then Null
+      else
+        let p = eval_node ~local_env ?store_cb (List.hd args) ctx in
+        match p with
+        | Path [] -> Null
+        | Path (first :: rest) ->
+          let top_opt = match ctx with
+            | `Assoc pairs ->
+              (match List.assoc_opt "active_document" pairs with
+               | Some (`Assoc ad) ->
+                 (match List.assoc_opt "top_level_layers" ad with
+                  | Some (`List arr) -> Some arr
+                  | _ -> None)
+               | _ -> None)
+            | _ -> None
+          in
+          (match top_opt with
+           | None -> Null
+           | Some top ->
+             if first < 0 || first >= List.length top then Null
+             else begin
+               let cur_ref = ref (List.nth top first) in
+               let ok = ref true in
+               List.iter (fun idx ->
+                 if not !ok then ()
+                 else match !cur_ref with
+                   | `Assoc pairs ->
+                     (match List.assoc_opt "children" pairs with
+                      | Some (`List kids) when idx >= 0 && idx < List.length kids ->
+                        cur_ref := List.nth kids idx
+                      | _ -> ok := false)
+                   | _ -> ok := false
+               ) rest;
+               if !ok then value_of_json !cur_ref else Null
+             end)
+        | _ -> Null
+    end
+
     (* reverse: list -> list *)
     else if name = "reverse" then begin
       if List.length args <> 1 then Null
@@ -957,6 +1001,48 @@ and eval_node_json_inner (node : ast) (ctx : Yojson.Safe.t) : Yojson.Safe.t =
        (match int_of_string_opt member with
         | Some idx when idx >= 0 && idx < List.length lst ->
           List.nth lst idx
+        | _ -> `Null)
+     | _ -> `Null)
+  | Ast_func_call ("element_at", args) ->
+    (* Phase 4: element_at returns a raw JSON element. Bypass the
+       Value roundtrip so dot/index chains can drill into the
+       preserved Assoc. Mirrors the Python reference's treatment of
+       dict Values. *)
+    (match args with
+     | [arg] ->
+       let p = eval_node arg ctx in
+       (match p with
+        | Path (first :: rest) ->
+          let top_opt = match ctx with
+            | `Assoc pairs ->
+              (match List.assoc_opt "active_document" pairs with
+               | Some (`Assoc ad) ->
+                 (match List.assoc_opt "top_level_layers" ad with
+                  | Some (`List arr) -> Some arr
+                  | _ -> None)
+               | _ -> None)
+            | _ -> None
+          in
+          (match top_opt with
+           | None -> `Null
+           | Some top ->
+             if first < 0 || first >= List.length top then `Null
+             else begin
+               let cur_ref = ref (List.nth top first) in
+               let ok = ref true in
+               List.iter (fun idx ->
+                 if not !ok then ()
+                 else match !cur_ref with
+                   | `Assoc pairs ->
+                     (match List.assoc_opt "children" pairs with
+                      | Some (`List kids)
+                        when idx >= 0 && idx < List.length kids ->
+                        cur_ref := List.nth kids idx
+                      | _ -> ok := false)
+                   | _ -> ok := false
+               ) rest;
+               if !ok then !cur_ref else `Null
+             end)
         | _ -> `Null)
      | _ -> `Null)
   | _ ->

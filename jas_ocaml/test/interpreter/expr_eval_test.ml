@@ -278,6 +278,50 @@ let path_tests = [
     assert_path [] (eval "path_from_id('')"));
   Alcotest.test_case "path_from_id_malformed" `Quick (fun () ->
     assert_null (eval "path_from_id('not-a-path')"));
+
+  (* Phase 4: element_at — walks active_document.top_level_layers *)
+  Alcotest.test_case "element_at_top_level" `Quick (fun () ->
+    let ctx = `Assoc [
+      ("active_document", `Assoc [
+        ("top_level_layers", `List [
+          `Assoc [("kind", `String "Layer"); ("name", `String "A");
+                   ("common", `Assoc [("visibility", `String "preview");
+                                       ("locked", `Bool false)])];
+        ]);
+      ]);
+    ] in
+    assert_string "A" (evaluate "element_at(path(0)).name" ctx));
+
+  Alcotest.test_case "element_at_out_of_range" `Quick (fun () ->
+    let ctx = `Assoc [
+      ("active_document", `Assoc [
+        ("top_level_layers", `List [
+          `Assoc [("kind", `String "Layer"); ("name", `String "A")];
+        ]);
+      ]);
+    ] in
+    assert_null (evaluate "element_at(path(5))" ctx));
+
+  Alcotest.test_case "element_at_non_path_arg" `Quick (fun () ->
+    let ctx = `Assoc [
+      ("active_document", `Assoc [("top_level_layers", `List [])]);
+    ] in
+    assert_null (evaluate "element_at('oops')" ctx));
+
+  Alcotest.test_case "element_at_common_fields" `Quick (fun () ->
+    let ctx = `Assoc [
+      ("active_document", `Assoc [
+        ("top_level_layers", `List [
+          `Assoc [("kind", `String "Layer"); ("name", `String "A");
+                   ("common", `Assoc [("visibility", `String "outline");
+                                       ("locked", `Bool true)])];
+        ]);
+      ]);
+    ] in
+    assert_string "outline"
+      (evaluate "element_at(path(0)).common.visibility" ctx);
+    assert_bool true
+      (evaluate "element_at(path(0)).common.locked" ctx));
 ]
 
 (* Phase 3 §4.4: closure captures shadowed binding (lexical scoping) *)
