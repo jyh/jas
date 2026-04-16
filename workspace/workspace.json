@@ -2089,13 +2089,81 @@
       ]
     },
     "layer_options_confirm": {
-      "description": "Confirm the Layer Options dialog. In create mode, creates a new layer with the specified properties. In edit mode, updates the existing layer's properties. The action is undoable.\n",
+      "description": "Commit the Layer Options dialog. In create mode (param.layer_id is null) creates a new layer with the specified name, visibility, and lock state, inserted above the topmost panel-selected layer (or appended when nothing is selected). In edit mode (param.layer_id non-null) updates the existing layer at that path in place. Visibility is derived from the show and preview booleans: show=false maps to invisible; show=true with preview=true maps to preview; show=true with preview=false maps to outline. One undo snapshot covers the operation. Closes the dialog on success.\n",
       "category": "layers",
       "tier": 3,
-      "effects": [
-        {
-          "log": "layer_options_confirm"
+      "params": {
+        "layer_id": {
+          "type": "string",
+          "nullable": true
+        },
+        "name": {
+          "type": "string"
+        },
+        "lock": {
+          "type": "bool"
+        },
+        "show": {
+          "type": "bool"
+        },
+        "preview": {
+          "type": "bool"
         }
+      },
+      "effects": [
+        "snapshot",
+        {
+          "let": {
+            "target_visibility": "if not param.show then 'invisible' else if param.preview then 'preview' else 'outline'\n"
+          }
+        },
+        {
+          "if": {
+            "condition": "param.layer_id != null",
+            "then": [
+              {
+                "doc.set": {
+                  "path": "path_from_id(param.layer_id)",
+                  "fields": {
+                    "name": "param.name",
+                    "common.locked": "param.lock",
+                    "common.visibility": "target_visibility"
+                  }
+                }
+              }
+            ],
+            "else": [
+              {
+                "let": {
+                  "insert_index": "active_document.new_layer_insert_index"
+                }
+              },
+              {
+                "doc.create_layer": {
+                  "name": "param.name"
+                },
+                "as": "new_layer"
+              },
+              {
+                "doc.insert_at": {
+                  "parent_path": "path()",
+                  "index": "insert_index",
+                  "element": "new_layer"
+                }
+              },
+              {
+                "doc.set": {
+                  "path": "path(insert_index)",
+                  "fields": {
+                    "common.locked": "param.lock",
+                    "common.visibility": "target_visibility"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "close_dialog"
       ]
     },
     "scroll_to_selected": {

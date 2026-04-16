@@ -908,6 +908,122 @@ class TestNewLayerAction:
         assert doc["layers"][3]["name"] == "Layer 3"
 
 
+class TestLayerOptionsConfirmAction:
+    """End-to-end: layer_options_confirm YAML action (Phase 3 Group E).
+
+    In edit mode the dialog's layer_id resolves to a path via
+    path_from_id; in create mode a new layer is appended above the
+    topmost selected layer. Visibility is derived from show+preview.
+    """
+
+    def _load_action(self, name):
+        import yaml as yl
+        path = os.path.join(os.path.dirname(__file__), "..", "..",
+                            "workspace", "actions.yaml")
+        with open(path) as f:
+            return yl.safe_load(f)["actions"][name]
+
+    def test_edit_mode_updates_existing_layer(self):
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("layer_options_confirm")["effects"]
+        doc = _make_doc([
+            {"kind": "Layer", "name": "Old",
+             "common": {"visibility": "preview", "locked": False}},
+        ])
+        store = StateStore(document=doc)
+        ctx = {"param": {
+            "layer_id": "0",        # path_from_id("0") == path(0)
+            "name": "Renamed",
+            "lock": True,
+            "show": True,
+            "preview": False,       # show=true, preview=false → outline
+        }}
+        run_effects(effects, ctx, store, diagnostics=[])
+        layer = doc["layers"][0]
+        assert layer["name"] == "Renamed"
+        assert layer["common"]["locked"] is True
+        assert layer["common"]["visibility"] == "outline"
+
+    def test_edit_mode_show_false_maps_to_invisible(self):
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("layer_options_confirm")["effects"]
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A",
+             "common": {"visibility": "preview", "locked": False}},
+        ])
+        store = StateStore(document=doc)
+        ctx = {"param": {
+            "layer_id": "0",
+            "name": "A",
+            "lock": False,
+            "show": False,           # invisible regardless of preview
+            "preview": True,
+        }}
+        run_effects(effects, ctx, store, diagnostics=[])
+        assert doc["layers"][0]["common"]["visibility"] == "invisible"
+
+    def test_create_mode_appends_new_layer(self):
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("layer_options_confirm")["effects"]
+        doc = _make_doc([
+            {"kind": "Layer", "name": "Existing"},
+        ])
+        store = StateStore(document=doc)
+        store.init_panel("layers", {"layers_panel_selection": []})
+        store.set_active_panel("layers")
+        ctx = {"param": {
+            "layer_id": None,        # create mode
+            "name": "Brand New",
+            "lock": False,
+            "show": True,
+            "preview": True,
+        }}
+        run_effects(effects, ctx, store, diagnostics=[])
+        assert len(doc["layers"]) == 2
+        # Appended at the end since nothing was selected
+        new_layer = doc["layers"][1]
+        assert new_layer["name"] == "Brand New"
+        assert new_layer["common"]["visibility"] == "preview"
+        assert new_layer["common"]["locked"] is False
+
+    def test_create_mode_inserts_above_selection(self):
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("layer_options_confirm")["effects"]
+        doc = _make_doc([
+            {"kind": "Layer", "name": "Layer 1"},
+            {"kind": "Layer", "name": "Layer 2"},
+            {"kind": "Layer", "name": "Layer 3"},
+        ])
+        store = StateStore(document=doc)
+        # Select layer at index 1 — new layer inserts at index 2.
+        store.init_panel("layers", {
+            "layers_panel_selection": [{"__path__": [1]}],
+        })
+        store.set_active_panel("layers")
+        ctx = {"param": {
+            "layer_id": None,
+            "name": "Inserted",
+            "lock": True,
+            "show": True,
+            "preview": False,
+        }}
+        run_effects(effects, ctx, store, diagnostics=[])
+        assert len(doc["layers"]) == 4
+        assert doc["layers"][2]["name"] == "Inserted"
+        assert doc["layers"][2]["common"]["locked"] is True
+        assert doc["layers"][2]["common"]["visibility"] == "outline"
+        # Old index-2 layer shifted to index 3
+        assert doc["layers"][3]["name"] == "Layer 3"
+
+
 class TestActiveDocumentRollups:
     def test_top_level_layers(self):
         doc = _make_doc([
