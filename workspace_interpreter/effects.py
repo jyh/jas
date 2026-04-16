@@ -112,6 +112,15 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
     binding (let:), else None. Callers in run_effects use the returned
     ctx for subsequent effects in the same list."""
 
+    # Platform-specific handlers take priority over built-ins so apps
+    # can override snapshot/doc.set with Model-based versions.
+    if platform_effects:
+        for key in effect:
+            handler = platform_effects.get(key)
+            if handler:
+                handler(effect[key], ctx, store)
+                return None
+
     # let: { name: expr, ... } — PHASE3 §5.1
     # Evaluates each expression against current ctx (earlier names visible
     # to later ones in the same block), returns an extended ctx.
@@ -363,6 +372,7 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         return
 
     # Platform-specific effects — delegate to registered handlers
+    # (kept for non-priority keys; priority keys handled at top of _run_one)
     if platform_effects:
         for key in effect:
             handler = platform_effects.get(key)
