@@ -116,3 +116,76 @@ def test_layers_dispatch_tier3_no_error():
                 "enter_isolation_mode", "exit_isolation_mode",
                 "flatten_artwork", "collect_in_new_layer"):
         panel_dispatch(PanelKind.LAYERS, cmd, addr, layout)
+
+
+# Phase 3: Group A toggle actions via YAML dispatch
+
+def _make_model_with_layers(layer_specs):
+    """Build a Model with top-level layers given (name, visibility, locked) tuples."""
+    import dataclasses
+    from geometry.element import Layer, Visibility
+    from document.model import Model
+    from document.document import Document
+    layers = tuple(
+        Layer(name=name, children=(), visibility=vis, locked=locked)
+        for name, vis, locked in layer_specs
+    )
+    doc = Document(layers=layers)
+    return Model(document=doc)
+
+
+def test_toggle_all_layers_visibility_via_yaml():
+    from geometry.element import Visibility
+    layout = WorkspaceLayout.default_layout()
+    dock = layout.anchored_dock(DockEdge.RIGHT)
+    addr = PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=2), panel_idx=0)
+    model = _make_model_with_layers([
+        ("A", Visibility.PREVIEW, False),
+        ("B", Visibility.INVISIBLE, False),
+    ])
+    panel_dispatch(PanelKind.LAYERS, "toggle_all_layers_visibility",
+                   addr, layout, model=model)
+    # any_visible=true → target=invisible
+    assert model.document.layers[0].visibility == Visibility.INVISIBLE
+    assert model.document.layers[1].visibility == Visibility.INVISIBLE
+
+
+def test_toggle_all_layers_visibility_all_invisible_to_preview():
+    from geometry.element import Visibility
+    layout = WorkspaceLayout.default_layout()
+    dock = layout.anchored_dock(DockEdge.RIGHT)
+    addr = PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=2), panel_idx=0)
+    model = _make_model_with_layers([
+        ("A", Visibility.INVISIBLE, False),
+        ("B", Visibility.INVISIBLE, False),
+    ])
+    panel_dispatch(PanelKind.LAYERS, "toggle_all_layers_visibility",
+                   addr, layout, model=model)
+    assert model.document.layers[0].visibility == Visibility.PREVIEW
+    assert model.document.layers[1].visibility == Visibility.PREVIEW
+
+
+def test_toggle_all_layers_outline_via_yaml():
+    from geometry.element import Visibility
+    layout = WorkspaceLayout.default_layout()
+    dock = layout.anchored_dock(DockEdge.RIGHT)
+    addr = PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=2), panel_idx=0)
+    model = _make_model_with_layers([
+        ("A", Visibility.PREVIEW, False),
+    ])
+    panel_dispatch(PanelKind.LAYERS, "toggle_all_layers_outline",
+                   addr, layout, model=model)
+    assert model.document.layers[0].visibility == Visibility.OUTLINE
+
+
+def test_toggle_all_layers_lock_via_yaml():
+    from geometry.element import Visibility
+    layout = WorkspaceLayout.default_layout()
+    dock = layout.anchored_dock(DockEdge.RIGHT)
+    addr = PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=2), panel_idx=0)
+    model = _make_model_with_layers([
+        ("A", Visibility.PREVIEW, False),
+    ])
+    panel_dispatch(PanelKind.LAYERS, "toggle_all_layers_lock",
+                   addr, layout, model=model)
+    assert model.document.layers[0].locked is True

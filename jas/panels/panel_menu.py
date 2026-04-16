@@ -114,6 +114,113 @@ def panel_menu(kind: PanelKind) -> list[PanelMenuItem]:
     return [PanelMenuItem.action(f"Close {panel_label(kind)}", "close_panel")]
 
 
+def _dispatch_yaml_layers_action(action_name: str, model) -> None:
+    """Phase 3: dispatch a layers action through the compiled YAML effects.
+
+    Builds active_document.top_level_layers / top_level_layer_paths from
+    model.document.layers and registers snapshot + doc.set as platform
+    effect handlers that operate on the Model.
+    """
+    import dataclasses
+    from geometry.element import Layer, Visibility
+    from workspace_interpreter.loader import load_workspace
+    from workspace_interpreter.state_store import StateStore
+    from workspace_interpreter.effects import run_effects
+    from workspace_interpreter.expr import evaluate
+    import os
+
+    # Locate workspace.json — the compiled actions catalog.
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+    ws_dir = os.path.join(repo_root, "workspace")
+    try:
+        ws = load_workspace(ws_dir)
+    except Exception:
+        return
+    actions = ws.get("actions", {})
+    action_def = actions.get(action_name)
+    if not action_def:
+        return
+    effects = action_def.get("effects", [])
+
+    # Build active_document rollups
+    from workspace_interpreter.expr_types import Value
+    top_level_layers = []
+    top_level_layer_paths = []
+    for i, elem in enumerate(model.document.layers):
+        if isinstance(elem, Layer):
+            vis_name = {
+                Visibility.INVISIBLE: "invisible",
+                Visibility.OUTLINE: "outline",
+                Visibility.PREVIEW: "preview",
+            }[elem.visibility]
+            path_val = Value.path((i,))
+            top_level_layers.append({
+                "kind": "Layer",
+                "name": elem.name,
+                "common": {"visibility": vis_name, "locked": elem.locked},
+                "path": path_val,
+            })
+            top_level_layer_paths.append(path_val)
+    ctx = {"active_document": {
+        "top_level_layers": top_level_layers,
+        "top_level_layer_paths": top_level_layer_paths,
+    }}
+
+    # Platform handlers
+    def snapshot_handler(_value, _ctx, _store):
+        model.snapshot()
+
+    def doc_set_handler(spec, call_ctx, _store):
+        if not isinstance(spec, dict):
+            return
+        path_expr = spec.get("path", "")
+        fields = spec.get("fields", {})
+        path_val = evaluate(path_expr, call_ctx)
+        if path_val.type.name != "PATH":
+            return
+        indices = path_val.value
+        if len(indices) != 1:
+            return
+        idx = indices[0]
+        if idx < 0 or idx >= len(model.document.layers):
+            return
+        elem = model.document.layers[idx]
+        if not isinstance(elem, Layer):
+            return
+        updates = {}
+        for dotted, expr_v in fields.items():
+            v = evaluate(str(expr_v) if expr_v is not None else "", call_ctx)
+            if dotted == "common.visibility" and v.type.name == "STRING":
+                vis_map = {"invisible": Visibility.INVISIBLE,
+                           "outline": Visibility.OUTLINE,
+                           "preview": Visibility.PREVIEW}
+                if v.value in vis_map:
+                    updates["visibility"] = vis_map[v.value]
+            elif dotted == "common.locked" and v.type.name == "BOOL":
+                updates["locked"] = v.value
+            elif dotted == "name" and v.type.name == "STRING":
+                updates["name"] = v.value
+        if updates:
+            new_layer = dataclasses.replace(elem, **updates)
+            new_layers = tuple(
+                new_layer if j == idx else l
+                for j, l in enumerate(model.document.layers)
+            )
+            model.document = dataclasses.replace(
+                model.document, layers=new_layers
+            )
+
+    platform_effects = {
+        "snapshot": snapshot_handler,
+        "doc.set": doc_set_handler,
+    }
+
+    store = StateStore()
+    run_effects(effects, ctx, store,
+                actions=actions, platform_effects=platform_effects)
+
+
 def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
                    layout: WorkspaceLayout, model=None) -> None:
     """Dispatch a menu command for a panel kind."""
@@ -134,41 +241,10 @@ def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
         new_layer = Layer(name=f"Layer {n}", children=())
         model.snapshot()
         model.document = dataclasses.replace(doc, layers=doc.layers + (new_layer,))
-    elif cmd == "toggle_all_layers_visibility" and kind == PanelKind.LAYERS and model is not None:
-        import dataclasses
-        from geometry.element import Layer, Visibility
-        doc = model.document
-        any_visible = any(l.visibility != Visibility.INVISIBLE for l in doc.layers)
-        target = Visibility.INVISIBLE if any_visible else Visibility.PREVIEW
-        new_layers = tuple(
-            dataclasses.replace(l, visibility=target) if isinstance(l, Layer) else l
-            for l in doc.layers
-        )
-        model.snapshot()
-        model.document = dataclasses.replace(doc, layers=new_layers)
-    elif cmd == "toggle_all_layers_outline" and kind == PanelKind.LAYERS and model is not None:
-        import dataclasses
-        from geometry.element import Layer, Visibility
-        doc = model.document
-        any_preview = any(l.visibility == Visibility.PREVIEW for l in doc.layers)
-        target = Visibility.OUTLINE if any_preview else Visibility.PREVIEW
-        new_layers = tuple(
-            dataclasses.replace(l, visibility=target) if isinstance(l, Layer) else l
-            for l in doc.layers
-        )
-        model.snapshot()
-        model.document = dataclasses.replace(doc, layers=new_layers)
-    elif cmd == "toggle_all_layers_lock" and kind == PanelKind.LAYERS and model is not None:
-        import dataclasses
-        from geometry.element import Layer
-        doc = model.document
-        any_unlocked = any(not l.locked for l in doc.layers)
-        new_layers = tuple(
-            dataclasses.replace(l, locked=any_unlocked) if isinstance(l, Layer) else l
-            for l in doc.layers
-        )
-        model.snapshot()
-        model.document = dataclasses.replace(doc, layers=new_layers)
+    elif cmd in ("toggle_all_layers_visibility",
+                 "toggle_all_layers_outline",
+                 "toggle_all_layers_lock") and kind == PanelKind.LAYERS and model is not None:
+        _dispatch_yaml_layers_action(cmd, model)
     elif cmd in ("new_group", "enter_isolation_mode", "exit_isolation_mode",
                  "flatten_artwork", "collect_in_new_layer") and kind == PanelKind.LAYERS:
         pass  # Tier-3 stubs for actions that need panel selection
