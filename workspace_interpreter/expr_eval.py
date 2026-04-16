@@ -136,6 +136,21 @@ def _eval_path(segments: list[str], ctx: dict) -> Value:
 def _eval_dot_access(node: DotAccess, ctx: dict) -> Value:
     obj_val = eval_node(node.obj, ctx)
 
+    # Path computed properties (Phase 3 §6.2)
+    if obj_val.type == ValueType.PATH:
+        indices = obj_val.value  # tuple[int, ...]
+        if node.member == "depth":
+            return Value.number(len(indices))
+        if node.member == "parent":
+            if len(indices) == 0:
+                return Value.null()
+            return Value.path(indices[:-1])
+        if node.member == "id":
+            return Value.string(".".join(str(i) for i in indices))
+        if node.member == "indices":
+            return Value.list_(list(indices))
+        return Value.null()
+
     # List methods
     if obj_val.type == ValueType.LIST and node.member == "length":
         return Value.number(len(obj_val.value))
@@ -201,6 +216,34 @@ def _color_arg(val: Value) -> str:
     return "#000000"
 
 
+# Keys in ctx that are runtime-context namespaces, not user bindings.
+# When a closure is applied, these are refreshed from the caller's ctx
+# so that state/panel reads see current values; user bindings stay
+# lexically captured.
+_NAMESPACE_KEYS = frozenset({
+    "state", "panel", "theme", "dialog", "param", "event", "node", "prop",
+    "active_document", "workspace", "data",
+})
+
+
+def _apply_closure(closure: Value, args: list[Value], caller_ctx: dict) -> Value:
+    """Invoke a closure with proper lexical scoping.
+
+    Start from the captured env, refresh runtime-context namespaces from
+    the caller (so state/panel reads are current), then bind parameters.
+    """
+    params, body, captured_ctx = closure.value
+    if len(args) != len(params):
+        return Value.null()
+    call_ctx = dict(captured_ctx)
+    for k in _NAMESPACE_KEYS:
+        if k in caller_ctx:
+            call_ctx[k] = caller_ctx[k]
+    for p, a in zip(params, args):
+        call_ctx[p] = a.value if a.type != ValueType.CLOSURE else a
+    return eval_node(body, call_ctx)
+
+
 _COLOR_DECOMPOSE = {
     "hsb_h": lambda r, g, b: color_util.rgb_to_hsb(r, g, b)[0],
     "hsb_s": lambda r, g, b: color_util.rgb_to_hsb(r, g, b)[1],
@@ -222,29 +265,15 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
     if name == "__apply__" and len(node.args) >= 1:
         callee = eval_node(node.args[0], ctx)
         if callee.type == ValueType.CLOSURE:
-            params, body, captured_ctx = callee.value
             args = [eval_node(a, ctx) for a in node.args[1:]]
-            if len(args) != len(params):
-                return Value.null()
-            call_ctx = dict(captured_ctx)
-            call_ctx.update(ctx)
-            for p, a in zip(params, args):
-                call_ctx[p] = a.value if a.type != ValueType.CLOSURE else a
-            return eval_node(body, call_ctx)
+            return _apply_closure(callee, args, ctx)
         return Value.null()
 
     # Check if name resolves to a closure in scope
     closure_val = ctx.get(name)
     if isinstance(closure_val, Value) and closure_val.type == ValueType.CLOSURE:
-        params, body, captured_ctx = closure_val.value
         args = [eval_node(a, ctx) for a in node.args]
-        if len(args) != len(params):
-            return Value.null()
-        call_ctx = dict(captured_ctx)
-        call_ctx.update(ctx)
-        for p, a in zip(params, args):
-            call_ctx[p] = a.value if a.type != ValueType.CLOSURE else a
-        return eval_node(body, call_ctx)
+        return _apply_closure(closure_val, args, ctx)
 
     # Color decomposition: single color argument → number
     if name in _COLOR_DECOMPOSE:
@@ -330,6 +359,62 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
         new_h = (h + 180) % 360
         nr, ng, nb = color_util.hsb_to_rgb(new_h, s, bv)
         return Value.color(color_util.rgb_to_hex(nr, ng, nb))
+
+    # ── Higher-order functions (Phase 3 §6.1) ─────────────
+    if name in ("any", "all", "map", "filter"):
+        if len(node.args) != 2:
+            return Value.null() if name in ("map", "filter") else Value.bool_(name == "all")
+        lst = eval_node(node.args[0], ctx)
+        callable_val = eval_node(node.args[1], ctx)
+        if lst.type != ValueType.LIST or callable_val.type != ValueType.CLOSURE:
+            return Value.null() if name in ("map", "filter") else Value.bool_(name == "all")
+        # Apply the closure to each item; _apply_closure handles arity checks
+        results = [_apply_closure(callable_val, [Value.from_python(item)], ctx)
+                   for item in lst.value]
+        if name == "any":
+            return Value.bool_(any(r.to_bool() for r in results))
+        if name == "all":
+            return Value.bool_(all(r.to_bool() for r in results))
+        if name == "map":
+            return Value.list_([r.value if r.type != ValueType.CLOSURE else r for r in results])
+        if name == "filter":
+            kept = [lst.value[i] for i, r in enumerate(results) if r.to_bool()]
+            return Value.list_(kept)
+
+    # ── Path functions (Phase 3 §6.2) ─────────────────────
+    if name == "path":
+        indices = []
+        for a in node.args:
+            v = eval_node(a, ctx)
+            if v.type != ValueType.NUMBER:
+                return Value.null()
+            indices.append(int(v.value))
+        return Value.path(tuple(indices))
+
+    if name == "path_child":
+        if len(node.args) != 2:
+            return Value.null()
+        p = eval_node(node.args[0], ctx)
+        i = eval_node(node.args[1], ctx)
+        if p.type != ValueType.PATH or i.type != ValueType.NUMBER:
+            return Value.null()
+        return Value.path(p.value + (int(i.value),))
+
+    if name == "path_from_id":
+        if len(node.args) != 1:
+            return Value.null()
+        s = eval_node(node.args[0], ctx)
+        if s.type != ValueType.STRING:
+            return Value.null()
+        if s.value == "":
+            return Value.path(())
+        try:
+            parts = [int(p) for p in s.value.split(".")]
+            if any(p < 0 for p in parts):
+                return Value.null()
+            return Value.path(tuple(parts))
+        except ValueError:
+            return Value.null()
 
     # mem: (element, list) → bool — list membership
     if name == "mem":

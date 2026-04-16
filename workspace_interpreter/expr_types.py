@@ -14,6 +14,7 @@ class ValueType(Enum):
     NULL = auto()
     LIST = auto()
     CLOSURE = auto()
+    PATH = auto()
 
 
 @dataclass(slots=True)
@@ -56,6 +57,11 @@ class Value:
     @staticmethod
     def list_(v: list) -> Value:
         return Value(ValueType.LIST, v)
+
+    @staticmethod
+    def path(indices: tuple) -> Value:
+        """Create a path value from a tuple of non-negative integers."""
+        return Value(ValueType.PATH, tuple(int(i) for i in indices))
 
     @staticmethod
     def from_python(v: Any) -> Value:
@@ -114,4 +120,6 @@ class Value:
             return self.value
         if self.type == ValueType.LIST:
             return "[list]"
+        if self.type == ValueType.PATH:
+            return ".".join(str(i) for i in self.value)
         return str(self.value)
