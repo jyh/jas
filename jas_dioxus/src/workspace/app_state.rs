@@ -113,6 +113,10 @@ pub(crate) struct AppState {
     pub(crate) layers_context_menu: Option<(f64, f64, Vec<usize>)>,
     /// Layers panel search query (case-insensitive name filter).
     pub(crate) layers_search_query: String,
+    /// Isolation mode stack. Each entry is the path of a container that
+    /// has been entered. Panel and canvas restrict interaction to
+    /// descendants of the deepest (last) isolated container.
+    pub(crate) layers_isolation_stack: Vec<Vec<usize>>,
 }
 
 /// Stroke panel state fields that sync with global state and the selection.
@@ -202,6 +206,7 @@ impl AppState {
             layers_drag_target: None,
             layers_context_menu: None,
             layers_search_query: String::new(),
+            layers_isolation_stack: Vec::new(),
         }
     }
 

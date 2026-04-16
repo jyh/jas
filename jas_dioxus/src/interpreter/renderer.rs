@@ -276,6 +276,34 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
             }
             return vec![];
         }
+        "enter_isolation_mode" => {
+            let layer_id = params.get("layer_id").and_then(|v| v.as_str()).map(String::from);
+            let path: Option<Vec<usize>> = layer_id.as_ref().and_then(|s| {
+                s.split(',').map(|p| p.parse::<usize>().ok()).collect()
+            });
+            let target_path = path.or_else(|| {
+                // Fall back to the single panel-selected container
+                if st.layers_panel_selection.len() == 1 {
+                    let p = &st.layers_panel_selection[0];
+                    if let Some(tab) = st.tab() {
+                        if let Some(elem) = tab.model.document().get_element(p) {
+                            if elem.is_group_or_layer() {
+                                return Some(p.clone());
+                            }
+                        }
+                    }
+                }
+                None
+            });
+            if let Some(p) = target_path {
+                st.layers_isolation_stack.push(p);
+            }
+            return vec![];
+        }
+        "exit_isolation_mode" => {
+            st.layers_isolation_stack.pop();
+            return vec![];
+        }
         "layer_options_confirm" => {
             use crate::geometry::element::{Element as E, LayerElem, Visibility};
             // Read dialog state from params (passed by the confirm button)
@@ -2557,6 +2585,35 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     // Read search query from AppState (populated by the search input handler)
     let search_query: String = rctx.app.borrow().layers_search_query.to_lowercase();
 
+    // Read isolation stack — if non-empty, only show rows that are descendants
+    // of the deepest isolated container.
+    let isolation_root: Option<Vec<usize>> = rctx.app.borrow()
+        .layers_isolation_stack.last().cloned();
+
+    // Build breadcrumb data for the isolation header
+    let breadcrumb: Vec<(Vec<usize>, String)> = {
+        let st = rctx.app.borrow();
+        let stack = st.layers_isolation_stack.clone();
+        let doc = st.tab().map(|t| t.model.document().clone());
+        let mut out = Vec::new();
+        if let Some(doc) = doc {
+            for p in &stack {
+                if let Some(elem) = doc.get_element(p) {
+                    let label = match elem {
+                        crate::geometry::element::Element::Layer(le) if !le.name.is_empty() => le.name.clone(),
+                        _ => format!("<{}>", match elem {
+                            crate::geometry::element::Element::Group(_) => "Group",
+                            crate::geometry::element::Element::Layer(_) => "Layer",
+                            _ => "?",
+                        }),
+                    };
+                    out.push((p.clone(), label));
+                }
+            }
+        }
+        out
+    };
+
     // Build flat row list from the live document
     let mut rows: Vec<TreeRow> = {
         let st = rctx.app.borrow();
@@ -2571,6 +2628,17 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             Vec::new()
         }
     };
+
+    // Apply isolation filter: keep only rows that are strict descendants of
+    // the isolated root (not the root itself).
+    if let Some(ref root) = isolation_root {
+        rows.retain(|r| r.path.len() > root.len() && r.path.starts_with(root));
+        // Decrement depth so isolated content starts at depth 0
+        let d = root.len();
+        for r in rows.iter_mut() {
+            r.depth = r.depth.saturating_sub(d);
+        }
+    }
 
     // Apply search filter: keep rows whose name matches, plus their ancestors.
     if !search_query.is_empty() {
@@ -2651,9 +2719,62 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     rsx! {
         div {
             id: "{id}",
-            style: "overflow-y:auto;flex:1;min-height:0;outline:none;{style}",
+            style: "display:flex;flex-direction:column;flex:1;min-height:0;outline:none;{style}",
             tabindex: 0,
             onkeydown: on_keydown,
+
+            // Breadcrumb bar (isolation mode only)
+            if !breadcrumb.is_empty() {
+                {
+                    let home_app = app.clone();
+                    let mut home_rev = revision;
+                    rsx! {
+                        div {
+                            style: "display:flex;align-items:center;gap:4px;padding:2px 6px;background:var(--jas-pane-bg-dark,#2a2a2a);border-bottom:1px solid var(--jas-border,#555);font-size:10px;color:var(--jas-text-dim,#999);flex-shrink:0;",
+                            span {
+                                style: "cursor:pointer;color:var(--jas-text,#ccc);",
+                                onclick: move |_: Event<MouseData>| {
+                                    let a = home_app.clone();
+                                    spawn(async move {
+                                        a.borrow_mut().layers_isolation_stack.clear();
+                                        home_rev += 1;
+                                    });
+                                },
+                                "⌂"
+                            }
+                            for (idx, (bp, bl)) in breadcrumb.iter().enumerate() {
+                                {
+                                    let bp = bp.clone();
+                                    let bl = bl.clone();
+                                    let exit_to = idx + 1;
+                                    let b_app = app.clone();
+                                    let mut b_rev = revision;
+                                    rsx! {
+                                        span { "> " }
+                                        span {
+                                            key: "{bp:?}",
+                                            style: "cursor:pointer;color:var(--jas-text,#ccc);",
+                                            onclick: move |_: Event<MouseData>| {
+                                                let a = b_app.clone();
+                                                let target = exit_to;
+                                                spawn(async move {
+                                                    let mut st = a.borrow_mut();
+                                                    st.layers_isolation_stack.truncate(target);
+                                                    b_rev += 1;
+                                                });
+                                            },
+                                            "{bl}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            div {
+                style: "overflow-y:auto;flex:1;min-height:0;",
             for row in rows.iter() {
                 {
                     let indent_px = row.depth * 16;
@@ -3092,6 +3213,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     }
                 }
             }
+            } // close inner scrolling div
             // Context menu overlay
             if let Some((cx, cy, cpath)) = context_menu_state.clone() {
                 {
