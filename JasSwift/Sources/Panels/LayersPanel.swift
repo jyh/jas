@@ -43,10 +43,12 @@ public enum LayersPanel {
     }
 
     /// Dispatch a layers action through the compiled YAML effects (Phase 3).
-    /// Wires snapshot + doc.set as platformEffects on the active Model,
-    /// and injects active_document.top_level_layers / top_level_layer_paths
-    /// into the evaluation context.
-    private static func dispatchYamlAction(_ actionName: String, model: Model) {
+    /// Wires snapshot/doc.set/doc.delete_at/doc.clone_at/doc.insert_after
+    /// as platformEffects on the active Model. Injects
+    /// active_document rollups and (if supplied) panel.layers_panel_selection
+    /// into the evaluation context — needed by Group B actions.
+    public static func dispatchYamlAction(_ actionName: String, model: Model,
+                                           panelSelection: [[Int]] = []) {
         guard let ws = WorkspaceData.load(),
               let actions = ws.data["actions"] as? [String: Any],
               let actionDef = actions[actionName] as? [String: Any],
@@ -78,8 +80,20 @@ public enum LayersPanel {
         let activeDoc: [String: Any] = [
             "top_level_layers": topLevelLayers,
             "top_level_layer_paths": topLevelLayerPaths,
+            "layers_panel_selection_count": panelSelection.count,
         ]
-        let ctx: [String: Any] = ["active_document": activeDoc]
+        // Inject panel.layers_panel_selection as list of __path__ markers
+        // for Group B actions (delete/duplicate_layer_selection).
+        let selectionMarkers: [[String: Any]] = panelSelection.map {
+            ["__path__": $0]
+        }
+        let panel: [String: Any] = [
+            "layers_panel_selection": selectionMarkers,
+        ]
+        let ctx: [String: Any] = [
+            "active_document": activeDoc,
+            "panel": panel,
+        ]
 
         // Platform handlers
         let snapshotHandler: PlatformEffect = { _, _, _ in
