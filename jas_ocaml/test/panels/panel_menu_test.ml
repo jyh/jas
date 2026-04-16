@@ -202,6 +202,40 @@ let menu_tests = [
     let after = m#document.Jas.Document.layers.(0) in
     assert (Jas.Element.is_locked after));
 
+  Alcotest.test_case "new_layer_via_yaml_no_selection" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    let layer a = Jas.Element.Layer {
+      name = a; children = [||];
+      opacity = 1.0; transform = None;
+      locked = false; visibility = Jas.Element.Preview;
+    } in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers = [|layer "Layer 1"|] };
+    Jas.Panel_menu.dispatch_yaml_action "new_layer" m;
+    let layers = m#document.Jas.Document.layers in
+    assert (Array.length layers = 2);
+    (* Auto name skips "Layer 1" -> next is "Layer 2" *)
+    assert (match layers.(1) with Jas.Element.Layer le -> le.name = "Layer 2" | _ -> false));
+
+  Alcotest.test_case "new_layer_via_yaml_inserts_above_selection" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    let layer a = Jas.Element.Layer {
+      name = a; children = [||];
+      opacity = 1.0; transform = None;
+      locked = false; visibility = Jas.Element.Preview;
+    } in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers =
+      [|layer "Layer 1"; layer "Layer 2"; layer "Layer 3"|] };
+    Jas.Panel_menu.dispatch_yaml_action
+      ~panel_selection:[[1]]
+      "new_layer" m;
+    let layers = m#document.Jas.Document.layers in
+    assert (Array.length layers = 4);
+    (* Inserted at idx 2, next unused name after {Layer 1,2,3} is Layer 4 *)
+    assert (match layers.(2) with Jas.Element.Layer le -> le.name = "Layer 4" | _ -> false);
+    assert (match layers.(3) with Jas.Element.Layer le -> le.name = "Layer 3" | _ -> false));
+
   Alcotest.test_case "delete_layer_selection_via_yaml" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
