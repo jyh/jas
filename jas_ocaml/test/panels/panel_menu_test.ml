@@ -270,6 +270,77 @@ let menu_tests = [
     assert (match layers.(1) with Jas.Element.Layer le -> le.name = "B" | _ -> false);
     assert (match layers.(2) with Jas.Element.Layer le -> le.name = "B" | _ -> false));
 
+  Alcotest.test_case "new_group_via_yaml_top_level" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    let layer a = Jas.Element.Layer {
+      name = a; children = [||];
+      opacity = 1.0; transform = None;
+      locked = false; visibility = Jas.Element.Preview;
+    } in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"; layer "C"|] };
+    Jas.Panel_menu.dispatch_yaml_action
+      ~panel_selection:[[0]; [2]]
+      "new_group" m;
+    let layers = m#document.Jas.Document.layers in
+    assert (Array.length layers = 2);
+    (* Layer A+C grouped at idx 0; B remains at idx 1 *)
+    (match layers.(0) with
+     | Jas.Element.Group { children; _ } ->
+       assert (Array.length children = 2)
+     | _ -> assert false);
+    assert (match layers.(1) with
+            | Jas.Element.Layer le -> le.name = "B" | _ -> false));
+
+  Alcotest.test_case "collect_in_new_layer_via_yaml" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    let layer a = Jas.Element.Layer {
+      name = a; children = [||];
+      opacity = 1.0; transform = None;
+      locked = false; visibility = Jas.Element.Preview;
+    } in
+    let doc = m#document in
+    m#set_document { doc with Jas.Document.layers =
+      [|layer "Layer 1"; layer "Layer 2"; layer "Layer 3"|] };
+    Jas.Panel_menu.dispatch_yaml_action
+      ~panel_selection:[[0]; [2]]
+      "collect_in_new_layer" m;
+    let layers = m#document.Jas.Document.layers in
+    assert (Array.length layers = 2);
+    (* Layer 2 survives at idx 0; new "Layer 4" appended at idx 1 *)
+    assert (match layers.(0) with
+            | Jas.Element.Layer le -> le.name = "Layer 2" | _ -> false);
+    assert (match layers.(1) with
+            | Jas.Element.Layer le ->
+              le.name = "Layer 4" && Array.length le.children = 2
+            | _ -> false));
+
+  Alcotest.test_case "flatten_artwork_via_yaml" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    let layer a = Jas.Element.Layer {
+      name = a; children = [||];
+      opacity = 1.0; transform = None;
+      locked = false; visibility = Jas.Element.Preview;
+    } in
+    let doc = m#document in
+    let child1 = layer "c1" in
+    let child2 = layer "c2" in
+    let group = Jas.Element.Group {
+      children = [|child1; child2|];
+      opacity = 1.0; transform = None;
+      locked = false; visibility = Jas.Element.Preview;
+    } in
+    m#set_document { doc with Jas.Document.layers = [|layer "A"; group; layer "B"|] };
+    Jas.Panel_menu.dispatch_yaml_action
+      ~panel_selection:[[1]]
+      "flatten_artwork" m;
+    let layers = m#document.Jas.Document.layers in
+    assert (Array.length layers = 4);
+    assert (match layers.(0) with Jas.Element.Layer le -> le.name = "A" | _ -> false);
+    assert (match layers.(1) with Jas.Element.Layer le -> le.name = "c1" | _ -> false);
+    assert (match layers.(2) with Jas.Element.Layer le -> le.name = "c2" | _ -> false);
+    assert (match layers.(3) with Jas.Element.Layer le -> le.name = "B" | _ -> false));
+
   Alcotest.test_case "layers_dispatch_tier3_no_crash" `Quick (fun () ->
     let l = default_layout () in
     let did = right_dock_id l in

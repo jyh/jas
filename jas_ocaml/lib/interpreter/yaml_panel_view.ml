@@ -374,7 +374,7 @@ and do_duplicate_panel_selection () =
         ~panel_selection:paths
         "duplicate_layer_selection" m
 
-(** Flatten groups in panel selection by unpacking their children. *)
+(** Flatten groups in panel selection via YAML dispatch (Phase 3). *)
 and do_flatten_artwork () =
   match !_get_model_ref () with
   | None -> ()
@@ -382,40 +382,14 @@ and do_flatten_artwork () =
     let paths = PathSet2.elements !_layers_panel_selection in
     if paths = [] then ()
     else begin
-      m#snapshot;
-      let sorted = List.sort (fun a b -> compare b a) paths in
-      let new_doc = List.fold_left (fun acc p ->
-        let e = Document.get_element acc p in
-        match e with
-        | Element.Group _ ->
-          let children = Document.children_of e in
-          let d1 = Document.delete_element acc p in
-          (* Insert children at original position *)
-          let rec drop_last = function
-            | [] | [_] -> []
-            | x :: xs -> x :: drop_last xs
-          in
-          let last_idx = List.nth p (List.length p - 1) in
-          let parent_path = drop_last p in
-          Array.fold_left (fun (acc_doc, offset) child ->
-            let ip = parent_path @ [last_idx + offset - 1] in
-            let acc_doc' =
-              if last_idx + offset - 1 < 0 then
-                (* Insert before first: insert after at idx -1 doesn't work.
-                   Instead, insert after and then the previous item shifts. *)
-                Document.insert_element_after acc_doc (parent_path @ [0]) child
-              else
-                Document.insert_element_after acc_doc ip child
-            in
-            (acc_doc', offset + 1)
-          ) (d1, 0) children |> fst
-        | _ -> acc
-      ) m#document sorted in
-      m#set_document new_doc;
-      _layers_panel_selection := PathSet2.empty
+      Panel_menu.dispatch_yaml_action
+        ~panel_selection:paths
+        ~on_selection_changed:(Some (fun _ ->
+          _layers_panel_selection := PathSet2.empty))
+        "flatten_artwork" m
     end
 
-(** Move panel-selected elements into a new layer. *)
+(** Move panel-selected elements into a new layer via YAML dispatch. *)
 and do_collect_in_new_layer () =
   match !_get_model_ref () with
   | None -> ()
@@ -423,27 +397,9 @@ and do_collect_in_new_layer () =
     let paths = PathSet2.elements !_layers_panel_selection in
     if paths = [] then ()
     else begin
-      let d = m#document in
-      let used = Array.fold_left (fun acc e ->
-        match e with
-        | Element.Layer le -> le.name :: acc
-        | _ -> acc) [] d.Document.layers in
-      let rec find_name n =
-        let candidate = Printf.sprintf "Layer %d" n in
-        if List.mem candidate used then find_name (n + 1) else candidate
-      in
-      let name = find_name 1 in
-      m#snapshot;
-      let sorted = List.sort compare paths in
-      let elems = List.map (fun p -> Document.get_element d p) sorted in
-      let new_doc_deleted =
-        let rev_sorted = List.rev sorted in
-        List.fold_left (fun acc p -> Document.delete_element acc p) d rev_sorted
-      in
-      let new_layer = Element.make_layer ~name (Array.of_list elems) in
-      let new_layers = Array.append new_doc_deleted.Document.layers [|new_layer|] in
-      m#set_document { new_doc_deleted with Document.layers = new_layers };
-      _layers_panel_selection := PathSet2.empty
+      Panel_menu.dispatch_yaml_action
+        ~panel_selection:paths
+        "collect_in_new_layer" m
     end
 
 (** Open a Layer Options dialog to edit the layer at path. *)
