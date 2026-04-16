@@ -70,6 +70,10 @@ class Value:
         Dicts are wrapped as STRING type but retain the dict reference
         so that property access can drill into them.
         """
+        # Already a typed Value (e.g., PATH from a foreach source, or a
+        # CLOSURE returned by a helper) — pass through.
+        if isinstance(v, Value):
+            return v
         if v is None:
             return Value.null()
         if isinstance(v, bool):
