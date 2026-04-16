@@ -383,6 +383,136 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
             }
             return vec![];
         }
+        "toggle_all_layers_visibility" => {
+            use crate::geometry::element::{Element as E, Visibility};
+            if let Some(tab) = st.tab_mut() {
+                let doc = tab.model.document();
+                let any_visible = doc.layers.iter()
+                    .any(|l| l.visibility() != Visibility::Invisible);
+                let target = if any_visible { Visibility::Invisible } else { Visibility::Preview };
+                tab.model.snapshot();
+                let mut new_doc = doc.clone();
+                for i in 0..new_doc.layers.len() {
+                    if let E::Layer(_) = new_doc.layers[i] {
+                        new_doc.layers[i].common_mut().visibility = target;
+                    }
+                }
+                tab.model.set_document(new_doc);
+            }
+            return vec![];
+        }
+        "toggle_all_layers_outline" => {
+            use crate::geometry::element::{Element as E, Visibility};
+            if let Some(tab) = st.tab_mut() {
+                let doc = tab.model.document();
+                let any_preview = doc.layers.iter()
+                    .any(|l| l.visibility() == Visibility::Preview);
+                let target = if any_preview { Visibility::Outline } else { Visibility::Preview };
+                tab.model.snapshot();
+                let mut new_doc = doc.clone();
+                for i in 0..new_doc.layers.len() {
+                    if let E::Layer(_) = new_doc.layers[i] {
+                        new_doc.layers[i].common_mut().visibility = target;
+                    }
+                }
+                tab.model.set_document(new_doc);
+            }
+            return vec![];
+        }
+        "toggle_all_layers_lock" => {
+            use crate::geometry::element::Element as E;
+            if let Some(tab) = st.tab_mut() {
+                let doc = tab.model.document();
+                let any_unlocked = doc.layers.iter().any(|l| !l.locked());
+                let target = any_unlocked;
+                tab.model.snapshot();
+                let mut new_doc = doc.clone();
+                for i in 0..new_doc.layers.len() {
+                    if let E::Layer(_) = new_doc.layers[i] {
+                        new_doc.layers[i].common_mut().locked = target;
+                    }
+                }
+                tab.model.set_document(new_doc);
+            }
+            return vec![];
+        }
+        "flatten_artwork" => {
+            use crate::geometry::element::Element as E;
+            use std::rc::Rc;
+            let paths = st.layers_panel_selection.clone();
+            if paths.is_empty() { return vec![]; }
+            if let Some(tab) = st.tab_mut() {
+                tab.model.snapshot();
+                let doc = tab.model.document().clone();
+                // Recursively unpack groups: for each panel-selected path,
+                // if it's a Group, replace it with its children in place.
+                let mut new_doc = doc;
+                // Process in reverse so earlier paths stay valid
+                let mut sorted = paths.clone();
+                sorted.sort();
+                sorted.reverse();
+                for path in &sorted {
+                    if let Some(E::Group(g)) = new_doc.get_element(path).cloned().as_ref() {
+                        let children: Vec<E> = g.children.iter().map(|rc| (**rc).clone()).collect();
+                        new_doc = new_doc.delete_element(path);
+                        let mut insert_path = path.clone();
+                        for child in children.into_iter().rev() {
+                            new_doc = new_doc.insert_element_at(&insert_path, child);
+                            let last = insert_path.len() - 1;
+                            insert_path[last] += 1;
+                        }
+                    }
+                }
+                tab.model.set_document(new_doc);
+            }
+            st.layers_panel_selection.clear();
+            return vec![];
+        }
+        "collect_in_new_layer" => {
+            use crate::geometry::element::{Element as E, LayerElem, CommonProps};
+            let paths = st.layers_panel_selection.clone();
+            if paths.is_empty() { return vec![]; }
+            if let Some(tab) = st.tab_mut() {
+                tab.model.snapshot();
+                let doc = tab.model.document().clone();
+                let used: std::collections::HashSet<String> = doc.layers.iter()
+                    .filter_map(|l| if let E::Layer(le) = l { Some(le.name.clone()) } else { None })
+                    .collect();
+                let mut n = 1;
+                let name = loop {
+                    let candidate = format!("Layer {n}");
+                    if !used.contains(&candidate) { break candidate; }
+                    n += 1;
+                };
+                // Collect elements in document order
+                let mut sorted_paths = paths.clone();
+                sorted_paths.sort();
+                let mut elems: Vec<E> = Vec::new();
+                for path in &sorted_paths {
+                    if let Some(e) = doc.get_element(path) {
+                        elems.push(e.clone());
+                    }
+                }
+                // Delete originals in reverse
+                let mut new_doc = doc;
+                let mut rev_paths = sorted_paths.clone();
+                rev_paths.reverse();
+                for path in &rev_paths {
+                    new_doc = new_doc.delete_element(path);
+                }
+                let children = elems.into_iter().map(std::rc::Rc::new).collect();
+                let new_layer = E::Layer(LayerElem {
+                    name,
+                    children,
+                    common: CommonProps::default(),
+                });
+                new_doc.layers.push(new_layer);
+                tab.model.set_document(new_doc);
+                let new_path = vec![st.tab().map(|t| t.model.document().layers.len() - 1).unwrap_or(0)];
+                st.layers_panel_selection = vec![new_path];
+            }
+            return vec![];
+        }
         _ => {}
     }
     // Fall through to YAML actions catalog
