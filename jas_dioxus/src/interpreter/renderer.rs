@@ -256,27 +256,7 @@ fn apply_dialog_confirm(
 /// Returns a list of deferred effects (open_dialog, close_dialog) that
 /// must be applied outside the AppState borrow.
 fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
-    use crate::geometry::element::Color;
     match action {
-        "set_active_color" => {
-            if let Some(color_val) = params.get("color").and_then(|v| v.as_str()) {
-                if let Some(c) = parse_hex_color(color_val) {
-                    st.set_active_color(c);
-                }
-            }
-            return vec![];
-        }
-        "set_active_color_none" => { st.set_active_to_none(); return vec![]; }
-        "swap_fill_stroke" => { st.swap_fill_stroke(); return vec![]; }
-        "reset_fill_stroke" => { st.reset_fill_stroke_defaults(); return vec![]; }
-        "select_tool" => {
-            if let Some(tool_name) = params.get("tool").and_then(|v| v.as_str()) {
-                if let Some(kind) = parse_tool_kind(tool_name) {
-                    st.set_tool(kind);
-                }
-            }
-            return vec![];
-        }
         "enter_isolation_mode" => {
             let layer_id = params.get("layer_id").and_then(|v| v.as_str()).map(String::from);
             let path: Option<Vec<usize>> = layer_id.as_ref().and_then(|s| {
@@ -299,10 +279,6 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
             if let Some(p) = target_path {
                 st.layers_isolation_stack.push(p);
             }
-            return vec![];
-        }
-        "exit_isolation_mode" => {
-            st.layers_isolation_stack.pop();
             return vec![];
         }
         "layer_options_confirm" => {
@@ -621,71 +597,10 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
     if let Some(ws) = ws {
         if let Some(action_def) = ws.actions().get(action) {
             if let Some(serde_json::Value::Array(effects)) = action_def.get("effects") {
+                let eval_ctx = build_appstate_ctx(params, st);
                 let mut deferred = Vec::new();
-                let mut ctx = serde_json::Map::new();
-                if !params.is_empty() {
-                    ctx.insert("param".to_string(), serde_json::Value::Object(params.clone()));
-                }
                 for eff in effects {
-                    if eff.get("open_dialog").is_some() || eff.get("close_dialog").is_some() {
-                        // Resolve param expressions in the effect
-                        let mut resolved_eff = eff.clone();
-                        if let Some(od) = eff.get("open_dialog").and_then(|o| o.as_object()) {
-                            if let Some(eff_params) = od.get("params").and_then(|p| p.as_object()) {
-                                let mut resolved_params = serde_json::Map::new();
-                                let eval_ctx = serde_json::json!({"param": serde_json::Value::Object(params.clone())});
-                                for (k, v) in eff_params {
-                                    if let Some(expr_str) = v.as_str() {
-                                        let result = super::expr::eval(expr_str, &eval_ctx);
-                                        resolved_params.insert(k.clone(), super::effects::value_to_json(&result));
-                                    } else {
-                                        resolved_params.insert(k.clone(), v.clone());
-                                    }
-                                }
-                                let mut new_od = od.clone();
-                                new_od.insert("params".to_string(), serde_json::Value::Object(resolved_params));
-                                resolved_eff = serde_json::json!({"open_dialog": new_od});
-                            }
-                        }
-                        deferred.push(resolved_eff);
-                    }
-                    // Handle set effects
-                    if let Some(set_map) = eff.get("set").and_then(|v| v.as_object()) {
-                        apply_set_effects(set_map, st);
-                    }
-                    // Handle set_panel_state effects
-                    if let Some(sps) = eff.get("set_panel_state").and_then(|v| v.as_object()) {
-                        apply_set_panel_state(sps, st);
-                    }
-                    // Handle swap effects
-                    if let Some(serde_json::Value::Array(keys)) = eff.get("swap") {
-                        if keys.len() == 2 {
-                            let a = keys[0].as_str().unwrap_or("").to_string();
-                            let b = keys[1].as_str().unwrap_or("").to_string();
-                            let a_val = get_app_state_field(&a, st);
-                            let b_val = get_app_state_field(&b, st);
-                            set_app_state_field(&a, &b_val, st);
-                            set_app_state_field(&b, &a_val, st);
-                        }
-                    }
-                    // Handle pop effects
-                    if let Some(target) = eff.get("pop").and_then(|v| v.as_str()) {
-                        if target == "panel.isolation_stack" {
-                            st.layers_isolation_stack.pop();
-                        }
-                    }
-                    // Handle swap_panel_state effects
-                    if let Some(serde_json::Value::Array(keys)) = eff.get("swap_panel_state") {
-                        if keys.len() == 2 {
-                            let a = keys[0].as_str().unwrap_or("");
-                            let b = keys[1].as_str().unwrap_or("");
-                            let sp = &mut st.stroke_panel;
-                            let a_val = get_stroke_field(sp, a);
-                            let b_val = get_stroke_field(sp, b);
-                            set_stroke_field(sp, a, &b_val);
-                            set_stroke_field(sp, b, &a_val);
-                        }
-                    }
+                    deferred.extend(run_yaml_effect(eff, &eval_ctx, st));
                 }
                 return deferred;
             }
@@ -997,6 +912,180 @@ fn set_stroke_field(sp: &mut crate::workspace::app_state::StrokePanelState, key:
     }
 }
 
+/// Build an expression evaluation context from AppState + action params.
+fn build_appstate_ctx(
+    params: &serde_json::Map<String, serde_json::Value>,
+    st: &crate::workspace::app_state::AppState,
+) -> serde_json::Value {
+    use crate::tools::tool::ToolKind;
+    let tool_name = match st.active_tool {
+        ToolKind::Selection => "selection",
+        ToolKind::PartialSelection => "partial_selection",
+        ToolKind::InteriorSelection => "interior_selection",
+        ToolKind::Pen => "pen",
+        ToolKind::AddAnchorPoint => "add_anchor",
+        ToolKind::DeleteAnchorPoint => "delete_anchor",
+        ToolKind::AnchorPoint => "anchor_point",
+        ToolKind::Pencil => "pencil",
+        ToolKind::PathEraser => "path_eraser",
+        ToolKind::Smooth => "smooth",
+        ToolKind::Type => "type",
+        ToolKind::TypeOnPath => "type_on_path",
+        ToolKind::Line => "line",
+        ToolKind::Rect => "rect",
+        ToolKind::RoundedRect => "rounded_rect",
+        ToolKind::Polygon => "polygon",
+        ToolKind::Star => "star",
+        ToolKind::Lasso => "lasso",
+    };
+    let fill_color = match st.app_default_fill {
+        None => serde_json::Value::Null,
+        Some(f) => serde_json::Value::String(format!("#{}", f.color.to_hex())),
+    };
+    let stroke_color = match st.app_default_stroke {
+        None => serde_json::Value::Null,
+        Some(s) => serde_json::Value::String(format!("#{}", s.color.to_hex())),
+    };
+    let state = serde_json::json!({
+        "fill_on_top": st.fill_on_top,
+        "fill_color": fill_color,
+        "stroke_color": stroke_color,
+        "active_tool": tool_name,
+    });
+    let mut ctx = serde_json::Map::new();
+    ctx.insert("state".to_string(), state);
+    if !params.is_empty() {
+        ctx.insert("param".to_string(), serde_json::Value::Object(params.clone()));
+    }
+    serde_json::Value::Object(ctx)
+}
+
+/// Execute one YAML effect against AppState, returning any deferred dialog effects.
+fn run_yaml_effect(
+    eff: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) -> Vec<serde_json::Value> {
+    let mut deferred = Vec::new();
+
+    // if: { condition, then, else }
+    if let Some(cond) = eff.get("if").and_then(|v| v.as_object()) {
+        let condition = cond.get("condition").and_then(|v| v.as_str()).unwrap_or("false");
+        let result = super::expr::eval(condition, eval_ctx);
+        let branch = if result.to_bool() { "then" } else { "else" };
+        if let Some(serde_json::Value::Array(branch_effs)) = cond.get(branch) {
+            for inner in branch_effs {
+                deferred.extend(run_yaml_effect(inner, eval_ctx, st));
+            }
+        }
+        return deferred;
+    }
+
+    // set: { key: expr_or_literal, ... }
+    if let Some(set_map) = eff.get("set").and_then(|v| v.as_object()) {
+        let mut evaluated = serde_json::Map::new();
+        for (k, v) in set_map {
+            let val = if let Some(expr_str) = v.as_str() {
+                super::effects::value_to_json(&super::expr::eval(expr_str, eval_ctx))
+            } else {
+                v.clone()
+            };
+            evaluated.insert(k.clone(), val);
+        }
+        apply_set_effects(&evaluated, st);
+        return deferred;
+    }
+
+    // swap: [key_a, key_b]
+    if let Some(serde_json::Value::Array(keys)) = eff.get("swap") {
+        if keys.len() == 2 {
+            let a = keys[0].as_str().unwrap_or("").to_string();
+            let b = keys[1].as_str().unwrap_or("").to_string();
+            let a_val = get_app_state_field(&a, st);
+            let b_val = get_app_state_field(&b, st);
+            set_app_state_field(&a, &b_val, st);
+            set_app_state_field(&b, &a_val, st);
+        }
+        return deferred;
+    }
+
+    // pop: panel.field_name
+    if let Some(target) = eff.get("pop").and_then(|v| v.as_str()) {
+        if target == "panel.isolation_stack" {
+            st.layers_isolation_stack.pop();
+        }
+        return deferred;
+    }
+
+    // list_push: { target, value, unique, max_length }
+    // Handles panel.recent_colors → tab.model.recent_colors
+    if let Some(lp) = eff.get("list_push").and_then(|v| v.as_object()) {
+        let target = lp.get("target").and_then(|v| v.as_str()).unwrap_or("");
+        if target == "panel.recent_colors" {
+            let value_expr = lp.get("value").and_then(|v| v.as_str()).unwrap_or("null");
+            let val = super::expr::eval(value_expr, eval_ctx);
+            if let super::expr_types::Value::Str(hex) = val {
+                let unique = lp.get("unique").and_then(|v| v.as_bool()).unwrap_or(false);
+                let max_len = lp.get("max_length").and_then(|v| v.as_u64()).map(|n| n as usize);
+                if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                    if unique {
+                        if let Some(pos) = tab.model.recent_colors.iter().position(|c| *c == hex) {
+                            tab.model.recent_colors.remove(pos);
+                        }
+                    }
+                    tab.model.recent_colors.insert(0, hex);
+                    if let Some(max) = max_len {
+                        tab.model.recent_colors.truncate(max);
+                    }
+                }
+            }
+        }
+        return deferred;
+    }
+
+    // set_panel_state: { key, value, panel? }
+    if let Some(sps) = eff.get("set_panel_state").and_then(|v| v.as_object()) {
+        apply_set_panel_state(sps, st);
+        return deferred;
+    }
+
+    // swap_panel_state: [key_a, key_b]
+    if let Some(serde_json::Value::Array(keys)) = eff.get("swap_panel_state") {
+        if keys.len() == 2 {
+            let a = keys[0].as_str().unwrap_or("");
+            let b = keys[1].as_str().unwrap_or("");
+            let sp = &mut st.stroke_panel;
+            let a_val = get_stroke_field(sp, a);
+            let b_val = get_stroke_field(sp, b);
+            set_stroke_field(sp, a, &b_val);
+            set_stroke_field(sp, b, &a_val);
+        }
+        return deferred;
+    }
+
+    // open_dialog / close_dialog — defer for handling outside AppState borrow
+    if eff.get("open_dialog").is_some() || eff.get("close_dialog").is_some() {
+        let mut resolved = eff.clone();
+        if let Some(od) = eff.get("open_dialog").and_then(|o| o.as_object()) {
+            if let Some(eff_params) = od.get("params").and_then(|p| p.as_object()) {
+                let mut rp = serde_json::Map::new();
+                for (k, v) in eff_params {
+                    let val = if let Some(s) = v.as_str() {
+                        super::effects::value_to_json(&super::expr::eval(s, eval_ctx))
+                    } else { v.clone() };
+                    rp.insert(k.clone(), val);
+                }
+                let mut new_od = od.clone();
+                new_od.insert("params".to_string(), serde_json::Value::Object(rp));
+                resolved = serde_json::json!({"open_dialog": new_od});
+            }
+        }
+        deferred.push(resolved);
+    }
+
+    deferred
+}
+
 /// Read a top-level AppState field as a JSON value (for use with swap:).
 fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) -> serde_json::Value {
     use crate::tools::tool::ToolKind;
@@ -1041,16 +1130,6 @@ fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) ->
     }
 }
 
-/// Get/set stroke state fields using the `state.stroke_*` naming convention (legacy, unused).
-fn get_stroke_state_field(sp: &crate::workspace::app_state::StrokePanelState, key: &str) -> serde_json::Value {
-    let panel_key = key.strip_prefix("stroke_").unwrap_or(key);
-    get_stroke_field(sp, panel_key)
-}
-
-fn set_stroke_state_field(sp: &mut crate::workspace::app_state::StrokePanelState, key: &str, val: &serde_json::Value) {
-    let panel_key = key.strip_prefix("stroke_").unwrap_or(key);
-    set_stroke_field(sp, panel_key, val);
-}
 
 /// Build an onclick handler from an element's behavior declarations.
 /// Returns None if the element has no click behaviors.
@@ -1273,24 +1352,6 @@ fn build_mouseup_handler(
     }))
 }
 
-/// Parse a hex color string (#rgb or #rrggbb) into a Color.
-fn parse_hex_color(s: &str) -> Option<crate::geometry::element::Color> {
-    let s = s.trim_start_matches('#');
-    let (r, g, b) = if s.len() == 3 {
-        let r = u8::from_str_radix(&s[0..1], 16).ok()?;
-        let g = u8::from_str_radix(&s[1..2], 16).ok()?;
-        let b = u8::from_str_radix(&s[2..3], 16).ok()?;
-        (r * 17, g * 17, b * 17)
-    } else if s.len() == 6 {
-        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-        (r, g, b)
-    } else {
-        return None;
-    };
-    Some(crate::geometry::element::Color::rgb(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0))
-}
 
 /// Parse a tool kind name from YAML (snake_case) to ToolKind.
 fn parse_tool_kind(name: &str) -> Option<crate::tools::tool::ToolKind> {
