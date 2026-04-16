@@ -20,6 +20,9 @@ let _layers_collapsed : PathSet2.t ref = ref PathSet2.empty
 (** Module-level set of panel-selected element paths. *)
 let _layers_panel_selection : PathSet2.t ref = ref PathSet2.empty
 
+(** Module-level path of the layer being renamed, or None. *)
+let _layers_renaming : int list option ref = ref None
+
 (** Callback to trigger re-render when UI state changes. *)
 let _rerender_layers : (unit -> unit) ref = ref (fun () -> ())
 
@@ -349,8 +352,46 @@ and render_tree_view ~packing ~ctx:_ _el =
         (* Preview *)
         let preview = GBin.frame ~shadow_type:`ETCHED_IN ~packing:(hbox#pack ~expand:false) () in
         preview#misc#set_size_request ~width:24 ~height:24 ();
-        (* Name *)
-        ignore (GMisc.label ~text:name ~packing:(hbox#pack ~expand:true) ());
+        (* Name — inline GEntry when renaming, GMisc.label otherwise *)
+        (match !_layers_renaming with
+         | Some rp when rp = path ->
+           let initial = match elem with
+             | Element.Layer le -> le.name
+             | _ -> ""
+           in
+           let entry = GEdit.entry ~text:initial ~packing:(hbox#pack ~expand:true) () in
+           let ep = path in
+           ignore (entry#connect#activate ~callback:(fun () ->
+             (match get_model () with
+              | None -> ()
+              | Some m2 ->
+                let d = m2#document in
+                let e = Document.get_element d ep in
+                (match e with
+                 | Element.Layer le ->
+                   let new_layer = Element.Layer { le with name = entry#text } in
+                   m2#snapshot;
+                   m2#set_document (Document.replace_element d ep new_layer)
+                 | _ -> ()));
+             _layers_renaming := None;
+             !_rerender_layers ()));
+           ignore (entry#event#connect#key_press ~callback:(fun key ->
+             if GdkEvent.Key.keyval key = GdkKeysyms._Escape then begin
+               _layers_renaming := None;
+               !_rerender_layers ();
+               true
+             end else false))
+         | _ ->
+           let name_eb = GBin.event_box ~packing:(hbox#pack ~expand:true) () in
+           ignore (GMisc.label ~text:name ~packing:name_eb#add ());
+           let np = path in
+           let is_layer_elem = is_layer elem in
+           ignore (name_eb#event#connect#button_press ~callback:(fun ev ->
+             if is_layer_elem && GdkEvent.get_type ev = `TWO_BUTTON_PRESS then begin
+               _layers_renaming := Some np;
+               !_rerender_layers ();
+               true
+             end else false)));
         (* Select square *)
         let sq_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
         let sq = GBin.frame ~shadow_type:`ETCHED_IN ~packing:sq_eb#add () in
@@ -448,8 +489,46 @@ and render_tree_view ~packing ~ctx:_ _el =
       (* Preview *)
       let preview = GBin.frame ~shadow_type:`ETCHED_IN ~packing:(hbox#pack ~expand:false) () in
       preview#misc#set_size_request ~width:24 ~height:24 ();
-      (* Name *)
-      ignore (GMisc.label ~text:name ~packing:(hbox#pack ~expand:true) ());
+      (* Name — inline GEntry when renaming, GMisc.label otherwise *)
+      (match !_layers_renaming with
+       | Some rp when rp = path ->
+         let initial = match elem with
+           | Element.Layer le -> le.name
+           | _ -> ""
+         in
+         let entry = GEdit.entry ~text:initial ~packing:(hbox#pack ~expand:true) () in
+         let ep = path in
+         ignore (entry#connect#activate ~callback:(fun () ->
+           (match get_model () with
+            | None -> ()
+            | Some m2 ->
+              let d = m2#document in
+              let e = Document.get_element d ep in
+              (match e with
+               | Element.Layer le ->
+                 let new_layer = Element.Layer { le with name = entry#text } in
+                 m2#snapshot;
+                 m2#set_document (Document.replace_element d ep new_layer)
+               | _ -> ()));
+           _layers_renaming := None;
+           !_rerender_layers ()));
+         ignore (entry#event#connect#key_press ~callback:(fun key ->
+           if GdkEvent.Key.keyval key = GdkKeysyms._Escape then begin
+             _layers_renaming := None;
+             !_rerender_layers ();
+             true
+           end else false))
+       | _ ->
+         let name_eb = GBin.event_box ~packing:(hbox#pack ~expand:true) () in
+         ignore (GMisc.label ~text:name ~packing:name_eb#add ());
+         let np = path in
+         let is_layer_elem = is_layer elem in
+         ignore (name_eb#event#connect#button_press ~callback:(fun ev ->
+           if is_layer_elem && GdkEvent.get_type ev = `TWO_BUTTON_PRESS then begin
+             _layers_renaming := Some np;
+             !_rerender_layers ();
+             true
+           end else false)));
       (* Select square *)
       let sq_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
       let sq = GBin.frame ~shadow_type:`ETCHED_IN ~packing:sq_eb#add () in

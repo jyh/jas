@@ -318,10 +318,11 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
     doc = model.document
     selected_paths = doc.selected_paths()
 
-    # Track collapsed paths and panel-selected paths as closure state
-    # (persists across rebuilds as long as the widget instance lives).
+    # Track collapsed paths, panel-selected paths, and renaming path as
+    # closure state (persists across rebuilds as long as the widget lives).
     collapsed = set()
     panel_selection = set()
+    renaming_path = [None]  # Boxed to allow mutation from inner closures
 
     def _flatten(elements, depth, path_prefix, layer_color, rows):
         for i in reversed(range(len(elements))):
@@ -456,12 +457,45 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
         preview.setStyleSheet("background: white;")
         row_layout.addWidget(preview)
 
-        # Name
-        name_lbl = QLabel(name)
-        name_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        if not is_named:
-            name_lbl.setStyleSheet("color: #999;")
-        row_layout.addWidget(name_lbl)
+        # Name — inline QLineEdit when renaming, QLabel otherwise
+        if renaming_path[0] == path:
+            from geometry.element import Layer as LayerCls
+            initial = elem.name if isinstance(elem, LayerCls) else ""
+            name_edit = QLineEdit(initial)
+            name_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            def _on_commit(p=path, edit=name_edit):
+                m = get_model()
+                if m is not None:
+                    d = m.document
+                    e = d.get_element(p)
+                    if isinstance(e, LayerCls):
+                        new_e = dc_replace(e, name=edit.text())
+                        m.snapshot()
+                        m.document = d.replace_element(p, new_e)
+                renaming_path[0] = None
+                _rebuild()
+            name_edit.returnPressed.connect(_on_commit)
+            def _on_escape(event, edit=name_edit):
+                if event.key() == Qt.Key_Escape:
+                    renaming_path[0] = None
+                    _rebuild()
+                else:
+                    QLineEdit.keyPressEvent(edit, event)
+            name_edit.keyPressEvent = _on_escape
+            name_edit.setFocus()
+            row_layout.addWidget(name_edit)
+        else:
+            from geometry.element import Layer as LayerCls
+            name_lbl = QLabel(name)
+            name_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            if not is_named:
+                name_lbl.setStyleSheet("color: #999;")
+            if isinstance(elem, LayerCls):
+                def _on_dbl(event, p=path):
+                    renaming_path[0] = p
+                    _rebuild()
+                name_lbl.mouseDoubleClickEvent = _on_dbl
+            row_layout.addWidget(name_lbl)
 
         # Select square
         sq = QFrame()

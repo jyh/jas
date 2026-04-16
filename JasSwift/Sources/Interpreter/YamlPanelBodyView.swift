@@ -555,6 +555,8 @@ struct TreeViewContent: View {
     @ObservedObject var model: Model
     @State private var collapsed: Set<ElementPath> = []
     @State private var panelSelection: Set<ElementPath> = []
+    @State private var renamingPath: ElementPath? = nil
+    @State private var editingName: String = ""
 
     var body: some View {
         let doc = model.document
@@ -637,13 +639,39 @@ struct TreeViewContent: View {
             Rectangle().fill(SwiftUI.Color.white)
                 .overlay(Rectangle().stroke(SwiftUI.Color.gray, lineWidth: 1))
                 .frame(width: 24, height: 24)
-            // Name
-            SwiftUI.Text(name)
+            // Name — inline TextField when renaming, Text otherwise
+            if renamingPath == path {
+                TextField("", text: $editingName, onCommit: {
+                    let e = model.document.getElement(path)
+                    if case .layer(let le) = e {
+                        let newLayer = Layer(name: editingName, children: le.children,
+                                             opacity: le.opacity, transform: le.transform,
+                                             locked: le.locked, visibility: le.visibility)
+                        model.snapshot()
+                        model.document = model.document.replaceElement(path, with: .layer(newLayer))
+                    }
+                    renamingPath = nil
+                })
+                .textFieldStyle(.plain)
                 .font(.system(size: 11))
-                .foregroundColor(isNamed ? SwiftUI.Color.white : SwiftUI.Color.gray)
-                .lineLimit(1)
-                .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .onExitCommand {
+                    renamingPath = nil
+                }
+            } else {
+                SwiftUI.Text(name)
+                    .font(.system(size: 11))
+                    .foregroundColor(isNamed ? SwiftUI.Color.white : SwiftUI.Color.gray)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .onTapGesture(count: 2) {
+                        if case .layer(let le) = elem {
+                            editingName = le.name
+                            renamingPath = path
+                        }
+                    }
+            }
             // Select square
             Rectangle()
                 .fill(isSelected ? SwiftUI.Color.blue : SwiftUI.Color.clear)
