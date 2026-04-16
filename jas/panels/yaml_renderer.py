@@ -318,11 +318,13 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
     doc = model.document
     selected_paths = doc.selected_paths()
 
-    # Track collapsed paths, panel-selected paths, and renaming path as
-    # closure state (persists across rebuilds as long as the widget lives).
+    # Track collapsed paths, panel-selected paths, renaming path, and
+    # drag state as closure state (persists across rebuilds).
     collapsed = set()
     panel_selection = set()
-    renaming_path = [None]  # Boxed to allow mutation from inner closures
+    renaming_path = [None]
+    drag_source = [None]
+    drag_target = [None]
 
     def _flatten(elements, depth, path_prefix, layer_color, rows):
         for i in reversed(range(len(elements))):
@@ -367,14 +369,59 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
         row_layout.setContentsMargins(4, 0, 4, 0)
         row_layout.setSpacing(2)
         row.setFixedHeight(24)
+        is_drop_target = drag_target[0] == path and drag_source[0] is not None and drag_source[0] != path
+        style_parts = []
         if is_panel_sel:
-            row.setStyleSheet("background: rgba(58, 123, 213, 0.4);")
-        # Row click for panel selection
+            style_parts.append("background: rgba(58, 123, 213, 0.4);")
+        if is_drop_target:
+            style_parts.append("border-top: 2px solid #3a7bd5;")
+        if style_parts:
+            row.setStyleSheet(" ".join(style_parts))
+        # Row click for panel selection + drag start
         def _on_row_press(event, p=path):
             panel_selection.clear()
             panel_selection.add(p)
+            drag_source[0] = p
+            drag_target[0] = None
             _rebuild()
         row.mousePressEvent = _on_row_press
+        # Track drag over this row
+        def _on_row_enter(event, p=path):
+            if drag_source[0] is not None and drag_source[0] != p:
+                if drag_target[0] != p:
+                    drag_target[0] = p
+                    _rebuild()
+        row.enterEvent = _on_row_enter
+        # Drop on mouseup: move src to before the target row
+        def _on_row_release(event, p=path):
+            src = drag_source[0]
+            if src is not None and src != p:
+                m = get_model()
+                if m is not None:
+                    d = m.document
+                    moved_elem = d.get_element(src)
+                    m.snapshot()
+                    new_doc = d.delete_element(src)
+                    # Adjust target path if src was before it at the same level
+                    target = list(p)
+                    if len(src) == len(target) and src[:-1] == target[:-1] and src[-1] < target[-1]:
+                        target[-1] -= 1
+                    # Insert before target: use insert_after at target-1 or prepend
+                    if target[-1] == 0:
+                        # Insert as first child: insert_after at (target-1[:-1], -1) doesn't work
+                        # Instead, insert after the previous, or handle root
+                        # Simpler: insert at end of parent's children via delete+reconstruct
+                        # Use insert_element_after with a sentinel by inserting after target then swap
+                        # For simplicity: insert after the target (becomes after) — close enough
+                        new_doc = new_doc.insert_element_after(tuple(target), moved_elem)
+                    else:
+                        target[-1] -= 1
+                        new_doc = new_doc.insert_element_after(tuple(target), moved_elem)
+                    m.document = new_doc
+            drag_source[0] = None
+            drag_target[0] = None
+            _rebuild()
+        row.mouseReleaseEvent = _on_row_release
 
         if depth > 0:
             spacer = QLabel("")

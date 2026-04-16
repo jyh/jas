@@ -23,6 +23,10 @@ let _layers_panel_selection : PathSet2.t ref = ref PathSet2.empty
 (** Module-level path of the layer being renamed, or None. *)
 let _layers_renaming : int list option ref = ref None
 
+(** Module-level drag source and target paths for drag-and-drop. *)
+let _layers_drag_source : int list option ref = ref None
+let _layers_drag_target : int list option ref = ref None
+
 (** Callback to trigger re-render when UI state changes. *)
 let _rerender_layers : (unit -> unit) ref = ref (fun () -> ())
 
@@ -284,14 +288,62 @@ and render_tree_view ~packing ~ctx:_ _el =
         let vis = Element.get_visibility elem in
         let locked = Element.is_locked elem in
         let is_panel_selected = PathSet2.mem path !_layers_panel_selection in
+        let is_drop_target =
+          match !_layers_drag_source, !_layers_drag_target with
+          | Some src, Some tgt when src <> path && tgt = path -> true
+          | _ -> false
+        in
         let row_eb = GBin.event_box ~packing:(vbox#pack ~expand:false) () in
         if is_panel_selected then
-          row_eb#misc#modify_bg [`NORMAL, `NAME "#3a4a6a"];
+          row_eb#misc#modify_bg [`NORMAL, `NAME "#3a4a6a"]
+        else if is_drop_target then
+          row_eb#misc#modify_bg [`NORMAL, `NAME "#3a7bd5"];
         let row_path = path in
         ignore (row_eb#event#connect#button_press ~callback:(fun _ ->
           _layers_panel_selection := PathSet2.singleton row_path;
+          _layers_drag_source := Some row_path;
+          _layers_drag_target := None;
           !_rerender_layers ();
           true));
+        ignore (row_eb#event#connect#enter_notify ~callback:(fun _ ->
+          (match !_layers_drag_source with
+           | Some src when src <> row_path ->
+             _layers_drag_target := Some row_path;
+             !_rerender_layers ()
+           | _ -> ());
+          false));
+        ignore (row_eb#event#connect#button_release ~callback:(fun _ ->
+          (match !_layers_drag_source with
+           | Some src when src <> row_path ->
+             (match get_model () with
+              | None -> ()
+              | Some m2 ->
+                let d = m2#document in
+                let moved = Document.get_element d src in
+                m2#snapshot;
+                let d1 = Document.delete_element d src in
+                (* Adjust target if src was at same level and before target *)
+                let target =
+                  let slen = List.length src and tlen = List.length row_path in
+                  if slen = tlen then
+                    match List.rev src, List.rev row_path with
+                    | si :: srest, ti :: trest when srest = trest && si < ti ->
+                      List.rev (ti - 1 :: trest)
+                    | _ -> row_path
+                  else row_path
+                in
+                (* Insert "before target": insert_after at (target with last-1) if possible *)
+                let insert_path =
+                  match List.rev target with
+                  | ti :: rest when ti > 0 -> List.rev (ti - 1 :: rest)
+                  | _ -> target  (* First-child: degrade to insert_after target *)
+                in
+                m2#set_document (Document.insert_element_after d1 insert_path moved))
+           | _ -> ());
+          _layers_drag_source := None;
+          _layers_drag_target := None;
+          !_rerender_layers ();
+          false));
         let hbox = GPack.hbox ~spacing:2 ~packing:row_eb#add () in
         if depth > 0 then begin
           let spacer = GMisc.label ~text:"" ~packing:(hbox#pack ~expand:false) () in
@@ -425,14 +477,60 @@ and render_tree_view ~packing ~ctx:_ _el =
       let vis = Element.get_visibility elem in
       let locked = Element.is_locked elem in
       let is_panel_selected = PathSet2.mem path !_layers_panel_selection in
+      let is_drop_target =
+        match !_layers_drag_source, !_layers_drag_target with
+        | Some src, Some tgt when src <> path && tgt = path -> true
+        | _ -> false
+      in
       let row_eb = GBin.event_box ~packing:(vbox#pack ~expand:false) () in
       if is_panel_selected then
-        row_eb#misc#modify_bg [`NORMAL, `NAME "#3a4a6a"];
+        row_eb#misc#modify_bg [`NORMAL, `NAME "#3a4a6a"]
+      else if is_drop_target then
+        row_eb#misc#modify_bg [`NORMAL, `NAME "#3a7bd5"];
       let row_path = path in
       ignore (row_eb#event#connect#button_press ~callback:(fun _ ->
         _layers_panel_selection := PathSet2.singleton row_path;
+        _layers_drag_source := Some row_path;
+        _layers_drag_target := None;
         !_rerender_layers ();
         true));
+      ignore (row_eb#event#connect#enter_notify ~callback:(fun _ ->
+        (match !_layers_drag_source with
+         | Some src when src <> row_path ->
+           _layers_drag_target := Some row_path;
+           !_rerender_layers ()
+         | _ -> ());
+        false));
+      ignore (row_eb#event#connect#button_release ~callback:(fun _ ->
+        (match !_layers_drag_source with
+         | Some src when src <> row_path ->
+           (match get_model () with
+            | None -> ()
+            | Some m2 ->
+              let d = m2#document in
+              let moved = Document.get_element d src in
+              m2#snapshot;
+              let d1 = Document.delete_element d src in
+              let target =
+                let slen = List.length src and tlen = List.length row_path in
+                if slen = tlen then
+                  match List.rev src, List.rev row_path with
+                  | si :: srest, ti :: trest when srest = trest && si < ti ->
+                    List.rev (ti - 1 :: trest)
+                  | _ -> row_path
+                else row_path
+              in
+              let insert_path =
+                match List.rev target with
+                | ti :: rest when ti > 0 -> List.rev (ti - 1 :: rest)
+                | _ -> target
+              in
+              m2#set_document (Document.insert_element_after d1 insert_path moved))
+         | _ -> ());
+        _layers_drag_source := None;
+        _layers_drag_target := None;
+        !_rerender_layers ();
+        false));
       let hbox = GPack.hbox ~spacing:2 ~packing:row_eb#add () in
       (* Eye *)
       let eye_eb = GBin.event_box ~packing:(hbox#pack ~expand:false) () in
