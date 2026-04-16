@@ -488,9 +488,39 @@ and render_tree_view ~packing ~ctx:_ _el =
            | Some m2 ->
              let d = m2#document in
              let e = Document.get_element d path in
-                let new_e = Element.set_locked (not (Element.is_locked e)) e in
-                m2#snapshot;
-                m2#set_document (Document.replace_element d path new_e));
+             let was_unlocked = not (Element.is_locked e) in
+             let is_cont_elem = is_container in
+             (* Save child lock states when locking a container *)
+             if is_cont_elem && was_unlocked then begin
+               let children = Document.children_of e in
+               let saved = Array.to_list (Array.map Element.is_locked children) in
+               _layers_saved_lock_states := PathMap2.add path saved !_layers_saved_lock_states
+             end;
+             m2#snapshot;
+             let new_e = Element.set_locked was_unlocked e in
+             let d1 = Document.replace_element d path new_e in
+             (* When locking a container, also lock all direct children *)
+             let d2 = if is_cont_elem && was_unlocked then begin
+               let children = Document.children_of e in
+               Array.fold_left (fun acc_doc i ->
+                 let child_path = path @ [i] in
+                 let child = Document.get_element acc_doc child_path in
+                 Document.replace_element acc_doc child_path (Element.set_locked true child)
+               ) d1 (Array.init (Array.length children) (fun i -> i))
+             end else d1 in
+             (* When unlocking a container, restore direct children's saved states *)
+             let d3 = if is_cont_elem && not was_unlocked then begin
+               match PathMap2.find_opt path !_layers_saved_lock_states with
+               | None -> d2
+               | Some saved ->
+                 _layers_saved_lock_states := PathMap2.remove path !_layers_saved_lock_states;
+                 List.fold_left (fun acc_doc (i, sl) ->
+                   let child_path = path @ [i] in
+                   let child = Document.get_element acc_doc child_path in
+                   Document.replace_element acc_doc child_path (Element.set_locked sl child)
+                 ) d2 (List.mapi (fun i s -> (i, s)) saved)
+             end else d2 in
+             m2#set_document d3);
           true));
         (* Twirl or gap *)
         let is_collapsed = PathSet2.mem path !_layers_collapsed in
@@ -693,9 +723,36 @@ and render_tree_view ~packing ~ctx:_ _el =
          | Some m2 ->
            let d = m2#document in
            let e = Document.get_element d path in
-              let new_e = Element.set_locked (not (Element.is_locked e)) e in
-              m2#snapshot;
-              m2#set_document (Document.replace_element d path new_e));
+           let was_unlocked = not (Element.is_locked e) in
+           let is_cont_elem = is_container in
+           if is_cont_elem && was_unlocked then begin
+             let children = Document.children_of e in
+             let saved = Array.to_list (Array.map Element.is_locked children) in
+             _layers_saved_lock_states := PathMap2.add path saved !_layers_saved_lock_states
+           end;
+           m2#snapshot;
+           let new_e = Element.set_locked was_unlocked e in
+           let d1 = Document.replace_element d path new_e in
+           let d2 = if is_cont_elem && was_unlocked then begin
+             let children = Document.children_of e in
+             Array.fold_left (fun acc_doc i ->
+               let child_path = path @ [i] in
+               let child = Document.get_element acc_doc child_path in
+               Document.replace_element acc_doc child_path (Element.set_locked true child)
+             ) d1 (Array.init (Array.length children) (fun i -> i))
+           end else d1 in
+           let d3 = if is_cont_elem && not was_unlocked then begin
+             match PathMap2.find_opt path !_layers_saved_lock_states with
+             | None -> d2
+             | Some saved ->
+               _layers_saved_lock_states := PathMap2.remove path !_layers_saved_lock_states;
+               List.fold_left (fun acc_doc (i, sl) ->
+                 let child_path = path @ [i] in
+                 let child = Document.get_element acc_doc child_path in
+                 Document.replace_element acc_doc child_path (Element.set_locked sl child)
+               ) d2 (List.mapi (fun i s -> (i, s)) saved)
+           end else d2 in
+           m2#set_document d3);
         true));
       (* Twirl or gap *)
       let is_collapsed = PathSet2.mem path !_layers_collapsed in
