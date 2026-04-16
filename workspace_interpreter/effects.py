@@ -297,6 +297,35 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         store.insert_at(insert_path_parent, insert_index, group)
         return None
 
+    # doc.unpack_group_at: path_expr — PHASE3 sub-tollgate 3
+    # Replace a Group at the given path with its children in place.
+    # Non-Group targets are no-ops. Used by flatten_artwork.
+    if "doc.unpack_group_at" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        path_expr = effect["doc.unpack_group_at"]
+        eval_ctx = store.eval_context(ctx)
+        path_val = evaluate(str(path_expr) if path_expr is not None else "", eval_ctx)
+        if path_val.type != ValueType.PATH:
+            return None
+        path = path_val.value
+        if len(path) == 0:
+            return None
+        # Fetch the element to check it's a Group
+        elem = store.get_element(path)
+        if not isinstance(elem, dict) or elem.get("kind") != "Group":
+            return None
+        children = elem.get("children", [])
+        # Remove the group at path
+        store.delete_element_at(path)
+        # Insert children at the vacated position (in order). Each
+        # insert shifts subsequent siblings; insert_at with increasing
+        # index places them consecutively.
+        parent_path = path[:-1]
+        base_index = path[-1]
+        for i, child in enumerate(children):
+            store.insert_at(parent_path, base_index + i, child)
+        return None
+
     # doc.wrap_in_layer: { paths, name } — PHASE3 sub-tollgate 3
     # Same as wrap_in_group but always produces a top-level Layer
     # with the given name. Selected elements are removed and become
@@ -340,10 +369,7 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 children.append(copy.deepcopy(elem))
         if not children:
             return None
-        # Insertion index: min top-level index among selected paths
-        top_level_indices = [p[0] for p in sorted_paths if len(p) == 1]
-        insert_index = min(top_level_indices) if top_level_indices else 0
-        # Delete in reverse
+        # Delete in reverse (keeps indices valid during deletion)
         for p in reversed(sorted_paths):
             store.delete_element_at(p)
         new_layer = {
@@ -356,7 +382,12 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 "opacity": 1.0,
             },
         }
-        store.insert_at((), insert_index, new_layer)
+        # Append at end — collect_in_new_layer semantics: "above all
+        # existing layers" = highest index (visually topmost).
+        if store.document() is not None:
+            layers = store.document().setdefault("layers", [])
+            if isinstance(layers, list):
+                layers.append(new_layer)
         return None
 
     # doc.insert_at: { parent_path, index, element } — PHASE3 §5.5

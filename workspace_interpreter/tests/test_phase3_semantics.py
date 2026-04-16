@@ -595,7 +595,7 @@ class TestDocWrapInLayerEffect:
     Parallel to doc.wrap_in_group but always inserts at top level and
     takes a name for the new Layer."""
 
-    def test_wrap_in_layer_top_level(self):
+    def test_wrap_in_layer_appends_at_end(self):
         doc = _make_doc([
             {"kind": "Layer", "name": "A"},
             {"kind": "Layer", "name": "B"},
@@ -607,12 +607,31 @@ class TestDocWrapInLayerEffect:
                 "name": "'Collected'",
             }},
         ], {}, store, diagnostics=[])
-        # After: single Layer at idx 0 containing A and B
+        # After: single Layer 'Collected' at the end, containing A + B
         assert len(doc["layers"]) == 1
         assert doc["layers"][0]["kind"] == "Layer"
         assert doc["layers"][0]["name"] == "Collected"
         children = doc["layers"][0]["children"]
         assert [c["name"] for c in children] == ["A", "B"]
+
+    def test_wrap_in_layer_partial_selection_goes_to_end(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A"},
+            {"kind": "Layer", "name": "B"},
+            {"kind": "Layer", "name": "C"},
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.wrap_in_layer": {
+                "paths": [{"__path__": [0]}, {"__path__": [2]}],
+                "name": "'Collected'",
+            }},
+        ], {}, store, diagnostics=[])
+        # After: B at idx 0, Collected(A,C) at idx 1 (appended at end)
+        assert len(doc["layers"]) == 2
+        assert doc["layers"][0]["name"] == "B"
+        assert doc["layers"][1]["name"] == "Collected"
+        assert [c["name"] for c in doc["layers"][1]["children"]] == ["A", "C"]
 
 
 class TestCollectInNewLayerAction:
@@ -642,15 +661,85 @@ class TestCollectInNewLayerAction:
         })
         store.set_active_panel("layers")
         run_effects(effects, {}, store, diagnostics=[])
-        # After: new auto-named layer at idx 0 containing Layer 1 + Layer 3
-        # (selection gathered in document order), Layer 2 remains
+        # After: Layer 2 at idx 0 (survivor), new auto-named Layer 4 at
+        # end containing Layer 1 + Layer 3 in document order.
         assert len(doc["layers"]) == 2
-        new_layer = doc["layers"][0]
+        assert doc["layers"][0]["name"] == "Layer 2"
+        new_layer = doc["layers"][1]
         assert new_layer["kind"] == "Layer"
-        # Next-unused "Layer N" — Layer 1,2,3 already exist so Layer 4
         assert new_layer["name"] == "Layer 4"
         assert [c["name"] for c in new_layer["children"]] == ["Layer 1", "Layer 3"]
-        assert doc["layers"][1]["name"] == "Layer 2"
+
+
+class TestDocUnpackGroupAtEffect:
+    """PHASE3.md sub-tollgate 3: doc.unpack_group_at primitive."""
+
+    def test_unpack_top_level_group(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A"},
+            {"kind": "Group", "name": "G", "children": [
+                {"kind": "Layer", "name": "child1"},
+                {"kind": "Layer", "name": "child2"},
+            ]},
+            {"kind": "Layer", "name": "B"},
+        ])
+        store = StateStore(document=doc)
+        run_effects([
+            {"doc.unpack_group_at": "path(1)"},
+        ], {}, store, diagnostics=[])
+        # After: A, child1, child2, B
+        assert len(doc["layers"]) == 4
+        assert [l["name"] for l in doc["layers"]] == ["A", "child1", "child2", "B"]
+
+    def test_unpack_non_group_is_noop(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A"},
+        ])
+        store = StateStore(document=doc)
+        run_effects([{"doc.unpack_group_at": "path(0)"}], {}, store, diagnostics=[])
+        # Layer is not a Group — noop (or deleted? spec says noop)
+        assert len(doc["layers"]) == 1
+        assert doc["layers"][0]["name"] == "A"
+
+    def test_unpack_empty_group_just_removes_it(self):
+        doc = _make_doc([
+            {"kind": "Group", "name": "G", "children": []},
+            {"kind": "Layer", "name": "B"},
+        ])
+        store = StateStore(document=doc)
+        run_effects([{"doc.unpack_group_at": "path(0)"}], {}, store, diagnostics=[])
+        assert len(doc["layers"]) == 1
+        assert doc["layers"][0]["name"] == "B"
+
+
+class TestFlattenArtworkAction:
+    def _load_action(self, name):
+        import yaml as yl
+        path = os.path.join(os.path.dirname(__file__), "..", "..",
+                            "workspace", "actions.yaml")
+        with open(path) as f:
+            return yl.safe_load(f)["actions"][name]
+
+    def test_flatten_unpacks_panel_selected_groups(self):
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("flatten_artwork")["effects"]
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A"},
+            {"kind": "Group", "name": "G", "children": [
+                {"kind": "Layer", "name": "c1"},
+                {"kind": "Layer", "name": "c2"},
+            ]},
+            {"kind": "Layer", "name": "B"},
+        ])
+        store = StateStore(document=doc)
+        store.init_panel("layers", {
+            "layers_panel_selection": [{"__path__": [1]}],
+        })
+        store.set_active_panel("layers")
+        run_effects(effects, {}, store, diagnostics=[])
+        assert [l["name"] for l in doc["layers"]] == ["A", "c1", "c2", "B"]
 
 
 class TestEnterIsolationModeAction:

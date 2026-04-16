@@ -1115,7 +1115,13 @@ actions:
     tier: 3
     enabled_when: "active_document.layers_panel_selection_has_group"
     effects:
-      - log: "flatten_artwork"
+      - snapshot
+      - foreach:
+          source: "reverse(panel.layers_panel_selection)"
+          as: p
+        do:
+          - doc.unpack_group_at: p
+      - set_panel_state: { key: "layers_panel_selection", value: "[]" }
 
   # Bulk visibility and lock toggles
 
