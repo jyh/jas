@@ -5,7 +5,7 @@
 
 import Foundation
 
-/// The seven value types in the expression language.
+/// The value types in the expression language.
 enum Value: Equatable {
     case null
     case bool(Bool)
@@ -13,6 +13,8 @@ enum Value: Equatable {
     case string(String)
     case color(String)  // normalized #rrggbb
     case list([AnyJSON])
+    /// Opaque document path (Phase 3 §6.2). Non-negative indices.
+    case path([Int])
     case closure(params: [String], body: Expr, capturedCtx: [String: Any])
 
     /// Normalize a color string: 3-digit -> 6-digit, lowercase.
@@ -62,6 +64,27 @@ enum Value: Equatable {
             return .list(arr.map { AnyJSON($0) })
         }
         if let dict = v as? [String: Any] {
+            // Path round-trip: recognize {"__path__": [i, j, ...]} marker
+            if dict.count == 1, let arr = dict["__path__"] as? [Any] {
+                var idx: [Int] = []
+                for n in arr {
+                    if let i = n as? Int {
+                        idx.append(i)
+                    } else if let d = n as? Double {
+                        idx.append(Int(d))
+                    } else if let num = n as? NSNumber {
+                        idx.append(num.intValue)
+                    } else {
+                        // Invalid path element; fall through to JSON-string path
+                        if let data = try? JSONSerialization.data(withJSONObject: dict),
+                           let str = String(data: data, encoding: .utf8) {
+                            return .string(str)
+                        }
+                        return .null
+                    }
+                }
+                return .path(idx)
+            }
             // Keep as JSON string for property access
             if let data = try? JSONSerialization.data(withJSONObject: dict),
                let str = String(data: data, encoding: .utf8) {
@@ -81,6 +104,7 @@ enum Value: Equatable {
         case .string(let s): return !s.isEmpty
         case .color: return true
         case .list(let l): return !l.isEmpty
+        case .path(let p): return !p.isEmpty
         case .closure: return true
         }
     }
@@ -98,6 +122,7 @@ enum Value: Equatable {
         case .string(let s): return s
         case .color(let c): return c
         case .list: return "[list]"
+        case .path(let p): return p.map { String($0) }.joined(separator: ".")
         case .closure: return "[closure]"
         }
     }
@@ -119,6 +144,7 @@ enum Value: Equatable {
         case .string(let s): return s
         case .color(let c): return c
         case .list(let l): return l.map { $0.value }
+        case .path: return self  // keep as Value for path-typed context ops
         case .closure: return self  // keep as Value for closure dispatch
         }
     }
@@ -136,6 +162,8 @@ enum Value: Equatable {
             return a == b
         case (.color(let a), .color(let b)):
             return normalizeColor(a) == normalizeColor(b)
+        case (.path(let a), .path(let b)):
+            return a == b
         case (.closure, _), (_, .closure):
             return false  // closures are never equal
         default:

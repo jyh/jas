@@ -97,6 +97,7 @@ private func valueToAnyDlg(_ v: Value) -> Any? {
     case .string(let s): return s
     case .color(let c): return c
     case .list(let l): return l.map { $0.value }
+    case .path(let p): return ["__path__": p]
     case .closure: return v  // keep as Value for closure dispatch
     }
 }

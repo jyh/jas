@@ -103,8 +103,9 @@ private func tokenize(_ source: String) -> [Token] {
     while i < n {
         let c = chars[i]
 
-        // Whitespace
-        if c == " " || c == "\t" {
+        // Whitespace (including newlines — YAML > and | folds may
+        // embed newlines in expression strings)
+        if c == " " || c == "\t" || c == "\n" || c == "\r" {
             i += 1
             continue
         }
@@ -128,11 +129,12 @@ private func tokenize(_ source: String) -> [Token] {
             continue
         }
 
-        // String literal
-        if c == "\"" {
+        // String literal (double or single quotes — matching Python / Rust)
+        if c == "\"" || c == "'" {
+            let quote = c
             var j = i + 1
             var parts = ""
-            while j < n && chars[j] != "\"" {
+            while j < n && chars[j] != quote {
                 if chars[j] == "\\" && j + 1 < n {
                     parts.append(chars[j + 1])
                     j += 2
@@ -141,7 +143,7 @@ private func tokenize(_ source: String) -> [Token] {
                     j += 1
                 }
             }
-            if j < n { j += 1 }  // consume closing "
+            if j < n { j += 1 }  // consume closing quote
             tokens.append(Token(kind: .str(parts)))
             i = j
             continue
@@ -786,6 +788,24 @@ private func evalPath(_ segments: [String], _ ctx: [String: Any]) -> Value {
     let namespace = segments[0]
     guard var obj = ctx[namespace] else { return .null }
 
+    // If the namespace resolves to a Value (e.g. .path or .closure set by
+    // foreach/let), handle the typed-value drill cases here.
+    if let v = obj as? Value {
+        if segments.count == 1 { return v }
+        // Drill into path Value by property name (.depth/.parent/.id/.indices)
+        if case .path(let indices) = v, segments.count == 2 {
+            switch segments[1] {
+            case "depth": return .number(Double(indices.count))
+            case "parent":
+                return indices.isEmpty ? .null : .path(Array(indices.dropLast()))
+            case "id": return .string(indices.map { String($0) }.joined(separator: "."))
+            case "indices": return .list(indices.map { AnyJSON($0) })
+            default: return .null
+            }
+        }
+        return .null
+    }
+
     for seg in segments.dropFirst() {
         if let dict = obj as? [String: Any] {
             guard let next = dict[seg] else { return .null }
@@ -803,6 +823,25 @@ private func evalPath(_ segments: [String], _ ctx: [String: Any]) -> Value {
             if seg == "length" {
                 return .number(Double(s.count))
             }
+            // A String obj may be a serialized-JSON dict put there by
+            // Value.toAny() — try deserializing and continuing the drill.
+            if let data = s.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: data) {
+                if let dict = parsed as? [String: Any] {
+                    guard let next = dict[seg] else { return .null }
+                    obj = next
+                    continue
+                }
+                if let arr = parsed as? [Any] {
+                    if let idx = Int(seg), idx >= 0 && idx < arr.count {
+                        obj = arr[idx]
+                        continue
+                    }
+                    if seg == "length" {
+                        return .number(Double(arr.count))
+                    }
+                }
+            }
             return .null
         } else {
             return .null
@@ -816,6 +855,23 @@ private func evalPath(_ segments: [String], _ ctx: [String: Any]) -> Value {
 
 private func evalDotAccess(_ objExpr: Expr, _ member: String, _ ctx: [String: Any]) -> Value {
     let objVal = evalNode(objExpr, ctx)
+
+    // Path computed properties (Phase 3 §6.2)
+    if case .path(let indices) = objVal {
+        switch member {
+        case "depth":
+            return .number(Double(indices.count))
+        case "parent":
+            if indices.isEmpty { return .null }
+            return .path(Array(indices.dropLast()))
+        case "id":
+            return .string(indices.map { String($0) }.joined(separator: "."))
+        case "indices":
+            return .list(indices.map { AnyJSON($0) })
+        default:
+            return .null
+        }
+    }
 
     // List .length
     if case .list(let arr) = objVal, member == "length" {
@@ -894,14 +950,29 @@ private func valToDouble(_ v: Value) -> Double {
     return 0.0
 }
 
-/// Apply a closure value to evaluated arguments.
+/// Keys in ctx that are runtime-context namespaces, not user bindings.
+/// When applying a closure, these are refreshed from the caller so state/
+/// panel reads are current; captured user bindings stay lexical.
+private let namespaceKeys: Set<String> = [
+    "state", "panel", "theme", "dialog", "param", "event", "node", "prop",
+    "active_document", "workspace", "data"
+]
+
+/// Apply a closure value to evaluated arguments (lexical scoping).
 private func applyClosure(_ closureVal: Value, _ evaluatedArgs: [Value], _ callerCtx: [String: Any]) -> Value {
     guard case .closure(let params, let body, let capturedCtx) = closureVal else {
         return .null
     }
     guard evaluatedArgs.count == params.count else { return .null }
+    // Start from captured (lexical user bindings); refresh only the
+    // runtime-context namespaces from the caller so closures see
+    // current state/panel values but do NOT pick up caller's user lets.
     var callCtx = capturedCtx
-    for (k, v) in callerCtx { callCtx[k] = v }
+    for k in namespaceKeys {
+        if let v = callerCtx[k] {
+            callCtx[k] = v
+        }
+    }
     for (p, a) in zip(params, evaluatedArgs) {
         if case .closure = a {
             callCtx[p] = a
@@ -1005,6 +1076,84 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         let newH = (h + 180) % 360
         let (nr, ng, nb) = hsbToRgb(Double(newH), Double(s), Double(bv))
         return Value.colorValue(rgbToHex(nr, ng, nb))
+
+    // Higher-order functions (Phase 3 §6.1)
+    case "any", "all", "map", "filter":
+        guard args.count == 2 else {
+            return (name == "map" || name == "filter") ? .null : .bool(name == "all")
+        }
+        let lst = evalNode(args[0], ctx)
+        let callable = evalNode(args[1], ctx)
+        guard case .list(let items) = lst else {
+            return (name == "map" || name == "filter") ? .null : .bool(name == "all")
+        }
+        guard case .closure = callable else {
+            return (name == "map" || name == "filter") ? .null : .bool(name == "all")
+        }
+        var results: [Value] = []
+        for item in items {
+            let argVal = Value.fromJson(item.value)
+            results.append(applyClosure(callable, [argVal], ctx))
+        }
+        switch name {
+        case "any":
+            return .bool(results.contains(where: { $0.toBool() }))
+        case "all":
+            return .bool(results.allSatisfy({ $0.toBool() }))
+        case "map":
+            return .list(results.map { r -> AnyJSON in
+                switch r {
+                case .null: return AnyJSON(NSNull())
+                case .bool(let b): return AnyJSON(b)
+                case .number(let n): return AnyJSON(n)
+                case .string(let s): return AnyJSON(s)
+                case .color(let c): return AnyJSON(c)
+                case .list(let l): return AnyJSON(l.map { $0.value })
+                case .path(let p): return AnyJSON(["__path__": p])
+                case .closure: return AnyJSON(NSNull())
+                }
+            })
+        case "filter":
+            var kept: [AnyJSON] = []
+            for (i, r) in results.enumerated() {
+                if r.toBool() { kept.append(items[i]) }
+            }
+            return .list(kept)
+        default:
+            return .null
+        }
+
+    // Path functions (Phase 3 §6.2)
+    case "path":
+        var indices: [Int] = []
+        for a in args {
+            let v = evalNode(a, ctx)
+            guard case .number(let n) = v, n >= 0 else { return .null }
+            indices.append(Int(n))
+        }
+        return .path(indices)
+
+    case "path_child":
+        guard args.count == 2 else { return .null }
+        let p = evalNode(args[0], ctx)
+        let i = evalNode(args[1], ctx)
+        guard case .path(var indices) = p, case .number(let n) = i, n >= 0 else {
+            return .null
+        }
+        indices.append(Int(n))
+        return .path(indices)
+
+    case "path_from_id":
+        guard args.count == 1 else { return .null }
+        let s = evalNode(args[0], ctx)
+        guard case .string(let str) = s else { return .null }
+        if str.isEmpty { return .path([]) }
+        var parts: [Int] = []
+        for p in str.split(separator: ".") {
+            if let n = Int(p) { parts.append(n) }
+            else { return .null }
+        }
+        return .path(parts)
 
     // mem: (element, list) -> bool — list membership
     case "mem":
