@@ -200,6 +200,74 @@ fn eval_literal(
 
 // -- Path resolution ---------------------------------------------------------
 
+/// Drill into a scope-bound Value using a sequence of dot segments.
+/// Handles the Value::Str(serialized_json) representation of dicts that
+/// foreach/HOF bind into scope, plus Path properties and List indexing.
+fn drill_into_value(val: &Value, segments: &[String]) -> Value {
+    let mut current: serde_json::Value = match val {
+        Value::Str(s) => {
+            // Try to deserialize — scope dicts are stored as serialized JSON
+            serde_json::from_str(s).unwrap_or_else(|_| serde_json::Value::String(s.clone()))
+        }
+        Value::Path(indices) => {
+            // Path property access via segments
+            if segments.is_empty() { return val.clone(); }
+            return path_property(indices, &segments[0]);
+        }
+        Value::List(arr) => serde_json::Value::Array(arr.clone()),
+        Value::Null => return Value::Null,
+        Value::Bool(b) => serde_json::json!(*b),
+        Value::Number(n) => serde_json::json!(*n),
+        Value::Color(c) => serde_json::Value::String(c.clone()),
+        Value::Closure { .. } => return Value::Null,
+    };
+    for seg in segments {
+        match current {
+            serde_json::Value::Object(map) => match map.get(seg.as_str()) {
+                Some(v) => current = v.clone(),
+                None => return Value::Null,
+            },
+            serde_json::Value::Array(arr) => {
+                if let Ok(idx) = seg.parse::<usize>() {
+                    if idx < arr.len() {
+                        current = arr[idx].clone();
+                    } else {
+                        return Value::Null;
+                    }
+                } else if seg == "length" {
+                    return Value::Number(arr.len() as f64);
+                } else {
+                    return Value::Null;
+                }
+            }
+            serde_json::Value::String(ref s) => {
+                if seg == "length" {
+                    return Value::Number(s.len() as f64);
+                }
+                return Value::Null;
+            }
+            _ => return Value::Null,
+        }
+    }
+    Value::from_json(&current)
+}
+
+fn path_property(indices: &[usize], member: &str) -> Value {
+    match member {
+        "depth" => Value::Number(indices.len() as f64),
+        "parent" => {
+            if indices.is_empty() {
+                Value::Null
+            } else {
+                Value::Path(indices[..indices.len() - 1].to_vec())
+            }
+        }
+        "id" => Value::Str(indices.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(".")),
+        "indices" => Value::List(indices.iter().map(|&i| serde_json::json!(i)).collect()),
+        _ => Value::Null,
+    }
+}
+
 fn eval_path(segments: &[String], ctx: &serde_json::Value, scope: &Scope) -> Value {
     if segments.is_empty() {
         return Value::Null;
@@ -217,15 +285,14 @@ fn eval_path(segments: &[String], ctx: &serde_json::Value, scope: &Scope) -> Val
     let obj = match ctx.get(namespace) {
         Some(v) => v,
         None => {
-            // Also check scope for multi-segment paths
-            // e.g. if scope has "x" => Number(5), "x" alone is handled above,
-            // but "x.foo" would need the scope value to be drillable.
+            // Check scope for the namespace — lets and foreach bindings live
+            // here. For single-segment paths we already handled it above.
+            // For multi-segment paths, try drilling into the scope value.
             if let Some(val) = scope.get(namespace) {
                 if segments.len() == 1 {
                     return val.clone();
                 }
-                // Can't drill into a scope value with dot notation currently
-                return Value::Null;
+                return drill_into_value(val, &segments[1..]);
             }
             return Value::Null;
         }

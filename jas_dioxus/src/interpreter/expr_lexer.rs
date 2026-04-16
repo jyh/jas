@@ -58,8 +58,9 @@ pub fn tokenize(source: &str) -> Vec<Token> {
     while i < n {
         let c = chars[i];
 
-        // Whitespace
-        if c == ' ' || c == '\t' {
+        // Whitespace (including newlines — YAML > and | folds may
+        // produce embedded newlines in expression strings)
+        if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
             i += 1;
             continue;
         }
