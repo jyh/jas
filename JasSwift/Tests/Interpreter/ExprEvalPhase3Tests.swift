@@ -104,6 +104,54 @@ import Testing
     #expect(evaluate("path_from_id('not-a-path')", context: [:]) == .null)
 }
 
+// MARK: - Phase 4: element_at(path)
+
+@Test func elementAtReturnsTopLevelLayer() {
+    let ctx: [String: Any] = [
+        "active_document": [
+            "top_level_layers": [
+                ["kind": "Layer", "name": "A",
+                 "common": ["visibility": "preview", "locked": false]],
+            ],
+        ],
+    ]
+    let r = evaluate("element_at(path(0)).name", context: ctx)
+    #expect(r == .string("A"))
+}
+
+@Test func elementAtOutOfRangeReturnsNull() {
+    let ctx: [String: Any] = [
+        "active_document": [
+            "top_level_layers": [
+                ["kind": "Layer", "name": "A"],
+            ],
+        ],
+    ]
+    let r = evaluate("element_at(path(5))", context: ctx)
+    #expect(r == .null)
+}
+
+@Test func elementAtNonPathArgReturnsNull() {
+    let r = evaluate("element_at('oops')",
+                     context: ["active_document": ["top_level_layers": []]])
+    #expect(r == .null)
+}
+
+@Test func elementAtReadsCommonFields() {
+    let ctx: [String: Any] = [
+        "active_document": [
+            "top_level_layers": [
+                ["kind": "Layer", "name": "A",
+                 "common": ["visibility": "outline", "locked": true]],
+            ],
+        ],
+    ]
+    #expect(evaluate("element_at(path(0)).common.visibility", context: ctx)
+            == .string("outline"))
+    #expect(evaluate("element_at(path(0)).common.locked", context: ctx)
+            == .bool(true))
+}
+
 // MARK: - Phase 3: lexical scoping — closure captures shadowed binding (§4.4)
 
 @Test func closureCapturesShadowedBinding() {
