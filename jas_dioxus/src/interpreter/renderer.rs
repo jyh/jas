@@ -260,30 +260,6 @@ fn apply_dialog_confirm(
 /// must be applied outside the AppState borrow.
 fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
     match action {
-        "enter_isolation_mode" => {
-            let layer_id = params.get("layer_id").and_then(|v| v.as_str()).map(String::from);
-            let path: Option<Vec<usize>> = layer_id.as_ref().and_then(|s| {
-                s.split(',').map(|p| p.parse::<usize>().ok()).collect()
-            });
-            let target_path = path.or_else(|| {
-                // Fall back to the single panel-selected container
-                if st.layers_panel_selection.len() == 1 {
-                    let p = &st.layers_panel_selection[0];
-                    if let Some(tab) = st.tab() {
-                        if let Some(elem) = tab.model.document().get_element(p) {
-                            if elem.is_group_or_layer() {
-                                return Some(p.clone());
-                            }
-                        }
-                    }
-                }
-                None
-            });
-            if let Some(p) = target_path {
-                st.layers_isolation_stack.push(p);
-            }
-            return vec![];
-        }
         "layer_options_confirm" => {
             use crate::geometry::element::{Element as E, LayerElem, Visibility};
             // Read dialog state from params (passed by the confirm button)
@@ -4621,6 +4597,32 @@ mod tests {
         assert_eq!(layers.len(), 1);
         assert_eq!(tab_layer(&st, 0).name, "B");
         assert_eq!(st.layers_panel_selection.len(), 0);
+    }
+
+    #[test]
+    fn enter_isolation_mode_via_yaml_with_container_id() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+        ]);
+        assert!(st.layers_isolation_stack.is_empty());
+        let mut params = serde_json::Map::new();
+        params.insert("container_id".into(), serde_json::Value::String("0".into()));
+        dispatch_action("enter_isolation_mode", &params, &mut st);
+        assert_eq!(st.layers_isolation_stack.len(), 1);
+        assert_eq!(st.layers_isolation_stack[0], vec![0]);
+    }
+
+    #[test]
+    fn enter_isolation_mode_via_yaml_fallback_to_selection() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Preview, false),
+        ]);
+        st.layers_panel_selection = vec![vec![1]];
+        let params = serde_json::Map::new();
+        dispatch_action("enter_isolation_mode", &params, &mut st);
+        assert_eq!(st.layers_isolation_stack.len(), 1);
+        assert_eq!(st.layers_isolation_stack[0], vec![1]);
     }
 
     #[test]
