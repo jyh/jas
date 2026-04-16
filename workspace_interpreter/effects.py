@@ -638,11 +638,16 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         store.init_dialog(dlg_id, defaults,
                          params=resolved_params or None,
                          props=props or None)
-        # Evaluate init expressions (order matters — later inits may reference earlier ones)
+        # Evaluate init expressions (order matters — later inits may reference earlier ones).
+        # The dialog's own params must win over the outer action's: dialog
+        # init expressions reference param.* expecting the dialog's params.
+        # Drop the outer "param" key from the eval-ctx extras so
+        # store.eval_context's own dialog-scoped param binding is preserved.
+        init_ctx = {k: v for k, v in ctx.items() if k != "param"} if ctx else {}
         init_map = dlg_def.get("init", {})
         if isinstance(init_map, dict):
             for key, expr in init_map.items():
-                value = _eval(expr, store, ctx)
+                value = _eval(expr, store, init_ctx)
                 store.set_dialog(key, value)
         return
 

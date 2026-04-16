@@ -424,6 +424,37 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
         except ValueError:
             return Value.null()
 
+    # element_at(path) — resolve a path against the active document's
+    # layer tree and return the element as a value (object/dict).
+    # Returns null for invalid paths, non-path args, or when no active
+    # document is present. Phase 4: used by open_layer_options to read
+    # the target layer's current state for dialog init.
+    if name == "element_at":
+        if len(node.args) != 1:
+            return Value.null()
+        p = eval_node(node.args[0], ctx)
+        if p.type != ValueType.PATH:
+            return Value.null()
+        indices = p.value
+        if len(indices) == 0:
+            return Value.null()
+        ad = ctx.get("active_document") if isinstance(ctx, dict) else None
+        if not isinstance(ad, dict):
+            return Value.null()
+        top = ad.get("top_level_layers")
+        if not isinstance(top, list):
+            return Value.null()
+        first = indices[0]
+        if not (0 <= first < len(top)):
+            return Value.null()
+        cur = top[first]
+        for idx in indices[1:]:
+            children = cur.get("children") if isinstance(cur, dict) else None
+            if not isinstance(children, list) or not (0 <= idx < len(children)):
+                return Value.null()
+            cur = children[idx]
+        return Value.from_python(cur)
+
     # reverse: list → list — reverses a list (useful for foreach over
     # index-sensitive paths where deletion order matters)
     if name == "reverse":

@@ -1024,6 +1024,124 @@ class TestLayerOptionsConfirmAction:
         assert doc["layers"][3]["name"] == "Layer 3"
 
 
+class TestElementAtFunction:
+    """Phase 4: element_at(path) free function.
+
+    Resolves a path against the active document's layer tree and
+    returns the element at that path. Used by open_layer_options to
+    read the target layer's current properties for dialog init.
+    """
+
+    def test_top_level_layer_returns_element(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A",
+             "common": {"visibility": "preview", "locked": False}},
+        ])
+        store = StateStore(document=doc)
+        ctx = store.eval_context()
+        r = evaluate("element_at(path(0)).name", ctx)
+        assert r.value == "A"
+
+    def test_invalid_index_returns_null(self):
+        doc = _make_doc([{"kind": "Layer", "name": "A"}])
+        store = StateStore(document=doc)
+        ctx = store.eval_context()
+        r = evaluate("element_at(path(5))", ctx)
+        assert r.value is None
+
+    def test_non_path_arg_returns_null(self):
+        doc = _make_doc([{"kind": "Layer", "name": "A"}])
+        store = StateStore(document=doc)
+        ctx = store.eval_context()
+        r = evaluate("element_at('oops')", ctx)
+        assert r.value is None
+
+    def test_nested_path_walks_children(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "parent", "children": [
+                {"kind": "Layer", "name": "nested"},
+            ]},
+        ])
+        store = StateStore(document=doc)
+        ctx = store.eval_context()
+        r = evaluate("element_at(path(0, 0)).name", ctx)
+        assert r.value == "nested"
+
+    def test_reads_common_fields(self):
+        doc = _make_doc([
+            {"kind": "Layer", "name": "A",
+             "common": {"visibility": "invisible", "locked": True}},
+        ])
+        store = StateStore(document=doc)
+        ctx = store.eval_context()
+        r = evaluate("element_at(path(0)).common.visibility", ctx)
+        assert r.value == "invisible"
+        r = evaluate("element_at(path(0)).common.locked", ctx)
+        assert r.value is True
+
+
+class TestOpenLayerOptionsAction:
+    """End-to-end: open_layer_options YAML action (Phase 4).
+
+    In edit mode the action resolves the target layer via
+    element_at(path_from_id(...)) and passes its current state as
+    open_dialog params so the dialog init block populates its fields.
+    """
+
+    def _load_action(self, name):
+        import yaml as yl
+        path = os.path.join(os.path.dirname(__file__), "..", "..",
+                            "workspace", "actions.yaml")
+        with open(path) as f:
+            return yl.safe_load(f)["actions"][name]
+
+    def test_edit_mode_populates_dialog_from_layer(self):
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("open_layer_options")["effects"]
+        doc = _make_doc([
+            {"kind": "Layer", "name": "Target",
+             "common": {"visibility": "outline", "locked": True}},
+        ])
+        # Load dialog definitions so open_dialog can resolve the id.
+        import yaml as yl
+        dialogs_path = os.path.join(os.path.dirname(__file__), "..", "..",
+                                     "workspace", "dialogs", "layer_options.yaml")
+        with open(dialogs_path) as f:
+            dialogs = yl.safe_load(f)
+        store = StateStore(document=doc)
+        ctx = {"param": {"mode": "edit", "layer_id": "0"}}
+        run_effects(effects, ctx, store, dialogs=dialogs, diagnostics=[])
+        # The dialog's state reflects the layer: name, locked, visibility.
+        assert store.get_dialog("name") == "Target"
+        assert store.get_dialog("lock") is True
+        # visibility=outline → show=true (not invisible), preview=false
+        assert store.get_dialog("show") is True
+        assert store.get_dialog("preview") is False
+
+    def test_create_mode_leaves_dialog_at_defaults(self):
+        import os as _os
+        global os
+        os = _os
+        effects = self._load_action("open_layer_options")["effects"]
+        doc = _make_doc([])
+        import yaml as yl
+        dialogs_path = os.path.join(os.path.dirname(__file__), "..", "..",
+                                     "workspace", "dialogs", "layer_options.yaml")
+        with open(dialogs_path) as f:
+            dialogs = yl.safe_load(f)
+        store = StateStore(document=doc)
+        ctx = {"param": {"mode": "create", "layer_id": None}}
+        run_effects(effects, ctx, store, dialogs=dialogs, diagnostics=[])
+        # In create mode the element_at branch returns null, so
+        # show/preview default to true (layer_elem == null is true).
+        assert store.get_dialog("name") == ""
+        assert store.get_dialog("lock") is False
+        assert store.get_dialog("show") is True
+        assert store.get_dialog("preview") is True
+
+
 class TestActiveDocumentRollups:
     def test_top_level_layers(self):
         doc = _make_doc([
