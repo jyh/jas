@@ -161,6 +161,29 @@ private func runLayersEffects(_ effects: [Any], model: Model) {
     #expect(model.document.layers[1].name == "D")
 }
 
+@Test func newLayerViaYamlNoSelection() {
+    let model = Model(document: Document(layers: [
+        Layer(name: "Layer 1", children: []),
+    ]))
+    LayersPanel.dispatchYamlAction("new_layer", model: model)
+    #expect(model.document.layers.count == 2)
+    #expect(model.document.layers[1].name == "Layer 2")
+}
+
+@Test func newLayerViaYamlInsertsAboveSelection() {
+    let model = Model(document: Document(layers: [
+        Layer(name: "Layer 1", children: []),
+        Layer(name: "Layer 2", children: []),
+        Layer(name: "Layer 3", children: []),
+    ]))
+    LayersPanel.dispatchYamlAction("new_layer", model: model,
+                                    panelSelection: [[1]])
+    #expect(model.document.layers.count == 4)
+    // Inserted at index 2, next unused after Layer 1/2/3 is Layer 4
+    #expect(model.document.layers[2].name == "Layer 4")
+    #expect(model.document.layers[3].name == "Layer 3")
+}
+
 @Test func deleteLayerSelectionViaYamlDispatch() {
     let model = Model(document: Document(layers: [
         Layer(name: "A", children: []),
