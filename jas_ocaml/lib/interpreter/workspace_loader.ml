@@ -19,6 +19,10 @@ let load () : workspace option =
     "workspace/workspace.json";
     "../workspace/workspace.json";
     "../../workspace/workspace.json";
+    "../../../workspace/workspace.json";
+    "../../../../workspace/workspace.json";
+    "../../../../../workspace/workspace.json";
+    "../../../../../../workspace/workspace.json";
   ] in
   let rec try_paths = function
     | [] -> None
