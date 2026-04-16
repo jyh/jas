@@ -23,9 +23,42 @@ func runEffects(
     schema: Bool = false,
     diagnostics: inout [Diagnostic]
 ) {
+    // Thread ctx through sibling effects: `let:` extends ctx for
+    // subsequent siblings; nested lists (then/else/do) recurse with
+    // their own ctx so bindings don't leak back.
+    var threadedCtx = ctx
     for effect in effects {
-        runOne(effect, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
-               schema: schema, diagnostics: &diagnostics)
+        // let: { name: expr, ... } — PHASE3 §5.1
+        if let bindings = effect["let"] as? [String: Any] {
+            for (name, exprV) in bindings {
+                let val = evalExpr(exprV, store: store, ctx: threadedCtx)
+                if case .closure = val {
+                    threadedCtx[name] = val
+                } else {
+                    threadedCtx[name] = valueToAny(val)
+                }
+            }
+            continue
+        }
+        // foreach: { source, as } do: [...] — PHASE3 §5.3
+        if let spec = effect["foreach"] as? [String: Any],
+           let body = effect["do"] as? [[String: Any]] {
+            let sourceExpr = spec["source"] ?? ""
+            let varName = (spec["as"] as? String) ?? "item"
+            let itemsVal = evalExpr(sourceExpr, store: store, ctx: threadedCtx)
+            guard case .list(let items) = itemsVal else { continue }
+            for (i, item) in items.enumerated() {
+                var iterCtx = threadedCtx
+                iterCtx[varName] = item.value
+                iterCtx["_index"] = i
+                runEffects(body, ctx: iterCtx, store: store,
+                           actions: actions, dialogs: dialogs,
+                           schema: schema, diagnostics: &diagnostics)
+            }
+            continue
+        }
+        runOne(effect, ctx: threadedCtx, store: store, actions: actions,
+               dialogs: dialogs, schema: schema, diagnostics: &diagnostics)
     }
 }
 
