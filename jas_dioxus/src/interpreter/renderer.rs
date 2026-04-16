@@ -2375,6 +2375,7 @@ struct TreeRow {
     eye_icon_svg: String,
     lock_icon_svg: String,
     twirl_svg: String,     // empty for leaf elements
+    preview_svg: String,   // fitted-viewBox SVG fragment for the thumbnail
     is_container: bool,
     display_name: String,
     is_named: bool,
@@ -2435,6 +2436,21 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         }
     }
 
+    /// Build a fitted-viewBox SVG thumbnail for a single element.
+    /// Returns an empty string for zero-extent or degenerate bounds.
+    fn build_preview_svg(elem: &GeoElement) -> String {
+        let (x, y, w, h) = elem.bounds();
+        if !(w.is_finite() && h.is_finite()) || w <= 0.0 || h <= 0.0 {
+            return String::new();
+        }
+        let pad = (w.max(h) * 0.02).max(0.5);
+        let vb = format!("{} {} {} {}", x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad);
+        let inner = crate::geometry::svg::element_svg(elem, "");
+        format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">{inner}</svg>"#
+        )
+    }
+
     fn elem_display_name(elem: &GeoElement) -> (String, bool) {
         if let GeoElement::Layer(le) = elem {
             if !le.name.is_empty() {
@@ -2492,12 +2508,14 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             };
             let (display_name, is_named) = elem_display_name(child);
 
+            let preview_svg = build_preview_svg(child);
             rows.push(TreeRow {
                 path: path.clone(),
                 depth,
                 eye_icon_svg: icon_svg(eye_icon),
                 lock_icon_svg: icon_svg(lock_icon),
                 twirl_svg,
+                preview_svg,
                 is_container,
                 display_name,
                 is_named,
@@ -2555,12 +2573,14 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             };
             let (display_name, is_named) = elem_display_name(elem);
 
+            let preview_svg = build_preview_svg(elem);
             rows.push(TreeRow {
                 path: path.clone(),
                 depth: 0,
                 eye_icon_svg: icon_svg(eye_icon),
                 lock_icon_svg: icon_svg(lock_icon),
                 twirl_svg,
+                preview_svg,
                 is_container,
                 display_name,
                 is_named,
@@ -3406,8 +3426,16 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             } else {
                                 div { style: "width:16px;flex-shrink:0" }
                             }
-                            // Preview placeholder
-                            div { style: "width:24px;height:24px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0" }
+                            // Preview thumbnail — fitted SVG of the element
+                            {
+                                let preview_svg = row.preview_svg.clone();
+                                rsx! {
+                                    div {
+                                        style: "width:24px;height:24px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0;overflow:hidden;",
+                                        dangerous_inner_html: "{preview_svg}",
+                                    }
+                                }
+                            }
                             // Name — inline input when renaming, otherwise span with double-click
                             if row.is_renaming {
                                 {
