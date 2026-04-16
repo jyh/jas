@@ -123,11 +123,55 @@ def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
         return
     if cmd == "close_panel":
         layout.close_panel(addr)
-    elif cmd in ("new_layer", "new_group", "toggle_all_layers_visibility",
-                 "toggle_all_layers_outline", "toggle_all_layers_lock",
-                 "enter_isolation_mode", "exit_isolation_mode",
+    elif cmd == "new_layer" and kind == PanelKind.LAYERS and model is not None:
+        import dataclasses
+        from geometry.element import Layer
+        doc = model.document
+        used = {l.name for l in doc.layers if isinstance(l, Layer)}
+        n = 1
+        while f"Layer {n}" in used:
+            n += 1
+        new_layer = Layer(name=f"Layer {n}", children=())
+        model.snapshot()
+        model.document = dataclasses.replace(doc, layers=doc.layers + (new_layer,))
+    elif cmd == "toggle_all_layers_visibility" and kind == PanelKind.LAYERS and model is not None:
+        import dataclasses
+        from geometry.element import Layer, Visibility
+        doc = model.document
+        any_visible = any(l.visibility != Visibility.INVISIBLE for l in doc.layers)
+        target = Visibility.INVISIBLE if any_visible else Visibility.PREVIEW
+        new_layers = tuple(
+            dataclasses.replace(l, visibility=target) if isinstance(l, Layer) else l
+            for l in doc.layers
+        )
+        model.snapshot()
+        model.document = dataclasses.replace(doc, layers=new_layers)
+    elif cmd == "toggle_all_layers_outline" and kind == PanelKind.LAYERS and model is not None:
+        import dataclasses
+        from geometry.element import Layer, Visibility
+        doc = model.document
+        any_preview = any(l.visibility == Visibility.PREVIEW for l in doc.layers)
+        target = Visibility.OUTLINE if any_preview else Visibility.PREVIEW
+        new_layers = tuple(
+            dataclasses.replace(l, visibility=target) if isinstance(l, Layer) else l
+            for l in doc.layers
+        )
+        model.snapshot()
+        model.document = dataclasses.replace(doc, layers=new_layers)
+    elif cmd == "toggle_all_layers_lock" and kind == PanelKind.LAYERS and model is not None:
+        import dataclasses
+        from geometry.element import Layer
+        doc = model.document
+        any_unlocked = any(not l.locked for l in doc.layers)
+        new_layers = tuple(
+            dataclasses.replace(l, locked=any_unlocked) if isinstance(l, Layer) else l
+            for l in doc.layers
+        )
+        model.snapshot()
+        model.document = dataclasses.replace(doc, layers=new_layers)
+    elif cmd in ("new_group", "enter_isolation_mode", "exit_isolation_mode",
                  "flatten_artwork", "collect_in_new_layer") and kind == PanelKind.LAYERS:
-        pass  # Tier-3 stubs
+        pass  # Tier-3 stubs for actions that need panel selection
     elif cmd == "invert_color" and kind == PanelKind.COLOR and model is not None:
         color = model.default_fill.color if model.fill_on_top and model.default_fill else (
             model.default_stroke.color if not model.fill_on_top and model.default_stroke else None)
