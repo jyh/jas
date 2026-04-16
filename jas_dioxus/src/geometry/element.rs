@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 /// A width control point for variable-width stroke profiles.
 /// Stored as a sorted list on PathElem/LineElem.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StrokeWidthPoint {
     /// Position along path [0.0, 1.0].
     pub t: f64,
@@ -77,7 +77,7 @@ pub const APPROX_CHAR_WIDTH_FACTOR: f64 = 0.6;
 ///
 /// Components are normalized to [0, 1] except HSB hue which is [0, 360).
 /// Each variant carries its own alpha in [0, 1].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Color {
     /// Red, green, blue, alpha — all in [0, 1].
     Rgb { r: f64, g: f64, b: f64, a: f64 },
@@ -252,7 +252,7 @@ impl Default for Color {
 }
 
 /// Arrowhead shape identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Arrowhead {
     #[default]
     None,
@@ -315,7 +315,7 @@ impl Arrowhead {
 }
 
 /// Arrow alignment mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ArrowAlign {
     #[default]
     TipAtEnd,
@@ -323,7 +323,7 @@ pub enum ArrowAlign {
 }
 
 /// Stroke alignment relative to the path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum StrokeAlign {
     #[default]
     Center,
@@ -332,7 +332,7 @@ pub enum StrokeAlign {
 }
 
 /// SVG stroke-linecap.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum LineCap {
     #[default]
     Butt,
@@ -341,7 +341,7 @@ pub enum LineCap {
 }
 
 /// SVG stroke-linejoin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum LineJoin {
     #[default]
     Miter,
@@ -350,7 +350,7 @@ pub enum LineJoin {
 }
 
 /// SVG fill presentation attribute.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Fill {
     pub color: Color,
     pub opacity: f64,
@@ -363,7 +363,7 @@ impl Fill {
 }
 
 /// SVG stroke presentation attributes.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Stroke {
     pub color: Color,
     pub width: f64,
@@ -415,7 +415,7 @@ impl Stroke {
 ///     | a c e |
 ///     | b d f |
 ///     | 0 0 1 |
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Transform {
     pub a: f64,
     pub b: f64,
@@ -498,7 +498,7 @@ impl Transform {
 // SVG path commands (the 'd' attribute)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum PathCommand {
     /// M x y
     MoveTo { x: f64, y: f64 },
@@ -560,7 +560,7 @@ fn inflate_bounds(bbox: Bounds, stroke: Option<&Stroke>) -> Bounds {
 // SVG Elements
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Element {
     Line(LineElem),
     Rect(RectElem),
@@ -582,7 +582,7 @@ pub enum Element {
 /// more restrictive of two modes, which is the rule used to combine
 /// an element's own visibility with the capping visibility inherited
 /// from its parent Group or Layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 #[derive(Default)]
 pub enum Visibility {
     /// Not rendered; cannot be selected or hit-tested.
@@ -598,7 +598,7 @@ pub enum Visibility {
 
 
 /// Common properties shared by all visible elements.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CommonProps {
     pub opacity: f64,
     pub transform: Option<Transform>,
@@ -617,7 +617,7 @@ impl Default for CommonProps {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LineElem {
     pub x1: f64,
     pub y1: f64,
@@ -628,7 +628,7 @@ pub struct LineElem {
     pub common: CommonProps,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RectElem {
     pub x: f64,
     pub y: f64,
@@ -641,7 +641,7 @@ pub struct RectElem {
     pub common: CommonProps,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CircleElem {
     pub cx: f64,
     pub cy: f64,
@@ -651,7 +651,7 @@ pub struct CircleElem {
     pub common: CommonProps,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EllipseElem {
     pub cx: f64,
     pub cy: f64,
@@ -662,7 +662,7 @@ pub struct EllipseElem {
     pub common: CommonProps,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PolylineElem {
     pub points: Vec<(f64, f64)>,
     pub fill: Option<Fill>,
@@ -670,7 +670,7 @@ pub struct PolylineElem {
     pub common: CommonProps,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PolygonElem {
     pub points: Vec<(f64, f64)>,
     pub fill: Option<Fill>,
@@ -678,7 +678,7 @@ pub struct PolygonElem {
     pub common: CommonProps,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PathElem {
     pub d: Vec<PathCommand>,
     pub fill: Option<Fill>,
@@ -687,7 +687,7 @@ pub struct PathElem {
     pub common: CommonProps,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TextElem {
     pub x: f64,
     pub y: f64,
@@ -710,7 +710,7 @@ impl TextElem {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TextPathElem {
     pub d: Vec<PathCommand>,
     pub content: String,
@@ -725,13 +725,13 @@ pub struct TextPathElem {
     pub common: CommonProps,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GroupElem {
     pub children: Vec<Rc<Element>>,
     pub common: CommonProps,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LayerElem {
     pub name: String,
     pub children: Vec<Rc<Element>>,
@@ -2610,5 +2610,39 @@ mod tests {
         assert!((r1 - r2).abs() < 0.004);
         assert!((g1 - g2).abs() < 0.004);
         assert!((b1 - b2).abs() < 0.004);
+    }
+
+    #[test]
+    fn element_serde_roundtrip_layer() {
+        let elem = Element::Layer(LayerElem {
+            name: "Layer 1".into(),
+            children: Vec::new(),
+            common: CommonProps { opacity: 0.75, transform: None,
+                                  locked: true, visibility: Visibility::Outline },
+        });
+        let json = serde_json::to_value(&elem).unwrap();
+        let back: Element = serde_json::from_value(json).unwrap();
+        assert_eq!(elem, back);
+    }
+
+    #[test]
+    fn element_serde_roundtrip_rect() {
+        let elem = rect(10.0, 20.0, 30.0, 40.0);
+        let json = serde_json::to_value(&elem).unwrap();
+        let back: Element = serde_json::from_value(json).unwrap();
+        assert_eq!(elem, back);
+    }
+
+    #[test]
+    fn element_serde_roundtrip_group_with_children() {
+        use std::rc::Rc;
+        let child = rect(0.0, 0.0, 10.0, 10.0);
+        let group = Element::Group(GroupElem {
+            children: vec![Rc::new(child)],
+            common: CommonProps::default(),
+        });
+        let json = serde_json::to_value(&group).unwrap();
+        let back: Element = serde_json::from_value(json).unwrap();
+        assert_eq!(group, back);
     }
 }
