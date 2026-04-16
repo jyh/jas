@@ -466,56 +466,6 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
             }
             return vec![];
         }
-        "toggle_all_layers_visibility" => {
-            use crate::geometry::element::{Element as E, Visibility};
-            if let Some(tab) = st.tab_mut() {
-                let mut new_doc = tab.model.document().clone();
-                let any_visible = new_doc.layers.iter()
-                    .any(|l| l.visibility() != Visibility::Invisible);
-                let target = if any_visible { Visibility::Invisible } else { Visibility::Preview };
-                tab.model.snapshot();
-                for i in 0..new_doc.layers.len() {
-                    if let E::Layer(_) = new_doc.layers[i] {
-                        new_doc.layers[i].common_mut().visibility = target;
-                    }
-                }
-                tab.model.set_document(new_doc);
-            }
-            return vec![];
-        }
-        "toggle_all_layers_outline" => {
-            use crate::geometry::element::{Element as E, Visibility};
-            if let Some(tab) = st.tab_mut() {
-                let mut new_doc = tab.model.document().clone();
-                let any_preview = new_doc.layers.iter()
-                    .any(|l| l.visibility() == Visibility::Preview);
-                let target = if any_preview { Visibility::Outline } else { Visibility::Preview };
-                tab.model.snapshot();
-                for i in 0..new_doc.layers.len() {
-                    if let E::Layer(_) = new_doc.layers[i] {
-                        new_doc.layers[i].common_mut().visibility = target;
-                    }
-                }
-                tab.model.set_document(new_doc);
-            }
-            return vec![];
-        }
-        "toggle_all_layers_lock" => {
-            use crate::geometry::element::Element as E;
-            if let Some(tab) = st.tab_mut() {
-                let mut new_doc = tab.model.document().clone();
-                let any_unlocked = new_doc.layers.iter().any(|l| !l.locked());
-                let target = any_unlocked;
-                tab.model.snapshot();
-                for i in 0..new_doc.layers.len() {
-                    if let E::Layer(_) = new_doc.layers[i] {
-                        new_doc.layers[i].common_mut().locked = target;
-                    }
-                }
-                tab.model.set_document(new_doc);
-            }
-            return vec![];
-        }
         "flatten_artwork" => {
             use crate::geometry::element::Element as E;
             use std::rc::Rc;
@@ -601,11 +551,7 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
         if let Some(action_def) = ws.actions().get(action) {
             if let Some(serde_json::Value::Array(effects)) = action_def.get("effects") {
                 let eval_ctx = build_appstate_ctx(params, st);
-                let mut deferred = Vec::new();
-                for eff in effects {
-                    deferred.extend(run_yaml_effect(eff, &eval_ctx, st));
-                }
-                return deferred;
+                return run_yaml_effects(effects, &eval_ctx, st);
             }
         }
     }
@@ -957,29 +903,169 @@ fn build_appstate_ctx(
     });
     let mut ctx = serde_json::Map::new();
     ctx.insert("state".to_string(), state);
+    ctx.insert("active_document".to_string(), build_active_document_view(st));
     if !params.is_empty() {
         ctx.insert("param".to_string(), serde_json::Value::Object(params.clone()));
     }
     serde_json::Value::Object(ctx)
 }
 
+/// Build the active_document ctx namespace (Phase 3 §7.2).
+/// Exposes top_level_layers (list of dicts with path, name, common, ...)
+/// and top_level_layer_paths (list of paths).
+fn build_active_document_view(
+    st: &crate::workspace::app_state::AppState,
+) -> serde_json::Value {
+    use crate::geometry::element::{Element, Visibility};
+    let Some(tab) = st.tabs.get(st.active_tab) else {
+        return serde_json::json!({
+            "top_level_layers": [],
+            "top_level_layer_paths": [],
+        });
+    };
+    let mut top_level_layers = Vec::new();
+    let mut top_level_layer_paths = Vec::new();
+    for (i, elem) in tab.model.document().layers.iter().enumerate() {
+        if let Element::Layer(le) = elem {
+            let vis = match le.common.visibility {
+                Visibility::Invisible => "invisible",
+                Visibility::Outline => "outline",
+                Visibility::Preview => "preview",
+            };
+            // Path is encoded as {"__path__": [i]} for round-trip
+            let path_json = serde_json::json!({"__path__": [i as u64]});
+            top_level_layers.push(serde_json::json!({
+                "kind": "Layer",
+                "name": le.name,
+                "common": {
+                    "visibility": vis,
+                    "locked": le.common.locked,
+                    "opacity": le.common.opacity,
+                },
+                "path": path_json.clone(),
+            }));
+            top_level_layer_paths.push(path_json);
+        }
+    }
+    serde_json::json!({
+        "top_level_layers": top_level_layers,
+        "top_level_layer_paths": top_level_layer_paths,
+    })
+}
+
 /// Execute one YAML effect against AppState, returning any deferred dialog effects.
+/// Run a list of YAML effects with lexical scope threading (Phase 3).
+/// Each `let:` extends scope for subsequent siblings in the same list;
+/// nested lists (then/else/do) get their own scope that doesn't leak.
+fn run_yaml_effects(
+    effects: &[serde_json::Value],
+    ctx_in: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) -> Vec<serde_json::Value> {
+    let mut scope = ctx_in.clone();
+    let mut deferred = Vec::new();
+    for eff in effects {
+        deferred.extend(run_yaml_effect(eff, &mut scope, st));
+    }
+    deferred
+}
+
 fn run_yaml_effect(
     eff: &serde_json::Value,
-    eval_ctx: &serde_json::Value,
+    eval_ctx: &mut serde_json::Value,
     st: &mut crate::workspace::app_state::AppState,
 ) -> Vec<serde_json::Value> {
     let mut deferred = Vec::new();
 
+    // Bare-string effects: `- snapshot` → {snapshot: null}
+    if let Some(name) = eff.as_str() {
+        if name == "snapshot" {
+            if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                tab.model.snapshot();
+            }
+        }
+        return deferred;
+    }
+
+    // let: { name: expr, ... } — PHASE3 §5.1
+    if let Some(bindings) = eff.get("let").and_then(|v| v.as_object()) {
+        for (name, expr_v) in bindings {
+            let val_json = if let Some(expr_str) = expr_v.as_str() {
+                let val = super::expr::eval(expr_str, &*eval_ctx);
+                super::effects::value_to_json(&val)
+            } else {
+                expr_v.clone()
+            };
+            if let Some(map) = eval_ctx.as_object_mut() {
+                map.insert(name.clone(), val_json);
+            }
+        }
+        return deferred;
+    }
+
+    // snapshot — PHASE3 §5.2
+    if eff.get("snapshot").is_some() {
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            tab.model.snapshot();
+        }
+        return deferred;
+    }
+
+    // foreach: { source, as } do: [...] — PHASE3 §5.3
+    if let Some(spec) = eff.get("foreach").and_then(|v| v.as_object()) {
+        let source_expr = spec.get("source").and_then(|v| v.as_str()).unwrap_or("");
+        let var_name = spec.get("as").and_then(|v| v.as_str()).unwrap_or("item");
+        let body = eff.get("do")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        // Evaluate source in current scope
+        let items_val = super::expr::eval(source_expr, &*eval_ctx);
+        let items = match items_val {
+            super::expr_types::Value::List(arr) => arr,
+            _ => return deferred,
+        };
+        for (i, item) in items.iter().enumerate() {
+            // Fresh iteration scope inheriting from outer
+            let mut iter_ctx = eval_ctx.clone();
+            if let Some(m) = iter_ctx.as_object_mut() {
+                m.insert(var_name.to_string(), item.clone());
+                m.insert("_index".to_string(), serde_json::json!(i));
+            }
+            deferred.extend(run_yaml_effects(&body, &iter_ctx, st));
+        }
+        return deferred;
+    }
+
+    // doc.set: { path, fields } — PHASE3 §5.4
+    if let Some(spec) = eff.get("doc.set").and_then(|v| v.as_object()) {
+        let path_expr = spec.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        let path_val = super::expr::eval(path_expr, &*eval_ctx);
+        let indices = match path_val {
+            super::expr_types::Value::Path(idx) => idx,
+            _ => return deferred,
+        };
+        if let Some(fields) = spec.get("fields").and_then(|v| v.as_object()) {
+            for (dotted, expr_v) in fields {
+                let val = if let Some(expr_str) = expr_v.as_str() {
+                    super::expr::eval(expr_str, &*eval_ctx)
+                } else {
+                    super::expr_types::Value::from_json(expr_v)
+                };
+                apply_doc_set_field(&indices, dotted, &val, st);
+            }
+        }
+        return deferred;
+    }
+
     // if: { condition, then, else }
     if let Some(cond) = eff.get("if").and_then(|v| v.as_object()) {
         let condition = cond.get("condition").and_then(|v| v.as_str()).unwrap_or("false");
-        let result = super::expr::eval(condition, eval_ctx);
+        let result = super::expr::eval(condition, &*eval_ctx);
         let branch = if result.to_bool() { "then" } else { "else" };
         if let Some(serde_json::Value::Array(branch_effs)) = cond.get(branch) {
-            for inner in branch_effs {
-                deferred.extend(run_yaml_effect(inner, eval_ctx, st));
-            }
+            // Nested list: own scope, doesn't leak back
+            deferred.extend(run_yaml_effects(branch_effs, eval_ctx, st));
         }
         return deferred;
     }
@@ -1087,6 +1173,74 @@ fn run_yaml_effect(
     }
 
     deferred
+}
+
+/// Write a dotted-field value to the element at the given path (Phase 3 §5.4).
+/// Supports `common.visibility`, `common.locked`, `common.opacity`, `name`
+/// at minimum — the fields used by the Group A toggle actions.
+fn apply_doc_set_field(
+    path: &[usize],
+    dotted_field: &str,
+    value: &super::expr_types::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    use crate::geometry::element::{Element, Visibility};
+    use super::expr_types::Value;
+
+    let Some(tab) = st.tabs.get_mut(st.active_tab) else { return; };
+    let mut new_doc = tab.model.document().clone();
+
+    // Navigate to the element. Only top-level layers supported for now;
+    // nested element traversal (for grouped layers) comes in a later Phase 3 step.
+    if path.len() != 1 {
+        return;
+    }
+    let idx = path[0];
+    if idx >= new_doc.layers.len() {
+        return;
+    }
+
+    // Write the field
+    let elem = &mut new_doc.layers[idx];
+    let written = match dotted_field {
+        "common.visibility" => {
+            let v = match value {
+                Value::Str(s) => match s.as_str() {
+                    "invisible" => Some(Visibility::Invisible),
+                    "outline" => Some(Visibility::Outline),
+                    "preview" => Some(Visibility::Preview),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(vis) = v {
+                elem.common_mut().visibility = vis;
+                true
+            } else { false }
+        }
+        "common.locked" => {
+            if let Value::Bool(b) = value {
+                elem.common_mut().locked = *b;
+                true
+            } else { false }
+        }
+        "common.opacity" => {
+            if let Value::Number(n) = value {
+                elem.common_mut().opacity = *n;
+                true
+            } else { false }
+        }
+        "name" => {
+            if let (Element::Layer(le), Value::Str(s)) = (elem, value) {
+                le.name = s.clone();
+                true
+            } else { false }
+        }
+        _ => false,
+    };
+    if written {
+        tab.model.set_document(new_doc);
+    }
 }
 
 /// Read a top-level AppState field as a JSON value (for use with swap:).
@@ -4114,5 +4268,118 @@ mod tests {
         let fill_hex = st.app_default_fill.map(|f| format!("#{}", f.color.to_hex()));
         assert_eq!(fill_hex, Some("#0000ff".to_string()));
         assert!(st.app_default_stroke.is_none());
+    }
+
+    // ── Phase 3: Group A toggle actions ───────────────────────
+    //
+    // These build a minimal AppState with some top-level layers, dispatch
+    // the action name (which falls through to the YAML effects catalog),
+    // and verify the layers' common.visibility / common.locked changed.
+
+    use crate::geometry::element::{Element, LayerElem, CommonProps, Visibility};
+
+    fn make_state_with_layers(layers: Vec<(String, Visibility, bool)>) -> AppState {
+        use crate::workspace::app_state::TabState;
+        let mut st = AppState::new();
+        // Ensure there's at least one tab (AppState::new may return empty tabs)
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let doc_layers: Vec<Element> = layers.into_iter().map(|(name, vis, locked)| {
+            Element::Layer(LayerElem {
+                name,
+                children: Vec::new(),
+                common: CommonProps {
+                    opacity: 1.0,
+                    transform: None,
+                    locked,
+                    visibility: vis,
+                },
+            })
+        }).collect();
+        let mut new_doc = st.tabs[st.active_tab].model.document().clone();
+        new_doc.layers = doc_layers;
+        st.tabs[st.active_tab].model.set_document(new_doc);
+        st
+    }
+
+    fn tab_layer(st: &AppState, idx: usize) -> &LayerElem {
+        match &st.tabs[st.active_tab].model.document().layers[idx] {
+            Element::Layer(le) => le,
+            _ => panic!("expected Layer at {}", idx),
+        }
+    }
+
+    #[test]
+    fn toggle_all_layers_visibility_any_visible_all_become_invisible() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Invisible, false),
+        ]);
+        let params = serde_json::Map::new();
+        dispatch_action("toggle_all_layers_visibility", &params, &mut st);
+        assert_eq!(tab_layer(&st, 0).common.visibility, Visibility::Invisible);
+        assert_eq!(tab_layer(&st, 1).common.visibility, Visibility::Invisible);
+    }
+
+    #[test]
+    fn toggle_all_layers_visibility_all_invisible_become_preview() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Invisible, false),
+            ("B".into(), Visibility::Invisible, false),
+        ]);
+        let params = serde_json::Map::new();
+        dispatch_action("toggle_all_layers_visibility", &params, &mut st);
+        assert_eq!(tab_layer(&st, 0).common.visibility, Visibility::Preview);
+        assert_eq!(tab_layer(&st, 1).common.visibility, Visibility::Preview);
+    }
+
+    #[test]
+    fn toggle_all_layers_outline_any_preview_become_outline() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Outline, false),
+        ]);
+        let params = serde_json::Map::new();
+        dispatch_action("toggle_all_layers_outline", &params, &mut st);
+        assert_eq!(tab_layer(&st, 0).common.visibility, Visibility::Outline);
+        assert_eq!(tab_layer(&st, 1).common.visibility, Visibility::Outline);
+    }
+
+    #[test]
+    fn toggle_all_layers_outline_all_outline_become_preview() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Outline, false),
+            ("B".into(), Visibility::Outline, false),
+        ]);
+        let params = serde_json::Map::new();
+        dispatch_action("toggle_all_layers_outline", &params, &mut st);
+        assert_eq!(tab_layer(&st, 0).common.visibility, Visibility::Preview);
+        assert_eq!(tab_layer(&st, 1).common.visibility, Visibility::Preview);
+    }
+
+    #[test]
+    fn toggle_all_layers_lock_any_unlocked_all_become_locked() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Preview, true),
+        ]);
+        let params = serde_json::Map::new();
+        dispatch_action("toggle_all_layers_lock", &params, &mut st);
+        assert!(tab_layer(&st, 0).common.locked);
+        assert!(tab_layer(&st, 1).common.locked);
+    }
+
+    #[test]
+    fn toggle_all_layers_lock_all_locked_become_unlocked() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, true),
+            ("B".into(), Visibility::Preview, true),
+        ]);
+        let params = serde_json::Map::new();
+        dispatch_action("toggle_all_layers_lock", &params, &mut st);
+        assert!(!tab_layer(&st, 0).common.locked);
+        assert!(!tab_layer(&st, 1).common.locked);
     }
 }
