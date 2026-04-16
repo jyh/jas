@@ -367,51 +367,6 @@ fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Va
             st.layers_panel_selection.clear();
             return vec![];
         }
-        "collect_in_new_layer" => {
-            use crate::geometry::element::{Element as E, LayerElem, CommonProps};
-            let paths = st.layers_panel_selection.clone();
-            if paths.is_empty() { return vec![]; }
-            if let Some(tab) = st.tab_mut() {
-                tab.model.snapshot();
-                let doc = tab.model.document().clone();
-                let used: std::collections::HashSet<String> = doc.layers.iter()
-                    .filter_map(|l| if let E::Layer(le) = l { Some(le.name.clone()) } else { None })
-                    .collect();
-                let mut n = 1;
-                let name = loop {
-                    let candidate = format!("Layer {n}");
-                    if !used.contains(&candidate) { break candidate; }
-                    n += 1;
-                };
-                // Collect elements in document order
-                let mut sorted_paths = paths.clone();
-                sorted_paths.sort();
-                let mut elems: Vec<E> = Vec::new();
-                for path in &sorted_paths {
-                    if let Some(e) = doc.get_element(path) {
-                        elems.push(e.clone());
-                    }
-                }
-                // Delete originals in reverse
-                let mut new_doc = doc;
-                let mut rev_paths = sorted_paths.clone();
-                rev_paths.reverse();
-                for path in &rev_paths {
-                    new_doc = new_doc.delete_element(path);
-                }
-                let children = elems.into_iter().map(std::rc::Rc::new).collect();
-                let new_layer = E::Layer(LayerElem {
-                    name,
-                    children,
-                    common: CommonProps::default(),
-                });
-                new_doc.layers.push(new_layer);
-                tab.model.set_document(new_doc);
-                let new_path = vec![st.tab().map(|t| t.model.document().layers.len() - 1).unwrap_or(0)];
-                st.layers_panel_selection = vec![new_path];
-            }
-            return vec![];
-        }
         _ => {}
     }
     // Fall through to YAML actions catalog
@@ -1045,6 +1000,70 @@ fn run_yaml_effect(
         let elem = resolve_element_arg(spec.get("element"), &*eval_ctx);
         if let Some(e) = elem {
             insert_element_after(&indices, e, st);
+        }
+        return deferred;
+    }
+
+    // doc.wrap_in_layer: { paths, name } — PHASE3 sub-tollgate 3
+    // Parallel to wrap_in_group but always appends a new top-level Layer
+    // at the end of the document's layers array.
+    if let Some(spec) = eff.get("doc.wrap_in_layer").and_then(|v| v.as_object()) {
+        let paths_expr = spec.get("paths").and_then(|v| v.as_str()).unwrap_or("[]");
+        let paths_val = super::expr::eval(paths_expr, &*eval_ctx);
+        let raw_paths = match paths_val {
+            super::expr_types::Value::List(items) => items,
+            _ => return deferred,
+        };
+        let mut normalized: Vec<Vec<usize>> = Vec::new();
+        for item in &raw_paths {
+            if let Some(obj) = item.as_object() {
+                if let Some(arr) = obj.get("__path__").and_then(|v| v.as_array()) {
+                    let idx: Option<Vec<usize>> = arr.iter()
+                        .map(|n| n.as_u64().map(|u| u as usize))
+                        .collect();
+                    if let Some(idx) = idx {
+                        normalized.push(idx);
+                    }
+                }
+            }
+        }
+        if normalized.is_empty() {
+            return deferred;
+        }
+        normalized.sort();
+        // Name expression
+        let name_expr = spec.get("name").and_then(|v| v.as_str()).unwrap_or("'Layer'");
+        let name_val = super::expr::eval(name_expr, &*eval_ctx);
+        let name = match name_val {
+            super::expr_types::Value::Str(s) => s,
+            _ => "Layer".to_string(),
+        };
+        use crate::geometry::element::{Element, LayerElem, CommonProps};
+        use std::rc::Rc;
+        let mut children: Vec<Rc<Element>> = Vec::new();
+        if let Some(tab) = st.tabs.get(st.active_tab) {
+            for p in &normalized {
+                if let Some(elem) = tab.model.document().get_element(p) {
+                    children.push(Rc::new(elem.clone()));
+                }
+            }
+        }
+        if children.is_empty() {
+            return deferred;
+        }
+        {
+            let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
+            let mut new_doc = tab.model.document().clone();
+            for p in normalized.iter().rev() {
+                new_doc = new_doc.delete_element(p);
+            }
+            let new_layer = Element::Layer(LayerElem {
+                name,
+                children,
+                common: CommonProps::default(),
+            });
+            new_doc.layers.push(new_layer);
+            tab.model.set_document(new_doc);
         }
         return deferred;
     }
@@ -4629,6 +4648,31 @@ mod tests {
         assert_eq!(layers.len(), 1);
         assert_eq!(tab_layer(&st, 0).name, "B");
         assert_eq!(st.layers_panel_selection.len(), 0);
+    }
+
+    #[test]
+    fn collect_in_new_layer_wraps_selection_at_end() {
+        use crate::geometry::element::Element;
+        let mut st = make_state_with_layers(vec![
+            ("Layer 1".into(), Visibility::Preview, false),
+            ("Layer 2".into(), Visibility::Preview, false),
+            ("Layer 3".into(), Visibility::Preview, false),
+        ]);
+        st.layers_panel_selection = vec![vec![0], vec![2]];
+        let params = serde_json::Map::new();
+        dispatch_action("collect_in_new_layer", &params, &mut st);
+        let layers = &st.tabs[st.active_tab].model.document().layers;
+        assert_eq!(layers.len(), 2);
+        // Layer 2 (not in selection) survives at idx 0;
+        // new auto-named Layer 4 at idx 1 with Layer 1 + Layer 3 as children.
+        assert_eq!(tab_layer(&st, 0).name, "Layer 2");
+        match &layers[1] {
+            Element::Layer(le) => {
+                assert_eq!(le.name, "Layer 4");
+                assert_eq!(le.children.len(), 2);
+            }
+            other => panic!("expected Layer at idx 1, got {:?}", other),
+        }
     }
 
     #[test]
