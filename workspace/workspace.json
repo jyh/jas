@@ -1593,24 +1593,55 @@
       ]
     },
     "delete_layer_selection": {
-      "description": "Delete the panel-selected elements from the document. If deletion would remove the last remaining layer, the action is prevented (the last layer cannot be deleted). Deleted elements are placed on the undo stack. After deletion, the panel selection becomes empty.\n",
+      "description": "Delete the panel-selected elements from the document. Iterates in reverse path order to keep indices valid across deletions. Deleted elements are placed on the undo stack. After deletion, the panel selection becomes empty.\n",
       "category": "layers",
       "tier": 3,
       "enabled_when": "active_document.layers_panel_selection_count > 0",
       "effects": [
+        "snapshot",
         {
-          "log": "delete_layer_selection"
+          "foreach": {
+            "source": "reverse(panel.layers_panel_selection)",
+            "as": "p"
+          },
+          "do": [
+            {
+              "doc.delete_at": "p"
+            }
+          ]
+        },
+        {
+          "set_panel_state": {
+            "key": "layers_panel_selection",
+            "value": "[]"
+          }
         }
       ]
     },
     "duplicate_layer_selection": {
-      "description": "Duplicate the panel-selected elements in place. Each duplicate is inserted immediately above its original in the same parent container. Duplicated layers receive auto-generated names following the \"Layer N\" convention. The panel selection changes to the duplicated elements.\n",
+      "description": "Duplicate the panel-selected elements in place. Each duplicate is inserted immediately after its original in the same parent container. Iterates in reverse path order so each insert's indices stay valid for remaining iterations.\n",
       "category": "layers",
       "tier": 3,
       "enabled_when": "active_document.layers_panel_selection_count > 0",
       "effects": [
+        "snapshot",
         {
-          "log": "duplicate_layer_selection"
+          "foreach": {
+            "source": "reverse(panel.layers_panel_selection)",
+            "as": "p"
+          },
+          "do": [
+            {
+              "doc.clone_at": "p",
+              "as": "clone"
+            },
+            {
+              "doc.insert_after": {
+                "path": "p",
+                "element": "clone"
+              }
+            }
+          ]
         }
       ]
     },

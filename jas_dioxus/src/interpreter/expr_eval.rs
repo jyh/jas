@@ -692,6 +692,19 @@ fn eval_func(
             Value::Path(parts)
         }
 
+        // reverse: list -> list
+        "reverse" => {
+            if args.len() != 1 { return Value::Null; }
+            let v = eval_inner(&args[0], ctx, scope, store_cb);
+            match v {
+                Value::List(mut arr) => {
+                    arr.reverse();
+                    Value::List(arr)
+                }
+                _ => Value::Null,
+            }
+        }
+
         // mem: (element, list) -> bool — list membership
         "mem" => {
             if args.len() != 2 {

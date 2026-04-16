@@ -1,0 +1,24 @@
+description: "delete_layer_selection: removes panel-selected layers in reverse order"
+action: delete_layer_selection
+initial_panel_state:
+  panel: layers
+  layers_panel_selection:
+    - { __path__: [0] }
+    - { __path__: [2] }
+initial_doc:
+  layers:
+    - kind: Layer
+      name: "A"
+      common: { visibility: preview, locked: false }
+    - kind: Layer
+      name: "B"
+      common: { visibility: preview, locked: false }
+    - kind: Layer
+      name: "C"
+      common: { visibility: preview, locked: false }
+expected_doc:
+  layers:
+    - kind: Layer
+      name: "B"
+      common: { visibility: preview, locked: false }
+expected_snapshots: 1

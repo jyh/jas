@@ -424,6 +424,16 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
         except ValueError:
             return Value.null()
 
+    # reverse: list → list — reverses a list (useful for foreach over
+    # index-sensitive paths where deletion order matters)
+    if name == "reverse":
+        if len(node.args) != 1:
+            return Value.null()
+        arg = eval_node(node.args[0], ctx)
+        if arg.type != ValueType.LIST:
+            return Value.null()
+        return Value.list_(list(reversed(arg.value)))
+
     # mem: (element, list) → bool — list membership
     if name == "mem":
         if len(node.args) != 2:

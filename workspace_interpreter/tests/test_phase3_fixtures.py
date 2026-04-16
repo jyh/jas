@@ -62,6 +62,14 @@ def test_phase3_fixture(fixture_path: str) -> None:
     effects = action_def.get("effects", [])
 
     store = StateStore(defaults={"tab_count": 1}, document=fixture["initial_doc"])
+    # Optional panel state seed (e.g. layers_panel_selection for Group B actions)
+    panel_state = fixture.get("initial_panel_state")
+    if panel_state:
+        panel_id = panel_state.get("panel", "layers")
+        store.init_panel(panel_id, {
+            k: v for k, v in panel_state.items() if k != "panel"
+        })
+        store.set_active_panel(panel_id)
     run_effects(effects, {}, store)
 
     # Assert the document tree matches expected_doc

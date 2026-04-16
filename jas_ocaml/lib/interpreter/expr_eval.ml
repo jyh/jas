@@ -874,6 +874,15 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
         | _ -> Null
     end
 
+    (* reverse: list -> list *)
+    else if name = "reverse" then begin
+      if List.length args <> 1 then Null
+      else
+        match eval_node ~local_env ?store_cb (List.hd args) ctx with
+        | List items -> List (List.rev items)
+        | _ -> Null
+    end
+
     (* mem: (element, list) -> bool — list membership *)
     else if name = "mem" then begin
       if List.length args <> 2 then Bool false
