@@ -161,5 +161,32 @@ private func runLayersEffects(_ effects: [Any], model: Model) {
     #expect(model.document.layers[1].name == "D")
 }
 
+@Test func deleteLayerSelectionViaYamlDispatch() {
+    let model = Model(document: Document(layers: [
+        Layer(name: "A", children: []),
+        Layer(name: "B", children: []),
+        Layer(name: "C", children: []),
+    ]))
+    LayersPanel.dispatchYamlAction("delete_layer_selection",
+                                    model: model,
+                                    panelSelection: [[0], [2]])
+    #expect(model.document.layers.count == 1)
+    #expect(model.document.layers[0].name == "B")
+}
+
+@Test func duplicateLayerSelectionViaYamlDispatch() {
+    let model = Model(document: Document(layers: [
+        Layer(name: "A", children: []),
+        Layer(name: "B", children: []),
+    ]))
+    LayersPanel.dispatchYamlAction("duplicate_layer_selection",
+                                    model: model,
+                                    panelSelection: [[1]])
+    #expect(model.document.layers.count == 3)
+    #expect(model.document.layers[0].name == "A")
+    #expect(model.document.layers[1].name == "B")
+    #expect(model.document.layers[2].name == "B")
+}
+
 // Shared mutable layout for tests — not exercised by dispatch here.
 private var defaultLayout: WorkspaceLayout = WorkspaceLayout.defaultLayout()
