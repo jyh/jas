@@ -89,6 +89,14 @@ class Value:
         if isinstance(v, list):
             return Value.list_(v)
         if isinstance(v, dict):
+            # Path round-trip: {"__path__": [i, j, ...]} marker restores
+            # Value.PATH from its JSON encoding (Phase 3 §6.2).
+            if len(v) == 1 and "__path__" in v:
+                indices = v["__path__"]
+                if isinstance(indices, (list, tuple)) and all(
+                    isinstance(i, int) and i >= 0 for i in indices
+                ):
+                    return Value.path(tuple(indices))
             # Keep as a special "dict" value — stored as STRING type
             # but with the dict reference so DotAccess can drill in.
             return Value(ValueType.STRING, v)

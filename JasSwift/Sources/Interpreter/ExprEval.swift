@@ -1155,6 +1155,13 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         }
         return .path(parts)
 
+    // reverse: list -> list
+    case "reverse":
+        guard args.count == 1 else { return .null }
+        let v = evalNode(args[0], ctx)
+        guard case .list(let items) = v else { return .null }
+        return .list(items.reversed())
+
     // mem: (element, list) -> bool — list membership
     case "mem":
         guard args.count == 2 else { return .bool(false) }

@@ -1,0 +1,26 @@
+description: "duplicate_layer_selection: clones a panel-selected layer in place"
+action: duplicate_layer_selection
+initial_panel_state:
+  panel: layers
+  layers_panel_selection:
+    - { __path__: [1] }
+initial_doc:
+  layers:
+    - kind: Layer
+      name: "A"
+      common: { visibility: preview, locked: false }
+    - kind: Layer
+      name: "B"
+      common: { visibility: preview, locked: false }
+expected_doc:
+  layers:
+    - kind: Layer
+      name: "A"
+      common: { visibility: preview, locked: false }
+    - kind: Layer
+      name: "B"
+      common: { visibility: preview, locked: false }
+    - kind: Layer
+      name: "B"
+      common: { visibility: preview, locked: false }
+expected_snapshots: 1
