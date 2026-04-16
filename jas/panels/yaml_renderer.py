@@ -341,6 +341,7 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
     layout = QVBoxLayout(widget)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
+    widget.setFocusPolicy(Qt.StrongFocus)
 
     get_model = ctx.get("_get_model")
     if not get_model:
@@ -415,6 +416,42 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
             store.subscribe_panel(panel_id, _on_panel_change)
     except Exception:
         pass
+
+    # Keyboard shortcuts
+    def _on_key(event):
+        key = event.key()
+        meta = (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)) != Qt.NoModifier
+        if key in (Qt.Key_Delete, Qt.Key_Backspace):
+            # Delete panel-selected elements (prevent last layer)
+            m = get_model()
+            if m is not None and panel_selection:
+                doc = m.document
+                paths = list(panel_selection)
+                # Prevent deleting the last layer
+                top_deletes = sum(1 for p in paths if len(p) == 1)
+                if top_deletes < len(doc.layers):
+                    m.snapshot()
+                    paths.sort(reverse=True)
+                    new_doc = doc
+                    for p in paths:
+                        new_doc = new_doc.delete_element(p)
+                    m.document = new_doc
+                    panel_selection.clear()
+                    _rebuild()
+        elif key == Qt.Key_A and meta:
+            # Select all visible rows in panel selection
+            panel_selection.clear()
+            m = get_model()
+            if m is not None:
+                def collect(elements, prefix):
+                    for i, e in enumerate(elements):
+                        p = prefix + (i,)
+                        panel_selection.add(p)
+                        if isinstance(e, Group) and hasattr(e, 'children'):
+                            collect(e.children, p)
+                collect(m.document.layers, ())
+            _rebuild()
+    widget.keyPressEvent = _on_key
 
     def _rebuild():
         """Rebuild the tree view after a document or UI state change."""
