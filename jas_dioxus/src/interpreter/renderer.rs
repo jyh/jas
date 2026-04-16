@@ -2615,6 +2615,47 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         out
     };
 
+    // Auto-expand ancestors of element-selected paths so selected elements
+    // are always visible in the tree (without this, selecting an element
+    // on the canvas inside a collapsed group would hide it).
+    let first_selected_path: Option<Vec<usize>> = {
+        let mut st = rctx.app.borrow_mut();
+        let selected_paths: Vec<Vec<usize>> = st.tab()
+            .map(|t| {
+                let doc = t.model.document();
+                let mut paths: Vec<Vec<usize>> = doc.selection.iter().map(|es| es.path.clone()).collect();
+                paths.sort();
+                paths
+            })
+            .unwrap_or_default();
+        for p in &selected_paths {
+            for i in 1..p.len() {
+                let ancestor = p[..i].to_vec();
+                st.layers_collapsed.remove(&ancestor);
+            }
+        }
+        selected_paths.into_iter().next()
+    };
+
+    // Schedule a scroll-into-view for the first selected row after render
+    #[cfg(target_arch = "wasm32")]
+    if let Some(ref p) = first_selected_path {
+        let row_id = format!("lp_row_{}", p.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("_"));
+        spawn(async move {
+            // Small delay to let the DOM settle
+            if let Some(win) = web_sys::window() {
+                if let Some(doc) = win.document() {
+                    if let Some(el) = doc.get_element_by_id(&row_id) {
+                        let opts = web_sys::ScrollIntoViewOptions::new();
+                        opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
+                        el.scroll_into_view_with_scroll_into_view_options(&opts);
+                    }
+                }
+            }
+        });
+    }
+    let _ = &first_selected_path; // suppress unused warning on non-wasm
+
     // Build flat row list from the live document
     let mut rows: Vec<TreeRow> = {
         let st = rctx.app.borrow();
@@ -3262,8 +3303,10 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         ""
                     };
 
+                    let row_dom_id = format!("lp_row_{}", row.path.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("_"));
                     rsx! {
                         div {
+                            id: "{row_dom_id}",
                             style: "display:flex;align-items:center;height:24px;padding:0 4px;gap:2px;font-size:11px;color:var(--jas-text,#ccc);cursor:default;user-select:none;{row_bg}{drop_indicator}",
                             onclick: on_row_click,
                             oncontextmenu: on_row_contextmenu,
