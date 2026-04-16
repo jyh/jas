@@ -504,6 +504,152 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
     except Exception:
         pass
 
+    # Context menu action helpers
+    def _enter_isolation(p):
+        isolation_stack.append(p)
+        _rebuild()
+
+    def _exit_isolation():
+        if isolation_stack:
+            isolation_stack.pop()
+        _rebuild()
+
+    def _do_delete():
+        m = get_model()
+        if m is None or not panel_selection:
+            return
+        dd = m.document
+        paths = sorted(panel_selection, reverse=True)
+        top_deletes = sum(1 for pp in paths if len(pp) == 1)
+        if top_deletes >= len(dd.layers):
+            return
+        m.snapshot()
+        new_doc = dd
+        for pp in paths:
+            new_doc = new_doc.delete_element(pp)
+        m.document = new_doc
+        panel_selection.clear()
+        panel_selection_order.clear()
+        _rebuild()
+
+    def _do_duplicate():
+        m = get_model()
+        if m is None or not panel_selection:
+            return
+        m.snapshot()
+        new_doc = m.document
+        for pp in sorted(panel_selection, reverse=True):
+            e = new_doc.get_element(pp)
+            if e is not None:
+                new_doc = new_doc.insert_element_after(pp, e)
+        m.document = new_doc
+        _rebuild()
+
+    def _do_flatten():
+        from geometry.element import Group as GroupCls
+        m = get_model()
+        if m is None or not panel_selection:
+            return
+        m.snapshot()
+        new_doc = m.document
+        for pp in sorted(panel_selection, reverse=True):
+            e = new_doc.get_element(pp)
+            if isinstance(e, GroupCls) and hasattr(e, 'children'):
+                children = list(e.children)
+                new_doc = new_doc.delete_element(pp)
+                insert_path = pp
+                for child in children:
+                    # insert each at insert_path position
+                    if insert_path[-1] == 0:
+                        new_doc = new_doc.insert_element_after(insert_path, child)
+                    else:
+                        insert_path = insert_path[:-1] + (insert_path[-1] - 1,)
+                        new_doc = new_doc.insert_element_after(insert_path, child)
+                    insert_path = insert_path[:-1] + (insert_path[-1] + 1,)
+        m.document = new_doc
+        panel_selection.clear()
+        panel_selection_order.clear()
+        _rebuild()
+
+    def _do_collect():
+        from dataclasses import replace as dcr
+        from geometry.element import Layer as LayerCls
+        m = get_model()
+        if m is None or not panel_selection:
+            return
+        dd = m.document
+        used = {l.name for l in dd.layers if isinstance(l, LayerCls)}
+        n = 1
+        while f"Layer {n}" in used:
+            n += 1
+        m.snapshot()
+        new_doc = dd
+        sorted_paths = sorted(panel_selection)
+        elems = tuple(new_doc.get_element(pp) for pp in sorted_paths)
+        for pp in sorted(sorted_paths, reverse=True):
+            new_doc = new_doc.delete_element(pp)
+        new_layer = LayerCls(name=f"Layer {n}", children=elems)
+        new_doc = dcr(new_doc, layers=new_doc.layers + (new_layer,))
+        m.document = new_doc
+        panel_selection.clear()
+        panel_selection_order.clear()
+        _rebuild()
+
+    def _open_layer_options(p):
+        # Minimal dialog: edit name + lock + visibility
+        from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
+                                        QLineEdit, QCheckBox, QLabel,
+                                        QDialogButtonBox)
+        m = get_model()
+        if m is None:
+            return
+        e = m.document.get_element(p)
+        if not isinstance(e, Layer):
+            return
+        dlg = QDialog(widget)
+        dlg.setWindowTitle("Layer Options")
+        dv = QVBoxLayout(dlg)
+        # Name
+        name_row = QHBoxLayout()
+        name_row.addWidget(QLabel("Name:"))
+        name_edit = QLineEdit(e.name)
+        name_row.addWidget(name_edit)
+        dv.addLayout(name_row)
+        # Lock
+        lock_cb = QCheckBox("Lock")
+        lock_cb.setChecked(e.locked)
+        dv.addWidget(lock_cb)
+        # Show
+        show_cb = QCheckBox("Show")
+        show_cb.setChecked(e.visibility != Visibility.INVISIBLE)
+        dv.addWidget(show_cb)
+        # Preview
+        preview_cb = QCheckBox("Preview")
+        preview_cb.setChecked(e.visibility == Visibility.PREVIEW)
+        preview_cb.setEnabled(show_cb.isChecked())
+        show_cb.toggled.connect(preview_cb.setEnabled)
+        dv.addWidget(preview_cb)
+        # OK / Cancel
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        dv.addWidget(bb)
+        if dlg.exec_() == QDialog.Accepted:
+            new_name = name_edit.text()
+            new_lock = lock_cb.isChecked()
+            new_show = show_cb.isChecked()
+            new_preview = preview_cb.isChecked()
+            if not new_show:
+                new_vis = Visibility.INVISIBLE
+            elif new_preview:
+                new_vis = Visibility.PREVIEW
+            else:
+                new_vis = Visibility.OUTLINE
+            m.snapshot()
+            new_e = dc_replace(e, name=new_name, locked=new_lock, visibility=new_vis)
+            m.document = m.document.replace_element(p, new_e)
+            _rebuild()
+
     _auto_expand_selected()
     rows = []
     _flatten(doc.layers, 0, (), "#4a90d9", rows)
@@ -647,13 +793,64 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
             drag_target[0] = None
             _rebuild()
         row.mousePressEvent = _on_row_press
-        # Track drag over this row
-        def _on_row_enter(event, p=path):
+        # Track drag over this row; schedule auto-expand on hover during drag
+        def _on_row_enter(event, p=path, is_cont=is_container, is_coll=is_collapsed):
+            from PySide6.QtCore import QTimer
             if drag_source[0] is not None and drag_source[0] != p:
                 if drag_target[0] != p:
                     drag_target[0] = p
                     _rebuild()
+                # Auto-expand collapsed containers after 500ms during drag
+                if is_cont and is_coll:
+                    def _expand_if_still_target(pp=p):
+                        if drag_source[0] is not None and drag_target[0] == pp:
+                            collapsed.discard(pp)
+                            _rebuild()
+                    QTimer.singleShot(500, _expand_if_still_target)
         row.enterEvent = _on_row_enter
+
+        # Right-click context menu
+        def _on_row_context(event, p=path):
+            from PySide6.QtWidgets import QMenu
+            if p not in panel_selection:
+                panel_selection.clear()
+                panel_selection.add(p)
+                panel_selection_order.clear()
+                panel_selection_order.append(p)
+                _rebuild()
+            menu = QMenu(widget)
+            m = get_model()
+            e = m.document.get_element(p) if m else None
+            is_layer_elem = isinstance(e, Layer)
+            is_cont_elem = isinstance(e, Group)
+            # Options for Layer...
+            act_opts = menu.addAction("Options for Layer...")
+            act_opts.setEnabled(is_layer_elem)
+            act_opts.triggered.connect(lambda: _open_layer_options(p))
+            # Duplicate
+            act_dup = menu.addAction("Duplicate")
+            act_dup.triggered.connect(lambda: _do_duplicate())
+            # Delete Selection
+            act_del = menu.addAction("Delete Selection")
+            act_del.triggered.connect(lambda: _do_delete())
+            menu.addSeparator()
+            # Enter/Exit Isolation Mode
+            if isolation_stack:
+                act_iso = menu.addAction("Exit Isolation Mode")
+                act_iso.triggered.connect(lambda: _exit_isolation())
+            else:
+                act_iso = menu.addAction("Enter Isolation Mode")
+                act_iso.setEnabled(is_cont_elem)
+                act_iso.triggered.connect(lambda: _enter_isolation(p))
+            menu.addSeparator()
+            # Flatten Artwork
+            act_flat = menu.addAction("Flatten Artwork")
+            act_flat.triggered.connect(lambda: _do_flatten())
+            # Collect in New Layer
+            act_col = menu.addAction("Collect in New Layer")
+            act_col.triggered.connect(lambda: _do_collect())
+            menu.exec_(event.globalPos() if hasattr(event, 'globalPos') else event.globalPosition().toPoint())
+        row.contextMenuEvent = _on_row_context
         # Drop on mouseup: move src to before the target row
         def _on_row_release(event, p=path):
             src = drag_source[0]
