@@ -3139,13 +3139,27 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     } else {
                         ""
                     };
+                    // Snapshot the current rows' ordered paths for shift-range selection
+                    let row_all_paths: Vec<Vec<usize>> = rows.iter().map(|r| r.path.clone()).collect();
                     let on_row_click = move |evt: Event<MouseData>| {
                         let p = row_path.clone();
                         let a = row_app.clone();
                         let meta = evt.data().modifiers().meta();
+                        let shift = evt.data().modifiers().shift();
+                        let all_paths = row_all_paths.clone();
                         spawn(async move {
                             let mut st = a.borrow_mut();
-                            if meta {
+                            if shift && !st.layers_panel_selection.is_empty() {
+                                // Range-select in visual order from the last panel-selected
+                                // to the clicked row.
+                                let anchor = st.layers_panel_selection.last().unwrap().clone();
+                                let anchor_idx = all_paths.iter().position(|pp| *pp == anchor);
+                                let clicked_idx = all_paths.iter().position(|pp| *pp == p);
+                                if let (Some(a_idx), Some(c_idx)) = (anchor_idx, clicked_idx) {
+                                    let (lo, hi) = if a_idx <= c_idx { (a_idx, c_idx) } else { (c_idx, a_idx) };
+                                    st.layers_panel_selection = all_paths[lo..=hi].to_vec();
+                                }
+                            } else if meta {
                                 if let Some(idx) = st.layers_panel_selection.iter().position(|pp| *pp == p) {
                                     st.layers_panel_selection.remove(idx);
                                 } else {
