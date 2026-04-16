@@ -27,6 +27,23 @@ let _layers_renaming : int list option ref = ref None
 let _layers_drag_source : int list option ref = ref None
 let _layers_drag_target : int list option ref = ref None
 
+(** Search query for filtering the layers tree by name. *)
+let _layers_search_query : string ref = ref ""
+
+(** Isolation mode stack — descendants of the deepest entry are shown. *)
+let _layers_isolation_stack : int list list ref = ref []
+
+(** Set of element type names (lowercase) currently hidden by the filter. *)
+module StrSet = Set.Make(String)
+let _layers_hidden_types : StrSet.t ref = ref StrSet.empty
+
+(** Saved direct-child lock states keyed by container path. *)
+module PathMap2 = Map.Make(PathKey)
+let _layers_saved_lock_states : bool list PathMap2.t ref = ref PathMap2.empty
+
+(** Solo/unsolo state: (soloed_path, map from sibling path to saved visibility). *)
+let _layers_solo_state : (int list * (int list * Element.visibility) list) option ref = ref None
+
 (** Callback to trigger re-render when UI state changes. *)
 let _rerender_layers : (unit -> unit) ref = ref (fun () -> ())
 
@@ -242,6 +259,55 @@ and render_panel ~packing ~ctx el =
 and render_tree_view ~packing ~ctx:_ _el =
   let vbox = GPack.vbox ~spacing:0 ~packing () in
   let get_model = !_get_model_ref in
+  (* Render breadcrumb bar if in isolation mode *)
+  (if !_layers_isolation_stack <> [] then begin
+    let bar_eb = GBin.event_box ~packing:(vbox#pack ~expand:false) () in
+    bar_eb#misc#modify_bg [`NORMAL, `NAME "#2a2a2a"];
+    let bar = GPack.hbox ~spacing:4 ~packing:bar_eb#add () in
+    let home_eb = GBin.event_box ~packing:(bar#pack ~expand:false) () in
+    ignore (GMisc.label ~text:"\xe2\x8c\x82" ~packing:home_eb#add ());
+    ignore (home_eb#event#connect#button_press ~callback:(fun _ ->
+      _layers_isolation_stack := [];
+      !_rerender_layers ();
+      true));
+    List.iteri (fun idx p ->
+      ignore (GMisc.label ~text:">" ~packing:(bar#pack ~expand:false) ());
+      match get_model () with
+      | None -> ()
+      | Some m2 ->
+        let e = Document.get_element m2#document p in
+        let label = match e with
+          | Element.Layer le when le.name <> "" -> le.name
+          | _ -> "<?>"
+        in
+        let seg_eb = GBin.event_box ~packing:(bar#pack ~expand:false) () in
+        ignore (GMisc.label ~text:label ~packing:seg_eb#add ());
+        let target_idx = idx + 1 in
+        ignore (seg_eb#event#connect#button_press ~callback:(fun _ ->
+          _layers_isolation_stack := (
+            let rec take n lst = match n, lst with
+              | 0, _ | _, [] -> []
+              | n, h :: t -> h :: take (n - 1) t
+            in take target_idx !_layers_isolation_stack);
+          !_rerender_layers ();
+          true))
+    ) !_layers_isolation_stack
+  end);
+  (* Isolation logic is applied inline in the rendering loop. *)
+  (* Helper: does element name contain the search query (case-insensitive) *)
+  let matches_search name =
+    let q = String.lowercase_ascii !_layers_search_query in
+    if q = "" then true
+    else
+      let n = String.lowercase_ascii name in
+      let rec find_sub s p si pi =
+        if pi >= String.length p then true
+        else if si >= String.length s then false
+        else if s.[si] = p.[pi] then find_sub s p (si+1) (pi+1)
+        else find_sub s p (si - pi + 1) 0
+      in find_sub n q 0 0
+  in
+  let _ = matches_search in  (* reserved for future search integration *)
   let type_label e =
     match e with
     | Element.Line _ -> "Line" | Element.Rect _ -> "Rectangle"
@@ -277,6 +343,25 @@ and render_tree_view ~packing ~ctx:_ _el =
         let i = ri in
         let elem = children.(i) in
         let path = path_prefix @ [i] in
+        (* Apply isolation filter: skip rows that aren't descendants of the
+           deepest isolated container. Note we still recurse so descendants
+           that do pass the filter are rendered. *)
+        let passes_iso = match !_layers_isolation_stack with
+          | [] -> true
+          | root :: _ ->
+            List.length path > List.length root &&
+            (let rec prefix_matches a b = match a, b with
+              | _, [] -> true
+              | [], _ -> false
+              | ah :: at, bh :: bt -> ah = bh && prefix_matches at bt
+            in prefix_matches path root)
+        in
+        if not passes_iso then begin
+          (* Still recurse, maybe a deeper descendant qualifies *)
+          (if is_container elem && not (PathSet2.mem path !_layers_collapsed) then
+            let ch = Document.children_of elem in
+            add_children ch (depth + 1) path layer_color)
+        end else
         let is_container = is_container elem in
         let is_selected = Document.PathSet.mem path selected_paths in
         let cur_color =
