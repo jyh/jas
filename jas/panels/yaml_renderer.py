@@ -261,6 +261,43 @@ def _render_panel(el, store, ctx, dispatch_fn):
     return _render_placeholder(el, store, ctx, dispatch_fn)
 
 
+def _make_element_preview(elem, size: int):
+    """Render a fitted-viewBox SVG thumbnail for an element as a Qt widget.
+
+    Uses QSvgWidget if available (PySide6.QtSvgWidgets); otherwise falls
+    back to a white square.
+    """
+    try:
+        from PySide6.QtSvgWidgets import QSvgWidget
+        from PySide6.QtCore import QByteArray
+        from geometry.svg import element_svg
+        bx, by, bw, bh = elem.bounds()
+        if not (bw > 0 and bh > 0):
+            frame = QFrame()
+            frame.setFixedSize(size, size)
+            frame.setFrameStyle(QFrame.Box)
+            frame.setStyleSheet("background: white;")
+            return frame
+        pad = max(max(bw, bh) * 0.02, 0.5)
+        vb = f"{bx - pad} {by - pad} {bw + 2*pad} {bh + 2*pad}"
+        inner = element_svg(elem, "")
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}" '
+            f'preserveAspectRatio="xMidYMid meet">{inner}</svg>'
+        )
+        w = QSvgWidget()
+        w.renderer().load(QByteArray(svg.encode("utf-8")))
+        w.setFixedSize(size, size)
+        w.setStyleSheet("background: white; border: 1px solid #555;")
+        return w
+    except Exception:
+        frame = QFrame()
+        frame.setFixedSize(size, size)
+        frame.setFrameStyle(QFrame.Box)
+        frame.setStyleSheet("background: white;")
+        return frame
+
+
 _LAYER_COLORS = [
     "#4a90d9", "#d94a4a", "#4ad94a", "#4a4ad9", "#d9d94a",
     "#d94ad9", "#4ad9d9", "#b0b0b0", "#2a7a2a",
@@ -497,11 +534,8 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
             gap.setFixedWidth(16)
             row_layout.addWidget(gap)
 
-        # Preview
-        preview = QFrame()
-        preview.setFixedSize(24, 24)
-        preview.setFrameStyle(QFrame.Box)
-        preview.setStyleSheet("background: white;")
+        # Preview thumbnail — SVG of the element fitted into 24x24
+        preview = _make_element_preview(elem, 24)
         row_layout.addWidget(preview)
 
         # Name — inline QLineEdit when renaming, QLabel otherwise
