@@ -278,34 +278,98 @@ Cost: YAML author must remember to add `snapshot` when migrating a
 document-mutating action. Mitigation: validator tool that warns when an
 action contains any `doc.*` effect but no `snapshot`.
 
-### Resolved: effects can return values
+### Resolved: effects can return values; pure writes return unit
 
 Decision: effects may return a value, and a subsequent effect can
 reference that value via a bound name. Syntax mirrors `foreach`'s
-`as:` binding.
+`as:` binding. Effects that are pure side-effects (like `set:`) return
+`()` of type `unit` — not `null`. This distinguishes "no return value"
+(unit) from "the returned value is null" (a legitimate null color,
+etc.).
 
 ```yaml
 effects:
   - doc.clone_at:
       path: "$source_path"
-      as: cloned
+      as: cloned            # type: Element
   - doc.insert_after:
       path: "$source_path"
       element: "$cloned"
+  - set:
+      fill_color: null      # sets field to null
+      as: ignored           # type: unit — binding is useless, warning candidate
 ```
+
+Return-type classification for Phase 1+ primitives:
+
+| Effect | Returns | Rationale |
+|---|---|---|
+| `set: { ... }` | `unit` | Pure write |
+| `swap: [a, b]` | `unit` | Pure write |
+| `pop: <list>` | popped element | Useful for chaining |
+| `snapshot` | `unit` | Pure side-effect |
+| `open_dialog` | `unit` | The effect IS the side-effect |
+| `close_dialog` | `unit` | Same |
+| `doc.delete_at($path)` | deleted element | Useful for move semantics |
+| `doc.insert_at(path, element)` | `unit` | Pure write |
+| `doc.clone_at($path)` | cloned element | The point is the return |
+| `doc.create_layer({name, ...})` | element | Factory |
 
 Implications:
 - Every effect optionally accepts an `as: <name>` field. Named value is
   visible to subsequent effects in the same `effects:` list (standard
   lexical scoping — also visible inside later `if`/`foreach` bodies).
-- Each effect primitive documents what it returns (the mutated element,
-  the new path, the previous value, or `null` for pure state-setters).
-- Unspecified `as:` means the return value is discarded.
+- Each effect primitive documents its return type. Pure writes are
+  `unit`; factories and mutators that retrieve-then-transform return
+  meaningful values.
+- Unspecified `as:` means the return value is discarded (always fine).
+- Specifying `as:` on a `unit`-returning effect is legal but useless;
+  linter may warn.
 - Binding name collision with `foreach` iterator variable is an error —
   YAML author must pick distinct names.
 
+Language representation of `unit`:
+
+| Language | Representation |
+|---|---|
+| Rust | `()` |
+| OCaml | `()` (type `unit`) |
+| Swift | `Void` / `()` |
+| Python | `None` (convention; distinct from JSON-null via schema type info) |
+
 This avoids the need for compound primitives like `duplicate_at` — they
-can be expressed as a two-line YAML chain.
+can be expressed as a two-line YAML chain using `clone_at` + `insert_after`.
+
+### Resolved: schema fields have an optional `writable` flag
+
+Decision: fields in the state schema (`workspace/state.yaml` and
+per-panel `state:` blocks) may declare `writable: false` to indicate
+they are managed imperatively by the engine and not intended to be
+written via YAML `set:`. Applies to transient UI state like
+`_drag_pane`, `_drag_offset_x`, `_resize_edge`, etc.
+
+```yaml
+_drag_pane:
+  type: string
+  default: null
+  nullable: true
+  writable: false
+  description: "Internal: element id of the pane currently being dragged"
+```
+
+Semantics:
+- Default for unspecified `writable` is `true` — any field declared in
+  the schema is `set:`-able unless explicitly marked otherwise.
+- `set:` on a `writable: false` field evaluates to `unit` (as all `set:`
+  does) but logs a warning. The write is NOT applied to state.
+- Reading such fields via expressions is unaffected — `writable` only
+  gates `set:` effects.
+- The schema validator (a future linter) can flag any YAML `set:` call
+  targeting a non-writable field at analysis time, not just runtime.
+
+This replaces the earlier "imperative: true" marker idea. Single
+semantic: the schema documents what exists; `writable: false` narrows
+what's YAML-mutable.
 
 ### Resolved: foreach keyword reuse
 
