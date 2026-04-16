@@ -214,6 +214,53 @@ def test_toggle_all_layers_lock_via_yaml():
     assert model.document.layers[0].locked is True
 
 
+def test_layer_options_confirm_edit_mode():
+    from geometry.element import Visibility
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    model = _make_model_with_layers([
+        ("Old", Visibility.PREVIEW, False),
+    ])
+    closed = [False]
+    _dispatch_yaml_layers_action(
+        "layer_options_confirm", model,
+        params={
+            "layer_id": "0",
+            "name": "Renamed",
+            "lock": True,
+            "show": True,
+            "preview": False,     # show=true, preview=false → outline
+        },
+        on_close_dialog=lambda: closed.__setitem__(0, True),
+    )
+    assert closed[0]
+    layer = model.document.layers[0]
+    assert layer.name == "Renamed"
+    assert layer.locked is True
+    assert layer.visibility == Visibility.OUTLINE
+
+
+def test_layer_options_confirm_create_mode():
+    from geometry.element import Visibility
+    from jas.panels.panel_menu import _dispatch_yaml_layers_action
+    model = _make_model_with_layers([
+        ("Existing", Visibility.PREVIEW, False),
+    ])
+    _dispatch_yaml_layers_action(
+        "layer_options_confirm", model,
+        params={
+            "layer_id": None,
+            "name": "Brand New",
+            "lock": False,
+            "show": True,
+            "preview": True,
+        },
+    )
+    assert len(model.document.layers) == 2
+    new_layer = model.document.layers[1]
+    assert new_layer.name == "Brand New"
+    assert new_layer.visibility == Visibility.PREVIEW
+
+
 def test_enter_isolation_mode_via_yaml_pushes_selection():
     from geometry.element import Visibility
     from jas.panels import layers_panel_state as lps

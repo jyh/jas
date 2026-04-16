@@ -115,7 +115,9 @@ def panel_menu(kind: PanelKind) -> list[PanelMenuItem]:
 
 
 def _dispatch_yaml_layers_action(action_name: str, model,
-                                  panel_selection=None) -> None:
+                                  panel_selection=None,
+                                  params=None,
+                                  on_close_dialog=None) -> None:
     """Phase 3: dispatch a layers action through the compiled YAML effects.
 
     Builds active_document.top_level_layers / top_level_layer_paths from
@@ -123,6 +125,7 @@ def _dispatch_yaml_layers_action(action_name: str, model,
     effect handlers that operate on the Model.
     """
     panel_selection = panel_selection or []
+    params = params or {}
     import dataclasses
     from geometry.element import Layer, Visibility
     from workspace_interpreter.loader import load_workspace
@@ -189,7 +192,7 @@ def _dispatch_yaml_layers_action(action_name: str, model,
             "layers_panel_selection_count": len(panel_selection),
         },
         "panel": {"layers_panel_selection": selection_markers},
-        "param": {},
+        "param": params,
     }
 
     # Platform handlers
@@ -301,6 +304,14 @@ def _dispatch_yaml_layers_action(action_name: str, model,
             _lps.pop_isolation_level()
         return None
 
+    # close_dialog: invoke the on_close_dialog callback when the YAML
+    # action ends with close_dialog. Layer Options uses this to dismiss
+    # its Qt dialog after layer_options_confirm commits.
+    def close_dialog_handler(_value, _ctx, _store):
+        if on_close_dialog is not None:
+            on_close_dialog()
+        return None
+
     platform_effects = {
         "snapshot": snapshot_handler,
         "doc.set": doc_set_handler,
@@ -309,6 +320,8 @@ def _dispatch_yaml_layers_action(action_name: str, model,
         "list_push": list_push_handler,
         "pop": pop_handler,
     }
+    if on_close_dialog is not None:
+        platform_effects["close_dialog"] = close_dialog_handler
 
     store = StateStore()
     run_effects(effects, ctx, store,
