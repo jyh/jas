@@ -23,6 +23,10 @@ public class Model: ObservableObject {
     @Published public var fillOnTop: Bool = true
     /// Per-document list of recently committed colors (hex strings, no #), newest first. Max 10.
     @Published public var recentColors: [String] = []
+    /// Stack of isolated container paths for the Layers panel. Each entry
+    /// is a top-level path [Int]. Written by enter/exit_isolation_mode
+    /// actions via YAML dispatch (see LayersPanel.dispatchYamlAction).
+    @Published public var layersIsolationStack: [[Int]] = []
     public private(set) var savedDocument: Document
     private var listeners: [(Document) -> Void] = []
     private var undoStack: [Document] = []
