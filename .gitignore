@@ -20,6 +20,7 @@ transcript/
 __pycache__/
 *.pyc
 
-# Compiled workspace (build artifact)
-workspace/workspace.json
+# NOTE: workspace/workspace.json is COMMITTED. Regenerate with:
+#   python -m workspace_interpreter.compile workspace/ workspace/workspace.json
+# CI enforces freshness; see scripts/check_workspace_json.sh.
 #EXPRESSION_LANGUAGE.md#
