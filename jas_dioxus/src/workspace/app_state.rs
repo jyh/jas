@@ -111,6 +111,8 @@ pub(crate) struct AppState {
     pub(crate) layers_drag_target: Option<Vec<usize>>,
     /// Context menu state: (screen_x, screen_y, right-clicked element path).
     pub(crate) layers_context_menu: Option<(f64, f64, Vec<usize>)>,
+    /// Layers panel search query (case-insensitive name filter).
+    pub(crate) layers_search_query: String,
 }
 
 /// Stroke panel state fields that sync with global state and the selection.
@@ -199,6 +201,7 @@ impl AppState {
             layers_panel_selection: Vec::new(),
             layers_drag_target: None,
             layers_context_menu: None,
+            layers_search_query: String::new(),
         }
     }
 
