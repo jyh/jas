@@ -217,8 +217,9 @@ class WorkspaceLayout:
                 id=0,
                 groups=[
                     PanelGroup(panels=[PanelKind.COLOR, PanelKind.SWATCHES]),
+                    PanelGroup(panels=[PanelKind.CHARACTER, PanelKind.PARAGRAPH]),
                     PanelGroup(panels=[PanelKind.STROKE, PanelKind.PROPERTIES]),
-                    PanelGroup(panels=[PanelKind.LAYERS]),
+                    PanelGroup(panels=[PanelKind.ARTBOARDS, PanelKind.LAYERS]),
                 ],
             ))],
             floating=[],

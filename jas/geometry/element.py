@@ -753,6 +753,13 @@ class Text(Element):
 
     When width and height are set (> 0), the text wraps within that area
     (area text). Otherwise it is point text (single line).
+
+    The 11 Character-panel attribute fields (``text_transform``,
+    ``font_variant``, ``baseline_shift``, ``line_height``,
+    ``letter_spacing``, ``xml_lang``, ``aa_mode``, ``rotate``,
+    ``horizontal_scale``, ``vertical_scale``, ``kerning``) mirror the
+    Rust ``TextElem`` shape. Empty string means "omit / inherit
+    default" per CHARACTER.md's identity-omission rule.
     """
     x: float
     y: float
@@ -762,6 +769,17 @@ class Text(Element):
     font_weight: str = "normal"
     font_style: str = "normal"
     text_decoration: str = "none"
+    text_transform: str = ""
+    font_variant: str = ""
+    baseline_shift: str = ""
+    line_height: str = ""
+    letter_spacing: str = ""
+    xml_lang: str = ""
+    aa_mode: str = ""
+    rotate: str = ""
+    horizontal_scale: str = ""
+    vertical_scale: str = ""
+    kerning: str = ""
     width: float = 0.0
     height: float = 0.0
     fill: Fill | None = None
@@ -803,7 +821,10 @@ class Text(Element):
 
 @dataclass(frozen=True)
 class TextPath(Element):
-    """SVG <text><textPath> element — text rendered along a path."""
+    """SVG <text><textPath> element — text rendered along a path.
+
+    See ``Text`` for the 11 Character-panel attribute fields.
+    """
     d: tuple[MoveTo | LineTo | CurveTo | QuadTo | SmoothCurveTo
              | SmoothQuadTo | ArcTo | ClosePath, ...] = ()
     content: str = "Lorem Ipsum"
@@ -813,6 +834,17 @@ class TextPath(Element):
     font_weight: str = "normal"
     font_style: str = "normal"
     text_decoration: str = "none"
+    text_transform: str = ""
+    font_variant: str = ""
+    baseline_shift: str = ""
+    line_height: str = ""
+    letter_spacing: str = ""
+    xml_lang: str = ""
+    aa_mode: str = ""
+    rotate: str = ""
+    horizontal_scale: str = ""
+    vertical_scale: str = ""
+    kerning: str = ""
     fill: Fill | None = None
     stroke: Stroke | None = None
     opacity: float = 1.0
