@@ -135,347 +135,424 @@ content:
   style: { padding: 4, gap: 6 }
   children:
 
-    # ── Font family ──────────────────────────────────────────
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
-      children:
-        - type: text
-          content: "Font"
-          style: { width: 60, font_size: 10 }
-        - id: ch_font_family
-          type: text_input
-          summary: "Font family"
-          description: "Font family string."
-          style: { flex: 1 }
-          bind:
-            value: "panel.font_family"
+    # Layout follows CHARACTER.md's Bootstrap grid spec:
+    # paired numeric fields share a row as col-2 label + col-4 input.
+    # Six character toggles fit one row of col-2 cells (6×2 = 12).
+    # Icon placeholders use short text labels for now; these become
+    # real icon components once the icon system is in.
 
-    # ── Style ────────────────────────────────────────────────
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
+    # ── Font family (full width, enum_dropdown) ───────────────
+    # Per CHARACTER.md: enum_dropdown listing installed fonts, with
+    # typeahead filtering. Placeholder list until font-enumeration
+    # plumbing lands; real fonts will populate this at runtime.
+    - type: row
       children:
-        - type: text
-          content: "Style"
-          style: { width: 60, font_size: 10 }
-        - id: ch_style_name
-          type: text_input
-          summary: "Style name"
-          description: "Verbatim style name from the font (e.g. Regular, Bold, Bold Italic, Condensed Display Bold SC)."
-          style: { flex: 1 }
-          bind:
-            value: "panel.style_name"
+        - type: container
+          col: 12
+          children:
+            - id: ch_font_family
+              type: select
+              summary: "Font family"
+              description: "Font family. Typing filters the list (typeahead)."
+              style: { width: "100%" }
+              options:
+                - { value: "sans-serif", label: "sans-serif" }
+                - { value: "serif", label: "serif" }
+                - { value: "monospace", label: "monospace" }
+                - { value: "Arial", label: "Arial" }
+                - { value: "Helvetica", label: "Helvetica" }
+                - { value: "Times New Roman", label: "Times New Roman" }
+                - { value: "Courier New", label: "Courier New" }
+                - { value: "Georgia", label: "Georgia" }
+                - { value: "Verdana", label: "Verdana" }
+              bind:
+                value: "panel.font_family"
 
-    # ── Size + Leading ───────────────────────────────────────
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
+    # ── Style name (full width, enum_dropdown) ────────────────
+    # Per CHARACTER.md: enum_dropdown listing styles available for
+    # the current font. Placeholder list until per-font style
+    # enumeration lands.
+    - type: row
       children:
-        - type: text
-          content: "Size"
-          style: { width: 60, font_size: 10 }
-        - id: ch_font_size
-          type: number_input
-          summary: "Font size"
-          description: "Font size in points."
-          min: 1
-          max: 1296
-          style: { flex: 1 }
-          bind:
-            value: "panel.font_size"
-        - type: text
-          content: "pt"
-          style: { font_size: 10 }
+        - type: container
+          col: 12
+          children:
+            - id: ch_style_name
+              type: select
+              summary: "Style name"
+              description: "Verbatim style name from the font (e.g. Regular, Italic, Bold, Bold Italic)."
+              style: { width: "100%" }
+              options:
+                - { value: "Regular", label: "Regular" }
+                - { value: "Italic", label: "Italic" }
+                - { value: "Bold", label: "Bold" }
+                - { value: "Bold Italic", label: "Bold Italic" }
+              bind:
+                value: "panel.style_name"
 
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
+    # ── Size (col-2/4) + Leading (col-2/4) ────────────────────
+    - type: row
       children:
-        - type: text
-          content: "Leading"
-          style: { width: 60, font_size: 10 }
-        - id: ch_leading
-          type: number_input
-          summary: "Leading"
-          description: "Line leading in points; Auto = 120% of font size."
-          min: 0
-          max: 1296
-          style: { flex: 1 }
-          bind:
-            value: "panel.leading"
-        - type: text
-          content: "pt"
-          style: { font_size: 10 }
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - type: icon
+              name: char_size
+              style: { width: 20, height: 20 }
+        - type: container
+          col: 4
+          children:
+            - id: ch_font_size
+              type: number_input
+              summary: "Font size"
+              description: "Font size in points."
+              min: 1
+              max: 1296
+              style: { width: "100%" }
+              bind:
+                value: "panel.font_size"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - type: icon
+              name: char_leading
+              style: { width: 20, height: 20 }
+        - type: container
+          col: 4
+          children:
+            - id: ch_leading
+              type: number_input
+              summary: "Leading"
+              description: "Line leading in points; Auto = 120% of font size."
+              min: 0
+              max: 1296
+              style: { width: "100%" }
+              bind:
+                value: "panel.leading"
 
-    # ── Kerning + Tracking ───────────────────────────────────
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
+    # ── Kerning (col-2/4) + Tracking (col-2/4) ────────────────
+    - type: row
       children:
-        - type: text
-          content: "Kerning"
-          style: { width: 60, font_size: 10 }
-        - id: ch_kerning
-          type: number_input
-          summary: "Kerning"
-          description: "Kerning between characters in 1/1000 em."
-          style: { flex: 1 }
-          bind:
-            value: "panel.kerning"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - type: icon
+              name: char_kerning
+              style: { width: 20, height: 20 }
+        - type: container
+          col: 4
+          children:
+            - id: ch_kerning
+              type: number_input
+              summary: "Kerning"
+              description: "Kerning between characters in 1/1000 em."
+              style: { width: "100%" }
+              bind:
+                value: "panel.kerning"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - type: icon
+              name: char_tracking
+              style: { width: 20, height: 20 }
+        - type: container
+          col: 4
+          children:
+            - id: ch_tracking
+              type: number_input
+              summary: "Tracking"
+              description: "Uniform letter-spacing in 1/1000 em, signed."
+              style: { width: "100%" }
+              bind:
+                value: "panel.tracking"
 
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
+    # ── V-scale (col-2/4) + H-scale (col-2/4) ─────────────────
+    - type: row
       children:
-        - type: text
-          content: "Tracking"
-          style: { width: 60, font_size: 10 }
-        - id: ch_tracking
-          type: number_input
-          summary: "Tracking"
-          description: "Uniform letter-spacing in 1/1000 em, signed."
-          style: { flex: 1 }
-          bind:
-            value: "panel.tracking"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - type: icon
+              name: char_vertical_scale
+              style: { width: 20, height: 20 }
+        - type: container
+          col: 4
+          children:
+            - id: ch_vertical_scale
+              type: number_input
+              summary: "Vertical scale"
+              description: "Vertical scale in percent (1–10000)."
+              min: 1
+              max: 10000
+              style: { width: "100%" }
+              bind:
+                value: "panel.vertical_scale"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - type: icon
+              name: char_horizontal_scale
+              style: { width: 20, height: 20 }
+        - type: container
+          col: 4
+          children:
+            - id: ch_horizontal_scale
+              type: number_input
+              summary: "Horizontal scale"
+              description: "Horizontal scale in percent (1–10000)."
+              min: 1
+              max: 10000
+              style: { width: "100%" }
+              bind:
+                value: "panel.horizontal_scale"
 
-    # ── Scale V + H ──────────────────────────────────────────
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
+    # ── Baseline shift (col-2/4) + Rotation (col-2/4) ─────────
+    - type: row
       children:
-        - type: text
-          content: "V Scale"
-          style: { width: 60, font_size: 10 }
-        - id: ch_vertical_scale
-          type: number_input
-          summary: "Vertical scale"
-          description: "Vertical scale in percent (1–10000)."
-          min: 1
-          max: 10000
-          style: { flex: 1 }
-          bind:
-            value: "panel.vertical_scale"
-        - type: text
-          content: "%"
-          style: { font_size: 10 }
-
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
-      children:
-        - type: text
-          content: "H Scale"
-          style: { width: 60, font_size: 10 }
-        - id: ch_horizontal_scale
-          type: number_input
-          summary: "Horizontal scale"
-          description: "Horizontal scale in percent (1–10000)."
-          min: 1
-          max: 10000
-          style: { flex: 1 }
-          bind:
-            value: "panel.horizontal_scale"
-        - type: text
-          content: "%"
-          style: { font_size: 10 }
-
-    # ── Baseline shift + Rotation ────────────────────────────
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
-      children:
-        - type: text
-          content: "Baseline"
-          style: { width: 60, font_size: 10 }
-        - id: ch_baseline_shift
-          type: number_input
-          summary: "Baseline shift"
-          description: "Baseline shift in points; positive = up."
-          style: { flex: 1 }
-          bind:
-            value: "panel.baseline_shift"
-        - type: text
-          content: "pt"
-          style: { font_size: 10 }
-
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
-      children:
-        - type: text
-          content: "Rotation"
-          style: { width: 60, font_size: 10 }
-        - id: ch_character_rotation
-          type: number_input
-          summary: "Character rotation"
-          description: "Per-glyph rotation in degrees; positive = clockwise (SVG convention)."
-          style: { flex: 1 }
-          bind:
-            value: "panel.character_rotation"
-        - type: text
-          content: "°"
-          style: { font_size: 10 }
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - type: icon
+              name: char_baseline_shift
+              style: { width: 20, height: 20 }
+        - type: container
+          col: 4
+          children:
+            - id: ch_baseline_shift
+              type: number_input
+              summary: "Baseline shift"
+              description: "Baseline shift in points; positive = up."
+              style: { width: "100%" }
+              bind:
+                value: "panel.baseline_shift"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - type: icon
+              name: char_rotation
+              style: { width: 20, height: 20 }
+        - type: container
+          col: 4
+          children:
+            - id: ch_character_rotation
+              type: number_input
+              summary: "Character rotation"
+              description: "Per-glyph rotation in degrees; positive = clockwise (SVG convention)."
+              style: { width: "100%" }
+              bind:
+                value: "panel.character_rotation"
 
     - type: separator
 
-    # ── Character toggles ────────────────────────────────────
-    - type: container
-      layout: row
-      style: { gap: 6, alignment: center }
+    # ── 6 character toggles (each col-2, summing to 12) ───────
+    # icon_toggle per CHARACTER.md spec. Typographic icons come from
+    # workspace/icons.yaml; highlighted background when on.
+    - type: row
       children:
-        - id: ch_all_caps
-          type: checkbox
-          label: "All Caps"
-          summary: "All Caps"
-          description: "Render the selection in uppercase."
-          bind:
-            value: "panel.all_caps"
-        - id: ch_small_caps
-          type: checkbox
-          label: "Small Caps"
-          summary: "Small Caps"
-          description: "Render lowercase letters as x-height-sized capitals."
-          bind:
-            value: "panel.small_caps"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - id: ch_all_caps
+              type: checkbox
+              icon: char_all_caps
+              summary: "All Caps"
+              description: "Render the selection in uppercase."
+              style: { width: 28, height: 24 }
+              bind:
+                value: "panel.all_caps"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - id: ch_small_caps
+              type: checkbox
+              icon: char_small_caps
+              summary: "Small Caps"
+              description: "Render lowercase letters as x-height-sized capitals."
+              style: { width: 28, height: 24 }
+              bind:
+                value: "panel.small_caps"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - id: ch_superscript
+              type: checkbox
+              icon: char_superscript
+              summary: "Superscript"
+              description: "Position the selection above the baseline."
+              style: { width: 28, height: 24 }
+              bind:
+                value: "panel.superscript"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - id: ch_subscript
+              type: checkbox
+              icon: char_subscript
+              summary: "Subscript"
+              description: "Position the selection below the baseline."
+              style: { width: 28, height: 24 }
+              bind:
+                value: "panel.subscript"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - id: ch_underline
+              type: checkbox
+              icon: char_underline
+              summary: "Underline"
+              description: "Underline the selected text."
+              style: { width: 28, height: 24 }
+              bind:
+                value: "panel.underline"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - id: ch_strikethrough
+              type: checkbox
+              icon: char_strikethrough
+              summary: "Strikethrough"
+              description: "Strike through the selected text."
+              style: { width: 28, height: 24 }
+              bind:
+                value: "panel.strikethrough"
 
-    - type: container
-      layout: row
-      style: { gap: 6, alignment: center }
+    # ── Language (col-6) + Anti-aliasing (col-6) ──────────────
+    - type: row
       children:
-        - id: ch_superscript
-          type: checkbox
-          label: "Super"
-          summary: "Superscript"
-          description: "Position the selection above the baseline."
-          bind:
-            value: "panel.superscript"
-        - id: ch_subscript
-          type: checkbox
-          label: "Sub"
-          summary: "Subscript"
-          description: "Position the selection below the baseline."
-          bind:
-            value: "panel.subscript"
-
-    - type: container
-      layout: row
-      style: { gap: 6, alignment: center }
-      children:
-        - id: ch_underline
-          type: checkbox
-          label: "Underline"
-          summary: "Underline"
-          description: "Underline the selected text."
-          bind:
-            value: "panel.underline"
-        - id: ch_strikethrough
-          type: checkbox
-          label: "Strikethrough"
-          summary: "Strikethrough"
-          description: "Strike through the selected text."
-          bind:
-            value: "panel.strikethrough"
+        - type: container
+          col: 6
+          children:
+            - id: ch_language
+              type: text_input
+              summary: "Language"
+              description: "ISO 639-1 language code (e.g. en, fr, de, ja)."
+              style: { width: "100%" }
+              bind:
+                value: "panel.language"
+        - type: container
+          col: 6
+          children:
+            - id: ch_anti_aliasing
+              type: text_input
+              summary: "Anti-aliasing"
+              description: "Anti-aliasing mode: None, Sharp, Crisp, Strong, or Smooth."
+              style: { width: "100%" }
+              bind:
+                value: "panel.anti_aliasing"
 
     - type: separator
 
-    # ── Language + Anti-alias ────────────────────────────────
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
+    # ── Snap to Glyph header (col-6 label + col-2 indicator + col-1 info; 3-col right pad intentional) ──
+    - type: row
       children:
-        - type: text
-          content: "Language"
-          style: { width: 60, font_size: 10 }
-        - id: ch_language
-          type: text_input
-          summary: "Language"
-          description: "ISO 639-1 language code (e.g. en, fr, de, ja)."
-          style: { flex: 1 }
-          bind:
-            value: "panel.language"
+        - type: container
+          col: 6
+          style: { alignment: center }
+          children:
+            - type: text
+              content: "Snap to Glyph"
+              style: { font_size: 10 }
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - type: icon
+              name: char_snap_glyph
+              style: { width: 20, height: 20 }
+        - type: container
+          col: 1
+          style: { alignment: center }
+          children:
+            - type: icon
+              name: char_info
+              style: { width: 18, height: 18, opacity: 0.5 }
 
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
+    # ── 6 Snap-to-Glyph category toggles (each col-2) ─────────
+    - type: row
       children:
-        - type: text
-          content: "AA"
-          style: { width: 60, font_size: 10 }
-        - id: ch_anti_aliasing
-          type: text_input
-          summary: "Anti-aliasing"
-          description: "Anti-aliasing mode: None, Sharp, Crisp, Strong, or Smooth."
-          style: { flex: 1 }
-          bind:
-            value: "panel.anti_aliasing"
-
-    - type: separator
-
-    # ── Snap to Glyph ────────────────────────────────────────
-    # Six independent category toggles (no master enable; feature is
-    # active iff at least one is on). See CHARACTER.md Snap to Glyph.
-    - type: container
-      layout: row
-      style: { gap: 4, alignment: center }
-      children:
-        - type: text
-          content: "Snap to Glyph"
-          style: { flex: 1, font_size: 10 }
-
-    - type: container
-      layout: row
-      style: { gap: 6, alignment: center }
-      children:
-        - id: ch_snap_baseline
-          type: checkbox
-          label: "Baseline"
-          summary: "Snap: Baseline"
-          description: "Snap to the invisible baseline letters sit on."
-          bind:
-            value: "panel.snap_baseline"
-        - id: ch_snap_x_height
-          type: checkbox
-          label: "x-Height"
-          summary: "Snap: x-Height"
-          description: "Snap to the top of lowercase letters (x, a, e, ...)."
-          bind:
-            value: "panel.snap_x_height"
-
-    - type: container
-      layout: row
-      style: { gap: 6, alignment: center }
-      children:
-        - id: ch_snap_glyph_bounds
-          type: checkbox
-          label: "Bounds"
-          summary: "Snap: Glyph Bounds"
-          description: "Snap to the left/right/top/bottom edges of a specific letter."
-          bind:
-            value: "panel.snap_glyph_bounds"
-        - id: ch_snap_proximity_guides
-          type: checkbox
-          label: "Proximity"
-          summary: "Snap: Proximity Guides"
-          description: "Snap to guides near the Baseline, x-Height, and Glyph Bounds, based on the glyph's shape and layout."
-          bind:
-            value: "panel.snap_proximity_guides"
-
-    - type: container
-      layout: row
-      style: { gap: 6, alignment: center }
-      children:
-        - id: ch_snap_angular_guides
-          type: checkbox
-          label: "Angular"
-          summary: "Snap: Angular Guides"
-          description: "Snap to the slant lines of letters like V or A."
-          bind:
-            value: "panel.snap_angular_guides"
-        - id: ch_snap_anchor_point
-          type: checkbox
-          label: "Anchor"
-          summary: "Snap: Anchor Point"
-          description: "Snap to the actual mathematical anchor points on glyph outlines."
-          bind:
-            value: "panel.snap_anchor_point"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - id: ch_snap_baseline
+              type: checkbox
+              icon: char_snap_baseline
+              summary: "Snap: Baseline"
+              description: "Snap to the invisible baseline letters sit on."
+              style: { width: 28, height: 24 }
+              bind:
+                value: "panel.snap_baseline"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - id: ch_snap_x_height
+              type: checkbox
+              icon: char_snap_x_height
+              summary: "Snap: x-Height"
+              description: "Snap to the top of lowercase letters (x, a, e, ...)."
+              style: { width: 28, height: 24 }
+              bind:
+                value: "panel.snap_x_height"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - id: ch_snap_glyph_bounds
+              type: checkbox
+              icon: char_snap_glyph_bounds
+              summary: "Snap: Glyph Bounds"
+              description: "Snap to the left/right/top/bottom edges of a specific letter."
+              style: { width: 28, height: 24 }
+              bind:
+                value: "panel.snap_glyph_bounds"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - id: ch_snap_proximity_guides
+              type: checkbox
+              icon: char_snap_proximity
+              summary: "Snap: Proximity Guides"
+              description: "Snap to guides near the Baseline, x-Height, and Glyph Bounds, based on the glyph's shape and layout."
+              style: { width: 28, height: 24 }
+              bind:
+                value: "panel.snap_proximity_guides"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - id: ch_snap_angular_guides
+              type: checkbox
+              icon: char_snap_angular
+              summary: "Snap: Angular Guides"
+              description: "Snap to the slant lines of letters like V or A."
+              style: { width: 28, height: 24 }
+              bind:
+                value: "panel.snap_angular_guides"
+        - type: container
+          col: 2
+          style: { alignment: center }
+          children:
+            - id: ch_snap_anchor_point
+              type: checkbox
+              icon: char_snap_anchor
+              summary: "Snap: Anchor Point"
+              description: "Snap to the actual mathematical anchor points on glyph outlines."
+              style: { width: 28, height: 24 }
+              bind:
+                value: "panel.snap_anchor_point"
