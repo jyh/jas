@@ -8,6 +8,7 @@ pub mod panel_menu;
 pub mod panel_menu_state;
 pub mod panel_menu_view;
 
+pub mod character_panel;
 pub mod color_panel;
 pub mod layers_panel;
 pub mod properties_panel;
@@ -26,6 +27,7 @@ pub fn panel_label(kind: PanelKind) -> &'static str {
         PanelKind::Swatches => swatches_panel::LABEL,
         PanelKind::Stroke => stroke_panel::LABEL,
         PanelKind::Properties => properties_panel::LABEL,
+        PanelKind::Character => character_panel::LABEL,
     }
 }
 
@@ -37,6 +39,7 @@ pub fn panel_menu(kind: PanelKind) -> Vec<PanelMenuItem> {
         PanelKind::Swatches => swatches_panel::menu_items(),
         PanelKind::Stroke => stroke_panel::menu_items(),
         PanelKind::Properties => properties_panel::menu_items(),
+        PanelKind::Character => character_panel::menu_items(),
     }
 }
 
@@ -53,6 +56,7 @@ pub(crate) fn panel_dispatch(
         PanelKind::Swatches => swatches_panel::dispatch(cmd, addr, state),
         PanelKind::Stroke => stroke_panel::dispatch(cmd, addr, state),
         PanelKind::Properties => properties_panel::dispatch(cmd, addr, state),
+        PanelKind::Character => character_panel::dispatch(cmd, addr, state),
     }
 }
 
@@ -64,6 +68,7 @@ pub(crate) fn panel_is_checked(kind: PanelKind, cmd: &str, state: &AppState) -> 
         PanelKind::Swatches => swatches_panel::is_checked(cmd, state),
         PanelKind::Stroke => stroke_panel::is_checked(cmd, state),
         PanelKind::Properties => properties_panel::is_checked(cmd, state),
+        PanelKind::Character => character_panel::is_checked(cmd, state),
     }
 }
 
