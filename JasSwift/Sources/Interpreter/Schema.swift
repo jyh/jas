@@ -259,20 +259,12 @@ private func resolveKey(_ key: String, activePanel: String?, store: StateStore) 
         return .notFound
     }
 
-    // Bare key: try global state, then active panel
-    let stateEntry = getSchemaEntry(key)
-
-    // Shadowing: key in both global state and active panel
-    if stateEntry != nil && activePanel != nil {
-        // Check if the key actually exists as a panel-specific field.
-        // Since we use a flat global schema, shadowing only occurs for
-        // fields explicitly declared in both scopes. Per the spec, this
-        // requires a real panel-scoped schema. For the generic-bag
-        // languages (Swift/Python/OCaml), we always resolve to state scope
-        // for bare keys found in the global schema.
-        return .found(scope: "state", fieldName: key, entry: stateEntry!)
-    }
-    if let entry = stateEntry {
+    // Bare key: resolve against the global schema.
+    //
+    // Shadowing note: since Swift/Python/OCaml use a flat global schema
+    // (no per-panel schemas), bare keys found in the global schema
+    // always resolve to state scope, regardless of the active panel.
+    if let entry = getSchemaEntry(key) {
         return .found(scope: "state", fieldName: key, entry: entry)
     }
     return .notFound
