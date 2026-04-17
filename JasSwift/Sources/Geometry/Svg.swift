@@ -95,6 +95,30 @@ private func pathData(_ commands: [PathCommand]) -> String {
     }.joined(separator: " ")
 }
 
+/// Build the attribute-string fragment for the 11 Character-panel
+/// attributes, emitting each attribute only when non-empty (per
+/// CHARACTER.md's identity-omission rule).
+private func textExtraAttrs(textTransform: String, fontVariant: String,
+                            baselineShift: String, lineHeight: String,
+                            letterSpacing: String, xmlLang: String,
+                            aaMode: String, rotate: String,
+                            horizontalScale: String, verticalScale: String,
+                            kerning: String) -> String {
+    var s = ""
+    if !textTransform.isEmpty { s += " text-transform=\"\(textTransform)\"" }
+    if !fontVariant.isEmpty { s += " font-variant=\"\(fontVariant)\"" }
+    if !baselineShift.isEmpty { s += " baseline-shift=\"\(baselineShift)\"" }
+    if !lineHeight.isEmpty { s += " line-height=\"\(lineHeight)\"" }
+    if !letterSpacing.isEmpty { s += " letter-spacing=\"\(letterSpacing)\"" }
+    if !xmlLang.isEmpty { s += " xml:lang=\"\(escapeXml(xmlLang))\"" }
+    if !aaMode.isEmpty { s += " urn:jas:1:aa-mode=\"\(escapeXml(aaMode))\"" }
+    if !rotate.isEmpty { s += " rotate=\"\(rotate)\"" }
+    if !horizontalScale.isEmpty { s += " horizontal-scale=\"\(horizontalScale)\"" }
+    if !verticalScale.isEmpty { s += " vertical-scale=\"\(verticalScale)\"" }
+    if !kerning.isEmpty { s += " urn:jas:1:kerning-mode=\"\(escapeXml(kerning))\"" }
+    return s
+}
+
 public func elementSvg(_ elem: Element, indent: String) -> String {
     switch elem {
     case .line(let v):
@@ -146,14 +170,22 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             : ""
         let fwAttr = v.fontWeight != "normal" ? " font-weight=\"\(v.fontWeight)\"" : ""
         let fsAttr = v.fontStyle != "normal" ? " font-style=\"\(v.fontStyle)\"" : ""
-        let tdAttr = v.textDecoration != "none" ? " text-decoration=\"\(v.textDecoration)\"" : ""
+        let tdAttr = (v.textDecoration != "none" && !v.textDecoration.isEmpty)
+            ? " text-decoration=\"\(v.textDecoration)\"" : ""
+        let extraAttrs = textExtraAttrs(
+            textTransform: v.textTransform, fontVariant: v.fontVariant,
+            baselineShift: v.baselineShift, lineHeight: v.lineHeight,
+            letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
+            aaMode: v.aaMode, rotate: v.rotate,
+            horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
+            kerning: v.kerning)
         // SVG `y` is the baseline of the first line; internally `v.y`
         // is the *top* of the layout box, so add the ascent (0.8 *
         // fontSize, the same value `text_layout` uses).
         let svgY = v.y + v.fontSize * 0.8
         return "\(indent)<text x=\"\(fmt(px(v.x)))\" y=\"\(fmt(px(svgY)))\"" +
             " font-family=\"\(escapeXml(v.fontFamily))\" font-size=\"\(fmt(px(v.fontSize)))\"" +
-            "\(fwAttr)\(fsAttr)\(tdAttr)" +
+            "\(fwAttr)\(fsAttr)\(tdAttr)\(extraAttrs)" +
             "\(areaAttrs)" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))>" +
@@ -163,10 +195,18 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         let d = pathData(v.d)
         let fwAttr = v.fontWeight != "normal" ? " font-weight=\"\(v.fontWeight)\"" : ""
         let fsAttr = v.fontStyle != "normal" ? " font-style=\"\(v.fontStyle)\"" : ""
-        let tdAttr = v.textDecoration != "none" ? " text-decoration=\"\(v.textDecoration)\"" : ""
+        let tdAttr = (v.textDecoration != "none" && !v.textDecoration.isEmpty)
+            ? " text-decoration=\"\(v.textDecoration)\"" : ""
+        let extraAttrs = textExtraAttrs(
+            textTransform: v.textTransform, fontVariant: v.fontVariant,
+            baselineShift: v.baselineShift, lineHeight: v.lineHeight,
+            letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
+            aaMode: v.aaMode, rotate: v.rotate,
+            horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
+            kerning: v.kerning)
         return "\(indent)<text\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
             " font-family=\"\(escapeXml(v.fontFamily))\" font-size=\"\(fmt(px(v.fontSize)))\"" +
-            "\(fwAttr)\(fsAttr)\(tdAttr)" +
+            "\(fwAttr)\(fsAttr)\(tdAttr)\(extraAttrs)" +
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))>" +
             "<textPath path=\"\(d)\"" +
             (v.startOffset > 0 ? " startOffset=\"\(fmt(v.startOffset * 100))%\"" : "") +
@@ -551,6 +591,18 @@ private func parseElement(_ node: XMLNode) -> Element? {
         let fw = elem.attribute(forName: "font-weight")?.stringValue ?? "normal"
         let fst = elem.attribute(forName: "font-style")?.stringValue ?? "normal"
         let td = elem.attribute(forName: "text-decoration")?.stringValue ?? "none"
+        let tt = elem.attribute(forName: "text-transform")?.stringValue ?? ""
+        let fv = elem.attribute(forName: "font-variant")?.stringValue ?? ""
+        let bs = elem.attribute(forName: "baseline-shift")?.stringValue ?? ""
+        let lh = elem.attribute(forName: "line-height")?.stringValue ?? ""
+        let ls = elem.attribute(forName: "letter-spacing")?.stringValue ?? ""
+        let lang = elem.attribute(forName: "xml:lang")?.stringValue
+                ?? elem.attribute(forName: "lang")?.stringValue ?? ""
+        let aa = elem.attribute(forName: "urn:jas:1:aa-mode")?.stringValue ?? ""
+        let rotate = elem.attribute(forName: "rotate")?.stringValue ?? ""
+        let hScale = elem.attribute(forName: "horizontal-scale")?.stringValue ?? ""
+        let vScale = elem.attribute(forName: "vertical-scale")?.stringValue ?? ""
+        let kern = elem.attribute(forName: "urn:jas:1:kerning-mode")?.stringValue ?? ""
         // Check for <textPath> child
         if let children = elem.children {
             for child in children {
@@ -570,6 +622,10 @@ private func parseElement(_ node: XMLNode) -> Element? {
                     d: d, content: tpContent, startOffset: startOffset,
                     fontFamily: ff, fontSize: fs,
                     fontWeight: fw, fontStyle: fst, textDecoration: td,
+                    textTransform: tt, fontVariant: fv,
+                    baselineShift: bs, lineHeight: lh, letterSpacing: ls,
+                    xmlLang: lang, aaMode: aa, rotate: rotate,
+                    horizontalScale: hScale, verticalScale: vScale, kerning: kern,
                     fill: fill, stroke: stroke, opacity: opacity, transform: transform))
             }
         }
@@ -595,6 +651,10 @@ private func parseElement(_ node: XMLNode) -> Element? {
             x: toPt(attrF(elem, "x")), y: svgY - fs * 0.8,
             content: content, fontFamily: ff, fontSize: fs,
             fontWeight: fw, fontStyle: fst, textDecoration: td,
+            textTransform: tt, fontVariant: fv,
+            baselineShift: bs, lineHeight: lh, letterSpacing: ls,
+            xmlLang: lang, aaMode: aa, rotate: rotate,
+            horizontalScale: hScale, verticalScale: vScale, kerning: kern,
             width: tw, height: th,
             fill: fill, stroke: stroke, opacity: opacity, transform: transform))
 

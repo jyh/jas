@@ -50,6 +50,28 @@ private class JsonObj {
         entries.append((key, "null"))
     }
 
+    /// Emit an empty string as null, otherwise as a JSON string.
+    /// Matches the canonical-JSON rule that default / omitted
+    /// attributes render as null.
+    func emptyAsNull(_ key: String, _ v: String) {
+        if v.isEmpty { null(key) } else { str(key, v) }
+    }
+
+    /// Emit `Some(v)` as a string, `None` as null.
+    func optStr(_ key: String, _ v: String?) {
+        if let v = v { str(key, v) } else { null(key) }
+    }
+
+    /// Emit `Some(v)` as a number, `None` as null.
+    func optNum(_ key: String, _ v: Double?) {
+        if let v = v { num(key, v) } else { null(key) }
+    }
+
+    /// Emit `Some(v)` as a bool, `None` as null.
+    func optBool(_ key: String, _ v: Bool?) {
+        if let v = v { bool(key, v) } else { null(key) }
+    }
+
     func raw(_ key: String, _ json: String) {
         entries.append((key, json))
     }
@@ -213,6 +235,56 @@ private func pointsJson(_ points: [(Double, Double)]) -> String {
 
 // MARK: - Element serializer
 
+/// Canonical JSON for the `text_decoration` element-wide field.
+/// Stored as a String (space-separated tokens); emitted as a
+/// sorted array for byte-stable output. `"none"` and empty both
+/// serialize to `[]`.
+private func textDecorationJson(_ td: String) -> String {
+    var tokens = td.split(separator: " ", omittingEmptySubsequences: true)
+                   .map { String($0) }
+                   .filter { $0 != "none" }
+    tokens.sort()
+    let quoted = tokens.map { "\"\($0)\"" }
+    return "[\(quoted.joined(separator: ","))]"
+}
+
+/// Canonical JSON for a single tspan. Mirrors the Rust emitter:
+/// every override field is serialized as a sorted key with null
+/// for inherit or the concrete value for an explicit override.
+private func tspanJson(_ t: Tspan) -> String {
+    let o = JsonObj()
+    o.optNum("baseline_shift", t.baselineShift)
+    o.str("content", t.content)
+    o.optNum("dx", t.dx)
+    o.optStr("font_family", t.fontFamily)
+    o.optNum("font_size", t.fontSize)
+    o.optStr("font_style", t.fontStyle)
+    o.optStr("font_variant", t.fontVariant)
+    o.optStr("font_weight", t.fontWeight)
+    o.int("id", Int(t.id))
+    o.optStr("jas_aa_mode", t.jasAaMode)
+    o.optBool("jas_fractional_widths", t.jasFractionalWidths)
+    o.optStr("jas_kerning_mode", t.jasKerningMode)
+    o.optBool("jas_no_break", t.jasNoBreak)
+    o.optNum("letter_spacing", t.letterSpacing)
+    o.optNum("line_height", t.lineHeight)
+    o.optNum("rotate", t.rotate)
+    o.optStr("style_name", t.styleName)
+    if let decor = t.textDecoration {
+        var sorted = decor
+        sorted.sort()
+        let quoted = sorted.map { "\"\($0)\"" }
+        o.raw("text_decoration", "[\(quoted.joined(separator: ","))]")
+    } else {
+        o.null("text_decoration")
+    }
+    o.optStr("text_rendering", t.textRendering)
+    o.optStr("text_transform", t.textTransform)
+    o.raw("transform", transformJson(t.transform))
+    o.optStr("xml_lang", t.xmlLang)
+    return o.build()
+}
+
 private func elementJson(_ elem: Element) -> String {
     let o = JsonObj()
     switch elem {
@@ -274,32 +346,70 @@ private func elementJson(_ elem: Element) -> String {
     case .text(let e):
         o.str("type", "text")
         commonFields(o, e.opacity, e.transform, e.locked, e.visibility)
-        o.str("content", e.content)
+        // Extended element-wide attribute slots. Still-null slots are
+        // placeholders until Text grows per-element override fields
+        // (see TSPAN.md Attribute Home).
+        o.emptyAsNull("baseline_shift", e.baselineShift)
+        o.null("dx")
         o.raw("fill", fillJson(e.fill))
         o.str("font_family", e.fontFamily)
         o.num("font_size", e.fontSize)
         o.str("font_style", e.fontStyle)
+        o.emptyAsNull("font_variant", e.fontVariant)
         o.str("font_weight", e.fontWeight)
         o.num("height", e.height)
+        o.emptyAsNull("horizontal_scale", e.horizontalScale)
+        o.emptyAsNull("jas_aa_mode", e.aaMode)
+        o.null("jas_fractional_widths")
+        o.emptyAsNull("jas_kerning_mode", e.kerning)
+        o.null("jas_no_break")
+        o.emptyAsNull("letter_spacing", e.letterSpacing)
+        o.emptyAsNull("line_height", e.lineHeight)
+        o.emptyAsNull("rotate", e.rotate)
         o.raw("stroke", strokeJson(e.stroke))
-        o.str("text_decoration", e.textDecoration)
+        o.null("style_name")
+        o.raw("text_decoration", textDecorationJson(e.textDecoration))
+        o.null("text_rendering")
+        o.emptyAsNull("text_transform", e.textTransform)
+        // Per-tspan list (always non-empty).
+        let tspans = e.tspans.map { tspanJson($0) }
+        o.raw("tspans", jsonArray(tspans))
+        o.emptyAsNull("vertical_scale", e.verticalScale)
         o.num("width", e.width)
         o.num("x", e.x)
+        o.emptyAsNull("xml_lang", e.xmlLang)
         o.num("y", e.y)
     case .textPath(let e):
         o.str("type", "text_path")
         commonFields(o, e.opacity, e.transform, e.locked, e.visibility)
-        o.str("content", e.content)
+        o.emptyAsNull("baseline_shift", e.baselineShift)
         let cmds = e.d.map { pathCommandJson($0) }
         o.raw("d", jsonArray(cmds))
+        o.null("dx")
         o.raw("fill", fillJson(e.fill))
         o.str("font_family", e.fontFamily)
         o.num("font_size", e.fontSize)
         o.str("font_style", e.fontStyle)
+        o.emptyAsNull("font_variant", e.fontVariant)
         o.str("font_weight", e.fontWeight)
+        o.emptyAsNull("horizontal_scale", e.horizontalScale)
+        o.emptyAsNull("jas_aa_mode", e.aaMode)
+        o.null("jas_fractional_widths")
+        o.emptyAsNull("jas_kerning_mode", e.kerning)
+        o.null("jas_no_break")
+        o.emptyAsNull("letter_spacing", e.letterSpacing)
+        o.emptyAsNull("line_height", e.lineHeight)
+        o.emptyAsNull("rotate", e.rotate)
         o.num("start_offset", e.startOffset)
         o.raw("stroke", strokeJson(e.stroke))
-        o.str("text_decoration", e.textDecoration)
+        o.null("style_name")
+        o.raw("text_decoration", textDecorationJson(e.textDecoration))
+        o.null("text_rendering")
+        o.emptyAsNull("text_transform", e.textTransform)
+        let tspans = e.tspans.map { tspanJson($0) }
+        o.raw("tspans", jsonArray(tspans))
+        o.emptyAsNull("vertical_scale", e.verticalScale)
+        o.emptyAsNull("xml_lang", e.xmlLang)
     case .group(let e):
         o.str("type", "group")
         commonFields(o, e.opacity, e.transform, e.locked, e.visibility)
@@ -453,6 +563,62 @@ private func parsePoints(_ v: Any?) -> [(Double, Double)] {
     }
 }
 
+/// Parse the canonical-JSON `tspans` array, or fall back to the
+/// legacy `content: String` shape and wrap it in a single default
+/// tspan. Keeps older fixtures readable during the migration.
+private func parseTspansOrLegacy(_ d: [String: Any]) -> [Tspan] {
+    if let arr = d["tspans"] as? [[String: Any]] {
+        return arr.map { parseTspan($0) }
+    }
+    let content = d["content"] as? String ?? ""
+    return [Tspan(id: 0, content: content)]
+}
+
+/// Parse a single tspan dict from canonical JSON.
+private func parseTspan(_ d: [String: Any]) -> Tspan {
+    let decor: [String]?
+    if let arr = d["text_decoration"] as? [Any] {
+        decor = arr.compactMap { $0 as? String }
+    } else {
+        decor = nil
+    }
+    return Tspan(
+        id: UInt32((d["id"] as? NSNumber)?.intValue ?? 0),
+        content: d["content"] as? String ?? "",
+        baselineShift: (d["baseline_shift"] as? NSNumber)?.doubleValue,
+        dx: (d["dx"] as? NSNumber)?.doubleValue,
+        fontFamily: d["font_family"] as? String,
+        fontSize: (d["font_size"] as? NSNumber)?.doubleValue,
+        fontStyle: d["font_style"] as? String,
+        fontVariant: d["font_variant"] as? String,
+        fontWeight: d["font_weight"] as? String,
+        jasAaMode: d["jas_aa_mode"] as? String,
+        jasFractionalWidths: d["jas_fractional_widths"] as? Bool,
+        jasKerningMode: d["jas_kerning_mode"] as? String,
+        jasNoBreak: d["jas_no_break"] as? Bool,
+        letterSpacing: (d["letter_spacing"] as? NSNumber)?.doubleValue,
+        lineHeight: (d["line_height"] as? NSNumber)?.doubleValue,
+        rotate: (d["rotate"] as? NSNumber)?.doubleValue,
+        styleName: d["style_name"] as? String,
+        textDecoration: decor,
+        textRendering: d["text_rendering"] as? String,
+        textTransform: d["text_transform"] as? String,
+        transform: nil,
+        xmlLang: d["xml_lang"] as? String
+    )
+}
+
+/// Accept the canonical text_decoration form (sorted array) or the
+/// legacy CSS string, normalising to the space-separated CSS form
+/// Swift's `Text.textDecoration: String` field stores.
+private func parseTextDecorationField(_ v: Any?) -> String {
+    if let arr = v as? [String] {
+        return arr.joined(separator: " ")
+    }
+    if let s = v as? String { return s }
+    return "none"
+}
+
 public func parseElement(_ v: Any?) -> Element {
     guard let d = v as? [String: Any] else { fatalError("Expected JSON object for element") }
     let typ = d["type"] as? String ?? ""
@@ -499,26 +665,50 @@ public func parseElement(_ v: Any?) -> Element {
                           opacity: opacity, transform: transform, locked: locked,
                           visibility: visibility))
     case "text":
+        let tspans = parseTspansOrLegacy(d)
         return .text(Text(x: parseF(d["x"]), y: parseF(d["y"]),
-                          content: d["content"] as? String ?? "",
+                          tspans: tspans,
                           fontFamily: d["font_family"] as? String ?? "sans-serif",
                           fontSize: parseF(d["font_size"]),
                           fontWeight: d["font_weight"] as? String ?? "normal",
                           fontStyle: d["font_style"] as? String ?? "normal",
-                          textDecoration: d["text_decoration"] as? String ?? "none",
+                          textDecoration: parseTextDecorationField(d["text_decoration"]),
+                          textTransform: d["text_transform"] as? String ?? "",
+                          fontVariant: d["font_variant"] as? String ?? "",
+                          baselineShift: d["baseline_shift"] as? String ?? "",
+                          lineHeight: d["line_height"] as? String ?? "",
+                          letterSpacing: d["letter_spacing"] as? String ?? "",
+                          xmlLang: d["xml_lang"] as? String ?? "",
+                          aaMode: d["jas_aa_mode"] as? String ?? "",
+                          rotate: d["rotate"] as? String ?? "",
+                          horizontalScale: d["horizontal_scale"] as? String ?? "",
+                          verticalScale: d["vertical_scale"] as? String ?? "",
+                          kerning: d["jas_kerning_mode"] as? String ?? "",
                           width: parseF(d["width"]), height: parseF(d["height"]),
                           fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                           opacity: opacity, transform: transform, locked: locked,
                           visibility: visibility))
     case "text_path":
+        let tspans = parseTspansOrLegacy(d)
         return .textPath(TextPath(d: parsePathCommands(d["d"]),
-                                  content: d["content"] as? String ?? "",
+                                  tspans: tspans,
                                   startOffset: parseF(d["start_offset"]),
                                   fontFamily: d["font_family"] as? String ?? "sans-serif",
                                   fontSize: parseF(d["font_size"]),
                                   fontWeight: d["font_weight"] as? String ?? "normal",
                                   fontStyle: d["font_style"] as? String ?? "normal",
-                                  textDecoration: d["text_decoration"] as? String ?? "none",
+                                  textDecoration: parseTextDecorationField(d["text_decoration"]),
+                                  textTransform: d["text_transform"] as? String ?? "",
+                                  fontVariant: d["font_variant"] as? String ?? "",
+                                  baselineShift: d["baseline_shift"] as? String ?? "",
+                                  lineHeight: d["line_height"] as? String ?? "",
+                                  letterSpacing: d["letter_spacing"] as? String ?? "",
+                                  xmlLang: d["xml_lang"] as? String ?? "",
+                                  aaMode: d["jas_aa_mode"] as? String ?? "",
+                                  rotate: d["rotate"] as? String ?? "",
+                                  horizontalScale: d["horizontal_scale"] as? String ?? "",
+                                  verticalScale: d["vertical_scale"] as? String ?? "",
+                                  kerning: d["jas_kerning_mode"] as? String ?? "",
                                   fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                                   opacity: opacity, transform: transform, locked: locked,
                                   visibility: visibility))
