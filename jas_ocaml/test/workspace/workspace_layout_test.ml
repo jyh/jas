@@ -525,7 +525,7 @@ let close_show_panels = [
   Alcotest.test_case "panel_menu_items_all_visible" `Quick (fun () ->
     let l = default_layout () in
     let items = panel_menu_items l in
-    assert (List.length items = 5);
+    assert (List.length items = List.length all_panel_kinds);
     List.iter (fun (_, v) -> assert v) items);
 
   Alcotest.test_case "panel_menu_items_with_hidden" `Quick (fun () ->

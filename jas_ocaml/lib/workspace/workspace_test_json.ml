@@ -89,6 +89,9 @@ let panel_kind_str = function
   | Swatches -> "swatches"
   | Stroke -> "stroke"
   | Properties -> "properties"
+  | Character -> "character"
+  | Paragraph -> "paragraph"
+  | Artboards -> "artboards"
 
 let pane_kind_str = function
   | Toolbar -> "toolbar"
@@ -483,6 +486,9 @@ let parse_panel_kind_str s =
   | "swatches" -> Swatches
   | "stroke" -> Stroke
   | "properties" -> Properties
+  | "character" -> Character
+  | "paragraph" -> Paragraph
+  | "artboards" -> Artboards
   | _ -> Layers
 
 let parse_panel_kind j = parse_panel_kind_str (to_string j)

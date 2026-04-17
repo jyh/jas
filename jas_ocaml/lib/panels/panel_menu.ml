@@ -10,7 +10,7 @@ type panel_menu_item =
   | Separator
 
 (** All panel kinds, for iteration. *)
-let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties |]
+let all_panel_kinds = [| Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards |]
 
 (** Human-readable label for a panel kind. *)
 let panel_label = function
@@ -19,6 +19,9 @@ let panel_label = function
   | Swatches -> "Swatches"
   | Stroke -> "Stroke"
   | Properties -> "Properties"
+  | Character -> "Character"
+  | Paragraph -> "Paragraph"
+  | Artboards -> "Artboards"
 
 (** Menu items for a panel kind. *)
 let panel_menu = function
@@ -51,6 +54,9 @@ let panel_menu = function
   | Swatches -> [Action { label = "Close Swatches"; command = "close_panel"; shortcut = "" }]
   | Stroke -> [Action { label = "Close Stroke"; command = "close_panel"; shortcut = "" }]
   | Properties -> [Action { label = "Close Properties"; command = "close_panel"; shortcut = "" }]
+  | Character -> [Action { label = "Close Character"; command = "close_panel"; shortcut = "" }]
+  | Paragraph -> [Action { label = "Close Paragraph"; command = "close_panel"; shortcut = "" }]
+  | Artboards -> [Action { label = "Close Artboards"; command = "close_panel"; shortcut = "" }]
 
 (** Set the active color (fill or stroke per fill_on_top), push to recent colors. *)
 let set_active_color color ~fill_on_top (m : Model.model) =

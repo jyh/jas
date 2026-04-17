@@ -30,7 +30,7 @@ type dock_id = int
 
 type dock_edge = Left | Right | Bottom
 
-type panel_kind = Layers | Color | Swatches | Stroke | Properties
+type panel_kind = Layers | Color | Swatches | Stroke | Properties | Character | Paragraph | Artboards
 
 type color_panel_mode = Grayscale | Hsb_mode | Rgb_mode | Cmyk_mode | Web_safe_rgb
 
@@ -474,6 +474,9 @@ let panel_label = function
   | Swatches -> "Swatches"
   | Stroke -> "Stroke"
   | Properties -> "Properties"
+  | Character -> "Character"
+  | Paragraph -> "Paragraph"
+  | Artboards -> "Artboards"
 
 (* ------------------------------------------------------------------ *)
 (* Close / show panels                                                *)
@@ -512,7 +515,7 @@ let show_panel l kind =
 let is_panel_visible l kind =
   not (List.mem kind l.hidden_panels)
 
-let all_panel_kinds = [Layers; Color; Swatches; Stroke; Properties]
+let all_panel_kinds = [Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards]
 
 let panel_menu_items l =
   List.map (fun k -> (k, is_panel_visible l k)) all_panel_kinds
@@ -642,8 +645,11 @@ let edge_of_json = function "Left" -> Left | "Right" -> Right | _ -> Bottom
 
 let kind_to_json = function
   | Layers -> "Layers" | Color -> "Color" | Swatches -> "Swatches" | Stroke -> "Stroke" | Properties -> "Properties"
+  | Character -> "Character" | Paragraph -> "Paragraph" | Artboards -> "Artboards"
 let kind_of_json = function
-  | "Layers" -> Layers | "Color" -> Color | "Swatches" -> Swatches | "Stroke" -> Stroke | _ -> Properties
+  | "Layers" -> Layers | "Color" -> Color | "Swatches" -> Swatches | "Stroke" -> Stroke
+  | "Character" -> Character | "Paragraph" -> Paragraph | "Artboards" -> Artboards
+  | _ -> Properties
 
 let panel_group_to_json g : Yojson.Safe.t =
   `Assoc [

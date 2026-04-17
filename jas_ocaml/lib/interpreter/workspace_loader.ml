@@ -141,3 +141,6 @@ let panel_kind_to_content_id (kind : Workspace_layout.panel_kind) : string =
   | Workspace_layout.Swatches -> "swatches_panel_content"
   | Workspace_layout.Stroke -> "stroke_panel_content"
   | Workspace_layout.Properties -> "properties_panel_content"
+  | Workspace_layout.Character -> "character_panel_content"
+  | Workspace_layout.Paragraph -> "paragraph_panel_content"
+  | Workspace_layout.Artboards -> "artboards_panel_content"

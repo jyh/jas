@@ -30,7 +30,7 @@ let label_tests = [
     assert (panel_label Properties = "Properties"));
 
   Alcotest.test_case "all_panel_kinds_count" `Quick (fun () ->
-    assert (Array.length all_panel_kinds = 5));
+    assert (Array.length all_panel_kinds = 8));
 
   Alcotest.test_case "all_panel_kinds_contains_all" `Quick (fun () ->
     let has k = Array.exists (( = ) k) all_panel_kinds in
@@ -38,7 +38,10 @@ let label_tests = [
     assert (has Color);
     assert (has Swatches);
     assert (has Stroke);
-    assert (has Properties));
+    assert (has Properties);
+    assert (has Character);
+    assert (has Paragraph);
+    assert (has Artboards));
 ]
 
 (* ================================================================== *)
