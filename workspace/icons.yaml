@@ -404,3 +404,211 @@ icons:
     svg: >
       <path d="M2,3 L14,3 L9.5,8.5 L9.5,12 L6.5,13.5 L6.5,8.5 Z"
         fill="currentColor" opacity="0.8"/>
+
+  # ── Character panel icons ──────────────────────────────────
+  # Placeholder typographic icons for the Character panel. Style:
+  # serif glyphs + small arrow/decoration marks, drawn in
+  # currentColor on a 24x24 grid. Matches the row-label slots in
+  # CHARACTER.md Layout and the reference examples/character.png.
+
+  char_size:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="1" y="19" font-family="serif" font-size="16" font-weight="700"
+        fill="currentColor">T</text>
+      <text x="13" y="19" font-family="serif" font-size="11" font-weight="700"
+        fill="currentColor">T</text>
+
+  char_leading:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="10" y="12" font-family="serif" font-size="11" font-weight="700"
+        fill="currentColor">A</text>
+      <text x="10" y="22" font-family="serif" font-size="11" font-weight="700"
+        fill="currentColor">A</text>
+      <path d="M5,4 L5,20" stroke="currentColor" stroke-width="1" fill="none"/>
+      <path d="M3,6 L5,4 L7,6 M3,18 L5,20 L7,18"
+        stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/>
+
+  char_kerning:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="1" y="19" font-family="serif" font-size="13" font-weight="700"
+        fill="currentColor">V</text>
+      <text x="14" y="19" font-family="serif" font-size="13" font-weight="700"
+        fill="currentColor">A</text>
+      <path d="M9,10 L12,10 M10,8 L12,10 L10,12"
+        stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/>
+      <path d="M15,10 L12,10 M14,8 L12,10 L14,12"
+        stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/>
+
+  char_tracking:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="1" y="19" font-family="serif" font-size="13" font-weight="700"
+        fill="currentColor">V</text>
+      <text x="14" y="19" font-family="serif" font-size="13" font-weight="700"
+        fill="currentColor">A</text>
+      <path d="M12,10 L9,10 M11,8 L9,10 L11,12"
+        stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/>
+      <path d="M12,10 L15,10 M13,8 L15,10 L13,12"
+        stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/>
+
+  char_vertical_scale:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="7" y="19" font-family="serif" font-size="14" font-weight="700"
+        fill="currentColor">T</text>
+      <path d="M19,4 L19,20" stroke="currentColor" stroke-width="1" fill="none"/>
+      <path d="M17,6 L19,4 L21,6 M17,18 L19,20 L21,18"
+        stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/>
+
+  char_horizontal_scale:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="8" y="14" font-family="serif" font-size="12" font-weight="700"
+        fill="currentColor">T</text>
+      <path d="M3,20 L21,20" stroke="currentColor" stroke-width="1" fill="none"/>
+      <path d="M5,18 L3,20 L5,22 M19,18 L21,20 L19,22"
+        stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/>
+
+  char_baseline_shift:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="4" y="13" font-family="serif" font-size="11" font-weight="700"
+        fill="currentColor">A</text>
+      <line x1="3" y1="15" x2="13" y2="15"
+        stroke="currentColor" stroke-width="1.25"/>
+      <path d="M18,20 L18,6" stroke="currentColor" stroke-width="1" fill="none"/>
+      <path d="M16,8 L18,6 L20,8"
+        stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/>
+
+  char_rotation:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="8" y="17" font-family="serif" font-size="12" font-weight="700"
+        fill="currentColor">T</text>
+      <path d="M20,12 A8,8 0 1 1 12,4"
+        stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/>
+      <path d="M10,2 L12,4 L10,6"
+        stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/>
+
+  char_all_caps:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="1" y="19" font-family="serif" font-size="15" font-weight="700"
+        fill="currentColor">TT</text>
+
+  char_small_caps:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="2" y="19" font-family="serif" font-size="15" font-weight="700"
+        fill="currentColor">T</text>
+      <text x="13" y="19" font-family="serif" font-size="11" font-weight="700"
+        fill="currentColor">T</text>
+
+  char_superscript:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="2" y="19" font-family="serif" font-size="15" font-weight="700"
+        fill="currentColor">T</text>
+      <text x="14" y="11" font-family="serif" font-size="9" font-weight="700"
+        fill="currentColor">1</text>
+
+  char_subscript:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="2" y="17" font-family="serif" font-size="15" font-weight="700"
+        fill="currentColor">T</text>
+      <text x="14" y="22" font-family="serif" font-size="9" font-weight="700"
+        fill="currentColor">1</text>
+
+  char_underline:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="6" y="17" font-family="serif" font-size="15" font-weight="700"
+        fill="currentColor">T</text>
+      <line x1="4" y1="21" x2="20" y2="21"
+        stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+
+  char_strikethrough:
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="6" y="20" font-family="serif" font-size="16" font-weight="700"
+        fill="currentColor">T</text>
+      <line x1="3" y1="14" x2="21" y2="14"
+        stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+
+  char_snap_glyph:
+    viewbox: "0 0 24 24"
+    svg: >
+      <rect x="2" y="4" width="20" height="16" rx="2"
+        stroke="currentColor" stroke-width="1" fill="none"/>
+      <text x="4" y="17" font-family="serif" font-size="12" font-weight="700"
+        fill="currentColor">Ag</text>
+
+  char_info:
+    viewbox: "0 0 24 24"
+    svg: >
+      <circle cx="12" cy="12" r="9"
+        stroke="currentColor" stroke-width="1" fill="none"/>
+      <circle cx="12" cy="7.5" r="1" fill="currentColor"/>
+      <rect x="11" y="10" width="2" height="8" fill="currentColor"/>
+
+  # Snap-to-Glyph category icons: a glyph plus the specific snap feature
+  # highlighted as a solid accent mark, with the rest rendered more
+  # faintly for reference.
+
+  char_snap_baseline:     # Ag resting on a bold baseline
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="5" y="18" font-family="serif" font-size="14" font-weight="700"
+        fill="currentColor">Ag</text>
+      <line x1="2" y1="19" x2="22" y2="19"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+
+  char_snap_x_height:     # x with highlighted x-height guide
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="7" y="19" font-family="serif" font-size="16" font-weight="700"
+        fill="currentColor">x</text>
+      <line x1="2" y1="10" x2="22" y2="10"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <line x1="2" y1="19" x2="22" y2="19"
+        stroke="currentColor" stroke-width="1" opacity="0.45"/>
+
+  char_snap_glyph_bounds: # A inside a solid bounding box
+    viewbox: "0 0 24 24"
+    svg: >
+      <rect x="3" y="5" width="18" height="15"
+        stroke="currentColor" stroke-width="1.5" fill="none"/>
+      <text x="6" y="18" font-family="serif" font-size="14" font-weight="700"
+        fill="currentColor">A</text>
+
+  char_snap_proximity:    # A with four nearby proximity ticks
+    viewbox: "0 0 24 24"
+    svg: >
+      <text x="7" y="19" font-family="serif" font-size="14" font-weight="700"
+        fill="currentColor">A</text>
+      <circle cx="3" cy="5" r="1.3" fill="currentColor"/>
+      <circle cx="21" cy="5" r="1.3" fill="currentColor"/>
+      <circle cx="3" cy="20" r="1.3" fill="currentColor"/>
+      <circle cx="21" cy="20" r="1.3" fill="currentColor"/>
+
+  char_snap_angular:      # V with its two angular guide lines
+    viewbox: "0 0 24 24"
+    svg: >
+      <path d="M5,4 L12,20 L19,4"
+        stroke="currentColor" stroke-width="1.5" fill="none"
+        stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M3,22 L12,4 L21,22"
+        stroke="currentColor" stroke-width="0.75" fill="none"
+        opacity="0.55" stroke-dasharray="2,1.5"/>
+
+  char_snap_anchor:       # diamond anchors on a curve
+    viewbox: "0 0 24 24"
+    svg: >
+      <path d="M3,19 C8,3 16,3 21,19"
+        stroke="currentColor" stroke-width="1" fill="none"/>
+      <path d="M3,19 L5,17 L3,15 L1,17 Z M21,19 L23,17 L21,15 L19,17 Z M12,5 L14,3 L12,1 L10,3 Z"
+        fill="currentColor"/>
