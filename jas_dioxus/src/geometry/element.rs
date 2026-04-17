@@ -700,6 +700,35 @@ pub struct TextElem {
     pub font_weight: String,
     pub font_style: String,
     pub text_decoration: String,
+    /// CSS `text-transform` — `"uppercase"` for All Caps, `"lowercase"`,
+    /// or empty (none). Per CHARACTER.md SVG-attribute mapping.
+    #[serde(default)]
+    pub text_transform: String,
+    /// CSS `font-variant` — `"small-caps"` for Small Caps, or empty.
+    #[serde(default)]
+    pub font_variant: String,
+    /// CSS `baseline-shift` — `"super"`, `"sub"`, a length, or empty.
+    /// Mutually exclusive super/sub are enforced at the panel layer.
+    #[serde(default)]
+    pub baseline_shift: String,
+    /// CSS `line-height` — e.g. `"14.4pt"`, or empty for Auto
+    /// (inherits 120% × font-size). Panel field: Leading.
+    #[serde(default)]
+    pub line_height: String,
+    /// CSS `letter-spacing` — e.g. `"0.025em"`, or empty for 0.
+    /// Panel field: Tracking, value is (panel.tracking / 1000) em.
+    #[serde(default)]
+    pub letter_spacing: String,
+    /// SVG `xml:lang` — ISO 639-1 language code, or empty. Used for
+    /// hyphenation and line-breaking. Panel field: Language.
+    #[serde(default)]
+    pub xml_lang: String,
+    /// Jas custom anti-alias mode — `"None"`, `"Sharp"`, `"Crisp"`,
+    /// `"Strong"`, `"Smooth"`, or empty. Emitted as the custom SVG
+    /// attribute `urn:jas:1:aa-mode`; also maps to CSS `text-rendering`
+    /// on export. Panel field: Anti-aliasing.
+    #[serde(default)]
+    pub aa_mode: String,
     pub width: f64,
     pub height: f64,
     pub fill: Option<Fill>,
@@ -750,6 +779,13 @@ impl TextElem {
             font_weight: font_weight.into(),
             font_style: font_style.into(),
             text_decoration: text_decoration.into(),
+            text_transform: String::new(),
+            font_variant: String::new(),
+            baseline_shift: String::new(),
+            line_height: String::new(),
+            letter_spacing: String::new(),
+            xml_lang: String::new(),
+            aa_mode: String::new(),
             width,
             height,
             fill,
@@ -771,6 +807,27 @@ pub struct TextPathElem {
     pub font_weight: String,
     pub font_style: String,
     pub text_decoration: String,
+    /// See `TextElem::text_transform`.
+    #[serde(default)]
+    pub text_transform: String,
+    /// See `TextElem::font_variant`.
+    #[serde(default)]
+    pub font_variant: String,
+    /// See `TextElem::baseline_shift`.
+    #[serde(default)]
+    pub baseline_shift: String,
+    /// See `TextElem::line_height`.
+    #[serde(default)]
+    pub line_height: String,
+    /// See `TextElem::letter_spacing`.
+    #[serde(default)]
+    pub letter_spacing: String,
+    /// See `TextElem::xml_lang`.
+    #[serde(default)]
+    pub xml_lang: String,
+    /// See `TextElem::aa_mode`.
+    #[serde(default)]
+    pub aa_mode: String,
     pub fill: Option<Fill>,
     pub stroke: Option<Stroke>,
     pub common: CommonProps,
@@ -807,6 +864,13 @@ impl TextPathElem {
             font_weight: font_weight.into(),
             font_style: font_style.into(),
             text_decoration: text_decoration.into(),
+            text_transform: String::new(),
+            font_variant: String::new(),
+            baseline_shift: String::new(),
+            line_height: String::new(),
+            letter_spacing: String::new(),
+            xml_lang: String::new(),
+            aa_mode: String::new(),
             fill,
             stroke,
             common,

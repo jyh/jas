@@ -75,6 +75,17 @@ impl JsonObj {
         }
     }
 
+    /// Emit an empty string as null, otherwise as a JSON string.
+    /// Matches the canonical-JSON rule that default/omitted attributes
+    /// render as null.
+    fn empty_as_null(&mut self, key: &str, v: &str) {
+        if v.is_empty() {
+            self.null(key);
+        } else {
+            self.str_val(key, v);
+        }
+    }
+
     fn opt_num(&mut self, key: &str, v: Option<f64>) {
         match v {
             Some(n) => self.num(key, n),
@@ -408,42 +419,42 @@ fn element_json(elem: &Element) -> String {
         Element::Text(e) => {
             o.str_val("type", "text");
             common_fields(&mut o, &e.common);
-            // Extended element-wide attribute slots (null until TextElem
-            // grows per-element override fields; see TSPAN.md Attribute
-            // Home).
-            o.null("baseline_shift");
+            // Extended element-wide attribute slots. Still-null slots
+            // are placeholders until TextElem grows per-element
+            // override fields (see TSPAN.md Attribute Home).
+            o.empty_as_null("baseline_shift", &e.baseline_shift);
             o.null("dx");
             o.raw("fill", fill_json(&e.fill));
             o.str_val("font_family", &e.font_family);
             o.num("font_size", e.font_size);
             o.str_val("font_style", &e.font_style);
-            o.null("font_variant");
+            o.empty_as_null("font_variant", &e.font_variant);
             o.str_val("font_weight", &e.font_weight);
             o.num("height", e.height);
-            o.null("jas_aa_mode");
+            o.empty_as_null("jas_aa_mode", &e.aa_mode);
             o.null("jas_fractional_widths");
             o.null("jas_kerning_mode");
             o.null("jas_no_break");
-            o.null("letter_spacing");
-            o.null("line_height");
+            o.empty_as_null("letter_spacing", &e.letter_spacing);
+            o.empty_as_null("line_height", &e.line_height);
             o.null("rotate");
             o.raw("stroke", stroke_json(&e.stroke));
             o.null("style_name");
             o.raw("text_decoration", text_decoration_json(&e.text_decoration));
             o.null("text_rendering");
-            o.null("text_transform");
+            o.empty_as_null("text_transform", &e.text_transform);
             // Per-tspan list (always non-empty).
             let tspans: Vec<String> = e.tspans.iter().map(tspan_json).collect();
             o.raw("tspans", json_array(&tspans));
             o.num("width", e.width);
             o.num("x", e.x);
-            o.null("xml_lang");
+            o.empty_as_null("xml_lang", &e.xml_lang);
             o.num("y", e.y);
         }
         Element::TextPath(e) => {
             o.str_val("type", "text_path");
             common_fields(&mut o, &e.common);
-            o.null("baseline_shift");
+            o.empty_as_null("baseline_shift", &e.baseline_shift);
             let cmds: Vec<String> = e.d.iter().map(path_command_json).collect();
             o.raw("d", json_array(&cmds));
             o.null("dx");
@@ -451,24 +462,24 @@ fn element_json(elem: &Element) -> String {
             o.str_val("font_family", &e.font_family);
             o.num("font_size", e.font_size);
             o.str_val("font_style", &e.font_style);
-            o.null("font_variant");
+            o.empty_as_null("font_variant", &e.font_variant);
             o.str_val("font_weight", &e.font_weight);
-            o.null("jas_aa_mode");
+            o.empty_as_null("jas_aa_mode", &e.aa_mode);
             o.null("jas_fractional_widths");
             o.null("jas_kerning_mode");
             o.null("jas_no_break");
-            o.null("letter_spacing");
-            o.null("line_height");
+            o.empty_as_null("letter_spacing", &e.letter_spacing);
+            o.empty_as_null("line_height", &e.line_height);
             o.null("rotate");
             o.num("start_offset", e.start_offset);
             o.raw("stroke", stroke_json(&e.stroke));
             o.null("style_name");
             o.raw("text_decoration", text_decoration_json(&e.text_decoration));
             o.null("text_rendering");
-            o.null("text_transform");
+            o.empty_as_null("text_transform", &e.text_transform);
             let tspans: Vec<String> = e.tspans.iter().map(tspan_json).collect();
             o.raw("tspans", json_array(&tspans));
-            o.null("xml_lang");
+            o.empty_as_null("xml_lang", &e.xml_lang);
         }
         Element::Group(e) => {
             o.str_val("type", "group");
@@ -786,6 +797,13 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             font_weight: v["font_weight"].as_str().unwrap_or("normal").to_string(),
             font_style: v["font_style"].as_str().unwrap_or("normal").to_string(),
             text_decoration: parse_text_decoration_field(&v["text_decoration"]),
+            text_transform: v["text_transform"].as_str().unwrap_or("").to_string(),
+            font_variant: v["font_variant"].as_str().unwrap_or("").to_string(),
+            baseline_shift: v["baseline_shift"].as_str().unwrap_or("").to_string(),
+            line_height: v["line_height"].as_str().unwrap_or("").to_string(),
+            letter_spacing: v["letter_spacing"].as_str().unwrap_or("").to_string(),
+            xml_lang: v["xml_lang"].as_str().unwrap_or("").to_string(),
+            aa_mode: v["jas_aa_mode"].as_str().unwrap_or("").to_string(),
             width: parse_f(&v["width"]),
             height: parse_f(&v["height"]),
             fill: parse_fill(&v["fill"]),
@@ -804,6 +822,13 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             font_weight: v["font_weight"].as_str().unwrap_or("normal").to_string(),
             font_style: v["font_style"].as_str().unwrap_or("normal").to_string(),
             text_decoration: parse_text_decoration_field(&v["text_decoration"]),
+            text_transform: v["text_transform"].as_str().unwrap_or("").to_string(),
+            font_variant: v["font_variant"].as_str().unwrap_or("").to_string(),
+            baseline_shift: v["baseline_shift"].as_str().unwrap_or("").to_string(),
+            line_height: v["line_height"].as_str().unwrap_or("").to_string(),
+            letter_spacing: v["letter_spacing"].as_str().unwrap_or("").to_string(),
+            xml_lang: v["xml_lang"].as_str().unwrap_or("").to_string(),
+            aa_mode: v["jas_aa_mode"].as_str().unwrap_or("").to_string(),
             fill: parse_fill(&v["fill"]),
             stroke: parse_stroke(&v["stroke"]),
             common,

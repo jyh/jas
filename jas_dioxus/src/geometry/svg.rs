@@ -249,19 +249,41 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             let fst_attr = if e.font_style != "normal" {
                 format!(" font-style=\"{}\"", e.font_style)
             } else { String::new() };
-            let td_attr = if e.text_decoration != "none" {
+            let td_attr = if e.text_decoration != "none" && !e.text_decoration.is_empty() {
                 format!(" text-decoration=\"{}\"", e.text_decoration)
+            } else { String::new() };
+            let tt_attr = if !e.text_transform.is_empty() {
+                format!(" text-transform=\"{}\"", e.text_transform)
+            } else { String::new() };
+            let fv_attr = if !e.font_variant.is_empty() {
+                format!(" font-variant=\"{}\"", e.font_variant)
+            } else { String::new() };
+            let bs_attr = if !e.baseline_shift.is_empty() {
+                format!(" baseline-shift=\"{}\"", e.baseline_shift)
+            } else { String::new() };
+            let lh_attr = if !e.line_height.is_empty() {
+                format!(" line-height=\"{}\"", e.line_height)
+            } else { String::new() };
+            let ls_attr = if !e.letter_spacing.is_empty() {
+                format!(" letter-spacing=\"{}\"", e.letter_spacing)
+            } else { String::new() };
+            let lang_attr = if !e.xml_lang.is_empty() {
+                format!(" xml:lang=\"{}\"", escape_xml(&e.xml_lang))
+            } else { String::new() };
+            let aa_attr = if !e.aa_mode.is_empty() {
+                format!(" urn:jas:1:aa-mode=\"{}\"", escape_xml(&e.aa_mode))
             } else { String::new() };
             let svg_y = e.y + e.font_size * 0.8;
             let is_flat = e.tspans.len() == 1 && e.tspans[0].has_no_overrides();
             if is_flat {
                 // Pre-Tspan-compatible emission: no <tspan> wrapper.
                 format!(
-                    "{}<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}>{}</text>\n",
+                    "{}<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}{}{}{}{}{}{}{}>{}</text>\n",
                     indent,
                     fmt(px(e.x)), fmt(px(svg_y)),
                     escape_xml(&e.font_family), fmt(px(e.font_size)),
-                    fw_attr, fst_attr, td_attr,
+                    fw_attr, fst_attr, td_attr, tt_attr, fv_attr, bs_attr,
+                    lh_attr, ls_attr, lang_attr, aa_attr,
                     area_attrs,
                     fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                     opacity_attr(e.common.opacity),
@@ -273,11 +295,12 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 // across round-trips (TSPAN.md SVG serialization).
                 let tspan_xml: String = e.tspans.iter().map(tspan_svg).collect();
                 format!(
-                    "{}<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{} xml:space=\"preserve\">{}</text>\n",
+                    "{}<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}{}{}{}{}{}{}{} xml:space=\"preserve\">{}</text>\n",
                     indent,
                     fmt(px(e.x)), fmt(px(svg_y)),
                     escape_xml(&e.font_family), fmt(px(e.font_size)),
-                    fw_attr, fst_attr, td_attr,
+                    fw_attr, fst_attr, td_attr, tt_attr, fv_attr, bs_attr,
+                    lh_attr, ls_attr, lang_attr, aa_attr,
                     area_attrs,
                     fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                     opacity_attr(e.common.opacity),
@@ -295,8 +318,29 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             let fst_attr = if e.font_style != "normal" {
                 format!(" font-style=\"{}\"", e.font_style)
             } else { String::new() };
-            let td_attr = if e.text_decoration != "none" {
+            let td_attr = if e.text_decoration != "none" && !e.text_decoration.is_empty() {
                 format!(" text-decoration=\"{}\"", e.text_decoration)
+            } else { String::new() };
+            let tt_attr = if !e.text_transform.is_empty() {
+                format!(" text-transform=\"{}\"", e.text_transform)
+            } else { String::new() };
+            let fv_attr = if !e.font_variant.is_empty() {
+                format!(" font-variant=\"{}\"", e.font_variant)
+            } else { String::new() };
+            let bs_attr = if !e.baseline_shift.is_empty() {
+                format!(" baseline-shift=\"{}\"", e.baseline_shift)
+            } else { String::new() };
+            let lh_attr = if !e.line_height.is_empty() {
+                format!(" line-height=\"{}\"", e.line_height)
+            } else { String::new() };
+            let ls_attr = if !e.letter_spacing.is_empty() {
+                format!(" letter-spacing=\"{}\"", e.letter_spacing)
+            } else { String::new() };
+            let lang_attr = if !e.xml_lang.is_empty() {
+                format!(" xml:lang=\"{}\"", escape_xml(&e.xml_lang))
+            } else { String::new() };
+            let aa_attr = if !e.aa_mode.is_empty() {
+                format!(" urn:jas:1:aa-mode=\"{}\"", escape_xml(&e.aa_mode))
             } else { String::new() };
             let is_flat = e.tspans.len() == 1 && e.tspans[0].has_no_overrides();
             let (space_attr, body) = if is_flat {
@@ -308,11 +352,12 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 )
             };
             format!(
-                "{}<text{}{} font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}><textPath path=\"{}\"{}{}>{}</textPath></text>\n",
+                "{}<text{}{} font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}{}{}{}{}{}><textPath path=\"{}\"{}{}>{}</textPath></text>\n",
                 indent,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 escape_xml(&e.font_family), fmt(px(e.font_size)),
-                fw_attr, fst_attr, td_attr,
+                fw_attr, fst_attr, td_attr, tt_attr, fv_attr, bs_attr,
+                lh_attr, ls_attr, lang_attr, aa_attr,
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
                 path_data(&e.d), offset_attr, space_attr,
                 body,
@@ -1094,6 +1139,18 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             let fw = get_s(node, "font-weight", "normal").to_string();
             let fst = get_s(node, "font-style", "normal").to_string();
             let td = get_s(node, "text-decoration", "none").to_string();
+            let tt = get_s(node, "text-transform", "").to_string();
+            let fv = get_s(node, "font-variant", "").to_string();
+            let bs = get_s(node, "baseline-shift", "").to_string();
+            let lh = get_s(node, "line-height", "").to_string();
+            let ls = get_s(node, "letter-spacing", "").to_string();
+            let lang = node.attrs.get("xml:lang")
+                .or_else(|| node.attrs.get("lang"))
+                .cloned()
+                .unwrap_or_default();
+            let aa = node.attrs.get("urn:jas:1:aa-mode")
+                .cloned()
+                .unwrap_or_default();
 
             // Check for textPath child
             for child in &node.children {
@@ -1139,6 +1196,13 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                         font_weight: fw,
                         font_style: fst,
                         text_decoration: td,
+                        text_transform: tt.clone(),
+                        font_variant: fv.clone(),
+                        baseline_shift: bs.clone(),
+                        line_height: lh.clone(),
+                        letter_spacing: ls.clone(),
+                        xml_lang: lang.clone(),
+                        aa_mode: aa.clone(),
                         fill: parse_fill(node),
                         stroke: parse_stroke(node),
                         common,
@@ -1195,6 +1259,13 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 font_weight: fw,
                 font_style: fst,
                 text_decoration: td,
+                text_transform: tt,
+                font_variant: fv,
+                baseline_shift: bs,
+                line_height: lh,
+                letter_spacing: ls,
+                xml_lang: lang,
+                aa_mode: aa,
                 width: tw,
                 height: th,
                 fill: parse_fill(node),
