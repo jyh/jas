@@ -3,47 +3,96 @@ type: panel
 summary: "Character"
 description: >
   Character formatting panel — initial placeholder implementation.
-  Provides font family, font size, and six character toggle buttons
-  (All Caps, Small Caps, Superscript, Subscript, Underline,
-  Strikethrough) bound to panel-local state. Per-tspan editing,
-  numeric combos for leading/kerning/tracking/scales/rotation/
-  baseline-shift, and the Snap to Glyph section from CHARACTER.md
-  land in follow-up work once the tspan-aware editing plumbing is
-  in place across all four native apps.
+  Provides font family, style-name, font size, leading, kerning,
+  tracking, vertical and horizontal scale, baseline shift, character
+  rotation, six character toggle buttons (All Caps, Small Caps,
+  Superscript, Subscript, Underline, Strikethrough), language, and
+  anti-aliasing mode, all bound to panel-local state.
+
+  Everything here is a placeholder bound to panel-local state — no
+  control is yet wired to per-tspan attributes on the selection.
+  Real editing arrives alongside the tspan-aware Character panel
+  work (set_character_attribute via the unified TSPAN.md algorithm,
+  mixed-value display for character-range selections, parens-default
+  display for computed defaults, and the Snap to Glyph section) once
+  that plumbing is in place across all four native apps.
 
 state:
   font_family:
     type: string
     default: "sans-serif"
-    description: "Font family string (placeholder — not yet bound to the selected text)."
+    description: "Font family string."
+  style_name:
+    type: string
+    default: "Regular"
+    description: "Style name, e.g. Regular, Italic, Bold, Bold Italic."
   font_size:
     type: number
     default: 12
-    description: "Font size in points (placeholder — not yet bound)."
+    description: "Font size in points."
+  leading:
+    type: number
+    default: 14.4
+    description: >
+      Leading (line height) in points. Default is the Auto value
+      (120% of font size, 14.4 for 12pt). Full spec uses a
+      parens-wrapped display for the Auto case.
+  kerning:
+    type: number
+    default: 0
+    description: "Kerning in 1/1000 em. Full spec adds Auto / Optical / Metrics named modes."
+  tracking:
+    type: number
+    default: 0
+    description: "Tracking in 1/1000 em, signed."
+  vertical_scale:
+    type: number
+    default: 100
+    description: "Vertical scale in percent (1–10000)."
+  horizontal_scale:
+    type: number
+    default: 100
+    description: "Horizontal scale in percent (1–10000)."
+  baseline_shift:
+    type: number
+    default: 0
+    description: "Baseline shift in points, signed; positive = up."
+  character_rotation:
+    type: number
+    default: 0
+    description: "Character rotation in degrees, signed; positive = clockwise (SVG convention)."
   all_caps:
     type: bool
     default: false
-    description: "All Caps toggle. Mutually exclusive with Small Caps in the full spec; not enforced yet."
+    description: "All Caps. Mutually exclusive with Small Caps in the full spec; not enforced yet."
   small_caps:
     type: bool
     default: false
-    description: "Small Caps toggle."
+    description: "Small Caps."
   superscript:
     type: bool
     default: false
-    description: "Superscript toggle. Mutually exclusive with Subscript in the full spec; not enforced yet."
+    description: "Superscript. Mutually exclusive with Subscript in the full spec; not enforced yet."
   subscript:
     type: bool
     default: false
-    description: "Subscript toggle."
+    description: "Subscript."
   underline:
     type: bool
     default: false
-    description: "Underline toggle."
+    description: "Underline."
   strikethrough:
     type: bool
     default: false
-    description: "Strikethrough toggle."
+    description: "Strikethrough."
+  language:
+    type: string
+    default: "en"
+    description: "Language code (ISO 639-1)."
+  anti_aliasing:
+    type: string
+    default: "Sharp"
+    description: "Anti-aliasing mode: None, Sharp, Crisp, Strong, or Smooth."
 
 init: {}
 
@@ -65,27 +114,43 @@ content:
       children:
         - type: text
           content: "Font"
-          style: { width: 40, font_size: 10 }
+          style: { width: 60, font_size: 10 }
         - id: ch_font_family
           type: text_input
           summary: "Font family"
-          description: "Font family string. Placeholder — not yet bound to the selected text."
+          description: "Font family string."
           style: { flex: 1 }
           bind:
             value: "panel.font_family"
 
-    # ── Font size ────────────────────────────────────────────
+    # ── Style ────────────────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Style"
+          style: { width: 60, font_size: 10 }
+        - id: ch_style_name
+          type: text_input
+          summary: "Style name"
+          description: "Verbatim style name from the font (e.g. Regular, Bold, Bold Italic, Condensed Display Bold SC)."
+          style: { flex: 1 }
+          bind:
+            value: "panel.style_name"
+
+    # ── Size + Leading ───────────────────────────────────────
     - type: container
       layout: row
       style: { gap: 4, alignment: center }
       children:
         - type: text
           content: "Size"
-          style: { width: 40, font_size: 10 }
+          style: { width: 60, font_size: 10 }
         - id: ch_font_size
           type: number_input
           summary: "Font size"
-          description: "Font size in points. Placeholder — not yet bound to the selected text."
+          description: "Font size in points."
           min: 1
           max: 1296
           style: { flex: 1 }
@@ -93,6 +158,135 @@ content:
             value: "panel.font_size"
         - type: text
           content: "pt"
+          style: { font_size: 10 }
+
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Leading"
+          style: { width: 60, font_size: 10 }
+        - id: ch_leading
+          type: number_input
+          summary: "Leading"
+          description: "Line leading in points; Auto = 120% of font size."
+          min: 0
+          max: 1296
+          style: { flex: 1 }
+          bind:
+            value: "panel.leading"
+        - type: text
+          content: "pt"
+          style: { font_size: 10 }
+
+    # ── Kerning + Tracking ───────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Kerning"
+          style: { width: 60, font_size: 10 }
+        - id: ch_kerning
+          type: number_input
+          summary: "Kerning"
+          description: "Kerning between characters in 1/1000 em."
+          style: { flex: 1 }
+          bind:
+            value: "panel.kerning"
+
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Tracking"
+          style: { width: 60, font_size: 10 }
+        - id: ch_tracking
+          type: number_input
+          summary: "Tracking"
+          description: "Uniform letter-spacing in 1/1000 em, signed."
+          style: { flex: 1 }
+          bind:
+            value: "panel.tracking"
+
+    # ── Scale V + H ──────────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "V Scale"
+          style: { width: 60, font_size: 10 }
+        - id: ch_vertical_scale
+          type: number_input
+          summary: "Vertical scale"
+          description: "Vertical scale in percent (1–10000)."
+          min: 1
+          max: 10000
+          style: { flex: 1 }
+          bind:
+            value: "panel.vertical_scale"
+        - type: text
+          content: "%"
+          style: { font_size: 10 }
+
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "H Scale"
+          style: { width: 60, font_size: 10 }
+        - id: ch_horizontal_scale
+          type: number_input
+          summary: "Horizontal scale"
+          description: "Horizontal scale in percent (1–10000)."
+          min: 1
+          max: 10000
+          style: { flex: 1 }
+          bind:
+            value: "panel.horizontal_scale"
+        - type: text
+          content: "%"
+          style: { font_size: 10 }
+
+    # ── Baseline shift + Rotation ────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Baseline"
+          style: { width: 60, font_size: 10 }
+        - id: ch_baseline_shift
+          type: number_input
+          summary: "Baseline shift"
+          description: "Baseline shift in points; positive = up."
+          style: { flex: 1 }
+          bind:
+            value: "panel.baseline_shift"
+        - type: text
+          content: "pt"
+          style: { font_size: 10 }
+
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Rotation"
+          style: { width: 60, font_size: 10 }
+        - id: ch_character_rotation
+          type: number_input
+          summary: "Character rotation"
+          description: "Per-glyph rotation in degrees; positive = clockwise (SVG convention)."
+          style: { flex: 1 }
+          bind:
+            value: "panel.character_rotation"
+        - type: text
+          content: "°"
           style: { font_size: 10 }
 
     - type: separator
@@ -154,3 +348,36 @@ content:
           description: "Strike through the selected text."
           bind:
             value: "panel.strikethrough"
+
+    - type: separator
+
+    # ── Language + Anti-alias ────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Language"
+          style: { width: 60, font_size: 10 }
+        - id: ch_language
+          type: text_input
+          summary: "Language"
+          description: "ISO 639-1 language code (e.g. en, fr, de, ja)."
+          style: { flex: 1 }
+          bind:
+            value: "panel.language"
+
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "AA"
+          style: { width: 60, font_size: 10 }
+        - id: ch_anti_aliasing
+          type: text_input
+          summary: "Anti-aliasing"
+          description: "Anti-aliasing mode: None, Sharp, Crisp, Strong, or Smooth."
+          style: { flex: 1 }
+          bind:
+            value: "panel.anti_aliasing"
