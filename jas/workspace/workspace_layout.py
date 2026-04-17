@@ -45,8 +45,15 @@ class PanelKind(Enum):
     SWATCHES = auto()
     STROKE = auto()
     PROPERTIES = auto()
+    CHARACTER = auto()
+    PARAGRAPH = auto()
+    ARTBOARDS = auto()
 
-ALL_PANEL_KINDS = [PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.STROKE, PanelKind.PROPERTIES]
+ALL_PANEL_KINDS = [
+    PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES,
+    PanelKind.STROKE, PanelKind.PROPERTIES,
+    PanelKind.CHARACTER, PanelKind.PARAGRAPH, PanelKind.ARTBOARDS,
+]
 
 @dataclass
 class PanelGroup:
@@ -447,6 +454,9 @@ class WorkspaceLayout:
             PanelKind.SWATCHES: "Swatches",
             PanelKind.STROKE: "Stroke",
             PanelKind.PROPERTIES: "Properties",
+            PanelKind.CHARACTER: "Character",
+            PanelKind.PARAGRAPH: "Paragraph",
+            PanelKind.ARTBOARDS: "Artboards",
         }[kind]
 
     # -- Close / show panels --

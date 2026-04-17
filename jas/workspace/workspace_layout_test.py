@@ -4,6 +4,7 @@ from workspace.workspace_layout import (
     WorkspaceLayout, DockEdge, PanelKind, PanelGroup, GroupAddr, PanelAddr,
     AppConfig, MIN_DOCK_WIDTH, MAX_DOCK_WIDTH, MIN_GROUP_HEIGHT,
     DEFAULT_DOCK_WIDTH, DEFAULT_LAYOUT_NAME, LAYOUT_VERSION,
+    ALL_PANEL_KINDS,
 )
 
 
@@ -476,7 +477,10 @@ def test_hidden_panels_default_empty():
 def test_panel_menu_items_all_visible():
     l = WorkspaceLayout.default_layout()
     items = l.panel_menu_items()
-    assert len(items) == 5
+    assert len(items) == len(ALL_PANEL_KINDS)
+    # `is_panel_visible` is defined as "not in hidden_panels", so a
+    # panel defined but not in any group still reports visible by
+    # default — matches the pre-Character/Paragraph/Artboards behavior.
     for _, v in items:
         assert v
 

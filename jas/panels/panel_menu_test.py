@@ -18,7 +18,7 @@ def test_panel_label_all_kinds():
 
 
 def test_all_panel_kinds_count():
-    assert len(ALL_PANEL_KINDS) == 5
+    assert len(ALL_PANEL_KINDS) == 8
 
 
 def test_all_panel_kinds_contains_all():
@@ -27,6 +27,9 @@ def test_all_panel_kinds_contains_all():
     assert PanelKind.SWATCHES in ALL_PANEL_KINDS
     assert PanelKind.STROKE in ALL_PANEL_KINDS
     assert PanelKind.PROPERTIES in ALL_PANEL_KINDS
+    assert PanelKind.CHARACTER in ALL_PANEL_KINDS
+    assert PanelKind.PARAGRAPH in ALL_PANEL_KINDS
+    assert PanelKind.ARTBOARDS in ALL_PANEL_KINDS
 
 
 def test_panel_menu_non_empty():

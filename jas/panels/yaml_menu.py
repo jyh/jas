@@ -26,6 +26,9 @@ PANEL_KIND_TO_CONTENT_ID = {
     PanelKind.SWATCHES: "swatches_panel_content",
     PanelKind.STROKE: "stroke_panel_content",
     PanelKind.PROPERTIES: "properties_panel_content",
+    PanelKind.CHARACTER: "character_panel_content",
+    PanelKind.PARAGRAPH: "paragraph_panel_content",
+    PanelKind.ARTBOARDS: "artboards_panel_content",
 }
 
 # Module-level cache for loaded panel specs
