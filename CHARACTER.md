@@ -431,3 +431,48 @@ defaults appear as absence.
 
 Shortcuts for Character panel actions (All Caps, Underline, etc.) are
 defined in `workspace/shortcuts.yaml` rather than here.
+
+## Panel-to-selection wiring status
+
+The current `workspace/panels/character.yaml` renders every control
+listed above bound to panel-local state (via `bind: value:
+"panel.X"`). None of those bindings yet flow through to the selected
+text element's attributes — editing the Size field, ticking a Caps
+toggle, etc. updates panel-local state but does not call
+`Controller::set_character_attribute`. This is a known gap that
+blocks real Character-panel editing.
+
+The root cause is in the Rust renderer (`jas_dioxus/src/interpreter/
+renderer.rs`): the per-widget event handlers in
+`render_number_input`, `render_text_input`, and `render_checkbox`
+are hardcoded against `stroke_panel` (they call
+`set_stroke_field(&mut st.stroke_panel, …)` on every
+`panel.*` bind, regardless of which panel the widget belongs to).
+`set_stroke_field` has a `_ => {}` fallthrough, so Character-panel
+bindings silently no-op instead of corrupting stroke state.
+
+Three layers of work are required to unblock this, in order:
+
+1. **Generify the widget event handlers.** The renderer must
+   dispatch panel-state writes to the correct panel (stroke_panel,
+   character_panel, paragraph_panel, …) based on the enclosing
+   panel's content id, not on a hardcoded identifier. This is a
+   Rust renderer refactor, not panel-specific.
+2. **Add per-panel state structs.** Mirror `StrokePanelState`
+   with `CharacterPanelState`, `ParagraphPanelState`, etc., on
+   `AppState`, plus `apply_character_panel_to_selection()` glue
+   that calls `Controller::set_character_attribute` per the unified
+   TSPAN.md algorithm.
+3. **Propagate to the other three apps** (Swift / OCaml / Python)
+   so Character-panel edits reach the selected text everywhere, not
+   just in Rust.
+
+Layer 1 is architectural and shared across all non-stroke panels
+(Character, Paragraph, Artboards), so it unblocks several pending
+features at once rather than being Character-specific. Read-side
+wiring (panel reflects current selection) is a separate chunk that
+layers on top of the same state structs.
+
+Until the wiring lands, the Character panel functions as a visual
+placeholder: the controls render and accept input, panel-local
+state updates, but nothing propagates to the document.
