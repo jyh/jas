@@ -20,6 +20,9 @@ transcript/
 __pycache__/
 *.pyc
 
+# Editor backup files (emacs, etc.)
+*~
+
 # NOTE: workspace/workspace.json is COMMITTED. Regenerate with:
 #   python -m workspace_interpreter.compile workspace/ workspace/workspace.json
 # CI enforces freshness; see scripts/check_workspace_json.sh.
