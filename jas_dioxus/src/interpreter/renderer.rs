@@ -2381,10 +2381,12 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
         String::new()
     };
 
-    let field = dialog_field(bind_expr);
+    let bind_target = classify_bind(bind_expr);
     let mut dialog_signal = rctx.dialog_ctx.0;
     let mut revision = rctx.revision;
     let app = rctx.app.clone();
+    let app_for_input = app.clone();
+    let panel_kind = rctx.panel_kind;
     // Special case: layers panel search binding
     let is_search = bind_expr == "panel.search_query";
     // Read live value from AppState if search
@@ -2401,23 +2403,56 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
             placeholder: "{placeholder}",
             initial_value: "{value}",
             style: "color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
-            oninput: move |evt: Event<FormData>| {
+            onchange: move |evt: Event<FormData>| {
                 let new_val = evt.value();
                 if is_search {
-                    let a = app.clone();
-                    let v = new_val.clone();
+                    // search updates live via oninput below; change event is a no-op
+                    return;
+                }
+                match &bind_target {
+                    BindTarget::Dialog(field) => {
+                        if let Some(mut ds) = dialog_signal() {
+                            ds.set_value(field, serde_json::json!(new_val));
+                            dialog_signal.set(Some(ds));
+                        }
+                    }
+                    BindTarget::Panel(field) => {
+                        let f = field.clone();
+                        let v = new_val.clone();
+                        let app = app.clone();
+                        spawn(async move {
+                            let mut st = app.borrow_mut();
+                            match panel_kind {
+                                Some(PanelKind::Character) => {
+                                    set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
+                                    st.apply_character_panel_to_selection();
+                                }
+                                Some(PanelKind::Stroke) | None => {
+                                    set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
+                                }
+                                // Paragraph, Artboards, Layers, Color, Swatches, Properties:
+                                // no-op until their per-panel state lands.
+                                _ => {}
+                            }
+                        });
+                    }
+                    BindTarget::None => {}
+                }
+                revision += 1;
+            },
+            oninput: move |evt: Event<FormData>| {
+                // The layers-panel search input still commits live, so
+                // the tree filters as the user types. All other text
+                // inputs commit on change (Enter / blur) to match the
+                // number_input convention.
+                if is_search {
+                    let a = app_for_input.clone();
+                    let v = evt.value();
                     spawn(async move {
                         a.borrow_mut().layers_search_query = v;
                         revision += 1;
                     });
-                    return;
                 }
-                if field.is_empty() { return; }
-                if let Some(mut ds) = dialog_signal() {
-                    ds.set_value(&field, serde_json::json!(new_val));
-                    dialog_signal.set(Some(ds));
-                }
-                revision += 1;
             },
         }
     }
