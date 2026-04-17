@@ -135,6 +135,36 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
     m.insert("profile".into(), J::String(sp.profile.clone()));
     m.insert("profile_flipped".into(), J::Bool(sp.profile_flipped));
 
+    // ── Character panel overrides ───────────────────────────
+    // Read font_family / font_size from the first selected
+    // Text / TextPath element; fall back to panel state when no
+    // text element is selected. Matches the stroke-panel pattern
+    // above; the Character panel dropdowns then show the current
+    // selection's attributes rather than stale panel-local values.
+    let sel_text = st.tab().and_then(|tab| {
+        let doc = tab.model.document();
+        doc.selection.first().and_then(|es| {
+            let elem = doc.get_element(&es.path)?;
+            match elem {
+                crate::geometry::element::Element::Text(t) => {
+                    Some((t.font_family.clone(), t.font_size))
+                }
+                crate::geometry::element::Element::TextPath(tp) => {
+                    Some((tp.font_family.clone(), tp.font_size))
+                }
+                _ => None,
+            }
+        })
+    });
+    let cp = &st.character_panel;
+    if let Some((ff, fs)) = sel_text {
+        m.insert("font_family".into(), J::String(ff));
+        m.insert("font_size".into(), serde_json::json!(fs));
+    } else {
+        m.insert("font_family".into(), J::String(cp.font_family.clone()));
+        m.insert("font_size".into(), serde_json::json!(cp.font_size));
+    }
+
     m
 }
 
@@ -588,7 +618,13 @@ pub(crate) fn build_dock_groups(
                         let panel_body: Option<(serde_json::Value, serde_json::Value)> = group.active_panel().and_then(|kind| {
                             let content_id = panel_kind_to_content_id(kind);
                             let ws = Workspace::load()?;
-                            let content = ws.panel_content(content_id)?.clone();
+                            // Pass the whole panel object (type: panel, id, content)
+                            // so render_el dispatches to render_panel — which sets
+                            // RenderCtx.panel_kind from the panel id. Without this,
+                            // widget writes inside the panel fall through to the
+                            // Stroke/None branch (stroke state writes silently
+                            // discard non-stroke fields like font_family).
+                            let content = ws.panel(content_id)?.clone();
                             let mut panel_map: serde_json::Map<String, serde_json::Value> = ws.panel_state_defaults(content_id).into_iter().collect();
                             // Apply live overrides only for relevant panels
                             let panel_name = content_id.strip_suffix("_panel_content").unwrap_or("");

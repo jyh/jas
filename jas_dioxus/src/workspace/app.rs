@@ -619,6 +619,10 @@ pub fn App() -> Element {
             sizes: "32x32",
             href: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAAsTAAALEwEAmpwYAAACi0lEQVR4nOXWXYhVVRQH8F85fqZQpiA65IOSBPkyDyIpipI4BKYvRpSgQZBmQYoQFCn6ICqCAwq+iCIU2FggKEhEkBYjgvQiGAgZDhIiqFNZieVc2bAObA5n7twZ594R+sPm7HP2Onv919rrY/M/wcTRVL4I93GiWQrmYXqd9VOo4T88N5KKx+M73EQfNlbIzMS/QSCN1Y+rdBbmxHx9EGjDi7iHCSX545nyNLoeR/ku3MZv+BKb4ylc+w8mZ/Kvoj8U/xHPi40qW4df0Yt38AL+wvNh5WWswTV8g6sl617CnVD6M7bE/E88NZjy9vh5ITpivjyez4TMD1iFKXgDS7EgjqgjvFQL0h2xXhxDMqYuFuOn7L0HK9Ad38/jUim3P4zN+8LKNH+A12J9Rkams5HovoaD4dbesHwMVuJ1PFv650Ap2Poy5cLt92PtXQ1gFnZjT4XL9sRGeyPQzuBhprwnsqKMX2L9Ew1kami2PQuctiy4yiPVg/fDU1X4caipuCPb/HjkfHG++UiWfZQF6EA4G/Kf1xN6M1x6JTuzqpFiZD9ewdMNGvRV/FvUjkp0VSjrD0JH8R7mGx6+iP1ODoXAQ3yPnZH3KZ2Gi+7Y8+t6Qttwq47ra1H1kjc2YPYQCBRdMREZFNOwJFx+CBei1lcRSvX9g1IfqMK3IX/EMDE2ynPK43NR6XIidyNzJg3w/+WQ22eEMAVvRzMqul4a17GsQr442o81AfOzICtuP1tL5b2olm9pIjpxIyNSWPty9i0dY1MxM7ploTC167XZe73744hhalxEatE7jsU8eadlmIu/S5lyWovxaYnAZ60mMBm/ZwTSbavlOJzdD8eNBoH26AObRkO5Jx6PAEOB3bAxAGnpAAAAAElFTkSuQmCC"
         }
+        document::Link {
+            rel: "stylesheet",
+            href: "https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css",
+        }
         style { r#"
             html, body {{ margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; }}
             #main {{ height: 100%; }}

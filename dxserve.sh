@@ -4,4 +4,4 @@ cd jas_dioxus
 
 set -x
 
-dx serve --addr 0.0.0.0
+dx serve --addr 0.0.0.0 --port 8080
