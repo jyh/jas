@@ -1,9 +1,9 @@
 # Phase 3 — Category C doc-mutation primitives
 
-**Status**: Phase 3 design tollgate. Supersedes the Phase 3 sketch in
-`PLAN.md`. Written before coding so the shape of the YAML, the new
-primitives, and the required evaluator changes are fixed before 11
-actions × 4 languages × tests begin.
+**Status**: Phase 3 complete (2026-04). Kept as the design record;
+supersedes the Phase 3 sketch in `PLAN.md`. See commits tagged
+"Phase 3" in `git log` for the implementation across
+`workspace_interpreter/` (reference) and the four native ports.
 
 Precedes the reference implementation in `workspace_interpreter/`
 (Step P3.1) and the per-language ports (Steps P3.2–P3.4).

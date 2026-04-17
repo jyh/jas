@@ -497,3 +497,63 @@ evaluators + Python reference. `open_layer_options` resolves the
 target layer's current state via `element_at(path_from_id(...))` and
 passes it as dialog init params; Rust's hardcoded open_layer_options
 arm is deleted.
+
+---
+
+## Known parity gaps (2026-04-17 review)
+
+Items surfaced during the codebase-review session that are tracked
+here rather than fixed inline.  Each represents dead or unwired code
+in one or more language ports where the sibling language has a live
+implementation.
+
+### G1. Stroke-panel propagation not wired in Swift / OCaml / Python
+
+- **Rust**: `apply_stroke_panel_to_selection` is called from
+  `renderer.rs:538, 2222, 2376` whenever a render-affecting stroke
+  panel key changes. Selected elements get restroked immediately.
+- **Swift**: `applyStrokePanelToSelection` / `syncStrokePanelFromSelection`
+  / `isStrokeRenderKey` exist in `Sources/Interpreter/Effects.swift`
+  but have zero source callers — only .build artifacts reference them.
+- **OCaml**: `apply_stroke_panel_to_selection` /
+  `sync_stroke_panel_from_selection` / `is_stroke_render_key` in
+  `lib/interpreter/effects.ml` are exposed in the .mli (as of the
+  review) but never invoked.
+- **Python**: `apply_stroke_panel_to_selection` in
+  `workspace_interpreter/effects.py` has no caller in `jas/`.
+
+Origin: commit `63fa3b4` "Propagate stroke panel features to Swift,
+OCaml, and Python" added the primitives; the integration step was
+skipped in 3 of 4 languages.  User-visible effect: stroke panel
+changes don't restroke the current selection until re-selected.
+
+Fix scope: design the hook (inline in `set_panel_state` handler vs.
+platform-effect registration vs. controller observer), then implement
+in 3 languages.  ~4–8 hours cross-language.
+
+### G2. OCaml `doc.wrap_in_group` top-level only
+
+`jas_ocaml/lib/panels/panel_menu.ml:308` restricts `doc.wrap_in_group`
+to top-level paths; the comment notes it needs a nonexistent
+`Document.insert_element_at`.  Swift now handles arbitrary-depth
+wrap via `replaceElement` + `insertElementAfter` (JasSwift/Sources/
+Panels/LayersPanel.swift, as of the review).  The same technique
+would port to OCaml: replace the group's first child, then
+`insert_element_after` the rest.
+
+### G3. OCaml schema: `field_type.List` / `field_type.Object` never
+constructed
+
+`jas_ocaml/lib/interpreter/schema.ml` declares these variants but
+no `get_entry` call uses them; `coerce_value` handles them
+defensively. Either dead variants from an aborted feature or
+placeholders for list/object-typed state fields Python supports
+but OCaml doesn't yet. Worth cross-checking against
+`workspace_interpreter/schema.py`.
+
+### G4. OCaml schema: `resolved_key.Ambiguous` never emitted
+
+`apply_set_schemadriven` at `schema.ml:205` pattern-matches
+`Ambiguous` defensively, but `resolve_key` never returns it.
+Python's equivalent likely does, for cross-namespace collisions.
+Latent cross-language parity gap.
