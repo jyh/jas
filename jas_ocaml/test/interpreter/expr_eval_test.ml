@@ -335,6 +335,25 @@ let closure_lexical_tests = [
       (eval ~state:[("x", `Int 42)] "let f = fun _ -> state.x in f(null)"));
 ]
 
+(* AST cache: same source string evaluated against varying contexts
+   must yield per-call results, not a stale cached value. *)
+let ast_cache_tests = [
+  Alcotest.test_case "repeat_with_different_contexts" `Quick (fun () ->
+    assert_number 1.0 (eval ~state:[("x", `Int 1)] "state.x");
+    assert_number 99.0 (eval ~state:[("x", `Int 99)] "state.x");
+    (* Re-eval is a cache hit; must still see the per-call ctx. *)
+    assert_number 1.0 (eval ~state:[("x", `Int 1)] "state.x");
+    assert_number 100.0 (eval ~state:[("x", `Int 99)] "state.x + 1"));
+  Alcotest.test_case "unparseable_input_caches_failure" `Quick (fun () ->
+    (match evaluate ")(" (`Assoc []) with
+     | Null -> ()
+     | _ -> Alcotest.fail "expected Null");
+    (* Second call hits the cached None and still returns Null. *)
+    (match evaluate ")(" (`Assoc []) with
+     | Null -> ()
+     | _ -> Alcotest.fail "expected Null"));
+]
+
 let () =
   Alcotest.run "Expr_eval" [
     "Arithmetic", arithmetic_tests;
@@ -348,4 +367,5 @@ let () =
     "Phase3 HOF", hof_tests;
     "Phase3 Path", path_tests;
     "Phase3 LexicalClosure", closure_lexical_tests;
+    "AstCache", ast_cache_tests;
   ]
