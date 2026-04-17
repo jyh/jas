@@ -9,6 +9,7 @@ helper used by every drawing tool.
 from __future__ import annotations
 
 import math
+from abc import abstractmethod
 from typing import TYPE_CHECKING
 
 from tools.tool import CanvasTool, ToolContext
@@ -62,11 +63,19 @@ class DrawingToolBase(CanvasTool):
         if elem is not None:
             ctx.controller.add_element(elem)
 
-    def _create_element(self, ctx, sx, sy, ex, ey):
-        raise NotImplementedError
+    @abstractmethod
+    def _create_element(self, ctx: ToolContext, sx: float, sy: float,
+                        ex: float, ey: float):
+        """Create the element to add after a drag completes.
 
-    def _draw_preview(self, painter: QPainter, sx, sy, ex, ey) -> None:
-        raise NotImplementedError
+        Returns the element, or None to skip adding (e.g. a zero-size drag)."""
+        ...
+
+    @abstractmethod
+    def _draw_preview(self, painter: QPainter, sx: float, sy: float,
+                      ex: float, ey: float) -> None:
+        """Draw the tool's drag preview onto [painter]."""
+        ...
 
     def draw_overlay(self, ctx: ToolContext, painter: QPainter) -> None:
         from PySide6.QtGui import QColor, QPen, Qt
