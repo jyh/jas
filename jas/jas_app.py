@@ -866,6 +866,11 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
     app = QApplication([])
     window = MainWindow()
     window.resize(1200, 900)

@@ -380,15 +380,13 @@ def _run_boolean_sweep(a: PolygonSet, b: PolygonSet, op: _Op) -> PolygonSet:
             events[idx].in_result = _edge_in_result(events[idx], op)
         else:
             other = ev.other_event
-            try:
+            if other in status:
                 pos = status.index(other)
                 above = status[pos + 1] if pos + 1 < len(status) else None
                 below = status[pos - 1] if pos > 0 else None
                 status.pop(pos)
                 if below is not None and above is not None:
                     _possible_intersection(events, queue, below, above, op)
-            except ValueError:
-                pass
             events[idx].in_result = events[other].in_result
 
     return _connect_edges(events, processed)
