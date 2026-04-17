@@ -2241,6 +2241,12 @@
             },
             {
               "panels": [
+                "character"
+              ],
+              "active": 0
+            },
+            {
+              "panels": [
                 "stroke",
                 "properties"
               ],
