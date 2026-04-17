@@ -162,5 +162,8 @@ func panelKindToContentId(_ kind: PanelKind) -> String {
     case .swatches: return "swatches_panel_content"
     case .stroke: return "stroke_panel_content"
     case .properties: return "properties_panel_content"
+    case .character: return "character_panel_content"
+    case .paragraph: return "paragraph_panel_content"
+    case .artboards: return "artboards_panel_content"
     }
 }

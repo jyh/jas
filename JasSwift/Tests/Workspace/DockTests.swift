@@ -539,7 +539,10 @@ private func rightDockId(_ l: WorkspaceLayout) -> DockId {
 @Test func panelMenuItemsAllVisible() {
     let l = WorkspaceLayout.defaultLayout()
     let items = l.panelMenuItems()
-    #expect(items.count == 5)
+    #expect(items.count == PanelKind.all.count)
+    // `isPanelVisible` is defined as "not in hiddenPanels", so a panel
+    // that is defined but not in any group still reports visible by
+    // default — matches the pre-Character/Paragraph/Artboards behavior.
     for (_, visible) in items { #expect(visible) }
 }
 

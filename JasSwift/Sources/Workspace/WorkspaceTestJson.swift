@@ -81,6 +81,9 @@ private func panelKindStr(_ k: PanelKind) -> String {
     case .swatches: return "swatches"
     case .stroke: return "stroke"
     case .properties: return "properties"
+    case .character: return "character"
+    case .paragraph: return "paragraph"
+    case .artboards: return "artboards"
     }
 }
 
@@ -531,6 +534,9 @@ private func parsePanelKind(_ v: Any?) -> PanelKind {
     case "swatches": return .swatches
     case "stroke": return .stroke
     case "properties": return .properties
+    case "character": return .character
+    case "paragraph": return .paragraph
+    case "artboards": return .artboards
     default: return .layers
     }
 }
