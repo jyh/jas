@@ -273,17 +273,30 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             let aa_attr = if !e.aa_mode.is_empty() {
                 format!(" urn:jas:1:aa-mode=\"{}\"", escape_xml(&e.aa_mode))
             } else { String::new() };
+            let rotate_attr = if !e.rotate.is_empty() {
+                format!(" rotate=\"{}\"", e.rotate)
+            } else { String::new() };
+            let hs_attr = if !e.horizontal_scale.is_empty() {
+                format!(" horizontal-scale=\"{}\"", e.horizontal_scale)
+            } else { String::new() };
+            let vs_attr = if !e.vertical_scale.is_empty() {
+                format!(" vertical-scale=\"{}\"", e.vertical_scale)
+            } else { String::new() };
+            let kern_attr = if !e.kerning.is_empty() {
+                format!(" urn:jas:1:kerning-mode=\"{}\"", escape_xml(&e.kerning))
+            } else { String::new() };
             let svg_y = e.y + e.font_size * 0.8;
             let is_flat = e.tspans.len() == 1 && e.tspans[0].has_no_overrides();
             if is_flat {
                 // Pre-Tspan-compatible emission: no <tspan> wrapper.
                 format!(
-                    "{}<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}{}{}{}{}{}{}{}>{}</text>\n",
+                    "{}<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}>{}</text>\n",
                     indent,
                     fmt(px(e.x)), fmt(px(svg_y)),
                     escape_xml(&e.font_family), fmt(px(e.font_size)),
                     fw_attr, fst_attr, td_attr, tt_attr, fv_attr, bs_attr,
                     lh_attr, ls_attr, lang_attr, aa_attr,
+                    rotate_attr, hs_attr, vs_attr, kern_attr,
                     area_attrs,
                     fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                     opacity_attr(e.common.opacity),
@@ -295,12 +308,13 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 // across round-trips (TSPAN.md SVG serialization).
                 let tspan_xml: String = e.tspans.iter().map(tspan_svg).collect();
                 format!(
-                    "{}<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}{}{}{}{}{}{}{} xml:space=\"preserve\">{}</text>\n",
+                    "{}<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{} xml:space=\"preserve\">{}</text>\n",
                     indent,
                     fmt(px(e.x)), fmt(px(svg_y)),
                     escape_xml(&e.font_family), fmt(px(e.font_size)),
                     fw_attr, fst_attr, td_attr, tt_attr, fv_attr, bs_attr,
                     lh_attr, ls_attr, lang_attr, aa_attr,
+                    rotate_attr, hs_attr, vs_attr, kern_attr,
                     area_attrs,
                     fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                     opacity_attr(e.common.opacity),
@@ -342,6 +356,18 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             let aa_attr = if !e.aa_mode.is_empty() {
                 format!(" urn:jas:1:aa-mode=\"{}\"", escape_xml(&e.aa_mode))
             } else { String::new() };
+            let rotate_attr = if !e.rotate.is_empty() {
+                format!(" rotate=\"{}\"", e.rotate)
+            } else { String::new() };
+            let hs_attr = if !e.horizontal_scale.is_empty() {
+                format!(" horizontal-scale=\"{}\"", e.horizontal_scale)
+            } else { String::new() };
+            let vs_attr = if !e.vertical_scale.is_empty() {
+                format!(" vertical-scale=\"{}\"", e.vertical_scale)
+            } else { String::new() };
+            let kern_attr = if !e.kerning.is_empty() {
+                format!(" urn:jas:1:kerning-mode=\"{}\"", escape_xml(&e.kerning))
+            } else { String::new() };
             let is_flat = e.tspans.len() == 1 && e.tspans[0].has_no_overrides();
             let (space_attr, body) = if is_flat {
                 (String::new(), escape_xml(&e.content()))
@@ -352,12 +378,13 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 )
             };
             format!(
-                "{}<text{}{} font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}{}{}{}{}{}><textPath path=\"{}\"{}{}>{}</textPath></text>\n",
+                "{}<text{}{} font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}><textPath path=\"{}\"{}{}>{}</textPath></text>\n",
                 indent,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 escape_xml(&e.font_family), fmt(px(e.font_size)),
                 fw_attr, fst_attr, td_attr, tt_attr, fv_attr, bs_attr,
                 lh_attr, ls_attr, lang_attr, aa_attr,
+                rotate_attr, hs_attr, vs_attr, kern_attr,
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
                 path_data(&e.d), offset_attr, space_attr,
                 body,
@@ -1151,6 +1178,12 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             let aa = node.attrs.get("urn:jas:1:aa-mode")
                 .cloned()
                 .unwrap_or_default();
+            let rotate = get_s(node, "rotate", "").to_string();
+            let h_scale = get_s(node, "horizontal-scale", "").to_string();
+            let v_scale = get_s(node, "vertical-scale", "").to_string();
+            let kerning = node.attrs.get("urn:jas:1:kerning-mode")
+                .cloned()
+                .unwrap_or_default();
 
             // Check for textPath child
             for child in &node.children {
@@ -1203,6 +1236,10 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                         letter_spacing: ls.clone(),
                         xml_lang: lang.clone(),
                         aa_mode: aa.clone(),
+                        rotate: rotate.clone(),
+                        horizontal_scale: h_scale.clone(),
+                        vertical_scale: v_scale.clone(),
+                        kerning: kerning.clone(),
                         fill: parse_fill(node),
                         stroke: parse_stroke(node),
                         common,
@@ -1266,6 +1303,10 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 letter_spacing: ls,
                 xml_lang: lang,
                 aa_mode: aa,
+                rotate,
+                horizontal_scale: h_scale,
+                vertical_scale: v_scale,
+                kerning,
                 width: tw,
                 height: th,
                 fill: parse_fill(node),
