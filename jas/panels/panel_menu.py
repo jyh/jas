@@ -118,6 +118,17 @@ def panel_menu(kind: PanelKind) -> list[PanelMenuItem]:
             PanelMenuItem.separator(),
             PanelMenuItem.action("Close Layers", "close_panel"),
         ]
+    if kind == PanelKind.CHARACTER:
+        return [
+            PanelMenuItem.toggle("Show Snap to Glyph Options", "toggle_snap_to_glyph_visible"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.toggle("All Caps", "toggle_all_caps"),
+            PanelMenuItem.toggle("Small Caps", "toggle_small_caps"),
+            PanelMenuItem.toggle("Superscript", "toggle_superscript"),
+            PanelMenuItem.toggle("Subscript", "toggle_subscript"),
+            PanelMenuItem.separator(),
+            PanelMenuItem.action("Close Character", "close_panel"),
+        ]
     return [PanelMenuItem.action(f"Close {panel_label(kind)}", "close_panel")]
 
 
