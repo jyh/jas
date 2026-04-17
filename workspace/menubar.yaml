@@ -96,7 +96,11 @@ menubar:
       - { id: menu_toolbar,    label: "Toolbar",     action: toggle_pane,  params: { pane: toolbar } }
       - { id: menu_panels,     label: "Panels",      action: toggle_pane,  params: { pane: dock } }
       - separator
-      - { id: menu_layers,     label: "&Layers",     action: toggle_panel, params: { panel: layers } }
-      - { id: menu_color,      label: "&Color",      action: toggle_panel, params: { panel: color } }
-      - { id: menu_stroke,     label: "&Stroke",     action: toggle_panel, params: { panel: stroke } }
-      - { id: menu_properties, label: "&Properties",  action: toggle_panel, params: { panel: properties } }
+      - { id: menu_artboards,     label: "&Artboards",    action: toggle_panel, params: { panel: artboards } }
+      - { id: menu_layers,        label: "&Layers",       action: toggle_panel, params: { panel: layers } }
+      - { id: menu_color,         label: "&Color",        action: toggle_panel, params: { panel: color } }
+      - { id: menu_swatches,      label: "S&watches",     action: toggle_panel, params: { panel: swatches } }
+      - { id: menu_stroke,        label: "&Stroke",       action: toggle_panel, params: { panel: stroke } }
+      - { id: menu_properties,    label: "&Properties",   action: toggle_panel, params: { panel: properties } }
+      - { id: menu_character,     label: "Ch&aracter",    action: toggle_panel, params: { panel: character } }
+      - { id: menu_paragraph,     label: "Para&graph",    action: toggle_panel, params: { panel: paragraph } }
