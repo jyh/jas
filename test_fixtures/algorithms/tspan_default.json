@@ -1,0 +1,14 @@
+{
+  "algorithm": "tspan_default",
+  "comparison": "exact",
+  "description": "default_tspan() returns a tspan with id=0, empty content, and every override slot null. See TSPAN.md Primitives section.",
+  "vectors": [
+    {
+      "name": "returns_empty_tspan_with_id_zero",
+      "expected": {
+        "id": 0,
+        "content": ""
+      }
+    }
+  ]
+}

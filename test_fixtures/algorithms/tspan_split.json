@@ -1,0 +1,87 @@
+{
+  "algorithm": "tspan_split",
+  "comparison": "exact",
+  "description": "split(text, tspan_idx, offset) returns (text', left_idx, right_idx). See TSPAN.md Primitives > Split at offset. Tspans carry only the fields relevant to the test; absent override slots are null.",
+  "vectors": [
+    {
+      "name": "split_at_offset_zero_no_change",
+      "input": {
+        "tspans": [{"id": 0, "content": "Hello"}],
+        "tspan_idx": 0,
+        "offset": 0
+      },
+      "expected": {
+        "tspans": [{"id": 0, "content": "Hello"}],
+        "left_idx": -1,
+        "right_idx": 0
+      }
+    },
+    {
+      "name": "split_at_end_no_change",
+      "input": {
+        "tspans": [{"id": 0, "content": "Hello"}],
+        "tspan_idx": 0,
+        "offset": 5
+      },
+      "expected": {
+        "tspans": [{"id": 0, "content": "Hello"}],
+        "left_idx": 0,
+        "right_idx": 1
+      }
+    },
+    {
+      "name": "split_in_middle_preserves_left_id_assigns_fresh_right",
+      "input": {
+        "tspans": [{"id": 0, "content": "Hello"}],
+        "tspan_idx": 0,
+        "offset": 2
+      },
+      "expected": {
+        "tspans": [
+          {"id": 0, "content": "He"},
+          {"id": 1, "content": "llo"}
+        ],
+        "left_idx": 0,
+        "right_idx": 1
+      }
+    },
+    {
+      "name": "split_in_middle_carries_attribute_overrides_to_both_sides",
+      "input": {
+        "tspans": [{"id": 7, "content": "world", "font_weight": "bold"}],
+        "tspan_idx": 0,
+        "offset": 3
+      },
+      "expected": {
+        "tspans": [
+          {"id": 7, "content": "wor", "font_weight": "bold"},
+          {"id": 8, "content": "ld", "font_weight": "bold"}
+        ],
+        "left_idx": 0,
+        "right_idx": 1
+      }
+    },
+    {
+      "name": "split_of_middle_tspan_in_a_list_fresh_id_above_current_max",
+      "input": {
+        "tspans": [
+          {"id": 0, "content": "abc"},
+          {"id": 3, "content": "defgh"},
+          {"id": 5, "content": "ij"}
+        ],
+        "tspan_idx": 1,
+        "offset": 2
+      },
+      "expected": {
+        "tspans": [
+          {"id": 0, "content": "abc"},
+          {"id": 3, "content": "de"},
+          {"id": 6, "content": "fgh"},
+          {"id": 5, "content": "ij"}
+        ],
+        "left_idx": 1,
+        "right_idx": 2
+      }
+    }
+  ]
+}

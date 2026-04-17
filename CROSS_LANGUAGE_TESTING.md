@@ -169,37 +169,140 @@ Note: path command keys are sorted alphabetically like all other keys.
 **Text:**
 ```json
 {
-  "type": "text",
-  "x": 10.0, "y": 20.0,
-  "content": "Hello",
+  "baseline_shift": null,
+  "dx": null,
+  "fill": null,
   "font_family": "sans-serif",
   "font_size": 16.0,
   "font_style": "normal",
+  "font_variant": null,
   "font_weight": "normal",
   "height": 0.0,
-  "text_decoration": "none",
+  "jas_aa_mode": null,
+  "jas_fractional_widths": null,
+  "jas_kerning_mode": null,
+  "jas_no_break": null,
+  "letter_spacing": null,
+  "line_height": null,
+  "locked": false,
+  "opacity": 1.0,
+  "rotate": null,
+  "stroke": null,
+  "style_name": null,
+  "text_decoration": [],
+  "text_rendering": null,
+  "text_transform": null,
+  "transform": null,
+  "tspans": [<Tspan>, ...],
+  "type": "text",
+  "visibility": "preview",
   "width": 0.0,
-  "fill": null, "stroke": null,
-  "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"
+  "x": 10.0,
+  "xml_lang": null,
+  "y": 20.0
 }
 ```
+
+Notes on the Text shape:
+
+- `content` is **not** an emitted key — it's a derived accessor on
+  `Text`, equivalent to concatenating every tspan's `content`. The
+  canonical JSON carries `tspans` instead; tools that need the full
+  string compute it at read time.
+- Extended attribute slots (`baseline_shift`, `dx`, `letter_spacing`,
+  `line_height`, `rotate`, `font_variant`, `text_transform`,
+  `xml_lang`, `text_rendering`, `style_name`, `jas_aa_mode`,
+  `jas_kerning_mode`, `jas_fractional_widths`, `jas_no_break`) are
+  element-wide defaults. `null` means no element-wide default — the
+  global default applies. See `TSPAN.md`.
+- `text_decoration` is a **sorted array** with members drawn from
+  `{"underline", "line-through"}`. An empty array means no
+  decoration. Canonical ordering: alphabetical (`"line-through"`
+  precedes `"underline"`).
+- `tspans` is a non-empty array. The empty-content case is a single
+  default tspan.
 
 **TextPath:**
 ```json
 {
-  "type": "text_path",
+  "baseline_shift": null,
   "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 100.0, "y": 0.0}],
-  "content": "Hello",
-  "start_offset": 0.0,
+  "dx": null,
+  "fill": null,
   "font_family": "sans-serif",
   "font_size": 16.0,
   "font_style": "normal",
+  "font_variant": null,
   "font_weight": "normal",
-  "text_decoration": "none",
-  "fill": null, "stroke": null,
-  "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"
+  "jas_aa_mode": null,
+  "jas_fractional_widths": null,
+  "jas_kerning_mode": null,
+  "jas_no_break": null,
+  "letter_spacing": null,
+  "line_height": null,
+  "locked": false,
+  "opacity": 1.0,
+  "rotate": null,
+  "start_offset": 0.0,
+  "stroke": null,
+  "style_name": null,
+  "text_decoration": [],
+  "text_rendering": null,
+  "text_transform": null,
+  "transform": null,
+  "tspans": [<Tspan>, ...],
+  "type": "text_path",
+  "visibility": "preview",
+  "xml_lang": null
 }
 ```
+
+`TextPath` has full tspan parity with `Text` (see TSPAN.md Open
+Question #1 resolution).
+
+**Tspan:**
+```json
+{
+  "baseline_shift": null,
+  "content": "Hello",
+  "dx": null,
+  "font_family": null,
+  "font_size": null,
+  "font_style": null,
+  "font_variant": null,
+  "font_weight": null,
+  "id": 0,
+  "jas_aa_mode": null,
+  "jas_fractional_widths": null,
+  "jas_kerning_mode": null,
+  "jas_no_break": null,
+  "letter_spacing": null,
+  "line_height": null,
+  "rotate": null,
+  "style_name": null,
+  "text_decoration": null,
+  "text_rendering": null,
+  "text_transform": null,
+  "transform": null,
+  "xml_lang": null
+}
+```
+
+Notes on the Tspan shape:
+
+- `id` is the in-memory stable id (monotonic `u32`, unique within
+  the parent `Text` or `TextPath`). Starts at `0` for the initial
+  tspan; each split that creates a right fragment bumps it above
+  the current max.
+- `content` is the tspan's substring of its parent's text. Always
+  present, even when empty (`""`).
+- Every other key is an override slot; `null` means "inherit from
+  the parent element's effective value". A non-null override
+  substitutes for the parent, except `transform` which composes
+  (see TSPAN.md's Attribute Inheritance section).
+- `text_decoration` override is either `null` (inherit) or a
+  sorted-array set (same domain as on Text).
+- Tspan objects never appear outside a parent's `tspans` array.
 
 **Group:**
 ```json

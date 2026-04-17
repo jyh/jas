@@ -1,0 +1,43 @@
+{
+  "algorithm": "tspan_concat_content",
+  "comparison": "exact",
+  "description": "concat_content(text) returns the concatenation of every tspan's content in reading order. Tspans carry only minimal fields here; absent override slots are null. See TSPAN.md Primitives section.",
+  "vectors": [
+    {
+      "name": "single_empty_tspan",
+      "tspans": [{"id": 0, "content": ""}],
+      "expected": ""
+    },
+    {
+      "name": "single_tspan_with_content",
+      "tspans": [{"id": 0, "content": "Hello"}],
+      "expected": "Hello"
+    },
+    {
+      "name": "two_tspans",
+      "tspans": [
+        {"id": 0, "content": "Hello "},
+        {"id": 1, "content": "world"}
+      ],
+      "expected": "Hello world"
+    },
+    {
+      "name": "three_tspans_with_overrides",
+      "tspans": [
+        {"id": 0, "content": "A"},
+        {"id": 1, "content": "B", "font_weight": "bold"},
+        {"id": 2, "content": "C"}
+      ],
+      "expected": "ABC"
+    },
+    {
+      "name": "empty_content_tspan_is_ignored_by_concat",
+      "tspans": [
+        {"id": 0, "content": "before"},
+        {"id": 1, "content": ""},
+        {"id": 2, "content": "after"}
+      ],
+      "expected": "beforeafter"
+    }
+  ]
+}
