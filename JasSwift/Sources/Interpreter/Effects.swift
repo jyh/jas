@@ -506,3 +506,145 @@ func syncStrokePanelFromSelection(store: StateStore, controller: Controller) {
 func isStrokeRenderKey(_ key: String) -> Bool {
     strokeRenderKeys.contains(key)
 }
+
+// MARK: - Character panel state binding
+
+/// Character-panel state keys stored under the `character_panel`
+/// scope in the StateStore. Used by
+/// `applyCharacterPanelToSelection` to build the attribute dict
+/// that gets pushed onto selected Text / TextPath elements.
+private let characterPanelKeys: Set<String> = [
+    "font_family", "style_name", "font_size", "leading", "kerning",
+    "tracking", "vertical_scale", "horizontal_scale",
+    "baseline_shift", "character_rotation",
+    "all_caps", "small_caps", "superscript", "subscript",
+    "underline", "strikethrough",
+    "language", "anti_aliasing",
+]
+
+/// Build the Text-attribute dict from the current Character-panel
+/// state and apply it to every selected Text / TextPath. Mirrors the
+/// Rust `apply_character_panel_to_selection` pipeline — for an
+/// object-level selection (whole element), writes the panel's current
+/// attributes directly to the parent element's fields.
+///
+/// Field mapping follows CHARACTER.md's SVG-attribute table:
+/// - underline + strikethrough combine into `text_decoration`
+///   (`"line-through underline"`, alphabetical).
+/// - all_caps → `text_transform: uppercase`; small_caps
+///   (when All Caps is off) → `font_variant: small-caps`.
+/// - superscript / subscript → `baseline_shift: super/sub`; the
+///   super/sub toggles take precedence over the numeric pt value.
+/// - style_name parses into font_weight + font_style
+///   (Regular / Italic / Bold / Bold Italic).
+/// - Leading → line_height (`Npt`, empty at the 120% Auto default),
+///   Tracking → letter_spacing (`Nem` from N/1000).
+///
+/// Called after any write to a character-panel key so the two
+/// surfaces (in-panel controls and the selected element) stay in
+/// sync.
+func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
+    let p = store.getPanelState("character_panel")
+    var attrs: [String: Any] = [:]
+
+    if let v = p["font_family"] as? String { attrs["font_family"] = v }
+    if let v = (p["font_size"] as? NSNumber)?.doubleValue { attrs["font_size"] = NSNumber(value: v) }
+
+    // style_name → font_weight + font_style
+    if let style = p["style_name"] as? String {
+        switch style.trimmingCharacters(in: .whitespaces) {
+        case "Regular":
+            attrs["font_weight"] = "normal"; attrs["font_style"] = "normal"
+        case "Italic":
+            attrs["font_weight"] = "normal"; attrs["font_style"] = "italic"
+        case "Bold":
+            attrs["font_weight"] = "bold"; attrs["font_style"] = "normal"
+        case "Bold Italic", "Italic Bold":
+            attrs["font_weight"] = "bold"; attrs["font_style"] = "italic"
+        default: break
+        }
+    }
+
+    // underline + strikethrough → text_decoration
+    let underline = p["underline"] as? Bool ?? false
+    let strikethrough = p["strikethrough"] as? Bool ?? false
+    let tdTokens = [
+        strikethrough ? "line-through" : nil,
+        underline ? "underline" : nil,
+    ].compactMap { $0 }
+    attrs["text_decoration"] = tdTokens.isEmpty ? "" : tdTokens.joined(separator: " ")
+
+    // all_caps / small_caps
+    let allCaps = p["all_caps"] as? Bool ?? false
+    let smallCaps = p["small_caps"] as? Bool ?? false
+    attrs["text_transform"] = allCaps ? "uppercase" : ""
+    attrs["font_variant"] = (smallCaps && !allCaps) ? "small-caps" : ""
+
+    // super / sub + numeric baseline_shift
+    let superOn = p["superscript"] as? Bool ?? false
+    let subOn = p["subscript"] as? Bool ?? false
+    let bsNum = (p["baseline_shift"] as? NSNumber)?.doubleValue ?? 0.0
+    if superOn {
+        attrs["baseline_shift"] = "super"
+    } else if subOn {
+        attrs["baseline_shift"] = "sub"
+    } else if bsNum != 0.0 {
+        attrs["baseline_shift"] = _fmtNum(bsNum) + "pt"
+    } else {
+        attrs["baseline_shift"] = ""
+    }
+
+    // leading → line_height: empty at 120% Auto default
+    let fsNum = (p["font_size"] as? NSNumber)?.doubleValue ?? 12.0
+    let leading = (p["leading"] as? NSNumber)?.doubleValue ?? (fsNum * 1.2)
+    attrs["line_height"] = abs(leading - fsNum * 1.2) < 1e-6
+        ? "" : _fmtNum(leading) + "pt"
+
+    // tracking (1/1000 em) → letter_spacing
+    let tracking = (p["tracking"] as? NSNumber)?.doubleValue ?? 0.0
+    attrs["letter_spacing"] = tracking == 0.0 ? "" : _fmtNum(tracking / 1000.0) + "em"
+
+    // kerning (1/1000 em) → numeric-only for now
+    let kerning = (p["kerning"] as? NSNumber)?.doubleValue ?? 0.0
+    attrs["kerning"] = kerning == 0.0 ? "" : _fmtNum(kerning / 1000.0) + "em"
+
+    // character_rotation (degrees)
+    let rot = (p["character_rotation"] as? NSNumber)?.doubleValue ?? 0.0
+    attrs["rotate"] = rot == 0.0 ? "" : _fmtNum(rot)
+
+    // vertical / horizontal scale (percent; identity = 100)
+    let vScale = (p["vertical_scale"] as? NSNumber)?.doubleValue ?? 100.0
+    let hScale = (p["horizontal_scale"] as? NSNumber)?.doubleValue ?? 100.0
+    attrs["vertical_scale"] = vScale == 100.0 ? "" : _fmtNum(vScale)
+    attrs["horizontal_scale"] = hScale == 100.0 ? "" : _fmtNum(hScale)
+
+    // language → xml_lang; anti_aliasing → aa_mode (Sharp default empties)
+    if let v = p["language"] as? String { attrs["xml_lang"] = v }
+    if let v = p["anti_aliasing"] as? String {
+        attrs["aa_mode"] = (v == "Sharp" || v.isEmpty) ? "" : v
+    }
+
+    // Snapshot + apply. No-op when nothing in the selection is text.
+    if !controller.model.document.selection.isEmpty {
+        controller.model.snapshot()
+        controller.setSelectionTextAttributes(attrs)
+    }
+}
+
+/// Check if a state key lives under the Character-panel scope.
+func isCharacterPanelKey(_ key: String) -> Bool {
+    characterPanelKeys.contains(key)
+}
+
+/// Format a number for CSS length / value output: integers have no
+/// decimal, fractions drop trailing zeros. Matches the Rust
+/// `fmt_num` helper.
+private func _fmtNum(_ n: Double) -> String {
+    if n == n.rounded(.towardZero) {
+        return String(Int(n))
+    }
+    var s = String(format: "%.4f", n)
+    while s.hasSuffix("0") { s.removeLast() }
+    if s.hasSuffix(".") { s.removeLast() }
+    return s
+}

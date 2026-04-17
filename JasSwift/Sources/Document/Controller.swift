@@ -523,6 +523,105 @@ public class Controller {
         model.document = doc
     }
 
+    /// Write Character-panel text attributes to every `Text` /
+    /// `TextPath` element in the current selection. Non-text elements
+    /// in the selection are left alone. Fields not present in `attrs`
+    /// preserve their current value on each element. Mirrors the Rust
+    /// `apply_character_panel_to_selection` pipeline.
+    ///
+    /// Recognised keys (mostly string): `font_family`, `font_size`
+    /// (number), `font_weight`, `font_style`, `text_decoration`,
+    /// `text_transform`, `font_variant`, `baseline_shift`,
+    /// `line_height`, `letter_spacing`, `xml_lang`, `aa_mode`,
+    /// `rotate`, `horizontal_scale`, `vertical_scale`, `kerning`.
+    /// Unknown keys are silently ignored.
+    public func setSelectionTextAttributes(_ attrs: [String: Any]) {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let newElem: Element
+            switch elem {
+            case .text(let t):
+                newElem = .text(Self.applyTextAttrs(t, attrs: attrs))
+            case .textPath(let tp):
+                newElem = .textPath(Self.applyTextPathAttrs(tp, attrs: attrs))
+            default:
+                continue
+            }
+            doc = doc.replaceElement(es.path, with: newElem)
+        }
+        model.document = doc
+    }
+
+    /// Apply a character-attribute dict onto a single `Text`, returning
+    /// a new value with only the overlapping keys replaced.
+    private static func applyTextAttrs(_ t: Text, attrs: [String: Any]) -> Text {
+        let ff = (attrs["font_family"] as? String) ?? t.fontFamily
+        let fs = (attrs["font_size"] as? NSNumber)?.doubleValue ?? t.fontSize
+        let fw = (attrs["font_weight"] as? String) ?? t.fontWeight
+        let fst = (attrs["font_style"] as? String) ?? t.fontStyle
+        let td = (attrs["text_decoration"] as? String) ?? t.textDecoration
+        let tt = (attrs["text_transform"] as? String) ?? t.textTransform
+        let fv = (attrs["font_variant"] as? String) ?? t.fontVariant
+        let bs = (attrs["baseline_shift"] as? String) ?? t.baselineShift
+        let lh = (attrs["line_height"] as? String) ?? t.lineHeight
+        let ls = (attrs["letter_spacing"] as? String) ?? t.letterSpacing
+        let lang = (attrs["xml_lang"] as? String) ?? t.xmlLang
+        let aa = (attrs["aa_mode"] as? String) ?? t.aaMode
+        let rotate = (attrs["rotate"] as? String) ?? t.rotate
+        let hscale = (attrs["horizontal_scale"] as? String) ?? t.horizontalScale
+        let vscale = (attrs["vertical_scale"] as? String) ?? t.verticalScale
+        let kern = (attrs["kerning"] as? String) ?? t.kerning
+        return Text(x: t.x, y: t.y, tspans: t.tspans,
+                    fontFamily: ff, fontSize: fs,
+                    fontWeight: fw, fontStyle: fst, textDecoration: td,
+                    textTransform: tt, fontVariant: fv,
+                    baselineShift: bs, lineHeight: lh,
+                    letterSpacing: ls, xmlLang: lang,
+                    aaMode: aa, rotate: rotate,
+                    horizontalScale: hscale, verticalScale: vscale,
+                    kerning: kern,
+                    width: t.width, height: t.height,
+                    fill: t.fill, stroke: t.stroke,
+                    opacity: t.opacity, transform: t.transform,
+                    locked: t.locked, visibility: t.visibility)
+    }
+
+    /// Apply a character-attribute dict onto a single `TextPath`,
+    /// returning a new value with overlapping keys replaced.
+    private static func applyTextPathAttrs(_ tp: TextPath, attrs: [String: Any]) -> TextPath {
+        let ff = (attrs["font_family"] as? String) ?? tp.fontFamily
+        let fs = (attrs["font_size"] as? NSNumber)?.doubleValue ?? tp.fontSize
+        let fw = (attrs["font_weight"] as? String) ?? tp.fontWeight
+        let fst = (attrs["font_style"] as? String) ?? tp.fontStyle
+        let td = (attrs["text_decoration"] as? String) ?? tp.textDecoration
+        let tt = (attrs["text_transform"] as? String) ?? tp.textTransform
+        let fv = (attrs["font_variant"] as? String) ?? tp.fontVariant
+        let bs = (attrs["baseline_shift"] as? String) ?? tp.baselineShift
+        let lh = (attrs["line_height"] as? String) ?? tp.lineHeight
+        let ls = (attrs["letter_spacing"] as? String) ?? tp.letterSpacing
+        let lang = (attrs["xml_lang"] as? String) ?? tp.xmlLang
+        let aa = (attrs["aa_mode"] as? String) ?? tp.aaMode
+        let rotate = (attrs["rotate"] as? String) ?? tp.rotate
+        let hscale = (attrs["horizontal_scale"] as? String) ?? tp.horizontalScale
+        let vscale = (attrs["vertical_scale"] as? String) ?? tp.verticalScale
+        let kern = (attrs["kerning"] as? String) ?? tp.kerning
+        return TextPath(d: tp.d, tspans: tp.tspans,
+                        startOffset: tp.startOffset,
+                        fontFamily: ff, fontSize: fs,
+                        fontWeight: fw, fontStyle: fst, textDecoration: td,
+                        textTransform: tt, fontVariant: fv,
+                        baselineShift: bs, lineHeight: lh,
+                        letterSpacing: ls, xmlLang: lang,
+                        aaMode: aa, rotate: rotate,
+                        horizontalScale: hscale, verticalScale: vscale,
+                        kerning: kern,
+                        fill: tp.fill, stroke: tp.stroke,
+                        opacity: tp.opacity, transform: tp.transform,
+                        locked: tp.locked, visibility: tp.visibility)
+    }
+
     public func setSelectionWidthProfile(_ widthPoints: [StrokeWidthPoint]) {
         var doc = model.document
         if doc.selection.isEmpty { return }
