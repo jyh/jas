@@ -1213,15 +1213,29 @@ and eval_logical ?(local_env : env = []) ?(store_cb : store_cb option)
 (* Public API                                                          *)
 (* ================================================================== *)
 
+(* Cache of parsed ASTs keyed by trimmed source string.  None is
+   cached for unparseable input so we don't re-tokenize+re-parse
+   known-bad strings.  The cache is unbounded but bounded-by-spec:
+   workspace YAML has a finite set of distinct expression strings. *)
+let _ast_cache : (string, ast option) Hashtbl.t = Hashtbl.create 128
+
 let evaluate ?(local_env : env = []) ?(store_cb : store_cb option)
     (expr_str : string) (ctx : Yojson.Safe.t) : value =
   if String.length expr_str = 0 then Null
   else
-    try
-      match parse (String.trim expr_str) with
-      | None -> Null
-      | Some ast -> eval_node ~local_env ?store_cb ast ctx
-    with _ -> Null
+    let key = String.trim expr_str in
+    let ast_opt = match Hashtbl.find_opt _ast_cache key with
+      | Some cached -> cached
+      | None ->
+        let ast = try parse key with _ -> None in
+        Hashtbl.add _ast_cache key ast;
+        ast
+    in
+    match ast_opt with
+    | None -> Null
+    | Some ast ->
+      try eval_node ~local_env ?store_cb ast ctx
+      with _ -> Null
 
 (** Resolve a dot-separated path through a JSON context, returning raw JSON.
     Unlike resolve_path, this preserves Assoc/List structure. *)
