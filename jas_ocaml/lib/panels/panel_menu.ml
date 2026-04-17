@@ -54,7 +54,15 @@ let panel_menu = function
   | Swatches -> [Action { label = "Close Swatches"; command = "close_panel"; shortcut = "" }]
   | Stroke -> [Action { label = "Close Stroke"; command = "close_panel"; shortcut = "" }]
   | Properties -> [Action { label = "Close Properties"; command = "close_panel"; shortcut = "" }]
-  | Character -> [Action { label = "Close Character"; command = "close_panel"; shortcut = "" }]
+  | Character -> [
+      Toggle { label = "Show Snap to Glyph Options"; command = "toggle_snap_to_glyph_visible" };
+      Separator;
+      Toggle { label = "All Caps"; command = "toggle_all_caps" };
+      Toggle { label = "Small Caps"; command = "toggle_small_caps" };
+      Toggle { label = "Superscript"; command = "toggle_superscript" };
+      Toggle { label = "Subscript"; command = "toggle_subscript" };
+      Separator;
+      Action { label = "Close Character"; command = "close_panel"; shortcut = "" } ]
   | Paragraph -> [Action { label = "Close Paragraph"; command = "close_panel"; shortcut = "" }]
   | Artboards -> [Action { label = "Close Artboards"; command = "close_panel"; shortcut = "" }]
 
