@@ -462,3 +462,29 @@ class TestCombined:
             {},
         )
         assert result.value == 11
+
+
+class TestAstCache:
+    """Verify that the parsed-AST cache returns correct results
+    across repeated evaluations against varying contexts."""
+
+    def test_repeat_with_different_contexts(self):
+        ctx1 = {"x": 1}
+        ctx2 = {"x": 99}
+        assert evaluate("x", ctx1).value == 1
+        assert evaluate("x", ctx2).value == 99
+        # Re-eval is a cache hit; must still see the per-call ctx.
+        assert evaluate("x", ctx1).value == 1
+        assert evaluate("x", ctx2).value == 99
+
+    def test_unparseable_input_caches_failure(self):
+        from workspace_interpreter.expr_types import ValueType
+        # First call parses (and fails); second is a cache hit.
+        assert evaluate(")(", {}).type == ValueType.NULL
+        assert evaluate(")(", {}).type == ValueType.NULL
+
+    def test_arithmetic_repeats(self):
+        ctx = {"a": 10, "b": 3}
+        for _ in range(5):
+            assert evaluate("a + b", ctx).value == 13
+            assert evaluate("a * b", ctx).value == 30
