@@ -3953,6 +3953,14 @@
         },
         "separator",
         {
+          "id": "menu_artboards",
+          "label": "&Artboards",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "artboards"
+          }
+        },
+        {
           "id": "menu_layers",
           "label": "&Layers",
           "action": "toggle_panel",
@@ -3969,6 +3977,14 @@
           }
         },
         {
+          "id": "menu_swatches",
+          "label": "S&watches",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "swatches"
+          }
+        },
+        {
           "id": "menu_stroke",
           "label": "&Stroke",
           "action": "toggle_panel",
@@ -3982,6 +3998,22 @@
           "action": "toggle_panel",
           "params": {
             "panel": "properties"
+          }
+        },
+        {
+          "id": "menu_character",
+          "label": "Ch&aracter",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "character"
+          }
+        },
+        {
+          "id": "menu_paragraph",
+          "label": "Para&graph",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "paragraph"
           }
         }
       ]
