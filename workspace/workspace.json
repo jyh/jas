@@ -2241,7 +2241,8 @@
             },
             {
               "panels": [
-                "character"
+                "character",
+                "paragraph"
               ],
               "active": 0
             },
@@ -2254,6 +2255,7 @@
             },
             {
               "panels": [
+                "artboards",
                 "layers"
               ],
               "active": 0
@@ -7961,6 +7963,77 @@
     }
   },
   "panels": {
+    "artboards_panel_content": {
+      "id": "artboards_panel_content",
+      "type": "panel",
+      "summary": "Artboards",
+      "description": "Artboards panel \u2014 initial placeholder implementation. A document has a set of artboards (print page regions) with unique numbers starting at 1 and editable names. New documents start with a single 612\u00d7792pt artboard.\nThis placeholder renders a single editable row (number + name) bound to panel-local state. Real support for multiple artboards, an artboards list, and the Artboard Dialog arrives alongside the Artboard Tool and document-level artboards implementation.\n",
+      "state": {
+        "artboard_number": {
+          "type": "number",
+          "default": 1,
+          "description": "Artboard number (starting at 1)."
+        },
+        "artboard_name": {
+          "type": "string",
+          "default": "Artboard 1",
+          "description": "User-editable artboard name."
+        }
+      },
+      "init": {},
+      "menu": [
+        {
+          "label": "Close Artboards",
+          "action": "close_panel"
+        }
+      ],
+      "content": {
+        "type": "container",
+        "id": "ab_content",
+        "layout": "column",
+        "style": {
+          "padding": 4,
+          "gap": 6
+        },
+        "children": [
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "id": "ab_number",
+                "type": "number_input",
+                "summary": "Artboard number",
+                "description": "Artboard number (1-based).",
+                "min": 1,
+                "style": {
+                  "width": 48
+                },
+                "bind": {
+                  "value": "panel.artboard_number"
+                }
+              },
+              {
+                "id": "ab_name",
+                "type": "text_input",
+                "summary": "Artboard name",
+                "description": "User-editable artboard name.",
+                "style": {
+                  "flex": 1
+                },
+                "bind": {
+                  "value": "panel.artboard_name"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
     "character_panel_content": {
       "id": "character_panel_content",
       "type": "panel",
@@ -10752,6 +10825,313 @@
               {
                 "key": "Escape",
                 "action": "{{if panel.renaming_element != null then 'cancel_rename' else 'exit_isolation_mode'}}"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "paragraph_panel_content": {
+      "id": "paragraph_panel_content",
+      "type": "panel",
+      "summary": "Paragraph",
+      "description": "Paragraph formatting panel \u2014 initial placeholder implementation. Provides alignment + justification toggles, indent and spacing fields, and a hyphenation toggle, bound to panel-local state per PARAGRAPH.md. Not yet wired to actual paragraph attributes on the selected text; real editing arrives with the tspan-aware editing plumbing and paragraph-level support.\n",
+      "state": {
+        "alignment": {
+          "type": "string",
+          "default": "left",
+          "description": "Alignment / justification mode. Values: left, center, right, justify_left, justify_center, justify_right, justify_all. Mutually exclusive in the full spec; not enforced in this placeholder.\n"
+        },
+        "left_indent": {
+          "type": "number",
+          "default": 0,
+          "description": "Left indent in points; applies to every line of the paragraph."
+        },
+        "right_indent": {
+          "type": "number",
+          "default": 0,
+          "description": "Right indent in points."
+        },
+        "first_line_indent": {
+          "type": "number",
+          "default": 0,
+          "description": "Additional indent on the first line of each paragraph, in points."
+        },
+        "space_before": {
+          "type": "number",
+          "default": 0,
+          "description": "Vertical spacing before each paragraph (except the first), in points."
+        },
+        "space_after": {
+          "type": "number",
+          "default": 0,
+          "description": "Vertical spacing after each paragraph, in points."
+        },
+        "hyphenate": {
+          "type": "bool",
+          "default": false,
+          "description": "Whether line breaking is allowed to use hyphenation."
+        }
+      },
+      "init": {},
+      "menu": [
+        {
+          "label": "Close Paragraph",
+          "action": "close_panel"
+        }
+      ],
+      "content": {
+        "type": "container",
+        "id": "pg_content",
+        "layout": "column",
+        "style": {
+          "padding": 4,
+          "gap": 6
+        },
+        "children": [
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Align",
+                "style": {
+                  "width": 60,
+                  "font_size": 10
+                }
+              },
+              {
+                "id": "pg_alignment",
+                "type": "text_input",
+                "summary": "Alignment",
+                "description": "One of: left, center, right, justify_left, justify_center, justify_right, justify_all. Real spec uses seven mutually exclusive icon toggle buttons.\n",
+                "style": {
+                  "flex": 1
+                },
+                "bind": {
+                  "value": "panel.alignment"
+                }
+              }
+            ]
+          },
+          {
+            "type": "separator"
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "L Indent",
+                "style": {
+                  "width": 60,
+                  "font_size": 10
+                }
+              },
+              {
+                "id": "pg_left_indent",
+                "type": "number_input",
+                "summary": "Left indent",
+                "description": "Left indent in points.",
+                "style": {
+                  "flex": 1
+                },
+                "bind": {
+                  "value": "panel.left_indent"
+                }
+              },
+              {
+                "type": "text",
+                "content": "pt",
+                "style": {
+                  "font_size": 10
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "R Indent",
+                "style": {
+                  "width": 60,
+                  "font_size": 10
+                }
+              },
+              {
+                "id": "pg_right_indent",
+                "type": "number_input",
+                "summary": "Right indent",
+                "description": "Right indent in points.",
+                "style": {
+                  "flex": 1
+                },
+                "bind": {
+                  "value": "panel.right_indent"
+                }
+              },
+              {
+                "type": "text",
+                "content": "pt",
+                "style": {
+                  "font_size": 10
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "First",
+                "style": {
+                  "width": 60,
+                  "font_size": 10
+                }
+              },
+              {
+                "id": "pg_first_line_indent",
+                "type": "number_input",
+                "summary": "First-line indent",
+                "description": "Additional indent on the first line of each paragraph, in points.",
+                "style": {
+                  "flex": 1
+                },
+                "bind": {
+                  "value": "panel.first_line_indent"
+                }
+              },
+              {
+                "type": "text",
+                "content": "pt",
+                "style": {
+                  "font_size": 10
+                }
+              }
+            ]
+          },
+          {
+            "type": "separator"
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Before",
+                "style": {
+                  "width": 60,
+                  "font_size": 10
+                }
+              },
+              {
+                "id": "pg_space_before",
+                "type": "number_input",
+                "summary": "Space before",
+                "description": "Vertical spacing before each paragraph (except the first), in points.",
+                "min": 0,
+                "style": {
+                  "flex": 1
+                },
+                "bind": {
+                  "value": "panel.space_before"
+                }
+              },
+              {
+                "type": "text",
+                "content": "pt",
+                "style": {
+                  "font_size": 10
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "After",
+                "style": {
+                  "width": 60,
+                  "font_size": 10
+                }
+              },
+              {
+                "id": "pg_space_after",
+                "type": "number_input",
+                "summary": "Space after",
+                "description": "Vertical spacing after each paragraph, in points.",
+                "min": 0,
+                "style": {
+                  "flex": 1
+                },
+                "bind": {
+                  "value": "panel.space_after"
+                }
+              },
+              {
+                "type": "text",
+                "content": "pt",
+                "style": {
+                  "font_size": 10
+                }
+              }
+            ]
+          },
+          {
+            "type": "separator"
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 6,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "id": "pg_hyphenate",
+                "type": "checkbox",
+                "label": "Hyphenate",
+                "summary": "Hyphenate",
+                "description": "When on, line breaking is allowed to use hyphenation.",
+                "bind": {
+                  "value": "panel.hyphenate"
+                }
               }
             ]
           }

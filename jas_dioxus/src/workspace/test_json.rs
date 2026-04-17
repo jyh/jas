@@ -100,6 +100,8 @@ fn panel_kind_str(k: PanelKind) -> &'static str {
         PanelKind::Stroke => "stroke",
         PanelKind::Properties => "properties",
         PanelKind::Character => "character",
+        PanelKind::Paragraph => "paragraph",
+        PanelKind::Artboards => "artboards",
     }
 }
 
@@ -520,6 +522,8 @@ fn parse_panel_kind(v: &serde_json::Value) -> PanelKind {
         "stroke" => PanelKind::Stroke,
         "properties" => PanelKind::Properties,
         "character" => PanelKind::Character,
+        "paragraph" => PanelKind::Paragraph,
+        "artboards" => PanelKind::Artboards,
         _ => PanelKind::Layers,
     }
 }

@@ -49,6 +49,8 @@ pub enum PanelKind {
     Stroke,
     Properties,
     Character,
+    Paragraph,
+    Artboards,
 }
 
 impl PanelKind {
@@ -60,6 +62,8 @@ impl PanelKind {
         Self::Stroke,
         Self::Properties,
         Self::Character,
+        Self::Paragraph,
+        Self::Artboards,
     ];
 }
 
@@ -271,9 +275,9 @@ impl WorkspaceLayout {
                     DockId(0),
                     vec![
                         PanelGroup::new(vec![PanelKind::Color, PanelKind::Swatches]),
-                        PanelGroup::new(vec![PanelKind::Character]),
+                        PanelGroup::new(vec![PanelKind::Character, PanelKind::Paragraph]),
                         PanelGroup::new(vec![PanelKind::Stroke, PanelKind::Properties]),
-                        PanelGroup::new(vec![PanelKind::Layers]),
+                        PanelGroup::new(vec![PanelKind::Artboards, PanelKind::Layers]),
                     ],
                     DEFAULT_DOCK_WIDTH,
                 ),
@@ -1480,18 +1484,19 @@ mod tests {
 
     #[test]
     fn move_last_panel_removes_group() {
-        // Find the group containing Layers; it has only one panel, so
-        // moving that panel away should remove the group entirely.
+        // Isolate Layers into its own group (by pulling out its group-
+        // mate Artboards first), then move Layers to the Color group
+        // and verify the now-empty source group is removed.
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        let (lg, lpi) = panel_of(&l, id, PanelKind::Layers);
+        let (ag, api) = panel_of(&l, id, PanelKind::Artboards);
+        l.detach_panel(pa(id.0, ag, api), 0.0, 0.0);
         let before = l.dock(id).unwrap().groups.len();
+        let (lg, lpi) = panel_of(&l, id, PanelKind::Layers);
         let cg = group_of(&l, id, PanelKind::Color);
         l.move_panel_to_group(pa(id.0, lg, lpi), ga(id.0, cg));
         let d = l.dock(id).unwrap();
         assert_eq!(d.groups.len(), before - 1);
-        // Layers is now somewhere in the anchored dock (specifically in
-        // the Color group).
         let layers_still_present = d.groups.iter()
             .any(|g| g.panels.contains(&PanelKind::Layers));
         assert!(layers_still_present);
@@ -1499,13 +1504,19 @@ mod tests {
 
     #[test]
     fn move_last_panel_removes_floating() {
+        // Detach any group into a floating dock, reduce it to a single
+        // panel, then move that panel back; the empty floating dock is
+        // removed.
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        let (lg, _) = panel_of(&l, id, PanelKind::Layers);
-        let fid = l.detach_group(ga(id.0, lg), 50.0, 50.0).unwrap();
-        let cg = group_of(&l, id, PanelKind::Color);
-        // Floating has one group with one panel (Layers). Move it back.
-        l.move_panel_to_group(pa(fid.0, 0, 0), ga(id.0, cg));
+        let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
+        while l.dock(fid).unwrap().groups[0].panels.len() > 1 {
+            l.detach_panel(pa(fid.0, 0, 0), 0.0, 0.0);
+        }
+        // Destination: any surviving anchored group (Stroke is still
+        // in the anchored dock after we detached group 0).
+        let sg = group_of(&l, id, PanelKind::Stroke);
+        l.move_panel_to_group(pa(fid.0, 0, 0), ga(id.0, sg));
         assert!(l.dock(fid).is_none());
     }
 
@@ -1564,12 +1575,15 @@ mod tests {
 
     #[test]
     fn insert_panel_cleans_source() {
-        // Move Layers' sole panel into its own brand-new group at the
-        // end; the original single-panel group should be cleaned up
-        // (total count unchanged) and Layers should sit in the last
-        // group by itself.
+        // Isolate Layers into a single-panel group (by pulling its
+        // group-mate Artboards out first). Then insert Layers as its
+        // own new group at the end — the original single-panel group
+        // should be cleaned up (net count unchanged) and Layers should
+        // sit in the last group by itself.
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
+        let (ag, api) = panel_of(&l, id, PanelKind::Artboards);
+        l.detach_panel(pa(id.0, ag, api), 0.0, 0.0);
         let before = l.dock(id).unwrap().groups.len();
         let (lg, lpi) = panel_of(&l, id, PanelKind::Layers);
         l.insert_panel_as_new_group(pa(id.0, lg, lpi), id, 99);
@@ -1617,8 +1631,14 @@ mod tests {
 
     #[test]
     fn detach_panel_last_removes_group() {
+        // Isolate any anchored group to a single panel by pulling the
+        // others off, then detach that last panel: the group should
+        // disappear.
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
+        // Pull Artboards out first so Layers stands alone in its group.
+        let (ag, api) = panel_of(&l, id, PanelKind::Artboards);
+        l.detach_panel(pa(id.0, ag, api), 0.0, 0.0);
         let before = l.dock(id).unwrap().groups.len();
         let (lg, lpi) = panel_of(&l, id, PanelKind::Layers);
         l.detach_panel(pa(id.0, lg, lpi), 50.0, 50.0);
@@ -1629,12 +1649,15 @@ mod tests {
     fn detach_panel_last_removes_floating() {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        let (lg, _) = panel_of(&l, id, PanelKind::Layers);
-        let f1 = l.detach_group(ga(id.0, lg), 50.0, 50.0).unwrap();
-        // f1 has one group with one panel (Layers). Detach it.
-        let _f2 = l.detach_panel(pa(f1.0, 0, 0), 100.0, 100.0);
-        // f1 should be gone
-        assert!(l.dock(f1).is_none());
+        // Detach any group into a floating dock; then reduce it to a
+        // single panel; detaching that panel should remove the floating
+        // dock entirely.
+        let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
+        while l.dock(fid).unwrap().groups[0].panels.len() > 1 {
+            l.detach_panel(pa(fid.0, 0, 0), 0.0, 0.0);
+        }
+        let _f2 = l.detach_panel(pa(fid.0, 0, 0), 100.0, 100.0);
+        assert!(l.dock(fid).is_none());
     }
 
     // -----------------------------------------------------------------------
@@ -1751,7 +1774,7 @@ mod tests {
 
     #[test]
     fn panel_kind_all_count() {
-        assert_eq!(PanelKind::ALL.len(), 6);
+        assert_eq!(PanelKind::ALL.len(), 8);
     }
 
     #[test]
@@ -1762,6 +1785,8 @@ mod tests {
         assert!(PanelKind::ALL.contains(&PanelKind::Stroke));
         assert!(PanelKind::ALL.contains(&PanelKind::Properties));
         assert!(PanelKind::ALL.contains(&PanelKind::Character));
+        assert!(PanelKind::ALL.contains(&PanelKind::Paragraph));
+        assert!(PanelKind::ALL.contains(&PanelKind::Artboards));
     }
 
     #[test]
@@ -1804,8 +1829,13 @@ mod tests {
 
     #[test]
     fn close_last_panel_removes_group() {
+        // Isolate Layers into a single-panel group first, then close
+        // that sole panel: the group is removed and the panel marked
+        // hidden.
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
+        let (ag, api) = panel_of(&l, id, PanelKind::Artboards);
+        l.detach_panel(pa(id.0, ag, api), 0.0, 0.0);
         let before = l.dock(id).unwrap().groups.len();
         let (lg, lpi) = panel_of(&l, id, PanelKind::Layers);
         l.close_panel(pa(id.0, lg, lpi));
