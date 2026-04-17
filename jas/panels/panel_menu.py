@@ -47,7 +47,11 @@ class PanelMenuItem:
 # All panel kinds
 # ---------------------------------------------------------------------------
 
-ALL_PANEL_KINDS = [PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES, PanelKind.STROKE, PanelKind.PROPERTIES]
+ALL_PANEL_KINDS = [
+    PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES,
+    PanelKind.STROKE, PanelKind.PROPERTIES,
+    PanelKind.CHARACTER, PanelKind.PARAGRAPH, PanelKind.ARTBOARDS,
+]
 
 # Color panel mode commands
 COLOR_MODE_COMMANDS = {
@@ -71,6 +75,9 @@ _PANEL_LABELS: dict[PanelKind, str] = {
     PanelKind.SWATCHES: "Swatches",
     PanelKind.STROKE: "Stroke",
     PanelKind.PROPERTIES: "Properties",
+    PanelKind.CHARACTER: "Character",
+    PanelKind.PARAGRAPH: "Paragraph",
+    PanelKind.ARTBOARDS: "Artboards",
 }
 
 

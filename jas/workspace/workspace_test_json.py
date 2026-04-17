@@ -91,6 +91,9 @@ def _panel_kind_str(k: PanelKind) -> str:
         PanelKind.SWATCHES: "swatches",
         PanelKind.STROKE: "stroke",
         PanelKind.PROPERTIES: "properties",
+        PanelKind.CHARACTER: "character",
+        PanelKind.PARAGRAPH: "paragraph",
+        PanelKind.ARTBOARDS: "artboards",
     }[k]
 
 
@@ -560,6 +563,9 @@ def _parse_panel_kind(v) -> PanelKind:
         "swatches": PanelKind.SWATCHES,
         "stroke": PanelKind.STROKE,
         "properties": PanelKind.PROPERTIES,
+        "character": PanelKind.CHARACTER,
+        "paragraph": PanelKind.PARAGRAPH,
+        "artboards": PanelKind.ARTBOARDS,
     }.get(v, PanelKind.LAYERS)
 
 
