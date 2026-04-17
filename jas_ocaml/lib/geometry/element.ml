@@ -326,6 +326,20 @@ type element =
       font_weight : string;
       font_style : string;
       text_decoration : string;
+      (* 11 Character-panel attributes — empty string = omit /
+         inherit default per CHARACTER.md's identity-omission rule.
+         Mirrors the Rust TextElem shape. *)
+      text_transform : string;
+      font_variant : string;
+      baseline_shift : string;
+      line_height : string;
+      letter_spacing : string;
+      xml_lang : string;
+      aa_mode : string;
+      rotate : string;
+      horizontal_scale : string;
+      vertical_scale : string;
+      kerning : string;
       text_width : float;
       text_height : float;
       fill : fill option;
@@ -344,6 +358,17 @@ type element =
       font_weight : string;
       font_style : string;
       text_decoration : string;
+      text_transform : string;
+      font_variant : string;
+      baseline_shift : string;
+      line_height : string;
+      letter_spacing : string;
+      xml_lang : string;
+      aa_mode : string;
+      rotate : string;
+      horizontal_scale : string;
+      vertical_scale : string;
+      kerning : string;
       fill : fill option;
       stroke : stroke option;
       opacity : float;
@@ -628,11 +653,27 @@ let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = 
 let make_path ?(fill = None) ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d =
   Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview }
 
-let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none") ?(text_width = 0.0) ?(text_height = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y content =
-  Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration; text_width; text_height; fill; stroke; opacity; transform; locked; visibility = Preview }
+let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none")
+    ?(text_transform = "") ?(font_variant = "") ?(baseline_shift = "")
+    ?(line_height = "") ?(letter_spacing = "") ?(xml_lang = "")
+    ?(aa_mode = "") ?(rotate = "") ?(horizontal_scale = "")
+    ?(vertical_scale = "") ?(kerning = "")
+    ?(text_width = 0.0) ?(text_height = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y content =
+  Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration;
+         text_transform; font_variant; baseline_shift; line_height; letter_spacing;
+         xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
+         text_width; text_height; fill; stroke; opacity; transform; locked; visibility = Preview }
 
-let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none") ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d content =
-  Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration; fill; stroke; opacity; transform; locked; visibility = Preview }
+let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none")
+    ?(text_transform = "") ?(font_variant = "") ?(baseline_shift = "")
+    ?(line_height = "") ?(letter_spacing = "") ?(xml_lang = "")
+    ?(aa_mode = "") ?(rotate = "") ?(horizontal_scale = "")
+    ?(vertical_scale = "") ?(kerning = "")
+    ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d content =
+  Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration;
+              text_transform; font_variant; baseline_shift; line_height; letter_spacing;
+              xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
+              fill; stroke; opacity; transform; locked; visibility = Preview }
 
 let make_group ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
   Group { children; opacity; transform; locked; visibility = Preview }

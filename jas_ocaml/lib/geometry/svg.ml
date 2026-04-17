@@ -97,6 +97,27 @@ let path_data cmds =
   ) cmds in
   String.concat " " parts
 
+(** Build the attribute-string fragment for the 11 Character-panel
+    attributes on a [<text>] element, emitting each attribute only
+    when non-empty (per CHARACTER.md's identity-omission rule). *)
+let text_extra_attrs tt fv bs lh ls lang aa rot hs vs kern =
+  let attr name v =
+    if v = "" then "" else Printf.sprintf " %s=\"%s\"" name (escape_xml v)
+  in
+  String.concat "" [
+    attr "text-transform" tt;
+    attr "font-variant" fv;
+    attr "baseline-shift" bs;
+    attr "line-height" lh;
+    attr "letter-spacing" ls;
+    attr "xml:lang" lang;
+    attr "urn:jas:1:aa-mode" aa;
+    attr "rotate" rot;
+    attr "horizontal-scale" hs;
+    attr "vertical-scale" vs;
+    attr "urn:jas:1:kerning-mode" kern;
+  ]
+
 let rec element_svg indent (elem : Element.element) =
   let open Element in
   match elem with
@@ -137,33 +158,41 @@ let rec element_svg indent (elem : Element.element) =
     Printf.sprintf "%s<path d=\"%s\"%s%s%s%s/>"
       indent (path_data d) (fill_attrs fill) (stroke_attrs stroke)
       (opacity_attr opacity) (transform_attr transform)
-  | Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration; text_width; text_height = _; fill; stroke; opacity; transform; _ } ->
+  | Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration;
+           text_transform; font_variant; baseline_shift; line_height; letter_spacing;
+           xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
+           text_width; text_height = _; fill; stroke; opacity; transform; _ } ->
     let area_attrs = if text_width > 0.0 then
       Printf.sprintf " style=\"inline-size: %spx; white-space: pre-wrap;\"" (fmt (px text_width))
     else "" in
     let fw_attr = if font_weight <> "normal" then Printf.sprintf " font-weight=\"%s\"" font_weight else "" in
     let fs_attr = if font_style <> "normal" then Printf.sprintf " font-style=\"%s\"" font_style else "" in
-    let td_attr = if text_decoration <> "none" then Printf.sprintf " text-decoration=\"%s\"" text_decoration else "" in
+    let td_attr = if text_decoration <> "none" && text_decoration <> "" then Printf.sprintf " text-decoration=\"%s\"" text_decoration else "" in
+    let extra = text_extra_attrs text_transform font_variant baseline_shift line_height letter_spacing xml_lang aa_mode rotate horizontal_scale vertical_scale kerning in
     (* SVG `y` is the baseline of the first line; internally `y` is the
        *top* of the layout box, so add the ascent (0.8 *. font_size,
        matching [Text_layout]). *)
     let svg_y = y +. font_size *. 0.8 in
-    Printf.sprintf "%s<text x=\"%s\" y=\"%s\" font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s%s%s%s>%s</text>"
+    Printf.sprintf "%s<text x=\"%s\" y=\"%s\" font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s%s%s%s%s>%s</text>"
       indent (fmt (px x)) (fmt (px svg_y)) (escape_xml font_family) (fmt (px font_size))
-      fw_attr fs_attr td_attr
+      fw_attr fs_attr td_attr extra
       area_attrs (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
       (transform_attr transform) (escape_xml content)
-  | Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration; fill; stroke; opacity; transform; _ } ->
+  | Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration;
+                text_transform; font_variant; baseline_shift; line_height; letter_spacing;
+                xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
+                fill; stroke; opacity; transform; _ } ->
     let offset_attr = if start_offset > 0.0 then
       Printf.sprintf " startOffset=\"%s%%\"" (fmt (start_offset *. 100.0))
     else "" in
     let fw_attr = if font_weight <> "normal" then Printf.sprintf " font-weight=\"%s\"" font_weight else "" in
     let fs_attr = if font_style <> "normal" then Printf.sprintf " font-style=\"%s\"" font_style else "" in
-    let td_attr = if text_decoration <> "none" then Printf.sprintf " text-decoration=\"%s\"" text_decoration else "" in
-    Printf.sprintf "%s<text%s%s font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s><textPath path=\"%s\"%s>%s</textPath></text>"
+    let td_attr = if text_decoration <> "none" && text_decoration <> "" then Printf.sprintf " text-decoration=\"%s\"" text_decoration else "" in
+    let extra = text_extra_attrs text_transform font_variant baseline_shift line_height letter_spacing xml_lang aa_mode rotate horizontal_scale vertical_scale kerning in
+    Printf.sprintf "%s<text%s%s font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s%s><textPath path=\"%s\"%s>%s</textPath></text>"
       indent (fill_attrs fill) (stroke_attrs stroke)
       (escape_xml font_family) (fmt (px font_size))
-      fw_attr fs_attr td_attr
+      fw_attr fs_attr td_attr extra
       (opacity_attr opacity) (transform_attr transform)
       (path_data d) offset_attr (escape_xml content)
   | Group { children; opacity; transform; _ } ->
@@ -530,11 +559,28 @@ let rec parse_element i =
         let fw = match get_attr attrs "font-weight" with Some s -> s | None -> "normal" in
         let fst = match get_attr attrs "font-style" with Some s -> s | None -> "normal" in
         let td = match get_attr attrs "text-decoration" with Some s -> s | None -> "none" in
+        let getopt name = match get_attr attrs name with Some s -> s | None -> "" in
+        let tt = getopt "text-transform" in
+        let fv = getopt "font-variant" in
+        let bs = getopt "baseline-shift" in
+        let lh = getopt "line-height" in
+        let ls = getopt "letter-spacing" in
+        let lang = match get_attr attrs "xml:lang" with
+          | Some s -> s
+          | None -> (match get_attr attrs "lang" with Some s -> s | None -> "") in
+        let aa = getopt "urn:jas:1:aa-mode" in
+        let rotate = getopt "rotate" in
+        let hs = getopt "horizontal-scale" in
+        let vs = getopt "vertical-scale" in
+        let kerning = getopt "urn:jas:1:kerning-mode" in
         let (tp_result, content) = collect_text_or_textpath i in
         (match tp_result with
          | Some (tp_d, tp_content, tp_offset) ->
            Some (Element.make_text_path ~start_offset:tp_offset
              ~font_family:ff ~font_size:fs ~font_weight:fw ~font_style:fst ~text_decoration:td
+             ~text_transform:tt ~font_variant:fv ~baseline_shift:bs
+             ~line_height:lh ~letter_spacing:ls ~xml_lang:lang
+             ~aa_mode:aa ~rotate ~horizontal_scale:hs ~vertical_scale:vs ~kerning
              ~fill ~stroke ~opacity ~transform tp_d tp_content)
          | None ->
            let tw = match get_attr attrs "style" with
@@ -553,7 +599,11 @@ let rec parse_element i =
            (* SVG `y` is the baseline of the first line; convert to the
               layout-box top by subtracting the ascent (0.8 *. fs). *)
            let svg_y = pt (get_attr_f attrs "y" 0.0) in
-           Some (Element.make_text ~font_family:ff ~font_size:fs ~font_weight:fw ~font_style:fst ~text_decoration:td ~text_width:tw ~text_height:th ~fill ~stroke ~opacity ~transform
+           Some (Element.make_text ~font_family:ff ~font_size:fs ~font_weight:fw ~font_style:fst ~text_decoration:td
+             ~text_transform:tt ~font_variant:fv ~baseline_shift:bs
+             ~line_height:lh ~letter_spacing:ls ~xml_lang:lang
+             ~aa_mode:aa ~rotate ~horizontal_scale:hs ~vertical_scale:vs ~kerning
+             ~text_width:tw ~text_height:th ~fill ~stroke ~opacity ~transform
              (pt (get_attr_f attrs "x" 0.0))
              (svg_y -. fs *. 0.8)
              content))
