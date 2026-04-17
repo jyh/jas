@@ -589,9 +589,12 @@ layout:
           - panels: [color, swatches]
             active: 0
             collapsed: false
+          - panels: [character, paragraph]
+            active: 0
+            collapsed: false
           - panels: [stroke, properties]
             active: 0
             collapsed: false
-          - panels: [layers]
+          - panels: [artboards, layers]
             active: 0
             collapsed: false

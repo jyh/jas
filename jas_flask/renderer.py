@@ -1057,6 +1057,9 @@ def _render_menu_items(items: list, actions: dict) -> str:
 _PANEL_LABELS = {
     "layers": "Layers", "color": "Color",
     "stroke": "Stroke", "properties": "Properties",
+    "swatches": "Swatches",
+    "character": "Character", "paragraph": "Paragraph",
+    "artboards": "Artboards",
 }
 
 
