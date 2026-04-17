@@ -1587,14 +1587,38 @@ public struct Path: Equatable {
 }
 
 /// SVG \<text\> element.
+///
+/// Text is stored as an ordered, non-empty list of `tspans`
+/// (per-character-range formatting substructures). The flat
+/// `content: String` surface is preserved as a derived computed
+/// property so existing callers continue to work; every constructor
+/// that takes a `content: String` wraps it in a single default
+/// tspan with id 0.
+///
+/// New character-panel fields (text_transform, font_variant,
+/// baseline_shift, line_height, letter_spacing, xml_lang, aa_mode,
+/// rotate, horizontal_scale, vertical_scale, kerning) mirror the
+/// Rust TextElem shape. Empty string means "omit / inherit default"
+/// per CHARACTER.md's identity-omission rule.
 public struct Text: Equatable {
     public let x: Double, y: Double
-    public let content: String
+    public let tspans: [Tspan]
     public let fontFamily: String
     public let fontSize: Double
     public let fontWeight: String
     public let fontStyle: String
     public let textDecoration: String
+    public let textTransform: String
+    public let fontVariant: String
+    public let baselineShift: String
+    public let lineHeight: String
+    public let letterSpacing: String
+    public let xmlLang: String
+    public let aaMode: String
+    public let rotate: String
+    public let horizontalScale: String
+    public let verticalScale: String
+    public let kerning: String
     public let width: Double
     public let height: Double
     public let fill: Fill?
@@ -1604,23 +1628,74 @@ public struct Text: Equatable {
     public let locked: Bool
     public let visibility: Visibility
 
-    public init(x: Double, y: Double, content: String,
+    /// Primary tspans-based initializer. Used by canonical JSON /
+    /// SVG parsers that have already split the text into tspans.
+    public init(x: Double, y: Double, tspans: [Tspan],
                 fontFamily: String = "sans-serif", fontSize: Double = 16.0,
                 fontWeight: String = "normal", fontStyle: String = "normal",
                 textDecoration: String = "none",
+                textTransform: String = "", fontVariant: String = "",
+                baselineShift: String = "", lineHeight: String = "",
+                letterSpacing: String = "", xmlLang: String = "",
+                aaMode: String = "", rotate: String = "",
+                horizontalScale: String = "", verticalScale: String = "",
+                kerning: String = "",
                 width: Double = 0, height: Double = 0,
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
                 visibility: Visibility = .preview) {
-        self.x = x; self.y = y; self.content = content
+        self.x = x; self.y = y; self.tspans = tspans
         self.fontFamily = fontFamily; self.fontSize = fontSize
         self.fontWeight = fontWeight; self.fontStyle = fontStyle; self.textDecoration = textDecoration
+        self.textTransform = textTransform; self.fontVariant = fontVariant
+        self.baselineShift = baselineShift; self.lineHeight = lineHeight
+        self.letterSpacing = letterSpacing; self.xmlLang = xmlLang
+        self.aaMode = aaMode; self.rotate = rotate
+        self.horizontalScale = horizontalScale; self.verticalScale = verticalScale
+        self.kerning = kerning
         self.width = width; self.height = height
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
         self.visibility = visibility
     }
+
+    /// Backward-compatible convenience initializer that wraps a flat
+    /// string in a single default tspan (id 0, no overrides).
+    public init(x: Double, y: Double, content: String,
+                fontFamily: String = "sans-serif", fontSize: Double = 16.0,
+                fontWeight: String = "normal", fontStyle: String = "normal",
+                textDecoration: String = "none",
+                textTransform: String = "", fontVariant: String = "",
+                baselineShift: String = "", lineHeight: String = "",
+                letterSpacing: String = "", xmlLang: String = "",
+                aaMode: String = "", rotate: String = "",
+                horizontalScale: String = "", verticalScale: String = "",
+                kerning: String = "",
+                width: Double = 0, height: Double = 0,
+                fill: Fill? = nil, stroke: Stroke? = nil,
+                opacity: Double = 1.0, transform: Transform? = nil,
+                locked: Bool = false,
+                visibility: Visibility = .preview) {
+        let t = Tspan(id: 0, content: content)
+        self.init(x: x, y: y, tspans: [t],
+                  fontFamily: fontFamily, fontSize: fontSize,
+                  fontWeight: fontWeight, fontStyle: fontStyle,
+                  textDecoration: textDecoration,
+                  textTransform: textTransform, fontVariant: fontVariant,
+                  baselineShift: baselineShift, lineHeight: lineHeight,
+                  letterSpacing: letterSpacing, xmlLang: xmlLang,
+                  aaMode: aaMode, rotate: rotate,
+                  horizontalScale: horizontalScale, verticalScale: verticalScale,
+                  kerning: kerning,
+                  width: width, height: height,
+                  fill: fill, stroke: stroke,
+                  opacity: opacity, transform: transform,
+                  locked: locked, visibility: visibility)
+    }
+
+    /// Derived content: concatenation of every tspan's content.
+    public var content: String { concatTspanContent(tspans) }
 
     public var isAreaText: Bool { width > 0 && height > 0 }
 
@@ -1632,6 +1707,12 @@ public struct Text: Equatable {
              fontFamily: fontFamily, fontSize: fontSize,
              fontWeight: fontWeight, fontStyle: fontStyle,
              textDecoration: textDecoration,
+             textTransform: textTransform, fontVariant: fontVariant,
+             baselineShift: baselineShift, lineHeight: lineHeight,
+             letterSpacing: letterSpacing, xmlLang: xmlLang,
+             aaMode: aaMode, rotate: rotate,
+             horizontalScale: horizontalScale, verticalScale: verticalScale,
+             kerning: kerning,
              width: width, height: height,
              fill: fill, stroke: stroke,
              opacity: opacity, transform: transform, locked: locked)
@@ -1658,15 +1739,30 @@ public struct Text: Equatable {
 }
 
 /// SVG \<text\>\<textPath\> — text rendered along a path.
+///
+/// Same tspan migration as `Text`: stored as `tspans`, `content` is
+/// computed, the `content:` initializer wraps in a default tspan.
+/// The 11 new character-panel fields mirror `Text`'s.
 public struct TextPath: Equatable {
     public let d: [PathCommand]
-    public let content: String
+    public let tspans: [Tspan]
     public let startOffset: Double
     public let fontFamily: String
     public let fontSize: Double
     public let fontWeight: String
     public let fontStyle: String
     public let textDecoration: String
+    public let textTransform: String
+    public let fontVariant: String
+    public let baselineShift: String
+    public let lineHeight: String
+    public let letterSpacing: String
+    public let xmlLang: String
+    public let aaMode: String
+    public let rotate: String
+    public let horizontalScale: String
+    public let verticalScale: String
+    public let kerning: String
     public let fill: Fill?
     public let stroke: Stroke?
     public let opacity: Double
@@ -1675,22 +1771,69 @@ public struct TextPath: Equatable {
     public let locked: Bool
     public let visibility: Visibility
 
+    public init(d: [PathCommand], tspans: [Tspan],
+                startOffset: Double = 0.0,
+                fontFamily: String = "sans-serif", fontSize: Double = 16.0,
+                fontWeight: String = "normal", fontStyle: String = "normal",
+                textDecoration: String = "none",
+                textTransform: String = "", fontVariant: String = "",
+                baselineShift: String = "", lineHeight: String = "",
+                letterSpacing: String = "", xmlLang: String = "",
+                aaMode: String = "", rotate: String = "",
+                horizontalScale: String = "", verticalScale: String = "",
+                kerning: String = "",
+                fill: Fill? = nil, stroke: Stroke? = nil,
+                opacity: Double = 1.0, transform: Transform? = nil,
+                locked: Bool = false,
+                visibility: Visibility = .preview) {
+        self.d = d; self.tspans = tspans; self.startOffset = startOffset
+        self.fontFamily = fontFamily; self.fontSize = fontSize
+        self.fontWeight = fontWeight; self.fontStyle = fontStyle; self.textDecoration = textDecoration
+        self.textTransform = textTransform; self.fontVariant = fontVariant
+        self.baselineShift = baselineShift; self.lineHeight = lineHeight
+        self.letterSpacing = letterSpacing; self.xmlLang = xmlLang
+        self.aaMode = aaMode; self.rotate = rotate
+        self.horizontalScale = horizontalScale; self.verticalScale = verticalScale
+        self.kerning = kerning
+        self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
+        self.locked = locked
+        self.visibility = visibility
+    }
+
+    /// Backward-compatible initializer: wraps a flat content string in
+    /// a single default tspan.
     public init(d: [PathCommand], content: String = "Lorem Ipsum",
                 startOffset: Double = 0.0,
                 fontFamily: String = "sans-serif", fontSize: Double = 16.0,
                 fontWeight: String = "normal", fontStyle: String = "normal",
                 textDecoration: String = "none",
+                textTransform: String = "", fontVariant: String = "",
+                baselineShift: String = "", lineHeight: String = "",
+                letterSpacing: String = "", xmlLang: String = "",
+                aaMode: String = "", rotate: String = "",
+                horizontalScale: String = "", verticalScale: String = "",
+                kerning: String = "",
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
                 visibility: Visibility = .preview) {
-        self.d = d; self.content = content; self.startOffset = startOffset
-        self.fontFamily = fontFamily; self.fontSize = fontSize
-        self.fontWeight = fontWeight; self.fontStyle = fontStyle; self.textDecoration = textDecoration
-        self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
-        self.locked = locked
-        self.visibility = visibility
+        let t = Tspan(id: 0, content: content)
+        self.init(d: d, tspans: [t], startOffset: startOffset,
+                  fontFamily: fontFamily, fontSize: fontSize,
+                  fontWeight: fontWeight, fontStyle: fontStyle,
+                  textDecoration: textDecoration,
+                  textTransform: textTransform, fontVariant: fontVariant,
+                  baselineShift: baselineShift, lineHeight: lineHeight,
+                  letterSpacing: letterSpacing, xmlLang: xmlLang,
+                  aaMode: aaMode, rotate: rotate,
+                  horizontalScale: horizontalScale, verticalScale: verticalScale,
+                  kerning: kerning,
+                  fill: fill, stroke: stroke,
+                  opacity: opacity, transform: transform,
+                  locked: locked, visibility: visibility)
     }
+
+    public var content: String { concatTspanContent(tspans) }
 
     public var bounds: BBox {
         return inflateBounds(pathBounds(d), stroke)
@@ -1702,6 +1845,12 @@ public struct TextPath: Equatable {
                  fontFamily: fontFamily, fontSize: fontSize,
                  fontWeight: fontWeight, fontStyle: fontStyle,
                  textDecoration: textDecoration,
+                 textTransform: textTransform, fontVariant: fontVariant,
+                 baselineShift: baselineShift, lineHeight: lineHeight,
+                 letterSpacing: letterSpacing, xmlLang: xmlLang,
+                 aaMode: aaMode, rotate: rotate,
+                 horizontalScale: horizontalScale, verticalScale: verticalScale,
+                 kerning: kerning,
                  fill: fill, stroke: stroke,
                  opacity: opacity, transform: transform, locked: locked)
     }
