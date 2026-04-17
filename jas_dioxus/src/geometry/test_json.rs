@@ -328,7 +328,7 @@ fn element_json(elem: &Element) -> String {
         Element::Text(e) => {
             o.str_val("type", "text");
             common_fields(&mut o, &e.common);
-            o.str_val("content", &e.content);
+            o.str_val("content", &e.content());
             o.raw("fill", fill_json(&e.fill));
             o.str_val("font_family", &e.font_family);
             o.num("font_size", e.font_size);
@@ -344,7 +344,7 @@ fn element_json(elem: &Element) -> String {
         Element::TextPath(e) => {
             o.str_val("type", "text_path");
             common_fields(&mut o, &e.common);
-            o.str_val("content", &e.content);
+            o.str_val("content", &e.content());
             let cmds: Vec<String> = e.d.iter().map(path_command_json).collect();
             o.raw("d", json_array(&cmds));
             o.raw("fill", fill_json(&e.fill));
@@ -582,30 +582,38 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             width_points: vec![],
             common,
         }),
-        "text" => Element::Text(TextElem {
-            x: parse_f(&v["x"]), y: parse_f(&v["y"]),
-            content: v["content"].as_str().unwrap_or("").to_string(),
-            font_family: v["font_family"].as_str().unwrap_or("sans-serif").to_string(),
-            font_size: parse_f(&v["font_size"]),
-            font_weight: v["font_weight"].as_str().unwrap_or("normal").to_string(),
-            font_style: v["font_style"].as_str().unwrap_or("normal").to_string(),
-            text_decoration: v["text_decoration"].as_str().unwrap_or("none").to_string(),
-            width: parse_f(&v["width"]), height: parse_f(&v["height"]),
-            fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
-            common,
-        }),
-        "text_path" => Element::TextPath(TextPathElem {
-            d: parse_path_commands(&v["d"]),
-            content: v["content"].as_str().unwrap_or("").to_string(),
-            start_offset: parse_f(&v["start_offset"]),
-            font_family: v["font_family"].as_str().unwrap_or("sans-serif").to_string(),
-            font_size: parse_f(&v["font_size"]),
-            font_weight: v["font_weight"].as_str().unwrap_or("normal").to_string(),
-            font_style: v["font_style"].as_str().unwrap_or("normal").to_string(),
-            text_decoration: v["text_decoration"].as_str().unwrap_or("none").to_string(),
-            fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
-            common,
-        }),
+        "text" => {
+            let mut text = TextElem::from_string(
+                parse_f(&v["x"]), parse_f(&v["y"]),
+                v["content"].as_str().unwrap_or(""),
+                v["font_family"].as_str().unwrap_or("sans-serif"),
+                parse_f(&v["font_size"]),
+                v["font_weight"].as_str().unwrap_or("normal"),
+                v["font_style"].as_str().unwrap_or("normal"),
+                v["text_decoration"].as_str().unwrap_or("none"),
+                parse_f(&v["width"]), parse_f(&v["height"]),
+                parse_fill(&v["fill"]), parse_stroke(&v["stroke"]),
+                common,
+            );
+            // future: if v has a "tspans" array, overwrite text.tspans with parsed tspans
+            let _ = &mut text;
+            Element::Text(text)
+        }
+        "text_path" => {
+            let text_path = TextPathElem::from_string(
+                parse_path_commands(&v["d"]),
+                v["content"].as_str().unwrap_or(""),
+                parse_f(&v["start_offset"]),
+                v["font_family"].as_str().unwrap_or("sans-serif"),
+                parse_f(&v["font_size"]),
+                v["font_weight"].as_str().unwrap_or("normal"),
+                v["font_style"].as_str().unwrap_or("normal"),
+                v["text_decoration"].as_str().unwrap_or("none"),
+                parse_fill(&v["fill"]), parse_stroke(&v["stroke"]),
+                common,
+            );
+            Element::TextPath(text_path)
+        }
         "group" => {
             let children = v["children"].as_array().unwrap_or(&vec![])
                 .iter().map(|c| std::rc::Rc::new(parse_element(c))).collect();

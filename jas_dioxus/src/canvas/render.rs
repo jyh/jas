@@ -453,13 +453,14 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             ctx.set_font(&font);
             let measure = crate::tools::text_measure::make_measurer(&font, e.font_size);
             let max_w = if e.is_area_text() { e.width } else { 0.0 };
+            let content_str = e.content();
             let layout = crate::algorithms::text_layout::layout(
-                &e.content,
+                &content_str,
                 max_w,
                 e.font_size,
                 measure.as_ref(),
             );
-            let chars: Vec<char> = e.content.chars().collect();
+            let chars: Vec<char> = content_str.chars().collect();
             for line in &layout.lines {
                 let s: String = chars[line.start..line.end].iter().collect();
                 let s = s.trim_end_matches('\n');
@@ -475,7 +476,8 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             ctx.stroke();
 
             // Draw text along the path
-            if !e.content.is_empty() && !e.d.is_empty() {
+            let content_str = e.content();
+            if !content_str.is_empty() && !e.d.is_empty() {
                 let fill_op = apply_fill(ctx, e.fill.as_ref());
                 ctx.set_global_alpha(base_alpha * fill_op);
                 let font = format!(
@@ -495,7 +497,7 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                 let total = *lengths.last().unwrap_or(&0.0);
                 if total > 0.0 {
                     let mut offset = e.start_offset * total;
-                    for ch in e.content.chars() {
+                    for ch in content_str.chars() {
                         let ch_str = ch.to_string();
                         let ch_width = ctx.measure_text(&ch_str).map(|m: web_sys::TextMetrics| m.width()).unwrap_or(8.0);
                         let t = (offset + ch_width / 2.0) / total;

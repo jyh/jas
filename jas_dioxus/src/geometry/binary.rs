@@ -231,7 +231,7 @@ fn pack_element(elem: &Element) -> Value {
         Element::Text(e) => {
             let (locked, opacity, vis, xform) = pack_common(&e.common);
             Value::Array(vec![vint(TAG_TEXT), locked, opacity, vis, xform,
-                              vf64(e.x), vf64(e.y), vstr(&e.content),
+                              vf64(e.x), vf64(e.y), vstr(&e.content()),
                               vstr(&e.font_family), vf64(e.font_size),
                               vstr(&e.font_weight), vstr(&e.font_style),
                               vstr(&e.text_decoration),
@@ -242,7 +242,7 @@ fn pack_element(elem: &Element) -> Value {
             let (locked, opacity, vis, xform) = pack_common(&e.common);
             let cmds: Vec<Value> = e.d.iter().map(pack_path_command).collect();
             Value::Array(vec![vint(TAG_TEXT_PATH), locked, opacity, vis, xform,
-                              Value::Array(cmds), vstr(&e.content), vf64(e.start_offset),
+                              Value::Array(cmds), vstr(&e.content()), vf64(e.start_offset),
                               vstr(&e.font_family), vf64(e.font_size),
                               vstr(&e.font_weight), vstr(&e.font_style),
                               vstr(&e.text_decoration),
@@ -534,33 +534,33 @@ fn unpack_element(v: &Value) -> Element {
                 common,
             })
         }
-        TAG_TEXT => Element::Text(TextElem {
-            x: as_f64(&arr[5]), y: as_f64(&arr[6]),
-            content: as_str(&arr[7]).to_string(),
-            font_family: as_str(&arr[8]).to_string(),
-            font_size: as_f64(&arr[9]),
-            font_weight: as_str(&arr[10]).to_string(),
-            font_style: as_str(&arr[11]).to_string(),
-            text_decoration: as_str(&arr[12]).to_string(),
-            width: as_f64(&arr[13]), height: as_f64(&arr[14]),
-            fill: unpack_fill(&arr[15]), stroke: unpack_stroke(&arr[16]),
+        TAG_TEXT => Element::Text(TextElem::from_string(
+            as_f64(&arr[5]), as_f64(&arr[6]),
+            as_str(&arr[7]),
+            as_str(&arr[8]),
+            as_f64(&arr[9]),
+            as_str(&arr[10]),
+            as_str(&arr[11]),
+            as_str(&arr[12]),
+            as_f64(&arr[13]), as_f64(&arr[14]),
+            unpack_fill(&arr[15]), unpack_stroke(&arr[16]),
             common,
-        }),
+        )),
         TAG_TEXT_PATH => {
             let cmds: Vec<PathCommand> = as_array(&arr[5]).iter()
                 .map(unpack_path_command).collect();
-            Element::TextPath(TextPathElem {
-                d: cmds,
-                content: as_str(&arr[6]).to_string(),
-                start_offset: as_f64(&arr[7]),
-                font_family: as_str(&arr[8]).to_string(),
-                font_size: as_f64(&arr[9]),
-                font_weight: as_str(&arr[10]).to_string(),
-                font_style: as_str(&arr[11]).to_string(),
-                text_decoration: as_str(&arr[12]).to_string(),
-                fill: unpack_fill(&arr[13]), stroke: unpack_stroke(&arr[14]),
+            Element::TextPath(TextPathElem::from_string(
+                cmds,
+                as_str(&arr[6]),
+                as_f64(&arr[7]),
+                as_str(&arr[8]),
+                as_f64(&arr[9]),
+                as_str(&arr[10]),
+                as_str(&arr[11]),
+                as_str(&arr[12]),
+                unpack_fill(&arr[13]), unpack_stroke(&arr[14]),
                 common,
-            })
+            ))
         }
         _ => panic!("unknown element tag: {}", tag),
     }
