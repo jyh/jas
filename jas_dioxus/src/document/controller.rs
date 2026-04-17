@@ -510,6 +510,159 @@ impl Controller {
         let _ = Visibility::Preview;
         model.set_document(new_doc);
     }
+
+    /// Apply the TSPAN.md "Character attribute writes" algorithm to the
+    /// text element at `path` over the character range
+    /// `[char_start, char_end)`: split_range → set attribute on every
+    /// targeted tspan → identity omission (null out overrides that
+    /// equal the parent's effective value) → merge adjacent equal.
+    ///
+    /// Attribute names are snake_case (`font_weight`, `font_style`,
+    /// `font_family`, `font_size`). Unsupported attributes are silently
+    /// ignored — add them here as needed.
+    ///
+    /// No-op when the target is not a Text / TextPath element or when
+    /// the range is out of bounds.
+    pub fn set_character_attribute(
+        model: &mut Model,
+        path: &ElementPath,
+        char_start: usize,
+        char_end: usize,
+        attribute: &str,
+        value: &str,
+    ) {
+        let doc = model.document().clone();
+        let new_elem = match doc.get_element(path) {
+            Some(Element::Text(t)) => {
+                let mut new_t = t.clone();
+                let parent_for_omission = t.clone();
+                let (tspans, first, last) = crate::geometry::tspan::split_range(
+                    &new_t.tspans,
+                    char_start,
+                    char_end,
+                );
+                new_t.tspans = tspans;
+                if let (Some(first), Some(last)) = (first, last) {
+                    for i in first..=last {
+                        apply_attr_to_tspan(&mut new_t.tspans[i], attribute, value);
+                    }
+                    for i in first..=last {
+                        omit_text_identity(
+                            &mut new_t.tspans[i],
+                            &parent_for_omission,
+                            attribute,
+                        );
+                    }
+                }
+                new_t.tspans = crate::geometry::tspan::merge(&new_t.tspans);
+                Element::Text(new_t)
+            }
+            Some(Element::TextPath(tp)) => {
+                let mut new_tp = tp.clone();
+                let parent_for_omission = tp.clone();
+                let (tspans, first, last) = crate::geometry::tspan::split_range(
+                    &new_tp.tspans,
+                    char_start,
+                    char_end,
+                );
+                new_tp.tspans = tspans;
+                if let (Some(first), Some(last)) = (first, last) {
+                    for i in first..=last {
+                        apply_attr_to_tspan(&mut new_tp.tspans[i], attribute, value);
+                    }
+                    for i in first..=last {
+                        omit_textpath_identity(
+                            &mut new_tp.tspans[i],
+                            &parent_for_omission,
+                            attribute,
+                        );
+                    }
+                }
+                new_tp.tspans = crate::geometry::tspan::merge(&new_tp.tspans);
+                Element::TextPath(new_tp)
+            }
+            _ => return,
+        };
+        let new_doc = doc.replace_element(path, new_elem);
+        model.set_document(new_doc);
+    }
+}
+
+/// Apply a character-panel attribute write to a single tspan by setting
+/// its override slot to `Some(value)`. Unsupported attribute names are
+/// silently ignored so callers can send arbitrary names.
+fn apply_attr_to_tspan(ts: &mut crate::geometry::tspan::Tspan, attr: &str, value: &str) {
+    match attr {
+        "font_family" => ts.font_family = Some(value.to_string()),
+        "font_size" => {
+            if let Ok(v) = value.parse::<f64>() {
+                ts.font_size = Some(v);
+            }
+        }
+        "font_weight" => ts.font_weight = Some(value.to_string()),
+        "font_style" => ts.font_style = Some(value.to_string()),
+        _ => {}
+    }
+}
+
+fn omit_text_identity(
+    ts: &mut crate::geometry::tspan::Tspan,
+    parent: &crate::geometry::element::TextElem,
+    attr: &str,
+) {
+    match attr {
+        "font_family" => {
+            if ts.font_family.as_deref() == Some(parent.font_family.as_str()) {
+                ts.font_family = None;
+            }
+        }
+        "font_size" => {
+            if ts.font_size == Some(parent.font_size) {
+                ts.font_size = None;
+            }
+        }
+        "font_weight" => {
+            if ts.font_weight.as_deref() == Some(parent.font_weight.as_str()) {
+                ts.font_weight = None;
+            }
+        }
+        "font_style" => {
+            if ts.font_style.as_deref() == Some(parent.font_style.as_str()) {
+                ts.font_style = None;
+            }
+        }
+        _ => {}
+    }
+}
+
+fn omit_textpath_identity(
+    ts: &mut crate::geometry::tspan::Tspan,
+    parent: &crate::geometry::element::TextPathElem,
+    attr: &str,
+) {
+    match attr {
+        "font_family" => {
+            if ts.font_family.as_deref() == Some(parent.font_family.as_str()) {
+                ts.font_family = None;
+            }
+        }
+        "font_size" => {
+            if ts.font_size == Some(parent.font_size) {
+                ts.font_size = None;
+            }
+        }
+        "font_weight" => {
+            if ts.font_weight.as_deref() == Some(parent.font_weight.as_str()) {
+                ts.font_weight = None;
+            }
+        }
+        "font_style" => {
+            if ts.font_style.as_deref() == Some(parent.font_style.as_str()) {
+                ts.font_style = None;
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Recursively rewrite `elem` so that every node whose own
