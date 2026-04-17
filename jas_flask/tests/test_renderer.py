@@ -99,7 +99,7 @@ class TestRenderPane:
         assert "position" in html
         assert "absolute" in html
         assert "left:10px" in html or "left: 10px" in html
-        assert "jas-pane-title" in html
+        assert "app-pane-title" in html
 
     def test_title_bar_buttons_rendered(self, theme, state):
         from renderer import render_element

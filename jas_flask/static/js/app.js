@@ -14,7 +14,7 @@
   const shortcuts = typeof JAS_SHORTCUTS !== "undefined" ? JAS_SHORTCUTS : [];
   const timers = {};  // named timers for long-press etc.
   var STORAGE_KEY = "workspace_layouts";  // localStorage key for saved layouts
-  var APPEARANCE_STORAGE_KEY = "jas_appearances";  // localStorage key for user appearances
+  var APPEARANCE_STORAGE_KEY = "app_appearances";  // localStorage key for user appearances
   var activeWorkspaceName = null;         // currently active workspace name
   var activeAppearanceName = typeof JAS_ACTIVE_APPEARANCE !== "undefined" ? JAS_ACTIVE_APPEARANCE : "dark_gray";
 
@@ -502,12 +502,12 @@
       if (isHollow) {
         el.style.borderColor = hasColor ? color : "transparent";
       } else if (hasColor) {
-        el.classList.remove("jas-color-swatch-empty");
+        el.classList.remove("app-color-swatch-empty");
         el.style.background = color;
         el.style.border = "1px solid #666";
         el.style.cursor = "pointer";
       } else {
-        el.classList.add("jas-color-swatch-empty");
+        el.classList.add("app-color-swatch-empty");
         el.style.background = "transparent";
         el.style.border = "";
         el.style.cursor = "default";
@@ -729,10 +729,10 @@
         maxEl.style.height = ph + "px";
         maxEl.style.zIndex = "1";
         maxEl.style.border = "none";
-        var title = maxEl.querySelector(".jas-pane-title");
+        var title = maxEl.querySelector(".app-pane-title");
         if (title) title.classList.add("d-none");
         // Ensure other panes float above the maximized one
-        var siblings = maxEl.parentElement ? maxEl.parentElement.querySelectorAll(".jas-pane") : [];
+        var siblings = maxEl.parentElement ? maxEl.parentElement.querySelectorAll(".app-pane") : [];
         siblings.forEach(function (p) {
           if (p !== maxEl) p.style.zIndex = "10";
         });
@@ -747,7 +747,7 @@
         var saved = restEl.getAttribute("data-saved-style");
         if (saved) restEl.setAttribute("style", saved);
         restEl.removeAttribute("data-saved-style");
-        var title = restEl.querySelector(".jas-pane-title");
+        var title = restEl.querySelector(".app-pane-title");
         if (title) title.classList.remove("d-none");
       }
       return;
@@ -858,7 +858,7 @@
       if (!container) return;
 
       // Phase 1: unhide all panes by setting any bound visible state to true
-      var paneEls = Array.from(container.querySelectorAll(".jas-pane"));
+      var paneEls = Array.from(container.querySelectorAll(".app-pane"));
       paneEls.forEach(function (p) {
         p.style.display = "";
         // Find the state key this pane's visibility is bound to and set it true
@@ -1070,8 +1070,8 @@
     if (effect.flash) {
       var flEl = document.getElementById(resolve(effect.flash, ctx));
       if (flEl) {
-        flEl.classList.add("jas-flash");
-        setTimeout(function () { flEl.classList.remove("jas-flash"); }, 300);
+        flEl.classList.add("app-flash");
+        setTimeout(function () { flEl.classList.remove("app-flash"); }, 300);
       }
       return;
     }
@@ -1110,7 +1110,7 @@
         if (!name) { console.warn("[save_layout] empty name"); return; }
         var configs = typeof JAS_PANE_CONFIGS !== "undefined" ? JAS_PANE_CONFIGS : {};
         var layoutData = { panes: {}, state: {}, dock: {}, floating: [], appearance: activeAppearanceName };
-        container.querySelectorAll(".jas-pane").forEach(function (p) {
+        container.querySelectorAll(".app-pane").forEach(function (p) {
           if (p.id) {
             layoutData.panes[p.id] = {
               left: p.offsetLeft, top: p.offsetTop,
@@ -1359,7 +1359,7 @@
       el.style.cssText = styles.join(";");
     } else if (type === "icon_button") {
       el = document.createElement("button");
-      el.className = "btn btn-sm btn-outline-secondary jas-tool-btn p-0";
+      el.className = "btn btn-sm btn-outline-secondary app-tool-btn p-0";
       if (spec.id) el.id = resolve(spec.id, ctx);
       var ibSz = s.size || 16;
       styles.push("width:" + ibSz + "px", "height:" + ibSz + "px",
@@ -1375,13 +1375,13 @@
         el.textContent = iconName;
       }
     } else if (type === "canvas") {
-      el.className = "jas-canvas";
+      el.className = "app-canvas";
       styles.push("display:flex", "align-items:center", "justify-content:center",
                    "color:#999", "font-size:14px", "min-height:200px");
       el.style.cssText = styles.join(";");
       el.textContent = (spec.summary || "Canvas") + " (tier 3)";
     } else if (type === "placeholder") {
-      el.className = "jas-placeholder";
+      el.className = "app-placeholder";
       styles.push("border:1px dashed #666", "padding:12px", "color:#888",
                    "text-align:center", "font-size:11px", "min-height:40px");
       el.style.cssText = styles.join(";");
@@ -1516,12 +1516,12 @@
     var defaultNames = Object.keys(defaults).sort();
     var userNames = Object.keys(saved).sort();
     // Remove any previously injected items
-    menu.querySelectorAll(".jas-ws-item").forEach(function (el) { el.remove(); });
+    menu.querySelectorAll(".app-ws-item").forEach(function (el) { el.remove(); });
     var firstItem = menu.firstElementChild;
     // Insert default layouts (non-deletable)
     defaultNames.forEach(function (name) {
       var li = document.createElement("li");
-      li.className = "jas-ws-item";
+      li.className = "app-ws-item";
       var check = (activeWorkspaceName === name) ? "\u2713 " : "    ";
       var a = document.createElement("a");
       a.className = "dropdown-item";
@@ -1535,14 +1535,14 @@
     // Separator between defaults and user layouts
     if (defaultNames.length > 0 && userNames.length > 0) {
       var sep1 = document.createElement("li");
-      sep1.className = "jas-ws-item";
+      sep1.className = "app-ws-item";
       sep1.innerHTML = '<hr class="dropdown-divider">';
       menu.insertBefore(sep1, firstItem);
     }
     // Insert user-saved layouts
     userNames.forEach(function (name) {
       var li = document.createElement("li");
-      li.className = "jas-ws-item";
+      li.className = "app-ws-item";
       var check = (activeWorkspaceName === name) ? "\u2713 " : "    ";
       var a = document.createElement("a");
       a.className = "dropdown-item";
@@ -1555,7 +1555,7 @@
     });
     if (defaultNames.length + userNames.length > 0) {
       var sep2 = document.createElement("li");
-      sep2.className = "jas-ws-item";
+      sep2.className = "app-ws-item";
       sep2.innerHTML = '<hr class="dropdown-divider">';
       menu.insertBefore(sep2, firstItem);
     }
@@ -1602,13 +1602,13 @@
     var root = document.documentElement;
     for (var k in resolved.colors) {
       if (resolved.colors.hasOwnProperty(k)) {
-        root.style.setProperty("--jas-" + k.replace(/_/g, "-"), resolved.colors[k]);
+        root.style.setProperty("--app-" + k.replace(/_/g, "-"), resolved.colors[k]);
       }
     }
     for (var fk in resolved.fonts) {
       if (resolved.fonts.hasOwnProperty(fk)) {
         var font = resolved.fonts[fk];
-        var prefix = "--jas-font-" + fk.replace(/_/g, "-");
+        var prefix = "--app-font-" + fk.replace(/_/g, "-");
         if (font.family) root.style.setProperty(prefix + "-family", font.family);
         if (font.size) root.style.setProperty(prefix + "-size", font.size + "px");
         if (font.weight) root.style.setProperty(prefix + "-weight", font.weight);
@@ -1616,7 +1616,7 @@
     }
     for (var sk in resolved.sizes) {
       if (resolved.sizes.hasOwnProperty(sk)) {
-        root.style.setProperty("--jas-size-" + sk.replace(/_/g, "-"), resolved.sizes[sk] + "px");
+        root.style.setProperty("--app-size-" + sk.replace(/_/g, "-"), resolved.sizes[sk] + "px");
       }
     }
 
@@ -1647,12 +1647,12 @@
     var appearances = typeof JAS_APPEARANCES !== "undefined" ? JAS_APPEARANCES : [];
     var userApps = JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) || "{}");
     // Remove previously injected items
-    menu.querySelectorAll(".jas-appearance-item").forEach(function (el) { el.remove(); });
+    menu.querySelectorAll(".app-appearance-item").forEach(function (el) { el.remove(); });
     var firstItem = menu.firstElementChild;
     // Insert predefined appearances
     appearances.forEach(function (app) {
       var li = document.createElement("li");
-      li.className = "jas-appearance-item";
+      li.className = "app-appearance-item";
       var check = (activeAppearanceName === app.name) ? "\u2713 " : "    ";
       var a = document.createElement("a");
       a.className = "dropdown-item";
@@ -1667,13 +1667,13 @@
     var userNames = Object.keys(userApps).sort();
     if (userNames.length > 0 && appearances.length > 0) {
       var sep1 = document.createElement("li");
-      sep1.className = "jas-appearance-item";
+      sep1.className = "app-appearance-item";
       sep1.innerHTML = '<hr class="dropdown-divider">';
       menu.insertBefore(sep1, firstItem);
     }
     userNames.forEach(function (name) {
       var li = document.createElement("li");
-      li.className = "jas-appearance-item";
+      li.className = "app-appearance-item";
       var check = (activeAppearanceName === name) ? "\u2713 " : "    ";
       var label = userApps[name].label || name;
       var a = document.createElement("a");
@@ -1687,7 +1687,7 @@
     });
     if (appearances.length + userNames.length > 0) {
       var sep2 = document.createElement("li");
-      sep2.className = "jas-appearance-item";
+      sep2.className = "app-appearance-item";
       sep2.innerHTML = '<hr class="dropdown-divider">';
       menu.insertBefore(sep2, firstItem);
     }
@@ -2048,7 +2048,7 @@
   var dragState = null;
 
   document.addEventListener("mousedown", function (e) {
-    var title = e.target.closest(".jas-pane-title");
+    var title = e.target.closest(".app-pane-title");
     if (!title) return;
     // Don't initiate drag if clicking an interactive element within the title bar
     var t = e.target;
@@ -2057,7 +2057,7 @@
           || t.hasAttribute("data-action") || t.hasAttribute("data-bs-toggle")) return;
       t = t.parentElement;
     }
-    var pane = title.closest(".jas-pane");
+    var pane = title.closest(".app-pane");
     if (!pane) return;
     // Don't preventDefault — it suppresses dblclick events on the title bar
     dragState = {
@@ -2066,7 +2066,7 @@
       offsetY: e.clientY - pane.offsetTop
     };
     document.body.style.cursor = "grabbing";
-    document.querySelectorAll(".jas-pane").forEach(function (p) {
+    document.querySelectorAll(".app-pane").forEach(function (p) {
       p.style.zIndex = p === pane ? "100" : "";
     });
   });
@@ -2080,7 +2080,7 @@
       edges.x.push(parent.clientWidth);
       edges.y.push(parent.clientHeight);
     }
-    var panes = parent ? parent.querySelectorAll(".jas-pane") : [];
+    var panes = parent ? parent.querySelectorAll(".app-pane") : [];
     panes.forEach(function (p) {
       if (p === pane || p.classList.contains("d-none") || p.style.display === "none") return;
       edges.x.push(p.offsetLeft);
@@ -2102,7 +2102,7 @@
   var snapLines = [];
   function showSnapLine(orient, pos, parent) {
     var line = document.createElement("div");
-    line.className = "jas-snap-line";
+    line.className = "app-snap-line";
     if (orient === "x") {
       line.style.cssText = "position:absolute;left:" + pos + "px;top:0;width:1px;height:100%;background:rgba(50,120,220,0.8);z-index:200;pointer-events:none";
     } else {
@@ -2159,7 +2159,7 @@
     // Find the pane whose opposite edge is closest to this pane's edge
     var parent = pane.parentElement;
     if (!parent) return null;
-    var panes = parent.querySelectorAll(".jas-pane");
+    var panes = parent.querySelectorAll(".app-pane");
     var best = null, bestDist = SNAP_DISTANCE * 2;
     var px = pane.offsetLeft, pw = pane.offsetWidth, py = pane.offsetTop, ph = pane.offsetHeight;
     panes.forEach(function (p) {
@@ -2174,9 +2174,9 @@
   }
 
   document.addEventListener("mousedown", function (e) {
-    var handle = e.target.closest(".jas-edge-handle");
+    var handle = e.target.closest(".app-edge-handle");
     if (!handle) return;
-    var pane = handle.closest(".jas-pane");
+    var pane = handle.closest(".app-pane");
     if (!pane) return;
     var handleIsLeft = handle.classList.contains("left");
     var handleIsRight = handle.classList.contains("right");
@@ -2256,7 +2256,7 @@
 
   // Initialize dock models from rendered dock_view elements
   function initDockModels() {
-    document.querySelectorAll(".jas-dock-view").forEach(function (el) {
+    document.querySelectorAll(".app-dock-view").forEach(function (el) {
       var id = el.id;
       var groupsAttr = el.getAttribute("data-groups");
       if (groupsAttr) {
@@ -2281,7 +2281,7 @@
   function rebuildDockViewDOM(container, model) {
     // Preserve server-rendered panel body elements before clearing
     var savedPanels = {};
-    container.querySelectorAll(".jas-dock-panel-body[data-panel-name]").forEach(function (el) {
+    container.querySelectorAll(".app-dock-panel-body[data-panel-name]").forEach(function (el) {
       var name = el.getAttribute("data-panel-name");
       if (name) savedPanels[name] = el;
     });
@@ -2291,12 +2291,12 @@
 
     if (collapsed) {
       var strip = document.createElement("div");
-      strip.className = "jas-dock-collapsed-strip";
+      strip.className = "app-dock-collapsed-strip";
       strip.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0";
       groups.forEach(function (group, gi) {
         (group.panels || []).forEach(function (panelName, pi) {
           var btn = document.createElement("button");
-          btn.className = "btn btn-sm jas-dock-icon p-0";
+          btn.className = "btn btn-sm app-dock-icon p-0";
           btn.style.cssText = "width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:#505050;border:none;color:#999";
           btn.title = panelName.charAt(0).toUpperCase() + panelName.slice(1);
           btn.setAttribute("data-dock", container.id);
@@ -2333,18 +2333,18 @@
       var groupCollapsed = group.collapsed || false;
 
       var groupDiv = document.createElement("div");
-      groupDiv.className = "jas-dock-group";
+      groupDiv.className = "app-dock-group";
       groupDiv.setAttribute("data-dock", container.id);
       groupDiv.setAttribute("data-group-index", gi);
 
       // Header
       var header = document.createElement("div");
-      header.className = "jas-dock-group-header";
+      header.className = "app-dock-group-header";
       header.style.cssText = "display:flex;align-items:center;background:#333;padding:2px 4px;gap:2px";
 
       // Grip
       var grip = document.createElement("span");
-      grip.className = "jas-dock-grip";
+      grip.className = "app-dock-grip";
       grip.style.cssText = "cursor:grab;color:#777;font-size:10px;padding:0 2px";
       grip.textContent = "⠁⠁";
       grip.setAttribute("data-dock", container.id);
@@ -2355,7 +2355,7 @@
       panels.forEach(function (panelName, pi) {
         var label = panelName.charAt(0).toUpperCase() + panelName.slice(1);
         var btn = document.createElement("button");
-        btn.className = "btn btn-sm jas-dock-tab" + (pi === active ? " active" : "");
+        btn.className = "btn btn-sm app-dock-tab" + (pi === active ? " active" : "");
         btn.style.cssText = "padding:1px 6px;font-size:11px;color:#ccc;background:" + (pi === active ? "#4a4a4a" : "#353535") + ";border:none;cursor:grab";
         btn.textContent = label;
         btn.setAttribute("data-dock", container.id);
@@ -2376,7 +2376,7 @@
 
       // Chevron
       var chevron = document.createElement("button");
-      chevron.className = "btn btn-sm jas-dock-chevron p-0";
+      chevron.className = "btn btn-sm app-dock-chevron p-0";
       chevron.style.cssText = "color:#888;background:transparent;border:none;font-size:18px;line-height:1";
       chevron.textContent = groupCollapsed ? "\u00bb" : "\u00ab";
       chevron.addEventListener("click", function () {
@@ -2419,7 +2419,7 @@
       // Body
       if (!groupCollapsed && panels.length > 0) {
         var body = document.createElement("div");
-        body.className = "jas-dock-group-body";
+        body.className = "app-dock-group-body";
         body.style.cssText = "flex:1";
         var activeName = panels[Math.min(active, panels.length - 1)];
         panels.forEach(function (pn) {
@@ -2429,7 +2429,7 @@
             body.appendChild(saved);
           } else if (pn === activeName) {
             var label = pn.charAt(0).toUpperCase() + pn.slice(1);
-            body.innerHTML += '<div class="jas-dock-panel-body" style="padding:12px;color:#aaa;font-size:12px" data-panel-name="' + pn + '">' + label + '</div>';
+            body.innerHTML += '<div class="app-dock-panel-body" style="padding:12px;color:#aaa;font-size:12px" data-panel-name="' + pn + '">' + label + '</div>';
           }
         });
         groupDiv.appendChild(body);
@@ -2520,14 +2520,14 @@
     // Create pane element
     var pane = document.createElement("div");
     pane.id = floatId;
-    pane.className = "jas-pane";
+    pane.className = "app-pane";
     pane.style.cssText = "position:absolute;left:" + x + "px;top:" + y + "px;width:220px;height:300px;" +
       "background:#3c3c3c;border:1px solid #555;display:flex;flex-direction:column;overflow:hidden;" +
       "box-shadow:4px 4px 12px rgba(0,0,0,0.4);z-index:200";
 
     // Title bar
     var title = document.createElement("div");
-    title.className = "jas-pane-title";
+    title.className = "app-pane-title";
     title.style.cssText = "height:20px;background:#2a2a2a;display:flex;align-items:center;padding:0 6px;cursor:grab;font-size:11px;color:#d9d9d9;user-select:none;flex-shrink:0";
     title.innerHTML = '<span style="flex:1">Panels</span>';
 
@@ -2539,11 +2539,11 @@
 
     // Content: dock_view
     var content = document.createElement("div");
-    content.className = "jas-pane-content";
+    content.className = "app-pane-content";
     content.style.cssText = "flex:1;overflow:auto;display:flex;flex-direction:column";
     var dockView = document.createElement("div");
     dockView.id = dockViewId;
-    dockView.className = "jas-dock-view";
+    dockView.className = "app-dock-view";
     dockView.style.cssText = "display:flex;flex-direction:column;flex:1";
     content.appendChild(dockView);
     pane.appendChild(content);
@@ -2551,12 +2551,12 @@
     // Edge handles
     ["left", "right", "top", "bottom"].forEach(function (side) {
       var handle = document.createElement("div");
-      handle.className = "jas-edge-handle " + side;
+      handle.className = "app-edge-handle " + side;
       pane.appendChild(handle);
     });
 
     // Add to pane system
-    var paneSystem = document.querySelector(".jas-pane-system");
+    var paneSystem = document.querySelector(".app-pane-system");
     if (paneSystem) paneSystem.appendChild(pane);
 
     // Render the dock view
@@ -2590,7 +2590,7 @@
   function getOrCreateDropIndicator() {
     if (!dropIndicator) {
       dropIndicator = document.createElement("div");
-      dropIndicator.className = "jas-panel-drop-indicator";
+      dropIndicator.className = "app-panel-drop-indicator";
       dropIndicator.style.cssText = "position:fixed;z-index:300;pointer-events:none;background:rgba(50,120,220,0.8);display:none";
       document.body.appendChild(dropIndicator);
     }
@@ -2622,15 +2622,15 @@
   // { dockId, newGroup: true, insertAt, dockView } for empty-area drops.
   function findDropTarget(clientX, clientY) {
     // First check group headers (tab bar drops)
-    var headers = document.querySelectorAll(".jas-dock-group-header");
+    var headers = document.querySelectorAll(".app-dock-group-header");
     for (var i = 0; i < headers.length; i++) {
       var rect = headers[i].getBoundingClientRect();
       if (clientX >= rect.left && clientX <= rect.right &&
           clientY >= rect.top - 8 && clientY <= rect.bottom + 8) {
-        var group = headers[i].closest(".jas-dock-group");
+        var group = headers[i].closest(".app-dock-group");
         var dockId = group ? group.getAttribute("data-dock") : null;
         var groupIdx = group ? parseInt(group.getAttribute("data-group-index") || "0") : 0;
-        var tabs = headers[i].querySelectorAll(".jas-dock-tab");
+        var tabs = headers[i].querySelectorAll(".app-dock-tab");
         var insertIdx = tabs.length;
         for (var j = 0; j < tabs.length; j++) {
           var tr = tabs[j].getBoundingClientRect();
@@ -2640,7 +2640,7 @@
       }
     }
     // Then check dock_view empty areas (between groups or below last group)
-    var dockViews = document.querySelectorAll(".jas-dock-view");
+    var dockViews = document.querySelectorAll(".app-dock-view");
     for (var d = 0; d < dockViews.length; d++) {
       var dv = dockViews[d];
       var dvRect = dv.getBoundingClientRect();
@@ -2650,7 +2650,7 @@
         var model = dockModels[dockId];
         if (!model) continue;
         // Find insertion position: check each group's vertical position
-        var groups = dv.querySelectorAll(".jas-dock-group");
+        var groups = dv.querySelectorAll(".app-dock-group");
         var insertAt = model.groups.length;
         for (var g = 0; g < groups.length; g++) {
           var gr = groups[g].getBoundingClientRect();
@@ -2664,8 +2664,8 @@
 
   // Mousedown on tab buttons or grip handles
   document.addEventListener("mousedown", function (e) {
-    var tab = e.target.closest(".jas-dock-tab");
-    var grip = e.target.closest(".jas-dock-grip");
+    var tab = e.target.closest(".app-dock-tab");
+    var grip = e.target.closest(".app-dock-grip");
     if (!tab && !grip) return;
     var el = tab || grip;
     panelDrag = {
@@ -2700,7 +2700,7 @@
     var target = findDropTarget(e.clientX, e.clientY);
     if (target && target.header) {
       // Tab bar drop: vertical indicator between tabs
-      var tabs = target.header.querySelectorAll(".jas-dock-tab");
+      var tabs = target.header.querySelectorAll(".app-dock-tab");
       if (target.tabIdx < tabs.length) {
         var r = tabs[target.tabIdx].getBoundingClientRect();
         showIndicator(r.left - 2, r.top, 3, r.height);
@@ -2712,7 +2712,7 @@
       // Empty dock area: horizontal indicator for new group insertion
       var dv = target.dockView;
       var dvRect = dv.getBoundingClientRect();
-      var groups = dv.querySelectorAll(".jas-dock-group");
+      var groups = dv.querySelectorAll(".app-dock-group");
       var yPos;
       if (target.insertAt < groups.length) {
         yPos = groups[target.insertAt].getBoundingClientRect().top;
@@ -3016,8 +3016,8 @@
     }
 
     // Preview placeholder
-    var preview = '<div class="jas-element-preview" style="width:24px;height:24px;' +
-                  'background:#fff;border:1px solid var(--jas-border,#555);' +
+    var preview = '<div class="app-element-preview" style="width:24px;height:24px;' +
+                  'background:#fff;border:1px solid var(--app-border,#555);' +
                   'border-radius:1px;flex-shrink:0"></div>';
 
     // Name
@@ -3031,7 +3031,7 @@
     var selectSq = '<div class="select-square" data-tree-action="select" data-node-id="' +
                    node.id + '" style="background:' + sqBg + '"></div>';
 
-    var rowClass = "jas-tree-row" + (selected ? " panel-selected" : "");
+    var rowClass = "app-tree-row" + (selected ? " panel-selected" : "");
     return '<div class="' + rowClass + '" data-node-id="' + node.id + '">' +
            indent + eyeBtn + lockBtn + twirlHtml + preview + nameHtml + selectSq +
            '</div>';
@@ -3083,7 +3083,7 @@
       var btn = e.target.closest("[data-tree-action]");
       if (!btn) {
         // Click on the row itself — panel select
-        var row = e.target.closest(".jas-tree-row");
+        var row = e.target.closest(".app-tree-row");
         if (row) {
           var ts = getTreeState(container);
           var nid = row.getAttribute("data-node-id");

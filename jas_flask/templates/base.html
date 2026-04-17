@@ -13,15 +13,15 @@
   <style>
     :root {
       {% for name, val in ws.theme.colors.items() %}
-      --jas-{{ name | replace('_', '-') }}: {{ val }};
+      --app-{{ name | replace('_', '-') }}: {{ val }};
       {% endfor %}
       {% for name, font in ws.theme.fonts.items() %}
-      --jas-font-{{ name }}-family: {{ font.family }};
-      --jas-font-{{ name }}-size: {{ font.size }}px;
-      {% if font.weight is defined %}--jas-font-{{ name }}-weight: {{ font.weight }};{% endif %}
+      --app-font-{{ name }}-family: {{ font.family }};
+      --app-font-{{ name }}-size: {{ font.size }}px;
+      {% if font.weight is defined %}--app-font-{{ name }}-weight: {{ font.weight }};{% endif %}
       {% endfor %}
       {% for name, val in ws.theme.sizes.items() %}
-      --jas-size-{{ name | replace('_', '-') }}: {{ val }}px;
+      --app-size-{{ name | replace('_', '-') }}: {{ val }}px;
       {% endfor %}
     }
     html, body {
@@ -29,18 +29,18 @@
       padding: 0;
       overflow: hidden;
       height: 100vh;
-      background: var(--jas-window-bg, #2e2e2e);
-      color: var(--jas-text, #cccccc);
-      font-family: var(--jas-font-default-family, sans-serif);
-      font-size: var(--jas-font-default-size, 12px);
+      background: var(--app-window-bg, #2e2e2e);
+      color: var(--app-text, #cccccc);
+      font-family: var(--app-font-default-family, sans-serif);
+      font-size: var(--app-font-default-size, 12px);
     }
     .navbar { min-height: 28px; }
-    .navbar .nav-link { font-size: 12px; padding: 2px 10px; color: var(--jas-text, #ccc); }
-    .navbar .nav-link:hover { color: var(--jas-title-bar-text, #fff); }
-    .dropdown-menu { font-size: 12px; background: var(--jas-pane-bg, #444); border-color: var(--jas-border, #555); }
-    .dropdown-item { color: var(--jas-text, #ccc); }
-    .dropdown-item:hover { background: var(--jas-button-checked, #555); color: var(--jas-title-bar-text, #fff); }
-    .dropdown-divider { border-color: var(--jas-border, #555); }
+    .navbar .nav-link { font-size: 12px; padding: 2px 10px; color: var(--app-text, #ccc); }
+    .navbar .nav-link:hover { color: var(--app-title-bar-text, #fff); }
+    .dropdown-menu { font-size: 12px; background: var(--app-pane-bg, #444); border-color: var(--app-border, #555); }
+    .dropdown-item { color: var(--app-text, #ccc); }
+    .dropdown-item:hover { background: var(--app-button-checked, #555); color: var(--app-title-bar-text, #fff); }
+    .dropdown-divider { border-color: var(--app-border, #555); }
   </style>
   {% block head %}{% endblock %}
 </head>

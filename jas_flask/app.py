@@ -9,6 +9,21 @@ from loader import load_workspace, find_element_by_id, resolve_appearance, list_
 from renderer import render_element, render_menubar, render_dialogs, set_icons, set_initial_state, set_brand, set_panels
 
 
+def _safe_join(root: str, rel: str) -> str | None:
+    """Join [root]/[rel] and confirm the result stays within [root].
+
+    Returns the absolute path on success, or None if [rel] escapes the
+    root (e.g. via ``../`` segments or by being an absolute path).
+    Defense-in-depth — workspace YAML is trusted in the normal case,
+    but rejecting traversal keeps the surface clean if the YAML ever
+    comes from a less-trusted source."""
+    candidate = os.path.abspath(os.path.join(root, rel))
+    root_abs = os.path.abspath(root)
+    if candidate != root_abs and not candidate.startswith(root_abs + os.sep):
+        return None
+    return candidate
+
+
 def _resolve_brand(ws: dict, workspace_path: str | None) -> None:
     """Read brand logo SVG files from disk and store inlined content in ws['app']['brand']."""
     brand = ws.get("app", {}).get("brand")
@@ -18,7 +33,10 @@ def _resolve_brand(ws: dict, workspace_path: str | None) -> None:
     for key in ("logo", "logo_small"):
         rel = brand.get(key)
         if rel:
-            path = os.path.join(project_root, rel)
+            path = _safe_join(project_root, rel)
+            if path is None:
+                brand[key + "_svg"] = ""
+                continue
             try:
                 with open(path) as f:
                     brand[key + "_svg"] = f.read()
