@@ -80,6 +80,28 @@ def _opacity_attr(opacity: float) -> str:
     return f' opacity="{_fmt(opacity)}"'
 
 
+def _text_extra_attrs(elem) -> str:
+    """Build the attribute-string fragment for the 11 Character-panel
+    attributes on a ``<text>`` element. Emits each attribute only
+    when non-empty (per CHARACTER.md's identity-omission rule).
+    """
+    def attr(name: str, v: str) -> str:
+        return f' {name}="{escape(v)}"' if v else ""
+    return "".join([
+        attr("text-transform", elem.text_transform),
+        attr("font-variant", elem.font_variant),
+        attr("baseline-shift", elem.baseline_shift),
+        attr("line-height", elem.line_height),
+        attr("letter-spacing", elem.letter_spacing),
+        attr("xml:lang", elem.xml_lang),
+        attr("urn:jas:1:aa-mode", elem.aa_mode),
+        attr("rotate", elem.rotate),
+        attr("horizontal-scale", elem.horizontal_scale),
+        attr("vertical-scale", elem.vertical_scale),
+        attr("urn:jas:1:kerning-mode", elem.kerning),
+    ])
+
+
 def _path_data(commands: tuple[PathCommand, ...]) -> str:
     parts: list[str] = []
     for cmd in commands:
@@ -173,45 +195,51 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}/>')
 
-        case TextPath(d=cmds, content=content, start_offset=start_offset,
-                      font_family=ff, font_size=fs,
-                      font_weight=fw, font_style=fst, text_decoration=td,
-                      fill=fill, stroke=stroke, opacity=opacity, transform=transform):
-            offset_attr = (f' startOffset="{_fmt(start_offset * 100)}%"'
-                           if start_offset > 0 else "")
-            fw_attr = f' font-weight="{fw}"' if fw != "normal" else ""
-            fst_attr = f' font-style="{fst}"' if fst != "normal" else ""
-            td_attr = f' text-decoration="{td}"' if td != "none" else ""
+        case TextPath():
+            # Destructure via attribute access to avoid an even wider
+            # match pattern now that Text/TextPath carry 11 extra
+            # character-panel fields.
+            elem_tp = elem
+            offset_attr = (f' startOffset="{_fmt(elem_tp.start_offset * 100)}%"'
+                           if elem_tp.start_offset > 0 else "")
+            fw_attr = f' font-weight="{elem_tp.font_weight}"' if elem_tp.font_weight != "normal" else ""
+            fst_attr = f' font-style="{elem_tp.font_style}"' if elem_tp.font_style != "normal" else ""
+            td_attr = (f' text-decoration="{elem_tp.text_decoration}"'
+                       if elem_tp.text_decoration not in ("none", "") else "")
+            extra = _text_extra_attrs(elem_tp)
             return (f'{indent}<text'
-                    f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
-                    f' font-family="{escape(ff)}" font-size="{_fmt(_px(fs))}"'
-                    f'{fw_attr}{fst_attr}{td_attr}'
-                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}>'
-                    f'<textPath path="{_path_data(cmds)}"{offset_attr}>'
-                    f'{escape(content)}</textPath></text>')
+                    f'{_fill_attrs(elem_tp.fill)}{_stroke_attrs(elem_tp.stroke)}'
+                    f' font-family="{escape(elem_tp.font_family)}"'
+                    f' font-size="{_fmt(_px(elem_tp.font_size))}"'
+                    f'{fw_attr}{fst_attr}{td_attr}{extra}'
+                    f'{_opacity_attr(elem_tp.opacity)}{_transform_attr(elem_tp.transform)}>'
+                    f'<textPath path="{_path_data(elem_tp.d)}"{offset_attr}>'
+                    f'{escape(elem_tp.content)}</textPath></text>')
 
-        case Text(x=x, y=y, content=content, font_family=ff, font_size=fs,
-                  font_weight=fw, font_style=fst, text_decoration=td,
-                  width=tw, height=th,
-                  fill=fill, stroke=stroke, opacity=opacity, transform=transform):
+        case Text():
+            # See TextPath: attribute-access destructure.
+            elem_t = elem
             area_attrs = ""
-            if tw > 0 and th > 0:
-                area_attrs = (f' style="inline-size: {_fmt(_px(tw))}px;'
+            if elem_t.width > 0 and elem_t.height > 0:
+                area_attrs = (f' style="inline-size: {_fmt(_px(elem_t.width))}px;'
                               f' white-space: pre-wrap;"')
-            fw_attr = f' font-weight="{fw}"' if fw != "normal" else ""
-            fst_attr = f' font-style="{fst}"' if fst != "normal" else ""
-            td_attr = f' text-decoration="{td}"' if td != "none" else ""
+            fw_attr = f' font-weight="{elem_t.font_weight}"' if elem_t.font_weight != "normal" else ""
+            fst_attr = f' font-style="{elem_t.font_style}"' if elem_t.font_style != "normal" else ""
+            td_attr = (f' text-decoration="{elem_t.text_decoration}"'
+                       if elem_t.text_decoration not in ("none", "") else "")
+            extra = _text_extra_attrs(elem_t)
             # SVG `y` is the baseline of the first line; internally `y`
             # is the *top* of the layout box, so add the ascent (0.8 *
             # font_size, the same value `text_layout` uses).
-            svg_y = y + fs * 0.8
-            return (f'{indent}<text x="{_fmt(_px(x))}" y="{_fmt(_px(svg_y))}"'
-                    f' font-family="{escape(ff)}" font-size="{_fmt(_px(fs))}"'
-                    f'{fw_attr}{fst_attr}{td_attr}'
+            svg_y = elem_t.y + elem_t.font_size * 0.8
+            return (f'{indent}<text x="{_fmt(_px(elem_t.x))}" y="{_fmt(_px(svg_y))}"'
+                    f' font-family="{escape(elem_t.font_family)}"'
+                    f' font-size="{_fmt(_px(elem_t.font_size))}"'
+                    f'{fw_attr}{fst_attr}{td_attr}{extra}'
                     f'{area_attrs}'
-                    f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
-                    f'{_opacity_attr(opacity)}{_transform_attr(transform)}>'
-                    f'{escape(content)}</text>')
+                    f'{_fill_attrs(elem_t.fill)}{_stroke_attrs(elem_t.stroke)}'
+                    f'{_opacity_attr(elem_t.opacity)}{_transform_attr(elem_t.transform)}>'
+                    f'{escape(elem_t.content)}</text>')
 
         case Layer(children=children, name=name, opacity=opacity, transform=transform):
             label = f' inkscape:label="{escape(name)}"' if name else ""
@@ -624,6 +652,20 @@ def _parse_element(node: ET.Element) -> Element | None:
         fw = node.get("font-weight", "normal")
         fst = node.get("font-style", "normal")
         td = node.get("text-decoration", "none")
+        tt = node.get("text-transform", "")
+        fv = node.get("font-variant", "")
+        bs = node.get("baseline-shift", "")
+        lh = node.get("line-height", "")
+        ls = node.get("letter-spacing", "")
+        lang = (node.get("{http://www.w3.org/XML/1998/namespace}lang")
+                or node.get("xml:lang")
+                or node.get("lang")
+                or "")
+        aa = node.get("urn:jas:1:aa-mode", "")
+        rotate = node.get("rotate", "")
+        hs = node.get("horizontal-scale", "")
+        vs = node.get("vertical-scale", "")
+        kern = node.get("urn:jas:1:kerning-mode", "")
         # Check for <textPath> child
         for child in node:
             ctag = _strip_ns(child.tag)
@@ -641,6 +683,10 @@ def _parse_element(node: ET.Element) -> Element | None:
                     d=d, content=tp_content, start_offset=start_offset,
                     font_family=ff, font_size=fs,
                     font_weight=fw, font_style=fst, text_decoration=td,
+                    text_transform=tt, font_variant=fv, baseline_shift=bs,
+                    line_height=lh, letter_spacing=ls, xml_lang=lang,
+                    aa_mode=aa, rotate=rotate, horizontal_scale=hs,
+                    vertical_scale=vs, kerning=kern,
                     fill=fill, stroke=stroke, opacity=opacity, transform=transform)
         content = node.text or ""
         tw = 0.0
@@ -663,6 +709,10 @@ def _parse_element(node: ET.Element) -> Element | None:
             y=svg_y - fs * 0.8,
             content=content, font_family=ff, font_size=fs,
             font_weight=fw, font_style=fst, text_decoration=td,
+            text_transform=tt, font_variant=fv, baseline_shift=bs,
+            line_height=lh, letter_spacing=ls, xml_lang=lang,
+            aa_mode=aa, rotate=rotate, horizontal_scale=hs,
+            vertical_scale=vs, kerning=kern,
             width=tw, height=th,
             fill=fill, stroke=stroke, opacity=opacity, transform=transform)
 
