@@ -1,0 +1,156 @@
+id: character_panel_content
+type: panel
+summary: "Character"
+description: >
+  Character formatting panel — initial placeholder implementation.
+  Provides font family, font size, and six character toggle buttons
+  (All Caps, Small Caps, Superscript, Subscript, Underline,
+  Strikethrough) bound to panel-local state. Per-tspan editing,
+  numeric combos for leading/kerning/tracking/scales/rotation/
+  baseline-shift, and the Snap to Glyph section from CHARACTER.md
+  land in follow-up work once the tspan-aware editing plumbing is
+  in place across all four native apps.
+
+state:
+  font_family:
+    type: string
+    default: "sans-serif"
+    description: "Font family string (placeholder — not yet bound to the selected text)."
+  font_size:
+    type: number
+    default: 12
+    description: "Font size in points (placeholder — not yet bound)."
+  all_caps:
+    type: bool
+    default: false
+    description: "All Caps toggle. Mutually exclusive with Small Caps in the full spec; not enforced yet."
+  small_caps:
+    type: bool
+    default: false
+    description: "Small Caps toggle."
+  superscript:
+    type: bool
+    default: false
+    description: "Superscript toggle. Mutually exclusive with Subscript in the full spec; not enforced yet."
+  subscript:
+    type: bool
+    default: false
+    description: "Subscript toggle."
+  underline:
+    type: bool
+    default: false
+    description: "Underline toggle."
+  strikethrough:
+    type: bool
+    default: false
+    description: "Strikethrough toggle."
+
+init: {}
+
+menu:
+  - label: "Close Character"
+    action: close_panel
+
+content:
+  type: container
+  id: ch_content
+  layout: column
+  style: { padding: 4, gap: 6 }
+  children:
+
+    # ── Font family ──────────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Font"
+          style: { width: 40, font_size: 10 }
+        - id: ch_font_family
+          type: text_input
+          summary: "Font family"
+          description: "Font family string. Placeholder — not yet bound to the selected text."
+          style: { flex: 1 }
+          bind:
+            value: "panel.font_family"
+
+    # ── Font size ────────────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Size"
+          style: { width: 40, font_size: 10 }
+        - id: ch_font_size
+          type: number_input
+          summary: "Font size"
+          description: "Font size in points. Placeholder — not yet bound to the selected text."
+          min: 1
+          max: 1296
+          style: { flex: 1 }
+          bind:
+            value: "panel.font_size"
+        - type: text
+          content: "pt"
+          style: { font_size: 10 }
+
+    - type: separator
+
+    # ── Character toggles ────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 6, alignment: center }
+      children:
+        - id: ch_all_caps
+          type: checkbox
+          label: "All Caps"
+          summary: "All Caps"
+          description: "Render the selection in uppercase."
+          bind:
+            value: "panel.all_caps"
+        - id: ch_small_caps
+          type: checkbox
+          label: "Small Caps"
+          summary: "Small Caps"
+          description: "Render lowercase letters as x-height-sized capitals."
+          bind:
+            value: "panel.small_caps"
+
+    - type: container
+      layout: row
+      style: { gap: 6, alignment: center }
+      children:
+        - id: ch_superscript
+          type: checkbox
+          label: "Super"
+          summary: "Superscript"
+          description: "Position the selection above the baseline."
+          bind:
+            value: "panel.superscript"
+        - id: ch_subscript
+          type: checkbox
+          label: "Sub"
+          summary: "Subscript"
+          description: "Position the selection below the baseline."
+          bind:
+            value: "panel.subscript"
+
+    - type: container
+      layout: row
+      style: { gap: 6, alignment: center }
+      children:
+        - id: ch_underline
+          type: checkbox
+          label: "Underline"
+          summary: "Underline"
+          description: "Underline the selected text."
+          bind:
+            value: "panel.underline"
+        - id: ch_strikethrough
+          type: checkbox
+          label: "Strikethrough"
+          summary: "Strikethrough"
+          description: "Strike through the selected text."
+          bind:
+            value: "panel.strikethrough"
