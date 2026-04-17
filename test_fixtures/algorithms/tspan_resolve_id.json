@@ -1,0 +1,62 @@
+{
+  "algorithm": "tspan_resolve_id",
+  "comparison": "exact",
+  "description": "resolve_id(text, id) returns the index of the tspan with the given id, or null if none. See TSPAN.md Primitives > Resolve an id to an index.",
+  "vectors": [
+    {
+      "name": "id_at_first_tspan",
+      "input": {
+        "tspans": [
+          {"id": 0, "content": "A"},
+          {"id": 1, "content": "B"}
+        ],
+        "id": 0
+      },
+      "expected": 0
+    },
+    {
+      "name": "id_at_later_tspan",
+      "input": {
+        "tspans": [
+          {"id": 0, "content": "A"},
+          {"id": 3, "content": "B"},
+          {"id": 7, "content": "C"}
+        ],
+        "id": 7
+      },
+      "expected": 2
+    },
+    {
+      "name": "id_not_found_returns_null",
+      "input": {
+        "tspans": [
+          {"id": 0, "content": "A"},
+          {"id": 3, "content": "B"}
+        ],
+        "id": 99
+      },
+      "expected": null
+    },
+    {
+      "name": "id_not_found_after_merge",
+      "input": {
+        "tspans": [
+          {"id": 0, "content": "AB"}
+        ],
+        "id": 1
+      },
+      "expected": null
+    },
+    {
+      "name": "gaps_in_id_sequence_after_merges_are_normal",
+      "input": {
+        "tspans": [
+          {"id": 0, "content": "A"},
+          {"id": 5, "content": "B"}
+        ],
+        "id": 5
+      },
+      "expected": 1
+    }
+  ]
+}

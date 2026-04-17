@@ -47,5 +47,29 @@
       {"op": "show_all"}
     ],
     "expected_json": "hide_show_cycle.json"
+  },
+  {
+    "name": "tspan_set_attribute_mid_word",
+    "setup_svg": "setup_text_hello.svg",
+    "ops": [
+      {"op": "set_character_attribute", "path": [0, 0], "char_start": 1, "char_end": 4, "attribute": "font_weight", "value": "bold"}
+    ],
+    "expected_json": "tspan_set_attribute_mid_word.json"
+  },
+  {
+    "name": "tspan_set_attribute_whole_range",
+    "setup_svg": "setup_text_hello.svg",
+    "ops": [
+      {"op": "set_character_attribute", "path": [0, 0], "char_start": 0, "char_end": 5, "attribute": "font_style", "value": "italic"}
+    ],
+    "expected_json": "tspan_set_attribute_whole_range.json"
+  },
+  {
+    "name": "tspan_set_attribute_causes_merge",
+    "setup_svg": "setup_text_ab_bold_b.svg",
+    "ops": [
+      {"op": "set_character_attribute", "path": [0, 0], "char_start": 0, "char_end": 2, "attribute": "font_weight", "value": "normal"}
+    ],
+    "expected_json": "tspan_set_attribute_causes_merge.json"
   }
 ]

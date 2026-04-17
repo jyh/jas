@@ -1,0 +1,100 @@
+{
+  "algorithm": "tspan_split_range",
+  "comparison": "exact",
+  "description": "split_range(text, char_start, char_end) returns (text', first_idx, last_idx) so tspans[first_idx..=last_idx] exactly cover the char range. See TSPAN.md Primitives > Split across a range.",
+  "vectors": [
+    {
+      "name": "empty_range_produces_first_gt_last",
+      "input": {
+        "tspans": [{"id": 0, "content": "Hello"}],
+        "char_start": 2,
+        "char_end": 2
+      },
+      "expected": {
+        "tspans": [{"id": 0, "content": "Hello"}],
+        "first_idx": 1,
+        "last_idx": 0
+      }
+    },
+    {
+      "name": "range_within_single_tspan_splits_to_three",
+      "input": {
+        "tspans": [{"id": 0, "content": "Hello"}],
+        "char_start": 1,
+        "char_end": 4
+      },
+      "expected": {
+        "tspans": [
+          {"id": 0, "content": "H"},
+          {"id": 1, "content": "ell"},
+          {"id": 2, "content": "o"}
+        ],
+        "first_idx": 1,
+        "last_idx": 1
+      }
+    },
+    {
+      "name": "range_spanning_two_tspans_splits_both_boundaries",
+      "input": {
+        "tspans": [
+          {"id": 0, "content": "Hello "},
+          {"id": 1, "content": "world"}
+        ],
+        "char_start": 3,
+        "char_end": 9
+      },
+      "expected": {
+        "tspans": [
+          {"id": 0, "content": "Hel"},
+          {"id": 2, "content": "lo "},
+          {"id": 1, "content": "wor"},
+          {"id": 3, "content": "ld"}
+        ],
+        "first_idx": 1,
+        "last_idx": 2
+      }
+    },
+    {
+      "name": "range_covers_whole_text_no_split_needed",
+      "input": {
+        "tspans": [
+          {"id": 0, "content": "Hello "},
+          {"id": 1, "content": "world"}
+        ],
+        "char_start": 0,
+        "char_end": 11
+      },
+      "expected": {
+        "tspans": [
+          {"id": 0, "content": "Hello "},
+          {"id": 1, "content": "world"}
+        ],
+        "first_idx": 0,
+        "last_idx": 1
+      }
+    },
+    {
+      "name": "range_spans_three_tspans_splits_outer_boundaries_only",
+      "input": {
+        "tspans": [
+          {"id": 0, "content": "AB"},
+          {"id": 1, "content": "CDE"},
+          {"id": 2, "content": "FGH"}
+        ],
+        "char_start": 1,
+        "char_end": 7
+      },
+      "expected": {
+        "tspans": [
+          {"id": 0, "content": "A"},
+          {"id": 3, "content": "B"},
+          {"id": 1, "content": "CDE"},
+          {"id": 2, "content": "FG"},
+          {"id": 4, "content": "H"}
+        ],
+        "first_idx": 1,
+        "last_idx": 3
+      }
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "algorithm": "tspan_merge",
+  "comparison": "exact",
+  "description": "merge(text) collapses adjacent tspans with identical resolved attribute sets, dropping empty-content tspans unconditionally. Surviving tspan keeps its id; right's id is dropped. See TSPAN.md Primitives > Merge adjacent equal.",
+  "vectors": [
+    {
+      "name": "empty_list_yields_single_empty_tspan",
+      "input": {"tspans": []},
+      "expected": {"tspans": [{"id": 0, "content": ""}]}
+    },
+    {
+      "name": "single_tspan_unchanged",
+      "input": {"tspans": [{"id": 0, "content": "Hello"}]},
+      "expected": {"tspans": [{"id": 0, "content": "Hello"}]}
+    },
+    {
+      "name": "two_adjacent_equal_tspans_merge",
+      "input": {
+        "tspans": [
+          {"id": 0, "content": "Hello "},
+          {"id": 1, "content": "world"}
+        ]
+      },
+      "expected": {
+        "tspans": [{"id": 0, "content": "Hello world"}]
+      }
+    },
+    {
+      "name": "two_adjacent_unequal_tspans_do_not_merge",
+      "input": {
+        "tspans": [
+          {"id": 0, "content": "Hello "},
+          {"id": 1, "content": "world", "font_weight": "bold"}
+        ]
+      },
+      "expected": {
+        "tspans": [
+          {"id": 0, "content": "Hello "},
+          {"id": 1, "content": "world", "font_weight": "bold"}
+        ]
+      }
+    },
+    {
+      "name": "empty_content_tspan_merged_away_unconditionally",
+      "input": {
+        "tspans": [
+          {"id": 0, "content": "before"},
+          {"id": 1, "content": "", "font_weight": "bold"},
+          {"id": 2, "content": "after"}
+        ]
+      },
+      "expected": {
+        "tspans": [{"id": 0, "content": "beforeafter"}]
+      }
+    },
+    {
+      "name": "cascade_merge_three_equal_tspans_collapse_to_one",
+      "input": {
+        "tspans": [
+          {"id": 0, "content": "A"},
+          {"id": 3, "content": "B"},
+          {"id": 7, "content": "C"}
+        ]
+      },
+      "expected": {
+        "tspans": [{"id": 0, "content": "ABC"}]
+      }
+    },
+    {
+      "name": "left_id_preserved_when_merging_empty_right",
+      "input": {
+        "tspans": [
+          {"id": 5, "content": "A"},
+          {"id": 6, "content": ""}
+        ]
+      },
+      "expected": {
+        "tspans": [{"id": 5, "content": "A"}]
+      }
+    }
+  ]
+}
