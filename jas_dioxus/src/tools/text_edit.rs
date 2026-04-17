@@ -382,12 +382,18 @@ impl TextEditSession {
         let new_elem = match (self.target, elem) {
             (EditTarget::Text, Element::Text(t)) => {
                 let mut new_t = t.clone();
-                new_t.content = self.content.clone();
+                new_t.tspans = vec![crate::geometry::tspan::Tspan {
+                    content: self.content.clone(),
+                    ..crate::geometry::tspan::Tspan::default_tspan()
+                }];
                 Element::Text(new_t)
             }
             (EditTarget::TextPath, Element::TextPath(tp)) => {
                 let mut new_tp = tp.clone();
-                new_tp.content = self.content.clone();
+                new_tp.tspans = vec![crate::geometry::tspan::Tspan {
+                    content: self.content.clone(),
+                    ..crate::geometry::tspan::Tspan::default_tspan()
+                }];
                 Element::TextPath(new_tp)
             }
             _ => return None,
@@ -408,39 +414,39 @@ pub fn char_to_byte(s: &str, char_idx: usize) -> usize {
 /// defaults. Used when the user clicks the type tool on empty canvas.
 pub fn empty_text_elem(x: f64, y: f64, width: f64, height: f64) -> TextElem {
     use crate::geometry::element::{Color, CommonProps, Fill};
-    TextElem {
+    TextElem::from_string(
         x,
         y,
-        content: String::new(),
-        font_family: "sans-serif".to_string(),
-        font_size: 16.0,
-        font_weight: "normal".to_string(),
-        font_style: "normal".to_string(),
-        text_decoration: "none".to_string(),
+        "",
+        "sans-serif",
+        16.0,
+        "normal",
+        "normal",
+        "none",
         width,
         height,
-        fill: Some(Fill::new(Color::BLACK)),
-        stroke: None,
-        common: CommonProps::default(),
-    }
+        Some(Fill::new(Color::BLACK)),
+        None,
+        CommonProps::default(),
+    )
 }
 
 /// Build a new TextPath element with empty content along `d`.
 pub fn empty_text_path_elem(d: Vec<crate::geometry::element::PathCommand>) -> TextPathElem {
     use crate::geometry::element::{Color, CommonProps, Fill};
-    TextPathElem {
+    TextPathElem::from_string(
         d,
-        content: String::new(),
-        start_offset: 0.0,
-        font_family: "sans-serif".to_string(),
-        font_size: 16.0,
-        font_weight: "normal".to_string(),
-        font_style: "normal".to_string(),
-        text_decoration: "none".to_string(),
-        fill: Some(Fill::new(Color::BLACK)),
-        stroke: None,
-        common: CommonProps::default(),
-    }
+        "",
+        0.0,
+        "sans-serif",
+        16.0,
+        "normal",
+        "normal",
+        "none",
+        Some(Fill::new(Color::BLACK)),
+        None,
+        CommonProps::default(),
+    )
 }
 
 #[cfg(test)]

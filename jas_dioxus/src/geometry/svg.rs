@@ -265,7 +265,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 area_attrs,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity),
-                escape_xml(&e.content),
+                escape_xml(&e.content()),
             )
         }
         Element::TextPath(e) => {
@@ -289,7 +289,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 fw_attr, fst_attr, td_attr,
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
                 path_data(&e.d), offset_attr,
-                escape_xml(&e.content),
+                escape_xml(&e.content()),
             )
         }
         Element::Layer(e) => {
@@ -1026,13 +1026,12 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                     } else {
                         offset_str.parse::<f64>().unwrap_or(0.0)
                     };
-                    return Some(Element::TextPath(TextPathElem {
-                        d, content: child.text.clone(), start_offset,
-                        font_family: ff, font_size: fs,
-                        font_weight: fw, font_style: fst, text_decoration: td,
-                        fill: parse_fill(node), stroke: parse_stroke(node),
+                    return Some(Element::TextPath(TextPathElem::from_string(
+                        d, child.text.clone(), start_offset,
+                        ff, fs, fw, fst, td,
+                        parse_fill(node), parse_stroke(node),
                         common,
-                    }));
+                    )));
                 }
             }
 
@@ -1056,15 +1055,15 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             // SVG `y` is the baseline of the first line; convert it to
             // the layout-box top by subtracting the ascent (0.8 * fs).
             let svg_y = pt(get_f(node, "y", 0.0));
-            Some(Element::Text(TextElem {
-                x: pt(get_f(node, "x", 0.0)),
-                y: svg_y - fs * 0.8,
-                content, font_family: ff, font_size: fs,
-                font_weight: fw, font_style: fst, text_decoration: td,
-                width: tw, height: th,
-                fill: parse_fill(node), stroke: parse_stroke(node),
+            Some(Element::Text(TextElem::from_string(
+                pt(get_f(node, "x", 0.0)),
+                svg_y - fs * 0.8,
+                content,
+                ff, fs, fw, fst, td,
+                tw, th,
+                parse_fill(node), parse_stroke(node),
                 common,
-            }))
+            )))
         }
         "g" => {
             let mut children = Vec::new();
@@ -1386,15 +1385,14 @@ mod tests {
         // Internally `e.y` is the top of the layout box. Round-tripping
         // through SVG (which uses the baseline as `y`) must put us back
         // at the same top-of-box position.
-        let t = TextElem {
-            x: 10.0, y: 20.0, content: "Hi".into(),
-            font_family: "sans-serif".into(), font_size: 16.0,
-            font_weight: "normal".into(), font_style: "normal".into(),
-            text_decoration: "none".into(),
-            width: 0.0, height: 0.0,
-            fill: Some(Fill::new(Color::BLACK)), stroke: None,
-            common: CommonProps::default(),
-        };
+        let t = TextElem::from_string(
+            10.0, 20.0, "Hi",
+            "sans-serif", 16.0,
+            "normal", "normal", "none",
+            0.0, 0.0,
+            Some(Fill::new(Color::BLACK)), None,
+            CommonProps::default(),
+        );
         let doc = make_doc(vec![Element::Text(t)]);
         let svg = document_to_svg(&doc);
         let doc2 = svg_to_document(&svg);

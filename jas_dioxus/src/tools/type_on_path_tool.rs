@@ -83,10 +83,14 @@ impl TypeOnPathTool {
         let elem = model.document().get_element(&session.path)?;
         if let Element::TextPath(tp) = elem {
             let mut tp = tp.clone();
-            tp.content = session.content.clone();
+            tp.tspans = vec![crate::geometry::tspan::Tspan {
+                content: session.content.clone(),
+                ..crate::geometry::tspan::Tspan::default_tspan()
+            }];
             let font = font_string(&tp.font_style, &tp.font_weight, tp.font_size, &tp.font_family);
             let measure = make_measurer(&font, tp.font_size);
-            let lay = layout_path_text(&tp.d, &tp.content, tp.start_offset, tp.font_size, measure.as_ref());
+            let content_str = tp.content();
+            let lay = layout_path_text(&tp.d, &content_str, tp.start_offset, tp.font_size, measure.as_ref());
             Some((tp, lay))
         } else {
             None
@@ -151,7 +155,7 @@ impl TypeOnPathTool {
         self.session = Some(TextEditSession::new(
             path.clone(),
             EditTarget::TextPath,
-            elem.content.clone(),
+            elem.content(),
             cursor,
             now_ms(),
         ));
@@ -739,22 +743,22 @@ mod tests {
     fn model_with_textpath(content: &str) -> Model {
         let mut model = Model::default();
         let mut doc = model.document().clone();
-        let tp = Element::TextPath(TextPathElem {
-            d: vec![
+        let tp = Element::TextPath(TextPathElem::from_string(
+            vec![
                 PathCommand::MoveTo { x: 0.0, y: 100.0 },
                 PathCommand::LineTo { x: 200.0, y: 100.0 },
             ],
-            content: content.to_string(),
-            start_offset: 0.0,
-            font_family: "sans-serif".into(),
-            font_size: 16.0,
-            font_weight: "normal".into(),
-            font_style: "normal".into(),
-            text_decoration: "none".into(),
-            fill: Some(Fill::new(Color::BLACK)),
-            stroke: None,
-            common: CommonProps::default(),
-        });
+            content,
+            0.0,
+            "sans-serif",
+            16.0,
+            "normal",
+            "normal",
+            "none",
+            Some(Fill::new(Color::BLACK)),
+            None,
+            CommonProps::default(),
+        ));
         if let Some(children) = doc.layers[0].children_mut() {
             children.push(Rc::new(tp));
         }
@@ -815,7 +819,7 @@ mod tests {
         assert_eq!(tool.session.as_ref().unwrap().content, "ab");
         if let Some(children) = model.document().layers[0].children() {
             if let Element::TextPath(tp) = &*children[0] {
-                assert_eq!(tp.content, "ab");
+                assert_eq!(tp.content(), "ab");
             }
         }
     }
@@ -845,7 +849,7 @@ mod tests {
         model.undo();
         if let Some(children) = model.document().layers[0].children() {
             if let Element::TextPath(tp) = &*children[0] {
-                assert_eq!(tp.content, "hi");
+                assert_eq!(tp.content(), "hi");
             }
         }
     }

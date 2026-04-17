@@ -691,7 +691,10 @@ pub struct PathElem {
 pub struct TextElem {
     pub x: f64,
     pub y: f64,
-    pub content: String,
+    /// Ordered, non-empty list of tspans. The derived text content is the
+    /// concatenation of each tspan's `content`; use `content()` to read it.
+    /// See TSPAN.md.
+    pub tspans: Vec<crate::geometry::tspan::Tspan>,
     pub font_family: String,
     pub font_size: f64,
     pub font_weight: String,
@@ -708,12 +711,60 @@ impl TextElem {
     pub fn is_area_text(&self) -> bool {
         self.width > 0.0 && self.height > 0.0
     }
+
+    /// Derived content: the concatenation of each tspan's `content` in
+    /// reading order. Replaces the previous flat `content: String` field.
+    pub fn content(&self) -> String {
+        crate::geometry::tspan::concat_content(&self.tspans)
+    }
+
+    /// Construct a `TextElem` holding a single default tspan whose
+    /// `content` is the provided string. Convenience factory for callers
+    /// that build text with a flat string (Type Tool, SVG import of
+    /// `<text>` without `<tspan>` children, legacy construction).
+    pub fn from_string(
+        x: f64,
+        y: f64,
+        content: impl Into<String>,
+        font_family: impl Into<String>,
+        font_size: f64,
+        font_weight: impl Into<String>,
+        font_style: impl Into<String>,
+        text_decoration: impl Into<String>,
+        width: f64,
+        height: f64,
+        fill: Option<Fill>,
+        stroke: Option<Stroke>,
+        common: CommonProps,
+    ) -> Self {
+        let t = crate::geometry::tspan::Tspan {
+            content: content.into(),
+            ..crate::geometry::tspan::Tspan::default_tspan()
+        };
+        Self {
+            x,
+            y,
+            tspans: vec![t],
+            font_family: font_family.into(),
+            font_size,
+            font_weight: font_weight.into(),
+            font_style: font_style.into(),
+            text_decoration: text_decoration.into(),
+            width,
+            height,
+            fill,
+            stroke,
+            common,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TextPathElem {
     pub d: Vec<PathCommand>,
-    pub content: String,
+    /// See `TextElem::tspans`. The `content()` accessor returns the
+    /// concatenation.
+    pub tspans: Vec<crate::geometry::tspan::Tspan>,
     pub start_offset: f64,
     pub font_family: String,
     pub font_size: f64,
@@ -723,6 +774,44 @@ pub struct TextPathElem {
     pub fill: Option<Fill>,
     pub stroke: Option<Stroke>,
     pub common: CommonProps,
+}
+
+impl TextPathElem {
+    pub fn content(&self) -> String {
+        crate::geometry::tspan::concat_content(&self.tspans)
+    }
+
+    pub fn from_string(
+        d: Vec<PathCommand>,
+        content: impl Into<String>,
+        start_offset: f64,
+        font_family: impl Into<String>,
+        font_size: f64,
+        font_weight: impl Into<String>,
+        font_style: impl Into<String>,
+        text_decoration: impl Into<String>,
+        fill: Option<Fill>,
+        stroke: Option<Stroke>,
+        common: CommonProps,
+    ) -> Self {
+        let t = crate::geometry::tspan::Tspan {
+            content: content.into(),
+            ..crate::geometry::tspan::Tspan::default_tspan()
+        };
+        Self {
+            d,
+            tspans: vec![t],
+            start_offset,
+            font_family: font_family.into(),
+            font_size,
+            font_weight: font_weight.into(),
+            font_style: font_style.into(),
+            text_decoration: text_decoration.into(),
+            fill,
+            stroke,
+            common,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -885,10 +974,11 @@ impl Element {
                     // line, measured with the real font (via the shared
                     // hidden-canvas measurer in-browser, falling back to
                     // a 0.55*font_size stub on host/cargo-test).
-                    let lines: Vec<&str> = if e.content.is_empty() {
+                    let content_str = e.content();
+                    let lines: Vec<&str> = if content_str.is_empty() {
                         vec![""]
                     } else {
-                        e.content.split('\n').collect()
+                        content_str.split('\n').collect()
                     };
                     #[cfg(feature = "web")]
                     let max_width = {
@@ -1995,18 +2085,14 @@ mod tests {
     }
 
     fn point_text(content: &str, x: f64, y: f64, font_size: f64) -> Element {
-        Element::Text(TextElem {
-            x, y,
-            content: content.to_string(),
-            font_family: "sans-serif".into(),
-            font_size,
-            font_weight: "normal".into(),
-            font_style: "normal".into(),
-            text_decoration: "none".into(),
-            width: 0.0, height: 0.0,
-            fill: Some(Fill::new(Color::BLACK)), stroke: None,
-            common: CommonProps::default(),
-        })
+        Element::Text(TextElem::from_string(
+            x, y, content,
+            "sans-serif", font_size,
+            "normal", "normal", "none",
+            0.0, 0.0,
+            Some(Fill::new(Color::BLACK)), None,
+            CommonProps::default(),
+        ))
     }
 
     #[test]

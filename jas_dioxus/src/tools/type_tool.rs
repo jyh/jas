@@ -84,11 +84,15 @@ impl TypeTool {
         let elem = model.document().get_element(&session.path)?;
         if let Element::Text(t) = elem {
             let mut t = t.clone();
-            t.content = session.content.clone();
+            t.tspans = vec![crate::geometry::tspan::Tspan {
+                content: session.content.clone(),
+                ..crate::geometry::tspan::Tspan::default_tspan()
+            }];
             let font = font_string(&t.font_style, &t.font_weight, t.font_size, &t.font_family);
             let measure = make_measurer(&font, t.font_size);
             let max_width = if t.is_area_text() { t.width } else { 0.0 };
-            let lay = layout(&t.content, max_width, t.font_size, measure.as_ref());
+            let content_str = t.content();
+            let lay = layout(&content_str, max_width, t.font_size, measure.as_ref());
             Some((t, lay))
         } else {
             None
@@ -186,7 +190,7 @@ impl TypeTool {
         self.session = Some(TextEditSession::new(
             path.clone(),
             EditTarget::Text,
-            elem.content.clone(),
+            elem.content(),
             cursor,
             now_ms(),
         ));
@@ -264,10 +268,11 @@ fn text_draw_bounds(t: &TextElem) -> (f64, f64, f64, f64) {
         // Approximate width per line, using the widest line; height grows
         // with the number of hard-broken lines so multi-line point text
         // hit-tests correctly.
-        let lines: Vec<&str> = if t.content.is_empty() {
+        let content_str = t.content();
+        let lines: Vec<&str> = if content_str.is_empty() {
             vec![""]
         } else {
-            t.content.split('\n').collect()
+            content_str.split('\n').collect()
         };
         let max_chars = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
         let w = (max_chars.max(1) as f64) * t.font_size * 0.55;
@@ -739,21 +744,21 @@ mod tests {
     fn model_with_text(content: &str, x: f64, y: f64) -> Model {
         let mut model = Model::default();
         let mut doc = model.document().clone();
-        let elem = Element::Text(TextElem {
+        let elem = Element::Text(TextElem::from_string(
             x,
             y,
-            content: content.to_string(),
-            font_family: "sans-serif".into(),
-            font_size: 16.0,
-            font_weight: "normal".into(),
-            font_style: "normal".into(),
-            text_decoration: "none".into(),
-            width: 0.0,
-            height: 0.0,
-            fill: Some(Fill::new(Color::BLACK)),
-            stroke: None,
-            common: CommonProps::default(),
-        });
+            content,
+            "sans-serif",
+            16.0,
+            "normal",
+            "normal",
+            "none",
+            0.0,
+            0.0,
+            Some(Fill::new(Color::BLACK)),
+            None,
+            CommonProps::default(),
+        ));
         if let Some(children) = doc.layers[0].children_mut() {
             children.push(Rc::new(elem));
         }
@@ -811,7 +816,7 @@ mod tests {
         let layer = &model.document().layers[0];
         if let Some(children) = layer.children() {
             if let Element::Text(t) = &*children[0] {
-                assert_eq!(t.content, "ab");
+                assert_eq!(t.content(), "ab");
             } else {
                 panic!("expected text element");
             }
@@ -850,7 +855,7 @@ mod tests {
         model.undo();
         if let Some(children) = model.document().layers[0].children() {
             if let Element::Text(t) = &*children[0] {
-                assert_eq!(t.content, "hello");
+                assert_eq!(t.content(), "hello");
             }
         }
     }
@@ -867,17 +872,19 @@ mod tests {
 
     #[test]
     fn text_draw_bounds_grows_with_hard_line_breaks() {
-        let one = TextElem {
-            x: 0.0, y: 0.0, content: "a".into(),
-            font_family: "sans-serif".into(), font_size: 20.0,
-            font_weight: "normal".into(), font_style: "normal".into(),
-            text_decoration: "none".into(),
-            width: 0.0, height: 0.0,
-            fill: Some(Fill::new(Color::BLACK)), stroke: None,
-            common: CommonProps::default(),
-        };
+        let one = TextElem::from_string(
+            0.0, 0.0, "a",
+            "sans-serif", 20.0,
+            "normal", "normal", "none",
+            0.0, 0.0,
+            Some(Fill::new(Color::BLACK)), None,
+            CommonProps::default(),
+        );
         let mut three = one.clone();
-        three.content = "a\nb\nc".into();
+        three.tspans = vec![crate::geometry::tspan::Tspan {
+            content: "a\nb\nc".to_string(),
+            ..crate::geometry::tspan::Tspan::default_tspan()
+        }];
         let (_, _, _, h1) = text_draw_bounds(&one);
         let (_, _, _, h3) = text_draw_bounds(&three);
         assert_eq!(h1, 20.0);
@@ -886,17 +893,19 @@ mod tests {
 
     #[test]
     fn text_draw_bounds_width_is_widest_line() {
-        let mut t = TextElem {
-            x: 0.0, y: 0.0, content: "hi\nhello".into(),
-            font_family: "sans-serif".into(), font_size: 10.0,
-            font_weight: "normal".into(), font_style: "normal".into(),
-            text_decoration: "none".into(),
-            width: 0.0, height: 0.0,
-            fill: Some(Fill::new(Color::BLACK)), stroke: None,
-            common: CommonProps::default(),
-        };
+        let mut t = TextElem::from_string(
+            0.0, 0.0, "hi\nhello",
+            "sans-serif", 10.0,
+            "normal", "normal", "none",
+            0.0, 0.0,
+            Some(Fill::new(Color::BLACK)), None,
+            CommonProps::default(),
+        );
         let (_, _, w_multi, _) = text_draw_bounds(&t);
-        t.content = "hello".into();
+        t.tspans = vec![crate::geometry::tspan::Tspan {
+            content: "hello".to_string(),
+            ..crate::geometry::tspan::Tspan::default_tspan()
+        }];
         let (_, _, w_one, _) = text_draw_bounds(&t);
         assert_eq!(w_multi, w_one);
     }
@@ -1157,7 +1166,7 @@ mod tests {
         model.undo();
         if let Some(children) = model.document().layers[0].children() {
             if let Element::Text(t) = &*children[0] {
-                assert_eq!(t.content, "hi");
+                assert_eq!(t.content(), "hi");
             }
         }
         // And no further undo if there was none before.
