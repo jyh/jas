@@ -10,11 +10,29 @@ import Foundation
 
 // MARK: - Public API
 
+/// Cache of parsed ASTs keyed by source string. ``nil`` cached for
+/// unparseable input so we don't reparse known-bad strings.
+///
+/// Workspace YAML has a finite set of expression strings (~hundreds);
+/// the cache reaches steady state after the first render and never
+/// grows unboundedly in practice. SwiftUI view-body evaluation runs
+/// on the main thread so a plain dictionary is sufficient — if
+/// off-main concurrent access ever becomes a vector, gate this with
+/// a serial DispatchQueue.
+private var _astCache: [String: Expr?] = [:]
+
 /// Evaluate an expression string against a context.
 /// Returns `.null` for empty or unparseable input.
 func evaluate(_ expr: String, context: [String: Any]) -> Value {
     if expr.isEmpty { return .null }
-    guard let ast = parseExpr(expr) else { return .null }
+    let ast: Expr?
+    if let cached = _astCache[expr] {
+        ast = cached
+    } else {
+        ast = parseExpr(expr)
+        _astCache[expr] = ast
+    }
+    guard let ast else { return .null }
     return evalNode(ast, context)
 }
 
