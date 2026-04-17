@@ -240,11 +240,14 @@ containing this value.
 `split(text, tspan_idx, offset) → (text', left_idx, right_idx)`
 
 - Pre: `0 ≤ offset ≤ tspan.content.length`.
-- If `offset == 0`: `text' == text`; `left_idx = tspan_idx - 1` (may
-  be out of range when `tspan_idx == 0`), `right_idx = tspan_idx`.
+- `left_idx` and `right_idx` are each either a tspan index or
+  nullable / absent when out of range (`None` in Rust/OCaml,
+  `nil` in Swift, `None` in Python, `null` in test fixtures).
+- If `offset == 0`: `text' == text`; `left_idx = tspan_idx - 1` or
+  absent when `tspan_idx == 0`, `right_idx = tspan_idx`.
 - If `offset == tspan.content.length`: `text' == text`;
-  `left_idx = tspan_idx`, `right_idx = tspan_idx + 1` (may be out
-  of range when `tspan_idx` is the last index).
+  `left_idx = tspan_idx`, `right_idx = tspan_idx + 1` or absent
+  when `tspan_idx` is the last index.
 - Otherwise `text'` is a new `Text` whose tspan list equals
   `text`'s except that the tspan at `tspan_idx` is replaced by two
   tspans `left` and `right` sharing the original's attribute
@@ -263,7 +266,8 @@ Returns a new `Text` whose tspan list exactly covers the character
 range `[char_start, char_end)` of the input's concatenated content
 with a contiguous run of tspans. Splits at each endpoint if needed.
 `first_idx` and `last_idx` are indices into `text'`'s tspan list
-(inclusive); if the range is empty, `first_idx > last_idx`.
+(inclusive) when the range is non-empty; both are absent (null /
+`None` / `nil`) when `char_start == char_end`.
 
 ### Merge adjacent equal
 
