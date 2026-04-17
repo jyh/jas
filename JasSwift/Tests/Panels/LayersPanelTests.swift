@@ -233,6 +233,118 @@ private func runLayersEffects(_ effects: [Any], model: Model) {
     #expect(model.document.layers[2].name == "B")
 }
 
+@Test func newGroupWrapsSelectedChildrenInGroup() {
+    // Wrap two of three sibling rects into a new Group at the
+    // topmost source position.
+    let children: [Element] = [
+        .rect(Rect(x: 0, y: 0, width: 10, height: 10)),
+        .rect(Rect(x: 20, y: 0, width: 10, height: 10)),
+        .rect(Rect(x: 40, y: 0, width: 10, height: 10)),
+    ]
+    let model = Model(document: Document(layers: [
+        Layer(name: "L", children: children),
+    ]))
+    LayersPanel.dispatchYamlAction("new_group",
+                                    model: model,
+                                    panelSelection: [[0, 0], [0, 1]])
+    let layer = model.document.layers[0]
+    #expect(layer.children.count == 2)
+    guard case .group(let g) = layer.children[0] else {
+        Issue.record("expected group at layer.children[0]"); return
+    }
+    #expect(g.children.count == 2)
+    // The trailing rect at original index 2 should still be at index 1
+    // of the rewritten layer.
+    guard case .rect = layer.children[1] else {
+        Issue.record("expected rect at layer.children[1]"); return
+    }
+}
+
+@Test func newGroupEmptySelectionIsNoop() {
+    let children: [Element] = [
+        .rect(Rect(x: 0, y: 0, width: 10, height: 10)),
+    ]
+    let model = Model(document: Document(layers: [
+        Layer(name: "L", children: children),
+    ]))
+    LayersPanel.dispatchYamlAction("new_group",
+                                    model: model,
+                                    panelSelection: [])
+    // Document unchanged.
+    #expect(model.document.layers[0].children.count == 1)
+    guard case .rect = model.document.layers[0].children[0] else {
+        Issue.record("expected unchanged rect"); return
+    }
+}
+
+@Test func newGroupMixedParentsIsNoop() {
+    // Selection that spans two different layers violates the
+    // same-parent invariant; handler must refuse to mutate.
+    let model = Model(document: Document(layers: [
+        Layer(name: "A", children: [
+            .rect(Rect(x: 0, y: 0, width: 10, height: 10)),
+        ]),
+        Layer(name: "B", children: [
+            .rect(Rect(x: 20, y: 0, width: 10, height: 10)),
+        ]),
+    ]))
+    LayersPanel.dispatchYamlAction("new_group",
+                                    model: model,
+                                    panelSelection: [[0, 0], [1, 0]])
+    // Both layers unchanged.
+    #expect(model.document.layers.count == 2)
+    #expect(model.document.layers[0].children.count == 1)
+    #expect(model.document.layers[1].children.count == 1)
+}
+
+@Test func flattenArtworkUnpacksSingleGroup() {
+    // A group containing two rects gets unpacked; the rects take the
+    // group's position in the parent layer.
+    let inner: [Element] = [
+        .rect(Rect(x: 0, y: 0, width: 10, height: 10)),
+        .rect(Rect(x: 20, y: 0, width: 10, height: 10)),
+    ]
+    let group = Element.group(Group(children: inner))
+    let model = Model(document: Document(layers: [
+        Layer(name: "L", children: [group]),
+    ]))
+    LayersPanel.dispatchYamlAction("flatten_artwork",
+                                    model: model,
+                                    panelSelection: [[0, 0]])
+    let layer = model.document.layers[0]
+    #expect(layer.children.count == 2)
+    for child in layer.children {
+        guard case .rect = child else {
+            Issue.record("expected rect after unpacking"); return
+        }
+    }
+}
+
+@Test func flattenArtworkPreservesSurroundingSiblings() {
+    // Group sandwiched between two rects. After unpacking, the group's
+    // children replace the group in place, preserving sibling order.
+    let before = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let group = Element.group(Group(children: [
+        Element.rect(Rect(x: 20, y: 0, width: 10, height: 10)),
+        Element.rect(Rect(x: 40, y: 0, width: 10, height: 10)),
+    ]))
+    let after = Element.rect(Rect(x: 60, y: 0, width: 10, height: 10))
+    let model = Model(document: Document(layers: [
+        Layer(name: "L", children: [before, group, after]),
+    ]))
+    LayersPanel.dispatchYamlAction("flatten_artwork",
+                                    model: model,
+                                    panelSelection: [[0, 1]])
+    let kids = model.document.layers[0].children
+    // Expect 4 rects in sequence: [before, inner[0], inner[1], after].
+    #expect(kids.count == 4)
+    let bounds = kids.map { $0.bounds }
+    #expect(bounds[0].x == 0)
+    #expect(bounds[1].x == 20)
+    #expect(bounds[2].x == 40)
+    #expect(bounds[3].x == 60)
+}
+
 @Test func collectInNewLayerViaYamlDispatch() {
     let model = Model(document: Document(layers: [
         Layer(name: "Layer 1", children: []),

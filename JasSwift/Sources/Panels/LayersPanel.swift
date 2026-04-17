@@ -31,16 +31,12 @@ public enum LayersPanel {
              "new_layer",
              "collect_in_new_layer",
              "enter_isolation_mode",
-             "exit_isolation_mode":
+             "exit_isolation_mode",
+             "new_group",
+             "flatten_artwork":
             if let m = model {
                 dispatchYamlAction(cmd, model: m)
             }
-        // Tier-3 stubs: log only until document model is implemented.
-        case "new_group",
-             "flatten_artwork":
-            #if DEBUG
-            print("[LayersPanel] dispatch: \(cmd)")
-            #endif
         default: break
         }
     }
@@ -292,6 +288,74 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.wrap_in_group: { paths } — wrap the elements at the given
+        // paths into a new Group at the topmost source position. All
+        // paths must share the same parent and be at least depth 2
+        // (children of a Layer or deeper); Swift's Document.layers is
+        // [Layer], so top-level items cannot be wrapped in a Group.
+        let docWrapInGroupHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any] else { return nil }
+            let pathsExpr = (spec["paths"] as? String) ?? "[]"
+            let pathsVal = evaluate(pathsExpr, context: callCtx)
+            guard case .list(let items) = pathsVal else { return nil }
+            var normalized: [[Int]] = []
+            for item in items {
+                if let obj = item.value as? [String: Any],
+                   let arr = obj["__path__"] as? [Int] {
+                    normalized.append(arr)
+                }
+            }
+            if normalized.isEmpty { return nil }
+            normalized.sort { $0.lexicographicallyPrecedes($1) }
+            // All paths must share the same parent and be nested (depth >= 2).
+            guard let first = normalized.first, first.count >= 2 else { return nil }
+            let parentPath = Array(first.dropLast())
+            for p in normalized where Array(p.dropLast()) != parentPath {
+                return nil
+            }
+            // Collect the selected children in document order.
+            let doc = model.document
+            let children = normalized.map { doc.getElement($0) }
+            // Delete all but the topmost in reverse, then replace the
+            // topmost with a new Group containing every collected child.
+            var newDoc = doc
+            for p in normalized.dropFirst().reversed() {
+                newDoc = newDoc.deleteElement(p)
+            }
+            let newGroup = Element.group(Group(children: children))
+            newDoc = newDoc.replaceElement(first, with: newGroup)
+            model.document = newDoc
+            return nil
+        }
+
+        // doc.unpack_group_at: path — replace a Group with its children
+        // in place. Path must point to a Group nested inside a Layer;
+        // top-level paths (length 1) point to Layers, which cannot be
+        // unpacked.
+        let docUnpackGroupAtHandler: PlatformEffect = { value, callCtx, _ in
+            guard let pathExpr = value as? String else { return nil }
+            let pathVal = evaluate(pathExpr, context: callCtx)
+            guard case .path(let indices) = pathVal, indices.count >= 2 else { return nil }
+            let doc = model.document
+            let elem = doc.getElement(indices)
+            guard case .group(let g) = elem else { return nil }
+            var newDoc = doc
+            if g.children.isEmpty {
+                newDoc = newDoc.deleteElement(indices)
+            } else {
+                // Replace the group with its first child, then insert
+                // each subsequent child just after its predecessor.
+                newDoc = newDoc.replaceElement(indices, with: g.children[0])
+                var insertAfter = indices
+                for child in g.children.dropFirst() {
+                    newDoc = newDoc.insertElementAfter(insertAfter, element: child)
+                    insertAfter[insertAfter.count - 1] += 1
+                }
+            }
+            model.document = newDoc
+            return nil
+        }
+
         // doc.create_layer: { name } — factory returning a new Layer
         // value. Bind via as: and insert with doc.insert_at.
         let docCreateLayerHandler: PlatformEffect = { value, callCtx, _ in
@@ -379,6 +443,8 @@ public enum LayersPanel {
             "doc.insert_at": docInsertAtHandler,
             "doc.create_layer": docCreateLayerHandler,
             "doc.wrap_in_layer": docWrapInLayerHandler,
+            "doc.wrap_in_group": docWrapInGroupHandler,
+            "doc.unpack_group_at": docUnpackGroupAtHandler,
             "list_push": listPushHandler,
             "pop": popHandler,
         ]
