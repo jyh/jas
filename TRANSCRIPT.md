@@ -1446,107 +1446,6 @@ panel:
   - .col-2: SUBTRACT_BACK
 ```
 
-# Character
-
-The Character Panel allows setting properties of text in the selection.
-- The FONT_DROPDOWN contains a list of available fonts, with a checkmark next to the current font.
-- The STYLE_DROPDOWN allows selecting from the available style of the font (e.g. italic, bold, etc)
-- The FONT_SIZE_DROPDOWN gives a selection of font sizes from 6pt to 64pt, and allows direct input of a point size
-- The LEADING_DROPDOWN is like font size, but sets the leading of the text
-- KERNING affects the spacing between characters
-- TRACKING is similar to KERNING
-- VERTICAL_SCALE stretches the vertical size of the text
-- HORIZONTAL_SCALE stretches the horizontal size
-- BASELINE_SHIFT allows shifting the baseline
-- CHARACTER_ROTATION applies a rotation to each character in the text
-- ALL_CAPS produces all capitals, even if the text is written in lowercase
-- SMALL_CAPS produces small captials for text written in lowercase, and regular capitals for character writeen in uppercase
-- SUPERSCRIPT places the selected text n superscript position
-- SUBSCRIPT does the same for subscript position
-- UNDERLINE underlines the selected text
-- STRIKETHROUGH applies strikethrough to the text
-
-Note that these operations are performed on the selected text, which may be a tspan within a text element.
-
-Here is the panel layout in bootstrap style.
-
-```yaml
-panel:
-- .row: FONT_DROPDOWN
-- .row: STYLE_DROPDOWN
-- .row:
-  - .col-2: font size icon
-  - .col-4: FONT_SIZE_DROPDOWN
-  - .col-2: leading icon
-  - .col-4: LEADING_DROPDOWN
-- .row:
-  - .col-2: kerning icon
-  - .col-4: KERNING_DROPDOWN
-  - .col-2: tracking icon
-  - .col-4: TRACKING_DROPDOWN
-- .row:
-  - .col-2: vertical scale icon
-  - .col-4: VERTICAL_SCALE_DROPDOWN
-  - .col-2: horizontal scale icon
-  - .col-4: HORIZONTAL SCALE DROPDOWN
-- .row:
-  - .col-2: baseline shift icon
-  - .col-4: BASELINE_SHIFT_DROPDOWN
-  - .col-2: character rotaton icon
-  - .col-4: CHARACTER_ROTATION_DROPDOWN
-- .row:
-  - .col-2: ALL_CAPS_BUTTON
-  - .col-2: SMALL_CAPS_BUTTON
-  - .col-2: SUPERSCRIPT_BUTTON
-  - .col-2: SUBSCRIPT_BUTTON
-  - .col-2: UNDERLINE_BUTTON
-  - .col-2: STRIKETHROUGH_BUTTON
-```
-
-# Paragraph
-
-The Paragraph Panel sets properties of paragraphs, longer space of text that may include wrapping and indentation.
-
-- ALIGN_LEFT aligns each line to the left boundary, with a ragged right.
-- ALIGN_CENTER centers each line, the left and right are ragged.
-- ALIGN_RIGHT aligns each line to the right margin, leaving the left ragged.
-- The JUSTIFY operations justify to both margins.
-  - JUSTIFY_LEFT justifies the last line left, leaving the right ragged.
-  - JUSTIFY_RIGHT justifies the last line right, leaving the left ragged.
-  - JUSTIFY_CENTER justifies the last line in the center.
-  - JUSTIFY_ALL forces justification on all lines
-- BULLETS_DROPDOWN lists a set of bullet list styles. Each paragraph starts with a bullet. We can include normal bullets, dashes, checkmarks.
-- NUMBERED_LIST_DROPDOWN gives a set of numbered list styles. Each paragraph starts with a number. We can give numbers, roman numerals (both capitals and lower case).
-- LEFT_INDENT allows specifying an identation for all the lines in a paragraph.
-- RIGHT_INDENT does the same, but indents from the right margin.
-- FIRST_LINE_INDENT_VALUE specifies additional indentation for the first line of each paragraph.
-- SPACE_BEFORE_VALUE indicates additional vertical spacing for every paragraph but the first one.
-- SPACE_AFTER_VALUE indicates additional veritcal spacing between paragraphs.
-- HYPHENATE, when checked, specifies that line breaking is allowed to use hyphenation.
-
-Here is the layour in bootstrap style format.
-
-```yaml
-panel:
-- .row: [ALIGN\_LEFT, ALIGN\_CENTER, ALIGN\_RIGHT, JUSTIFY\_LEFT, JUSTIFY\_CENTER, JUSTIFY\_RIGHT, JUSTIFY\_ALL]
-- .row: [BULLETS_DROPDOWN, NUMBERED_LIST_DROPDOWN]
-- .row:
-  - .col-1: left indent icon
-  - .col-5: LEFT_INDENT_VALUE
-  - .col-1: right indent icon
-  - .col-5: RIGHT_INDENT_VALUE
-- .row:
-  - .col-1: first line indent icon
-  - .col-5: FIRST_LINE_INDENT_VALUE
-- .row:
-  - .col-1: space before icon
-  - .col-5: SPACE_BEFORE_VALUE
-  - .col-1: space after icon
-  - .col-5: SPACE AFTER VALIE
-- .row:
-  - .col-3: HYPHENATE_CHECKBOX
-```
-
 # Magic wand
 
 The Magic Wand Panel specifies properties of the Magic Wand, which starts with a selection, and selects additional elements based on whether those elements are similar to the selection in stroke and fill.
@@ -1844,6 +1743,135 @@ downsides? Be ready for a deep dive into any of the suggestions.
 I'd like to compile expressions to byte-code. This will give a compact
 representation that is efficient to evaluate. I'm thinking we should use the
 ZINC abstract machine.
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements, ranking them in priority
+from high to low, and giving each a number. What are the benefits? What are the
+downsides? Be ready for a deep dive into any of the suggestions.
+
+# Paragraph
+
+The Paragraph Panel sets properties of paragraphs, longer space of text that may include wrapping and indentation.
+
+- ALIGN_LEFT aligns each line to the left boundary, with a ragged right.
+- ALIGN_CENTER centers each line, the left and right are ragged.
+- ALIGN_RIGHT aligns each line to the right margin, leaving the left ragged.
+- The JUSTIFY operations justify to both margins.
+  - JUSTIFY_LEFT justifies the last line left, leaving the right ragged.
+  - JUSTIFY_RIGHT justifies the last line right, leaving the left ragged.
+  - JUSTIFY_CENTER justifies the last line in the center.
+  - JUSTIFY_ALL forces justification on all lines
+- BULLETS_DROPDOWN lists a set of bullet list styles. Each paragraph starts with a bullet. We can include normal bullets, dashes, checkmarks.
+- NUMBERED_LIST_DROPDOWN gives a set of numbered list styles. Each paragraph starts with a number. We can give numbers, roman numerals (both capitals and lower case).
+- LEFT_INDENT allows specifying an identation for all the lines in a paragraph.
+- RIGHT_INDENT does the same, but indents from the right margin.
+- FIRST_LINE_INDENT_VALUE specifies additional indentation for the first line of each paragraph.
+- SPACE_BEFORE_VALUE indicates additional vertical spacing for every paragraph but the first one.
+- SPACE_AFTER_VALUE indicates additional veritcal spacing between paragraphs.
+- HYPHENATE, when checked, specifies that line breaking is allowed to use hyphenation.
+
+Here is the layour in bootstrap style format.
+
+```yaml
+panel:
+- .row: [ALIGN\_LEFT, ALIGN\_CENTER, ALIGN\_RIGHT, JUSTIFY\_LEFT, JUSTIFY\_CENTER, JUSTIFY\_RIGHT, JUSTIFY\_ALL]
+- .row: [BULLETS_DROPDOWN, NUMBERED_LIST_DROPDOWN]
+- .row:
+  - .col-1: left indent icon
+  - .col-5: LEFT_INDENT_VALUE
+  - .col-1: right indent icon
+  - .col-5: RIGHT_INDENT_VALUE
+- .row:
+  - .col-1: first line indent icon
+  - .col-5: FIRST_LINE_INDENT_VALUE
+- .row:
+  - .col-1: space before icon
+  - .col-5: SPACE_BEFORE_VALUE
+  - .col-1: space after icon
+  - .col-5: SPACE AFTER VALIE
+- .row:
+  - .col-3: HYPHENATE_CHECKBOX
+```
+
+# Character
+
+The Character Panel allows setting properties of text in the selection. An example is shown in examples/character.png.
+
+- The FONT_DROPDOWN contains a list of available fonts, with a checkmark next to the current font.
+- The STYLE_DROPDOWN allows selecting from the available style of the font (e.g. italic, bold, etc)
+- The FONT_SIZE_DROPDOWN gives a selection of font sizes from 6pt to 64pt, and allows direct input of a point size
+- The LEADING_DROPDOWN is like font size, but sets the leading of the text
+- KERNING affects the spacing between characters
+- TRACKING is similar to KERNING
+- VERTICAL_SCALE stretches the vertical size of the text
+- HORIZONTAL_SCALE stretches the horizontal size
+- BASELINE_SHIFT allows shifting the baseline
+- CHARACTER_ROTATION applies a rotation to each character in the text
+- ALL_CAPS produces all capitals, even if the text is written in lowercase
+- SMALL_CAPS produces small captials for text written in lowercase, and regular capitals for character writeen in uppercase
+- SUPERSCRIPT places the selected text n superscript position
+- SUBSCRIPT does the same for subscript position
+- UNDERLINE underlines the selected text
+- STRIKETHROUGH applies strikethrough to the text
+
+Note that these operations are performed on the selected text, which may be a tspan within a text element.
+
+Here is the panel layout in bootstrap style.
+
+```yaml
+panel:
+- .row: FONT_DROPDOWN
+- .row: STYLE_DROPDOWN
+- .row:
+  - .col-2: font size icon
+  - .col-4: FONT_SIZE_DROPDOWN
+  - .col-2: leading icon
+  - .col-4: LEADING_DROPDOWN
+- .row:
+  - .col-2: kerning icon
+  - .col-4: KERNING_DROPDOWN
+  - .col-2: tracking icon
+  - .col-4: TRACKING_DROPDOWN
+- .row:
+  - .col-2: vertical scale icon
+  - .col-4: VERTICAL_SCALE_DROPDOWN
+  - .col-2: horizontal scale icon
+  - .col-4: HORIZONTAL SCALE DROPDOWN
+- .row:
+  - .col-2: baseline shift icon
+  - .col-4: BASELINE_SHIFT_DROPDOWN
+  - .col-2: character rotaton icon
+  - .col-4: CHARACTER_ROTATION_DROPDOWN
+- .row:
+  - .col-2: ALL_CAPS_BUTTON
+  - .col-2: SMALL_CAPS_BUTTON
+  - .col-2: SUPERSCRIPT_BUTTON
+  - .col-2: SUBSCRIPT_BUTTON
+  - .col-2: UNDERLINE_BUTTON
+  - .col-2: STRIKETHROUGH_BUTTON
+```
+
+The menu has the following entries.
+
+- Show Snap to Glyph Options (checkmark if active)
+- ----
+- Show Font Height Options (checkmark if active)
+- ----
+- Standard Vertical Roman Alignment (checkmark if active)
+- ----
+- Touch Type Tool  (checkmark if active)
+- Enable in-menu font previews (checkmark if active)
+- ----
+- All Caps  (checkmark if active)
+- Small Caps  (checkmark if active)
+- Superscript  (checkmark if active)
+- Subscript  (checkmark if active)
+- ----
+- Fractional Widths  (checkmark if active)
+- ----
+- No Break  (checkmark if active)
+- ----
+- Reset Panel
 
 Please read and understand these requirements. Analyze them for inconsistencies
 and completeness. Make suggestions for improvements, ranking them in priority
