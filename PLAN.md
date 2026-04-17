@@ -1,5 +1,16 @@
 # Plan: Move hardcoded actions into the YAML effects language
 
+> **Status (2026-04-17): Phases 1–4 complete on `main`. Final commit: `3d74551`
+> "Docs: record Phase 3/4 completion." This document describes the historical
+> plan; see AUDIT.md for bug resolution and `git log --grep="Phase"` for the
+> implementation timeline. Kept for context, not a roadmap for current work.**
+>
+> **Remaining `- log:` placeholders: 53** (down from the ~81 baseline;
+> 51 in `workspace/actions.yaml`, 1 each in two dialogs). The remaining
+> tail is system-integration-heavy — native file dialogs, clipboard,
+> undo/redo plumbing — and needs host-specific platform effects rather
+> than new YAML primitives. Deferred to future phases.
+
 ## Goal
 
 Eliminate the ~81 `- log: "..."` placeholder effects in `workspace/actions.yaml`
@@ -32,16 +43,15 @@ across all 4 languages that will benefit from the same primitives.
 
 ## Constraints
 
-1. **Branch**: do this on `yaml-interpreter-2` (currently empty off main).
-   `layers-panel` must merge to main first — don't mix this refactor into
-   a feature branch.
-2. **Propagation order**: shared-first.
+1. **Branch** *(historical)*: executed on `main` after `layers-panel` merged;
+   the originally-proposed `yaml-interpreter-2` branch was never used.
+2. **Propagation order** *(historical)*: shared-first. Executed in sequence:
    1. `workspace_interpreter/` (Python — the spec)
    2. Rust `jas_dioxus/src/interpreter/`
    3. Swift `JasSwift/Sources/Interpreter/`
    4. OCaml `jas_ocaml/lib/interpreter/`
-   5. Python-app `jas/` (reuses `workspace_interpreter/` if possible)
-   6. Flask (only if its rendering path needs the primitive)
+   5. Python-app `jas/` (reuses `workspace_interpreter/` where possible)
+   6. Flask (applied only where rendering needed the primitive)
 3. **Tests first** per project convention — every new primitive has tests
    in each language before code.
 4. **No auto-commit** — ask before committing.
@@ -199,7 +209,7 @@ partial support exists.
 
 ## Open questions
 
-All resolved. Ready for Phase 0.
+All resolved; Phase 0 through Phase 4 executed and complete (final commit: `3d74551`).
 
 ### Resolved: expression-language path navigation
 
