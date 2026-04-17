@@ -729,6 +729,25 @@ pub struct TextElem {
     /// on export. Panel field: Anti-aliasing.
     #[serde(default)]
     pub aa_mode: String,
+    /// Character rotation in degrees (SVG `rotate` attribute on the
+    /// text element). Signed; positive = clockwise per SVG. Empty =
+    /// identity (0°). Panel field: Character rotation.
+    #[serde(default)]
+    pub rotate: String,
+    /// Horizontal glyph scale, percent. Identity (100) = empty so the
+    /// attribute is omitted. Panel field: Horizontal scale.
+    #[serde(default)]
+    pub horizontal_scale: String,
+    /// Vertical glyph scale, percent. Identity (100) = empty so the
+    /// attribute is omitted. Panel field: Vertical scale.
+    #[serde(default)]
+    pub vertical_scale: String,
+    /// Kerning adjustment — stored verbatim as the value of the
+    /// `urn:jas:1:kerning-mode` custom attribute. Named modes
+    /// (`"Auto"`, `"Optical"`, `"Metrics"`) or a length like
+    /// `"0.025em"`. Empty = Auto (default). Panel field: Kerning.
+    #[serde(default)]
+    pub kerning: String,
     pub width: f64,
     pub height: f64,
     pub fill: Option<Fill>,
@@ -786,6 +805,10 @@ impl TextElem {
             letter_spacing: String::new(),
             xml_lang: String::new(),
             aa_mode: String::new(),
+            rotate: String::new(),
+            horizontal_scale: String::new(),
+            vertical_scale: String::new(),
+            kerning: String::new(),
             width,
             height,
             fill,
@@ -828,6 +851,18 @@ pub struct TextPathElem {
     /// See `TextElem::aa_mode`.
     #[serde(default)]
     pub aa_mode: String,
+    /// See `TextElem::rotate`.
+    #[serde(default)]
+    pub rotate: String,
+    /// See `TextElem::horizontal_scale`.
+    #[serde(default)]
+    pub horizontal_scale: String,
+    /// See `TextElem::vertical_scale`.
+    #[serde(default)]
+    pub vertical_scale: String,
+    /// See `TextElem::kerning`.
+    #[serde(default)]
+    pub kerning: String,
     pub fill: Option<Fill>,
     pub stroke: Option<Stroke>,
     pub common: CommonProps,
@@ -871,6 +906,10 @@ impl TextPathElem {
             letter_spacing: String::new(),
             xml_lang: String::new(),
             aa_mode: String::new(),
+            rotate: String::new(),
+            horizontal_scale: String::new(),
+            vertical_scale: String::new(),
+            kerning: String::new(),
             fill,
             stroke,
             common,

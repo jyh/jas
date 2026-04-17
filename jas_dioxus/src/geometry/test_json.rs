@@ -431,13 +431,14 @@ fn element_json(elem: &Element) -> String {
             o.empty_as_null("font_variant", &e.font_variant);
             o.str_val("font_weight", &e.font_weight);
             o.num("height", e.height);
+            o.empty_as_null("horizontal_scale", &e.horizontal_scale);
             o.empty_as_null("jas_aa_mode", &e.aa_mode);
             o.null("jas_fractional_widths");
-            o.null("jas_kerning_mode");
+            o.empty_as_null("jas_kerning_mode", &e.kerning);
             o.null("jas_no_break");
             o.empty_as_null("letter_spacing", &e.letter_spacing);
             o.empty_as_null("line_height", &e.line_height);
-            o.null("rotate");
+            o.empty_as_null("rotate", &e.rotate);
             o.raw("stroke", stroke_json(&e.stroke));
             o.null("style_name");
             o.raw("text_decoration", text_decoration_json(&e.text_decoration));
@@ -446,6 +447,7 @@ fn element_json(elem: &Element) -> String {
             // Per-tspan list (always non-empty).
             let tspans: Vec<String> = e.tspans.iter().map(tspan_json).collect();
             o.raw("tspans", json_array(&tspans));
+            o.empty_as_null("vertical_scale", &e.vertical_scale);
             o.num("width", e.width);
             o.num("x", e.x);
             o.empty_as_null("xml_lang", &e.xml_lang);
@@ -464,13 +466,14 @@ fn element_json(elem: &Element) -> String {
             o.str_val("font_style", &e.font_style);
             o.empty_as_null("font_variant", &e.font_variant);
             o.str_val("font_weight", &e.font_weight);
+            o.empty_as_null("horizontal_scale", &e.horizontal_scale);
             o.empty_as_null("jas_aa_mode", &e.aa_mode);
             o.null("jas_fractional_widths");
-            o.null("jas_kerning_mode");
+            o.empty_as_null("jas_kerning_mode", &e.kerning);
             o.null("jas_no_break");
             o.empty_as_null("letter_spacing", &e.letter_spacing);
             o.empty_as_null("line_height", &e.line_height);
-            o.null("rotate");
+            o.empty_as_null("rotate", &e.rotate);
             o.num("start_offset", e.start_offset);
             o.raw("stroke", stroke_json(&e.stroke));
             o.null("style_name");
@@ -479,6 +482,7 @@ fn element_json(elem: &Element) -> String {
             o.empty_as_null("text_transform", &e.text_transform);
             let tspans: Vec<String> = e.tspans.iter().map(tspan_json).collect();
             o.raw("tspans", json_array(&tspans));
+            o.empty_as_null("vertical_scale", &e.vertical_scale);
             o.empty_as_null("xml_lang", &e.xml_lang);
         }
         Element::Group(e) => {
@@ -804,6 +808,10 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             letter_spacing: v["letter_spacing"].as_str().unwrap_or("").to_string(),
             xml_lang: v["xml_lang"].as_str().unwrap_or("").to_string(),
             aa_mode: v["jas_aa_mode"].as_str().unwrap_or("").to_string(),
+            rotate: v["rotate"].as_str().unwrap_or("").to_string(),
+            horizontal_scale: v["horizontal_scale"].as_str().unwrap_or("").to_string(),
+            vertical_scale: v["vertical_scale"].as_str().unwrap_or("").to_string(),
+            kerning: v["jas_kerning_mode"].as_str().unwrap_or("").to_string(),
             width: parse_f(&v["width"]),
             height: parse_f(&v["height"]),
             fill: parse_fill(&v["fill"]),
@@ -829,6 +837,10 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             letter_spacing: v["letter_spacing"].as_str().unwrap_or("").to_string(),
             xml_lang: v["xml_lang"].as_str().unwrap_or("").to_string(),
             aa_mode: v["jas_aa_mode"].as_str().unwrap_or("").to_string(),
+            rotate: v["rotate"].as_str().unwrap_or("").to_string(),
+            horizontal_scale: v["horizontal_scale"].as_str().unwrap_or("").to_string(),
+            vertical_scale: v["vertical_scale"].as_str().unwrap_or("").to_string(),
+            kerning: v["jas_kerning_mode"].as_str().unwrap_or("").to_string(),
             fill: parse_fill(&v["fill"]),
             stroke: parse_stroke(&v["stroke"]),
             common,

@@ -158,6 +158,10 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
         letter_spacing: String,
         xml_lang: String,
         aa_mode: String,
+        rotate: String,
+        horizontal_scale: String,
+        vertical_scale: String,
+        kerning: String,
     }
     let sel_text: Option<TextAttrs> = st.tab().and_then(|tab| {
         let doc = tab.model.document();
@@ -177,6 +181,10 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
                     letter_spacing: t.letter_spacing.clone(),
                     xml_lang: t.xml_lang.clone(),
                     aa_mode: t.aa_mode.clone(),
+                    rotate: t.rotate.clone(),
+                    horizontal_scale: t.horizontal_scale.clone(),
+                    vertical_scale: t.vertical_scale.clone(),
+                    kerning: t.kerning.clone(),
                 }),
                 crate::geometry::element::Element::TextPath(tp) => Some(TextAttrs {
                     font_family: tp.font_family.clone(),
@@ -191,6 +199,10 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
                     letter_spacing: tp.letter_spacing.clone(),
                     xml_lang: tp.xml_lang.clone(),
                     aa_mode: tp.aa_mode.clone(),
+                    rotate: tp.rotate.clone(),
+                    horizontal_scale: tp.horizontal_scale.clone(),
+                    vertical_scale: tp.vertical_scale.clone(),
+                    kerning: tp.kerning.clone(),
                 }),
                 _ => None,
             }
@@ -236,8 +248,25 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
         m.insert("baseline_shift".into(), serde_json::json!(bshift_pt));
         m.insert("leading".into(), serde_json::json!(leading_pt));
         m.insert("tracking".into(), serde_json::json!(tracking_val));
+        // Character rotation: parse degrees; empty → 0.
+        let rotation = a.rotate.parse::<f64>().unwrap_or(0.0);
+        // V/H scale: parse percent; empty → 100 (identity).
+        let h_scale = a.horizontal_scale.parse::<f64>().unwrap_or(100.0);
+        let v_scale = a.vertical_scale.parse::<f64>().unwrap_or(100.0);
+        // Kerning: parse "{N}em" → N*1000. Empty or named mode → 0.
+        let kerning_val = if a.kerning.is_empty()
+            || a.kerning == "Auto" || a.kerning == "Optical" || a.kerning == "Metrics"
+        {
+            0.0
+        } else {
+            super::app_state::parse_em_as_thousandths(&a.kerning).unwrap_or(0.0)
+        };
         m.insert("language".into(), J::String(a.xml_lang));
         m.insert("anti_aliasing".into(), J::String(aa_mode_display));
+        m.insert("character_rotation".into(), serde_json::json!(rotation));
+        m.insert("horizontal_scale".into(), serde_json::json!(h_scale));
+        m.insert("vertical_scale".into(), serde_json::json!(v_scale));
+        m.insert("kerning".into(), serde_json::json!(kerning_val));
     } else {
         m.insert("font_family".into(), J::String(cp.font_family.clone()));
         m.insert("font_size".into(), serde_json::json!(cp.font_size));
@@ -253,6 +282,10 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
         m.insert("tracking".into(), serde_json::json!(cp.tracking));
         m.insert("language".into(), J::String(cp.language.clone()));
         m.insert("anti_aliasing".into(), J::String(cp.anti_aliasing.clone()));
+        m.insert("character_rotation".into(), serde_json::json!(cp.character_rotation));
+        m.insert("horizontal_scale".into(), serde_json::json!(cp.horizontal_scale));
+        m.insert("vertical_scale".into(), serde_json::json!(cp.vertical_scale));
+        m.insert("kerning".into(), serde_json::json!(cp.kerning));
     }
 
     m

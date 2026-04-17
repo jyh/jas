@@ -462,20 +462,49 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             let effective_fs = e.font_size * size_scale;
             let font = format!("{} {} {}px {}", e.font_style, e.font_weight, effective_fs, e.font_family);
             ctx.set_font(&font);
-            // Letter-spacing: Canvas 2D exposes a non-standard
-            // letterSpacing setter in modern browsers; fall back to 0
-            // when the value doesn't parse cleanly.
-            let ls_px = if !e.letter_spacing.is_empty() {
+            // Letter-spacing = tracking + kerning (Canvas 2D has no
+            // per-pair kerning, so numeric kerning adds to the
+            // uniform letter-spacing advance — same cheap
+            // approximation both fields use.)
+            let ls_em = if !e.letter_spacing.is_empty() {
                 crate::workspace::app_state::parse_em_as_thousandths(&e.letter_spacing)
-                    .map(|thousandths| thousandths * effective_fs / 1000.0)
                     .unwrap_or(0.0)
             } else { 0.0 };
+            let kern_em = if !e.kerning.is_empty() {
+                crate::workspace::app_state::parse_em_as_thousandths(&e.kerning)
+                    .unwrap_or(0.0)
+            } else { 0.0 };
+            let ls_px = (ls_em + kern_em) * effective_fs / 1000.0;
             if ls_px != 0.0 {
                 let _ = js_sys::Reflect::set(
                     ctx,
                     &js_sys::JsString::from("letterSpacing"),
                     &js_sys::JsString::from(format!("{}px", ls_px).as_str()),
                 );
+            }
+            // V/H scale + character rotation: wrap the text draw in a
+            // save / translate / scale / rotate / restore. Scale applies
+            // around the element's origin; rotation likewise. Per-
+            // glyph rotation (CHARACTER.md says SVG-native on tspans)
+            // needs per-char tspans which is a later pass; for now
+            // rotate the whole element as a placeholder.
+            let h_scale = if e.horizontal_scale.is_empty() { 1.0 }
+                else { e.horizontal_scale.parse::<f64>().unwrap_or(100.0) / 100.0 };
+            let v_scale = if e.vertical_scale.is_empty() { 1.0 }
+                else { e.vertical_scale.parse::<f64>().unwrap_or(100.0) / 100.0 };
+            let rotate_deg = if e.rotate.is_empty() { 0.0 }
+                else { e.rotate.parse::<f64>().unwrap_or(0.0) };
+            let needs_txform = h_scale != 1.0 || v_scale != 1.0 || rotate_deg != 0.0;
+            if needs_txform {
+                ctx.save();
+                ctx.translate(e.x, e.y).ok();
+                if rotate_deg != 0.0 {
+                    ctx.rotate(rotate_deg.to_radians()).ok();
+                }
+                if h_scale != 1.0 || v_scale != 1.0 {
+                    ctx.scale(h_scale, v_scale).ok();
+                }
+                ctx.translate(-e.x, -e.y).ok();
             }
             let measure = crate::tools::text_measure::make_measurer(&font, effective_fs);
             let max_w = if e.is_area_text() { e.width } else { 0.0 };
@@ -530,6 +559,9 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                     &js_sys::JsString::from("letterSpacing"),
                     &js_sys::JsString::from("0px"),
                 );
+            }
+            if needs_txform {
+                ctx.restore();
             }
         }
         Element::TextPath(e) => {

@@ -884,6 +884,32 @@ impl AppState {
         // leave the current weight/style alone (write None from
         // parse_style_name).
         let parsed_style = parse_style_name(&cp.style_name);
+        // Character rotation: degrees, signed, 0 omits the attribute.
+        let rotate = if cp.character_rotation == 0.0 {
+            String::new()
+        } else {
+            fmt_num(cp.character_rotation)
+        };
+        // V/H scale: identity (100%) omits.
+        let horizontal_scale = if cp.horizontal_scale == 100.0 {
+            String::new()
+        } else {
+            fmt_num(cp.horizontal_scale)
+        };
+        let vertical_scale = if cp.vertical_scale == 100.0 {
+            String::new()
+        } else {
+            fmt_num(cp.vertical_scale)
+        };
+        // Kerning: numeric 1/1000 em → "{em}em". 0 omits (the default
+        // "Auto" behaviour). Named modes (Auto / Optical / Metrics)
+        // land here verbatim once the panel exposes them as a
+        // combo_box; for now the Character panel only emits numerics.
+        let kerning = if cp.kerning == 0.0 {
+            String::new()
+        } else {
+            format!("{}em", fmt_num(cp.kerning / 1000.0))
+        };
         let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
         let target_paths: Vec<Vec<usize>> = {
             let doc = tab.model.document();
@@ -913,6 +939,10 @@ impl AppState {
                     new_t.letter_spacing = letter_spacing.clone();
                     new_t.xml_lang = xml_lang.clone();
                     new_t.aa_mode = aa_mode.clone();
+                    new_t.rotate = rotate.clone();
+                    new_t.horizontal_scale = horizontal_scale.clone();
+                    new_t.vertical_scale = vertical_scale.clone();
+                    new_t.kerning = kerning.clone();
                     if let Some((fw, fst)) = parsed_style.clone() {
                         new_t.font_weight = fw;
                         new_t.font_style = fst;
@@ -931,6 +961,10 @@ impl AppState {
                     new_tp.letter_spacing = letter_spacing.clone();
                     new_tp.xml_lang = xml_lang.clone();
                     new_tp.aa_mode = aa_mode.clone();
+                    new_tp.rotate = rotate.clone();
+                    new_tp.horizontal_scale = horizontal_scale.clone();
+                    new_tp.vertical_scale = vertical_scale.clone();
+                    new_tp.kerning = kerning.clone();
                     if let Some((fw, fst)) = parsed_style.clone() {
                         new_tp.font_weight = fw;
                         new_tp.font_style = fst;
