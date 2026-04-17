@@ -77,11 +77,11 @@ def render_menubar(menubar: list, actions: dict, theme: dict, brand: dict | None
                 f'</span>'
             )
     return Markup(
-        f'<nav class="navbar navbar-expand" style="background:var(--jas-pane-bg-dark,#333);padding:0 8px;">'
+        f'<nav class="navbar navbar-expand" style="background:var(--app-pane-bg-dark,#333);padding:0 8px;">'
         f'{logo_html}'
         f'<ul class="navbar-nav">{items_html}</ul>'
         f'<div class="ms-auto">'
-        f'<a class="nav-link small" style="color:var(--jas-text-dim,#999)" href="?mode=wireframe" id="mode-toggle">Wireframe</a>'
+        f'<a class="nav-link small" style="color:var(--app-text-dim,#999)" href="?mode=wireframe" id="mode-toggle">Wireframe</a>'
         f'</div>'
         f'</nav>'
     )
@@ -221,9 +221,9 @@ _THEME_CSS_RE = re.compile(r"\{\{\s*theme\.colors\.(\w+)\s*\}\}")
 def _resolve(val, theme, state):
     """Resolve a value, emitting CSS var() references for theme.colors.*."""
     if isinstance(val, str) and "{{" in val:
-        # Replace theme.colors.* with var(--jas-*) so appearance switching works
+        # Replace theme.colors.* with var(--app-*) so appearance switching works
         css_val = _THEME_CSS_RE.sub(
-            lambda m: "var(--jas-" + m.group(1).replace("_", "-") + ")",
+            lambda m: "var(--app-" + m.group(1).replace("_", "-") + ")",
             val,
         )
         # If there are remaining non-color interpolations, resolve them normally
@@ -334,7 +334,7 @@ def _id_attr(el: dict) -> str:
 def _render_pane_system(el, theme, state):
     children = _render_children(el, theme, state)
     return Markup(
-        f'<div{_id_attr(el)} class="jas-pane-system"'
+        f'<div{_id_attr(el)} class="app-pane-system"'
         f' style="position:relative;width:100%;height:100vh;overflow:hidden;'
         f'background:{_resolve(el.get("style", {}).get("background", "{{theme.colors.window_bg}}"), theme, state)}">'
         f'{children}</div>'
@@ -366,19 +366,19 @@ def _render_pane(el, theme, state):
         extra_data += f' data-collapsed-width="{collapsed_width}"'
 
     return Markup(
-        f'<div{_id_attr(el)} class="jas-pane"'
+        f'<div{_id_attr(el)} class="app-pane"'
         f' style="position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;'
         f'background:{bg};border:{border};display:flex;flex-direction:column;overflow:hidden"'
         f'{extra_data}>'
-        f'<div{_id_attr(title_bar)} class="jas-pane-title" style="height:var(--jas-size-title-bar-height,20px);background:var(--jas-title-bar-bg,#2a2a2a);display:flex;'
-        f'align-items:center;padding:0 6px;cursor:grab;font-size:11px;color:var(--jas-title-bar-text,#d9d9d9)"'
+        f'<div{_id_attr(title_bar)} class="app-pane-title" style="height:var(--app-size-title-bar-height,20px);background:var(--app-title-bar-bg,#2a2a2a);display:flex;'
+        f'align-items:center;padding:0 6px;cursor:grab;font-size:11px;color:var(--app-title-bar-text,#d9d9d9)"'
         f'{_data_attrs(title_bar)}>'
         f'<span class="ms-auto d-flex gap-1">{title_btns}</span></div>'
-        f'<div class="jas-pane-content" style="flex:1;overflow:auto;display:flex;flex-direction:column">{content_html}</div>'
-        f'<div class="jas-edge-handle left"></div>'
-        f'<div class="jas-edge-handle right"></div>'
-        f'<div class="jas-edge-handle top"></div>'
-        f'<div class="jas-edge-handle bottom"></div>'
+        f'<div class="app-pane-content" style="flex:1;overflow:auto;display:flex;flex-direction:column">{content_html}</div>'
+        f'<div class="app-edge-handle left"></div>'
+        f'<div class="app-edge-handle right"></div>'
+        f'<div class="app-edge-handle top"></div>'
+        f'<div class="app-edge-handle bottom"></div>'
         f'</div>'
     )
 
@@ -469,7 +469,7 @@ def _render_grid(el, theme, state):
     gap = el.get("gap", 2)
     children = _render_children(el, theme, state)
     return Markup(
-        f'<div{_id_attr(el)} class="jas-grid"'
+        f'<div{_id_attr(el)} class="app-grid"'
         f' style="display:grid;grid-template-columns:repeat({cols},1fr);gap:{gap}px">'
         f'{children}</div>'
     )
@@ -537,13 +537,13 @@ def _render_panel(el, theme, state):
         menu_html = (
             f'<div class="dropdown float-end">'
             f'<button class="btn btn-sm p-0" data-bs-toggle="dropdown"'
-            f' style="color:var(--jas-text-button,#888);font-size:16px;display:inline-flex;align-items:center">&#8942;</button>'
+            f' style="color:var(--app-text-button,#888);font-size:16px;display:inline-flex;align-items:center">&#8942;</button>'
             f'<ul class="dropdown-menu">{menu_items}</ul></div>'
         )
 
     return Markup(
-        f'<div{_id_attr(el)} class="jas-panel"{panel_data}>'
-        f'<div class="d-flex align-items-center p-1" style="background:var(--jas-title-bar-bg,#2a2a2a);font-size:11px;color:var(--jas-text,#ccc)">'
+        f'<div{_id_attr(el)} class="app-panel"{panel_data}>'
+        f'<div class="d-flex align-items-center p-1" style="background:var(--app-title-bar-bg,#2a2a2a);font-size:11px;color:var(--app-text,#ccc)">'
         f'{summary}{menu_html}</div>'
         f'<div class="p-2">{content_html}</div>'
         f'</div>'
@@ -576,14 +576,14 @@ def _render_icon_button(el, theme, state):
         icon_sz = int(float(sz) * 0.75)
         icon_html = (
             f'<svg viewBox="{viewbox}" width="{icon_sz}" height="{icon_sz}"'
-            f' style="color:var(--jas-text,#cccccc);fill:currentColor;stroke:currentColor">{svg_content}</svg>'
+            f' style="color:var(--app-text,#cccccc);fill:currentColor;stroke:currentColor">{svg_content}</svg>'
         )
     else:
         # Fallback: show first letter of summary or icon name
         fallback = summary[0] if summary else (icon_name[0] if icon_name else "?")
-        icon_html = f'<span style="font-size:{int(float(sz)*0.5)}px;font-weight:bold;color:var(--jas-text,#ccc)">{escape(str(fallback))}</span>'
+        icon_html = f'<span style="font-size:{int(float(sz)*0.5)}px;font-weight:bold;color:var(--app-text,#ccc)">{escape(str(fallback))}</span>'
     return Markup(
-        f'<button{_id_attr(el)} class="btn btn-sm btn-outline-secondary jas-tool-btn p-0"'
+        f'<button{_id_attr(el)} class="btn btn-sm btn-outline-secondary app-tool-btn p-0"'
         f' style="{pos_css}width:{sz}px;height:{sz}px;display:flex;align-items:center;justify-content:center"'
         f' title="{summary}"{_data_attrs(el)}>'
         f'{icon_html}</button>'
@@ -712,20 +712,20 @@ def _render_color_swatch(el, theme, state):
     if is_empty:
         # Fill/stroke swatches with behavior show "none" indicator (red diagonal)
         # Plain empty slots (recent colors) show hollow square
-        empty_class = "jas-color-swatch-none" if has_behavior else "jas-color-swatch-empty"
+        empty_class = "app-color-swatch-none" if has_behavior else "app-color-swatch-empty"
         return Markup(
-            f'<div{_id_attr(el)} class="jas-color-swatch {empty_class}"'
+            f'<div{_id_attr(el)} class="app-color-swatch {empty_class}"'
             f' style="{pos_css}width:{sz}px;height:{sz}px;box-sizing:border-box"'
             f'{_data_attrs(el)}></div>'
         )
     if hollow:
         return Markup(
-            f'<div{_id_attr(el)} class="jas-color-swatch" data-hollow="true"'
+            f'<div{_id_attr(el)} class="app-color-swatch" data-hollow="true"'
             f' style="{pos_css}width:{sz}px;height:{sz}px;border:6px solid {color};background:transparent;box-sizing:border-box"'
             f'{_data_attrs(el)}></div>'
         )
     return Markup(
-        f'<div{_id_attr(el)} class="jas-color-swatch"'
+        f'<div{_id_attr(el)} class="app-color-swatch"'
         f' style="{pos_css}width:{sz}px;height:{sz}px;background:{color};border:1px solid #666"'
         f'{_data_attrs(el)}></div>'
     )
@@ -755,7 +755,7 @@ def _render_disclosure(el, theme, state):
     open_attr = "" if collapsed else " open"
     return Markup(
         f'<details{_id_attr(el)}{open_attr}{_style_str(el, theme, state)}{_data_attrs(el)}>'
-        f'<summary style="cursor:pointer;font-size:12px;padding:2px 4px;color:var(--jas-text,#ccc)">'
+        f'<summary style="cursor:pointer;font-size:12px;padding:2px 4px;color:var(--app-text,#ccc)">'
         f'{escape(label)}</summary>'
         f'<div>{children}</div>'
         f'</details>'
@@ -788,7 +788,7 @@ def _render_canvas(el, theme, state):
                 f'width:54px;height:24px;color:{escape(color)};opacity:0.35;">{svg}</span>'
             )
     return Markup(
-        f'<div{_id_attr(el)} class="jas-canvas" '
+        f'<div{_id_attr(el)} class="app-canvas" '
         f'style="flex:1;background:#fff;display:flex;align-items:center;justify-content:center;'
         f'color:#999;font-size:14px;min-height:200px;position:relative;"'
         f'{_data_attrs(el)}>'
@@ -800,9 +800,9 @@ def _render_canvas(el, theme, state):
 def _render_placeholder(el, theme, state):
     summary = escape(el.get("summary", "Placeholder"))
     desc = escape(el.get("description", ""))
-    base = "border:1px dashed var(--jas-border,#666);padding:12px;color:var(--jas-text-button,#888);text-align:center;font-size:11px;min-height:40px"
+    base = "border:1px dashed var(--app-border,#666);padding:12px;color:var(--app-text-button,#888);text-align:center;font-size:11px;min-height:40px"
     return Markup(
-        f'<div{_id_attr(el)} class="jas-placeholder"'
+        f'<div{_id_attr(el)} class="app-placeholder"'
         f'{_style_str(el, theme, state, base)}'
         f' title="{desc}"{_data_attrs(el)}>{summary}</div>'
     )
@@ -812,8 +812,8 @@ def _render_separator(el, theme, state):
     orientation = el.get("orientation", "horizontal")
     extra_class = f' {escape(el["class"])}' if el.get("class") else ""
     if orientation == "vertical":
-        return Markup(f'<div{_id_attr(el)} class="jas-separator-v{extra_class}" style="width:1px;background:var(--jas-border,#555);margin:0 4px;align-self:stretch"{_data_attrs(el)}></div>')
-    return Markup(f'<hr{_id_attr(el)} class="jas-separator{extra_class}" style="border-color:var(--jas-border,#555);margin:4px 0"{_data_attrs(el)}>')
+        return Markup(f'<div{_id_attr(el)} class="app-separator-v{extra_class}" style="width:1px;background:var(--app-border,#555);margin:0 4px;align-self:stretch"{_data_attrs(el)}></div>')
+    return Markup(f'<hr{_id_attr(el)} class="app-separator{extra_class}" style="border-color:var(--app-border,#555);margin:4px 0"{_data_attrs(el)}>')
 
 
 def _render_spacer(el, theme, state):
@@ -833,7 +833,7 @@ def _render_color_bar(el, theme, state):
     bind_attrs = _data_attrs(el)
     brightness = el.get("bind", {}).get("brightness", "100")
     return Markup(
-        f'<canvas{_id_attr(el)} class="jas-color-bar"'
+        f'<canvas{_id_attr(el)} class="app-color-bar"'
         f' data-type="color-bar"'
         f' data-brightness="{escape(str(brightness))}"'
         f' style="width:100%;height:64px;display:block;cursor:crosshair"'
@@ -856,7 +856,7 @@ def _render_color_gradient(el, theme, state):
         f'<div{_id_attr(el)} data-type="color-gradient"'
         f' data-bind-hue="{escape(str(hue_bind))}"'
         f' style="width:180px;height:180px;cursor:crosshair;position:relative;'
-        f'border:1px solid var(--jas-border,#555);box-sizing:border-box;'
+        f'border:1px solid var(--app-border,#555);box-sizing:border-box;'
         f'background:linear-gradient(to bottom,transparent,#000),'
         f'linear-gradient(to right,#fff,hsl(0,100%,50%))"{style}{data}>'
         f'<div style="position:absolute;width:10px;height:10px;border:2px solid #fff;'
@@ -878,7 +878,7 @@ def _render_color_hue_bar(el, theme, state):
         f'<div{_id_attr(el)} data-type="color-hue-bar"'
         f' data-bind-value="{escape(str(value_bind))}"'
         f' style="width:32px;height:180px;cursor:crosshair;position:relative;'
-        f'border:1px solid var(--jas-border,#555);box-sizing:border-box;'
+        f'border:1px solid var(--app-border,#555);box-sizing:border-box;'
         f'background:linear-gradient(to bottom,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)"'
         f'{style}{data}>'
         f'<div style="position:absolute;left:-2px;right:-2px;top:0;height:3px;'
@@ -904,7 +904,7 @@ def _render_dropdown(el, theme, state):
         icon_sz = int(float(sz) * 0.75)
         btn_content = (
             f'<svg viewBox="{viewbox}" width="{icon_sz}" height="{icon_sz}"'
-            f' fill="currentColor" style="color:var(--jas-text,#cccccc)">{svg_content}</svg>'
+            f' fill="currentColor" style="color:var(--app-text,#cccccc)">{svg_content}</svg>'
         )
     elif label_text:
         btn_content = escape(label_text)
@@ -931,7 +931,7 @@ def _render_dropdown(el, theme, state):
         f'<div{_id_attr(el)} class="dropdown" style="display:inline-block"{_data_attrs(el)}>'
         f'<button class="btn btn-sm p-0" data-bs-toggle="dropdown"'
         f' style="width:{sz}px;height:{sz}px;display:flex;align-items:center;'
-        f'justify-content:center;color:var(--jas-text-dim,#999);border:none;background:transparent">'
+        f'justify-content:center;color:var(--app-text-dim,#999);border:none;background:transparent">'
         f'{btn_content}</button>'
         f'<ul class="dropdown-menu">{menu_html}</ul></div>'
     )
@@ -959,7 +959,7 @@ def _render_tree_view(el, theme, state):
         f' data-bind-source="{escape(str(bind.get("source", "")))}"'
     )
     return Markup(
-        f'<div{_id_attr(el)} class="jas-tree-view"'
+        f'<div{_id_attr(el)} class="app-tree-view"'
         f'{_style_str(el, theme, state)}{data}{_data_attrs(el)}>'
         f'</div>'
     )
@@ -972,10 +972,10 @@ def _render_element_preview(el, theme, state):
     sz = style.get("size", 32)
     eid = bind.get("element_id", "")
     return Markup(
-        f'<div{_id_attr(el)} class="jas-element-preview"'
+        f'<div{_id_attr(el)} class="app-element-preview"'
         f' data-type="element-preview" data-element-id="{escape(str(eid))}"'
         f' style="width:{sz}px;height:{sz}px;background:#fff;'
-        f'border:1px solid var(--jas-border,#555);border-radius:1px;'
+        f'border:1px solid var(--app-border,#555);border-radius:1px;'
         f'flex-shrink:0"'
         f'{_data_attrs(el)}></div>'
     )
@@ -986,7 +986,7 @@ def _render_unknown(el, theme, state):
     summary = escape(el.get("summary", etype))
     children = _render_children(el, theme, state)
     return Markup(
-        f'<div{_id_attr(el)} class="jas-unknown"'
+        f'<div{_id_attr(el)} class="app-unknown"'
         f' style="border:1px solid #cc8800;padding:4px;color:#cc8800;font-size:10px">'
         f'[{etype}] {summary}{children}</div>'
     )
@@ -1067,14 +1067,14 @@ def _render_dock_view(el, theme, state):
     collapsed_width = el.get("collapsed_width", 36)
     dock_collapsed = state.get("dock_collapsed", False)
 
-    html = f'<div id="{escape(eid)}" class="jas-dock-view" data-element-type="dock_view"'
+    html = f'<div id="{escape(eid)}" class="app-dock-view" data-element-type="dock_view"'
     html += f' data-collapsed-width="{collapsed_width}"'
     html += f' data-groups=\'{escape(json.dumps(groups))}\''
     html += ' style="display:flex;flex-direction:column;flex:1">'
 
     if dock_collapsed:
         # Collapsed icon strip
-        html += '<div class="jas-dock-collapsed-strip" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0">'
+        html += '<div class="app-dock-collapsed-strip" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0">'
         for gi, group in enumerate(groups):
             for pi, panel_name in enumerate(group.get("panels", [])):
                 icon_name = f"panel_{panel_name}"
@@ -1082,13 +1082,13 @@ def _render_dock_view(el, theme, state):
                 viewbox = icon_def.get("viewbox", "0 0 28 28")
                 svg = icon_def.get("svg", "")
                 html += (
-                    f'<button class="btn btn-sm jas-dock-icon p-0" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:var(--jas-button-checked,#505050);border:none;color:var(--jas-text-dim,#999)"'
+                    f'<button class="btn btn-sm app-dock-icon p-0" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:var(--app-button-checked,#505050);border:none;color:var(--app-text-dim,#999)"'
                     f' data-dock="{escape(eid)}" data-group="{gi}" data-panel="{pi}"'
                     f' title="{escape(_PANEL_LABELS.get(panel_name, panel_name))}">'
                     f'<svg viewBox="{viewbox}" width="20" height="20" fill="currentColor">{svg}</svg></button>'
                 )
             if gi < len(groups) - 1:
-                html += '<hr style="width:80%;border-color:var(--jas-border,#555);margin:2px 0">'
+                html += '<hr style="width:80%;border-color:var(--app-border,#555);margin:2px 0">'
         html += '</div>'
     else:
         # Expanded: render each group
@@ -1097,21 +1097,21 @@ def _render_dock_view(el, theme, state):
             active = group.get("active", 0)
             collapsed = group.get("collapsed", False)
 
-            html += f'<div class="jas-dock-group" data-dock="{escape(eid)}" data-group-index="{gi}">'
+            html += f'<div class="app-dock-group" data-dock="{escape(eid)}" data-group-index="{gi}">'
 
             # Group header: grip + tab buttons + spacer + chevron + hamburger
-            html += '<div class="jas-dock-group-header" style="display:flex;align-items:center;background:var(--jas-pane-bg-dark,#333);padding:2px 4px;gap:2px;height:22px">'
+            html += '<div class="app-dock-group-header" style="display:flex;align-items:center;background:var(--app-pane-bg-dark,#333);padding:2px 4px;gap:2px;height:22px">'
 
             # Grip handle for group drag
-            html += f'<span class="jas-dock-grip" draggable="true" style="cursor:grab;color:var(--jas-text-hint,#777);font-size:10px;padding:0 2px" data-dock="{escape(eid)}" data-group="{gi}">⠁⠁</span>'
+            html += f'<span class="app-dock-grip" draggable="true" style="cursor:grab;color:var(--app-text-hint,#777);font-size:10px;padding:0 2px" data-dock="{escape(eid)}" data-group="{gi}">⠁⠁</span>'
 
             # Tab buttons
             for pi, panel_name in enumerate(panels):
                 label = _PANEL_LABELS.get(panel_name, panel_name.title())
                 active_cls = " active" if pi == active else ""
-                tab_bg = "var(--jas-tab-active,#4a4a4a)" if pi == active else "var(--jas-tab-inactive,#353535)"
+                tab_bg = "var(--app-tab-active,#4a4a4a)" if pi == active else "var(--app-tab-inactive,#353535)"
                 html += (
-                    f'<button class="btn btn-sm jas-dock-tab{active_cls}" style="padding:1px 6px;font-size:11px;color:var(--jas-text,#ccc);background:{tab_bg};border:none"'
+                    f'<button class="btn btn-sm app-dock-tab{active_cls}" style="padding:1px 6px;font-size:11px;color:var(--app-text,#ccc);background:{tab_bg};border:none"'
                     f' draggable="true" data-dock="{escape(eid)}" data-group="{gi}" data-panel-index="{pi}" data-panel-name="{escape(panel_name)}">'
                     f'{escape(label)}</button>'
                 )
@@ -1122,7 +1122,7 @@ def _render_dock_view(el, theme, state):
             # Collapse chevron
             chevron = "\u00bb" if collapsed else "\u00ab"
             html += (
-                f'<button class="btn btn-sm jas-dock-chevron p-0" style="color:var(--jas-text-button,#888);background:transparent;border:none;font-size:16px;line-height:1;display:inline-flex;align-items:center"'
+                f'<button class="btn btn-sm app-dock-chevron p-0" style="color:var(--app-text-button,#888);background:transparent;border:none;font-size:16px;line-height:1;display:inline-flex;align-items:center"'
                 f' data-dock="{escape(eid)}" data-group="{gi}">{chevron}</button>'
             )
 
@@ -1135,7 +1135,7 @@ def _render_dock_view(el, theme, state):
                     active_panel_spec = _panels.get(active_key)
 
                 html += '<div class="dropdown d-inline-block">'
-                html += '<button class="btn btn-sm p-0" data-bs-toggle="dropdown" style="color:var(--jas-text-button,#888);background:transparent;border:none;font-size:16px;display:inline-flex;align-items:center">≡</button>'
+                html += '<button class="btn btn-sm p-0" data-bs-toggle="dropdown" style="color:var(--app-text-button,#888);background:transparent;border:none;font-size:16px;display:inline-flex;align-items:center">≡</button>'
                 html += '<ul class="dropdown-menu">'
                 # Panel-specific menu items first
                 if active_panel_spec and active_panel_spec.get("menu"):
@@ -1166,8 +1166,8 @@ def _render_dock_view(el, theme, state):
                     active_panel_close = panels[active]
                     close_params = escape(json.dumps({"panel": active_panel_close}))
                     html += (
-                        f'<button class="btn btn-sm jas-dock-close p-0"'
-                        f' style="color:var(--jas-text-button,#888);background:transparent;border:none;font-size:12px;line-height:1;display:inline-flex;align-items:center;width:20px"'
+                        f'<button class="btn btn-sm app-dock-close p-0"'
+                        f' style="color:var(--app-text-button,#888);background:transparent;border:none;font-size:12px;line-height:1;display:inline-flex;align-items:center;width:20px"'
                         f' data-action="close_panel" data-action-params=\'{close_params}\''
                         f' title="Close">&#x2715;</button>'
                     )
@@ -1176,7 +1176,7 @@ def _render_dock_view(el, theme, state):
 
             # Group body (hidden when collapsed) — render ALL panels, hide inactive
             if not collapsed:
-                html += '<div class="jas-dock-group-body" style="flex:1;overflow:auto">'
+                html += '<div class="app-dock-group-body" style="flex:1;overflow:auto">'
                 for pi, panel_name in enumerate(panels):
                     is_active = (pi == active)
                     panel_key = f"{panel_name}_panel_content"
@@ -1209,17 +1209,17 @@ def _render_dock_view(el, theme, state):
                         except Exception:
                             pass
                         content_html = render_element(content_el, theme, panel_scope.to_dict(), mode="normal") if isinstance(content_el, dict) else ""
-                        html += f'<div class="jas-dock-panel-body{hidden_cls}"{body_attrs}>{content_html}</div>'
+                        html += f'<div class="app-dock-panel-body{hidden_cls}"{body_attrs}>{content_html}</div>'
                     else:
                         label = _PANEL_LABELS.get(panel_name, panel_name.title())
-                        html += f'<div class="jas-dock-panel-body{hidden_cls}" style="padding:12px;color:var(--jas-text-body,#aaa);font-size:18px" data-panel-name="{escape(panel_name)}">{escape(label)}</div>'
+                        html += f'<div class="app-dock-panel-body{hidden_cls}" style="padding:12px;color:var(--app-text-body,#aaa);font-size:18px" data-panel-name="{escape(panel_name)}">{escape(label)}</div>'
                 html += '</div>'
 
             html += '</div>'  # group
 
             # Separator between groups
             if gi < len(groups) - 1:
-                html += '<hr style="border-color:var(--jas-border,#555);margin:0">'
+                html += '<hr style="border-color:var(--app-border,#555);margin:0">'
 
     html += '</div>'  # dock_view
     return Markup(html)
