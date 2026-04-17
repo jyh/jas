@@ -848,6 +848,153 @@ new_offset = path_closest_offset(d, cursor_x, cursor_y)
 
 ---
 
+## Touch Type Tool
+
+**Shortcut:** none (activated from the Character panel's
+`TOUCH_TYPE_PANEL_BUTTON`; see `WIDGET.md` for the panel side).
+
+Provides a per-glyph editing mode for text elements. While the tool
+is active, individual glyphs within the currently selected text
+element can be moved, scaled, and rotated without leaving their
+underlying tspan editable. All transforms are stored as ordinary
+Character attributes on a split-out solo tspan — the text remains
+fully editable with the Type Tool afterwards.
+
+### Activation and deactivation
+
+The tool's active state lives in `state.touch_type_active`.
+
+| Action | Result |
+|--------|--------|
+| Click `TOUCH_TYPE_PANEL_BUTTON` while inactive | `touch_type_active = true`; cursor changes |
+| Click `TOUCH_TYPE_PANEL_BUTTON` while active | `touch_type_active = false`; commit + exit |
+| Press Esc while a glyph is selected | Deselect the glyph; tool stays active |
+| Press Esc while no glyph is selected | `touch_type_active = false` |
+| Select another canvas tool | `touch_type_active = false`; commit + exit |
+| Click inside an unrelated (non-text) element | `touch_type_active = false`; normal selection resumes |
+| Click on a different text element | Currently selected text element becomes that element; no glyph selected yet |
+
+When the tool activates with no text element selected, the cursor is
+the Touch-Type cursor (see `examples/touch-type-session.png`) but no
+handles are drawn; the user must first click inside a text element
+for glyph-level handles to appear.
+
+### Cursor
+
+Touch-Type cursor (arrow with a small boxed `T` indicator). Reverts
+to the system arrow cursor when the tool deactivates.
+
+### Glyph selection
+
+Selection granularity is a single glyph (one Unicode code point in
+the tspan's character stream). Multi-glyph selection is deferred to a
+later revision.
+
+| Action | Result |
+|--------|--------|
+| Click a glyph in the selected text element | Select that glyph; show handles |
+| Click a glyph in a different text element | Switch selected text element; select that glyph |
+| Click empty canvas | Deselect glyph; tool stays active |
+| Press Esc while a glyph is selected | Deselect glyph |
+
+Font-rendered ligatures (e.g. the `fi` ligature) are not decomposed;
+each underlying code point is a separate selection target. Whitespace
+and tab glyphs are selectable — their bounding boxes may render
+narrow, but behave like any other glyph.
+
+### Handles and gestures
+
+A selected glyph shows a tight bounding box around its rendered form
+with four corner handles, four side-middle handles, and one rotation
+handle centred above the top edge. All handles are drawn in the
+standard selection-blue.
+
+| Gesture | Handle | Writes to |
+|---|---|---|
+| Drag letter body, vertical component | body (inside bbox) | `baseline_shift` (pt) |
+| Drag letter body, horizontal component | body | per-letter `dx` on the tspan (not surfaced in the Character panel) |
+| Drag a corner | corner | both `vertical_scale` and `horizontal_scale` (%); uniform if Shift held, free otherwise |
+| Drag a side-middle (left / right) | side | `horizontal_scale` only |
+| Drag a side-middle (top / bottom) | side | `vertical_scale` only |
+| Drag the rotation handle | rotation | `character_rotation` (°); free, Shift constrains to 15° increments |
+
+Drags shorter than `DRAG_THRESHOLD` (4 px) are treated as clicks.
+
+Gestures apply in real time: the glyph re-renders at each pointer
+move. On pointer-up, values are committed and a single undo unit is
+recorded.
+
+### States
+
+- **Inactive** — `touch_type_active = false`. Tool is not in effect.
+- **Active, no text element selected** — cursor shown, handles not
+  drawn, waiting for the user to click a text element.
+- **Active, text element selected, no glyph selected** — cursor
+  shown, no handles; click a glyph to enter glyph mode.
+- **Active, glyph selected** — handles drawn around the glyph,
+  gestures routed per the table above.
+- **Active, dragging a handle** — transforms applied in real time;
+  pointer-up commits.
+
+### Overlay
+
+- Touch-Type cursor whenever the tool is active.
+- Tight blue bounding box around the selected glyph's rendered form.
+- Four 6 px square corner handles and four 6 px square side-middle
+  handles on the bounding box, filled selection-blue.
+- One 8 px circular rotation handle 20 px above the top edge,
+  connected to the top edge by a 1 px line.
+- No per-glyph bounding boxes for unselected glyphs (keeps the
+  canvas readable).
+- Snap-to-Glyph guide overlays are **not** drawn during Touch Type
+  drags — the Snap to Glyph feature is disabled while the tool is
+  active (see `WIDGET.md`).
+
+### Storage rule
+
+Each glyph the user transforms is guaranteed to live in its own solo
+tspan. If the glyph is already in a solo tspan (i.e. its parent tspan
+contains only that glyph), no split occurs. Otherwise the parent
+tspan is split at the glyph boundaries, producing up to three tspans:
+prefix, the solo target, suffix. All other Character attributes on
+the parent are inherited by each piece.
+
+Split is lazy: it runs on the first commit that would actually differ
+from the parent tspan's attribute set, not on glyph selection. A
+glyph that is selected but not transformed does not trigger a split.
+
+On commit, if all touch-type transforms on a solo tspan have returned
+to identity (baseline shift 0, scales 100%, rotation 0°, dx 0), the
+tspan is merged back into its neighbour via the general selection
+model's merge-adjacent-equal rule.
+
+### Interaction with the Character panel
+
+- The six Snap-to-Glyph buttons in the Character panel are
+  non-interactive while `touch_type_active` is true (visually
+  dimmed).
+- Writes from the Character panel (font size, kerning, etc.) while
+  the tool is active and a glyph is selected apply to the selected
+  glyph only, via the same split-and-merge rule.
+- The `TOUCH_TYPE_PANEL_BUTTON` is highlighted while the tool is
+  active, giving a visible tie-back from canvas to panel.
+
+### Undo
+
+One undo unit per pointer-up. Tspan splits that occur on a commit are
+included in that undo unit; merges on identity-return are included
+in the next commit's undo unit.
+
+### Out of scope for v1
+
+- Multi-glyph selection (drag-select, Shift-click to extend).
+- Touch Type on text following a path (TextPath element) — the tool
+  is inert on TextPath elements in v1.
+- Decomposing font-rendered ligatures into individual glyph targets.
+- Snapping during Touch Type drags (canvas grid snap, guide snap).
+
+---
+
 ## Line Tool
 
 **Shortcut:** L
