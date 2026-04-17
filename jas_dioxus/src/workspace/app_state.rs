@@ -816,23 +816,74 @@ impl AppState {
 
     /// Push the current Character panel state to the selected text
     /// element(s). For an object-level selection (whole element), write
-    /// directly to the parent Text/TextPath's font_family / font_size
-    /// so the canvas renderer — which reads the parent's attributes —
-    /// reflects the change. Tspan-range writes (via
+    /// directly to the parent Text/TextPath's attributes so the canvas
+    /// renderer — which reads the parent's attributes — reflects the
+    /// change. Tspan-range writes (via
     /// `Controller::set_character_attribute`) come back when partial
     /// tspan selections are supported.
     ///
-    /// Currently wires only `font_family` and `font_size`. Remaining
-    /// character panel fields (caps/sub/super, kerning, tracking,
-    /// scales, baseline shift, rotation, language, anti-alias, Snap to
-    /// Glyph) stay in panel-local state until their SVG-attribute
-    /// plumbing lands.
+    /// Currently wires `font_family`, `font_size`, and `text_decoration`
+    /// (from the Underline / Strikethrough toggles). Remaining
+    /// Character-panel fields (All Caps, Small Caps, Super/Sub,
+    /// kerning, tracking, scales, baseline shift, rotation, language,
+    /// anti-alias, Snap to Glyph) stay in panel-local state until their
+    /// SVG-attribute plumbing lands.
     ///
     /// No-op when no tab is active, when the selection is empty, or
     /// when the selected element is not a Text / TextPath.
     pub(crate) fn apply_character_panel_to_selection(&mut self) {
         use crate::geometry::element::Element;
         let cp = self.character_panel.clone();
+        // Combine underline + strikethrough into the CSS
+        // `text-decoration` form. Empty when neither is set.
+        let text_decoration = text_decoration_from_flags(cp.underline, cp.strikethrough);
+        // All Caps and Small Caps are mutually exclusive per
+        // CHARACTER.md; if both bools are true we prefer All Caps
+        // (the panel should have enforced exclusion, but be safe).
+        let text_transform = if cp.all_caps { "uppercase" } else { "" }.to_string();
+        let font_variant = if cp.small_caps && !cp.all_caps { "small-caps" } else { "" }.to_string();
+        // Baseline shift: the super / sub toggles take precedence
+        // over the numeric pt value (CHARACTER.md mutual exclusion).
+        // Zero pt + no toggle renders as empty (omit attribute).
+        let baseline_shift = if cp.superscript {
+            "super".to_string()
+        } else if cp.subscript {
+            "sub".to_string()
+        } else if cp.baseline_shift != 0.0 {
+            format!("{}pt", fmt_num(cp.baseline_shift))
+        } else {
+            String::new()
+        };
+        // Leading → line-height. Auto (120% of font size) is
+        // represented as empty per CHARACTER.md, so a panel value at
+        // the Auto ratio omits the attribute.
+        let line_height = if (cp.leading - cp.font_size * 1.2).abs() < 1e-6 {
+            String::new()
+        } else {
+            format!("{}pt", fmt_num(cp.leading))
+        };
+        // Tracking (1/1000 em, signed) → letter-spacing in em. Zero
+        // means empty.
+        let letter_spacing = if cp.tracking == 0.0 {
+            String::new()
+        } else {
+            format!("{}em", fmt_num(cp.tracking / 1000.0))
+        };
+        // Language: xml:lang attribute. Blank panel field omits.
+        let xml_lang = cp.language.clone();
+        // Anti-aliasing: store the panel mode name verbatim. Empty =
+        // default (Sharp is the panel default, but we treat it as the
+        // implicit identity and only store when something different
+        // would appear on export).
+        let aa_mode = if cp.anti_aliasing == "Sharp" || cp.anti_aliasing.is_empty() {
+            String::new()
+        } else {
+            cp.anti_aliasing.clone()
+        };
+        // Style name → font_weight + font_style. Unknown style names
+        // leave the current weight/style alone (write None from
+        // parse_style_name).
+        let parsed_style = parse_style_name(&cp.style_name);
         let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
         let target_paths: Vec<Vec<usize>> = {
             let doc = tab.model.document();
@@ -854,12 +905,36 @@ impl AppState {
                     let mut new_t = t.clone();
                     new_t.font_family = cp.font_family.clone();
                     new_t.font_size = cp.font_size;
+                    new_t.text_decoration = text_decoration.clone();
+                    new_t.text_transform = text_transform.clone();
+                    new_t.font_variant = font_variant.clone();
+                    new_t.baseline_shift = baseline_shift.clone();
+                    new_t.line_height = line_height.clone();
+                    new_t.letter_spacing = letter_spacing.clone();
+                    new_t.xml_lang = xml_lang.clone();
+                    new_t.aa_mode = aa_mode.clone();
+                    if let Some((fw, fst)) = parsed_style.clone() {
+                        new_t.font_weight = fw;
+                        new_t.font_style = fst;
+                    }
                     Some(Element::Text(new_t))
                 }
                 Some(Element::TextPath(tp)) => {
                     let mut new_tp = tp.clone();
                     new_tp.font_family = cp.font_family.clone();
                     new_tp.font_size = cp.font_size;
+                    new_tp.text_decoration = text_decoration.clone();
+                    new_tp.text_transform = text_transform.clone();
+                    new_tp.font_variant = font_variant.clone();
+                    new_tp.baseline_shift = baseline_shift.clone();
+                    new_tp.line_height = line_height.clone();
+                    new_tp.letter_spacing = letter_spacing.clone();
+                    new_tp.xml_lang = xml_lang.clone();
+                    new_tp.aa_mode = aa_mode.clone();
+                    if let Some((fw, fst)) = parsed_style.clone() {
+                        new_tp.font_weight = fw;
+                        new_tp.font_style = fst;
+                    }
                     Some(Element::TextPath(new_tp))
                 }
                 _ => None,
@@ -870,4 +945,94 @@ impl AppState {
             }
         }
     }
+}
+
+/// Format a number for CSS length/value output: integers have no
+/// decimal, fractions drop trailing zeros. Matches the visual form
+/// users expect in Illustrator-style number fields (e.g. `14.4pt`,
+/// `0.025em`, `5pt`).
+pub(crate) fn fmt_num(n: f64) -> String {
+    if n == n.trunc() {
+        format!("{}", n as i64)
+    } else {
+        let s = format!("{:.4}", n);
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+/// Parse a CSS length string in `pt` and return the numeric value, or
+/// `None` if the string is empty or has an unsupported unit. Used by
+/// the Character panel read-back for `line-height` and the numeric
+/// branch of `baseline-shift`.
+pub(crate) fn parse_pt(s: &str) -> Option<f64> {
+    let s = s.trim();
+    let rest = s.strip_suffix("pt").unwrap_or(s);
+    rest.parse::<f64>().ok()
+}
+
+/// Parse a CSS letter-spacing value in `em`. Returns the value in
+/// 1/1000 em (panel units), or None if unparseable.
+pub(crate) fn parse_em_as_thousandths(s: &str) -> Option<f64> {
+    let s = s.trim();
+    let rest = s.strip_suffix("em").unwrap_or(s);
+    rest.parse::<f64>().ok().map(|v| v * 1000.0)
+}
+
+/// Parse a Character-panel Style name into the `(font_weight,
+/// font_style)` pair used on Text / TextPath elements. Returns `None`
+/// for names the parser doesn't recognise — callers should leave the
+/// existing weight/style alone in that case.
+pub(crate) fn parse_style_name(name: &str) -> Option<(String, String)> {
+    match name.trim() {
+        "Regular" => Some(("normal".into(), "normal".into())),
+        "Italic" => Some(("normal".into(), "italic".into())),
+        "Bold" => Some(("bold".into(), "normal".into())),
+        "Bold Italic" | "Italic Bold" => Some(("bold".into(), "italic".into())),
+        _ => None,
+    }
+}
+
+/// Inverse of `parse_style_name` — build the Character-panel display
+/// name from an element's font_weight / font_style. Falls back to
+/// `"Regular"` for unrecognised combinations so the dropdown always
+/// shows a concrete value.
+pub(crate) fn format_style_name(font_weight: &str, font_style: &str) -> String {
+    let bold = font_weight == "bold" || font_weight.parse::<u16>().map(|n| n >= 600).unwrap_or(false);
+    let italic = font_style == "italic" || font_style == "oblique";
+    match (bold, italic) {
+        (true, true) => "Bold Italic".into(),
+        (true, false) => "Bold".into(),
+        (false, true) => "Italic".into(),
+        (false, false) => "Regular".into(),
+    }
+}
+
+/// Build the CSS `text-decoration` value from two independent flags.
+/// Combines them in a stable alphabetical order — matches what the SVG
+/// serializer already emits for tspan text_decoration arrays.
+pub(crate) fn text_decoration_from_flags(underline: bool, strikethrough: bool) -> String {
+    match (underline, strikethrough) {
+        (true, true) => "line-through underline".to_string(),
+        (true, false) => "underline".to_string(),
+        (false, true) => "line-through".to_string(),
+        (false, false) => String::new(),
+    }
+}
+
+/// Inverse of `text_decoration_from_flags` — extract the two flags from
+/// a `text-decoration` string. Whitespace-split so "underline
+/// line-through", "line-through underline", and mixed-case input all
+/// round-trip cleanly through the Character panel's Underline /
+/// Strikethrough toggles.
+pub(crate) fn text_decoration_flags(td: &str) -> (bool, bool) {
+    let mut underline = false;
+    let mut strikethrough = false;
+    for tok in td.split_whitespace() {
+        match tok {
+            "underline" => underline = true,
+            "line-through" => strikethrough = true,
+            _ => {}
+        }
+    }
+    (underline, strikethrough)
 }

@@ -449,22 +449,87 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
         Element::Text(e) => {
             let fill_op = apply_fill(ctx, e.fill.as_ref());
             ctx.set_global_alpha(base_alpha * fill_op);
-            let font = format!("{} {} {}px {}", e.font_style, e.font_weight, e.font_size, e.font_family);
+            // Baseline-shift: super/sub render at a smaller size and
+            // offset from the baseline.
+            let (size_scale, y_shift) = match e.baseline_shift.as_str() {
+                "super" => (0.7, -e.font_size * 0.35),
+                "sub"   => (0.7,  e.font_size * 0.2),
+                // Numeric "Npt" — shift up by N points, keep size.
+                other => crate::workspace::app_state::parse_pt(other)
+                    .map(|pt| (1.0_f64, -pt))
+                    .unwrap_or((1.0, 0.0)),
+            };
+            let effective_fs = e.font_size * size_scale;
+            let font = format!("{} {} {}px {}", e.font_style, e.font_weight, effective_fs, e.font_family);
             ctx.set_font(&font);
-            let measure = crate::tools::text_measure::make_measurer(&font, e.font_size);
+            // Letter-spacing: Canvas 2D exposes a non-standard
+            // letterSpacing setter in modern browsers; fall back to 0
+            // when the value doesn't parse cleanly.
+            let ls_px = if !e.letter_spacing.is_empty() {
+                crate::workspace::app_state::parse_em_as_thousandths(&e.letter_spacing)
+                    .map(|thousandths| thousandths * effective_fs / 1000.0)
+                    .unwrap_or(0.0)
+            } else { 0.0 };
+            if ls_px != 0.0 {
+                let _ = js_sys::Reflect::set(
+                    ctx,
+                    &js_sys::JsString::from("letterSpacing"),
+                    &js_sys::JsString::from(format!("{}px", ls_px).as_str()),
+                );
+            }
+            let measure = crate::tools::text_measure::make_measurer(&font, effective_fs);
             let max_w = if e.is_area_text() { e.width } else { 0.0 };
-            let content_str = e.content();
+            // text-transform / font-variant: small-caps is rendered as
+            // uppercase-with-same-size for now (close-enough placeholder
+            // until OpenType small-caps substitution lands).
+            let raw = e.content();
+            let content_str = if e.text_transform == "uppercase"
+                || e.font_variant == "small-caps"
+            {
+                raw.to_uppercase()
+            } else if e.text_transform == "lowercase" {
+                raw.to_lowercase()
+            } else {
+                raw
+            };
+            // Leading: line_height in pt (empty = Auto = font_size).
+            // The text_layout::layout function uses its font_size
+            // argument as the line height, so pass the leading value
+            // there when set. Kept equal to font_size for Auto.
+            let leading_px = if e.line_height.is_empty() {
+                effective_fs
+            } else {
+                crate::workspace::app_state::parse_pt(&e.line_height).unwrap_or(effective_fs)
+            };
             let layout = crate::algorithms::text_layout::layout(
                 &content_str,
                 max_w,
-                e.font_size,
+                leading_px,
                 measure.as_ref(),
             );
             let chars: Vec<char> = content_str.chars().collect();
+            let has_underline = e.text_decoration.split_whitespace().any(|t| t == "underline");
+            let has_strike = e.text_decoration.split_whitespace().any(|t| t == "line-through");
             for line in &layout.lines {
                 let s: String = chars[line.start..line.end].iter().collect();
                 let s = s.trim_end_matches('\n');
-                ctx.fill_text(s, e.x, e.y + line.baseline_y).ok();
+                ctx.fill_text(s, e.x, e.y + line.baseline_y + y_shift).ok();
+                if has_underline || has_strike {
+                    let w = measure(s);
+                    draw_text_decorations(
+                        ctx, e.x, e.y + line.baseline_y + y_shift, w, effective_fs,
+                        has_underline, has_strike, e.fill.as_ref(),
+                    );
+                }
+            }
+            // Reset letterSpacing so subsequent text elements without
+            // the attribute draw without inheriting this one's value.
+            if ls_px != 0.0 {
+                let _ = js_sys::Reflect::set(
+                    ctx,
+                    &js_sys::JsString::from("letterSpacing"),
+                    &js_sys::JsString::from("0px"),
+                );
             }
         }
         Element::TextPath(e) => {
@@ -543,6 +608,45 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
 
 /// Trace the given element's geometry as a sub-path on `ctx` without
 /// filling or stroking. Used by `draw_selection_overlays` to stroke
+/// Draw the underline and/or strikethrough lines for a text run.
+/// Called from Text rendering when `text_decoration` includes either
+/// token. Positions follow CSS-ish conventions: underline sits at
+/// ~5% of the font size below the baseline, strike-through at roughly
+/// the x-height (about 35% above the baseline). Line thickness is a
+/// fixed fraction of the font size so it scales with the text.
+fn draw_text_decorations(
+    ctx: &CanvasRenderingContext2d,
+    x: f64,
+    baseline_y: f64,
+    width: f64,
+    font_size: f64,
+    underline: bool,
+    strike: bool,
+    fill: Option<&Fill>,
+) {
+    let color = match fill {
+        Some(f) => css_color(&f.color),
+        None => "currentColor".to_string(),
+    };
+    let thickness = (font_size * 0.07).max(1.0);
+    ctx.set_stroke_style_str(&color);
+    ctx.set_line_width(thickness);
+    if underline {
+        let y = baseline_y + font_size * 0.12;
+        ctx.begin_path();
+        ctx.move_to(x, y);
+        ctx.line_to(x + width, y);
+        ctx.stroke();
+    }
+    if strike {
+        let y = baseline_y - font_size * 0.3;
+        ctx.begin_path();
+        ctx.move_to(x, y);
+        ctx.line_to(x + width, y);
+        ctx.stroke();
+    }
+}
+
 /// the element's path in the selection color.
 ///
 /// Text, TextPath, Group, and Layer are not traced here — they use a
