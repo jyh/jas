@@ -4,7 +4,7 @@
   "description": "split_range(text, char_start, char_end) returns (text', first_idx, last_idx) so tspans[first_idx..=last_idx] exactly cover the char range. See TSPAN.md Primitives > Split across a range.",
   "vectors": [
     {
-      "name": "empty_range_produces_first_gt_last",
+      "name": "empty_range_returns_null_indices",
       "input": {
         "tspans": [{"id": 0, "content": "Hello"}],
         "char_start": 2,
@@ -12,8 +12,8 @@
       },
       "expected": {
         "tspans": [{"id": 0, "content": "Hello"}],
-        "first_idx": 1,
-        "last_idx": 0
+        "first_idx": null,
+        "last_idx": null
       }
     },
     {
