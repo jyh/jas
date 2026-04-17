@@ -252,21 +252,38 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             let td_attr = if e.text_decoration != "none" {
                 format!(" text-decoration=\"{}\"", e.text_decoration)
             } else { String::new() };
-            // SVG `y` is the baseline of the first line; internally
-            // `e.y` is the *top* of the layout box, so add the ascent
-            // (0.8 * font_size, the same value `text_layout` uses).
             let svg_y = e.y + e.font_size * 0.8;
-            format!(
-                "{}<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}>{}</text>\n",
-                indent,
-                fmt(px(e.x)), fmt(px(svg_y)),
-                escape_xml(&e.font_family), fmt(px(e.font_size)),
-                fw_attr, fst_attr, td_attr,
-                area_attrs,
-                fill_attrs(&e.fill), stroke_attrs(&e.stroke),
-                opacity_attr(e.common.opacity),
-                escape_xml(&e.content()),
-            )
+            let is_flat = e.tspans.len() == 1 && e.tspans[0].has_no_overrides();
+            if is_flat {
+                // Pre-Tspan-compatible emission: no <tspan> wrapper.
+                format!(
+                    "{}<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}>{}</text>\n",
+                    indent,
+                    fmt(px(e.x)), fmt(px(svg_y)),
+                    escape_xml(&e.font_family), fmt(px(e.font_size)),
+                    fw_attr, fst_attr, td_attr,
+                    area_attrs,
+                    fill_attrs(&e.fill), stroke_attrs(&e.stroke),
+                    opacity_attr(e.common.opacity),
+                    escape_xml(&e.content()),
+                )
+            } else {
+                // Multi-tspan or overriding tspan: wrap children, carry
+                // xml:space="preserve" so inter-glyph whitespace is stable
+                // across round-trips (TSPAN.md SVG serialization).
+                let tspan_xml: String = e.tspans.iter().map(tspan_svg).collect();
+                format!(
+                    "{}<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{} xml:space=\"preserve\">{}</text>\n",
+                    indent,
+                    fmt(px(e.x)), fmt(px(svg_y)),
+                    escape_xml(&e.font_family), fmt(px(e.font_size)),
+                    fw_attr, fst_attr, td_attr,
+                    area_attrs,
+                    fill_attrs(&e.fill), stroke_attrs(&e.stroke),
+                    opacity_attr(e.common.opacity),
+                    tspan_xml,
+                )
+            }
         }
         Element::TextPath(e) => {
             let offset_attr = if e.start_offset > 0.0 {
@@ -281,15 +298,24 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             let td_attr = if e.text_decoration != "none" {
                 format!(" text-decoration=\"{}\"", e.text_decoration)
             } else { String::new() };
+            let is_flat = e.tspans.len() == 1 && e.tspans[0].has_no_overrides();
+            let (space_attr, body) = if is_flat {
+                (String::new(), escape_xml(&e.content()))
+            } else {
+                (
+                    " xml:space=\"preserve\"".to_string(),
+                    e.tspans.iter().map(tspan_svg).collect::<String>(),
+                )
+            };
             format!(
-                "{}<text{}{} font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}><textPath path=\"{}\"{}>{}</textPath></text>\n",
+                "{}<text{}{} font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}><textPath path=\"{}\"{}{}>{}</textPath></text>\n",
                 indent,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 escape_xml(&e.font_family), fmt(px(e.font_size)),
                 fw_attr, fst_attr, td_attr,
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
-                path_data(&e.d), offset_attr,
-                escape_xml(&e.content()),
+                path_data(&e.d), offset_attr, space_attr,
+                body,
             )
         }
         Element::Layer(e) => {
@@ -501,6 +527,64 @@ fn unescape_xml(s: &str) -> String {
 // ---------------------------------------------------------------------------
 // SVG element parsing
 // ---------------------------------------------------------------------------
+
+/// Emit a single Tspan as an SVG `<tspan ...>content</tspan>` element.
+/// Only overridden attributes are emitted (inherited values are absent).
+fn tspan_svg(t: &crate::geometry::tspan::Tspan) -> String {
+    let mut attrs = String::new();
+    if let Some(v) = &t.font_family {
+        attrs.push_str(&format!(" font-family=\"{}\"", escape_xml(v)));
+    }
+    if let Some(v) = t.font_size {
+        attrs.push_str(&format!(" font-size=\"{}\"", fmt(px(v))));
+    }
+    if let Some(v) = &t.font_weight {
+        attrs.push_str(&format!(" font-weight=\"{}\"", escape_xml(v)));
+    }
+    if let Some(v) = &t.font_style {
+        attrs.push_str(&format!(" font-style=\"{}\"", escape_xml(v)));
+    }
+    if let Some(v) = &t.text_decoration
+        && !v.is_empty()
+    {
+        let joined = v.join(" ");
+        attrs.push_str(&format!(
+            " text-decoration=\"{}\"",
+            escape_xml(&joined)
+        ));
+    }
+    format!("<tspan{}>{}</tspan>", attrs, escape_xml(&t.content))
+}
+
+/// Parse an SVG `<tspan>` child node into a Tspan.
+///
+/// Only attributes present on the node become Some overrides; absent
+/// attributes remain None (tspan inherits from the parent element).
+fn parse_tspan(node: &XmlNode, id: u32) -> crate::geometry::tspan::Tspan {
+    use crate::geometry::tspan::Tspan;
+    Tspan {
+        id,
+        content: node.text.clone(),
+        font_family: node.attrs.get("font-family").cloned(),
+        font_size: node
+            .attrs
+            .get("font-size")
+            .and_then(|s| s.parse::<f64>().ok())
+            .map(pt),
+        font_weight: node.attrs.get("font-weight").cloned(),
+        font_style: node.attrs.get("font-style").cloned(),
+        text_decoration: node.attrs.get("text-decoration").map(|s| {
+            let mut parts: Vec<String> = s
+                .split_whitespace()
+                .filter(|x| *x != "none" && !x.is_empty())
+                .map(String::from)
+                .collect();
+            parts.sort();
+            parts
+        }),
+        ..Tspan::default_tspan()
+    }
+}
 
 fn strip_ns(tag: &str) -> &str {
     if let Some(pos) = tag.rfind('}') {
@@ -1026,16 +1110,63 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                     } else {
                         offset_str.parse::<f64>().unwrap_or(0.0)
                     };
-                    return Some(Element::TextPath(TextPathElem::from_string(
-                        d, child.text.clone(), start_offset,
-                        ff, fs, fw, fst, td,
-                        parse_fill(node), parse_stroke(node),
+                    // TextPath can host tspan children; if any are present,
+                    // build the tspan list from them. Otherwise fall back to
+                    // the child's flat text as a single default tspan.
+                    let tp_tspan_children: Vec<&XmlNode> = child
+                        .children
+                        .iter()
+                        .filter(|c| strip_ns(&c.tag) == "tspan")
+                        .collect();
+                    let tspans = if tp_tspan_children.is_empty() {
+                        vec![crate::geometry::tspan::Tspan {
+                            content: child.text.clone(),
+                            ..crate::geometry::tspan::Tspan::default_tspan()
+                        }]
+                    } else {
+                        tp_tspan_children
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, c)| parse_tspan(c, idx as u32))
+                            .collect()
+                    };
+                    return Some(Element::TextPath(TextPathElem {
+                        d,
+                        tspans,
+                        start_offset,
+                        font_family: ff,
+                        font_size: fs,
+                        font_weight: fw,
+                        font_style: fst,
+                        text_decoration: td,
+                        fill: parse_fill(node),
+                        stroke: parse_stroke(node),
                         common,
-                    )));
+                    }));
                 }
             }
 
-            let content = node.text.clone();
+            // Tspan children of a <text> element — if present, they are the
+            // authoritative content; node.text (the inter-tspan whitespace
+            // that XML collected into one field) is discarded.
+            let text_tspan_children: Vec<&XmlNode> = node
+                .children
+                .iter()
+                .filter(|c| strip_ns(&c.tag) == "tspan")
+                .collect();
+            let tspans: Vec<crate::geometry::tspan::Tspan> = if text_tspan_children.is_empty() {
+                vec![crate::geometry::tspan::Tspan {
+                    content: node.text.clone(),
+                    ..crate::geometry::tspan::Tspan::default_tspan()
+                }]
+            } else {
+                text_tspan_children
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, c)| parse_tspan(c, idx as u32))
+                    .collect()
+            };
+            let content: String = tspans.iter().map(|t| t.content.as_str()).collect();
             let mut tw = 0.0;
             if let Some(style) = node.attrs.get("style")
                 && let Some(pos) = style.find("inline-size:") {
@@ -1055,15 +1186,21 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             // SVG `y` is the baseline of the first line; convert it to
             // the layout-box top by subtracting the ascent (0.8 * fs).
             let svg_y = pt(get_f(node, "y", 0.0));
-            Some(Element::Text(TextElem::from_string(
-                pt(get_f(node, "x", 0.0)),
-                svg_y - fs * 0.8,
-                content,
-                ff, fs, fw, fst, td,
-                tw, th,
-                parse_fill(node), parse_stroke(node),
+            Some(Element::Text(TextElem {
+                x: pt(get_f(node, "x", 0.0)),
+                y: svg_y - fs * 0.8,
+                tspans,
+                font_family: ff,
+                font_size: fs,
+                font_weight: fw,
+                font_style: fst,
+                text_decoration: td,
+                width: tw,
+                height: th,
+                fill: parse_fill(node),
+                stroke: parse_stroke(node),
                 common,
-            )))
+            }))
         }
         "g" => {
             let mut children = Vec::new();

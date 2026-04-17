@@ -165,6 +165,7 @@ mod tests {
             "text_basic", "text_path_basic",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document",
+            "text_with_tspans", "text_xml_space_preserve", "text_path_with_tspans",
         ];
         for name in &names {
             let svg = read_fixture(&format!("svg/{}.svg", name));
@@ -186,10 +187,26 @@ mod tests {
             "text_basic", "text_path_basic",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document",
+            "text_with_tspans", "text_xml_space_preserve", "text_path_with_tspans",
         ];
         for name in &names {
             assert_svg_roundtrip(name);
         }
+    }
+
+    #[test]
+    fn svg_parse_text_with_tspans() {
+        assert_svg_parse("text_with_tspans");
+    }
+
+    #[test]
+    fn svg_parse_text_xml_space_preserve() {
+        assert_svg_parse("text_xml_space_preserve");
+    }
+
+    #[test]
+    fn svg_parse_text_path_with_tspans() {
+        assert_svg_parse("text_path_with_tspans");
     }
 
     #[test]
