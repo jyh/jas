@@ -9,6 +9,7 @@
 mod tests {
     use crate::algorithms::hit_test;
     use crate::document::controller::Controller;
+    use crate::document::document::ElementPath;
     use crate::document::model::Model;
     use crate::geometry::binary::{document_to_binary, binary_to_document};
     use crate::geometry::svg::{document_to_svg, svg_to_document};
@@ -384,6 +385,22 @@ mod tests {
             "show_all" => {
                 Controller::show_all(model);
             }
+            "set_character_attribute" => {
+                let path: ElementPath = op["path"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|i| i.as_u64().unwrap() as usize)
+                    .collect();
+                Controller::set_character_attribute(
+                    model,
+                    &path,
+                    op["char_start"].as_u64().unwrap() as usize,
+                    op["char_end"].as_u64().unwrap() as usize,
+                    op["attribute"].as_str().unwrap(),
+                    op["value"].as_str().unwrap(),
+                );
+            }
             "snapshot" => {
                 model.snapshot();
             }
@@ -431,7 +448,8 @@ mod tests {
     #[ignore]
     fn generate_operation_expected() {
         for fixture in &["operations/select_and_move.json", "operations/undo_redo_laws.json",
-                         "operations/controller_ops.json"] {
+                         "operations/controller_ops.json",
+                         "operations/tspan_ops.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -469,6 +487,11 @@ mod tests {
     #[test]
     fn operation_controller_ops() {
         run_operation_fixture("operations/controller_ops.json");
+    }
+
+    #[test]
+    fn operation_tspan_ops() {
+        run_operation_fixture("operations/tspan_ops.json");
     }
 
     // ---------------------------------------------------------------
