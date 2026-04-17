@@ -8266,6 +8266,33 @@
       "init": {},
       "menu": [
         {
+          "label": "Show Snap to Glyph Options",
+          "action": "toggle_snap_to_glyph_visible",
+          "checked": "panel.snap_to_glyph_visible"
+        },
+        "separator",
+        {
+          "label": "All Caps",
+          "action": "toggle_all_caps",
+          "checked": "panel.all_caps"
+        },
+        {
+          "label": "Small Caps",
+          "action": "toggle_small_caps",
+          "checked": "panel.small_caps"
+        },
+        {
+          "label": "Superscript",
+          "action": "toggle_superscript",
+          "checked": "panel.superscript"
+        },
+        {
+          "label": "Subscript",
+          "action": "toggle_subscript",
+          "checked": "panel.subscript"
+        },
+        "separator",
+        {
           "label": "Close Character",
           "action": "close_panel"
         }
@@ -8844,12 +8871,114 @@
                 "children": [
                   {
                     "id": "ch_language",
-                    "type": "text_input",
+                    "type": "select",
                     "summary": "Language",
-                    "description": "ISO 639-1 language code (e.g. en, fr, de, ja).",
+                    "description": "Language of the selected text, stored as an ISO 639-1 code on the `xml:lang` attribute (used for hyphenation and line-breaking). Dropdown options show the language name; the value stored on the element is the code.\n",
                     "style": {
                       "width": "100%"
                     },
+                    "options": [
+                      {
+                        "value": "",
+                        "label": "(none)"
+                      },
+                      {
+                        "value": "en",
+                        "label": "English"
+                      },
+                      {
+                        "value": "fr",
+                        "label": "French"
+                      },
+                      {
+                        "value": "de",
+                        "label": "German"
+                      },
+                      {
+                        "value": "es",
+                        "label": "Spanish"
+                      },
+                      {
+                        "value": "it",
+                        "label": "Italian"
+                      },
+                      {
+                        "value": "pt",
+                        "label": "Portuguese"
+                      },
+                      {
+                        "value": "nl",
+                        "label": "Dutch"
+                      },
+                      {
+                        "value": "sv",
+                        "label": "Swedish"
+                      },
+                      {
+                        "value": "no",
+                        "label": "Norwegian"
+                      },
+                      {
+                        "value": "da",
+                        "label": "Danish"
+                      },
+                      {
+                        "value": "fi",
+                        "label": "Finnish"
+                      },
+                      {
+                        "value": "pl",
+                        "label": "Polish"
+                      },
+                      {
+                        "value": "cs",
+                        "label": "Czech"
+                      },
+                      {
+                        "value": "ru",
+                        "label": "Russian"
+                      },
+                      {
+                        "value": "tr",
+                        "label": "Turkish"
+                      },
+                      {
+                        "value": "el",
+                        "label": "Greek"
+                      },
+                      {
+                        "value": "he",
+                        "label": "Hebrew"
+                      },
+                      {
+                        "value": "ar",
+                        "label": "Arabic"
+                      },
+                      {
+                        "value": "hi",
+                        "label": "Hindi"
+                      },
+                      {
+                        "value": "th",
+                        "label": "Thai"
+                      },
+                      {
+                        "value": "vi",
+                        "label": "Vietnamese"
+                      },
+                      {
+                        "value": "ja",
+                        "label": "Japanese"
+                      },
+                      {
+                        "value": "ko",
+                        "label": "Korean"
+                      },
+                      {
+                        "value": "zh",
+                        "label": "Chinese"
+                      }
+                    ],
                     "bind": {
                       "value": "panel.language"
                     }
@@ -8862,12 +8991,34 @@
                 "children": [
                   {
                     "id": "ch_anti_aliasing",
-                    "type": "text_input",
+                    "type": "select",
                     "summary": "Anti-aliasing",
                     "description": "Anti-aliasing mode: None, Sharp, Crisp, Strong, or Smooth.",
                     "style": {
                       "width": "100%"
                     },
+                    "options": [
+                      {
+                        "value": "None",
+                        "label": "None"
+                      },
+                      {
+                        "value": "Sharp",
+                        "label": "Sharp"
+                      },
+                      {
+                        "value": "Crisp",
+                        "label": "Crisp"
+                      },
+                      {
+                        "value": "Strong",
+                        "label": "Strong"
+                      },
+                      {
+                        "value": "Smooth",
+                        "label": "Smooth"
+                      }
+                    ],
                     "bind": {
                       "value": "panel.anti_aliasing"
                     }
