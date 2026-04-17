@@ -115,6 +115,7 @@ mod tests {
             app_default_stroke: Some(crate::geometry::element::Stroke::new(crate::geometry::element::Color::BLACK, 1.0)),
             swatch_libraries: serde_json::json!({}),
             stroke_panel: crate::workspace::app_state::StrokePanelState::default(),
+            character_panel: crate::workspace::app_state::CharacterPanelState::default(),
             layers_renaming: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),

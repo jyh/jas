@@ -118,6 +118,7 @@ mod tests {
             )),
             swatch_libraries: serde_json::json!({}),
             stroke_panel: StrokePanelState::default(),
+            character_panel: crate::workspace::app_state::CharacterPanelState::default(),
             layers_renaming: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),

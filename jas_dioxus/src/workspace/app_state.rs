@@ -98,6 +98,9 @@ pub(crate) struct AppState {
     pub(crate) swatch_libraries: serde_json::Value,
     /// Stroke panel state — mirrored to/from global state for selection sync.
     pub(crate) stroke_panel: StrokePanelState,
+    /// Character panel state — panel-local; pushed to selected Text /
+    /// TextPath via apply_character_panel_to_selection.
+    pub(crate) character_panel: CharacterPanelState,
     /// Element path currently being renamed in the layers panel, or None.
     pub(crate) layers_renaming: Option<Vec<usize>>,
     /// Collapsed element paths in the layers panel. Elements not in this
@@ -195,6 +198,73 @@ impl Default for StrokePanelState {
     }
 }
 
+/// Character panel state fields — mirror the panel-local state
+/// declared in `workspace/panels/character.yaml`. Written to by the
+/// renderer when the user edits a Character panel control; read by
+/// `apply_character_panel_to_selection` to push the attributes onto
+/// the selected Text / TextPath element via
+/// `Controller::set_character_attribute`.
+#[derive(Debug, Clone)]
+pub(crate) struct CharacterPanelState {
+    pub font_family: String,
+    pub style_name: String,
+    pub font_size: f64,
+    pub leading: f64,
+    pub kerning: f64,
+    pub tracking: f64,
+    pub vertical_scale: f64,
+    pub horizontal_scale: f64,
+    pub baseline_shift: f64,
+    pub character_rotation: f64,
+    pub all_caps: bool,
+    pub small_caps: bool,
+    pub superscript: bool,
+    pub subscript: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+    pub language: String,
+    pub anti_aliasing: String,
+    pub snap_to_glyph_visible: bool,
+    pub snap_baseline: bool,
+    pub snap_x_height: bool,
+    pub snap_glyph_bounds: bool,
+    pub snap_proximity_guides: bool,
+    pub snap_angular_guides: bool,
+    pub snap_anchor_point: bool,
+}
+
+impl Default for CharacterPanelState {
+    fn default() -> Self {
+        Self {
+            font_family: "sans-serif".into(),
+            style_name: "Regular".into(),
+            font_size: 12.0,
+            leading: 14.4,
+            kerning: 0.0,
+            tracking: 0.0,
+            vertical_scale: 100.0,
+            horizontal_scale: 100.0,
+            baseline_shift: 0.0,
+            character_rotation: 0.0,
+            all_caps: false,
+            small_caps: false,
+            superscript: false,
+            subscript: false,
+            underline: false,
+            strikethrough: false,
+            language: "en".into(),
+            anti_aliasing: "Sharp".into(),
+            snap_to_glyph_visible: true,
+            snap_baseline: false,
+            snap_x_height: false,
+            snap_glyph_bounds: false,
+            snap_proximity_guides: false,
+            snap_angular_guides: false,
+            snap_anchor_point: false,
+        }
+    }
+}
+
 impl AppState {
     pub(crate) fn new() -> Self {
         let app_config = Self::load_app_config();
@@ -226,6 +296,7 @@ impl AppState {
                 .map(|ws| ws.data().get("swatch_libraries").cloned().unwrap_or(serde_json::json!({})))
                 .unwrap_or(serde_json::json!({})),
             stroke_panel: StrokePanelState::default(),
+            character_panel: CharacterPanelState::default(),
             layers_renaming: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),
@@ -740,6 +811,80 @@ impl AppState {
         // Draw tool overlay
         if let Some(tool) = tab.tools.get(&self.active_tool) {
             tool.draw_overlay(&tab.model, &ctx);
+        }
+    }
+
+    /// Push the current Character panel state to the selected text
+    /// element(s), via the unified TSPAN.md character-attribute write
+    /// algorithm in `Controller::set_character_attribute`.
+    ///
+    /// Currently wires only `font_family` and `font_size`, which are the
+    /// two attributes `apply_attr_to_tspan` supports today with a direct
+    /// 1:1 panel-field→SVG-attribute mapping. Remaining character panel
+    /// fields (All Caps, Small Caps, Super/Sub, Underline, Strikethrough,
+    /// kerning, tracking, scales, baseline shift, rotation, language,
+    /// anti-alias, Snap to Glyph) stay in panel-local state until their
+    /// SVG-attribute plumbing lands.
+    ///
+    /// No-op when no tab is active, when the selection is empty, or when
+    /// the selected element is not a Text / TextPath.
+    pub(crate) fn apply_character_panel_to_selection(&mut self) {
+        let cp = self.character_panel.clone();
+        let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
+        // Collect paths of selected Text / TextPath elements. We hold no
+        // borrow of the document across the set_character_attribute call
+        // (which mutates the document via Model::set_document).
+        let target_paths: Vec<Vec<usize>> = {
+            let doc = tab.model.document();
+            doc.selection
+                .iter()
+                .filter_map(|es| {
+                    let elem = doc.get_element(&es.path)?;
+                    match elem {
+                        crate::geometry::element::Element::Text(_)
+                        | crate::geometry::element::Element::TextPath(_) => {
+                            Some(es.path.clone())
+                        }
+                        _ => None,
+                    }
+                })
+                .collect()
+        };
+        for path in target_paths {
+            // Compute the char range from the concatenated content of
+            // the target at call time — works for both Text and
+            // TextPath via their content() accessors.
+            let char_len = {
+                let doc = tab.model.document();
+                match doc.get_element(&path) {
+                    Some(crate::geometry::element::Element::Text(t)) => {
+                        t.content().chars().count()
+                    }
+                    Some(crate::geometry::element::Element::TextPath(tp)) => {
+                        tp.content().chars().count()
+                    }
+                    _ => 0,
+                }
+            };
+            if char_len == 0 {
+                continue;
+            }
+            crate::document::controller::Controller::set_character_attribute(
+                &mut tab.model,
+                &path,
+                0,
+                char_len,
+                "font_family",
+                &cp.font_family,
+            );
+            crate::document::controller::Controller::set_character_attribute(
+                &mut tab.model,
+                &path,
+                0,
+                char_len,
+                "font_size",
+                &cp.font_size.to_string(),
+            );
         }
     }
 }

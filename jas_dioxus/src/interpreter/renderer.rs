@@ -12,16 +12,25 @@ use std::rc::Rc;
 use super::expr;
 use super::expr_types::Value;
 use crate::workspace::app_state::AppHandle;
+use crate::workspace::workspace::PanelKind;
 
 /// Shared context captured once per panel body render, passed to all
 /// child element renderers so they don't need to call use_context
 /// (which would violate the rules of hooks inside conditional branches).
+///
+/// `panel_kind` is set by `render_panel` when a panel element is
+/// entered, so widget-level event handlers can dispatch panel-state
+/// writes (set_panel_state, number_input/checkbox/text_input commit)
+/// to the right per-panel state struct on AppState. `None` for
+/// widgets rendered outside any panel (e.g., dialog contents,
+/// toolbar).
 #[derive(Clone)]
 struct RenderCtx {
     app: AppHandle,
     revision: Signal<u64>,
     dialog_ctx: super::dialog_view::DialogCtx,
     timer_ctx: super::timer::TimerCtx,
+    panel_kind: Option<PanelKind>,
 }
 
 /// Render a YAML element spec into a Dioxus Element.
@@ -40,6 +49,7 @@ pub fn render_element(
         revision: use_context::<Signal<u64>>(),
         dialog_ctx: use_context::<super::dialog_view::DialogCtx>(),
         timer_ctx: use_context::<super::timer::TimerCtx>(),
+        panel_kind: None,
     };
     render_el(el, ctx, &rctx)
 }
@@ -567,6 +577,45 @@ fn get_stroke_field(sp: &crate::workspace::app_state::StrokePanelState, key: &st
 }
 
 /// Set a stroke panel field from a JSON value.
+/// Write a Character-panel field from a YAML-interpreted value. Keys
+/// match the panel-local state declared in `workspace/panels/
+/// character.yaml`. Unknown keys are silently ignored (mirrors
+/// `set_stroke_field`).
+fn set_character_field(
+    cp: &mut crate::workspace::app_state::CharacterPanelState,
+    key: &str,
+    val: &serde_json::Value,
+) {
+    match key {
+        "font_family"          => { if let Some(s) = val.as_str() { cp.font_family = s.into(); } }
+        "style_name"           => { if let Some(s) = val.as_str() { cp.style_name = s.into(); } }
+        "font_size"            => { if let Some(n) = val.as_f64() { cp.font_size = n; } }
+        "leading"              => { if let Some(n) = val.as_f64() { cp.leading = n; } }
+        "kerning"              => { if let Some(n) = val.as_f64() { cp.kerning = n; } }
+        "tracking"             => { if let Some(n) = val.as_f64() { cp.tracking = n; } }
+        "vertical_scale"       => { if let Some(n) = val.as_f64() { cp.vertical_scale = n; } }
+        "horizontal_scale"     => { if let Some(n) = val.as_f64() { cp.horizontal_scale = n; } }
+        "baseline_shift"       => { if let Some(n) = val.as_f64() { cp.baseline_shift = n; } }
+        "character_rotation"   => { if let Some(n) = val.as_f64() { cp.character_rotation = n; } }
+        "all_caps"             => { if let Some(b) = val.as_bool() { cp.all_caps = b; } }
+        "small_caps"           => { if let Some(b) = val.as_bool() { cp.small_caps = b; } }
+        "superscript"          => { if let Some(b) = val.as_bool() { cp.superscript = b; } }
+        "subscript"            => { if let Some(b) = val.as_bool() { cp.subscript = b; } }
+        "underline"            => { if let Some(b) = val.as_bool() { cp.underline = b; } }
+        "strikethrough"        => { if let Some(b) = val.as_bool() { cp.strikethrough = b; } }
+        "language"             => { if let Some(s) = val.as_str() { cp.language = s.into(); } }
+        "anti_aliasing"        => { if let Some(s) = val.as_str() { cp.anti_aliasing = s.into(); } }
+        "snap_to_glyph_visible"=> { if let Some(b) = val.as_bool() { cp.snap_to_glyph_visible = b; } }
+        "snap_baseline"        => { if let Some(b) = val.as_bool() { cp.snap_baseline = b; } }
+        "snap_x_height"        => { if let Some(b) = val.as_bool() { cp.snap_x_height = b; } }
+        "snap_glyph_bounds"    => { if let Some(b) = val.as_bool() { cp.snap_glyph_bounds = b; } }
+        "snap_proximity_guides"=> { if let Some(b) = val.as_bool() { cp.snap_proximity_guides = b; } }
+        "snap_angular_guides"  => { if let Some(b) = val.as_bool() { cp.snap_angular_guides = b; } }
+        "snap_anchor_point"    => { if let Some(b) = val.as_bool() { cp.snap_anchor_point = b; } }
+        _ => {}
+    }
+}
+
 fn set_stroke_field(sp: &mut crate::workspace::app_state::StrokePanelState, key: &str, val: &serde_json::Value) {
     match key {
         "cap" => { if let Some(s) = val.as_str() { sp.cap = s.into(); } }
@@ -2197,6 +2246,12 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
 
     // Panel bindings: commit on Enter/blur only, don't fight with re-renders.
     // Dialog bindings: controlled value with live updates.
+    //
+    // Dispatch the write to the correct per-panel state struct based on
+    // the enclosing panel's kind (set by render_panel on rctx). Stroke
+    // keeps its existing weight → app_default_stroke sync; Character
+    // pushes changes through apply_character_panel_to_selection.
+    let panel_kind = rctx.panel_kind;
     let panel_handler = if let BindTarget::Panel(ref field) = bind_target {
         let f = field.clone();
         let app = app.clone();
@@ -2207,19 +2262,32 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
             let app = app.clone();
             spawn(async move {
                 let mut st = app.borrow_mut();
-                set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
-                if f == "weight" {
-                    if let Some(ref mut stroke) = st.app_default_stroke {
-                        stroke.width = new_val;
+                match panel_kind {
+                    Some(PanelKind::Character) => {
+                        set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
+                        st.apply_character_panel_to_selection();
                     }
-                    let idx = st.active_tab;
-                    if let Some(tab) = st.tabs.get_mut(idx) {
-                        if let Some(ref mut stroke) = tab.model.default_stroke {
-                            stroke.width = new_val;
+                    Some(PanelKind::Stroke) | None => {
+                        set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
+                        if f == "weight" {
+                            if let Some(ref mut stroke) = st.app_default_stroke {
+                                stroke.width = new_val;
+                            }
+                            let idx = st.active_tab;
+                            if let Some(tab) = st.tabs.get_mut(idx) {
+                                if let Some(ref mut stroke) = tab.model.default_stroke {
+                                    stroke.width = new_val;
+                                }
+                            }
                         }
+                        st.apply_stroke_panel_to_selection();
                     }
+                    // Paragraph, Artboards, Layers, Color, Swatches, Properties:
+                    // no-op for number_input writes until their per-panel state
+                    // structs land. Drops the edit silently rather than
+                    // corrupting stroke state.
+                    _ => {}
                 }
-                st.apply_stroke_panel_to_selection();
             });
             revision += 1;
         }))
@@ -2910,7 +2978,23 @@ fn render_fill_stroke_widget(el: &serde_json::Value, ctx: &serde_json::Value, rc
 
 fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     if let Some(content) = el.get("content") {
-        render_el(content, ctx, rctx)
+        // Route widget events inside this panel to the correct per-panel
+        // state struct on AppState. The mapping keys match the content
+        // ids produced by interpreter::workspace::panel_kind_to_content_id.
+        let panel_kind = el.get("id").and_then(|v| v.as_str()).and_then(|id| match id {
+            "layers_panel_content"     => Some(PanelKind::Layers),
+            "color_panel_content"      => Some(PanelKind::Color),
+            "swatches_panel_content"   => Some(PanelKind::Swatches),
+            "stroke_panel_content"     => Some(PanelKind::Stroke),
+            "properties_panel_content" => Some(PanelKind::Properties),
+            "character_panel_content"  => Some(PanelKind::Character),
+            "paragraph_panel_content"  => Some(PanelKind::Paragraph),
+            "artboards_panel_content"  => Some(PanelKind::Artboards),
+            _ => None,
+        });
+        let mut child = rctx.clone();
+        child.panel_kind = panel_kind;
+        render_el(content, ctx, &child)
     } else {
         render_placeholder(el, ctx)
     }
