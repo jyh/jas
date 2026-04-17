@@ -63,6 +63,16 @@ class _JsonObj:
     def null(self, key: str):
         self._entries.append((key, "null"))
 
+    def empty_as_null(self, key: str, v: str):
+        """Emit an empty string as null, otherwise as a JSON string.
+        Matches the canonical-JSON rule that default / omitted
+        attributes render as null.
+        """
+        if v == "":
+            self.null(key)
+        else:
+            self.str(key, v)
+
     def raw(self, key: str, json: str):
         self._entries.append((key, json))
 
@@ -151,6 +161,44 @@ def _common_fields(o: _JsonObj, elem: Element):
     o.num("opacity", elem.opacity)
     o.raw("transform", _transform_json(elem.transform))
     o.str("visibility", _visibility_str(elem.visibility))
+
+
+def _text_decoration_array_json(td: str) -> str:
+    """Emit ``text_decoration`` as a sorted JSON array of CSS tokens.
+    Empty string or ``"none"`` produces ``[]``. Matches Rust's
+    canonical form."""
+    tokens = sorted({t for t in td.split() if t and t != "none"})
+    return "[" + ",".join(f'"{t}"' for t in tokens) + "]"
+
+
+def _default_tspan_json(content: str) -> str:
+    """Emit a single default tspan carrying ``content`` — id 0 and
+    every override ``null``. Used to derive the canonical ``tspans``
+    array from the flat ``content`` string on emit."""
+    o = _JsonObj()
+    o.null("baseline_shift")
+    o.str("content", content)
+    o.null("dx")
+    o.null("font_family")
+    o.null("font_size")
+    o.null("font_style")
+    o.null("font_variant")
+    o.null("font_weight")
+    o._entries.append(("id", "0"))
+    o.null("jas_aa_mode")
+    o.null("jas_fractional_widths")
+    o.null("jas_kerning_mode")
+    o.null("jas_no_break")
+    o.null("letter_spacing")
+    o.null("line_height")
+    o.null("rotate")
+    o.null("style_name")
+    o.null("text_decoration")
+    o.null("text_rendering")
+    o.null("text_transform")
+    o.null("transform")
+    o.null("xml_lang")
+    return o.build()
 
 
 def _path_command_json(cmd) -> str:
@@ -282,32 +330,67 @@ def _element_json(elem: Element) -> str:
     elif isinstance(elem, Text):
         o.str("type", "text")
         _common_fields(o, elem)
-        o.str("content", elem.content)
+        # Extended element-wide attribute slots. Still-null slots are
+        # placeholders until Text grows per-element override fields
+        # (see TSPAN.md Attribute Home).
+        o.empty_as_null("baseline_shift", elem.baseline_shift)
+        o.null("dx")
         o.raw("fill", _fill_json(elem.fill))
         o.str("font_family", elem.font_family)
         o.num("font_size", elem.font_size)
         o.str("font_style", elem.font_style)
+        o.empty_as_null("font_variant", elem.font_variant)
         o.str("font_weight", elem.font_weight)
         o.num("height", elem.height)
+        o.empty_as_null("horizontal_scale", elem.horizontal_scale)
+        o.empty_as_null("jas_aa_mode", elem.aa_mode)
+        o.null("jas_fractional_widths")
+        o.empty_as_null("jas_kerning_mode", elem.kerning)
+        o.null("jas_no_break")
+        o.empty_as_null("letter_spacing", elem.letter_spacing)
+        o.empty_as_null("line_height", elem.line_height)
+        o.empty_as_null("rotate", elem.rotate)
         o.raw("stroke", _stroke_json(elem.stroke))
-        o.str("text_decoration", elem.text_decoration)
+        o.null("style_name")
+        o.raw("text_decoration", _text_decoration_array_json(elem.text_decoration))
+        o.null("text_rendering")
+        o.empty_as_null("text_transform", elem.text_transform)
+        o.raw("tspans", _json_array([_default_tspan_json(elem.content)]))
+        o.empty_as_null("vertical_scale", elem.vertical_scale)
         o.num("width", elem.width)
         o.num("x", elem.x)
+        o.empty_as_null("xml_lang", elem.xml_lang)
         o.num("y", elem.y)
     elif isinstance(elem, TextPath):
         o.str("type", "text_path")
         _common_fields(o, elem)
-        o.str("content", elem.content)
+        o.empty_as_null("baseline_shift", elem.baseline_shift)
         cmds = [_path_command_json(c) for c in elem.d]
         o.raw("d", _json_array(cmds))
+        o.null("dx")
         o.raw("fill", _fill_json(elem.fill))
         o.str("font_family", elem.font_family)
         o.num("font_size", elem.font_size)
         o.str("font_style", elem.font_style)
+        o.empty_as_null("font_variant", elem.font_variant)
         o.str("font_weight", elem.font_weight)
+        o.empty_as_null("horizontal_scale", elem.horizontal_scale)
+        o.empty_as_null("jas_aa_mode", elem.aa_mode)
+        o.null("jas_fractional_widths")
+        o.empty_as_null("jas_kerning_mode", elem.kerning)
+        o.null("jas_no_break")
+        o.empty_as_null("letter_spacing", elem.letter_spacing)
+        o.empty_as_null("line_height", elem.line_height)
+        o.empty_as_null("rotate", elem.rotate)
         o.num("start_offset", elem.start_offset)
         o.raw("stroke", _stroke_json(elem.stroke))
-        o.str("text_decoration", elem.text_decoration)
+        o.null("style_name")
+        o.raw("text_decoration", _text_decoration_array_json(elem.text_decoration))
+        o.null("text_rendering")
+        o.empty_as_null("text_transform", elem.text_transform)
+        o.raw("tspans", _json_array([_default_tspan_json(elem.content)]))
+        o.empty_as_null("vertical_scale", elem.vertical_scale)
+        o.empty_as_null("xml_lang", elem.xml_lang)
     return o.build()
 
 
@@ -437,6 +520,27 @@ def _parse_points(lst: list) -> tuple[tuple[float, float], ...]:
     return tuple((p[0], p[1]) for p in lst)
 
 
+def _parse_content_or_tspans(d: dict) -> str:
+    """Parse the Text / TextPath ``content`` field. Accepts the
+    canonical ``tspans`` array (concatenates each tspan's content) or
+    the legacy ``content: "..."`` string."""
+    tspans = d.get("tspans")
+    if tspans is not None:
+        return "".join(t.get("content", "") for t in tspans)
+    return d.get("content", "")
+
+
+def _parse_text_decoration_field(v) -> str:
+    """Accept the canonical text_decoration shape (a sorted array of
+    CSS tokens) or the legacy CSS string. Returns the space-separated
+    CSS string the ``Text.text_decoration: str`` field stores."""
+    if isinstance(v, list):
+        return " ".join(v) if v else "none"
+    if isinstance(v, str):
+        return v
+    return "none"
+
+
 # ------------------------------------------------------------------ #
 # Element parser                                                      #
 # ------------------------------------------------------------------ #
@@ -482,22 +586,46 @@ def _parse_element(d: dict) -> Element:
                     fill=_parse_fill(d["fill"]),
                     stroke=_parse_stroke(d["stroke"]), **common)
     elif typ == "text":
-        return Text(x=d["x"], y=d["y"], content=d["content"],
+        return Text(x=d["x"], y=d["y"],
+                    content=_parse_content_or_tspans(d),
                     font_family=d["font_family"], font_size=d["font_size"],
                     font_weight=d["font_weight"], font_style=d["font_style"],
-                    text_decoration=d["text_decoration"],
+                    text_decoration=_parse_text_decoration_field(d.get("text_decoration")),
+                    text_transform=d.get("text_transform") or "",
+                    font_variant=d.get("font_variant") or "",
+                    baseline_shift=d.get("baseline_shift") or "",
+                    line_height=d.get("line_height") or "",
+                    letter_spacing=d.get("letter_spacing") or "",
+                    xml_lang=d.get("xml_lang") or "",
+                    aa_mode=d.get("jas_aa_mode") or "",
+                    rotate=d.get("rotate") or "",
+                    horizontal_scale=d.get("horizontal_scale") or "",
+                    vertical_scale=d.get("vertical_scale") or "",
+                    kerning=d.get("jas_kerning_mode") or "",
                     width=d["width"], height=d["height"],
                     fill=_parse_fill(d["fill"]),
                     stroke=_parse_stroke(d["stroke"]), **common)
     elif typ == "text_path":
         cmds = tuple(_parse_path_command(c) for c in d["d"])
-        return TextPath(d=cmds, content=d["content"],
+        return TextPath(d=cmds,
+                        content=_parse_content_or_tspans(d),
                         start_offset=d["start_offset"],
                         font_family=d["font_family"],
                         font_size=d["font_size"],
                         font_weight=d["font_weight"],
                         font_style=d["font_style"],
-                        text_decoration=d["text_decoration"],
+                        text_decoration=_parse_text_decoration_field(d.get("text_decoration")),
+                        text_transform=d.get("text_transform") or "",
+                        font_variant=d.get("font_variant") or "",
+                        baseline_shift=d.get("baseline_shift") or "",
+                        line_height=d.get("line_height") or "",
+                        letter_spacing=d.get("letter_spacing") or "",
+                        xml_lang=d.get("xml_lang") or "",
+                        aa_mode=d.get("jas_aa_mode") or "",
+                        rotate=d.get("rotate") or "",
+                        horizontal_scale=d.get("horizontal_scale") or "",
+                        vertical_scale=d.get("vertical_scale") or "",
+                        kerning=d.get("jas_kerning_mode") or "",
                         fill=_parse_fill(d["fill"]),
                         stroke=_parse_stroke(d["stroke"]), **common)
     raise ValueError(f"Unknown element type: {typ}")
