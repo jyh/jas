@@ -48,6 +48,7 @@ pub enum PanelKind {
     Swatches,
     Stroke,
     Properties,
+    Character,
 }
 
 impl PanelKind {
@@ -58,6 +59,7 @@ impl PanelKind {
         Self::Swatches,
         Self::Stroke,
         Self::Properties,
+        Self::Character,
     ];
 }
 
@@ -1651,7 +1653,7 @@ mod tests {
 
     #[test]
     fn panel_kind_all_count() {
-        assert_eq!(PanelKind::ALL.len(), 5);
+        assert_eq!(PanelKind::ALL.len(), 6);
     }
 
     #[test]
@@ -1661,6 +1663,7 @@ mod tests {
         assert!(PanelKind::ALL.contains(&PanelKind::Swatches));
         assert!(PanelKind::ALL.contains(&PanelKind::Stroke));
         assert!(PanelKind::ALL.contains(&PanelKind::Properties));
+        assert!(PanelKind::ALL.contains(&PanelKind::Character));
     }
 
     #[test]
@@ -1739,7 +1742,10 @@ mod tests {
     fn panel_menu_items_all_visible() {
         let l = WorkspaceLayout::default_layout();
         let items = l.panel_menu_items();
-        assert_eq!(items.len(), 5);
+        assert_eq!(items.len(), PanelKind::ALL.len());
+        // `is_panel_visible` is defined as "not in hidden_panels", so a
+        // panel that is defined but not in any group still reports
+        // visible by default — matches the pre-Character behavior.
         for (_, visible) in &items {
             assert!(visible);
         }

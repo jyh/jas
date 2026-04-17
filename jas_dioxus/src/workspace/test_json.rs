@@ -99,6 +99,7 @@ fn panel_kind_str(k: PanelKind) -> &'static str {
         PanelKind::Swatches => "swatches",
         PanelKind::Stroke => "stroke",
         PanelKind::Properties => "properties",
+        PanelKind::Character => "character",
     }
 }
 
@@ -518,6 +519,7 @@ fn parse_panel_kind(v: &serde_json::Value) -> PanelKind {
         "swatches" => PanelKind::Swatches,
         "stroke" => PanelKind::Stroke,
         "properties" => PanelKind::Properties,
+        "character" => PanelKind::Character,
         _ => PanelKind::Layers,
     }
 }
