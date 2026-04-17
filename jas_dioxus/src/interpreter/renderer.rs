@@ -4300,11 +4300,12 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                                     let item_app = rctx.app.clone();
                                     let mut item_rev = close_rev;
                                     let v = value.clone();
+                                    let v_for_key = v.clone();
                                     let checked = !hidden_types.contains(&v);
                                     let check_mark = if checked { "☑" } else { "☐" };
                                     rsx! {
                                         div {
-                                            key: "{v}",
+                                            key: "{v_for_key}",
                                             style: "padding:3px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;display:flex;align-items:center;gap:6px;",
                                             onclick: move |evt: Event<MouseData>| {
                                                 evt.stop_propagation();
