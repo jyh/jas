@@ -8129,6 +8129,41 @@
           "type": "string",
           "default": "Sharp",
           "description": "Anti-aliasing mode: None, Sharp, Crisp, Strong, or Smooth."
+        },
+        "snap_to_glyph_visible": {
+          "type": "bool",
+          "default": true,
+          "description": "Whether the Snap to Glyph section is visible in the panel."
+        },
+        "snap_baseline": {
+          "type": "bool",
+          "default": false,
+          "description": "Enable snapping to glyph baselines on the canvas."
+        },
+        "snap_x_height": {
+          "type": "bool",
+          "default": false,
+          "description": "Enable snapping to glyph x-heights."
+        },
+        "snap_glyph_bounds": {
+          "type": "bool",
+          "default": false,
+          "description": "Enable snapping to glyph bounding-box edges."
+        },
+        "snap_proximity_guides": {
+          "type": "bool",
+          "default": false,
+          "description": "Enable snapping to glyph proximity guides."
+        },
+        "snap_angular_guides": {
+          "type": "bool",
+          "default": false,
+          "description": "Enable snapping to glyph slant lines."
+        },
+        "snap_anchor_point": {
+          "type": "bool",
+          "default": false,
+          "description": "Enable snapping to glyph anchor points."
         }
       },
       "init": {},
@@ -8649,6 +8684,117 @@
                 },
                 "bind": {
                   "value": "panel.anti_aliasing"
+                }
+              }
+            ]
+          },
+          {
+            "type": "separator"
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Snap to Glyph",
+                "style": {
+                  "flex": 1,
+                  "font_size": 10
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 6,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "id": "ch_snap_baseline",
+                "type": "checkbox",
+                "label": "Baseline",
+                "summary": "Snap: Baseline",
+                "description": "Snap to the invisible baseline letters sit on.",
+                "bind": {
+                  "value": "panel.snap_baseline"
+                }
+              },
+              {
+                "id": "ch_snap_x_height",
+                "type": "checkbox",
+                "label": "x-Height",
+                "summary": "Snap: x-Height",
+                "description": "Snap to the top of lowercase letters (x, a, e, ...).",
+                "bind": {
+                  "value": "panel.snap_x_height"
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 6,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "id": "ch_snap_glyph_bounds",
+                "type": "checkbox",
+                "label": "Bounds",
+                "summary": "Snap: Glyph Bounds",
+                "description": "Snap to the left/right/top/bottom edges of a specific letter.",
+                "bind": {
+                  "value": "panel.snap_glyph_bounds"
+                }
+              },
+              {
+                "id": "ch_snap_proximity_guides",
+                "type": "checkbox",
+                "label": "Proximity",
+                "summary": "Snap: Proximity Guides",
+                "description": "Snap to guides near the Baseline, x-Height, and Glyph Bounds, based on the glyph's shape and layout.",
+                "bind": {
+                  "value": "panel.snap_proximity_guides"
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 6,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "id": "ch_snap_angular_guides",
+                "type": "checkbox",
+                "label": "Angular",
+                "summary": "Snap: Angular Guides",
+                "description": "Snap to the slant lines of letters like V or A.",
+                "bind": {
+                  "value": "panel.snap_angular_guides"
+                }
+              },
+              {
+                "id": "ch_snap_anchor_point",
+                "type": "checkbox",
+                "label": "Anchor",
+                "summary": "Snap: Anchor Point",
+                "description": "Snap to the actual mathematical anchor points on glyph outlines.",
+                "bind": {
+                  "value": "panel.snap_anchor_point"
                 }
               }
             ]
