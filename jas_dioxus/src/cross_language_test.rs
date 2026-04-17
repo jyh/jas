@@ -150,6 +150,33 @@ mod tests {
         }
     }
 
+    /// Bootstrap helper: regenerate expected JSON for parse-equivalence
+    /// fixtures after the canonical JSON schema changes (e.g., the tspan
+    /// migration). Reads each SVG, emits canonical JSON, and writes it
+    /// back to expected/{name}.json. Run with:
+    ///   cargo test regenerate_parse_expected -- --nocapture --ignored
+    #[test]
+    #[ignore]
+    fn regenerate_parse_expected() {
+        let names = [
+            "line_basic", "rect_basic", "rect_with_stroke",
+            "circle_basic", "ellipse_basic",
+            "polyline_basic", "polygon_basic", "path_all_commands",
+            "text_basic", "text_path_basic",
+            "group_nested", "transform_translate", "transform_rotate",
+            "multi_layer", "complex_document",
+        ];
+        for name in &names {
+            let svg = read_fixture(&format!("svg/{}.svg", name));
+            let doc = svg_to_document(&svg);
+            let actual = document_to_test_json(&doc);
+            let path = format!("{}/expected/{}.json", FIXTURES, name);
+            std::fs::write(&path, &actual)
+                .unwrap_or_else(|e| panic!("Failed to write {}: {}", path, e));
+            eprintln!("Regenerated: expected/{}.json", name);
+        }
+    }
+
     #[test]
     fn svg_roundtrip_all_fixtures() {
         let names = [
