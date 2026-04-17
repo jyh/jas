@@ -152,6 +152,8 @@ pub fn panel_kind_to_content_id(kind: crate::workspace::workspace::PanelKind) ->
         PanelKind::Stroke => "stroke_panel_content",
         PanelKind::Properties => "properties_panel_content",
         PanelKind::Character => "character_panel_content",
+        PanelKind::Paragraph => "paragraph_panel_content",
+        PanelKind::Artboards => "artboards_panel_content",
     }
 }
 

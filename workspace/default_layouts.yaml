@@ -13,11 +13,11 @@ default_layouts:
         groups:
           - panels: [color, swatches]
             active: 0
-          - panels: [character]
+          - panels: [character, paragraph]
             active: 0
           - panels: [stroke, properties]
             active: 0
-          - panels: [layers]
+          - panels: [artboards, layers]
             active: 0
     floating: []
 

@@ -1,0 +1,57 @@
+id: artboards_panel_content
+type: panel
+summary: "Artboards"
+description: >
+  Artboards panel — initial placeholder implementation. A document
+  has a set of artboards (print page regions) with unique numbers
+  starting at 1 and editable names. New documents start with a
+  single 612×792pt artboard.
+
+  This placeholder renders a single editable row (number + name)
+  bound to panel-local state. Real support for multiple artboards,
+  an artboards list, and the Artboard Dialog arrives alongside the
+  Artboard Tool and document-level artboards implementation.
+
+state:
+  artboard_number:
+    type: number
+    default: 1
+    description: "Artboard number (starting at 1)."
+  artboard_name:
+    type: string
+    default: "Artboard 1"
+    description: "User-editable artboard name."
+
+init: {}
+
+menu:
+  - label: "Close Artboards"
+    action: close_panel
+
+content:
+  type: container
+  id: ab_content
+  layout: column
+  style: { padding: 4, gap: 6 }
+  children:
+
+    # ── Single artboard row (placeholder) ────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - id: ab_number
+          type: number_input
+          summary: "Artboard number"
+          description: "Artboard number (1-based)."
+          min: 1
+          style: { width: 48 }
+          bind:
+            value: "panel.artboard_number"
+        - id: ab_name
+          type: text_input
+          summary: "Artboard name"
+          description: "User-editable artboard name."
+          style: { flex: 1 }
+          bind:
+            value: "panel.artboard_name"
