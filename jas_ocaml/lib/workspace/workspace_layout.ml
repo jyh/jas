@@ -180,7 +180,7 @@ type workspace_layout = {
 let named name = {
   version = layout_version;
   name;
-  anchored = [(Right, make_dock 0 [[Color; Swatches]; [Stroke; Properties]; [Layers]] default_dock_width)];
+  anchored = [(Right, make_dock 0 [[Color; Swatches]; [Character; Paragraph]; [Stroke; Properties]; [Artboards; Layers]] default_dock_width)];
   floating = [];
   hidden_panels = [];
   z_order = [];

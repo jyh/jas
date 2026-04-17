@@ -195,6 +195,17 @@ type element =
       font_weight : string;
       font_style : string;
       text_decoration : string;
+      text_transform : string;
+      font_variant : string;
+      baseline_shift : string;
+      line_height : string;
+      letter_spacing : string;
+      xml_lang : string;
+      aa_mode : string;
+      rotate : string;
+      horizontal_scale : string;
+      vertical_scale : string;
+      kerning : string;
       text_width : float;
       text_height : float;
       fill : fill option;
@@ -213,6 +224,17 @@ type element =
       font_weight : string;
       font_style : string;
       text_decoration : string;
+      text_transform : string;
+      font_variant : string;
+      baseline_shift : string;
+      line_height : string;
+      letter_spacing : string;
+      xml_lang : string;
+      aa_mode : string;
+      rotate : string;
+      horizontal_scale : string;
+      vertical_scale : string;
+      kerning : string;
       fill : fill option;
       stroke : stroke option;
       opacity : float;
@@ -262,8 +284,8 @@ val make_ellipse : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float 
 val make_polyline : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
 val make_polygon : ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> (float * float) list -> element
 val make_path : ?fill:fill option -> ?stroke:stroke option -> ?width_points:stroke_width_point list -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> path_command list -> element
-val make_text : ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?text_width:float -> ?text_height:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> string -> element
-val make_text_path : ?start_offset:float -> ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> path_command list -> string -> element
+val make_text : ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?text_transform:string -> ?font_variant:string -> ?baseline_shift:string -> ?line_height:string -> ?letter_spacing:string -> ?xml_lang:string -> ?aa_mode:string -> ?rotate:string -> ?horizontal_scale:string -> ?vertical_scale:string -> ?kerning:string -> ?text_width:float -> ?text_height:float -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> float -> float -> string -> element
+val make_text_path : ?start_offset:float -> ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?text_transform:string -> ?font_variant:string -> ?baseline_shift:string -> ?line_height:string -> ?letter_spacing:string -> ?xml_lang:string -> ?aa_mode:string -> ?rotate:string -> ?horizontal_scale:string -> ?vertical_scale:string -> ?kerning:string -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> path_command list -> string -> element
 val make_group : ?opacity:float -> ?transform:transform option -> ?locked:bool -> element array -> element
 val make_layer : ?name:string -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> element array -> element
 

@@ -67,6 +67,13 @@ let json_null o key =
 let json_raw o key v =
   o.entries <- (key, v) :: o.entries
 
+(** Emit an empty string as null, otherwise as a JSON string.
+    Matches the canonical-JSON rule that default / omitted
+    attributes render as null. *)
+let json_empty_as_null o key v =
+  if v = "" then json_null o key
+  else json_str o key v
+
 let json_build o =
   let sorted = List.sort (fun (a, _) (b, _) -> String.compare a b) o.entries in
   let pairs = List.map (fun (k, v) -> Printf.sprintf "\"%s\":%s" k v) sorted in
@@ -154,6 +161,46 @@ let common_fields o ~opacity ~transform ~locked ~visibility =
   json_num o "opacity" opacity;
   json_raw o "transform" (transform_json transform);
   json_str o "visibility" (visibility_str visibility)
+
+(** Emit `text_decoration` as a sorted JSON array of CSS tokens. Empty
+    string or `"none"` produces `[]`. Matches Rust's canonical form. *)
+let text_decoration_array_json (td : string) =
+  let tokens =
+    String.split_on_char ' ' td
+    |> List.filter (fun t -> t <> "" && t <> "none")
+    |> List.sort_uniq String.compare
+  in
+  let quoted = List.map (fun t -> Printf.sprintf "\"%s\"" t) tokens in
+  Printf.sprintf "[%s]" (String.concat "," quoted)
+
+(** Emit a single default tspan carrying `content`, with id 0 and
+    every override field `null`. Used to derive the `tspans` array
+    from the flat `content` string on canonical-JSON emit. *)
+let default_tspan_json (content : string) =
+  let o = json_obj () in
+  json_null o "baseline_shift";
+  json_str o "content" content;
+  json_null o "dx";
+  json_null o "font_family";
+  json_null o "font_size";
+  json_null o "font_style";
+  json_null o "font_variant";
+  json_null o "font_weight";
+  json_int o "id" 0;
+  json_null o "jas_aa_mode";
+  json_null o "jas_fractional_widths";
+  json_null o "jas_kerning_mode";
+  json_null o "jas_no_break";
+  json_null o "letter_spacing";
+  json_null o "line_height";
+  json_null o "rotate";
+  json_null o "style_name";
+  json_null o "text_decoration";
+  json_null o "text_rendering";
+  json_null o "text_transform";
+  json_null o "transform";
+  json_null o "xml_lang";
+  json_build o
 
 let path_command_json cmd =
   let o = json_obj () in
@@ -293,17 +340,36 @@ let rec element_json = function
     json_str o "type" "text";
     common_fields o ~opacity:e.opacity ~transform:e.transform
       ~locked:e.locked ~visibility:e.visibility;
-    json_str o "content" e.content;
+    (* Extended element-wide attribute slots. Still-null slots are
+       placeholders until Text grows per-element override fields
+       (see TSPAN.md Attribute Home). *)
+    json_empty_as_null o "baseline_shift" e.baseline_shift;
+    json_null o "dx";
     json_raw o "fill" (fill_json e.fill);
     json_str o "font_family" e.font_family;
     json_num o "font_size" e.font_size;
     json_str o "font_style" e.font_style;
+    json_empty_as_null o "font_variant" e.font_variant;
     json_str o "font_weight" e.font_weight;
     json_num o "height" e.text_height;
+    json_empty_as_null o "horizontal_scale" e.horizontal_scale;
+    json_empty_as_null o "jas_aa_mode" e.aa_mode;
+    json_null o "jas_fractional_widths";
+    json_empty_as_null o "jas_kerning_mode" e.kerning;
+    json_null o "jas_no_break";
+    json_empty_as_null o "letter_spacing" e.letter_spacing;
+    json_empty_as_null o "line_height" e.line_height;
+    json_empty_as_null o "rotate" e.rotate;
     json_raw o "stroke" (stroke_json e.stroke);
-    json_str o "text_decoration" e.text_decoration;
+    json_null o "style_name";
+    json_raw o "text_decoration" (text_decoration_array_json e.text_decoration);
+    json_null o "text_rendering";
+    json_empty_as_null o "text_transform" e.text_transform;
+    json_raw o "tspans" (json_array [default_tspan_json e.content]);
+    json_empty_as_null o "vertical_scale" e.vertical_scale;
     json_num o "width" e.text_width;
     json_num o "x" e.x;
+    json_empty_as_null o "xml_lang" e.xml_lang;
     json_num o "y" e.y;
     json_build o
   | Text_path e ->
@@ -311,17 +377,33 @@ let rec element_json = function
     json_str o "type" "text_path";
     common_fields o ~opacity:e.opacity ~transform:e.transform
       ~locked:e.locked ~visibility:e.visibility;
-    json_str o "content" e.content;
+    json_empty_as_null o "baseline_shift" e.baseline_shift;
     let cmds = List.map path_command_json e.d in
     json_raw o "d" (json_array cmds);
+    json_null o "dx";
     json_raw o "fill" (fill_json e.fill);
     json_str o "font_family" e.font_family;
     json_num o "font_size" e.font_size;
     json_str o "font_style" e.font_style;
+    json_empty_as_null o "font_variant" e.font_variant;
     json_str o "font_weight" e.font_weight;
+    json_empty_as_null o "horizontal_scale" e.horizontal_scale;
+    json_empty_as_null o "jas_aa_mode" e.aa_mode;
+    json_null o "jas_fractional_widths";
+    json_empty_as_null o "jas_kerning_mode" e.kerning;
+    json_null o "jas_no_break";
+    json_empty_as_null o "letter_spacing" e.letter_spacing;
+    json_empty_as_null o "line_height" e.line_height;
+    json_empty_as_null o "rotate" e.rotate;
     json_num o "start_offset" e.start_offset;
     json_raw o "stroke" (stroke_json e.stroke);
-    json_str o "text_decoration" e.text_decoration;
+    json_null o "style_name";
+    json_raw o "text_decoration" (text_decoration_array_json e.text_decoration);
+    json_null o "text_rendering";
+    json_empty_as_null o "text_transform" e.text_transform;
+    json_raw o "tspans" (json_array [default_tspan_json e.content]);
+    json_empty_as_null o "vertical_scale" e.vertical_scale;
+    json_empty_as_null o "xml_lang" e.xml_lang;
     json_build o
   | Group e ->
     let o = json_obj () in
@@ -392,6 +474,31 @@ open Yojson.Safe.Util
 (** Parse a numeric JSON value, handling both floats and ints. *)
 let to_num j =
   try to_float j with _ -> float_of_int (to_int j)
+
+(** Parse an optional string: `null` → empty, else the string value. *)
+let nullable_str j =
+  try to_string j with _ -> ""
+
+(** Parse the Text / Text_path `content` field. Accepts the canonical
+    shape `tspans: [...]` (concatenates each tspan's content) or the
+    legacy `content: "..."` string. *)
+let parse_content_or_tspans j =
+  try
+    let tspans = j |> member "tspans" |> to_list in
+    String.concat "" (List.map (fun t -> t |> member "content" |> to_string) tspans)
+  with _ ->
+    (try j |> member "content" |> to_string with _ -> "")
+
+(** Parse the canonical-JSON `text_decoration` field, which is now a
+    sorted array of CSS tokens (e.g. `["underline"]`) and was a
+    legacy CSS string. Returns a space-separated CSS string for
+    Text.text_decoration. *)
+let parse_text_decoration j =
+  try
+    let tokens = j |> to_list |> List.map to_string in
+    if tokens = [] then "none" else String.concat " " tokens
+  with _ ->
+    try to_string j with _ -> "none"
 
 let parse_color j =
   let space = try j |> member "space" |> to_string with _ -> "rgb" in
@@ -572,12 +679,23 @@ let rec parse_element j =
   | "text" ->
     Text { x = j |> member "x" |> to_num;
            y = j |> member "y" |> to_num;
-           content = j |> member "content" |> to_string;
+           content = parse_content_or_tspans j;
            font_family = j |> member "font_family" |> to_string;
            font_size = j |> member "font_size" |> to_num;
            font_weight = j |> member "font_weight" |> to_string;
            font_style = j |> member "font_style" |> to_string;
-           text_decoration = j |> member "text_decoration" |> to_string;
+           text_decoration = parse_text_decoration (j |> member "text_decoration");
+           text_transform = nullable_str (j |> member "text_transform");
+           font_variant = nullable_str (j |> member "font_variant");
+           baseline_shift = nullable_str (j |> member "baseline_shift");
+           line_height = nullable_str (j |> member "line_height");
+           letter_spacing = nullable_str (j |> member "letter_spacing");
+           xml_lang = nullable_str (j |> member "xml_lang");
+           aa_mode = nullable_str (j |> member "jas_aa_mode");
+           rotate = nullable_str (j |> member "rotate");
+           horizontal_scale = nullable_str (j |> member "horizontal_scale");
+           vertical_scale = nullable_str (j |> member "vertical_scale");
+           kerning = nullable_str (j |> member "jas_kerning_mode");
            text_width = j |> member "width" |> to_num;
            text_height = j |> member "height" |> to_num;
            fill = parse_fill (j |> member "fill");
@@ -585,13 +703,24 @@ let rec parse_element j =
            opacity; transform; locked; visibility }
   | "text_path" ->
     Text_path { d = j |> member "d" |> to_list |> List.map parse_path_command;
-                content = j |> member "content" |> to_string;
+                content = parse_content_or_tspans j;
                 start_offset = j |> member "start_offset" |> to_num;
                 font_family = j |> member "font_family" |> to_string;
                 font_size = j |> member "font_size" |> to_num;
                 font_weight = j |> member "font_weight" |> to_string;
                 font_style = j |> member "font_style" |> to_string;
-                text_decoration = j |> member "text_decoration" |> to_string;
+                text_decoration = parse_text_decoration (j |> member "text_decoration");
+                text_transform = nullable_str (j |> member "text_transform");
+                font_variant = nullable_str (j |> member "font_variant");
+                baseline_shift = nullable_str (j |> member "baseline_shift");
+                line_height = nullable_str (j |> member "line_height");
+                letter_spacing = nullable_str (j |> member "letter_spacing");
+                xml_lang = nullable_str (j |> member "xml_lang");
+                aa_mode = nullable_str (j |> member "jas_aa_mode");
+                rotate = nullable_str (j |> member "rotate");
+                horizontal_scale = nullable_str (j |> member "horizontal_scale");
+                vertical_scale = nullable_str (j |> member "vertical_scale");
+                kerning = nullable_str (j |> member "jas_kerning_mode");
                 fill = parse_fill (j |> member "fill");
                 stroke = parse_stroke (j |> member "stroke");
                 opacity; transform; locked; visibility }

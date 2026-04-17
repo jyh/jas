@@ -185,7 +185,7 @@ let rec pack_element = function
            pack_width_points width_points]
   | Text { x; y; content; font_family; font_size; font_weight; font_style;
            text_decoration; text_width; text_height; fill; stroke;
-           opacity; transform; locked; visibility } ->
+           opacity; transform; locked; visibility; _ } ->
     vlist [vint tag_text; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
            vf64 x; vf64 y; vstr content;
@@ -195,7 +195,7 @@ let rec pack_element = function
            pack_fill fill; pack_stroke stroke]
   | Text_path { d; content; start_offset; font_family; font_size; font_weight;
                 font_style; text_decoration; fill; stroke;
-                opacity; transform; locked; visibility } ->
+                opacity; transform; locked; visibility; _ } ->
     let cmds = List.map pack_path_command d in
     vlist [vint tag_text_path; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
@@ -400,6 +400,13 @@ let rec unpack_element v =
            font_weight = as_str (List.nth arr 10);
            font_style = as_str (List.nth arr 11);
            text_decoration = as_str (List.nth arr 12);
+           (* Character-panel attributes not yet persisted in the binary
+              codec — default to empty on decode (a follow-up extends
+              the format when partial-tspan editing lands). *)
+           text_transform = ""; font_variant = ""; baseline_shift = "";
+           line_height = ""; letter_spacing = ""; xml_lang = "";
+           aa_mode = ""; rotate = ""; horizontal_scale = "";
+           vertical_scale = ""; kerning = "";
            text_width = as_f64 (List.nth arr 13);
            text_height = as_f64 (List.nth arr 14);
            fill = unpack_fill (List.nth arr 15);
@@ -414,6 +421,10 @@ let rec unpack_element v =
                 font_weight = as_str (List.nth arr 10);
                 font_style = as_str (List.nth arr 11);
                 text_decoration = as_str (List.nth arr 12);
+                text_transform = ""; font_variant = ""; baseline_shift = "";
+                line_height = ""; letter_spacing = ""; xml_lang = "";
+                aa_mode = ""; rotate = ""; horizontal_scale = "";
+                vertical_scale = ""; kerning = "";
                 fill = unpack_fill (List.nth arr 13);
                 stroke = unpack_stroke (List.nth arr 14);
                 opacity; transform; locked; visibility }

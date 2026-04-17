@@ -287,11 +287,14 @@ let menu_bar = [
     ("Toolbar", "toggle_pane_toolbar", "");
     ("Panels", "toggle_pane_dock", "");
     ("---", "", "");
+    ("Artboards", "toggle_panel_artboards", "");
     ("Layers", "toggle_panel_layers", "");
     ("Color", "toggle_panel_color", "");
     ("Swatches", "toggle_panel_swatches", "");
     ("Stroke", "toggle_panel_stroke", "");
     ("Properties", "toggle_panel_properties", "");
+    ("Character", "toggle_panel_character", "");
+    ("Paragraph", "toggle_panel_paragraph", "");
   ]);
 ]
 
