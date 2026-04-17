@@ -68,6 +68,42 @@ impl JsonObj {
         self.entries.push((key.to_string(), json));
     }
 
+    fn opt_str(&mut self, key: &str, v: &Option<String>) {
+        match v {
+            Some(s) => self.str_val(key, s),
+            None => self.null(key),
+        }
+    }
+
+    fn opt_num(&mut self, key: &str, v: Option<f64>) {
+        match v {
+            Some(n) => self.num(key, n),
+            None => self.null(key),
+        }
+    }
+
+    fn opt_bool(&mut self, key: &str, v: Option<bool>) {
+        match v {
+            Some(b) => self.bool_val(key, b),
+            None => self.null(key),
+        }
+    }
+
+    fn opt_str_vec(&mut self, key: &str, v: &Option<Vec<String>>) {
+        match v {
+            Some(vec) => {
+                let mut sorted = vec.clone();
+                sorted.sort();
+                let quoted: Vec<String> = sorted
+                    .iter()
+                    .map(|s| format!("\"{}\"", s))
+                    .collect();
+                self.raw(key, format!("[{}]", quoted.join(",")));
+            }
+            None => self.null(key),
+        }
+    }
+
     fn build(mut self) -> String {
         self.entries.sort_by(|a, b| a.0.cmp(&b.0));
         let pairs: Vec<String> = self
@@ -173,6 +209,50 @@ fn transform_json(t: &Option<Transform>) -> String {
             o.build()
         }
     }
+}
+
+fn tspan_json(t: &crate::geometry::tspan::Tspan) -> String {
+    let mut o = JsonObj::new();
+    o.opt_num("baseline_shift", t.baseline_shift);
+    o.str_val("content", &t.content);
+    o.opt_num("dx", t.dx);
+    o.opt_str("font_family", &t.font_family);
+    o.opt_num("font_size", t.font_size);
+    o.opt_str("font_style", &t.font_style);
+    o.opt_str("font_variant", &t.font_variant);
+    o.opt_str("font_weight", &t.font_weight);
+    o.int("id", t.id as usize);
+    o.opt_str("jas_aa_mode", &t.jas_aa_mode);
+    o.opt_bool("jas_fractional_widths", t.jas_fractional_widths);
+    o.opt_str("jas_kerning_mode", &t.jas_kerning_mode);
+    o.opt_bool("jas_no_break", t.jas_no_break);
+    o.opt_num("letter_spacing", t.letter_spacing);
+    o.opt_num("line_height", t.line_height);
+    o.opt_num("rotate", t.rotate);
+    o.opt_str("style_name", &t.style_name);
+    o.opt_str_vec("text_decoration", &t.text_decoration);
+    o.opt_str("text_rendering", &t.text_rendering);
+    o.opt_str("text_transform", &t.text_transform);
+    o.raw("transform", transform_json(&t.transform));
+    o.opt_str("xml_lang", &t.xml_lang);
+    o.build()
+}
+
+/// Convert the legacy `text_decoration: String` field into the canonical
+/// sorted-array-of-members form.
+///
+/// `"none"` / `""` → `[]`
+/// `"underline"` → `["underline"]`
+/// `"line-through"` → `["line-through"]`
+/// `"underline line-through"` → `["line-through","underline"]` (alphabetical)
+fn text_decoration_json(td: &str) -> String {
+    let mut parts: Vec<&str> = td
+        .split_whitespace()
+        .filter(|s| !s.is_empty() && *s != "none")
+        .collect();
+    parts.sort();
+    let quoted: Vec<String> = parts.iter().map(|s| format!("\"{}\"", s)).collect();
+    format!("[{}]", quoted.join(","))
 }
 
 fn visibility_str(v: Visibility) -> &'static str {
@@ -328,33 +408,67 @@ fn element_json(elem: &Element) -> String {
         Element::Text(e) => {
             o.str_val("type", "text");
             common_fields(&mut o, &e.common);
-            o.str_val("content", &e.content());
+            // Extended element-wide attribute slots (null until TextElem
+            // grows per-element override fields; see TSPAN.md Attribute
+            // Home).
+            o.null("baseline_shift");
+            o.null("dx");
             o.raw("fill", fill_json(&e.fill));
             o.str_val("font_family", &e.font_family);
             o.num("font_size", e.font_size);
             o.str_val("font_style", &e.font_style);
+            o.null("font_variant");
             o.str_val("font_weight", &e.font_weight);
             o.num("height", e.height);
+            o.null("jas_aa_mode");
+            o.null("jas_fractional_widths");
+            o.null("jas_kerning_mode");
+            o.null("jas_no_break");
+            o.null("letter_spacing");
+            o.null("line_height");
+            o.null("rotate");
             o.raw("stroke", stroke_json(&e.stroke));
-            o.str_val("text_decoration", &e.text_decoration);
+            o.null("style_name");
+            o.raw("text_decoration", text_decoration_json(&e.text_decoration));
+            o.null("text_rendering");
+            o.null("text_transform");
+            // Per-tspan list (always non-empty).
+            let tspans: Vec<String> = e.tspans.iter().map(tspan_json).collect();
+            o.raw("tspans", json_array(&tspans));
             o.num("width", e.width);
             o.num("x", e.x);
+            o.null("xml_lang");
             o.num("y", e.y);
         }
         Element::TextPath(e) => {
             o.str_val("type", "text_path");
             common_fields(&mut o, &e.common);
-            o.str_val("content", &e.content());
+            o.null("baseline_shift");
             let cmds: Vec<String> = e.d.iter().map(path_command_json).collect();
             o.raw("d", json_array(&cmds));
+            o.null("dx");
             o.raw("fill", fill_json(&e.fill));
             o.str_val("font_family", &e.font_family);
             o.num("font_size", e.font_size);
             o.str_val("font_style", &e.font_style);
+            o.null("font_variant");
             o.str_val("font_weight", &e.font_weight);
+            o.null("jas_aa_mode");
+            o.null("jas_fractional_widths");
+            o.null("jas_kerning_mode");
+            o.null("jas_no_break");
+            o.null("letter_spacing");
+            o.null("line_height");
+            o.null("rotate");
             o.num("start_offset", e.start_offset);
             o.raw("stroke", stroke_json(&e.stroke));
-            o.str_val("text_decoration", &e.text_decoration);
+            o.null("style_name");
+            o.raw("text_decoration", text_decoration_json(&e.text_decoration));
+            o.null("text_rendering");
+            o.null("text_transform");
+            let tspans: Vec<String> = e.tspans.iter().map(tspan_json).collect();
+            o.raw("tspans", json_array(&tspans));
+            o.null("xml_lang");
         }
         Element::Group(e) => {
             o.str_val("type", "group");
@@ -425,6 +539,84 @@ pub fn document_to_test_json(doc: &Document) -> String {
 
 fn parse_f(v: &serde_json::Value) -> f64 {
     v.as_f64().unwrap_or(0.0)
+}
+
+fn parse_str_opt(v: &serde_json::Value) -> Option<String> {
+    v.as_str().map(String::from)
+}
+
+fn parse_transform_opt(v: &serde_json::Value) -> Option<Transform> {
+    if v.is_null() {
+        return None;
+    }
+    Some(Transform {
+        a: parse_f(&v["a"]),
+        b: parse_f(&v["b"]),
+        c: parse_f(&v["c"]),
+        d: parse_f(&v["d"]),
+        e: parse_f(&v["e"]),
+        f: parse_f(&v["f"]),
+    })
+}
+
+fn parse_tspan(v: &serde_json::Value) -> crate::geometry::tspan::Tspan {
+    crate::geometry::tspan::Tspan {
+        id: v["id"].as_u64().unwrap_or(0) as u32,
+        content: v["content"].as_str().unwrap_or("").to_string(),
+        baseline_shift: v["baseline_shift"].as_f64(),
+        dx: v["dx"].as_f64(),
+        font_family: parse_str_opt(&v["font_family"]),
+        font_size: v["font_size"].as_f64(),
+        font_style: parse_str_opt(&v["font_style"]),
+        font_variant: parse_str_opt(&v["font_variant"]),
+        font_weight: parse_str_opt(&v["font_weight"]),
+        jas_aa_mode: parse_str_opt(&v["jas_aa_mode"]),
+        jas_fractional_widths: v["jas_fractional_widths"].as_bool(),
+        jas_kerning_mode: parse_str_opt(&v["jas_kerning_mode"]),
+        jas_no_break: v["jas_no_break"].as_bool(),
+        letter_spacing: v["letter_spacing"].as_f64(),
+        line_height: v["line_height"].as_f64(),
+        rotate: v["rotate"].as_f64(),
+        style_name: parse_str_opt(&v["style_name"]),
+        text_decoration: v["text_decoration"].as_array().map(|arr| {
+            arr.iter()
+                .filter_map(|s| s.as_str().map(String::from))
+                .collect()
+        }),
+        text_rendering: parse_str_opt(&v["text_rendering"]),
+        text_transform: parse_str_opt(&v["text_transform"]),
+        transform: parse_transform_opt(&v["transform"]),
+        xml_lang: parse_str_opt(&v["xml_lang"]),
+    }
+}
+
+/// Parse the tspan list from a Text / TextPath JSON value. Accepts two
+/// shapes for backward compatibility during the migration:
+/// - New: `"tspans": [...]` array of tspan objects.
+/// - Legacy: `"content": "..."` string (→ single default tspan).
+fn parse_tspans_or_legacy(v: &serde_json::Value) -> Vec<crate::geometry::tspan::Tspan> {
+    if let Some(arr) = v.get("tspans").and_then(|t| t.as_array()) {
+        return arr.iter().map(parse_tspan).collect();
+    }
+    let content = v["content"].as_str().unwrap_or("").to_string();
+    vec![crate::geometry::tspan::Tspan {
+        content,
+        ..crate::geometry::tspan::Tspan::default_tspan()
+    }]
+}
+
+/// Accepts the new `text_decoration` canonical form (sorted array) or
+/// the legacy string form; returns the space-separated string shape
+/// used by the current `TextElem.text_decoration: String` field.
+fn parse_text_decoration_field(v: &serde_json::Value) -> String {
+    if let Some(arr) = v.as_array() {
+        if arr.is_empty() {
+            return "none".to_string();
+        }
+        let parts: Vec<&str> = arr.iter().filter_map(|x| x.as_str()).collect();
+        return parts.join(" ");
+    }
+    v.as_str().unwrap_or("none").to_string()
 }
 
 fn parse_color(v: &serde_json::Value) -> Color {
@@ -582,38 +774,40 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             width_points: vec![],
             common,
         }),
-        "text" => {
-            let mut text = TextElem::from_string(
-                parse_f(&v["x"]), parse_f(&v["y"]),
-                v["content"].as_str().unwrap_or(""),
-                v["font_family"].as_str().unwrap_or("sans-serif"),
-                parse_f(&v["font_size"]),
-                v["font_weight"].as_str().unwrap_or("normal"),
-                v["font_style"].as_str().unwrap_or("normal"),
-                v["text_decoration"].as_str().unwrap_or("none"),
-                parse_f(&v["width"]), parse_f(&v["height"]),
-                parse_fill(&v["fill"]), parse_stroke(&v["stroke"]),
-                common,
-            );
-            // future: if v has a "tspans" array, overwrite text.tspans with parsed tspans
-            let _ = &mut text;
-            Element::Text(text)
-        }
-        "text_path" => {
-            let text_path = TextPathElem::from_string(
-                parse_path_commands(&v["d"]),
-                v["content"].as_str().unwrap_or(""),
-                parse_f(&v["start_offset"]),
-                v["font_family"].as_str().unwrap_or("sans-serif"),
-                parse_f(&v["font_size"]),
-                v["font_weight"].as_str().unwrap_or("normal"),
-                v["font_style"].as_str().unwrap_or("normal"),
-                v["text_decoration"].as_str().unwrap_or("none"),
-                parse_fill(&v["fill"]), parse_stroke(&v["stroke"]),
-                common,
-            );
-            Element::TextPath(text_path)
-        }
+        "text" => Element::Text(TextElem {
+            x: parse_f(&v["x"]),
+            y: parse_f(&v["y"]),
+            tspans: parse_tspans_or_legacy(v),
+            font_family: v["font_family"]
+                .as_str()
+                .unwrap_or("sans-serif")
+                .to_string(),
+            font_size: parse_f(&v["font_size"]),
+            font_weight: v["font_weight"].as_str().unwrap_or("normal").to_string(),
+            font_style: v["font_style"].as_str().unwrap_or("normal").to_string(),
+            text_decoration: parse_text_decoration_field(&v["text_decoration"]),
+            width: parse_f(&v["width"]),
+            height: parse_f(&v["height"]),
+            fill: parse_fill(&v["fill"]),
+            stroke: parse_stroke(&v["stroke"]),
+            common,
+        }),
+        "text_path" => Element::TextPath(TextPathElem {
+            d: parse_path_commands(&v["d"]),
+            tspans: parse_tspans_or_legacy(v),
+            start_offset: parse_f(&v["start_offset"]),
+            font_family: v["font_family"]
+                .as_str()
+                .unwrap_or("sans-serif")
+                .to_string(),
+            font_size: parse_f(&v["font_size"]),
+            font_weight: v["font_weight"].as_str().unwrap_or("normal").to_string(),
+            font_style: v["font_style"].as_str().unwrap_or("normal").to_string(),
+            text_decoration: parse_text_decoration_field(&v["text_decoration"]),
+            fill: parse_fill(&v["fill"]),
+            stroke: parse_stroke(&v["stroke"]),
+            common,
+        }),
         "group" => {
             let children = v["children"].as_array().unwrap_or(&vec![])
                 .iter().map(|c| std::rc::Rc::new(parse_element(c))).collect();
