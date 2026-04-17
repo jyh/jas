@@ -3,7 +3,7 @@
 Sub-structure of a `Text` element that carries per-character-range
 formatting. Every `Text` element owns an ordered list of tspans; the
 concatenation of their contents is the text of the element. Tspans
-are the unit that the Character panel (see `WIDGET.md`) reads and
+are the unit that the Character panel (see `CHARACTER.md`) reads and
 writes, and the unit that the Touch Type tool (see `TOOLS.md`)
 splits per glyph.
 
@@ -65,7 +65,7 @@ For attributes that have no natural slot on `Text` today
 the parent holds the element-wide default; the tspan can override.
 
 `rotate` is the schema name for what the Character panel surfaces as
-`CHARACTER_ROTATION_DROPDOWN` (see `WIDGET.md`). The naming diverges
+`CHARACTER_ROTATION_DROPDOWN` (see `CHARACTER.md`). The naming diverges
 intentionally — the schema tracks the SVG attribute name, while the
 panel tracks the UX label. The value is always a single degrees
 number applied uniformly to every glyph in the tspan; per-glyph
@@ -168,7 +168,7 @@ The **effective** value of an attribute for a tspan is:
    `Text` stores).
 3. Otherwise use the global default (Sans Serif 16 pt, etc.).
 
-Writers follow the identity-omission rule (same as `WIDGET.md`'s
+Writers follow the identity-omission rule (same as `CHARACTER.md`'s
 SVG attribute mapping section): on commit, any tspan override that
 equals the parent's effective value is set to null on that tspan, so
 inherited-equal attributes are not serialized as overrides.

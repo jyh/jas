@@ -851,7 +851,7 @@ new_offset = path_closest_offset(d, cursor_x, cursor_y)
 ## Touch Type Tool
 
 **Shortcut:** none (activated from the Character panel's
-`TOUCH_TYPE_PANEL_BUTTON`; see `WIDGET.md` for the panel side).
+`TOUCH_TYPE_PANEL_BUTTON`; see `CHARACTER.md` for the panel side).
 
 Provides a per-glyph editing mode for text elements. While the tool
 is active, individual glyphs within the currently selected text
@@ -948,7 +948,7 @@ recorded.
   canvas readable).
 - Snap-to-Glyph guide overlays are **not** drawn during Touch Type
   drags — the Snap to Glyph feature is disabled while the tool is
-  active (see `WIDGET.md`).
+  active (see `CHARACTER.md`).
 
 ### Storage rule
 
