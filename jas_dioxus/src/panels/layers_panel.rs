@@ -210,13 +210,24 @@ mod tests {
             .anchored_dock(DockEdge::Right)
             .unwrap()
             .id;
-        // Layers is in its own group in the default layout
+        // Look up Layers' current group + panel index rather than
+        // hardcoding positions (the default layout shifts as panels
+        // are added).
+        let dock = state.workspace_layout.dock(dock_id).unwrap();
+        let (group_idx, panel_idx) = dock
+            .groups
+            .iter()
+            .enumerate()
+            .find_map(|(gi, g)| {
+                g.panels
+                    .iter()
+                    .position(|&p| p == crate::workspace::workspace::PanelKind::Layers)
+                    .map(|pi| (gi, pi))
+            })
+            .expect("Layers panel present in default layout");
         let addr = PanelAddr {
-            group: GroupAddr {
-                dock_id,
-                group_idx: 2,
-            },
-            panel_idx: 0,
+            group: GroupAddr { dock_id, group_idx },
+            panel_idx,
         };
         assert!(state
             .workspace_layout
