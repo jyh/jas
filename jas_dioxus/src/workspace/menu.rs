@@ -55,11 +55,14 @@ pub const MENU_BAR: &[(&str, &[MenuItem])] = &[
         ("Toolbar", "toggle_pane_toolbar", ""),
         ("Panels", "toggle_pane_dock", ""),
         SEP,
+        ("Artboards", "toggle_panel_artboards", ""),
         ("Layers", "toggle_panel_layers", ""),
         ("Color", "toggle_panel_color", ""),
         ("Swatches", "toggle_panel_swatches", ""),
         ("Stroke", "toggle_panel_stroke", ""),
         ("Properties", "toggle_panel_properties", ""),
+        ("Character", "toggle_panel_character", ""),
+        ("Paragraph", "toggle_panel_paragraph", ""),
     ]),
 ];
 
@@ -76,9 +79,11 @@ pub const DISPATCH_COMMANDS: &[&str] = &[
     "appearance_submenu",
     "tile_panes",
     "toggle_pane_toolbar", "toggle_pane_dock",
+    "toggle_panel_artboards",
     "toggle_panel_layers", "toggle_panel_color",
     "toggle_panel_swatches", "toggle_panel_stroke",
     "toggle_panel_properties",
+    "toggle_panel_character", "toggle_panel_paragraph",
 ];
 
 #[cfg(test)]
@@ -229,7 +234,7 @@ mod tests {
     #[test]
     fn total_menu_item_count() {
         let total: usize = MENU_BAR.iter().map(|(_, items)| items.len()).sum();
-        assert_eq!(total, 37); // 5 + 10 + 9 + 13
+        assert_eq!(total, 40); // 5 + 10 + 9 + 16
     }
 
     #[test]
