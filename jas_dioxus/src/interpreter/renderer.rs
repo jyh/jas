@@ -83,6 +83,7 @@ fn render_el(
         "text" => render_text(el, ctx),
         "button" => render_button(el, ctx, rctx),
         "icon_button" => render_icon_button(el, ctx, rctx),
+        "icon" => render_icon(el, ctx),
         "slider" => render_slider(el, ctx, rctx),
         "number_input" => render_number_input(el, ctx, rctx),
         "text_input" => render_text_input(el, ctx, rctx),
@@ -1981,6 +1982,37 @@ fn render_text(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
     }
 }
 
+/// Render a non-interactive icon display. The icon name is looked up
+/// in the icons map (ctx first, then the cached workspace), same as
+/// `render_icon_button`. Use this for labels and decorative icons
+/// (e.g. Character panel row markers).
+fn render_icon(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
+    let id = get_id(el);
+    let style = build_style(el, ctx);
+    let icon_name = el.get("name").and_then(|i| i.as_str()).unwrap_or("");
+    let ws_for_icons = super::workspace::Workspace::load();
+    let icon_svg = if !icon_name.is_empty() {
+        let icon_from_ctx = ctx.get("icons").and_then(|i| i.get(icon_name));
+        let icon_from_ws = ws_for_icons.as_ref().and_then(|ws| ws.icons().get(icon_name));
+        if let Some(icon_def) = icon_from_ctx.or(icon_from_ws) {
+            let viewbox = icon_def.get("viewbox").and_then(|v| v.as_str()).unwrap_or("0 0 16 16");
+            let svg_inner = icon_def.get("svg").and_then(|v| v.as_str()).unwrap_or("");
+            format!(r#"<svg viewBox="{viewbox}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">{svg_inner}</svg>"#)
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+    rsx! {
+        div {
+            id: "{id}",
+            style: "display:inline-flex;align-items:center;justify-content:center;{style}",
+            dangerous_inner_html: "{icon_svg}",
+        }
+    }
+}
+
 fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let label = el.get("label").and_then(|l| l.as_str()).unwrap_or("");
@@ -2301,7 +2333,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 min: "{min}",
                 max: "{max}",
                 initial_value: "{value}",
-                style: "width:45px;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
+                style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
                 onchange: move |evt: Event<FormData>| {
                     if let Some(ref h) = panel_handler { h.call(evt); }
                 },
@@ -2315,7 +2347,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 min: "{min}",
                 max: "{max}",
                 value: "{value}",
-                style: "width:45px;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
+                style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
                 oninput: move |evt: Event<FormData>| {
                     let new_val: f64 = evt.value().parse().unwrap_or(0.0);
                     if let BindTarget::Dialog(ref field) = bind_target {
@@ -2418,6 +2450,7 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
     let cv = current_value.clone();
+    let panel_kind = rctx.panel_kind;
 
     rsx! {
         select {
@@ -2440,8 +2473,19 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                         let app = app.clone();
                         spawn(async move {
                             let mut st = app.borrow_mut();
-                            set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
-                            st.apply_stroke_panel_to_selection();
+                            match panel_kind {
+                                Some(PanelKind::Character) => {
+                                    set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
+                                    st.apply_character_panel_to_selection();
+                                }
+                                Some(PanelKind::Stroke) | None => {
+                                    set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
+                                    st.apply_stroke_panel_to_selection();
+                                }
+                                // Paragraph, Artboards, Layers, Color, Swatches, Properties:
+                                // no-op until their per-panel state lands.
+                                _ => {}
+                            }
                         });
                     }
                     BindTarget::None => { return; }
@@ -2586,9 +2630,15 @@ fn render_combo_box_option(opt: &serde_json::Value) -> Element {
 fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let label_text = el.get("label").and_then(|l| l.as_str()).unwrap_or("");
+    let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
 
-    let bind_expr = el.get("bind").and_then(|b| b.get("checked")).and_then(|v| v.as_str()).unwrap_or("");
+    // Accept either bind.value or bind.checked; panels prefer `value`
+    // (matches the convention used elsewhere), dialog binds have
+    // historically used `checked`. We fall back cleanly.
+    let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str())
+        .or_else(|| el.get("bind").and_then(|b| b.get("checked")).and_then(|v| v.as_str()))
+        .unwrap_or("");
     let checked = if !bind_expr.is_empty() {
         expr::eval(bind_expr, ctx).to_bool()
     } else {
@@ -2606,40 +2656,94 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
     let on_click = build_click_handler(el, ctx, rctx);
+    let panel_kind = rctx.panel_kind;
 
-    let check_icon = if checked { "\u{2611}" } else { "\u{2610}" };
-    rsx! {
-        div {
-            id: "{id}",
-            style: "display:flex;align-items:center;gap:4px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;user-select:none;{style}",
-            onclick: move |evt| {
-                if disabled { return; }
-                if let Some(ref handler) = on_click {
-                    handler.call(evt);
-                } else {
-                    let new_val = !checked;
-                    match &bind_target {
-                        BindTarget::Dialog(field) => {
-                            if let Some(mut ds) = dialog_signal() {
-                                ds.set_value(field, serde_json::json!(new_val));
-                                dialog_signal.set(Some(ds));
-                            }
-                        }
-                        BindTarget::Panel(field) => {
-                            let f = field.clone();
-                            let app = app.clone();
-                            spawn(async move {
-                                let mut st = app.borrow_mut();
-                                set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
-                            });
-                        }
-                        BindTarget::None => {}
-                    }
-                    revision += 1;
+    // Optional icon field: when present the toggle renders as a
+    // square icon button (matching icon_toggle semantics per
+    // CHARACTER.md) instead of a checkbox-plus-label row.
+    let icon_name = el.get("icon").and_then(|i| i.as_str()).unwrap_or("");
+    let ws_for_icons = super::workspace::Workspace::load();
+    let icon_svg = if !icon_name.is_empty() {
+        let icon_from_ctx = ctx.get("icons").and_then(|i| i.get(icon_name));
+        let icon_from_ws = ws_for_icons.as_ref().and_then(|ws| ws.icons().get(icon_name));
+        if let Some(icon_def) = icon_from_ctx.or(icon_from_ws) {
+            let viewbox = icon_def.get("viewbox").and_then(|v| v.as_str()).unwrap_or("0 0 16 16");
+            let svg_inner = icon_def.get("svg").and_then(|v| v.as_str()).unwrap_or("");
+            format!(r#"<svg viewBox="{viewbox}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">{svg_inner}</svg>"#)
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    let bg_style = if checked {
+        "background:var(--jas-button-checked,#505050);".to_string()
+    } else {
+        String::new()
+    };
+    let dim = if disabled { "opacity:0.4;" } else { "" };
+
+    let onclick = move |evt: Event<MouseData>| {
+        if disabled { return; }
+        if let Some(ref handler) = on_click {
+            handler.call(evt);
+            return;
+        }
+        let new_val = !checked;
+        match &bind_target {
+            BindTarget::Dialog(field) => {
+                if let Some(mut ds) = dialog_signal() {
+                    ds.set_value(field, serde_json::json!(new_val));
+                    dialog_signal.set(Some(ds));
                 }
-            },
-            span { style: "font-size:14px;", "{check_icon}" }
-            "{label_text}"
+            }
+            BindTarget::Panel(field) => {
+                let f = field.clone();
+                let app = app.clone();
+                spawn(async move {
+                    let mut st = app.borrow_mut();
+                    match panel_kind {
+                        Some(PanelKind::Character) => {
+                            set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
+                            st.apply_character_panel_to_selection();
+                        }
+                        Some(PanelKind::Stroke) | None => {
+                            set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
+                        }
+                        _ => {}
+                    }
+                });
+            }
+            BindTarget::None => {}
+        }
+        revision += 1;
+    };
+
+    if !icon_svg.is_empty() {
+        rsx! {
+            div {
+                id: "{id}",
+                title: "{summary}",
+                style: "display:inline-flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;border-radius:2px;{bg_style}{dim}{style}",
+                onclick: onclick,
+                div {
+                    style: "width:100%;height:100%;display:flex;align-items:center;justify-content:center;",
+                    dangerous_inner_html: "{icon_svg}",
+                }
+            }
+        }
+    } else {
+        let check_icon = if checked { "\u{2611}" } else { "\u{2610}" };
+        rsx! {
+            div {
+                id: "{id}",
+                title: "{summary}",
+                style: "display:flex;align-items:center;gap:4px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;user-select:none;{dim}{style}",
+                onclick: onclick,
+                span { style: "font-size:14px;", "{check_icon}" }
+                "{label_text}"
+            }
         }
     }
 }

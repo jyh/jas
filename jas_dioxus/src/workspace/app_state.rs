@@ -815,25 +815,25 @@ impl AppState {
     }
 
     /// Push the current Character panel state to the selected text
-    /// element(s), via the unified TSPAN.md character-attribute write
-    /// algorithm in `Controller::set_character_attribute`.
+    /// element(s). For an object-level selection (whole element), write
+    /// directly to the parent Text/TextPath's font_family / font_size
+    /// so the canvas renderer — which reads the parent's attributes —
+    /// reflects the change. Tspan-range writes (via
+    /// `Controller::set_character_attribute`) come back when partial
+    /// tspan selections are supported.
     ///
-    /// Currently wires only `font_family` and `font_size`, which are the
-    /// two attributes `apply_attr_to_tspan` supports today with a direct
-    /// 1:1 panel-field→SVG-attribute mapping. Remaining character panel
-    /// fields (All Caps, Small Caps, Super/Sub, Underline, Strikethrough,
-    /// kerning, tracking, scales, baseline shift, rotation, language,
-    /// anti-alias, Snap to Glyph) stay in panel-local state until their
-    /// SVG-attribute plumbing lands.
+    /// Currently wires only `font_family` and `font_size`. Remaining
+    /// character panel fields (caps/sub/super, kerning, tracking,
+    /// scales, baseline shift, rotation, language, anti-alias, Snap to
+    /// Glyph) stay in panel-local state until their SVG-attribute
+    /// plumbing lands.
     ///
-    /// No-op when no tab is active, when the selection is empty, or when
-    /// the selected element is not a Text / TextPath.
+    /// No-op when no tab is active, when the selection is empty, or
+    /// when the selected element is not a Text / TextPath.
     pub(crate) fn apply_character_panel_to_selection(&mut self) {
+        use crate::geometry::element::Element;
         let cp = self.character_panel.clone();
         let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
-        // Collect paths of selected Text / TextPath elements. We hold no
-        // borrow of the document across the set_character_attribute call
-        // (which mutates the document via Model::set_document).
         let target_paths: Vec<Vec<usize>> = {
             let doc = tab.model.document();
             doc.selection
@@ -841,50 +841,33 @@ impl AppState {
                 .filter_map(|es| {
                     let elem = doc.get_element(&es.path)?;
                     match elem {
-                        crate::geometry::element::Element::Text(_)
-                        | crate::geometry::element::Element::TextPath(_) => {
-                            Some(es.path.clone())
-                        }
+                        Element::Text(_) | Element::TextPath(_) => Some(es.path.clone()),
                         _ => None,
                     }
                 })
                 .collect()
         };
         for path in target_paths {
-            // Compute the char range from the concatenated content of
-            // the target at call time — works for both Text and
-            // TextPath via their content() accessors.
-            let char_len = {
-                let doc = tab.model.document();
-                match doc.get_element(&path) {
-                    Some(crate::geometry::element::Element::Text(t)) => {
-                        t.content().chars().count()
-                    }
-                    Some(crate::geometry::element::Element::TextPath(tp)) => {
-                        tp.content().chars().count()
-                    }
-                    _ => 0,
+            let doc = tab.model.document().clone();
+            let new_elem = match doc.get_element(&path) {
+                Some(Element::Text(t)) => {
+                    let mut new_t = t.clone();
+                    new_t.font_family = cp.font_family.clone();
+                    new_t.font_size = cp.font_size;
+                    Some(Element::Text(new_t))
                 }
+                Some(Element::TextPath(tp)) => {
+                    let mut new_tp = tp.clone();
+                    new_tp.font_family = cp.font_family.clone();
+                    new_tp.font_size = cp.font_size;
+                    Some(Element::TextPath(new_tp))
+                }
+                _ => None,
             };
-            if char_len == 0 {
-                continue;
+            if let Some(elem) = new_elem {
+                let new_doc = doc.replace_element(&path, elem);
+                tab.model.set_document(new_doc);
             }
-            crate::document::controller::Controller::set_character_attribute(
-                &mut tab.model,
-                &path,
-                0,
-                char_len,
-                "font_family",
-                &cp.font_family,
-            );
-            crate::document::controller::Controller::set_character_attribute(
-                &mut tab.model,
-                &path,
-                0,
-                char_len,
-                "font_size",
-                &cp.font_size.to_string(),
-            );
         }
     }
 }
