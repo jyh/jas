@@ -1,10 +1,26 @@
 //! Top-level expression evaluation entry point.
 //!
 //! Re-exports the parser and evaluator for convenient use.
+//!
+//! Parsed ASTs are cached per source string in a thread-local
+//! `Rc`-keyed map: re-evaluating the same expression (e.g. a
+//! `bind:` clause inside a 216-iteration `foreach`) skips the
+//! tokenize+parse step entirely. The cache is unbounded — fine
+//! for workspace YAML, where the set of distinct expression
+//! strings is finite and bounded by the spec.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 use super::expr_eval;
-use super::expr_parser;
+use super::expr_parser::{self, Expr};
 use super::expr_types::Value;
+
+thread_local! {
+    static AST_CACHE: RefCell<HashMap<String, Option<Rc<Expr>>>> =
+        RefCell::new(HashMap::new());
+}
 
 /// Evaluate an expression string against a JSON context.
 ///
@@ -13,7 +29,16 @@ pub fn eval(source: &str, ctx: &serde_json::Value) -> Value {
     if source.is_empty() {
         return Value::Null;
     }
-    match expr_parser::parse(source) {
+    let ast_opt = AST_CACHE.with(|c| {
+        let mut cache = c.borrow_mut();
+        if let Some(cached) = cache.get(source) {
+            return cached.clone();
+        }
+        let ast = expr_parser::parse(source).map(Rc::new);
+        cache.insert(source.to_string(), ast.clone());
+        ast
+    });
+    match ast_opt {
         Some(ast) => expr_eval::eval_node(&ast, ctx),
         None => Value::Null,
     }
@@ -116,5 +141,101 @@ mod tests {
         assert_eq!(eval("param.swatch_name", &ctx), Value::Str("Red".into()));
         assert_eq!(eval("param.color", &ctx), Value::Color("#ff0000".into()));
         assert_eq!(eval("param.color_mode", &ctx), Value::Str("rgb".into()));
+    }
+
+    #[test]
+    fn cache_returns_correct_results_on_repeat() {
+        // Sanity: same expression evaluated twice with different
+        // contexts must return per-context results, not a stale
+        // cached value.
+        let ctx1 = serde_json::json!({"x": 1});
+        let ctx2 = serde_json::json!({"x": 99});
+        assert_eq!(eval("x", &ctx1), Value::Number(1.0));
+        assert_eq!(eval("x", &ctx2), Value::Number(99.0));
+        assert_eq!(eval("x + 1", &ctx1), Value::Number(2.0));
+        assert_eq!(eval("x + 1", &ctx2), Value::Number(100.0));
+        // Re-eval should be cache hits and still correct.
+        assert_eq!(eval("x", &ctx1), Value::Number(1.0));
+        assert_eq!(eval("x + 1", &ctx2), Value::Number(100.0));
+    }
+
+    #[test]
+    fn cache_handles_unparseable_input() {
+        // Garbage strings cache as None so we don't reparse.
+        let ctx = serde_json::json!({});
+        assert_eq!(eval(")(", &ctx), Value::Null);
+        assert_eq!(eval(")(", &ctx), Value::Null);  // cache hit on None
+    }
+
+    /// Bench harness — gated behind --ignored so it doesn't run with
+    /// the regular suite.  Run with:
+    ///   cargo test --release -- --ignored --nocapture bench_eval_swatches
+    #[test]
+    #[ignore]
+    fn bench_eval_swatches() {
+        // Representative swatches workload: 11 expressions × 216 swatches
+        // = 2376 evals per "render". The expressions are the actual ones
+        // from workspace/panels/swatches.yaml bind clauses.
+        let exprs = [
+            "swatch.color",
+            "swatch.color_mode",
+            "swatch.name",
+            "swatch._index",
+            "lib.id",
+            "lib.name",
+            "panel.selected_swatches",
+            "panel.selected_library",
+            "panel.recent_colors",
+            "state.fill_color",
+            "state.fill_on_top",
+        ];
+
+        // 216 distinct contexts (one per swatch tile)
+        let contexts: Vec<serde_json::Value> = (0..216)
+            .map(|i| {
+                serde_json::json!({
+                    "swatch": {
+                        "name": format!("c{}", i),
+                        "color": format!("#{:06x}", i * 0x123),
+                        "color_mode": "rgb",
+                        "_index": i,
+                    },
+                    "lib": { "id": "default", "name": "Default" },
+                    "panel": {
+                        "selected_swatches": [],
+                        "selected_library": "default",
+                        "recent_colors": [],
+                    },
+                    "state": {
+                        "fill_color": "#cc0000",
+                        "fill_on_top": true,
+                    },
+                })
+            })
+            .collect();
+
+        // Warmup
+        for _ in 0..3 {
+            for ctx in &contexts {
+                for e in &exprs { let _ = eval(e, ctx); }
+            }
+        }
+
+        // Measure: 20 "renders", each = 216 ctx × 11 exprs
+        let iters = 20;
+        let t0 = std::time::Instant::now();
+        for _ in 0..iters {
+            for ctx in &contexts {
+                for e in &exprs { let _ = eval(e, ctx); }
+            }
+        }
+        let elapsed = t0.elapsed();
+        let per_render_ms = elapsed.as_secs_f64() * 1000.0 / iters as f64;
+        let evals_per_render = contexts.len() * exprs.len();
+        let per_eval_us = per_render_ms * 1000.0 / evals_per_render as f64;
+        eprintln!(
+            "\n  bench_eval_swatches: {:.2} ms/render  ({} evals × {} renders, {:.2} µs/eval)\n",
+            per_render_ms, evals_per_render, iters, per_eval_us,
+        );
     }
 }
