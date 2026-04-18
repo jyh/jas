@@ -228,6 +228,7 @@ fn pack_tspan(t: &crate::geometry::tspan::Tspan) -> Value {
         opt_str(t.text_transform.as_ref()),
         transform,
         opt_str(t.xml_lang.as_ref()),
+        opt_str(t.jas_role.as_ref()),
     ])
 }
 
@@ -273,6 +274,7 @@ fn unpack_tspan(v: &Value) -> crate::geometry::tspan::Tspan {
         text_transform: as_opt_str(get(19)),
         transform,
         xml_lang: as_opt_str(get(21)),
+        jas_role: as_opt_str(get(22)),
     }
 }
 
