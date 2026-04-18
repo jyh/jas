@@ -106,6 +106,66 @@ pub fn resolve_id(tspans: &[Tspan], id: TspanId) -> Option<usize> {
     tspans.iter().position(|t| t.id == id)
 }
 
+/// Caret side at a tspan boundary. See `TSPAN.md` Text-edit session
+/// integration — when a character index lands exactly on the join
+/// between two tspans, the affinity decides which side "wins".
+///
+/// `Left` corresponds to the spec's default: "new text inherits the
+/// attributes of the previous character". `Right` is used by callers
+/// that explicitly want the caret on the leading edge of the next
+/// tspan (e.g. the user just moved the caret rightward across a
+/// boundary).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Affinity {
+    Left,
+    Right,
+}
+
+impl Default for Affinity {
+    fn default() -> Self {
+        Affinity::Left
+    }
+}
+
+/// Resolve a flat character index to a concrete `(tspan_idx, offset)`
+/// position given the tspan list and a caret affinity.
+///
+/// - Mid-tspan: returns `(i, char_idx - prefix_chars)`.
+/// - Boundary between tspan `i` and `i+1`: `Left` returns the end of
+///   tspan `i`; `Right` returns the start of tspan `i+1`. The very
+///   last boundary (end of the final tspan) always returns the end of
+///   that tspan regardless of affinity.
+/// - Beyond the last tspan: clamps to the end.
+/// - Empty tspan list: returns `(0, 0)`.
+pub fn char_to_tspan_pos(
+    tspans: &[Tspan],
+    char_idx: usize,
+    affinity: Affinity,
+) -> (usize, usize) {
+    if tspans.is_empty() {
+        return (0, 0);
+    }
+    let mut acc = 0usize;
+    for (i, t) in tspans.iter().enumerate() {
+        let n = t.content.chars().count();
+        if char_idx < acc + n {
+            return (i, char_idx - acc);
+        }
+        if char_idx == acc + n {
+            if i + 1 == tspans.len() {
+                return (i, n);
+            }
+            return match affinity {
+                Affinity::Left => (i, n),
+                Affinity::Right => (i + 1, 0),
+            };
+        }
+        acc += n;
+    }
+    let last = tspans.len() - 1;
+    (last, tspans[last].content.chars().count())
+}
+
 /// Split the tspan at `tspan_idx` at character `offset`.
 ///
 /// Returns `(new_tspans, left_idx, right_idx)`. `left_idx` and
@@ -1042,5 +1102,66 @@ mod tests {
         assert_eq!(concat_content(&r), "barfoobar");
         // Original bold "bar" preserved; new prefix "bar" also bold via clipboard.
         assert!(r.iter().any(|t| t.content.contains("bar") && t.font_weight.as_deref() == Some("bold")));
+    }
+
+    // ── char_to_tspan_pos / Affinity ────────────────────────────────
+
+    #[test]
+    fn char_to_tspan_pos_mid_first_tspan() {
+        let base = vec![plain("foo"), bold("bar")];
+        assert_eq!(char_to_tspan_pos(&base, 1, Affinity::Left), (0, 1));
+        assert_eq!(char_to_tspan_pos(&base, 1, Affinity::Right), (0, 1));
+    }
+
+    #[test]
+    fn char_to_tspan_pos_mid_later_tspan() {
+        let base = vec![plain("foo"), bold("bar")];
+        // char index 4 = "b|a|r"[1] → (1, 1)
+        assert_eq!(char_to_tspan_pos(&base, 4, Affinity::Left), (1, 1));
+    }
+
+    #[test]
+    fn char_to_tspan_pos_boundary_left_affinity() {
+        let base = vec![plain("foo"), bold("bar")];
+        // Boundary at char index 3 — Left picks end of tspan 0.
+        assert_eq!(char_to_tspan_pos(&base, 3, Affinity::Left), (0, 3));
+    }
+
+    #[test]
+    fn char_to_tspan_pos_boundary_right_affinity() {
+        let base = vec![plain("foo"), bold("bar")];
+        // Same boundary — Right picks start of tspan 1.
+        assert_eq!(char_to_tspan_pos(&base, 3, Affinity::Right), (1, 0));
+    }
+
+    #[test]
+    fn char_to_tspan_pos_final_boundary_always_end() {
+        let base = vec![plain("foo"), bold("bar")];
+        // End of content: both affinities resolve to the end of the last tspan.
+        assert_eq!(char_to_tspan_pos(&base, 6, Affinity::Left), (1, 3));
+        assert_eq!(char_to_tspan_pos(&base, 6, Affinity::Right), (1, 3));
+    }
+
+    #[test]
+    fn char_to_tspan_pos_beyond_end_clamps() {
+        let base = vec![plain("foo"), bold("bar")];
+        assert_eq!(char_to_tspan_pos(&base, 999, Affinity::Left), (1, 3));
+    }
+
+    #[test]
+    fn char_to_tspan_pos_empty_list() {
+        let empty: Vec<Tspan> = vec![];
+        assert_eq!(char_to_tspan_pos(&empty, 0, Affinity::Left), (0, 0));
+        assert_eq!(char_to_tspan_pos(&empty, 5, Affinity::Left), (0, 0));
+    }
+
+    #[test]
+    fn char_to_tspan_pos_skips_empty_tspans() {
+        // Empty tspan in the middle should be passed through transparently.
+        let base = vec![plain("fo"), plain(""), bold("bar")];
+        // Boundary between "fo" (idx 0, len 2) and "" (idx 1, len 0):
+        // Left stops at (0, 2), Right would fall through to (1, 0).
+        assert_eq!(char_to_tspan_pos(&base, 2, Affinity::Left), (0, 2));
+        assert_eq!(char_to_tspan_pos(&base, 2, Affinity::Right), (1, 0));
     }
 }
