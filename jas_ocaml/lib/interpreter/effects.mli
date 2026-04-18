@@ -98,3 +98,12 @@ val apply_character_panel_to_selection :
     subscription follows the active model as the user switches tabs. *)
 val subscribe_character_panel :
   State_store.t -> (unit -> Controller.controller) -> unit
+
+(** Subscribe [apply_stroke_panel_to_selection] to global-state writes
+    filtered by [is_stroke_render_key]. Stroke state lives in the
+    global scope (keys like [stroke_cap], [stroke_align_stroke]), so
+    this uses [subscribe_global] rather than [subscribe_panel].
+    [ctrl_getter] is a thunk so the subscription follows the active
+    model as the user switches tabs. *)
+val subscribe_stroke_panel :
+  State_store.t -> (unit -> Controller.controller) -> unit

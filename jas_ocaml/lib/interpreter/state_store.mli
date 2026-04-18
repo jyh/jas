@@ -36,6 +36,15 @@ type panel_subscriber = string -> Yojson.Safe.t -> unit
     [StateStore.subscribe_panel]. *)
 val subscribe_panel : t -> string -> panel_subscriber -> unit
 
+(** Callback invoked on a global-state write: (key, new_value). *)
+type global_subscriber = string -> Yojson.Safe.t -> unit
+
+(** Subscribe to global state changes. Callbacks fire after every
+    [set]. The stroke panel uses this path (via
+    [Effects.subscribe_stroke_panel]) because stroke keys live in
+    global state rather than in a named panel scope. *)
+val subscribe_global : t -> global_subscriber -> unit
+
 (* ── Dialog-scoped state ─────────────────────────────────── *)
 
 val init_dialog :

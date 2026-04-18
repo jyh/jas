@@ -347,6 +347,47 @@ let apply_to_elem_tests = [
     assert (r = r'));
 ]
 
+(* ── subscribe_stroke_panel ────────────────────────────────── *)
+
+(** Build a model whose document has one selected rect with a stroke.
+    Used by the stroke-subscribe tests below so the apply pipeline has
+    something to push to. *)
+let _make_stroked_rect_model () =
+  let stroke = Jas.Element.make_stroke ~width:2.0 Jas.Element.black in
+  let rect = Jas.Element.make_rect ~stroke:(Some stroke) 0.0 0.0 10.0 10.0 in
+  let layer = Jas.Element.make_layer [| rect |] in
+  let selection =
+    Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_all [0; 0])
+  in
+  let doc = Jas.Document.make_document ~selection [| layer |] in
+  Jas.Model.create ~document:doc ()
+
+let stroke_subscribe_tests = [
+  Alcotest.test_case "global_write_fires_apply_for_stroke_key" `Quick (fun () ->
+    let model = _make_stroked_rect_model () in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    subscribe_stroke_panel store (fun () -> ctrl);
+    set store "stroke_cap" (`String "round");
+    let doc = ctrl#document in
+    let elem = Jas.Document.get_element doc [0; 0] in
+    match elem with
+    | Jas.Element.Rect { stroke = Some s; _ } ->
+      assert (s.stroke_linecap = Jas.Element.Round_cap)
+    | _ -> assert false);
+
+  Alcotest.test_case "non_stroke_key_does_not_fire_apply" `Quick (fun () ->
+    (* Writing a non-stroke key must not mutate the selection. *)
+    let model = _make_stroked_rect_model () in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    subscribe_stroke_panel store (fun () -> ctrl);
+    let before = ctrl#document in
+    set store "unrelated_key" (`String "value");
+    assert (ctrl#document == before));
+]
+
 let () =
   Alcotest.run "Effects" [
     "Set", set_tests;
@@ -362,4 +403,5 @@ let () =
     "Phase3 PlatformEffects", platform_effects_tests;
     "Character attrs", character_attrs_tests;
     "Character apply-to-elem", apply_to_elem_tests;
+    "Stroke subscribe", stroke_subscribe_tests;
   ]

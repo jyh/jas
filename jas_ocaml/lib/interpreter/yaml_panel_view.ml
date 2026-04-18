@@ -1442,11 +1442,16 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
       (* Wire the Character-panel apply pipeline. [get_model] is
          already a thunk returning the live model; we adapt it to
          yield a Controller when one is available. *)
+      let make_ctrl_getter () () =
+        match get_model () with
+        | Some model -> Controller.create ~model ()
+        | None -> failwith "no model available for panel apply"
+      in
       (if kind = Character then
-         let ctrl_getter () =
-           match get_model () with
-           | Some model -> Controller.create ~model ()
-           | None -> failwith "no model available for character panel apply"
-         in
-         Effects.subscribe_character_panel store ctrl_getter);
+         Effects.subscribe_character_panel store (make_ctrl_getter ()));
+      (* Stroke panel writes global [stroke_*] keys; subscribe via the
+         global channel (filtered by [is_stroke_render_key]) so
+         widget changes reach the selected element. *)
+      (if kind = Stroke then
+         Effects.subscribe_stroke_panel store (make_ctrl_getter ()));
       render_element ~packing ~ctx content

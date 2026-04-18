@@ -11,6 +11,9 @@ type prop_def = {
 (** Callback invoked on a panel-state write: (key, new_value). *)
 type panel_subscriber = string -> Yojson.Safe.t -> unit
 
+(** Callback invoked on a global-state write: (key, new_value). *)
+type global_subscriber = string -> Yojson.Safe.t -> unit
+
 type t = {
   mutable state : (string * Yojson.Safe.t) list;
   mutable panels : (string * (string * Yojson.Safe.t) list) list;
@@ -20,6 +23,7 @@ type t = {
   mutable dialog_params : (string * Yojson.Safe.t) list option;
   mutable dialog_props : (string * prop_def) list;
   mutable panel_subscribers : (string * panel_subscriber list) list;
+  mutable global_subscribers : global_subscriber list;
 }
 
 let create ?(defaults = []) () : t =
@@ -30,7 +34,8 @@ let create ?(defaults = []) () : t =
     dialog_id = None;
     dialog_params = None;
     dialog_props = [];
-    panel_subscribers = [] }
+    panel_subscribers = [];
+    global_subscribers = [] }
 
 (* ── Global state ─────────────────────────────────────── *)
 
@@ -40,7 +45,11 @@ let get (store : t) (key : string) : Yojson.Safe.t =
   | None -> `Null
 
 let set (store : t) (key : string) (value : Yojson.Safe.t) : unit =
-  store.state <- (key, value) :: List.filter (fun (k, _) -> k <> key) store.state
+  store.state <- (key, value) :: List.filter (fun (k, _) -> k <> key) store.state;
+  List.iter (fun sub -> sub key value) store.global_subscribers
+
+let subscribe_global (store : t) (callback : global_subscriber) : unit =
+  store.global_subscribers <- callback :: store.global_subscribers
 
 let get_all (store : t) : (string * Yojson.Safe.t) list =
   store.state

@@ -206,6 +206,33 @@ let subscription_tests = [
     subscribe_panel s "character_panel" (fun _ _ -> incr fires);
     set_panel s "character_panel" "x" (`Int 1);
     assert (!fires = 0));
+
+  Alcotest.test_case "subscribe_global_fires_on_set" `Quick (fun () ->
+    let s = create () in
+    let received = ref [] in
+    subscribe_global s (fun k v -> received := (k, v) :: !received);
+    set s "stroke_cap" (`String "round");
+    assert (!received = [("stroke_cap", `String "round")]));
+
+  Alcotest.test_case "subscribe_global_multiple_subscribers" `Quick (fun () ->
+    let s = create () in
+    let a = ref 0 in
+    let b = ref 0 in
+    subscribe_global s (fun _ _ -> incr a);
+    subscribe_global s (fun _ _ -> incr b);
+    set s "x" (`Int 1);
+    assert (!a = 1);
+    assert (!b = 1));
+
+  Alcotest.test_case "subscribe_global_does_not_fire_on_panel_writes" `Quick (fun () ->
+    let s = create () in
+    init_panel s "character_panel" [];
+    let fires = ref 0 in
+    subscribe_global s (fun _ _ -> incr fires);
+    set_panel s "character_panel" "font_family" (`String "Arial");
+    assert (!fires = 0);
+    set s "some_global" (`Int 1);
+    assert (!fires = 1));
 ]
 
 let () =
