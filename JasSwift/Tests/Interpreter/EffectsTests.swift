@@ -242,3 +242,52 @@ import Testing
     runEffects([["set": ["fill_color": "dialog.color"]]], ctx: [:], store: store)
     #expect(store.get("fill_color") as? String == "#aabbcc")
 }
+
+// MARK: - notify_panel_state_changed hook
+
+@Test func setPanelStateFiresNotifyHook() {
+    let store = StateStore()
+    store.initPanel("character_panel", defaults: ["font_family": "sans-serif"])
+    var notified: [String] = []
+    let hook: PlatformEffect = { panelIdAny, _, _ in
+        if let pid = panelIdAny as? String { notified.append(pid) }
+        return nil
+    }
+    runEffects(
+        [["set_panel_state": ["key": "font_family", "value": "\"Arial\"", "panel": "character_panel"]]],
+        ctx: [:], store: store,
+        platformEffects: ["notify_panel_state_changed": hook]
+    )
+    #expect(store.getPanel("character_panel", "font_family") as? String == "Arial")
+    #expect(notified == ["character_panel"])
+}
+
+@Test func setPanelXFiresNotifyHookForActivePanel() {
+    let store = StateStore()
+    store.initPanel("stroke_panel", defaults: ["cap": "butt"])
+    store.setActivePanel("stroke_panel")
+    var notified: [String] = []
+    let hook: PlatformEffect = { panelIdAny, _, _ in
+        if let pid = panelIdAny as? String { notified.append(pid) }
+        return nil
+    }
+    // Non-schema path: writes directly to the store keyed by "panel.cap".
+    // The hook detects the `panel.` prefix and fires for the active panel.
+    runEffects(
+        [["set": ["panel.cap": "\"round\""]]],
+        ctx: [:], store: store,
+        platformEffects: ["notify_panel_state_changed": hook]
+    )
+    #expect(notified == ["stroke_panel"])
+}
+
+@Test func notifyHookSilentWhenUnregistered() {
+    let store = StateStore()
+    store.initPanel("character_panel", defaults: ["font_family": "sans-serif"])
+    // Should not crash or error when no hook is registered.
+    runEffects(
+        [["set_panel_state": ["key": "font_family", "value": "\"Arial\"", "panel": "character_panel"]]],
+        ctx: [:], store: store
+    )
+    #expect(store.getPanel("character_panel", "font_family") as? String == "Arial")
+}
