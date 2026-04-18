@@ -958,6 +958,49 @@ impl AppState {
             return;
         }
 
+        // Per-range write: when the active edit session has a range
+        // selection, apply the panel state to that range only via
+        // split_range + merge_tspan_overrides + merge. The rest of
+        // the edited element is left untouched (per TSPAN.md
+        // "Character attribute writes (from panels)").
+        let range_route: Option<(Vec<usize>, usize, usize)> = {
+            tab.tools.get_mut(&active_tool).and_then(|tool| {
+                let s = tool.edit_session_mut()?;
+                if !s.has_selection() { return None; }
+                let (lo, hi) = s.selection_range();
+                Some((s.path.clone(), lo, hi))
+            })
+        };
+        if let Some((path, lo, hi)) = range_route {
+            let overrides = build_panel_full_overrides(&cp);
+            let doc = tab.model.document().clone();
+            if let Some(elem) = doc.get_element(&path) {
+                let new_elem = match elem {
+                    Element::Text(t) => {
+                        let new_tspans = apply_overrides_to_tspan_range(
+                            &t.tspans, lo, hi, &overrides);
+                        let mut new_t = t.clone();
+                        new_t.tspans = new_tspans;
+                        Some(Element::Text(new_t))
+                    }
+                    Element::TextPath(tp) => {
+                        let new_tspans = apply_overrides_to_tspan_range(
+                            &tp.tspans, lo, hi, &overrides);
+                        let mut new_tp = tp.clone();
+                        new_tp.tspans = new_tspans;
+                        Some(Element::TextPath(new_tp))
+                    }
+                    _ => None,
+                };
+                if let Some(new_elem) = new_elem {
+                    tab.model.snapshot();
+                    let new_doc = doc.replace_element(&path, new_elem);
+                    tab.model.set_document(new_doc);
+                }
+            }
+            return;
+        }
+
         let target_paths: Vec<Vec<usize>> = {
             let doc = tab.model.document();
             doc.selection
@@ -1025,6 +1068,81 @@ impl AppState {
                 tab.model.set_document(new_doc);
             }
         }
+    }
+}
+
+/// Build a `Tspan` override template from the Character panel state
+/// that forces every panel-driven field onto the targeted tspans
+/// regardless of element-level defaults. Used by the per-range
+/// Character-panel write path.
+///
+/// Scope mirrors [`build_panel_pending_template`]: font-family,
+/// font-size, font-weight, font-style, text-decoration,
+/// text-transform, font-variant, xml-lang, rotate. Complex
+/// attributes still write to the element.
+///
+/// Unlike the pending template, this builder does NOT diff against
+/// element values — clicking Regular with a bold range should clear
+/// the bold explicitly, which requires emitting `Some("normal")`,
+/// not "nothing changed". Identity-omission (collapsing overrides
+/// that match the parent element) is a future optimization.
+pub(crate) fn build_panel_full_overrides(
+    cp: &CharacterPanelState,
+) -> crate::geometry::tspan::Tspan {
+    use crate::geometry::tspan::Tspan;
+    let mut t = Tspan::default_tspan();
+    t.font_family = Some(cp.font_family.clone());
+    t.font_size = Some(cp.font_size);
+    // Unknown style names leave font_weight/font_style alone (matching
+    // the element-write semantics) — pasteStyleName returns None.
+    if let Some((fw, fst)) = parse_style_name(&cp.style_name) {
+        t.font_weight = Some(fw);
+        t.font_style = Some(fst);
+    }
+    let td_str = text_decoration_from_flags(cp.underline, cp.strikethrough);
+    let parts: Vec<String> = td_str
+        .split_whitespace()
+        .map(String::from)
+        .collect();
+    t.text_decoration = Some(parts);
+    t.text_transform = Some(
+        if cp.all_caps { "uppercase".into() } else { "".into() }
+    );
+    t.font_variant = Some(
+        if cp.small_caps && !cp.all_caps { "small-caps".into() } else { "".into() }
+    );
+    t.xml_lang = Some(cp.language.clone());
+    t.rotate = Some(cp.character_rotation);
+    t
+}
+
+/// Apply `overrides` to the tspans covering the character range
+/// `[char_start, char_end)`. Uses `split_range` to isolate the
+/// targeted tspans, copies every `Some(...)` field from `overrides`
+/// onto each one via `merge_tspan_overrides`, then calls `merge` to
+/// collapse adjacent-equal tspans. Mirrors TSPAN.md's "Character
+/// attribute writes (from panels)" algorithm (steps 1, 2, and 4;
+/// step 3's identity-omission is a follow-up).
+pub(crate) fn apply_overrides_to_tspan_range(
+    tspans: &[crate::geometry::tspan::Tspan],
+    char_start: usize,
+    char_end: usize,
+    overrides: &crate::geometry::tspan::Tspan,
+) -> Vec<crate::geometry::tspan::Tspan> {
+    use crate::geometry::tspan::{merge, merge_tspan_overrides, split_range};
+    if char_start >= char_end {
+        return tspans.to_vec();
+    }
+    let (mut split, first, last) = split_range(tspans, char_start, char_end);
+    if let (Some(f), Some(l)) = (first, last) {
+        for i in f..=l {
+            let mut t = split[i].clone();
+            merge_tspan_overrides(&mut t, overrides);
+            split[i] = t;
+        }
+        merge(&split)
+    } else {
+        split
     }
 }
 
@@ -1291,5 +1409,80 @@ mod pending_override_tests {
         cp.all_caps = true;
         let tpl = build_panel_pending_template(&cp, &Element::Text(t)).unwrap();
         assert_eq!(tpl.text_transform.as_deref(), Some("uppercase"));
+    }
+
+    // ── full-override template for range writes ──────────────
+
+    #[test]
+    fn full_overrides_sets_every_scope_field() {
+        let mut cp = CharacterPanelState::default();
+        cp.style_name = "Bold".into();
+        cp.all_caps = true;
+        cp.underline = true;
+        let t = build_panel_full_overrides(&cp);
+        assert_eq!(t.font_family.as_deref(), Some("sans-serif"));
+        assert_eq!(t.font_size, Some(12.0));
+        assert_eq!(t.font_weight.as_deref(), Some("bold"));
+        assert_eq!(t.font_style.as_deref(), Some("normal"));
+        assert_eq!(t.text_transform.as_deref(), Some("uppercase"));
+        assert_eq!(t.text_decoration.as_ref().unwrap(), &vec!["underline".to_string()]);
+    }
+
+    #[test]
+    fn full_overrides_regular_style_forces_normal_not_none() {
+        // The key distinction from the pending template: clicking
+        // Regular on a bold range must emit Some("normal") so the
+        // range's bold override gets replaced, not skipped.
+        let mut cp = CharacterPanelState::default();
+        cp.style_name = "Regular".into();
+        let t = build_panel_full_overrides(&cp);
+        assert_eq!(t.font_weight.as_deref(), Some("normal"));
+        assert_eq!(t.font_style.as_deref(), Some("normal"));
+    }
+
+    // ── apply_overrides_to_tspan_range ───────────────────────
+
+    #[test]
+    fn apply_overrides_to_range_bolds_partial_word() {
+        use crate::geometry::tspan::Tspan;
+        let base = vec![Tspan { content: "hello".into(), ..Tspan::default_tspan() }];
+        let mut cp = CharacterPanelState::default();
+        cp.style_name = "Bold".into();
+        let overrides = build_panel_full_overrides(&cp);
+        // Apply Bold to "ell" (chars [1..4)).
+        let out = apply_overrides_to_tspan_range(&base, 1, 4, &overrides);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0].content, "h");
+        assert_eq!(out[1].content, "ell");
+        assert_eq!(out[1].font_weight.as_deref(), Some("bold"));
+        assert_eq!(out[2].content, "o");
+        assert!(out[2].font_weight.as_deref() != Some("bold"));
+    }
+
+    #[test]
+    fn apply_overrides_to_empty_range_is_passthrough() {
+        use crate::geometry::tspan::Tspan;
+        let base = vec![Tspan { content: "hello".into(), ..Tspan::default_tspan() }];
+        let overrides = Tspan { font_weight: Some("bold".into()),
+                                ..Tspan::default_tspan() };
+        let out = apply_overrides_to_tspan_range(&base, 2, 2, &overrides);
+        assert_eq!(out, base);
+    }
+
+    #[test]
+    fn apply_overrides_to_range_merges_adjacent_equal() {
+        use crate::geometry::tspan::Tspan;
+        // Two adjacent plain tspans become one bold tspan after the
+        // merge step collapses the adjacent-equal pair.
+        let base = vec![
+            Tspan { content: "foo".into(), ..Tspan::default_tspan() },
+            Tspan { id: 1, content: "bar".into(), ..Tspan::default_tspan() },
+        ];
+        let overrides = Tspan { font_weight: Some("bold".into()),
+                                ..Tspan::default_tspan() };
+        let out = apply_overrides_to_tspan_range(&base, 0, 6, &overrides);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].content, "foobar");
+        assert_eq!(out[0].font_weight.as_deref(), Some("bold"));
     }
 }
