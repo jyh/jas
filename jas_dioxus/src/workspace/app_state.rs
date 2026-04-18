@@ -1113,6 +1113,24 @@ pub(crate) fn build_panel_full_overrides(
     );
     t.xml_lang = Some(cp.language.clone());
     t.rotate = Some(cp.character_rotation);
+    // Leading → line_height (pt). No explicit Auto state in the tspan
+    // model, so always emit the value; identity-omission is a follow-up.
+    t.line_height = Some(cp.leading);
+    // Tracking (panel units: 1/1000 em) → letter_spacing (em).
+    t.letter_spacing = Some(cp.tracking / 1000.0);
+    // Baseline shift numeric (pt). Super/sub flags and kerning modes
+    // stay element-level for now — Tspan.baseline_shift is Option<f64>
+    // and can't express "super" / "sub" strings.
+    if !cp.superscript && !cp.subscript {
+        t.baseline_shift = Some(cp.baseline_shift);
+    }
+    // Anti-aliasing: "Sharp" (and empty) are the panel default; write
+    // the mode name otherwise.
+    if cp.anti_aliasing != "Sharp" && !cp.anti_aliasing.is_empty() {
+        t.jas_aa_mode = Some(cp.anti_aliasing.clone());
+    } else {
+        t.jas_aa_mode = Some(String::new());
+    }
     t
 }
 
@@ -1163,16 +1181,19 @@ pub(crate) fn build_panel_pending_template(
     use crate::geometry::element::Element;
     use crate::geometry::tspan::Tspan;
     let (elem_ff, elem_fs, elem_fw, elem_fst, elem_td, elem_tt, elem_fv,
-         elem_xl, elem_rot) = match elem {
+         elem_xl, elem_rot, elem_lh_str, elem_ls_str, elem_bs_str,
+         elem_aa_str) = match elem {
         Element::Text(t) => (
             &t.font_family, t.font_size, &t.font_weight, &t.font_style,
             &t.text_decoration, &t.text_transform, &t.font_variant,
             &t.xml_lang, &t.rotate,
+            &t.line_height, &t.letter_spacing, &t.baseline_shift, &t.aa_mode,
         ),
         Element::TextPath(tp) => (
             &tp.font_family, tp.font_size, &tp.font_weight, &tp.font_style,
             &tp.text_decoration, &tp.text_transform, &tp.font_variant,
             &tp.xml_lang, &tp.rotate,
+            &tp.line_height, &tp.letter_spacing, &tp.baseline_shift, &tp.aa_mode,
         ),
         _ => return None,
     };
@@ -1246,6 +1267,39 @@ pub(crate) fn build_panel_pending_template(
             Some(cp.character_rotation)
         };
         if t.rotate.is_some() { any = true; }
+    }
+    // Leading → line_height. Element stores as a CSS length string
+    // ("14.4pt") or empty; empty means "Auto" (120% of font_size).
+    let elem_lh = parse_pt(elem_lh_str).unwrap_or(elem_fs * 1.2);
+    if (cp.leading - elem_lh).abs() > 1e-6 {
+        t.line_height = Some(cp.leading);
+        any = true;
+    }
+    // Tracking → letter_spacing. Element stores as "Nem"; empty
+    // means 0. Panel units are 1/1000 em, so convert.
+    let elem_tracking = parse_em_as_thousandths(elem_ls_str).unwrap_or(0.0);
+    if (cp.tracking - elem_tracking).abs() > 1e-6 {
+        t.letter_spacing = Some(cp.tracking / 1000.0);
+        any = true;
+    }
+    // Baseline shift numeric. Super / sub stay element-level.
+    if !cp.superscript && !cp.subscript {
+        let elem_bs = parse_pt(elem_bs_str).unwrap_or(0.0);
+        if (cp.baseline_shift - elem_bs).abs() > 1e-6 {
+            t.baseline_shift = Some(cp.baseline_shift);
+            any = true;
+        }
+    }
+    // Anti-aliasing → jas_aa_mode. "Sharp" and empty both round-trip
+    // to an empty element attribute.
+    let aa = if cp.anti_aliasing == "Sharp" || cp.anti_aliasing.is_empty() {
+        String::new()
+    } else {
+        cp.anti_aliasing.clone()
+    };
+    if aa != *elem_aa_str {
+        t.jas_aa_mode = Some(aa);
+        any = true;
     }
     if any { Some(t) } else { None }
 }
@@ -1349,13 +1403,19 @@ mod pending_override_tests {
 
     #[test]
     fn template_empty_when_panel_matches_element() {
-        // Align the panel defaults to the element's defaults first
-        // (font_size, font_family, language), then verify no diff.
+        // Align the panel defaults to the element's defaults first,
+        // then verify no diff. The empty element has font_size=16 with
+        // line_height="" (auto = 120% → 19.2pt) and blank letter-
+        // spacing / baseline-shift / aa-mode.
         let t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
         let mut cp = CharacterPanelState::default();
         cp.font_size = t.font_size;
         cp.font_family = t.font_family.clone();
         cp.language = t.xml_lang.clone();
+        cp.leading = t.font_size * 1.2;  // matches the auto default
+        cp.tracking = 0.0;
+        cp.baseline_shift = 0.0;
+        cp.anti_aliasing = "Sharp".into();
         let tpl = build_panel_pending_template(&cp, &Element::Text(t));
         assert!(tpl.is_none());
     }
@@ -1426,6 +1486,80 @@ mod pending_override_tests {
         assert_eq!(t.font_style.as_deref(), Some("normal"));
         assert_eq!(t.text_transform.as_deref(), Some("uppercase"));
         assert_eq!(t.text_decoration.as_ref().unwrap(), &vec!["underline".to_string()]);
+        // Complex attrs are part of the template now too.
+        assert!(t.line_height.is_some());
+        assert!(t.letter_spacing.is_some());
+        assert!(t.baseline_shift.is_some());
+        assert!(t.jas_aa_mode.is_some());
+    }
+
+    #[test]
+    fn template_leading_differs_from_auto() {
+        let t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        let mut cp = CharacterPanelState::default();
+        cp.font_size = t.font_size;
+        cp.font_family = t.font_family.clone();
+        cp.language = t.xml_lang.clone();
+        cp.leading = t.font_size * 2.0;  // 2x = non-auto leading
+        let tpl = build_panel_pending_template(&cp, &Element::Text(t)).unwrap();
+        assert_eq!(tpl.line_height, Some(cp.leading));
+    }
+
+    #[test]
+    fn template_tracking_differs_from_zero() {
+        let t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        let mut cp = CharacterPanelState::default();
+        cp.font_size = t.font_size;
+        cp.font_family = t.font_family.clone();
+        cp.language = t.xml_lang.clone();
+        cp.leading = t.font_size * 1.2;
+        cp.tracking = 50.0;  // 50/1000 = 0.05 em
+        let tpl = build_panel_pending_template(&cp, &Element::Text(t)).unwrap();
+        assert!((tpl.letter_spacing.unwrap() - 0.05).abs() < 1e-9);
+    }
+
+    #[test]
+    fn template_baseline_shift_numeric_differs() {
+        let t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        let mut cp = CharacterPanelState::default();
+        cp.font_size = t.font_size;
+        cp.font_family = t.font_family.clone();
+        cp.language = t.xml_lang.clone();
+        cp.leading = t.font_size * 1.2;
+        cp.baseline_shift = 3.0;
+        let tpl = build_panel_pending_template(&cp, &Element::Text(t)).unwrap();
+        assert_eq!(tpl.baseline_shift, Some(3.0));
+    }
+
+    #[test]
+    fn template_baseline_shift_numeric_skipped_when_super_on() {
+        let t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        let mut cp = CharacterPanelState::default();
+        cp.font_size = t.font_size;
+        cp.font_family = t.font_family.clone();
+        cp.language = t.xml_lang.clone();
+        cp.leading = t.font_size * 1.2;
+        cp.superscript = true;
+        cp.baseline_shift = 3.0;  // ignored when super is on
+        let tpl = build_panel_pending_template(&cp, &Element::Text(t));
+        // Super/sub are still element-level; the tspan template
+        // should not carry baseline_shift in this case.
+        if let Some(t) = tpl {
+            assert!(t.baseline_shift.is_none());
+        }
+    }
+
+    #[test]
+    fn template_anti_aliasing_differs_from_sharp() {
+        let t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        let mut cp = CharacterPanelState::default();
+        cp.font_size = t.font_size;
+        cp.font_family = t.font_family.clone();
+        cp.language = t.xml_lang.clone();
+        cp.leading = t.font_size * 1.2;
+        cp.anti_aliasing = "Smooth".into();
+        let tpl = build_panel_pending_template(&cp, &Element::Text(t)).unwrap();
+        assert_eq!(tpl.jas_aa_mode.as_deref(), Some("Smooth"));
     }
 
     #[test]
