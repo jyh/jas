@@ -289,6 +289,7 @@ let tspan_clipboard_payload t =
     [Text_edit.t]. *)
 let as_session_ref (t : t) : Model.edit_session_ref = object
   method has_selection = has_selection t
+  method selection_range = selection_range t
   method path = t.path
   method set_pending_override o = set_pending_override t o
   method clear_pending_override () = clear_pending_override t

@@ -767,6 +767,87 @@ let apply_character_attrs_to_elem (elem : Element.element) (a : character_attrs)
   | other -> other
 
 (** Build a [tspan] override template from the Character panel state
+    that forces every panel-scoped field onto the targeted tspans
+    regardless of the element-level defaults. Used by the per-range
+    write path. Unlike the pending template, this builder does NOT
+    diff against element values — clicking Regular on a bold range
+    emits [Some "normal"] so the range's bold override is cleared. *)
+let build_panel_full_overrides
+    (panel : (string * Yojson.Safe.t) list)
+  : Element.tspan =
+  let t = ref (Tspan.default_tspan ()) in
+  let set_opt (f : Element.tspan -> Element.tspan) = t := f !t in
+  let font_family = match List.assoc_opt "font_family" panel with
+    | Some (`String s) -> s | _ -> "sans-serif" in
+  set_opt (fun x -> { x with font_family = Some font_family });
+  let font_size = match List.assoc_opt "font_size" panel with
+    | Some (`Int n) -> Float.of_int n
+    | Some (`Float n) -> n
+    | _ -> 12.0 in
+  set_opt (fun x -> { x with font_size = Some font_size });
+  let style = match List.assoc_opt "style_name" panel with
+    | Some (`String s) -> String.trim s | _ -> "" in
+  let (fw_parsed, fst_parsed) = match style with
+    | "Regular" -> (Some "normal", Some "normal")
+    | "Italic" -> (Some "normal", Some "italic")
+    | "Bold" -> (Some "bold", Some "normal")
+    | "Bold Italic" | "Italic Bold" -> (Some "bold", Some "italic")
+    | _ -> (None, None) in
+  (match fw_parsed with
+   | Some fw -> set_opt (fun x -> { x with font_weight = Some fw })
+   | None -> ());
+  (match fst_parsed with
+   | Some fs -> set_opt (fun x -> { x with font_style = Some fs })
+   | None -> ());
+  let underline = match List.assoc_opt "underline" panel with
+    | Some (`Bool b) -> b | _ -> false in
+  let strikethrough = match List.assoc_opt "strikethrough" panel with
+    | Some (`Bool b) -> b | _ -> false in
+  let td = List.filter_map (fun x -> x) [
+    if strikethrough then Some "line-through" else None;
+    if underline then Some "underline" else None;
+  ] in
+  set_opt (fun x -> { x with text_decoration = Some td });
+  let all_caps = match List.assoc_opt "all_caps" panel with
+    | Some (`Bool b) -> b | _ -> false in
+  let tt = if all_caps then "uppercase" else "" in
+  set_opt (fun x -> { x with text_transform = Some tt });
+  let small_caps = match List.assoc_opt "small_caps" panel with
+    | Some (`Bool b) -> b | _ -> false in
+  let fv = if small_caps && not all_caps then "small-caps" else "" in
+  set_opt (fun x -> { x with font_variant = Some fv });
+  let lang = match List.assoc_opt "language" panel with
+    | Some (`String s) -> s | _ -> "" in
+  set_opt (fun x -> { x with xml_lang = Some lang });
+  let rot = match List.assoc_opt "character_rotation" panel with
+    | Some (`Int n) -> Float.of_int n
+    | Some (`Float n) -> n
+    | _ -> 0.0 in
+  set_opt (fun x -> { x with rotate = Some rot });
+  !t
+
+(** Apply [overrides] to the tspans covering the character range
+    [[char_start, char_end)]. Runs TSPAN.md's per-range algorithm:
+    [split_range] isolates the targeted tspans,
+    [merge_tspan_overrides] copies the override fields onto each
+    one, [merge] collapses adjacent-equal tspans. *)
+let apply_overrides_to_tspan_range
+    (tspans : Element.tspan array)
+    (char_start : int) (char_end : int)
+    (overrides : Element.tspan)
+  : Element.tspan array =
+  if char_start >= char_end then tspans
+  else
+    let (split, first, last) = Tspan.split_range tspans char_start char_end in
+    match first, last with
+    | Some f, Some l ->
+      for i = f to l do
+        split.(i) <- Tspan.merge_tspan_overrides split.(i) overrides
+      done;
+      Tspan.merge split
+    | _ -> split
+
+(** Build a [tspan] override template from the Character panel state
     that contains only the fields where the panel differs from the
     currently-edited element. [None] when everything matches. Scope
     (Phase 3 MVP, mirrors Rust 390513e / Swift bea4d61): font-family,
@@ -906,6 +987,35 @@ let apply_character_panel_to_selection (store : State_store.t)
                        as "handled by pending route" *))
     | _ -> false in
   if routed_to_pending then () else
+  (* Per-range write: when the active session has a range selection,
+     apply the panel state to that range via split_range +
+     merge_tspan_overrides + merge. *)
+  let routed_to_range = match ctrl#model#current_edit_session with
+    | Some session when session#has_selection ->
+      (try
+        let elem = Document.get_element ctrl#document session#path in
+        let (lo, hi) = session#selection_range in
+        let overrides = build_panel_full_overrides (panel_list ()) in
+        let new_elem = match elem with
+          | Element.Text r ->
+            let new_tspans = apply_overrides_to_tspan_range
+              r.tspans lo hi overrides in
+            Some (Element.Text { r with tspans = new_tspans })
+          | Element.Text_path r ->
+            let new_tspans = apply_overrides_to_tspan_range
+              r.tspans lo hi overrides in
+            Some (Element.Text_path { r with tspans = new_tspans })
+          | _ -> None
+        in
+        (match new_elem with
+         | Some e ->
+           ctrl#model#snapshot;
+           ctrl#set_document (Document.replace_element ctrl#document session#path e)
+         | None -> ());
+        true
+      with _ -> false)
+    | _ -> false in
+  if routed_to_range then () else
   let doc = ctrl#document in
   if Document.PathMap.is_empty doc.Document.selection then ()
   else begin
