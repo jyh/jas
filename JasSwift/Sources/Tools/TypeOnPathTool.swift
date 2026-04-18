@@ -75,16 +75,18 @@ class TypeOnPathTool: CanvasTool {
         let s = TextEditSession(path: path, target: .textPath, content: content, insertion: cursor)
         s.blinkEpochMs = nowMs()
         session = s
+        ctx.model.currentEditSession = s
         didSnapshot = false
         ctx.controller.selectElement(path)
     }
 
-    private func endSession() {
+    private func endSession(_ ctx: ToolContext? = nil) {
         session = nil
         didSnapshot = false
         dragStart = nil
         dragEnd = nil
         controlPt = nil
+        ctx?.model.currentEditSession = nil
     }
 
     private func findSelectedTextPathHandle(_ ctx: ToolContext, _ x: Double, _ y: Double)
@@ -115,7 +117,7 @@ class TypeOnPathTool: CanvasTool {
                 ctx.requestUpdate()
                 return
             }
-            endSession()
+            endSession(ctx)
         }
         beginPressNoSession(ctx, x: x, y: y)
     }
@@ -153,6 +155,7 @@ class TypeOnPathTool: CanvasTool {
                 let s = TextEditSession(path: path, target: .textPath, content: "", insertion: 0)
                 s.blinkEpochMs = nowMs()
                 session = s
+                ctx.model.currentEditSession = s
                 ctx.requestUpdate()
             default:
                 break
@@ -255,6 +258,7 @@ class TypeOnPathTool: CanvasTool {
         let s = TextEditSession(path: path, target: .textPath, content: "", insertion: 0)
         s.blinkEpochMs = nowMs()
         session = s
+        ctx.model.currentEditSession = s
         controlPt = nil
         ctx.requestUpdate()
     }
@@ -267,7 +271,7 @@ class TypeOnPathTool: CanvasTool {
     }
 
     func deactivate(_ ctx: ToolContext) {
-        endSession()
+        endSession(ctx)
     }
 
     func capturesKeyboard() -> Bool { session != nil }
@@ -346,7 +350,7 @@ class TypeOnPathTool: CanvasTool {
         }
         switch key {
         case "Escape":
-            endSession(); ctx.requestUpdate(); return true
+            endSession(ctx); ctx.requestUpdate(); return true
         case "Backspace":
             ensureSnapshot(ctx); s.backspace()
             bump(); syncToModel(ctx); ctx.requestUpdate(); return true

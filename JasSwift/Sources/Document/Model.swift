@@ -34,6 +34,12 @@ public class Model: ObservableObject {
     /// is a top-level path [Int]. Written by enter/exit_isolation_mode
     /// actions via YAML dispatch (see LayersPanel.dispatchYamlAction).
     @Published public var layersIsolationStack: [[Int]] = []
+    /// Live reference to the active in-place text-editing session, if
+    /// any. TypeTool and TypeOnPathTool publish their session here
+    /// while editing so the Character-panel write pipeline can route
+    /// panel writes to the session's next-typed-character state when a
+    /// bare caret is placed. Cleared when the session ends.
+    public var currentEditSession: TextEditSession? = nil
     public private(set) var savedDocument: Document
     private var listeners: [(Document) -> Void] = []
     private var undoStack: [Document] = []

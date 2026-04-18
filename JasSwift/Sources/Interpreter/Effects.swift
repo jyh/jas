@@ -565,7 +565,133 @@ private let characterPanelKeys: Set<String> = [
 /// Called after any write to a character-panel key so the two
 /// surfaces (in-panel controls and the selected element) stay in
 /// sync.
+/// Build a `Tspan` override template from the Character panel state
+/// that contains only the fields where the panel differs from the
+/// currently-edited element. Returns `nil` when everything matches.
+/// Scope (Phase 3 MVP, mirrors Rust 390513e): font-family, font-size,
+/// font-weight, font-style, text-decoration, text-transform,
+/// font-variant, xml-lang, rotate. Complex attributes (baseline-shift
+/// with super/sub, kerning modes, scales, line-height) aren't yet
+/// supported as pending overrides and are left out of the template.
+func buildPanelPendingTemplate(_ panel: [String: Any], _ elem: Element) -> Tspan? {
+    let (elemFF, elemFS, elemFW, elemFSt, elemTD, elemTT, elemFV, elemXL, elemRot):
+        (String, Double, String, String, String, String, String, String, String)
+    switch elem {
+    case .text(let t):
+        (elemFF, elemFS, elemFW, elemFSt, elemTD, elemTT, elemFV, elemXL, elemRot) =
+            (t.fontFamily, t.fontSize, t.fontWeight, t.fontStyle,
+             t.textDecoration, t.textTransform, t.fontVariant,
+             t.xmlLang, t.rotate)
+    case .textPath(let tp):
+        (elemFF, elemFS, elemFW, elemFSt, elemTD, elemTT, elemFV, elemXL, elemRot) =
+            (tp.fontFamily, tp.fontSize, tp.fontWeight, tp.fontStyle,
+             tp.textDecoration, tp.textTransform, tp.fontVariant,
+             tp.xmlLang, tp.rotate)
+    default:
+        return nil
+    }
+    var any = false
+    var fontFamily: String? = nil
+    var fontSize: Double? = nil
+    var fontWeight: String? = nil
+    var fontStyle: String? = nil
+    var textDecoration: [String]? = nil
+    var textTransform: String? = nil
+    var fontVariant: String? = nil
+    var xmlLang: String? = nil
+    var rotate: Double? = nil
+
+    if let v = panel["font_family"] as? String, v != elemFF {
+        fontFamily = v; any = true
+    }
+    if let v = (panel["font_size"] as? NSNumber)?.doubleValue,
+       abs(v - elemFS) > 1e-6 {
+        fontSize = v; any = true
+    }
+    if let style = panel["style_name"] as? String {
+        let (fw, fst): (String?, String?) = {
+            switch style.trimmingCharacters(in: .whitespaces) {
+            case "Regular":      return ("normal", "normal")
+            case "Italic":       return ("normal", "italic")
+            case "Bold":         return ("bold",   "normal")
+            case "Bold Italic", "Italic Bold": return ("bold", "italic")
+            default: return (nil, nil)
+            }
+        }()
+        if let fw = fw, fw != elemFW { fontWeight = fw; any = true }
+        if let fst = fst, fst != elemFSt { fontStyle = fst; any = true }
+    }
+    // text-decoration: parse both sides into sorted sets so "none"
+    // and "" (no decoration) collapse.
+    let underline = panel["underline"] as? Bool ?? false
+    let strikethrough = panel["strikethrough"] as? Bool ?? false
+    let panelTd: [String] = [
+        strikethrough ? "line-through" : nil,
+        underline ? "underline" : nil,
+    ].compactMap { $0 }.sorted()
+    let elemTdParsed: [String] = elemTD
+        .split(separator: " ")
+        .map(String.init)
+        .filter { $0 != "none" }
+        .sorted()
+    if panelTd != elemTdParsed {
+        textDecoration = panelTd; any = true
+    }
+    // text-transform: All Caps flag.
+    let allCaps = panel["all_caps"] as? Bool ?? false
+    let tt = allCaps ? "uppercase" : ""
+    if tt != elemTT { textTransform = tt; any = true }
+    // font-variant: Small Caps flag (when All Caps is off).
+    let smallCaps = panel["small_caps"] as? Bool ?? false
+    let fv = (smallCaps && !allCaps) ? "small-caps" : ""
+    if fv != elemFV { fontVariant = fv; any = true }
+    if let v = panel["language"] as? String, v != elemXL {
+        xmlLang = v; any = true
+    }
+    // Character rotation: Double on the panel, string on the element.
+    let rot = (panel["character_rotation"] as? NSNumber)?.doubleValue ?? 0.0
+    let rotStr = rot == 0.0 ? "" : _fmtNum(rot)
+    if rotStr != elemRot {
+        rotate = rot == 0.0 ? nil : rot
+        if rotate != nil { any = true }
+    }
+
+    if !any { return nil }
+    // Parameter order must match the declared init — fontVariant
+    // precedes fontWeight in Tspan.swift; textDecoration / textTransform
+    // follow rotate.
+    return Tspan(
+        id: 0, content: "",
+        fontFamily: fontFamily, fontSize: fontSize,
+        fontStyle: fontStyle, fontVariant: fontVariant,
+        fontWeight: fontWeight,
+        rotate: rotate,
+        textDecoration: textDecoration,
+        textTransform: textTransform,
+        xmlLang: xmlLang
+    )
+}
+
 func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
+    // Phase 3: route to next-typed-character state when there is an
+    // active edit session with a bare caret (no range selection).
+    // The panel's widget click should prime the session's pending
+    // override rather than rewrite the whole element.
+    if let session = controller.model.currentEditSession,
+       !session.hasSelection {
+        let p = store.getPanelState("character_panel")
+        let doc = controller.model.document
+        if pathIsValid(doc, session.path) {
+            let elem = doc.getElement(session.path)
+            let template = buildPanelPendingTemplate(p, elem)
+            session.clearPendingOverride()
+            if let tpl = template {
+                session.setPendingOverride(tpl)
+            }
+            return
+        }
+    }
+
     let p = store.getPanelState("character_panel")
     var attrs: [String: Any] = [:]
 
