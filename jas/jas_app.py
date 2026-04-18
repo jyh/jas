@@ -262,6 +262,14 @@ class MainWindow(QMainWindow):
             self._yaml_state = StateStore()
         register_color_bar()
 
+        # Character panel → selection apply pipeline. Subscribes once
+        # per lifetime; the panel-scope callback invokes
+        # ``apply_character_panel_to_selection`` on every write,
+        # flowing panel changes through to the selected element
+        # (mirrors the Rust Character-panel wiring).
+        from panels.character_panel_state import subscribe as _subscribe_character_panel
+        _subscribe_character_panel(self._yaml_state, self.active_model)
+
         # Dock pane
         self.dock_panel = DockPanelWidget(self.workspace_layout, get_model=self.active_model,
                                           state_store=self._yaml_state)
