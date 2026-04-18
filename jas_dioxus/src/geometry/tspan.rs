@@ -328,6 +328,118 @@ fn attrs_equal(a: &Tspan, b: &Tspan) -> bool {
         && a.xml_lang == b.xml_lang
 }
 
+/// Extract the covered slice `[char_start, char_end)` of the input
+/// as a fresh tspan list. Each returned tspan carries its source
+/// tspan's overrides and id, with `content` truncated to the
+/// overlap. Empty range → empty Vec. Out-of-range bounds saturate.
+///
+/// Building block for tspan-aware clipboard: `copy_range` produces
+/// the tspan payload to stash, and `insert_tspans_at` consumes it
+/// at paste time.
+pub fn copy_range(original: &[Tspan], char_start: usize, char_end: usize) -> Vec<Tspan> {
+    if char_start >= char_end {
+        return Vec::new();
+    }
+    let total: usize = original.iter().map(|t| t.content.chars().count()).sum();
+    let start = char_start.min(total);
+    let end = char_end.min(total);
+    if start >= end {
+        return Vec::new();
+    }
+
+    let mut result = Vec::new();
+    let mut cursor = 0usize;
+    for t in original {
+        let t_len = t.content.chars().count();
+        let t_start = cursor;
+        let t_end = cursor + t_len;
+        let overlap_start = start.max(t_start);
+        let overlap_end = end.min(t_end);
+        if overlap_start < overlap_end {
+            let local_start = overlap_start - t_start;
+            let local_end = overlap_end - t_start;
+            let byte_start: usize = t.content.chars().take(local_start).map(|c| c.len_utf8()).sum();
+            let byte_end: usize = t.content.chars().take(local_end).map(|c| c.len_utf8()).sum();
+            let mut cloned = t.clone();
+            cloned.content = t.content[byte_start..byte_end].to_string();
+            result.push(cloned);
+        }
+        cursor = t_end;
+    }
+    result
+}
+
+/// Splice `to_insert` into `original` at character position
+/// `char_pos`. When `char_pos` lands inside a tspan, that tspan
+/// splits around the insertion; when at a boundary, the new tspans
+/// slot between neighbours cleanly. Ids on `to_insert` are
+/// reassigned to avoid collision with `original`'s ids, so the
+/// caller can reuse tspans copied from the same or a different
+/// element without worrying about id clashes.
+///
+/// Runs the final `merge` pass so adjacent tspans whose overrides
+/// match collapse automatically.
+pub fn insert_tspans_at(
+    original: &[Tspan],
+    char_pos: usize,
+    to_insert: &[Tspan],
+) -> Vec<Tspan> {
+    // Empty insertion: no-op. Empty-content-only tspans drop out
+    // via merge, so treat them as empty too.
+    let nonempty = to_insert.iter().any(|t| !t.content.is_empty());
+    if !nonempty {
+        return original.to_vec();
+    }
+
+    // Re-id to_insert to sit above original's max id.
+    let base_max = original.iter().map(|t| t.id).max().unwrap_or(0);
+    let mut next_id = base_max + 1;
+    let reindexed: Vec<Tspan> = to_insert.iter().map(|t| {
+        let mut cloned = t.clone();
+        cloned.id = next_id;
+        next_id += 1;
+        cloned
+    }).collect();
+
+    // Split original at char_pos into left / right halves.
+    let total: usize = original.iter().map(|t| t.content.chars().count()).sum();
+    let pos = char_pos.min(total);
+    let mut before: Vec<Tspan> = Vec::new();
+    let mut after: Vec<Tspan> = Vec::new();
+    let mut cursor = 0usize;
+    for t in original {
+        let t_len = t.content.chars().count();
+        let t_end = cursor + t_len;
+        if t_end <= pos {
+            before.push(t.clone());
+        } else if cursor >= pos {
+            after.push(t.clone());
+        } else {
+            let local = pos - cursor;
+            let byte: usize = t.content.chars().take(local).map(|c| c.len_utf8()).sum();
+            let mut left = t.clone();
+            left.content = t.content[..byte].to_string();
+            before.push(left);
+            // Right half gets a fresh id (max + inserted + 1) to
+            // avoid colliding with the left half that keeps the
+            // original id.
+            let mut right = t.clone();
+            right.id = next_id;
+            next_id += 1;
+            right.content = t.content[byte..].to_string();
+            after.push(right);
+        }
+        cursor = t_end;
+    }
+
+    let mut result: Vec<Tspan> =
+        Vec::with_capacity(before.len() + reindexed.len() + after.len());
+    result.extend(before);
+    result.extend(reindexed);
+    result.extend(after);
+    merge(&result)
+}
+
 /// Reconcile a new flat content string back onto the original tspan
 /// structure, preserving per-range attribute overrides where possible.
 ///
@@ -806,5 +918,129 @@ mod tests {
         let r = reconcile_content(&tspans, "ab");
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].content, "ab");
+    }
+
+    // ── copy_range ──────────────────────────────────────────────
+
+    #[test]
+    fn copy_range_empty_returns_empty() {
+        let tspans = vec![plain("hello")];
+        assert!(copy_range(&tspans, 2, 2).is_empty());
+        assert!(copy_range(&tspans, 3, 1).is_empty());
+    }
+
+    #[test]
+    fn copy_range_inside_single_tspan_preserves_overrides() {
+        let tspans = vec![bold("bold text")];
+        let r = copy_range(&tspans, 5, 9);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].content, "text");
+        assert_eq!(r[0].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn copy_range_across_boundary_returns_both_partial_tspans() {
+        // "foo" + bold "bar": copy chars 1..5 → "oo" + "ba"
+        let tspans = vec![plain("foo"), bold("bar")];
+        let r = copy_range(&tspans, 1, 5);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].content, "oo");
+        assert!(r[0].font_weight.is_none());
+        assert_eq!(r[1].content, "ba");
+        assert_eq!(r[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn copy_range_end_saturates_to_total() {
+        let tspans = vec![plain("hi")];
+        let r = copy_range(&tspans, 0, 999);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].content, "hi");
+    }
+
+    // ── insert_tspans_at ────────────────────────────────────────
+
+    #[test]
+    fn insert_tspans_at_boundary_between_tspans() {
+        // "foo" + bold "bar"; insert bold "X" at char_pos=3 (boundary).
+        let base = vec![plain("foo"), bold("bar")];
+        let ins = vec![bold("X")];
+        let r = insert_tspans_at(&base, 3, &ins);
+        // Expect: foo | bold X | bold bar → merge collapses boldX+boldbar
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].content, "foo");
+        assert_eq!(r[1].content, "Xbar");
+        assert_eq!(r[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn insert_tspans_at_inside_a_tspan_splits() {
+        // Plain "hello"; insert bold "X" at char_pos=2.
+        let base = vec![plain("hello")];
+        let ins = vec![bold("X")];
+        let r = insert_tspans_at(&base, 2, &ins);
+        // Expect: plain "he" | bold "X" | plain "llo"
+        assert_eq!(r.len(), 3);
+        assert_eq!(r[0].content, "he");
+        assert!(r[0].font_weight.is_none());
+        assert_eq!(r[1].content, "X");
+        assert_eq!(r[1].font_weight.as_deref(), Some("bold"));
+        assert_eq!(r[2].content, "llo");
+        assert!(r[2].font_weight.is_none());
+    }
+
+    #[test]
+    fn insert_tspans_at_prepend_at_position_zero() {
+        let base = vec![plain("hello")];
+        let ins = vec![bold("Say ")];
+        let r = insert_tspans_at(&base, 0, &ins);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].content, "Say ");
+        assert_eq!(r[0].font_weight.as_deref(), Some("bold"));
+        assert_eq!(r[1].content, "hello");
+    }
+
+    #[test]
+    fn insert_tspans_at_append_at_end() {
+        let base = vec![plain("hello")];
+        let ins = vec![bold("!")];
+        let r = insert_tspans_at(&base, 5, &ins);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].content, "hello");
+        assert_eq!(r[1].content, "!");
+        assert_eq!(r[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn insert_tspans_at_reassigns_ids() {
+        let base = vec![Tspan { id: 0, content: "abc".into(), ..Tspan::default_tspan() }];
+        let ins = vec![
+            Tspan { id: 0, content: "X".into(), font_weight: Some("bold".into()),
+                    ..Tspan::default_tspan() },
+        ];
+        let r = insert_tspans_at(&base, 1, &ins);
+        // All ids must be distinct.
+        let mut ids: Vec<u32> = r.iter().map(|t| t.id).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), r.len());
+    }
+
+    #[test]
+    fn insert_empty_is_noop() {
+        let base = vec![plain("hello")];
+        assert_eq!(insert_tspans_at(&base, 2, &[]), base);
+        assert_eq!(insert_tspans_at(&base, 2, &[plain("")]), base);
+    }
+
+    #[test]
+    fn copy_then_insert_roundtrip_preserves_overrides() {
+        // "foo" + bold "bar": copy "bar", paste at 0 → bold "bar" + "foo" + bold "bar"
+        let base = vec![plain("foo"), bold("bar")];
+        let clipboard = copy_range(&base, 3, 6);
+        let r = insert_tspans_at(&base, 0, &clipboard);
+        assert_eq!(concat_content(&r), "barfoobar");
+        // Original bold "bar" preserved; new prefix "bar" also bold via clipboard.
+        assert!(r.iter().any(|t| t.content.contains("bar") && t.font_weight.as_deref() == Some("bold")));
     }
 }
