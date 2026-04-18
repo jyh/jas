@@ -237,6 +237,38 @@ type transform = {
   f : float;
 }
 
+(** Per-character-range formatting substructure of Text / Text_path.
+    Declared here (rather than in [Tspan]) to break the circular
+    module dep: Text needs to carry a [tspans] field, and [Tspan]
+    needs [transform] from Element. [Tspan] consumes this type and
+    provides the pure-function primitives. See TSPAN.md. *)
+type tspan_id = int
+
+type tspan = {
+  id : tspan_id;
+  content : string;
+  baseline_shift : float option;
+  dx : float option;
+  font_family : string option;
+  font_size : float option;
+  font_style : string option;
+  font_variant : string option;
+  font_weight : string option;
+  jas_aa_mode : string option;
+  jas_fractional_widths : bool option;
+  jas_kerning_mode : string option;
+  jas_no_break : bool option;
+  letter_spacing : float option;
+  line_height : float option;
+  rotate : float option;
+  style_name : string option;
+  text_decoration : string list option;
+  text_rendering : string option;
+  text_transform : string option;
+  transform : transform option;
+  xml_lang : string option;
+}
+
 (** SVG path commands (the 'd' attribute). *)
 type path_command =
   | MoveTo of float * float                                       (** M x y *)
@@ -348,6 +380,8 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      (* See element.mli for the tspans invariant. *)
+      tspans : tspan array;
     }
   | Text_path of {
       d : path_command list;
@@ -375,6 +409,7 @@ type element =
       transform : transform option;
       locked : bool;
       visibility : visibility;
+      tspans : tspan array;
     }
   | Group of {
       children : element array;
@@ -653,6 +688,31 @@ let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = 
 let make_path ?(fill = None) ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d =
   Path { d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview }
 
+(** Build a one-element tspan array that mirrors [content] with no
+    overrides. Seeds the [tspans] field on newly-constructed Text /
+    Text_path elements. *)
+let tspans_from_content (content : string) : tspan array =
+  let default : tspan = {
+    id = 0;
+    content;
+    baseline_shift = None; dx = None;
+    font_family = None; font_size = None;
+    font_style = None; font_variant = None; font_weight = None;
+    jas_aa_mode = None; jas_fractional_widths = None;
+    jas_kerning_mode = None; jas_no_break = None;
+    letter_spacing = None; line_height = None;
+    rotate = None; style_name = None;
+    text_decoration = None; text_rendering = None;
+    text_transform = None; transform = None; xml_lang = None;
+  } in
+  [| default |]
+
+let sync_tspans_from_content elem =
+  match elem with
+  | Text r -> Text { r with tspans = tspans_from_content r.content }
+  | Text_path r -> Text_path { r with tspans = tspans_from_content r.content }
+  | _ -> elem
+
 let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none")
     ?(text_transform = "") ?(font_variant = "") ?(baseline_shift = "")
     ?(line_height = "") ?(letter_spacing = "") ?(xml_lang = "")
@@ -662,7 +722,8 @@ let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = 
   Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration;
          text_transform; font_variant; baseline_shift; line_height; letter_spacing;
          xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
-         text_width; text_height; fill; stroke; opacity; transform; locked; visibility = Preview }
+         text_width; text_height; fill; stroke; opacity; transform; locked; visibility = Preview;
+         tspans = tspans_from_content content }
 
 let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = "normal") ?(font_style = "normal") ?(text_decoration = "none")
     ?(text_transform = "") ?(font_variant = "") ?(baseline_shift = "")
@@ -673,7 +734,8 @@ let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_si
   Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration;
               text_transform; font_variant; baseline_shift; line_height; letter_spacing;
               xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
-              fill; stroke; opacity; transform; locked; visibility = Preview }
+              fill; stroke; opacity; transform; locked; visibility = Preview;
+              tspans = tspans_from_content content }
 
 let make_group ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
   Group { children; opacity; transform; locked; visibility = Preview }

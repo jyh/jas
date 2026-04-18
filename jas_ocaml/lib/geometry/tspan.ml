@@ -1,34 +1,12 @@
-(** Per-character-range formatting substructure of Text and Text_path.
+(** Pure-function primitives over tspan lists.
 
-    See [TSPAN.md]; mirrors [jas_dioxus/src/geometry/tspan.rs] and
+    The [tspan] / [tspan_id] types live in [Element] to break the
+    circular module dep (see the header of [element.mli]). Mirrors
+    [jas_dioxus/src/geometry/tspan.rs] and
     [JasSwift/Sources/Geometry/TspanPrimitives.swift]. *)
 
-type tspan_id = int
-
-type tspan = {
-  id : tspan_id;
-  content : string;
-  baseline_shift : float option;
-  dx : float option;
-  font_family : string option;
-  font_size : float option;
-  font_style : string option;
-  font_variant : string option;
-  font_weight : string option;
-  jas_aa_mode : string option;
-  jas_fractional_widths : bool option;
-  jas_kerning_mode : string option;
-  jas_no_break : bool option;
-  letter_spacing : float option;
-  line_height : float option;
-  rotate : float option;
-  style_name : string option;
-  text_decoration : string list option;
-  text_rendering : string option;
-  text_transform : string option;
-  transform : Element.transform option;
-  xml_lang : string option;
-}
+type tspan_id = Element.tspan_id
+type tspan = Element.tspan
 
 let default_tspan () : tspan = {
   id = 0;
@@ -79,12 +57,12 @@ let has_no_overrides (t : tspan) : bool =
 
 let concat_content (tspans : tspan array) : string =
   let buf = Buffer.create 64 in
-  Array.iter (fun t -> Buffer.add_string buf t.content) tspans;
+  Array.iter (fun (t : tspan) -> Buffer.add_string buf t.content) tspans;
   Buffer.contents buf
 
 let resolve_id (tspans : tspan array) (id : tspan_id) : int option =
   let result = ref None in
-  Array.iteri (fun i t ->
+  Array.iteri (fun i (t : tspan) ->
     if !result = None && t.id = id then result := Some i
   ) tspans;
   !result
@@ -92,7 +70,7 @@ let resolve_id (tspans : tspan array) (id : tspan_id) : int option =
 (** Max id in the list; [-1] when empty (caller adds [+ 1] to get
     the next fresh id, yielding [0] for an empty list). *)
 let _max_id (tspans : tspan array) : tspan_id =
-  Array.fold_left (fun acc t -> if t.id > acc then t.id else acc) (-1) tspans
+  Array.fold_left (fun acc (t : tspan) -> if t.id > acc then t.id else acc) (-1) tspans
 
 let split (tspans : tspan array) (tspan_idx : int) (offset : int)
   : tspan array * int option * int option =
@@ -136,7 +114,7 @@ let split_range (tspans : tspan array) (char_start : int) (char_end : int)
   if char_start > char_end then
     invalid_arg (Printf.sprintf
       "Tspan.split_range: char_start %d > char_end %d" char_start char_end);
-  let total = Array.fold_left (fun acc t -> acc + String.length t.content) 0 tspans in
+  let total = Array.fold_left (fun acc (t : tspan) -> acc + String.length t.content) 0 tspans in
   if char_end > total then
     invalid_arg (Printf.sprintf
       "Tspan.split_range: char_end %d exceeds content length %d" char_end total);
@@ -153,7 +131,7 @@ let split_range (tspans : tspan array) (char_start : int) (char_end : int)
       if !first_idx = None then first_idx := Some idx;
       last_idx := Some idx
     in
-    Array.iter (fun t ->
+    Array.iter (fun (t : tspan) ->
       let len = String.length t.content in
       let span_start = !cursor in
       let span_end = span_start + len in
@@ -218,7 +196,7 @@ let _attrs_equal (a : tspan) (b : tspan) : bool =
   && a.xml_lang = b.xml_lang
 
 let merge (tspans : tspan array) : tspan array =
-  let filtered = Array.to_list tspans |> List.filter (fun t -> t.content <> "") in
+  let filtered = Array.to_list tspans |> List.filter (fun (t : tspan) -> t.content <> "") in
   match filtered with
   | [] -> [| default_tspan () |]
   | head :: rest ->

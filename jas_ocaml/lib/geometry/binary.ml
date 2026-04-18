@@ -393,8 +393,9 @@ let rec unpack_element v =
            width_points = wp;
            opacity; transform; locked; visibility }
   else if tag = tag_text then
+    let content = as_str (List.nth arr 7) in
     Text { x = as_f64 (List.nth arr 5); y = as_f64 (List.nth arr 6);
-           content = as_str (List.nth arr 7);
+           content;
            font_family = as_str (List.nth arr 8);
            font_size = as_f64 (List.nth arr 9);
            font_weight = as_str (List.nth arr 10);
@@ -411,10 +412,12 @@ let rec unpack_element v =
            text_height = as_f64 (List.nth arr 14);
            fill = unpack_fill (List.nth arr 15);
            stroke = unpack_stroke (List.nth arr 16);
-           opacity; transform; locked; visibility }
+           opacity; transform; locked; visibility;
+           tspans = tspans_from_content content }
   else if tag = tag_text_path then
     let cmds = List.map unpack_path_command (as_list (List.nth arr 5)) in
-    Text_path { d = cmds; content = as_str (List.nth arr 6);
+    let content = as_str (List.nth arr 6) in
+    Text_path { d = cmds; content;
                 start_offset = as_f64 (List.nth arr 7);
                 font_family = as_str (List.nth arr 8);
                 font_size = as_f64 (List.nth arr 9);
@@ -427,7 +430,8 @@ let rec unpack_element v =
                 vertical_scale = ""; kerning = "";
                 fill = unpack_fill (List.nth arr 13);
                 stroke = unpack_stroke (List.nth arr 14);
-                opacity; transform; locked; visibility }
+                opacity; transform; locked; visibility;
+                tspans = tspans_from_content content }
   else failwith (Printf.sprintf "unknown element tag: %d" tag)
 
 let unpack_selection v =
