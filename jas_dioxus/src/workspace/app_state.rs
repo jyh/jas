@@ -922,7 +922,42 @@ impl AppState {
                 }
             }
         };
+        let active_tool = self.active_tool;
         let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
+
+        // Phase 3: route to next-typed-character state when there is
+        // an active edit session with a bare caret (no range
+        // selection). The panel's widget click should prime the
+        // session's pending override rather than rewrite the whole
+        // element.
+        let pending_route: Option<(Vec<usize>, Option<crate::geometry::tspan::Tspan>)> = {
+            let doc = tab.model.document();
+            let session_path_and_selection =
+                tab.tools.get_mut(&active_tool).and_then(|tool| {
+                    let s = tool.edit_session_mut()?;
+                    if s.has_selection() { return None; }
+                    Some(s.path.clone())
+                });
+            session_path_and_selection.and_then(|path| {
+                let elem = doc.get_element(&path)?;
+                let template = build_panel_pending_template(&cp, elem);
+                Some((path, template))
+            })
+        };
+        if let Some((_path, template)) = pending_route {
+            let tool = tab.tools.get_mut(&active_tool).unwrap();
+            let session = tool.edit_session_mut().unwrap();
+            // Replace semantics: the panel state is authoritative for
+            // the next-typed-character override. Clear first, then
+            // merge the new template so subsequent panel clicks with
+            // the same attributes don't accumulate duplicates.
+            session.clear_pending_override();
+            if let Some(tspan) = template {
+                session.set_pending_override(&tspan);
+            }
+            return;
+        }
+
         let target_paths: Vec<Vec<usize>> = {
             let doc = tab.model.document();
             doc.selection
@@ -991,6 +1026,110 @@ impl AppState {
             }
         }
     }
+}
+
+/// Build a `Tspan` override template from the Character panel state
+/// that contains only the fields where the panel differs from the
+/// currently-edited element. Returns `None` when everything matches.
+///
+/// Scope (Phase 3 MVP): font-family, font-size, font-weight,
+/// font-style, text-decoration, text-transform, font-variant,
+/// xml-lang, rotate. Complex attributes (baseline-shift with
+/// super/sub, kerning modes, transform-based scales) aren't yet
+/// supported as pending overrides and are left out of the template —
+/// the panel still writes those to the element normally.
+pub(crate) fn build_panel_pending_template(
+    cp: &CharacterPanelState,
+    elem: &crate::geometry::element::Element,
+) -> Option<crate::geometry::tspan::Tspan> {
+    use crate::geometry::element::Element;
+    use crate::geometry::tspan::Tspan;
+    let (elem_ff, elem_fs, elem_fw, elem_fst, elem_td, elem_tt, elem_fv,
+         elem_xl, elem_rot) = match elem {
+        Element::Text(t) => (
+            &t.font_family, t.font_size, &t.font_weight, &t.font_style,
+            &t.text_decoration, &t.text_transform, &t.font_variant,
+            &t.xml_lang, &t.rotate,
+        ),
+        Element::TextPath(tp) => (
+            &tp.font_family, tp.font_size, &tp.font_weight, &tp.font_style,
+            &tp.text_decoration, &tp.text_transform, &tp.font_variant,
+            &tp.xml_lang, &tp.rotate,
+        ),
+        _ => return None,
+    };
+    let mut t = Tspan::default_tspan();
+    let mut any = false;
+    if cp.font_family != *elem_ff {
+        t.font_family = Some(cp.font_family.clone());
+        any = true;
+    }
+    if (cp.font_size - elem_fs).abs() > 1e-6 {
+        t.font_size = Some(cp.font_size);
+        any = true;
+    }
+    if let Some((fw, fst)) = parse_style_name(&cp.style_name) {
+        if fw != *elem_fw {
+            t.font_weight = Some(fw);
+            any = true;
+        }
+        if fst != *elem_fst {
+            t.font_style = Some(fst);
+            any = true;
+        }
+    }
+    // text-decoration: parse both sides into sorted sets, so CSS
+    // "none" and "" (no decoration) collapse to the same value.
+    let panel_td: Vec<String> = {
+        let s = text_decoration_from_flags(cp.underline, cp.strikethrough);
+        let mut v: Vec<String> = s.split_whitespace().map(String::from).collect();
+        v.sort();
+        v
+    };
+    let elem_td_parsed: Vec<String> = {
+        let mut v: Vec<String> = elem_td
+            .split_whitespace()
+            .filter(|tok| *tok != "none")
+            .map(String::from)
+            .collect();
+        v.sort();
+        v
+    };
+    if panel_td != elem_td_parsed {
+        t.text_decoration = Some(panel_td);
+        any = true;
+    }
+    // text-transform: All Caps flag → "uppercase" or "".
+    let tt = if cp.all_caps { "uppercase" } else { "" };
+    if tt != elem_tt.as_str() {
+        t.text_transform = Some(tt.to_string());
+        any = true;
+    }
+    // font-variant: Small Caps flag → "small-caps" (when All Caps is off).
+    let fv = if cp.small_caps && !cp.all_caps { "small-caps" } else { "" };
+    if fv != elem_fv.as_str() {
+        t.font_variant = Some(fv.to_string());
+        any = true;
+    }
+    if cp.language != *elem_xl {
+        t.xml_lang = Some(cp.language.clone());
+        any = true;
+    }
+    // Character rotation: f64 on the panel, string on the element.
+    let rot_str = if cp.character_rotation == 0.0 {
+        String::new()
+    } else {
+        fmt_num(cp.character_rotation)
+    };
+    if rot_str != *elem_rot {
+        t.rotate = if cp.character_rotation == 0.0 {
+            None
+        } else {
+            Some(cp.character_rotation)
+        };
+        if t.rotate.is_some() { any = true; }
+    }
+    if any { Some(t) } else { None }
 }
 
 /// Format a number for CSS length/value output: integers have no
@@ -1081,4 +1220,76 @@ pub(crate) fn text_decoration_flags(td: &str) -> (bool, bool) {
         }
     }
     (underline, strikethrough)
+}
+
+#[cfg(test)]
+mod pending_override_tests {
+    use super::*;
+    use crate::geometry::element::Element;
+
+    // ── build_panel_pending_template direct tests ──────────
+
+    #[test]
+    fn template_empty_when_panel_matches_element() {
+        // Align the panel defaults to the element's defaults first
+        // (font_size, font_family, language), then verify no diff.
+        let t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        let mut cp = CharacterPanelState::default();
+        cp.font_size = t.font_size;
+        cp.font_family = t.font_family.clone();
+        cp.language = t.xml_lang.clone();
+        let tpl = build_panel_pending_template(&cp, &Element::Text(t));
+        assert!(tpl.is_none());
+    }
+
+    #[test]
+    fn template_bold_sets_font_weight_only() {
+        let mut cp = CharacterPanelState::default();
+        let t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        cp.font_size = t.font_size;
+        cp.font_family = t.font_family.clone();
+        cp.language = t.xml_lang.clone();
+        cp.style_name = "Bold".into();
+        let tpl = build_panel_pending_template(&cp, &Element::Text(t)).unwrap();
+        assert_eq!(tpl.font_weight.as_deref(), Some("bold"));
+        // Regular element's font_style is "normal" and Bold parses to
+        // ("bold", "normal") — so font_style doesn't differ and is omitted.
+        assert!(tpl.font_style.is_none());
+        assert!(tpl.font_family.is_none());
+        assert!(tpl.font_size.is_none());
+    }
+
+    #[test]
+    fn template_font_size_differs() {
+        let mut cp = CharacterPanelState::default();
+        let t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        cp.font_family = t.font_family.clone();
+        cp.font_size = 24.0;  // element has 16
+        let tpl = build_panel_pending_template(&cp, &Element::Text(t)).unwrap();
+        assert_eq!(tpl.font_size, Some(24.0));
+    }
+
+    #[test]
+    fn template_text_decoration_underline_flag() {
+        let mut cp = CharacterPanelState::default();
+        let t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        cp.font_size = t.font_size;
+        cp.font_family = t.font_family.clone();
+        cp.language = t.xml_lang.clone();
+        cp.underline = true;
+        let tpl = build_panel_pending_template(&cp, &Element::Text(t)).unwrap();
+        assert_eq!(tpl.text_decoration, Some(vec!["underline".to_string()]));
+    }
+
+    #[test]
+    fn template_all_caps_sets_text_transform() {
+        let mut cp = CharacterPanelState::default();
+        let t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        cp.font_size = t.font_size;
+        cp.font_family = t.font_family.clone();
+        cp.language = t.xml_lang.clone();
+        cp.all_caps = true;
+        let tpl = build_panel_pending_template(&cp, &Element::Text(t)).unwrap();
+        assert_eq!(tpl.text_transform.as_deref(), Some("uppercase"));
+    }
 }
