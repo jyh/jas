@@ -158,14 +158,29 @@ public final class TextEditSession {
 
     /// Build a new Document with this session's content applied to `path`.
     /// Returns nil if the path no longer points at a compatible element.
+    ///
+    /// Tspan preservation rule: when the session flat content matches
+    /// the current concatenation of the element's tspans, the
+    /// original tspan structure (and per-range overrides) is
+    /// preserved. Any content change falls back to collapsing into a
+    /// single default tspan via `with(content:)`. Mirrors the Rust
+    /// first-pass tspan-preserving behaviour — full tspan-aware
+    /// editing lands later.
     public func applyToDocument(_ doc: Document) -> Document? {
         // Defensive: avoid out-of-range crashes if the path is stale.
         guard pathIsValid(doc, path) else { return nil }
         let elem = doc.getElement(path)
         switch (target, elem) {
         case (.text, .text(let t)):
+            if concatTspanContent(t.tspans) == content {
+                // No content change — keep the original tspans.
+                return doc
+            }
             return doc.replaceElement(path, with: .text(t.with(content: content)))
         case (.textPath, .textPath(let tp)):
+            if concatTspanContent(tp.tspans) == content {
+                return doc
+            }
             return doc.replaceElement(path, with: .textPath(tp.with(content: content)))
         default:
             return nil

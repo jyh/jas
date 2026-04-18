@@ -131,15 +131,33 @@ let copy_selection t =
     Some (Text_layout.utf8_sub t.content lo (hi - lo))
 
 let apply_to_document t doc =
+  (* Tspan preservation: when the session flat content matches the
+     current concatenation of the element's tspans, the original
+     tspans pass through unchanged. Any content change collapses the
+     tspans into a single default tspan derived from the new
+     content — mirrors the Rust / Swift first pass. Full tspan-aware
+     editing (caret split, merge on paste) is a follow-up. *)
   try
     let elem = Document.get_element doc t.path in
     match t.target, elem with
     | Edit_text, Element.Text r ->
-      let new_elem = Element.Text { r with content = t.content } in
-      Some (Document.replace_element doc t.path new_elem)
+      if Tspan.concat_content r.tspans = t.content then
+        Some doc
+      else
+        let new_elem = Element.Text { r with
+          content = t.content;
+          tspans = Element.tspans_from_content t.content
+        } in
+        Some (Document.replace_element doc t.path new_elem)
     | Edit_text_path, Element.Text_path r ->
-      let new_elem = Element.Text_path { r with content = t.content } in
-      Some (Document.replace_element doc t.path new_elem)
+      if Tspan.concat_content r.tspans = t.content then
+        Some doc
+      else
+        let new_elem = Element.Text_path { r with
+          content = t.content;
+          tspans = Element.tspans_from_content t.content
+        } in
+        Some (Document.replace_element doc t.path new_elem)
     | _ -> None
   with _ -> None
 
