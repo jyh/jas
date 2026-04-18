@@ -132,6 +132,12 @@ type tspan = {
   jas_fractional_widths : bool option;
   jas_kerning_mode : string option;
   jas_no_break : bool option;
+  (** Marks a tspan as a paragraph wrapper when set to [Some "paragraph"].
+      Wrapper tspans implicitly group subsequent content tspans (until
+      the next wrapper) into one paragraph for the Paragraph panel.
+      Phase 1a only round-trips this marker; the paragraph attribute
+      fields and Enter/Backspace edit primitives land in Phase 1b. *)
+  jas_role : string option;
   letter_spacing : float option;
   line_height : float option;
   rotate : float option;

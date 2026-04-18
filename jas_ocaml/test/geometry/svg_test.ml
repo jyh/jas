@@ -656,5 +656,31 @@ let () =
           assert (tspans.(1).rotate = Some 90.0);
           assert (tspans.(2).rotate = Some 0.0)
         | _ -> assert false);
+
+      Alcotest.test_case "jas_role emitted on tspan in document SVG" `Quick (fun () ->
+        (* Phase 1a: a wrapper Tspan with jas_role="paragraph" emits
+           urn:jas:1:role="paragraph" on the <tspan> element. Full
+           document round-trip through Xmlm is deferred to Phase 1b
+           alongside the xmlns:jas namespace work. *)
+        let base = make_text 0.0 0.0 "AB" in
+        let input = match base with
+          | Text r ->
+            let tspans = [|
+              { (Jas.Tspan.default_tspan ()) with
+                id = 0; content = ""; jas_role = Some "paragraph" };
+              { (Jas.Tspan.default_tspan ()) with
+                id = 1; content = "hello" };
+            |] in
+            Text { r with tspans }
+          | _ -> assert false
+        in
+        let doc = make_document [|make_layer [| input |]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        assert (try let _ : int = Str.search_forward
+            (Str.regexp_string {|urn:jas:1:role="paragraph"|}) svg 0 in true
+                with Not_found -> false);
+        assert (try let _ : int = Str.search_forward
+            (Str.regexp_string ">hello</tspan>") svg 0 in true
+                with Not_found -> false));
     ];
   ]
