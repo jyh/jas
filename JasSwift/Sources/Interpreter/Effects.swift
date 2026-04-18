@@ -370,12 +370,40 @@ private func runOne(
                 store.setDialog(key, valueToAny(value))
             }
         }
+        // Capture preview snapshot if the dialog declares preview_targets.
+        // Restored on close_dialog unless first cleared by an OK action via
+        // clear_dialog_snapshot.
+        if let targetsObj = dlgDef["preview_targets"] as? [String: Any] {
+            var targets: [String: String] = [:]
+            for (k, v) in targetsObj {
+                if let s = v as? String { targets[k] = s }
+            }
+            store.captureDialogSnapshot(targets)
+        }
         return
     }
 
     // close_dialog: null or dialog_id
     if effect.keys.contains("close_dialog") {
+        // Preview restore: if a snapshot survived (i.e., no OK action
+        // cleared it), revert each target to its captured original value.
+        // Phase 0 handles only top-level state keys.
+        if let snapshot = store.getDialogSnapshot() {
+            for (key, value) in snapshot {
+                if !key.contains(".") {
+                    store.set(key, value)
+                }
+            }
+            store.clearDialogSnapshot()
+        }
         store.closeDialog()
+        return
+    }
+
+    // clear_dialog_snapshot: drop the preview snapshot so close_dialog
+    // does not restore. OK actions emit this before close_dialog to commit.
+    if effect.keys.contains("clear_dialog_snapshot") {
+        store.clearDialogSnapshot()
         return
     }
 

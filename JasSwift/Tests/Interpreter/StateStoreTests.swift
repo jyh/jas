@@ -120,6 +120,45 @@ import Testing
     #expect(store.getDialog("y") as? Int == 2)
 }
 
+// MARK: - Dialog preview snapshot/restore (Phase 0)
+//
+// captureDialogSnapshot copies the current value of every state key
+// referenced by a dialog's preview_targets. Phase 0 supports only
+// top-level state keys; deep paths are silently skipped and will be
+// added with their first real consumer in Phase 8/9.
+
+@Test func dialogSnapshotCaptureAndGet() {
+    let store = StateStore(defaults: ["left_indent": 12, "right_indent": 0])
+    store.captureDialogSnapshot([
+        "dlg_left": "left_indent",
+        "dlg_right": "right_indent",
+    ])
+    let snap = store.getDialogSnapshot()
+    #expect(snap?["left_indent"] as? Int == 12)
+    #expect(snap?["right_indent"] as? Int == 0)
+    #expect(store.hasDialogSnapshot())
+}
+
+@Test func dialogSnapshotClearDropsIt() {
+    let store = StateStore(defaults: ["x": 1])
+    store.captureDialogSnapshot(["k": "x"])
+    #expect(store.hasDialogSnapshot())
+    store.clearDialogSnapshot()
+    #expect(!store.hasDialogSnapshot())
+    #expect(store.getDialogSnapshot() == nil)
+}
+
+@Test func dialogSnapshotSkipsDeepPathsForPhase0() {
+    let store = StateStore(defaults: ["flat": 1])
+    store.captureDialogSnapshot([
+        "a": "flat",
+        "b": "selection.deep.path",
+    ])
+    let snap = store.getDialogSnapshot()
+    #expect(snap?["flat"] != nil)
+    #expect(snap?["selection.deep.path"] == nil)
+}
+
 // MARK: - Eval context
 
 @Test func evalContextBasic() {
