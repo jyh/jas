@@ -652,6 +652,66 @@ class SvgImportTest(absltest.TestCase):
         self.assertAlmostEqual(elem.fill.color.g, 130 / 255, places=2)
         self.assertAlmostEqual(elem.fill.color.b, 180 / 255, places=2)
 
+    # ── Tspan rotate roundtrip (multi-value handling) ───────────────
+
+    def _svg_with_tspan(self, markup: str) -> str:
+        return ('<?xml version="1.0" encoding="UTF-8"?>'
+                '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">'
+                f'<text x="0" y="20" font-size="12">{markup}</text>'
+                '</svg>')
+
+    def test_svg_single_value_tspan_rotate_roundtrip(self):
+        svg = self._svg_with_tspan('<tspan rotate="30">abc</tspan>')
+        doc = svg_to_document(svg)
+        elem = doc.layers[0].children[0]
+        self.assertEqual(len(elem.tspans), 1)
+        self.assertEqual(elem.tspans[0].content, "abc")
+        self.assertEqual(elem.tspans[0].rotate, 30.0)
+
+    def test_svg_multi_value_tspan_rotate_splits_per_glyph(self):
+        svg = self._svg_with_tspan('<tspan rotate="45 90 0">abc</tspan>')
+        doc = svg_to_document(svg)
+        elem = doc.layers[0].children[0]
+        self.assertEqual(len(elem.tspans), 3)
+        self.assertEqual(elem.tspans[0].content, "a")
+        self.assertEqual(elem.tspans[0].rotate, 45.0)
+        self.assertEqual(elem.tspans[1].content, "b")
+        self.assertEqual(elem.tspans[1].rotate, 90.0)
+        self.assertEqual(elem.tspans[2].content, "c")
+        self.assertEqual(elem.tspans[2].rotate, 0.0)
+        self.assertEqual(elem.tspans[0].id, 0)
+        self.assertEqual(elem.tspans[1].id, 1)
+        self.assertEqual(elem.tspans[2].id, 2)
+
+    def test_svg_multi_value_tspan_rotate_reuses_last_angle(self):
+        svg = self._svg_with_tspan('<tspan rotate="45 90">abcd</tspan>')
+        doc = svg_to_document(svg)
+        elem = doc.layers[0].children[0]
+        self.assertEqual(len(elem.tspans), 4)
+        self.assertEqual(elem.tspans[0].rotate, 45.0)
+        self.assertEqual(elem.tspans[1].rotate, 90.0)
+        self.assertEqual(elem.tspans[2].rotate, 90.0)
+        self.assertEqual(elem.tspans[3].rotate, 90.0)
+
+    def test_svg_per_glyph_tspan_rotate_full_roundtrip(self):
+        from geometry.element import Layer, Text
+        from geometry.tspan import Tspan
+        t = Text(
+            x=10, y=20, content="abc",
+            tspans=(
+                Tspan(id=0, content="a", rotate=45.0),
+                Tspan(id=1, content="b", rotate=90.0),
+                Tspan(id=2, content="c", rotate=0.0),
+            ))
+        layer = Layer(children=(t,))
+        doc = Document(layers=(layer,))
+        doc2 = self._roundtrip(doc)
+        elem = doc2.layers[0].children[0]
+        self.assertEqual(len(elem.tspans), 3)
+        self.assertEqual(elem.tspans[0].rotate, 45.0)
+        self.assertEqual(elem.tspans[1].rotate, 90.0)
+        self.assertEqual(elem.tspans[2].rotate, 0.0)
+
 
 if __name__ == "__main__":
     absltest.main()

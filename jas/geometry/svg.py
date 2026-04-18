@@ -100,6 +100,13 @@ def _tspan_svg(t) -> str:
     if t.text_decoration is not None and t.text_decoration:
         joined = " ".join(t.text_decoration)
         attrs += f' text-decoration="{escape(joined)}"'
+    # Per-tspan rotation. Our model stores a single float per tspan,
+    # so per-glyph varying rotations require each glyph to live in
+    # its own tspan (enforced by the Touch Type tool). SVG's
+    # multi-value ``rotate="a1 a2 …"`` is handled on the parse side
+    # by splitting the tspan into one per glyph.
+    if t.rotate is not None:
+        attrs += f' rotate="{_fmt(t.rotate)}"'
     return f"<tspan{attrs}>{escape(t.content)}</tspan>"
 
 
@@ -625,11 +632,14 @@ _SVG_NS = "http://www.w3.org/2000/svg"
 _INKSCAPE_NS = "http://www.inkscape.org/namespaces/inkscape"
 
 
-def _parse_tspan(node, tspan_id: int):
-    """Parse an SVG ``<tspan>`` child node into a Tspan. Only attributes
-    present on the node become non-None overrides; absent attributes
-    remain None (tspan inherits from the parent element). Mirrors the
-    Rust / Swift / OCaml ``parse_tspan``.
+def _parse_tspan(node) -> list:
+    """Parse an SVG ``<tspan>`` child node into one or more Tspans.
+
+    Returns a list so SVG's multi-value ``rotate="a1 a2 a3 …"`` can
+    be expanded into one tspan per glyph (each carrying its own
+    rotate angle). The single-value case returns a one-element
+    list. Ids are left at 0; the caller assigns fresh sequential
+    ids across the whole tspan list.
     """
     from geometry.tspan import Tspan
     content = node.text or ""
@@ -645,26 +655,52 @@ def _parse_tspan(node, tspan_id: int):
         decoration: tuple[str, ...] | None = tuple(parts)
     else:
         decoration = None
-    return Tspan(
-        id=tspan_id, content=content,
+    rotate_raw = node.get("rotate")
+    rotate_vals: list[float] = []
+    if rotate_raw is not None:
+        for p in rotate_raw.split():
+            try:
+                rotate_vals.append(float(p))
+            except ValueError:
+                pass
+    base_kwargs = dict(
         font_family=font_family, font_size=font_size,
         font_style=font_style, font_weight=font_weight,
         text_decoration=decoration,
     )
+    if not rotate_vals:
+        return [Tspan(id=0, content=content, **base_kwargs)]
+    if len(rotate_vals) == 1 or len(content) <= 1:
+        return [Tspan(id=0, content=content, rotate=rotate_vals[0],
+                       **base_kwargs)]
+    # Multi-value rotate: split the tspan into one per glyph. Each
+    # inherits the other override fields and gets the matching
+    # rotate angle; the last angle is reused for any trailing glyphs
+    # past the end of the list (per SVG spec).
+    last_angle = rotate_vals[-1]
+    out = []
+    for i, ch in enumerate(content):
+        angle = rotate_vals[i] if i < len(rotate_vals) else last_angle
+        out.append(Tspan(id=0, content=ch, rotate=angle, **base_kwargs))
+    return out
 
 
 def _collect_tspan_children(node):
     """Collect ``<tspan>`` children from an ElementTree node, in
     document order. Returns an empty tuple when none are present —
     the caller falls back to flat-content parsing.
+
+    When a child's ``rotate`` attribute is multi-valued and the
+    child has multiple characters, the tspan is split on parse into
+    one per glyph — see :func:`_parse_tspan`. Ids are renumbered
+    sequentially across the full flattened list.
     """
-    result = []
-    next_id = 0
+    from dataclasses import replace
+    flat = []
     for child in node:
         if _strip_ns(child.tag) == "tspan":
-            result.append(_parse_tspan(child, next_id))
-            next_id += 1
-    return tuple(result)
+            flat.extend(_parse_tspan(child))
+    return tuple(replace(t, id=i) for i, t in enumerate(flat))
 
 
 def _strip_ns(tag: str) -> str:
