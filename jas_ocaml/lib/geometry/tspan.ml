@@ -22,6 +22,7 @@ let default_tspan () : tspan = {
   jas_fractional_widths = None;
   jas_kerning_mode = None;
   jas_no_break = None;
+  jas_role = None;
   letter_spacing = None;
   line_height = None;
   rotate = None;
@@ -45,6 +46,7 @@ let has_no_overrides (t : tspan) : bool =
   && t.jas_fractional_widths = None
   && t.jas_kerning_mode = None
   && t.jas_no_break = None
+  && t.jas_role = None
   && t.letter_spacing = None
   && t.line_height = None
   && t.rotate = None
@@ -133,6 +135,7 @@ let _tspan_from_json (i : int) (j : Yojson.Safe.t) : tspan =
     jas_fractional_widths = get_bool "jas_fractional_widths";
     jas_kerning_mode = get_str "jas_kerning_mode";
     jas_no_break = get_bool "jas_no_break";
+    jas_role = get_str "jas_role";
     letter_spacing = get_float "letter_spacing";
     line_height = get_float "line_height";
     rotate = get_float "rotate";
@@ -196,6 +199,7 @@ let tspans_to_svg_fragment (tspans : tspan array) : string =
     (match t.jas_fractional_widths with Some v -> add "jas:fractional-widths" (string_of_bool v) | None -> ());
     (match t.jas_kerning_mode with Some v -> add "jas:kerning-mode" v | None -> ());
     (match t.jas_no_break with Some v -> add "jas:no-break" (string_of_bool v) | None -> ());
+    (match t.jas_role with Some v -> add "jas:role" v | None -> ());
     (match t.letter_spacing with Some v -> add "letter-spacing" (_fmt_float v) | None -> ());
     (match t.line_height with Some v -> add "line-height" (_fmt_float v) | None -> ());
     (match t.rotate with Some v -> add "rotate" (_fmt_float v) | None -> ());
@@ -301,6 +305,7 @@ let tspans_from_svg_fragment (svg_str : string) : tspan array option =
             | "jas:fractional-widths" -> { cur with jas_fractional_widths = Some (v = "true") }
             | "jas:kerning-mode" -> { cur with jas_kerning_mode = Some v }
             | "jas:no-break" -> { cur with jas_no_break = Some (v = "true") }
+            | "jas:role" -> { cur with jas_role = Some v }
             | "letter-spacing" -> { cur with letter_spacing = float_of_string_opt v }
             | "line-height" -> { cur with line_height = float_of_string_opt v }
             | "rotate" -> { cur with rotate = float_of_string_opt v }
@@ -338,6 +343,7 @@ let merge_tspan_overrides (target : tspan) (source : tspan) : tspan =
     jas_fractional_widths = or_some source.jas_fractional_widths target.jas_fractional_widths;
     jas_kerning_mode = or_some source.jas_kerning_mode target.jas_kerning_mode;
     jas_no_break = or_some source.jas_no_break target.jas_no_break;
+    jas_role = or_some source.jas_role target.jas_role;
     letter_spacing = or_some source.letter_spacing target.letter_spacing;
     line_height = or_some source.line_height target.line_height;
     rotate = or_some source.rotate target.rotate;
@@ -584,6 +590,7 @@ let _attrs_equal (a : tspan) (b : tspan) : bool =
   && a.jas_fractional_widths = b.jas_fractional_widths
   && a.jas_kerning_mode = b.jas_kerning_mode
   && a.jas_no_break = b.jas_no_break
+  && a.jas_role = b.jas_role
   && a.letter_spacing = b.letter_spacing
   && a.line_height = b.line_height
   && a.rotate = b.rotate

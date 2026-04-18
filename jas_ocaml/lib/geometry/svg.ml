@@ -146,13 +146,15 @@ let tspan_svg (t : Element.tspan) : string =
     | Some v -> Printf.sprintf " rotate=\"%s\"" (fmt v)
     | None -> ""
   in
-  Printf.sprintf "<tspan%s%s%s%s%s%s>%s</tspan>"
+  let role_attr = attr_str "urn:jas:1:role" t.jas_role in
+  Printf.sprintf "<tspan%s%s%s%s%s%s%s>%s</tspan>"
     (attr_str "font-family" t.font_family)
     (attr_f "font-size" t.font_size)
     (attr_str "font-weight" t.font_weight)
     (attr_str "font-style" t.font_style)
     decor_attr
     rotate_attr
+    role_attr
     (escape_xml t.content)
 
 let rec element_svg indent (elem : Element.element) =
@@ -734,6 +736,7 @@ and parse_tspan_body i attrs : Element.tspan list =
     font_weight = get_attr a "font-weight";
     font_style = get_attr a "font-style";
     text_decoration = decoration;
+    jas_role = get_attr a "urn:jas:1:role";
   } in
   match rotate_vals with
   | [] -> [base]

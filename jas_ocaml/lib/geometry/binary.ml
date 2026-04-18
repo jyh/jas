@@ -169,6 +169,7 @@ let pack_tspan (t : Element.tspan) : Msgpck.t =
     opt_str t.text_transform;
     transform;
     opt_str t.xml_lang;
+    opt_str t.jas_role;
   ]
 
 (** Inverse of [pack_tspan]. Tolerant of trailing field additions —
@@ -208,6 +209,7 @@ let unpack_tspan v : Element.tspan =
     text_transform = as_opt_str (get 19);
     transform;
     xml_lang = as_opt_str (get 21);
+    jas_role = as_opt_str (get 22);
   }
 
 let pack_path_command = function

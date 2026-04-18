@@ -258,6 +258,7 @@ type tspan = {
   jas_fractional_widths : bool option;
   jas_kerning_mode : string option;
   jas_no_break : bool option;
+  jas_role : string option;
   letter_spacing : float option;
   line_height : float option;
   rotate : float option;
@@ -700,6 +701,7 @@ let tspans_from_content (content : string) : tspan array =
     font_style = None; font_variant = None; font_weight = None;
     jas_aa_mode = None; jas_fractional_widths = None;
     jas_kerning_mode = None; jas_no_break = None;
+    jas_role = None;
     letter_spacing = None; line_height = None;
     rotate = None; style_name = None;
     text_decoration = None; text_rendering = None;

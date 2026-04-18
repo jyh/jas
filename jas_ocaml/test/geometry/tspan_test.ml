@@ -93,6 +93,7 @@ let tspan_of_json v : tspan =
     jas_fractional_widths = opt "jas_fractional_widths" opt_bool;
     jas_kerning_mode = opt "jas_kerning_mode" opt_string;
     jas_no_break = opt "jas_no_break" opt_bool;
+    jas_role = opt "jas_role" opt_string;
     letter_spacing = opt "letter_spacing" opt_float;
     line_height = opt "line_height" opt_float;
     rotate = opt "rotate" opt_float;
@@ -479,5 +480,25 @@ let () =
       Alcotest.test_case "reassigns_ids" `Quick insert_reassigns_ids_test;
       Alcotest.test_case "empty_is_noop" `Quick insert_empty_is_noop_test;
       Alcotest.test_case "copy_then_insert_roundtrip" `Quick copy_then_insert_roundtrip_test;
+    ];
+    "jas_role (Phase 1a)", [
+      (* Paragraph wrapper tspans are tagged with jas:role="paragraph".
+         Phase 1a only persists the role marker through clipboard SVG
+         round-trips; paragraph attribute fields and Enter/Backspace
+         edit primitives land in Phase 1b. *)
+      Alcotest.test_case "default_tspan_has_no_role" `Quick (fun () ->
+        assert ((default_tspan ()).jas_role = None));
+      Alcotest.test_case "has_no_overrides_false_when_jas_role_set" `Quick (fun () ->
+        let t = { (default_tspan ()) with jas_role = Some "paragraph" } in
+        assert (not (has_no_overrides t)));
+      Alcotest.test_case "svg_fragment_jas_role_round_trip" `Quick (fun () ->
+        let t = { (default_tspan ()) with content = ""; jas_role = Some "paragraph" } in
+        let svg = tspans_to_svg_fragment [| t |] in
+        let pat = Str.regexp_string "jas:role=\"paragraph\"" in
+        let _ = Str.search_forward pat svg 0 in
+        match tspans_from_svg_fragment svg with
+        | Some [| back |] ->
+          assert (back.jas_role = Some "paragraph")
+        | _ -> assert false);
     ];
   ]
