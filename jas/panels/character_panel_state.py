@@ -139,11 +139,30 @@ def _attrs_from_panel(panel: dict) -> dict[str, Any]:
     attrs["line_height"] = "" if abs(leading - fs_num * 1.2) < 1e-6 \
         else _fmt_num(leading) + "pt"
 
-    # tracking / kerning (1/1000 em) -> letter_spacing / kerning.
+    # tracking (1/1000 em) -> letter_spacing.
     tracking = float(panel.get("tracking") or 0.0)
-    kerning = float(panel.get("kerning") or 0.0)
     attrs["letter_spacing"] = "" if tracking == 0.0 else _fmt_num(tracking / 1000.0) + "em"
-    attrs["kerning"] = "" if kerning == 0.0 else _fmt_num(kerning / 1000.0) + "em"
+
+    # kerning combo_box: named modes (Auto / Optical / Metrics) pass
+    # through verbatim; numeric strings are 1/1000 em and convert to
+    # "{N}em". Empty / "0" / "Auto" all omit (the element default).
+    # Legacy numeric panel values also land here via the else branch.
+    k_raw = panel.get("kerning")
+    if isinstance(k_raw, str):
+        k = k_raw.strip()
+        if k in ("", "0", "Auto"):
+            attrs["kerning"] = ""
+        elif k in ("Optical", "Metrics"):
+            attrs["kerning"] = k
+        else:
+            try:
+                n = float(k)
+                attrs["kerning"] = "" if n == 0.0 else _fmt_num(n / 1000.0) + "em"
+            except ValueError:
+                attrs["kerning"] = ""
+    else:
+        k = float(k_raw or 0.0)
+        attrs["kerning"] = "" if k == 0.0 else _fmt_num(k / 1000.0) + "em"
 
     # character_rotation (degrees).
     rot = float(panel.get("character_rotation") or 0.0)
