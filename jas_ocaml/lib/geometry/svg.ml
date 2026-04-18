@@ -137,12 +137,22 @@ let tspan_svg (t : Element.tspan) : string =
       Printf.sprintf " text-decoration=\"%s\"" (escape_xml (String.concat " " ds))
     | _ -> ""
   in
-  Printf.sprintf "<tspan%s%s%s%s%s>%s</tspan>"
+  (* Per-tspan rotation. Our model stores a single float per tspan,
+     so per-glyph varying rotations require each glyph to live in its
+     own tspan (enforced by the Touch Type tool). SVG's multi-value
+     [rotate="a1 a2 …"] form is handled on the parse side by
+     splitting the tspan into one per glyph. *)
+  let rotate_attr = match t.rotate with
+    | Some v -> Printf.sprintf " rotate=\"%s\"" (fmt v)
+    | None -> ""
+  in
+  Printf.sprintf "<tspan%s%s%s%s%s%s>%s</tspan>"
     (attr_str "font-family" t.font_family)
     (attr_f "font-size" t.font_size)
     (attr_str "font-weight" t.font_weight)
     (attr_str "font-style" t.font_style)
     decor_attr
+    rotate_attr
     (escape_xml t.content)
 
 let rec element_svg indent (elem : Element.element) =
@@ -677,10 +687,14 @@ let rec parse_element i =
     elem
   | _ -> None
 
-and parse_tspan_body i attrs id : Element.tspan =
-  (* Consume the body of a <tspan> start, returning the parsed tspan
-     with overrides populated from attrs and content from text data
-     children. Called after the start event has been read. *)
+and parse_tspan_body i attrs : Element.tspan list =
+  (* Consume the body of a <tspan> start, returning one or more
+     parsed tspans. Returns multiple tspans (one per glyph) when the
+     SVG attribute [rotate="a b c …"] lists more than one angle and
+     the content has multiple characters — the only legal way to
+     express per-glyph varying rotates in our single-value-per-tspan
+     model. Ids are left at 0; the caller assigns fresh sequential
+     ids across the whole tspan list. *)
   let a = attrs_of_xmlm_attrs attrs in
   let content_buf = Buffer.create 16 in
   let rec loop () =
@@ -691,6 +705,7 @@ and parse_tspan_body i attrs id : Element.tspan =
     | `Dtd _ -> let _ = Xmlm.input i in loop ()
   in
   loop ();
+  let content = Buffer.contents content_buf in
   let font_size = match get_attr a "font-size" with
     | Some s -> (try Some (pt (float_of_string s)) with _ -> None)
     | None -> None
@@ -703,15 +718,46 @@ and parse_tspan_body i attrs id : Element.tspan =
       Some sorted
     | None -> None
   in
-  { (Tspan.default_tspan ()) with
-    id;
-    content = Buffer.contents content_buf;
+  let rotate_vals = match get_attr a "rotate" with
+    | Some s ->
+      String.split_on_char ' ' s
+      |> List.filter_map (fun p ->
+           let p = String.trim p in
+           if p = "" then None else try Some (float_of_string p) with _ -> None)
+    | None -> []
+  in
+  let base : Element.tspan = { (Tspan.default_tspan ()) with
+    id = 0;
+    content;
     font_family = get_attr a "font-family";
     font_size;
     font_weight = get_attr a "font-weight";
     font_style = get_attr a "font-style";
     text_decoration = decoration;
-  }
+  } in
+  match rotate_vals with
+  | [] -> [base]
+  | [v] -> [{ base with rotate = Some v }]
+  | _ ->
+    let char_count = Text_layout.utf8_char_count content in
+    if char_count <= 1 then
+      [{ base with rotate = Some (List.hd rotate_vals) }]
+    else begin
+      (* Split the tspan into one per glyph. Each inherits the base's
+         override fields and gets the matching rotate angle; the last
+         angle is reused for any trailing glyphs past the end of the
+         list (per SVG spec). *)
+      let angles = Array.of_list rotate_vals in
+      let n_angles = Array.length angles in
+      let last_angle = angles.(n_angles - 1) in
+      let out = ref [] in
+      for i = char_count - 1 downto 0 do
+        let ch = Text_layout.utf8_sub content i 1 in
+        let angle = if i < n_angles then angles.(i) else last_angle in
+        out := { base with content = ch; rotate = Some angle } :: !out
+      done;
+      !out
+    end
 
 and collect_text_or_textpath i =
   (* Parse <text> children. Returns
@@ -729,10 +775,13 @@ and collect_text_or_textpath i =
     | `Data s -> let _ = Xmlm.input i in Buffer.add_string buf s; loop ()
     | `El_start ((_, tag), attrs) when tag = "tspan" ->
       let _ = Xmlm.input i in  (* consume the El_start *)
-      let t = parse_tspan_body i attrs !next_id in
-      incr next_id;
-      tspans_acc := t :: !tspans_acc;
-      Buffer.add_string buf t.content;
+      let parsed = parse_tspan_body i attrs in
+      List.iter (fun (t : Element.tspan) ->
+        let t = { t with id = !next_id } in
+        incr next_id;
+        tspans_acc := t :: !tspans_acc;
+        Buffer.add_string buf t.content
+      ) parsed;
       loop ()
     | `El_start ((_, tag), _) when tag = "textPath" ->
       let (_, tp_attrs) = match Xmlm.input i with `El_start (_, a) -> ("", a) | _ -> ("", []) in
@@ -749,10 +798,13 @@ and collect_text_or_textpath i =
         | `Data s -> let _ = Xmlm.input i in Buffer.add_string tp_content s; collect_tp ()
         | `El_start ((_, tag), attrs) when tag = "tspan" ->
           let _ = Xmlm.input i in
-          let t = parse_tspan_body i attrs !tp_next_id in
-          incr tp_next_id;
-          tp_tspans_acc := t :: !tp_tspans_acc;
-          Buffer.add_string tp_content t.content;
+          let parsed = parse_tspan_body i attrs in
+          List.iter (fun (t : Element.tspan) ->
+            let t = { t with id = !tp_next_id } in
+            incr tp_next_id;
+            tp_tspans_acc := t :: !tp_tspans_acc;
+            Buffer.add_string tp_content t.content
+          ) parsed;
           collect_tp ()
         | `El_start _ -> skip_element_full i; collect_tp ()
         | `Dtd _ -> let _ = Xmlm.input i in collect_tp ()

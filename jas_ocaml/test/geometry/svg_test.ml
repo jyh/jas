@@ -592,5 +592,69 @@ let () =
           assert (abs_float (g -. 130.0 /. 255.0) < 0.01);
           assert (abs_float (b -. 180.0 /. 255.0) < 0.01)
         | _ -> assert false);
+
+      (* Tspan rotate roundtrip (multi-value handling) *)
+
+      Alcotest.test_case "svg single-value tspan rotate roundtrip" `Quick (fun () ->
+        let svg = {|<svg xmlns="http://www.w3.org/2000/svg"><g><text x="0" y="20" font-size="12"><tspan rotate="30">abc</tspan></text></g></svg>|} in
+        let doc = Jas.Svg.svg_to_document svg in
+        match (children_of doc.Jas.Document.layers.(0)).(0) with
+        | Text { tspans; _ } ->
+          assert (Array.length tspans = 1);
+          assert (tspans.(0).content = "abc");
+          assert (tspans.(0).rotate = Some 30.0)
+        | _ -> assert false);
+
+      Alcotest.test_case "svg multi-value rotate splits per glyph" `Quick (fun () ->
+        let svg = {|<svg xmlns="http://www.w3.org/2000/svg"><g><text x="0" y="20" font-size="12"><tspan rotate="45 90 0">abc</tspan></text></g></svg>|} in
+        let doc = Jas.Svg.svg_to_document svg in
+        match (children_of doc.Jas.Document.layers.(0)).(0) with
+        | Text { tspans; _ } ->
+          assert (Array.length tspans = 3);
+          assert (tspans.(0).content = "a");
+          assert (tspans.(0).rotate = Some 45.0);
+          assert (tspans.(1).content = "b");
+          assert (tspans.(1).rotate = Some 90.0);
+          assert (tspans.(2).content = "c");
+          assert (tspans.(2).rotate = Some 0.0);
+          assert (tspans.(0).id = 0);
+          assert (tspans.(1).id = 1);
+          assert (tspans.(2).id = 2)
+        | _ -> assert false);
+
+      Alcotest.test_case "svg multi-value rotate reuses last angle" `Quick (fun () ->
+        let svg = {|<svg xmlns="http://www.w3.org/2000/svg"><g><text x="0" y="20" font-size="12"><tspan rotate="45 90">abcd</tspan></text></g></svg>|} in
+        let doc = Jas.Svg.svg_to_document svg in
+        match (children_of doc.Jas.Document.layers.(0)).(0) with
+        | Text { tspans; _ } ->
+          assert (Array.length tspans = 4);
+          assert (tspans.(0).rotate = Some 45.0);
+          assert (tspans.(1).rotate = Some 90.0);
+          assert (tspans.(2).rotate = Some 90.0);
+          assert (tspans.(3).rotate = Some 90.0)
+        | _ -> assert false);
+
+      Alcotest.test_case "svg per-glyph tspan rotate full roundtrip" `Quick (fun () ->
+        let t = Jas.Text_edit.empty_text_elem 10.0 20.0 0.0 0.0 in
+        let t = match t with
+          | Text r ->
+            Text { r with tspans = [|
+              { (Jas.Tspan.default_tspan ()) with id = 0; content = "a"; rotate = Some 45.0 };
+              { (Jas.Tspan.default_tspan ()) with id = 1; content = "b"; rotate = Some 90.0 };
+              { (Jas.Tspan.default_tspan ()) with id = 2; content = "c"; rotate = Some 0.0 };
+            |]}
+          | _ -> assert false in
+        let layer = Jas.Element.make_layer ~name:"L1" [| t |] in
+        let doc = { (Jas.Document.default_document ()) with
+                    layers = [| layer |] } in
+        let svg = Jas.Svg.document_to_svg doc in
+        let doc2 = Jas.Svg.svg_to_document svg in
+        match (children_of doc2.Jas.Document.layers.(0)).(0) with
+        | Text { tspans; _ } ->
+          assert (Array.length tspans = 3);
+          assert (tspans.(0).rotate = Some 45.0);
+          assert (tspans.(1).rotate = Some 90.0);
+          assert (tspans.(2).rotate = Some 0.0)
+        | _ -> assert false);
     ];
   ]
