@@ -191,6 +191,11 @@ pub struct WorkspaceLayout {
     pub anchored: Vec<(DockEdge, Dock)>,
     pub floating: Vec<FloatingDock>,
     pub hidden_panels: Vec<PanelKind>,
+    /// Remembered group address per hidden panel, so reopening restores the
+    /// panel to its prior group. Entries are added by `close_panel` and
+    /// consumed by `show_panel`.
+    #[serde(default)]
+    pub hidden_panel_positions: Vec<(PanelKind, GroupAddr)>,
     pub z_order: Vec<DockId>,
     pub focused_panel: Option<PanelAddr>,
     /// Active appearance name (e.g. "dark_gray", "light_gray").
@@ -284,6 +289,7 @@ impl WorkspaceLayout {
             )],
             floating: vec![],
             hidden_panels: vec![],
+            hidden_panel_positions: vec![],
             z_order: vec![],
             focused_panel: None,
             appearance: default_appearance(),
@@ -315,6 +321,7 @@ impl WorkspaceLayout {
         Self {
             version, name, anchored, floating, hidden_panels, z_order,
             focused_panel, appearance, pane_layout, next_id,
+            hidden_panel_positions: vec![],
             generation: 0, saved_generation: 0,
         }
     }
@@ -692,6 +699,8 @@ impl WorkspaceLayout {
         if !self.hidden_panels.contains(&panel) {
             self.hidden_panels.push(panel);
         }
+        self.hidden_panel_positions.retain(|(k, _)| *k != panel);
+        self.hidden_panel_positions.push((panel, addr.group));
         self.cleanup(addr.group.dock_id);
         self.bump();
     }
@@ -704,7 +713,22 @@ impl WorkspaceLayout {
         } else {
             return; // not hidden
         }
-        // Find the first anchored dock and add to its first group.
+        // Try to restore to the group the panel was in when it was closed.
+        let saved_group = self.hidden_panel_positions
+            .iter()
+            .position(|(k, _)| *k == kind)
+            .map(|i| self.hidden_panel_positions.remove(i).1);
+        if let Some(group_addr) = saved_group {
+            if let Some(dock) = self.dock_mut(group_addr.dock_id) {
+                if let Some(group) = dock.groups.get_mut(group_addr.group_idx) {
+                    group.panels.push(kind);
+                    group.active = group.panels.len() - 1;
+                    self.bump();
+                    return;
+                }
+            }
+        }
+        // Fallback: first anchored dock's first group.
         if let Some((_, dock)) = self.anchored.first_mut() {
             if let Some(group) = dock.groups.first_mut() {
                 group.panels.push(kind);
@@ -1872,6 +1896,39 @@ mod tests {
     fn hidden_panels_default_empty() {
         let l = WorkspaceLayout::default_layout();
         assert!(l.hidden_panels().is_empty());
+    }
+
+    #[test]
+    fn show_panel_restores_to_prior_group() {
+        // Character is in group 1 of the default layout (Color+Swatches
+        // = 0, Character+Paragraph = 1). Close then reopen it, verify it
+        // lands back in group 1 rather than the default group 0.
+        let mut l = WorkspaceLayout::default_layout();
+        let id = right_dock_id(&l);
+        let (cg, cpi) = panel_of(&l, id, PanelKind::Character);
+        assert_eq!(cg, 1);
+        l.close_panel(pa(id.0, cg, cpi));
+        l.show_panel(PanelKind::Character);
+        let (cg2, _) = panel_of(&l, id, PanelKind::Character);
+        assert_eq!(cg2, 1, "reopened panel should be in the same group");
+    }
+
+    #[test]
+    fn show_panel_falls_back_when_prior_group_gone() {
+        // Detach Artboards to isolate Layers in its own group, close
+        // Layers (which removes that group), then reopen. The prior
+        // group no longer exists; fall back to first group.
+        let mut l = WorkspaceLayout::default_layout();
+        let id = right_dock_id(&l);
+        let (ag, api) = panel_of(&l, id, PanelKind::Artboards);
+        l.detach_panel(pa(id.0, ag, api), 0.0, 0.0);
+        let (lg, lpi) = panel_of(&l, id, PanelKind::Layers);
+        l.close_panel(pa(id.0, lg, lpi));
+        // Group containing Layers no longer exists. Reopen should not panic.
+        l.show_panel(PanelKind::Layers);
+        let has_layers = l.dock(id).unwrap().groups.iter()
+            .any(|g| g.panels.contains(&PanelKind::Layers));
+        assert!(has_layers, "panel must be restored somewhere");
     }
 
     #[test]

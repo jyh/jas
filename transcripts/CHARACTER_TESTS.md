@@ -10,9 +10,11 @@ Session I parity sweep.
 
 ## Known broken
 
-_Last reviewed: —_
+_Last reviewed: 2026-04-18_
 
-(None yet.)
+- CHR-011 — Font family typeahead does letter-jump, not filter. since
+  2026-04-18. Select-widget rework; affects all `select` widgets, not just
+  Character panel.
 
 ---
 
@@ -98,38 +100,48 @@ Full pass: ~75 min. Partial runs are useful — each session stands alone.
 
 If any P0 here fails, stop and flag. Downstream sessions will only produce noise.
 
-- [ ] **CHR-001** [placeholder] Panel opens via Window menu.
+- [x] **CHR-001** [placeholder] Panel opens via Window menu.
       Do: Select Window → Character.
       Expect: Character panel appears in the dock or as a floating panel; no
               console error; no visual glitch.
-      — last: —
+      — last: 2026-04-18 · first run exposed missing dispatch handlers for
+        toggle_panel_character/paragraph/artboards in menu_bar.rs; fixed
+        this session.
 
-- [ ] **CHR-002** [placeholder] All 25 controls render without layout collapse.
+- [x] **CHR-002** [placeholder] All 25 controls render without layout collapse.
       Do: Visually scan the open Character panel.
       Expect: Font family + Style name dropdowns; 8 numeric fields with icons
               (size, leading, kerning, tracking, V-scale, H-scale, baseline
               shift, rotation); 6 character toggle icons; Language +
               Anti-aliasing dropdowns; Snap to Glyph header; 6 Snap toggle
               icons. No overlapping controls, no truncated labels.
-      — last: —
+      — last: 2026-04-18
 
-- [ ] **CHR-003** [placeholder] Layout matches `examples/character.png`.
+- [x] **CHR-003** [placeholder] Layout matches `examples/character.png`.
       Do: Compare panel to `examples/character.png` at default appearance (Dark).
       Expect: Holistic match — groupings, spacing, icon positions align with
               the reference.
-      — last: —
+      — last: 2026-04-18
 
-- [ ] **CHR-004** [placeholder] Panel closes via menu.
+- [x] **CHR-004** [placeholder] Panel closes via menu.
       Do: Open panel menu; select "Close Character".
       Expect: Panel removed from dock / floating area. No error.
-      — last: —
+      — last: 2026-04-18
 
-- [ ] **CHR-005** [placeholder] Opening Character doesn't break other panels.
+- [x] **CHR-005** [placeholder] Opening Character doesn't break other panels.
       Setup: Open Layers and Color panels in addition to default layout.
       Do: Open Character panel.
       Expect: Layers + Color panels remain rendered and interactive;
               dock layout adjusts without collapsing any panel.
-      — last: —
+      — last: 2026-04-18
+
+- [x] **CHR-006** [placeholder] Panel reopens in its previous panel group.
+      Do: With Character in a non-top group, close via menu; then reopen via
+          Window → Character.
+      Expect: Panel reappears in the same panel group and position it was in
+              before closing.
+      — last: 2026-04-18 · first run showed reopen always went to top group;
+        fixed this session (hidden_panel_positions tracks prior group).
 
 ---
 
@@ -137,54 +149,60 @@ If any P0 here fails, stop and flag. Downstream sessions will only produce noise
 
 **P1**
 
-- [ ] **CHR-010** [placeholder] Font family dropdown lists 9 options in yaml order.
+- [x] **CHR-010** [placeholder] Font family dropdown lists 9 options in yaml order.
       Do: Click Font family dropdown.
       Expect: Dropdown opens with sans-serif, serif, monospace, Arial,
               Helvetica, Times New Roman, Courier New, Georgia, Verdana —
               in that order.
-      — last: —
+      — last: 2026-04-18
 
-- [ ] **CHR-011** [placeholder] Font family typeahead filters the list.
+- [ ] **CHR-011** [placeholder][known-broken: select-widget rework] Font family typeahead filters the list.
       Do: Click dropdown; type "ar".
       Expect: List narrows to matching entries (Arial at minimum).
-      — last: —
+      — last: 2026-04-18 · regression: implementation does letter-jump not
+        typeahead filter — "a" highlights Arial, "r" jumps to serif, list
+        never narrows. Spec (yaml ch_font_family description) calls for
+        filtering typeahead. Likely affects every `select` widget, not just
+        font family.
 
-- [ ] **CHR-012** [placeholder] Font family selection commits via click.
+- [x] **CHR-012** [placeholder] Font family selection commits via click.
       Do: Open dropdown; click "Georgia".
       Expect: Dropdown closes; field shows "Georgia" as current value.
-      — last: —
+      — last: 2026-04-18
 
-- [ ] **CHR-013** [placeholder] Selection persists across panel close/reopen.
+- [x] **CHR-013** [placeholder] Selection persists across panel close/reopen.
       Do: Set font to Georgia; close panel; reopen.
       Expect: Font field still shows "Georgia".
-      — last: —
+      — last: 2026-04-18
 
-- [ ] **CHR-015** [placeholder] Style name dropdown lists 4 options.
+- [x] **CHR-015** [placeholder] Style name dropdown lists 4 options.
       Do: Click Style name dropdown.
       Expect: Regular, Italic, Bold, Bold Italic.
-      — last: —
+      — last: 2026-04-18
 
-- [ ] **CHR-016** [placeholder] Style name selection commits.
+- [x] **CHR-016** [placeholder] Style name selection commits.
       Do: Select "Bold Italic".
       Expect: Dropdown closes; field shows "Bold Italic".
-      — last: —
+      — last: 2026-04-18
 
 **P2**
 
-- [ ] **CHR-017** [placeholder] Font dropdown keyboard navigation.
+- [x] **CHR-017** [placeholder] Font dropdown keyboard navigation.
       Do: Open Font family dropdown; press ↓ three times; press Enter.
-      Expect: Third option in list commits (likely "monospace").
-      — last: —
+      Expect: Dropdown highlight advances 3 items from current selection;
+              Enter commits the highlighted item. From default sans-serif this
+              lands on Arial (3 steps: serif → monospace → Arial).
+      — last: 2026-04-18
 
-- [ ] **CHR-018** [placeholder] Escape closes open dropdown without committing.
+- [x] **CHR-018** [placeholder] Escape closes open dropdown without committing.
       Do: Open Font family dropdown; press Escape.
       Expect: Dropdown closes; field value unchanged from before open.
-      — last: —
+      — last: 2026-04-18
 
-- [ ] **CHR-019** [placeholder] Tab moves focus between Font family and Style.
+- [x] **CHR-019** [placeholder] Tab moves focus between Font family and Style.
       Do: Focus Font family; press Tab.
       Expect: Focus moves to Style name dropdown.
-      — last: —
+      — last: 2026-04-18
 
 ---
 
@@ -195,27 +213,32 @@ H-scale, baseline shift, rotation.
 
 **P1**
 
-- [ ] **CHR-030** [placeholder] Font size accepts valid value; commits on Enter.
+- [x] **CHR-030** [placeholder] Font size accepts valid value; commits on Enter.
       Do: Enter 24 in Font size; press Enter.
-      Expect: Field shows 24.
-      — last: —
+      Expect: Field shows 24. (Focus stays on the field after Enter — not a
+              regression; yaml doesn't mandate blur-on-commit.)
+      — last: 2026-04-18
 
-- [ ] **CHR-031** [placeholder] Font size rejects out-of-range values.
+- [x] **CHR-031** [placeholder] Font size rejects out-of-range values.
       Do: Enter 0 then press Enter; then enter 1297 then Enter.
       Expect: Per yaml min: 1, max: 1296. Both rejected or clamped; field
               stays within bounds.
-      — last: —
+      — last: 2026-04-18 · first run showed no clamping + displayed raw value;
+        fixed this session (clamp-on-commit + controlled value + key-based
+        remount + bump revision after mutation).
 
-- [ ] **CHR-032** [placeholder] Leading accepts numeric, commits.
+- [x] **CHR-032** [placeholder] Leading accepts numeric, commits.
       Do: Enter 18 in Leading; press Enter.
       Expect: Field shows 18.
-      — last: —
+      — last: 2026-04-18
 
 - [ ] **CHR-033** [placeholder] Leading 14.4 = Auto default per yaml.
-      Do: Observe Leading field at first open (default state).
-      Expect: Value is 14.4 (Auto = 120% of default 12pt font size).
-              (Full spec specifies parens-wrap for Auto display — not required
-              until that UX lands.)
+      Setup: Fresh app launch with no prior panel edits (panel state persists
+              across close/reopen within a session, so a relaunch is needed).
+      Do: Open Character panel; observe Leading field.
+      Expect: Value is 14.4 (Auto = 120% of default 12pt font size per yaml
+              ch_leading description). Full spec specifies parens-wrap for
+              Auto display — not required until that UX lands.
       — last: —
 
 - [ ] **CHR-034** [placeholder] Kerning combo_box opens and lists options.
@@ -659,3 +682,26 @@ Inactive tests. Categories: `[wontfix: <reason>]`, `[duplicate: <canonical-ID>]`
 ### Retired
 
 (None.)
+
+---
+
+## Enhancements / follow-ups
+
+Non-blocking suggestions surfaced during manual testing. Not tests — just
+captured so they don't get lost. Use the `ENH-NNN` prefix, three-digit dense
+numbering per component. When an enhancement is done, delete the entry (or
+move under a "Done" sub-header if the history is useful).
+
+- **ENH-001** Promote Font size to `combo_box` with common presets
+  (8, 9, 10, 11, 12, 14, 18, 24, 36, 48, 72) plus free numeric entry;
+  mirrors `ch_kerning`'s pattern. Yaml change in `character.yaml`; verify
+  all 5 renderers (Rust/Swift/OCaml/Python/Flask) handle combo_box for
+  numeric-valued inputs uniformly.
+  _Raised during CHR-030 on 2026-04-18._
+
+- **ENH-002** Cmd-A should select all text in focused `text_input` /
+  `number_input` fields. Standard browser/OS behavior; global key handler
+  likely intercepts before the DOM element sees it. Cross-cutting — fix
+  probably lives outside Character panel. Also relevant: Cmd-C/V/X,
+  double-click-to-select-word.
+  _Raised during CHR-031 on 2026-04-18._
