@@ -109,8 +109,20 @@ let _draw_segmented_text cr ~x ~y ~fontsize ~fontfamily ~fontweight
       let weight = if eff_bold then Cairo.Bold else Cairo.Normal in
       Cairo.select_font_face cr eff_family ~slant ~weight;
       Cairo.set_font_size cr eff_size;
-      Cairo.move_to cr !cx baseline;
-      Cairo.show_text cr t.content;
+      (* Per-tspan positioning:
+         - dx (em): horizontal leading-edge nudge, scaled by eff_size.
+         - baseline_shift (pt, + is up): subtracted from the shared
+           baseline (Cairo y grows downward, same as the app convention).
+         - rotate (deg) / transform (SVG matrix): wrap the tspan draw
+           around its starting baseline point.  *)
+      let dx_px = match t.dx with Some d -> d *. eff_size | None -> 0.0 in
+      cx := !cx +. dx_px;
+      let b_shift = match t.baseline_shift with Some s -> s | None -> 0.0 in
+      let tspan_baseline = baseline -. b_shift in
+      let rot_rad = match t.rotate with
+        | Some d -> d *. Float.pi /. 180.0 | None -> 0.0 in
+      let has_rotate = rot_rad <> 0.0 in
+      let has_transform = match t.transform with Some _ -> true | None -> false in
       let w = (Cairo.text_extents cr t.content).Cairo.x_advance in
       (* Effective decoration: [Some []] overrides to no decoration;
          [None] inherits parent tokens. *)
@@ -121,24 +133,43 @@ let _draw_segmented_text cr ~x ~y ~fontsize ~fontfamily ~fontweight
           (List.mem "underline" parent_decor_tokens,
            List.mem "line-through" parent_decor_tokens)
       in
-      if has_u || has_s then begin
-        let thickness = Float.max 1.0 (eff_size *. 0.07) in
+      let draw_body origin_x origin_baseline =
+        Cairo.move_to cr origin_x origin_baseline;
+        Cairo.show_text cr t.content;
+        if has_u || has_s then begin
+          let thickness = Float.max 1.0 (eff_size *. 0.07) in
+          Cairo.save cr;
+          Cairo.set_line_width cr thickness;
+          if has_u then begin
+            let ly = origin_baseline +. eff_size *. 0.12 in
+            Cairo.move_to cr origin_x ly;
+            Cairo.line_to cr (origin_x +. w) ly;
+            Cairo.stroke cr
+          end;
+          if has_s then begin
+            let ly = origin_baseline -. eff_size *. 0.3 in
+            Cairo.move_to cr origin_x ly;
+            Cairo.line_to cr (origin_x +. w) ly;
+            Cairo.stroke cr
+          end;
+          Cairo.restore cr
+        end
+      in
+      if has_rotate || has_transform then begin
         Cairo.save cr;
-        Cairo.set_line_width cr thickness;
-        if has_u then begin
-          let ly = baseline +. eff_size *. 0.12 in
-          Cairo.move_to cr !cx ly;
-          Cairo.line_to cr (!cx +. w) ly;
-          Cairo.stroke cr
-        end;
-        if has_s then begin
-          let ly = baseline -. eff_size *. 0.3 in
-          Cairo.move_to cr !cx ly;
-          Cairo.line_to cr (!cx +. w) ly;
-          Cairo.stroke cr
-        end;
+        Cairo.translate cr !cx tspan_baseline;
+        (match t.transform with
+         | Some tr ->
+           let m = { Cairo.xx = tr.Element.a; yx = tr.b;
+                     xy = tr.c; yy = tr.d;
+                     x0 = tr.e; y0 = tr.f } in
+           Cairo.transform cr m
+         | None -> ());
+        if has_rotate then Cairo.rotate cr rot_rad;
+        draw_body 0.0 0.0;
         Cairo.restore cr
-      end;
+      end else
+        draw_body !cx tspan_baseline;
       cx := !cx +. w
     end
   ) tspans
