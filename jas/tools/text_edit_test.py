@@ -1,6 +1,7 @@
 """Tests for TextEditSession."""
 
 from geometry.element import RgbColor, Fill, Text
+from geometry.tspan import Tspan
 from tools.text_edit import EditTarget, TextEditSession
 
 
@@ -139,3 +140,53 @@ def test_select_all_then_insert_replaces():
     s.insert("X")
     assert s.content == "X"
     assert s.insertion == 1
+
+
+# Session-scoped tspan clipboard — mirrors Swift/OCaml/Rust coverage.
+
+
+def test_copy_selection_with_tspans_captures_and_returns_flat():
+    element_tspans = (
+        Tspan(id=0, content="foo"),
+        Tspan(id=1, content="bar", font_weight="bold"),
+    )
+    s = TextEditSession(path=(0, 0), target=EditTarget.TEXT,
+                        content="foobar", insertion=0)
+    s.set_insertion(1, False)
+    s.set_insertion(5, True)  # select "ooba"
+    flat = s.copy_selection_with_tspans(element_tspans)
+    assert flat == "ooba"
+    assert s.tspan_clipboard is not None
+    saved_flat, saved = s.tspan_clipboard
+    assert saved_flat == "ooba"
+    assert len(saved) == 2
+    assert saved[0].content == "oo"
+    assert saved[0].font_weight is None
+    assert saved[1].content == "ba"
+    assert saved[1].font_weight == "bold"
+
+
+def test_try_paste_tspans_matches_and_splices():
+    element_tspans = (Tspan(id=0, content="foo"),)
+    s = TextEditSession(path=(0, 0), target=EditTarget.TEXT,
+                        content="foo", insertion=0)
+    s.tspan_clipboard = (
+        "X",
+        (Tspan(id=0, content="X", font_weight="bold"),),
+    )
+    s.set_insertion(1, False)
+    result = s.try_paste_tspans(element_tspans, "X")
+    assert result is not None
+    assert len(result) == 3
+    assert result[0].content == "f"
+    assert result[1].content == "X"
+    assert result[1].font_weight == "bold"
+    assert result[2].content == "oo"
+
+
+def test_try_paste_tspans_returns_none_when_text_doesnt_match():
+    element_tspans = (Tspan(id=0, content="foo"),)
+    s = TextEditSession(path=(0, 0), target=EditTarget.TEXT,
+                        content="foo", insertion=0)
+    s.tspan_clipboard = ("X", ())
+    assert s.try_paste_tspans(element_tspans, "DIFFERENT") is None
