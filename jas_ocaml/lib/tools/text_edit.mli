@@ -34,6 +34,17 @@ val set_insertion_with_affinity :
 
 val caret_affinity : t -> Tspan.affinity
 
+(** Prime the next-typed-character state. Non-[None] fields of
+    [overrides] are merged into the existing pending template; the
+    anchor position is captured on the first call (later calls layer
+    on more attributes without moving the anchor). *)
+val set_pending_override : t -> Element.tspan -> unit
+
+val clear_pending_override : t -> unit
+val has_pending_override : t -> bool
+val pending_override : t -> Element.tspan option
+val pending_char_start : t -> int option
+
 (** Resolve the caret's [(tspan_idx, offset)] using [caret_affinity].
     Used by the next-typed-character path. *)
 val insertion_tspan_pos : t -> Element.tspan array -> int * int

@@ -67,6 +67,33 @@ let resolve_id (tspans : tspan array) (id : tspan_id) : int option =
   ) tspans;
   !result
 
+let merge_tspan_overrides (target : tspan) (source : tspan) : tspan =
+  let or_some a b = match a with Some _ -> a | None -> b in
+  {
+    id = target.id;
+    content = target.content;
+    baseline_shift = or_some source.baseline_shift target.baseline_shift;
+    dx = or_some source.dx target.dx;
+    font_family = or_some source.font_family target.font_family;
+    font_size = or_some source.font_size target.font_size;
+    font_style = or_some source.font_style target.font_style;
+    font_variant = or_some source.font_variant target.font_variant;
+    font_weight = or_some source.font_weight target.font_weight;
+    jas_aa_mode = or_some source.jas_aa_mode target.jas_aa_mode;
+    jas_fractional_widths = or_some source.jas_fractional_widths target.jas_fractional_widths;
+    jas_kerning_mode = or_some source.jas_kerning_mode target.jas_kerning_mode;
+    jas_no_break = or_some source.jas_no_break target.jas_no_break;
+    letter_spacing = or_some source.letter_spacing target.letter_spacing;
+    line_height = or_some source.line_height target.line_height;
+    rotate = or_some source.rotate target.rotate;
+    style_name = or_some source.style_name target.style_name;
+    text_decoration = or_some source.text_decoration target.text_decoration;
+    text_rendering = or_some source.text_rendering target.text_rendering;
+    text_transform = or_some source.text_transform target.text_transform;
+    transform = or_some source.transform target.transform;
+    xml_lang = or_some source.xml_lang target.xml_lang;
+  }
+
 type affinity = Left | Right
 
 let char_to_tspan_pos (tspans : tspan array) (char_idx : int) (aff : affinity) : int * int =

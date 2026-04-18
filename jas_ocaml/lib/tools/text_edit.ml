@@ -29,6 +29,14 @@ type t = {
      system-clipboard flat text matches. Preserves per-range overrides
      across cut/paste within a single edit session. *)
   mutable tspan_clipboard : (string * Element.tspan array) option;
+  (* Next-typed-character override: a [tspan] template whose
+     [Some _] fields are applied to characters inserted from
+     [pending_char_start] to the current [insertion] at commit time.
+     Primed by Character-panel writes when there is no selection
+     (bare caret); cleared by any caret move with no selection
+     extension and by undo/redo. Not persisted to the document. *)
+  mutable pending_override : Element.tspan option;
+  mutable pending_char_start : int option;
 }
 
 let create ~path ~target ~content ~insertion =
@@ -41,7 +49,27 @@ let create ~path ~target ~content ~insertion =
     drag_active = false; blink_epoch_ms = 0.0;
     undo_stack = []; redo_stack = [];
     tspan_clipboard = None;
+    pending_override = None;
+    pending_char_start = None;
   }
+
+let clear_pending_override t =
+  t.pending_override <- None;
+  t.pending_char_start <- None
+
+let has_pending_override t = t.pending_override <> None
+
+let set_pending_override t overrides =
+  let base = match t.pending_override with
+    | Some p -> p
+    | None ->
+      t.pending_char_start <- Some t.insertion;
+      Tspan.default_tspan ()
+  in
+  t.pending_override <- Some (Tspan.merge_tspan_overrides base overrides)
+
+let pending_override t = t.pending_override
+let pending_char_start t = t.pending_char_start
 
 let path t = t.path
 let target t = t.target
@@ -72,7 +100,8 @@ let undo t =
     t.redo_stack <- { s_content = t.content; s_insertion = t.insertion; s_anchor = t.anchor } :: t.redo_stack;
     t.content <- prev.s_content;
     t.insertion <- prev.s_insertion;
-    t.anchor <- prev.s_anchor
+    t.anchor <- prev.s_anchor;
+    clear_pending_override t
 
 let redo t =
   match t.redo_stack with
@@ -82,7 +111,8 @@ let redo t =
     t.undo_stack <- { s_content = t.content; s_insertion = t.insertion; s_anchor = t.anchor } :: t.undo_stack;
     t.content <- nxt.s_content;
     t.insertion <- nxt.s_insertion;
-    t.anchor <- nxt.s_anchor
+    t.anchor <- nxt.s_anchor;
+    clear_pending_override t
 
 let char_count t = Text_layout.utf8_char_count t.content
 
@@ -130,12 +160,21 @@ let delete_forward t =
 
 let set_insertion t pos ~extend =
   let n = char_count t in
-  t.insertion <- max 0 (min pos n);
+  let new_pos = max 0 (min pos n) in
+  (* Non-extending caret movement cancels any pending next-typed-
+     character override (the user abandoned the position where the
+     override was primed). *)
+  if (not extend) && new_pos <> t.insertion then
+    clear_pending_override t;
+  t.insertion <- new_pos;
   if not extend then t.anchor <- t.insertion
 
 let set_insertion_with_affinity t pos ~affinity ~extend =
   let n = char_count t in
-  t.insertion <- max 0 (min pos n);
+  let new_pos = max 0 (min pos n) in
+  if (not extend) && new_pos <> t.insertion then
+    clear_pending_override t;
+  t.insertion <- new_pos;
   t.caret_affinity <- affinity;
   if not extend then t.anchor <- t.insertion
 
@@ -189,25 +228,37 @@ let set_content t new_content ~insertion ~anchor =
   t.insertion <- max 0 (min insertion n);
   t.anchor <- max 0 (min anchor n)
 
+(* Apply the pending next-typed-character override to the range
+   [pending_char_start, insertion) of [tspans], then merge.
+   Passthrough when pending is unset or the range is empty. *)
+let apply_pending_to t tspans =
+  match t.pending_override, t.pending_char_start with
+  | Some pending, Some start when start < t.insertion ->
+    let (split, first, last) = Tspan.split_range tspans start t.insertion in
+    (match first, last with
+     | Some f, Some l ->
+       for i = f to l do
+         split.(i) <- Tspan.merge_tspan_overrides split.(i) pending
+       done;
+       Tspan.merge split
+     | _ -> split)
+  | _ -> tspans
+
 let apply_to_document t doc =
-  (* Tspan-aware commit: reconcile the session's flat content against
-     the element's current tspan structure. Unchanged prefix and
-     suffix regions keep their original tspan assignments (and all
-     per-range overrides); the changed middle is absorbed into the
-     first overlapping tspan, with adjacent-equal tspans collapsed
-     by the merge pass. *)
   try
     let elem = Document.get_element doc t.path in
     match t.target, elem with
     | Edit_text, Element.Text r ->
-      let new_tspans = Tspan.reconcile_content r.tspans t.content in
+      let reconciled = Tspan.reconcile_content r.tspans t.content in
+      let new_tspans = apply_pending_to t reconciled in
       let new_elem = Element.Text { r with
         content = t.content;
         tspans = new_tspans
       } in
       Some (Document.replace_element doc t.path new_elem)
     | Edit_text_path, Element.Text_path r ->
-      let new_tspans = Tspan.reconcile_content r.tspans t.content in
+      let reconciled = Tspan.reconcile_content r.tspans t.content in
+      let new_tspans = apply_pending_to t reconciled in
       let new_elem = Element.Text_path { r with
         content = t.content;
         tspans = new_tspans
