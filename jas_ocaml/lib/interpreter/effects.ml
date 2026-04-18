@@ -675,11 +675,30 @@ let attrs_from_character_panel (panel : (string * Yojson.Safe.t) list) : charact
   let letter_spacing =
     if Float.equal tracking 0.0 then ""
     else _fmt_num (tracking /. 1000.0) ^ "em" in
-  (* kerning (1/1000 em, numeric only for now). *)
-  let kerning_num = _panel_f panel "kerning" 0.0 in
+  (* kerning combo_box: named modes (Auto / Optical / Metrics) pass
+     through verbatim; numeric strings are 1/1000 em and convert to
+     "{N}em". Empty / "0" / "Auto" all omit (the element default).
+     Legacy JSON number values also land here via the Float branch. *)
   let kerning =
-    if Float.equal kerning_num 0.0 then ""
-    else _fmt_num (kerning_num /. 1000.0) ^ "em" in
+    match List.assoc_opt "kerning" panel with
+    | Some (`String s) ->
+      let trimmed = String.trim s in
+      (match trimmed with
+       | "" | "0" | "Auto" -> ""
+       | "Optical" | "Metrics" -> trimmed
+       | _ ->
+         (try
+            let n = float_of_string trimmed in
+            if Float.equal n 0.0 then ""
+            else _fmt_num (n /. 1000.0) ^ "em"
+          with Failure _ -> ""))
+    | Some (`Int n) ->
+      if n = 0 then ""
+      else _fmt_num (Float.of_int n /. 1000.0) ^ "em"
+    | Some (`Float n) ->
+      if Float.equal n 0.0 then ""
+      else _fmt_num (n /. 1000.0) ^ "em"
+    | _ -> "" in
   (* character_rotation (degrees). *)
   let rot = _panel_f panel "character_rotation" 0.0 in
   let rotate = if Float.equal rot 0.0 then "" else _fmt_num rot in
