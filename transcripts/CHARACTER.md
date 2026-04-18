@@ -468,9 +468,9 @@ Per-app entry points:
 All four apps' canvases also honor the 11 character attributes
 directly when rendering text (see the SVG attribute mapping above).
 
-Remaining polish:
-
-1. **Per-glyph rotate** (Rust). The current `rotate` attribute
-   applies a single rotation around the element origin. The spec
-   calls for per-glyph rotations, which requires a tspan split
-   per-glyph at serialization time (a B.3-sequence follow-up).
+No remaining polish items on the Character panel itself. Open
+follow-ups live with the Tspan sequence (TSPAN.md): multi-value
+`rotate` (per-glyph different angles) requires tspan-per-glyph
+splitting at serialization time; the uniform single-value case
+(every glyph rotated by the same angle) already renders correctly
+on all four canvases.

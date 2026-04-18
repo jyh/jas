@@ -580,20 +580,19 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
             attrs[.kern] = kernPx as NSNumber
         }
         ctx.saveGState()
-        // Horizontal / vertical scale + character rotation wrap the
-        // text draw. They apply around the element's (x, y) origin.
+        // H/V scale wraps the whole text draw around the element's
+        // (x, y) origin. Character rotation is *per-glyph* (matches
+        // SVG's <text rotate="N"> spec and Illustrator's Character
+        // Rotation field): each glyph rotates around its own baseline,
+        // leaving the overall layout horizontal.
         let hScale = parseScalePercent(v.horizontalScale)
         let vScale = parseScalePercent(v.verticalScale)
         let rotDeg = parseRotateDeg(v.rotate)
-        let needsTransform = (hScale != 1.0 || vScale != 1.0 || rotDeg != 0.0)
-        if needsTransform {
+        let rotRad = rotDeg * .pi / 180.0
+        let needsScale = (hScale != 1.0 || vScale != 1.0)
+        if needsScale {
             ctx.translateBy(x: v.x, y: v.y)
-            if rotDeg != 0.0 {
-                ctx.rotate(by: rotDeg * .pi / 180.0)
-            }
-            if hScale != 1.0 || vScale != 1.0 {
-                ctx.scaleBy(x: hScale, y: vScale)
-            }
+            ctx.scaleBy(x: hScale, y: vScale)
             ctx.translateBy(x: -v.x, y: -v.y)
         }
         // Both point and area text are rendered as one CTLine per visual
@@ -617,10 +616,31 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
         for line in lay.lines {
             let segChars = chars[line.start..<line.end]
             let segStr = String(segChars)
-            let lineStr = NSAttributedString(string: segStr, attributes: attrs)
-            let ctLine = CTLineCreateWithAttributedString(lineStr)
-            ctx.textPosition = CGPoint(x: v.x, y: v.y + line.baselineY + yShift)
-            CTLineDraw(ctLine, ctx)
+            let baselineY = v.y + line.baselineY + yShift
+            if rotRad == 0.0 {
+                // Fast path: single CTLine per line honors NSAttributedString.Key.kern.
+                let lineStr = NSAttributedString(string: segStr, attributes: attrs)
+                let ctLine = CTLineCreateWithAttributedString(lineStr)
+                ctx.textPosition = CGPoint(x: v.x, y: baselineY)
+                CTLineDraw(ctLine, ctx)
+            } else {
+                // Per-glyph rotation: draw each char with its own
+                // save / translate / rotate / restore. letter_spacing
+                // is folded into the manual advance since individual
+                // CTLines don't contribute to each other's kern.
+                var cx = v.x
+                for ch in segChars {
+                    let chStr = NSAttributedString(string: String(ch), attributes: attrs)
+                    let ctLine = CTLineCreateWithAttributedString(chStr)
+                    ctx.saveGState()
+                    ctx.translateBy(x: cx, y: baselineY)
+                    ctx.rotate(by: rotRad)
+                    ctx.textPosition = .zero
+                    CTLineDraw(ctLine, ctx)
+                    ctx.restoreGState()
+                    cx += measure(String(ch)) + kernPx
+                }
+            }
         }
         ctx.restoreGState()
 

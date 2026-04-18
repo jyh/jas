@@ -482,28 +482,23 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                     &js_sys::JsString::from(format!("{}px", ls_px).as_str()),
                 );
             }
-            // V/H scale + character rotation: wrap the text draw in a
-            // save / translate / scale / rotate / restore. Scale applies
-            // around the element's origin; rotation likewise. Per-
-            // glyph rotation (CHARACTER.md says SVG-native on tspans)
-            // needs per-char tspans which is a later pass; for now
-            // rotate the whole element as a placeholder.
+            // V/H scale wraps the whole text draw. Character rotation
+            // is *per-glyph* (matches SVG's <text rotate="N"> spec and
+            // Illustrator's Character Rotation field): each glyph
+            // rotates around its own baseline position, leaving the
+            // overall layout on a horizontal baseline.
             let h_scale = if e.horizontal_scale.is_empty() { 1.0 }
                 else { e.horizontal_scale.parse::<f64>().unwrap_or(100.0) / 100.0 };
             let v_scale = if e.vertical_scale.is_empty() { 1.0 }
                 else { e.vertical_scale.parse::<f64>().unwrap_or(100.0) / 100.0 };
             let rotate_deg = if e.rotate.is_empty() { 0.0 }
                 else { e.rotate.parse::<f64>().unwrap_or(0.0) };
-            let needs_txform = h_scale != 1.0 || v_scale != 1.0 || rotate_deg != 0.0;
-            if needs_txform {
+            let rotate_rad = rotate_deg.to_radians();
+            let needs_scale = h_scale != 1.0 || v_scale != 1.0;
+            if needs_scale {
                 ctx.save();
                 ctx.translate(e.x, e.y).ok();
-                if rotate_deg != 0.0 {
-                    ctx.rotate(rotate_deg.to_radians()).ok();
-                }
-                if h_scale != 1.0 || v_scale != 1.0 {
-                    ctx.scale(h_scale, v_scale).ok();
-                }
+                ctx.scale(h_scale, v_scale).ok();
                 ctx.translate(-e.x, -e.y).ok();
             }
             let measure = crate::tools::text_measure::make_measurer(&font, effective_fs);
@@ -542,11 +537,34 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             for line in &layout.lines {
                 let s: String = chars[line.start..line.end].iter().collect();
                 let s = s.trim_end_matches('\n');
-                ctx.fill_text(s, e.x, e.y + line.baseline_y + y_shift).ok();
+                let baseline = e.y + line.baseline_y + y_shift;
+                if rotate_rad == 0.0 {
+                    // Fast path: single fill_text per line. The CSS
+                    // letterSpacing property set earlier handles the
+                    // inter-glyph advance.
+                    ctx.fill_text(s, e.x, baseline).ok();
+                } else {
+                    // Per-glyph rotation: each glyph rotates around
+                    // its own (cx, baseline). fill_text takes only a
+                    // whole string, so draw one char at a time and
+                    // advance cx manually. letter_spacing is folded
+                    // into the advance the same way the fast path
+                    // relies on CSS letterSpacing.
+                    let mut cx = e.x;
+                    for ch in s.chars() {
+                        let ch_str = ch.to_string();
+                        ctx.save();
+                        ctx.translate(cx, baseline).ok();
+                        ctx.rotate(rotate_rad).ok();
+                        ctx.fill_text(&ch_str, 0.0, 0.0).ok();
+                        ctx.restore();
+                        cx += measure(&ch_str) + ls_px;
+                    }
+                }
                 if has_underline || has_strike {
                     let w = measure(s);
                     draw_text_decorations(
-                        ctx, e.x, e.y + line.baseline_y + y_shift, w, effective_fs,
+                        ctx, e.x, baseline, w, effective_fs,
                         has_underline, has_strike, e.fill.as_ref(),
                     );
                 }
@@ -560,7 +578,7 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
                     &js_sys::JsString::from("0px"),
                 );
             }
-            if needs_txform {
+            if needs_scale {
                 ctx.restore();
             }
         }

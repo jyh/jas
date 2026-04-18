@@ -741,20 +741,19 @@ def _draw_element(painter: QPainter, elem: Element,
                 _apply_stroke(painter, stroke)
             else:
                 painter.setPen(QColor("black"))
-            # Wrap the draw in a save/translate/rotate/scale/restore
-            # block when horizontal/vertical scale or rotation depart
-            # from identity. Applies around the element origin.
+            # H/V scale wraps the whole text draw around the element
+            # origin. Character rotation is *per-glyph* (matches SVG's
+            # <text rotate> spec and Illustrator's Character Rotation
+            # field): each glyph rotates around its own baseline,
+            # leaving the overall layout horizontal.
             h_scale = _parse_scale_percent(t.horizontal_scale)
             v_scale = _parse_scale_percent(t.vertical_scale)
             rot_deg = _parse_rotate_deg(t.rotate)
-            needs_txform = (h_scale != 1.0 or v_scale != 1.0 or rot_deg != 0.0)
-            if needs_txform:
+            needs_scale = (h_scale != 1.0 or v_scale != 1.0)
+            if needs_scale:
                 painter.save()
                 painter.translate(x, y)
-                if rot_deg != 0.0:
-                    painter.rotate(rot_deg)
-                if h_scale != 1.0 or v_scale != 1.0:
-                    painter.scale(h_scale, v_scale)
+                painter.scale(h_scale, v_scale)
                 painter.translate(-x, -y)
             # Layout: line_height (when non-empty) overrides the
             # default line stride (which equals font_size).
@@ -767,8 +766,25 @@ def _draw_element(painter: QPainter, elem: Element,
             lay = _layout(content, max_w, layout_fs, measure)
             for line in lay.lines:
                 s = content[line.start:line.end].rstrip('\n')
-                painter.drawText(QPointF(x, y + line.baseline_y + y_shift), s)
-            if needs_txform:
+                baseline = y + line.baseline_y + y_shift
+                if rot_deg == 0.0:
+                    # Fast path: QFont.setLetterSpacing handles inter-
+                    # glyph advance for a single drawText call.
+                    painter.drawText(QPointF(x, baseline), s)
+                else:
+                    # Per-glyph rotation: draw each char with its own
+                    # translate/rotate/restore. letter_spacing is
+                    # folded into the manual advance since drawText
+                    # per char doesn't chain kern.
+                    cx = x
+                    for ch in s:
+                        painter.save()
+                        painter.translate(cx, baseline)
+                        painter.rotate(rot_deg)
+                        painter.drawText(QPointF(0, 0), ch)
+                        painter.restore()
+                        cx += measure(ch) + ls_px
+            if needs_scale:
                 painter.restore()
 
         case TextPath() as tp:

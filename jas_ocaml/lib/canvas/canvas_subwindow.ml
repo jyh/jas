@@ -315,17 +315,20 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
        uppercase for now (same placeholder Rust uses — real OpenType
        small-caps substitution waits on a shaper). *)
     let content = _apply_text_transform text_transform font_variant content in
-    (* Horizontal / vertical scale and character rotation wrap the
-       text draw. They apply around the element's (x, y) origin. *)
+    (* H/V scale wraps the whole text draw around the element origin.
+       Character rotation is *per-glyph* (matches SVG's <text rotate>
+       spec and Illustrator's Character Rotation field): each glyph
+       rotates around its own baseline position, leaving the overall
+       layout on a horizontal baseline. [show_with_spacing] picks the
+       per-glyph loop when [rot_rad] is non-zero. *)
     let h_scale = _parse_scale_percent horizontal_scale in
     let v_scale = _parse_scale_percent vertical_scale in
     let rot_rad = _parse_rotate_deg rotate *. Float.pi /. 180.0 in
-    let needs_txform = h_scale <> 1.0 || v_scale <> 1.0 || rot_rad <> 0.0 in
-    if needs_txform then begin
+    let needs_scale = h_scale <> 1.0 || v_scale <> 1.0 in
+    if needs_scale then begin
       Cairo.save cr;
       Cairo.translate cr x y;
-      if rot_rad <> 0.0 then Cairo.rotate cr rot_rad;
-      if h_scale <> 1.0 || v_scale <> 1.0 then Cairo.scale cr h_scale v_scale;
+      Cairo.scale cr h_scale v_scale;
       Cairo.translate cr (-. x) (-. y)
     end;
     Cairo.select_font_face cr font_family ~slant ~weight;
@@ -350,17 +353,30 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
       else w +. float_of_int (n - 1) *. ls_px
     in
     let show_with_spacing seg base_y =
-      if ls_px = 0.0 then begin
+      if ls_px = 0.0 && rot_rad = 0.0 then begin
         Cairo.move_to cr x base_y;
         Cairo.show_text cr seg
       end else begin
+        (* Per-char loop covers two cases: non-zero letter_spacing
+           (Cairo has no single-string kern attribute) and non-zero
+           rotate (each glyph rotates around its own baseline). When
+           both are zero we take the fast path above. *)
         let len = String.length seg in
         let pos = ref x in
         for i = 0 to len - 1 do
           let ch = String.make 1 seg.[i] in
-          Cairo.move_to cr !pos base_y;
-          Cairo.show_text cr ch;
           let cw = (Cairo.text_extents cr ch).Cairo.x_advance in
+          if rot_rad = 0.0 then begin
+            Cairo.move_to cr !pos base_y;
+            Cairo.show_text cr ch
+          end else begin
+            Cairo.save cr;
+            Cairo.translate cr !pos base_y;
+            Cairo.rotate cr rot_rad;
+            Cairo.move_to cr 0.0 0.0;
+            Cairo.show_text cr ch;
+            Cairo.restore cr
+          end;
           pos := !pos +. cw +. ls_px
         done
       end
@@ -407,7 +423,7 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
         draw_line_decorations line line_y
       ) lines
     end;
-    if needs_txform then Cairo.restore cr;
+    if needs_scale then Cairo.restore cr;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
