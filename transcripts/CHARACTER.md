@@ -434,45 +434,51 @@ defined in `workspace/shortcuts.yaml` rather than here.
 
 ## Panel-to-selection wiring status
 
-The current `workspace/panels/character.yaml` renders every control
-listed above bound to panel-local state (via `bind: value:
-"panel.X"`). None of those bindings yet flow through to the selected
-text element's attributes — editing the Size field, ticking a Caps
-toggle, etc. updates panel-local state but does not call
-`Controller::set_character_attribute`. This is a known gap that
-blocks real Character-panel editing.
+Fully wired in Rust, Swift, OCaml, and Python. Editing a Character-
+panel control (Size, Leading, a Caps toggle, Baseline Shift, …)
+updates the panel scope in the app's state store and then pushes the
+full attribute set onto the selected Text / TextPath elements via
+each app's `apply_character_panel_to_selection` pipeline. The inverse
+direction — panel widgets reflect the selected element's current
+attributes — lands through live overrides built on each render.
 
-The root cause is in the Rust renderer (`jas_dioxus/src/interpreter/
-renderer.rs`): the per-widget event handlers in
-`render_number_input`, `render_text_input`, and `render_checkbox`
-are hardcoded against `stroke_panel` (they call
-`set_stroke_field(&mut st.stroke_panel, …)` on every
-`panel.*` bind, regardless of which panel the widget belongs to).
-`set_stroke_field` has a `_ => {}` fallthrough, so Character-panel
-bindings silently no-op instead of corrupting stroke state.
+Per-app entry points:
 
-Three layers of work are required to unblock this, in order:
+- **Rust** (`jas_dioxus`): `apply_character_panel_to_selection` in
+  `src/workspace/app_state.rs`. Panel-to-widget overrides are built
+  in `src/workspace/dock_panel.rs::build_live_panel_overrides`. The
+  widget dispatch refactor (Layer 1 below) lives in the generic
+  `render_select / render_toggle / render_number_input /
+  render_text_input` helpers in `src/interpreter/renderer.rs`,
+  switched by the enclosing panel's `panel_kind`.
+- **Swift** (`JasSwift`): `applyCharacterPanelToSelection` and the
+  `notifyPanelStateChanged` dispatcher in
+  `Sources/Interpreter/Effects.swift`; live overrides in
+  `Sources/Interpreter/CharacterPanelSync.swift`. Widget write-backs
+  flow through `YamlElementView.commitPanelWrite` and the per-panel
+  state scope lives on `Model.stateStore`.
+- **OCaml** (`jas_ocaml`): `apply_character_panel_to_selection` in
+  `lib/interpreter/effects.ml` with the `State_store.subscribe_panel`
+  hook. GTK widget callbacks in `lib/interpreter/yaml_panel_view.ml`
+  commit via `_write_back_bind`.
+- **Python** (`jas`): `apply_character_panel_to_selection` in
+  `jas/panels/character_panel_state.py`, subscribed through the
+  store's panel notifier.
 
-1. **Generify the widget event handlers.** The renderer must
-   dispatch panel-state writes to the correct panel (stroke_panel,
-   character_panel, paragraph_panel, …) based on the enclosing
-   panel's content id, not on a hardcoded identifier. This is a
-   Rust renderer refactor, not panel-specific.
-2. **Add per-panel state structs.** Mirror `StrokePanelState`
-   with `CharacterPanelState`, `ParagraphPanelState`, etc., on
-   `AppState`, plus `apply_character_panel_to_selection()` glue
-   that calls `Controller::set_character_attribute` per the unified
-   TSPAN.md algorithm.
-3. **Propagate to the other three apps** (Swift / OCaml / Python)
-   so Character-panel edits reach the selected text everywhere, not
-   just in Rust.
+All four apps' canvases also honor the 11 character attributes
+directly when rendering text (see the SVG attribute mapping above).
 
-Layer 1 is architectural and shared across all non-stroke panels
-(Character, Paragraph, Artboards), so it unblocks several pending
-features at once rather than being Character-specific. Read-side
-wiring (panel reflects current selection) is a separate chunk that
-layers on top of the same state structs.
+Remaining polish:
 
-Until the wiring lands, the Character panel functions as a visual
-placeholder: the controls render and accept input, panel-local
-state updates, but nothing propagates to the document.
+1. **Kerning combo_box named modes** (Rust). The yaml declares
+   `Auto / Optical / Metrics / <numeric>` but the Rust widget still
+   only accepts a numeric value. Swift / OCaml / Python treat the
+   named modes as 0 via the same fallback.
+2. **Per-glyph rotate** (Rust). The current `rotate` attribute
+   applies a single rotation around the element origin. The spec
+   calls for per-glyph rotations, which requires a tspan split
+   per-glyph at serialization time (a B.3-sequence follow-up).
+3. **OCaml letter-spacing draw loop.** Cairo has no single-pass
+   per-string kern advance, so `letter_spacing != 0` text in the
+   OCaml canvas currently draws without the extra advance — a
+   per-char loop is the intended fix.
