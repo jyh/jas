@@ -161,17 +161,8 @@ public struct PanelGroupView: View {
                     let contentId = panelKindToContentId(kind)
                     if let ws = WorkspaceData.load(),
                        let content = ws.panelContent(contentId) {
-                        let stateMap = ws.stateDefaults()
-                        let panelMap = ws.panelStateDefaults(contentId)
-                        let icons = ws.icons()
-                        let swatchLibs = ws.swatchLibraries()
-                        let ctx: [String: Any] = [
-                            "state": stateMap,
-                            "panel": panelMap,
-                            "icons": icons,
-                            "data": ["swatch_libraries": swatchLibs] as [String: Any]
-                        ]
-                        YamlPanelBodyView(contentSpec: content, context: ctx, model: model)
+                        let ctx = buildPanelCtx(ws: ws, contentId: contentId)
+                        YamlPanelBodyView(contentSpec: content, context: ctx, model: model, panelId: contentId)
                     } else {
                         SwiftUI.Text(verbatim: panelLabel(kind))
                             .font(.system(size: 12))
@@ -189,6 +180,41 @@ public struct PanelGroupView: View {
         .onDrop(of: [dockDragUTType], isTargeted: nil) { providers in
             handleDrop(providers)
         }
+    }
+
+    /// Build the evaluation context for a panel body. Ensures the
+    /// StateStore has a scope for this panel (seeded from yaml
+    /// defaults on first render) and marks it active so `panel.X`
+    /// resolves here. When no model is present (unit tests) falls
+    /// back to fresh yaml defaults.
+    private func buildPanelCtx(ws: WorkspaceData, contentId: String) -> [String: Any] {
+        let stateMap = ws.stateDefaults()
+        let icons = ws.icons()
+        let swatchLibs = ws.swatchLibraries()
+        var panelMap: [String: Any]
+        if let store = model?.stateStore {
+            if !store.hasPanel(contentId) {
+                store.initPanel(contentId, defaults: ws.panelStateDefaults(contentId))
+            }
+            store.setActivePanel(contentId)
+            panelMap = store.getPanelState(contentId)
+        } else {
+            panelMap = ws.panelStateDefaults(contentId)
+        }
+        // Selection-driven overrides: when a Text / TextPath is
+        // selected, the Character panel reflects its attributes rather
+        // than the stored panel defaults. Mirrors the Rust dock
+        // `build_live_panel_overrides` block.
+        if contentId == "character_panel", let m = model,
+           let overrides = characterPanelLiveOverrides(model: m) {
+            for (k, v) in overrides { panelMap[k] = v }
+        }
+        return [
+            "state": stateMap,
+            "panel": panelMap,
+            "icons": icons,
+            "data": ["swatch_libraries": swatchLibs] as [String: Any]
+        ]
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {

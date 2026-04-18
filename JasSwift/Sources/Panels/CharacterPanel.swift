@@ -8,9 +8,14 @@
 /// `bind: panel.*_caps / super / sub` checked expressions so the
 /// two surfaces stay in sync.
 ///
-/// Layer B wiring — per-panel state, `apply_character_panel_to_selection`,
-/// and menu checkmark reflection from panel state — will arrive in a
-/// later pass.
+/// Layer B wiring lives in:
+/// - `DockPanelView.buildPanelCtx` — seeds / activates the panel
+///   scope in `model.stateStore` and merges `characterPanelLive
+///   Overrides(model:)` on top so the widgets reflect the selected
+///   Text / TextPath.
+/// - `YamlElementView.commitPanelWrite` — widget write-backs fire
+///   `notifyPanelStateChanged("character_panel", ...)`, which calls
+///   `applyCharacterPanelToSelection`.
 
 public enum CharacterPanel {
     public static let label = "Character"

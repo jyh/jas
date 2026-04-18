@@ -658,6 +658,19 @@ func isCharacterPanelKey(_ key: String) -> Bool {
     characterPanelKeys.contains(key)
 }
 
+/// Dispatch a panel-state change to the matching apply-to-selection
+/// pipeline. Called after any widget write-back or `set: panel.X`
+/// batch so the downstream surface (selected element, other views)
+/// re-syncs. Silent no-op for panels without a subscriber.
+public func notifyPanelStateChanged(_ panelId: String, store: StateStore, model: Model) {
+    switch panelId {
+    case "character_panel":
+        applyCharacterPanelToSelection(store: store, controller: Controller(model: model))
+    default:
+        break
+    }
+}
+
 /// Format a number for CSS length / value output: integers have no
 /// decimal, fractions drop trailing zeros. Matches the Rust
 /// `fmt_num` helper.

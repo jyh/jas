@@ -17,6 +17,11 @@ struct YamlElementView: View {
     let element: [String: Any]
     let context: [String: Any]
     var model: Model?
+    /// ID of the enclosing panel — widget write-backs (onChange) route
+    /// through `model.stateStore.setPanel(panelId, key, value)` when
+    /// non-nil. `nil` in dialog / non-panel contexts; writes fall back
+    /// to the legacy no-op for now.
+    var panelId: String? = nil
 
     var body: some View {
         // Check bind.visible — if the expression evaluates to false, hide the element.
@@ -81,6 +86,42 @@ struct YamlElementView: View {
         return evaluate(visExpr, context: context).toBool()
     }
 
+    /// Extract the write-back key from a `bind.value` / `bind.checked`
+    /// expression. Returns the bare panel-scoped key when the expression
+    /// is the simple lookup form `panel.some_key`; returns `nil` for
+    /// computed expressions (they are treated as read-only for widgets).
+    private func writeBackKey(_ expr: String?) -> String? {
+        guard let e = expr?.trimmingCharacters(in: .whitespaces),
+              e.hasPrefix("panel.") else { return nil }
+        let rest = String(e.dropFirst("panel.".count))
+        guard !rest.isEmpty,
+              rest.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else {
+            return nil
+        }
+        return rest
+    }
+
+    /// Commit a write to the panel state: store → bump version →
+    /// fire the `notify_panel_state_changed` hook. No-op when the
+    /// target key / panelId / store isn't available.
+    ///
+    /// For panels whose visible state is driven by selection overrides
+    /// (Character panel), sync the overrides into the store *first* so
+    /// that the apply-to-selection pipeline sees the complete shown
+    /// state. Without this the user's single-field edit would push
+    /// stale stored defaults for every *other* attr back onto the
+    /// selected element, undoing attrs they hadn't touched.
+    private func commitPanelWrite(key: String, value: Any?) {
+        guard let model = model, let pid = panelId else { return }
+        if pid == "character_panel",
+           let overrides = characterPanelLiveOverrides(model: model) {
+            for (k, v) in overrides { model.stateStore.setPanel(pid, k, v) }
+        }
+        model.stateStore.setPanel(pid, key, value)
+        model.panelStateVersion &+= 1
+        notifyPanelStateChanged(pid, store: model.stateStore, model: model)
+    }
+
     // MARK: - Repeat
 
     /// Expand a repeat directive: evaluate the source expression to get a list,
@@ -107,21 +148,21 @@ struct YamlElementView: View {
             ) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId)
                 }
             }
         } else if layout == "row" {
             HStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId)
                 }
             }
         } else {
             VStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId)
                 }
             }
         }
@@ -211,7 +252,7 @@ struct YamlElementView: View {
             spacing: gap
         ) {
             ForEach(0..<children.count, id: \.self) { i in
-                YamlElementView(element: children[i], context: context, model: model)
+                YamlElementView(element: children[i], context: context, model: model, panelId: panelId)
             }
         }
     }
@@ -282,17 +323,23 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderNumberInput() -> some View {
         let minVal = element["min"] as? Int ?? 0
-        let maxVal = element["max"] as? Int ?? 100
-        let initialValue: Int = {
-            if let bind = element["bind"] as? [String: Any],
-               let valueExpr = bind["value"] as? String {
-                let result = evaluate(valueExpr, context: context)
+        let bind = element["bind"] as? [String: Any]
+        let valueExpr = bind?["value"] as? String
+        let currentValue: Int = {
+            if let e = valueExpr {
+                let result = evaluate(e, context: context)
                 if case .number(let n) = result { return Int(n) }
             }
             return minVal
         }()
+        let writeKey = writeBackKey(valueExpr)
 
-        TextField("", value: .constant(initialValue), format: .number)
+        TextField("", value: Binding<Int>(
+            get: { currentValue },
+            set: { newVal in
+                if let key = writeKey { commitPanelWrite(key: key, value: newVal) }
+            }
+        ), format: .number)
             .frame(width: 45)
             .textFieldStyle(.roundedBorder)
     }
@@ -302,7 +349,23 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderTextInput() -> some View {
         let placeholder = element["placeholder"] as? String ?? ""
-        TextField(placeholder, text: .constant(""))
+        let bind = element["bind"] as? [String: Any]
+        let valueExpr = bind?["value"] as? String
+        let currentValue: String = {
+            if let e = valueExpr {
+                let result = evaluate(e, context: context)
+                if case .string(let s) = result { return s }
+            }
+            return ""
+        }()
+        let writeKey = writeBackKey(valueExpr)
+
+        TextField(placeholder, text: Binding<String>(
+            get: { currentValue },
+            set: { newVal in
+                if let key = writeKey { commitPanelWrite(key: key, value: newVal) }
+            }
+        ))
             .textFieldStyle(.roundedBorder)
     }
 
@@ -378,7 +441,7 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderPanel() -> some View {
         if let content = element["content"] as? [String: Any] {
-            YamlElementView(element: content, context: context, model: model)
+            YamlElementView(element: content, context: context, model: model, panelId: panelId)
         } else {
             renderPlaceholder()
         }
@@ -425,21 +488,28 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderSelect() -> some View {
         let options = element["options"] as? [[String: Any]] ?? []
+        let bind = element["bind"] as? [String: Any]
+        let valueExpr = bind?["value"] as? String
         let currentValue: String = {
-            if let bind = element["bind"] as? [String: Any],
-               let valueExpr = bind["value"] as? String {
-                let result = evaluate(valueExpr, context: context)
+            if let e = valueExpr {
+                let result = evaluate(e, context: context)
                 if case .string(let s) = result { return s }
             }
             return ""
         }()
+        let writeKey = writeBackKey(valueExpr)
 
         let entries = options.enumerated().map { i, opt -> PickerEntry in
             let v = opt["value"].map { "\($0)" } ?? ""
             let l = opt["label"] as? String ?? ""
             return PickerEntry(id: i, val: v, displayLabel: l.isEmpty ? v : l)
         }
-        Picker("", selection: .constant(currentValue)) {
+        Picker("", selection: Binding<String>(
+            get: { currentValue },
+            set: { newVal in
+                if let key = writeKey { commitPanelWrite(key: key, value: newVal) }
+            }
+        )) {
             ForEach(entries) { e in
                 SwiftUI.Text(e.displayLabel).tag(e.val)
             }
@@ -452,15 +522,22 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderToggle() -> some View {
         let label = element["label"] as? String ?? ""
+        let bind = element["bind"] as? [String: Any]
+        let checkedExpr = bind?["checked"] as? String
         let isChecked: Bool = {
-            if let bind = element["bind"] as? [String: Any],
-               let checkedExpr = bind["checked"] as? String {
-                return evaluate(checkedExpr, context: context).toBool()
+            if let e = checkedExpr {
+                return evaluate(e, context: context).toBool()
             }
             return false
         }()
+        let writeKey = writeBackKey(checkedExpr)
 
-        Toggle(label, isOn: .constant(isChecked))
+        Toggle(label, isOn: Binding<Bool>(
+            get: { isChecked },
+            set: { newVal in
+                if let key = writeKey { commitPanelWrite(key: key, value: newVal) }
+            }
+        ))
             .toggleStyle(.checkbox)
     }
 
@@ -469,10 +546,11 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderComboBox() -> some View {
         let options = element["options"] as? [[String: Any]] ?? []
+        let bind = element["bind"] as? [String: Any]
+        let valueExpr = bind?["value"] as? String
         let currentValue: String = {
-            if let bind = element["bind"] as? [String: Any],
-               let valueExpr = bind["value"] as? String {
-                let result = evaluate(valueExpr, context: context)
+            if let e = valueExpr {
+                let result = evaluate(e, context: context)
                 switch result {
                 case .string(let s): return s
                 case .number(let n): return String(Int(n))
@@ -481,6 +559,7 @@ struct YamlElementView: View {
             }
             return ""
         }()
+        let writeKey = writeBackKey(valueExpr)
 
         // SwiftUI doesn't have a native combo box with free entry;
         // use Picker as a dropdown with the current value displayed.
@@ -489,7 +568,12 @@ struct YamlElementView: View {
             let l = opt["label"] as? String ?? ""
             return PickerEntry(id: i, val: v, displayLabel: l.isEmpty ? v : l)
         }
-        Picker("", selection: .constant(currentValue)) {
+        Picker("", selection: Binding<String>(
+            get: { currentValue },
+            set: { newVal in
+                if let key = writeKey { commitPanelWrite(key: key, value: newVal) }
+            }
+        )) {
             ForEach(entries) { e in
                 SwiftUI.Text(e.displayLabel).tag(e.val)
             }
@@ -503,7 +587,7 @@ struct YamlElementView: View {
     private func renderChildElements() -> some View {
         let children = element["children"] as? [[String: Any]] ?? []
         ForEach(0..<children.count, id: \.self) { i in
-            YamlElementView(element: children[i], context: context, model: model)
+            YamlElementView(element: children[i], context: context, model: model, panelId: panelId)
         }
     }
 }
@@ -1482,9 +1566,13 @@ struct YamlPanelBodyView: View {
     let contentSpec: [String: Any]
     let context: [String: Any]
     var model: Model?
+    /// ID of the panel whose scope is active in `context["panel"]`.
+    /// Widget write-backs inside this body route to
+    /// `model.stateStore.setPanel(panelId, ...)`.
+    var panelId: String?
 
     var body: some View {
-        YamlElementView(element: contentSpec, context: context, model: model)
+        YamlElementView(element: contentSpec, context: context, model: model, panelId: panelId)
             .padding(4)
     }
 }
