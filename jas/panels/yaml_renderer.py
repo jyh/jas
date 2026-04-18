@@ -1211,10 +1211,20 @@ def _apply_style(widget: QWidget, style: dict, store: StateStore, ctx: dict):
             widget.setFixedSize(sz, sz)
             continue
         if key == "width":
-            widget.setFixedWidth(int(val))
+            if isinstance(val, str) and val.endswith("%"):
+                from PySide6.QtWidgets import QSizePolicy
+                widget.setSizePolicy(QSizePolicy.Expanding,
+                                     widget.sizePolicy().verticalPolicy())
+            else:
+                widget.setFixedWidth(int(val))
             continue
         if key == "height":
-            widget.setFixedHeight(int(val))
+            if isinstance(val, str) and val.endswith("%"):
+                from PySide6.QtWidgets import QSizePolicy
+                widget.setSizePolicy(widget.sizePolicy().horizontalPolicy(),
+                                     QSizePolicy.Expanding)
+            else:
+                widget.setFixedHeight(int(val))
             continue
         if key == "min_width":
             widget.setMinimumWidth(int(val))
