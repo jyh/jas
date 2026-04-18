@@ -397,6 +397,76 @@ private func letterSpacingPx(_ letterSpacing: String, _ kerning: String, fontSiz
     return (ls + k) * fontSize
 }
 
+/// Draw a Text element's tspans in sequence on a shared baseline,
+/// each using its effective font (override || parent-element
+/// fallback) and effective text-decoration. Mirrors Rust's
+/// `draw_segmented_text`. Covers TSPAN.md's rendering "minimum
+/// subset": different fonts and decorations across tspans on one
+/// line. Omits per-tspan baseline-shift / transform / rotate / dx
+/// and multi-line wrapping — those still collapse to the element
+/// defaults for now.
+private func drawSegmentedText(_ ctx: CGContext, _ v: Text) {
+    let parentBold = v.fontWeight == "bold"
+    let parentItalic = v.fontStyle == "italic" || v.fontStyle == "oblique"
+    let parentDecorTokens: [String] = v.textDecoration
+        .split(separator: " ")
+        .map(String.init)
+        .filter { !$0.isEmpty && $0 != "none" }
+
+    let foreground: NSColor
+    if let fill = v.fill {
+        foreground = nsColor(fill.color)
+    } else {
+        foreground = .black
+    }
+
+    // The baseline sits at the first visual line: element y + 0.8 *
+    // fontSize. Segmented rendering is one-line only for now.
+    let baselineY = v.y + v.fontSize * 0.8
+    ctx.textMatrix = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
+
+    var cx = v.x
+    for t in v.tspans {
+        if t.content.isEmpty { continue }
+        let effFamily = t.fontFamily ?? v.fontFamily
+        let effSize = t.fontSize ?? v.fontSize
+        let effBold = t.fontWeight.map { $0 == "bold" } ?? parentBold
+        let effItalic = t.fontStyle.map { $0 == "italic" || $0 == "oblique" } ?? parentItalic
+
+        var fontDesc = NSFontDescriptor(name: effFamily, size: effSize)
+        var traits: NSFontDescriptor.SymbolicTraits = []
+        if effBold { traits.insert(.bold) }
+        if effItalic { traits.insert(.italic) }
+        fontDesc = fontDesc.withSymbolicTraits(traits)
+        let font = NSFont(descriptor: fontDesc, size: effSize)
+            ?? NSFont.systemFont(ofSize: effSize)
+
+        // Effective decoration: Some([..]) overrides parent (empty
+        // list = explicit no-decoration); nil inherits parent tokens.
+        let hasUnderline: Bool
+        let hasStrike: Bool
+        if let members = t.textDecoration {
+            hasUnderline = members.contains("underline")
+            hasStrike = members.contains("line-through")
+        } else {
+            hasUnderline = parentDecorTokens.contains("underline")
+            hasStrike = parentDecorTokens.contains("line-through")
+        }
+        var attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: foreground,
+        ]
+        if hasUnderline { attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue }
+        if hasStrike { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+
+        let line = NSAttributedString(string: t.content, attributes: attrs)
+        let ctLine = CTLineCreateWithAttributedString(line)
+        ctx.textPosition = CGPoint(x: cx, y: baselineY)
+        CTLineDraw(ctLine, ctx)
+        cx += Double(CTLineGetTypographicBounds(ctLine, nil, nil, nil))
+    }
+}
+
 private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview) {
     let effective = min(ancestorVis, elem.visibility)
     if effective == .invisible { return }
@@ -540,6 +610,17 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
     case .text(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
+        // Multi-tspan Text renders each tspan with its own effective
+        // font (family / size / weight / style) and text-decoration on
+        // a shared baseline. Single no-override tspan falls through to
+        // the flat fast path below. Mirrors the Rust first pass —
+        // per-tspan baseline-shift / rotate / transform / dx and
+        // wrapping are follow-ups.
+        let isFlat = v.tspans.count == 1 && v.tspans[0].hasNoOverrides
+        if !isFlat {
+            drawSegmentedText(ctx, v)
+            break
+        }
         // Baseline-shift: super/sub shrink the font to 70% and
         // offset the baseline; numeric "Npt" shifts up by N pt
         // without resizing. Empty = identity. Mirrors Rust / Python
