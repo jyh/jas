@@ -1365,113 +1365,6 @@ and completeness. Make suggestions for improvements, ranking them in priority
 from high to low, and giving each a number. What are the benefits? What are the
 downsides? Be ready for a deep dive into any of the suggestions.
 
-
-# Align
-
-The Alignment Panel allows the elements on the selection to be aligned in a few different ways.
-
-Alignment:
-- The ALIGN_LEFT_BUTTON finds the leftmost bounding box of all the elements in the selection, and moves all elements horizontally to have the same left position
-- The ALIGN_HORIZONTAL_BUTTON finds the mid-point of all the elements in the selection, and moves all elements horizontally to have the same midpoint
-- The ALIGN_RIGHT_BUTTON finds the rightmost bounding box of all the elements in the selection, and moves all elements horizontally to have the same right position
-- ALIGN_TOP_BUTTON, ALIGN_VERTICAL_BUTTON, ALIGN_BOTTOM_BUTTON do the same, but in the vertical dimension
-
-Distribute tries to ensure that the _spacing_ of elements is uniform.
-- The DISTRIBUTE_LEFT_BUTTON moves the elements in the selection horizontally so that the left coordinates of their bounding boxes are evenly spaced
-- DISTRIBUTE_HORIZONTAL_BUTTON does the same, with the midpoints
-- DISTRIBUTE_RIGHT_BUTTON does the same, with the right coordinates
-- DISTRIBUTE_TOP_BUTTON, DISTRIBUTE_VERTICAL_BUTTON, and DISTRIBUTE_BOTTOM_BUTTON do the same, but moving element vertically to ensure an even vertical distribution
-
-The spacing tools look at the spacing between elements and tries to ensure even spacing.
-- DISTRIBUTE_VERTICAL_SPACING_BUTTON moves elements vertically to ensure that the spacing between the elements is the same
-- DISTRIBUTE_HORIZONTAL_SPACING_BUTTON moves elements horizontally to ensure that the spacing between the elements is the same
-
-Here is the layout described in bootstrap form.
-
-```yaml
-panel:
-- .row: "Align Objects:"
-- .row:
-  - .col-2: ALIGN_LEFT_BUTTON
-  - .col-2: ALIGN_HORIZONTAL_BUTTON
-  - .col-2: ALGN_RIGHT_BUTTON
-  - .col-2: ALIGN_TOP_BUTTON
-  - .col-2: ALIGN_VERTICAL_BUTTON
-  - .col-2: ALIGN_BOTTOM_BUTTON
-- .row: "Distribute Objects:"
-- .row:
-  - .col-2: DISTRIBUTE_LEFT_BUTTON
-  - .col-2: DISTRIBUTE_HORIZONTAL_BUTTON
-  - .col-2: DISTRIBUTE_RIGHT_BUTTON
-  - .col-2: DISTRIBUTE_TOP_BUTTON
-  - .col-2: DISTRIBUTE_VERTICAL_BUTTON
-  - .col-2: DISTRIBUTE_BOTTOM_BUTTON
-- .row:
-  - .col-6:
-    - .row: "Distribute Spacing:"
-	- .col-3: DISTRIBUTE_VERTICAL_SPACING_BUTTON
-	- .col-3: DISTRIBUTE_HORIZONTAL_SPACING_BUTTON
-```
-
-The Alignment panel has the following menu:
-- Use Preview Bounds (if this is checked, the preview bounding box is used, which takes into account fill and stroke)
-
-# Boolean Operations
-
-The Boolean Operations Panel allows performing a set of boolean operations on the geometry in the selection. These boolean operation are performed on the fill, and ignore stroke properties on the elements.
-
-- UNION merges all elements into a single element, taking the union of their fills.
-- INTERSECTION takes the intersection of fills
-- SUBTRACT_FRONT subtracts the fill of the frontmost element from all other elements in the selection
-- EXCLUDE subtracts the intersection of all elements from all elements in the selection
-- DIVIDE cuts the elements apart so that none of them overlap
-- TRIM removes the parts of elements that are hidden behind other elements
-- MERGE performs a TRIM, and afterwards merges all elements that are touching and have exactly the same fill color
-- CROP uses the topmost element as a mask and crops all other elements in the selection, removing anything outside the mask
-- SUBTRACT_BACK is like SUBTRACT_FRONT but it subtracts the backmost element from all other elements
-
-```yaml
-panel:
-- .row: "Shape Modes:"
-- .row:
-  - .col-2: UNION
-  - .col-2: SUBTRACT_FRONT
-  - .col-2: INTERSECTION
-  - .col-2: EXCLUDE
-- .row:
-  - .col-2: DIVIDE
-  - .col-2: TRIM
-  - .col-2: MERGE
-  - .col-2: CHOP
-  - .col-2: SUBTRACT_BACK
-```
-
-# Magic wand
-
-The Magic Wand Panel specifies properties of the Magic Wand, which starts with a selection, and selects additional elements based on whether those elements are similar to the selection in stroke and fill.
-
-- If FILL_COLOR_CHECKBOX is active, elements are selected if they have a similar fill color, tolerance is given by FILL_TOLERANCE. This is RMS distance in RGB.
-- STROKE_COLOR is similar to FILL_COLOR.
-- STROKE_WEIGHT allows selecting elements if they have similar stroke weight. STROKE_TOLERANCE is in points.
-- OPACITY allows selecting elements if they have similar opacity. OPACITY_TOLERANCE is in percent.
-
-Here is the layout in bootstrp-style format.
-```yaml
-panel:
-- .row:
-  - .col-5: FILL\_COLOR\_CHECKBOX
-  - .col-7: ["Tolerance:", FILL\_TOLERANCE]
-- .row:
-  - .col-5: STROKE\_COLOR\_CHECKBOX
-  - .col-7: ["Tolerance:", STROKE\_TOLERANCE]
-- .row:
-  - .col-5: STROKE\_WEIGHT\_CHECKBOX
-  - .col-7: ["Tolerance:", STROKE\_WEIGHT\_TOLERANCE (pt)]
-- .row:
-  - .col-5: OPACITY\_CHECKBOX
-  - .col-7: ["Tolerance:", OPACITY\_TOLERANCE (%)]
-```
-
 # Stroke
 
 The Stroke Panel allows specifying the stroke atrributes of the elements in the selection.
@@ -1550,194 +1443,6 @@ Document. Give me your suggestions.
 In dioxus, before reloading, save all open documents to local storage in binary
 format. On restart, reload them. Give me your suggestions.
 
-# Layer
-
-
-  The Layer Panel displays the elements in the document. An example is shown in examples/layers.png.
-
-  Each element has a row in the panel.
-  - The EYE_BUTTON indicates the element's visibility.
-  - The LOCK_BUTTON indicates whether the element is locked.
-  - The TWIRL_DOWN_BUTTON is used to display or hide the elements of Layers and Groups.
-  - The ELEMENT_PREVIEW gives a small 32px square visual summary of the element.
-  - The ELEMENT_NAME is the name of the element, if it has one. Unnamed elements display their element type in angle brackets (e.g., <Path>, <Group>,
-  <Rectangle>), truncated with ellipsis if the name exceeds the available space.
-  - The SELECT_SQUARE is filled with the color of the element's nearest ancestor layer if the element is selected, otherwise it is empty.
-
-  ELEMENT_PREVIEW is a 32px square rasterized thumbnail of the element scaled to fit, on a white background. Thumbnails are refreshed as elements change
-  on a best-effort basis. Elements with outline or invisible visibility modes are rendered as if in preview mode. Empty groups and layers show a blank
-  preview.
-
-  Layers and groups have a TWIRL_DOWN_BUTTON, open by default. Twirl state persists across sessions. Leaf elements (paths, text, images) do not have a
-  twirl button; a blank gap preserves alignment. Empty layers and groups still show an active twirl button.
-
-  The SPACER is used for indentation in increments of 16px. Layers are not indented. Each nesting level adds 16px: direct children of a layer are
-  indented 16px, children of a group within a layer are indented 32px, and so on.
-
-  Click-and-wait on the ELEMENT_NAME enters inline editing mode (same as macOS file renaming). Enter confirms the new name, Escape cancels. Any element
-  can be renamed, including locked elements.
-
-  Here is the layout in bootstrap-style format.
-
-  panel:
-  - .row:
-    - .col-11: SEARCH_ALL_TEXT
-    - .col-1: SEARCH_FILTER_BUTTON
-  - .row: (per element)
-    - .col-1: EYE_BUTTON
-    - .col-1: LOCK_BUTTON
-    - .col-9: SPACER TWIRL_DOWN_BUTTON ELEMENT_PREVIEW ELEMENT_NAME
-    - .col-1: SELECT_SQUARE
-  - .footer:
-    - NEW_LAYER_BUTTON
-    - NEW_GROUP_BUTTON
-    - DELETE_SELECTION_BUTTON
-
-  SEARCH_ALL_TEXT filters the panel by element name. As the user types, only elements whose names match the search text are shown. Parent elements
-  (groups, layers) of matching elements are shown to preserve hierarchy, even if they don't match themselves. SEARCH_FILTER_BUTTON opens a dropdown to
-  filter by element kind (line, rectangle, etc.). The search and kind filter can be combined. Clearing the search text restores the full panel.
-
-  Panel-selection is preserved during search but invisible for hidden rows; it re-appears when the search is cleared. Menu items only act on visible
-  (matching) panel-selected elements.
-
-  Visibility
-
-  Each element has a visibility mode with three values:
-  - preview: the element is rendered normally. The EYE_BUTTON shows an open eye icon.
-  - outline: the element is rendered as outlines only (no fills, no raster content). The EYE_BUTTON shows a hollow eye icon.
-  - invisible: the element is not rendered on the canvas. The EYE_BUTTON shows a struck-through eye icon.
-
-  Clicking the EYE_BUTTON cycles through the modes: preview → outline → invisible → preview.
-
-  Locking
-
-  Clicking the LOCK_BUTTON toggles the element between locked and unlocked. When locked, the button shows a padlock icon. When unlocked, the button is
-  blank. Locking a layer or group saves each child's lock state and locks all children recursively. Unlocking restores each child's previous lock state.
-
-  Element Selection
-
-  Clicking on the SELECT_SQUARE selects that element and deselects all others. Shift-click extends the selection from the last-clicked element to the
-  clicked element. Command-click toggles the clicked element in or out of the current selection. Elements can be selected across layers.
-
-  Panel Selection
-
-  There is another kind of selection: each element can be panel-selected by clicking on the element's spacer, twirl-down gap, preview, or name. This has
-  no relation to element selection; panel-selection is local to the panel and is used for moving elements around in the panel and for menu operations.
-  Panel-selected elements are highlighted with the system selection color as a background on the row. The usual semantics of shift-click and
-  command-click apply.
-
-  Panel-selected elements can be moved within the panel by dragging. This affects the ordering of elements in the document. When a selection is moved,
-  the elements preserve their order, but move to the drop point, potentially changing layers. A horizontal line between rows indicates the drop insertion
-   point. Hovering over a collapsed container auto-expands it after a delay. Layers can be dragged into other layers (nesting), but not into themselves.
-  Non-layer elements can be dragged into layers and groups. Nothing can be dragged into a locked layer.
-
-  Panel Keyboard Shortcuts
-
-  - Delete/Backspace: delete panel-selected elements
-  - F2 or Enter: start renaming the panel-selected element
-  - Command-A: select all elements in the panel
-  - Up/Down arrow: move between visible rows
-  - Right arrow: expand a collapsed container, or move to first child if already expanded
-  - Left arrow: collapse an expanded container, or move to parent if already collapsed or a leaf
-
-  Menu
-
-  All menu operations that refer to "selected" layers or items act on panel-selection, not element selection (SELECT_SQUARE).
-
-  - New Layer... (brings up the Layer Options dialogue to create a new layer. The layer is inserted above the topmost panel-selected layer. If nothing is
-   panel-selected, the layer is inserted at the top of the layer stack. The default name is auto-generated as "Layer N", skipping numbers already in use.
-   The default color cycles through the preset list so adjacent layers get different colors.)
-  - New Group (wraps the panel-selected elements in a new group at the position of the topmost panel-selected element. All panel-selected elements must
-  be in the same layer; grayed out otherwise. Grayed out when nothing is panel-selected.)
-  - Duplicate (deep copies the panel-selected elements and all their contents, placing the copies above the originals. Grayed out when nothing is
-  panel-selected.)
-  - Delete Selection (deletes panel-selected elements and all their contents. Grayed out when nothing is panel-selected.)
-  - Delete Hidden Layers (deletes layers that are not visible)
-  - -----
-  - Options for Layer... (brings up the Layer Options dialogue for the topmost panel-selected layer. Grayed out when no layer is panel-selected.)
-  - ----
-  - Enter Isolation Mode / Exit Isolation Mode (toggle. "Enter Isolation Mode" saves the current visibility state of all layers, then makes all layers
-  and groups invisible except the panel-selected one. Non-isolated layers and groups appear dimmed in the panel. Isolation mode can be nested: entering
-  isolation on a group within an already-isolated layer pushes another level. Enabled when a layer or group is panel-selected. "Exit Isolation Mode" pops
-   one level of isolation, restoring the visibility state saved on the most recent entry. Enabled when in isolation mode.)
-  - ----
-  - Flatten Artwork (recursively unpacks all groups in the panel-selected items until no groups remain. Enabled when the panel-selected items contain at
-  least one group. Grayed out otherwise.)
-  - Collect in New Layer (moves all panel-selected items into a new layer placed above all existing layers. The items are removed from their original
-  locations and maintain their relative order. The new layer's name and color follow the same auto-generation rules as New Layer. Grayed out when nothing
-   is panel-selected.)
-  - ----
-  - Hide All Layers / Show All Layers (toggle: "Hide All Layers" when any layer is visible, "Show All Layers" when all layers are invisible)
-  - Outline All Layers / Preview All Layers (toggle: "Outline All Layers" when any layer is in preview mode, "Preview All Layers" when all layers are in
-  outline mode)
-  - Lock All Layers / Unlock All Layers (toggle: "Lock All Layers" when any layer is unlocked, "Unlock All Layers" when all layers are locked)
-
-  Right-Click Context Menu
-
-  Right-clicking a panel row opens a context menu with:
-  - Options for Layer...
-  - Duplicate
-  - Delete Selection
-  - Enter/Exit Isolation Mode
-  - Flatten Artwork
-  - Collect in New Layer
-
-  Layer Options Dialogue
-
-  An example is shown in examples/layer-options.png.
-
-  dialog:
-  - .row:
-    .col3: "Name:"
-    .col9: NAME
-  - .row:
-    .col3: "Color:"
-    .col9: LAYER_COLOR_DROPDOWN LAYER_COLOR_SWATCH
-  - .row:
-    .col3:
-    .col3: TEMPLATE_CHECKBOX
-    .col3: LOCK_CHECKBOX
-  - .row:
-    .col3:
-    .col3: SHOW_CHECKBOX
-    .col3: PRINT_CHECKBOX
-  - .row:
-    .col3:
-    .col3: PREVIEW_CHECKBOX
-    .col3: DIM_IMAGES_TO_CHECKBOX
-  - .row:
-    .col6:
-    .col6: CANCEL_BUTTON OK_BUTTON
-
-  Layer attributes:
-  - LAYER_COLOR: each layer has a color that is used to color the selection highlight.
-  - LAYER_PRINT: boolean, if false the layer will not be included in prints (default true, not implemented)
-  - LAYER_TEMPLATE: boolean, if true the layer is a template (default false, not implemented)
-  - LAYER_DIM_IMAGES: boolean, if true raster images in the layer are dimmed (default false)
-  - LAYER_DIM_IMAGES_PERCENT: number 0–100, the opacity percentage applied to raster images when dimming is enabled (default 50)
-
-  Dialogue fields:
-  - NAME: the layer name
-  - LAYER_COLOR_DROPDOWN: the dropdown lists a set of preset colors for layers (red, blue, green, light red, light blue, dark green, etc.). When a preset
-   is selected, the swatch updates to match. If the current color does not match any preset, the dropdown displays "Custom." If a custom color matches a
-  preset, the dropdown displays that preset name.
-  - LAYER_COLOR_SWATCH: clicking on the swatch brings up the Color Picker to change the color of the layer.
-  - TEMPLATE_CHECKBOX is checked if the layer is a template (default off, to be implemented)
-  - LOCK_CHECKBOX is checked if the layer is locked
-  - SHOW_CHECKBOX is checked if the layer is not invisible. In the Layer Options dialogue, the SHOW and PREVIEW checkboxes map to the visibility state:
-    - SHOW unchecked → invisible (PREVIEW is disabled)
-    - SHOW checked + PREVIEW checked → preview
-    - SHOW checked + PREVIEW unchecked → outline
-  - PRINT_CHECKBOX is checked if the layer is included in prints (default on, to be implemented)
-  - PREVIEW_CHECKBOX is checked if the visibility mode is "preview" (otherwise "outline"). Disabled when SHOW is unchecked.
-  - DIM_IMAGES_TO_CHECKBOX is checked if raster images in the layer are dimmed to the specified percentage. When checked, the percentage input is
-  enabled. Default off, 50%.
-
-Please read and understand these requirements. Analyze them for inconsistencies
-and completeness. Make suggestions for improvements, ranking them in priority
-from high to low, and giving each a number. What are the benefits? What are the
-downsides? Be ready for a deep dive into any of the suggestions.
-
 # Byte Code
 
 I'd like to compile expressions to byte-code. This will give a compact
@@ -1749,50 +1454,6 @@ and completeness. Make suggestions for improvements, ranking them in priority
 from high to low, and giving each a number. What are the benefits? What are the
 downsides? Be ready for a deep dive into any of the suggestions.
 
-# Paragraph
-
-The Paragraph Panel sets properties of paragraphs, longer space of text that may include wrapping and indentation.
-
-- ALIGN_LEFT aligns each line to the left boundary, with a ragged right.
-- ALIGN_CENTER centers each line, the left and right are ragged.
-- ALIGN_RIGHT aligns each line to the right margin, leaving the left ragged.
-- The JUSTIFY operations justify to both margins.
-  - JUSTIFY_LEFT justifies the last line left, leaving the right ragged.
-  - JUSTIFY_RIGHT justifies the last line right, leaving the left ragged.
-  - JUSTIFY_CENTER justifies the last line in the center.
-  - JUSTIFY_ALL forces justification on all lines
-- BULLETS_DROPDOWN lists a set of bullet list styles. Each paragraph starts with a bullet. We can include normal bullets, dashes, checkmarks.
-- NUMBERED_LIST_DROPDOWN gives a set of numbered list styles. Each paragraph starts with a number. We can give numbers, roman numerals (both capitals and lower case).
-- LEFT_INDENT allows specifying an identation for all the lines in a paragraph.
-- RIGHT_INDENT does the same, but indents from the right margin.
-- FIRST_LINE_INDENT_VALUE specifies additional indentation for the first line of each paragraph.
-- SPACE_BEFORE_VALUE indicates additional vertical spacing for every paragraph but the first one.
-- SPACE_AFTER_VALUE indicates additional veritcal spacing between paragraphs.
-- HYPHENATE, when checked, specifies that line breaking is allowed to use hyphenation.
-
-Here is the layour in bootstrap style format.
-
-```yaml
-panel:
-- .row: [ALIGN\_LEFT, ALIGN\_CENTER, ALIGN\_RIGHT, JUSTIFY\_LEFT, JUSTIFY\_CENTER, JUSTIFY\_RIGHT, JUSTIFY\_ALL]
-- .row: [BULLETS_DROPDOWN, NUMBERED_LIST_DROPDOWN]
-- .row:
-  - .col-1: left indent icon
-  - .col-5: LEFT_INDENT_VALUE
-  - .col-1: right indent icon
-  - .col-5: RIGHT_INDENT_VALUE
-- .row:
-  - .col-1: first line indent icon
-  - .col-5: FIRST_LINE_INDENT_VALUE
-- .row:
-  - .col-1: space before icon
-  - .col-5: SPACE_BEFORE_VALUE
-  - .col-1: space after icon
-  - .col-5: SPACE AFTER VALIE
-- .row:
-  - .col-3: HYPHENATE_CHECKBOX
-```
-
 # Splitting the TRANSCRIPT.md
 
 [Note that this point I forked the discussion of each feature into a separate file, e.g. CHARACTER.md,
@@ -1800,7 +1461,15 @@ to capture the conversation with Claude.]
 
 Sequence:
 
+Before splitting:
+- COLOR.md
+- SWATCHES.md
+- STROKE.md
+- LAYERS.md
+
+After:
 - CHARACTER.md
+- PARAGRAPH.md
 
 # Testing
 
@@ -1813,6 +1482,15 @@ instead. Include only tests that cannot be automated. My time is precious and I
 get easily distracted. Give stable unique identifiers to the manual tasks and
 order them by priority, with the most insightful tests first.  Write them into
 CHARACTER_TESTS.md. We'll keep this file up to date as we investigate.
+
+Please read and understand these requirements. Analyze them for inconsistencies
+and completeness. Make suggestions for improvements. Rank your responses in priority
+from high to low, and giving each a number. What are the benefits? What are the
+downsides? Be ready for a deep dive into any of the suggestions.
+
+# Paragraph
+
+Read PARAGRAPH.md
 
 Please read and understand these requirements. Analyze them for inconsistencies
 and completeness. Make suggestions for improvements. Rank your responses in priority
