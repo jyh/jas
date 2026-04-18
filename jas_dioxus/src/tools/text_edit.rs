@@ -223,6 +223,11 @@ pub struct TextEditSession {
     /// Use a `VecDeque` so the O(n) cap eviction (`pop_front`) is O(1).
     undo: VecDeque<EditSnapshot>,
     redo: VecDeque<EditSnapshot>,
+    /// Session-scoped tspan clipboard. Captured on copy/cut from the
+    /// current element's tspan structure; consumed on paste when the
+    /// system-clipboard flat text matches. Preserves per-range
+    /// overrides across cut/paste within a single edit session.
+    pub tspan_clipboard: Option<(String, Vec<crate::geometry::tspan::Tspan>)>,
 }
 
 impl TextEditSession {
@@ -239,6 +244,7 @@ impl TextEditSession {
             blink_epoch_ms,
             undo: VecDeque::new(),
             redo: VecDeque::new(),
+            tspan_clipboard: None,
         }
     }
 
@@ -372,6 +378,47 @@ impl TextEditSession {
         let lo_b = char_to_byte(&self.content, lo);
         let hi_b = char_to_byte(&self.content, hi);
         Some(self.content[lo_b..hi_b].to_string())
+    }
+
+    /// Capture the current selection's flat text *and* its tspan
+    /// structure (from the supplied element tspans) into the session
+    /// clipboard. Returns the flat text for the system clipboard.
+    /// `None` when there is no selection.
+    pub fn copy_selection_with_tspans(
+        &mut self,
+        element_tspans: &[crate::geometry::tspan::Tspan],
+    ) -> Option<String> {
+        if !self.has_selection() {
+            return None;
+        }
+        let (lo, hi) = self.selection_range();
+        let flat = {
+            let lo_b = char_to_byte(&self.content, lo);
+            let hi_b = char_to_byte(&self.content, hi);
+            self.content[lo_b..hi_b].to_string()
+        };
+        let tspans = crate::geometry::tspan::copy_range(element_tspans, lo, hi);
+        self.tspan_clipboard = Some((flat.clone(), tspans));
+        Some(flat)
+    }
+
+    /// Try a tspan-aware paste: if `self.tspan_clipboard` holds a
+    /// payload whose flat text equals `text`, splice the captured
+    /// tspans into `element_tspans` at the caret and return the new
+    /// tspan list. Returns `None` when the clipboard is absent or
+    /// stale; the caller falls back to the flat `insert` path.
+    pub fn try_paste_tspans(
+        &self,
+        element_tspans: &[crate::geometry::tspan::Tspan],
+        text: &str,
+    ) -> Option<Vec<crate::geometry::tspan::Tspan>> {
+        let (flat, payload) = self.tspan_clipboard.as_ref()?;
+        if flat != text {
+            return None;
+        }
+        Some(crate::geometry::tspan::insert_tspans_at(
+            element_tspans, self.insertion, payload,
+        ))
     }
 
     /// Build a new Document with the session's current content applied to
@@ -772,5 +819,73 @@ mod tests {
         assert!(t.tspans[0].font_weight.is_none());
         assert_eq!(t.tspans[1].content, "world");
         assert_eq!(t.tspans[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    // ── session-scoped tspan clipboard ──────────────────────────
+
+    #[test]
+    fn copy_selection_with_tspans_captures_and_returns_flat() {
+        use crate::geometry::tspan::Tspan;
+        let tspans = vec![
+            Tspan { content: "foo".into(), ..Tspan::default_tspan() },
+            Tspan { id: 1, content: "bar".into(),
+                    font_weight: Some("bold".into()),
+                    ..Tspan::default_tspan() },
+        ];
+        let mut s = TextEditSession::new(vec![0, 0], EditTarget::Text,
+                                         "foobar".into(), 0, 0.0);
+        s.set_insertion(1, false);
+        s.set_insertion(5, true); // select "ooba"
+        let flat = s.copy_selection_with_tspans(&tspans).expect("copy");
+        assert_eq!(flat, "ooba");
+        let (saved_flat, saved) = s.tspan_clipboard.as_ref().expect("clipboard");
+        assert_eq!(saved_flat, "ooba");
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[0].content, "oo");
+        assert!(saved[0].font_weight.is_none());
+        assert_eq!(saved[1].content, "ba");
+        assert_eq!(saved[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn try_paste_tspans_matches_clipboard_and_splices() {
+        use crate::geometry::tspan::Tspan;
+        let tspans = vec![Tspan {
+            content: "foo".into(),
+            ..Tspan::default_tspan()
+        }];
+        let mut s = TextEditSession::new(vec![0, 0], EditTarget::Text,
+                                         "foo".into(), 0, 0.0);
+        // Seed the clipboard with a bold "X".
+        s.tspan_clipboard = Some((
+            "X".to_string(),
+            vec![Tspan {
+                content: "X".into(),
+                font_weight: Some("bold".into()),
+                ..Tspan::default_tspan()
+            }],
+        ));
+        s.set_insertion(1, false);
+        let result = s.try_paste_tspans(&tspans, "X").expect("paste");
+        // Expect: plain "f" | bold "X" | plain "oo"
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].content, "f");
+        assert!(result[0].font_weight.is_none());
+        assert_eq!(result[1].content, "X");
+        assert_eq!(result[1].font_weight.as_deref(), Some("bold"));
+        assert_eq!(result[2].content, "oo");
+    }
+
+    #[test]
+    fn try_paste_tspans_returns_none_when_text_doesnt_match() {
+        use crate::geometry::tspan::Tspan;
+        let tspans = vec![Tspan {
+            content: "foo".into(),
+            ..Tspan::default_tspan()
+        }];
+        let mut s = TextEditSession::new(vec![0, 0], EditTarget::Text,
+                                         "foo".into(), 0, 0.0);
+        s.tspan_clipboard = Some(("X".to_string(), vec![]));
+        assert!(s.try_paste_tspans(&tspans, "DIFFERENT").is_none());
     }
 }
