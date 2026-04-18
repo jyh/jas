@@ -234,6 +234,17 @@ pub struct TextEditSession {
     /// system-clipboard flat text matches. Preserves per-range
     /// overrides across cut/paste within a single edit session.
     pub tspan_clipboard: Option<(String, Vec<crate::geometry::tspan::Tspan>)>,
+    /// Next-typed-character override: a `Tspan` used as a template
+    /// whose non-`None` fields are applied to characters inserted
+    /// from `pending_char_start` to the current `insertion` at commit
+    /// time. Primed by Character-panel writes when there is no
+    /// selection (bare caret); cleared by any caret move with no
+    /// selection extension and by undo/redo. Not persisted to the
+    /// document — see `TSPAN.md` Text-edit session integration.
+    pub pending_override: Option<crate::geometry::tspan::Tspan>,
+    /// Char position where `pending_override` was primed. `None` iff
+    /// `pending_override` is `None`.
+    pub pending_char_start: Option<usize>,
 }
 
 impl TextEditSession {
@@ -252,7 +263,31 @@ impl TextEditSession {
             undo: VecDeque::new(),
             redo: VecDeque::new(),
             tspan_clipboard: None,
+            pending_override: None,
+            pending_char_start: None,
         }
+    }
+
+    /// Prime the next-typed-character state. Non-`None` fields of
+    /// `overrides` are merged into the existing pending template; the
+    /// anchor position is captured on the first call (later calls
+    /// layer on more attributes without moving the anchor).
+    pub fn set_pending_override(&mut self, overrides: &crate::geometry::tspan::Tspan) {
+        if self.pending_override.is_none() {
+            self.pending_override = Some(crate::geometry::tspan::Tspan::default_tspan());
+            self.pending_char_start = Some(self.insertion);
+        }
+        let target = self.pending_override.as_mut().unwrap();
+        crate::geometry::tspan::merge_tspan_overrides(target, overrides);
+    }
+
+    pub fn clear_pending_override(&mut self) {
+        self.pending_override = None;
+        self.pending_char_start = None;
+    }
+
+    pub fn has_pending_override(&self) -> bool {
+        self.pending_override.is_some()
     }
 
     /// Resolve the caret's `(tspan_idx, offset)` using `caret_affinity`.
@@ -286,7 +321,13 @@ impl TextEditSession {
         extend: bool,
     ) {
         let n = self.content.chars().count();
-        self.insertion = pos.min(n);
+        let new_pos = pos.min(n);
+        // Non-extending caret movement cancels any pending next-typed-
+        // character override.
+        if !extend && new_pos != self.insertion {
+            self.clear_pending_override();
+        }
+        self.insertion = new_pos;
         self.caret_affinity = affinity;
         if !extend {
             self.anchor = self.insertion;
@@ -324,6 +365,7 @@ impl TextEditSession {
             self.content = prev.content;
             self.insertion = prev.insertion;
             self.anchor = prev.anchor;
+            self.clear_pending_override();
         }
     }
 
@@ -337,6 +379,7 @@ impl TextEditSession {
             self.content = next.content;
             self.insertion = next.insertion;
             self.anchor = next.anchor;
+            self.clear_pending_override();
         }
     }
 
@@ -404,7 +447,14 @@ impl TextEditSession {
     /// in place to grow the selection.
     pub fn set_insertion(&mut self, pos: usize, extend: bool) {
         let n = self.content.chars().count();
-        self.insertion = pos.min(n);
+        let new_pos = pos.min(n);
+        // Non-extending caret movement cancels any pending next-typed-
+        // character override (the user abandoned the position where
+        // the override was primed).
+        if !extend && new_pos != self.insertion {
+            self.clear_pending_override();
+        }
+        self.insertion = new_pos;
         if !extend {
             self.anchor = self.insertion;
         }
@@ -484,18 +534,45 @@ impl TextEditSession {
         let elem = doc.get_element(&self.path)?;
         let new_elem = match (self.target, elem) {
             (EditTarget::Text, Element::Text(t)) => {
+                let reconciled = reconcile_content(&t.tspans, &self.content);
                 let mut new_t = t.clone();
-                new_t.tspans = reconcile_content(&t.tspans, &self.content);
+                new_t.tspans = self.apply_pending_to(reconciled);
                 Element::Text(new_t)
             }
             (EditTarget::TextPath, Element::TextPath(tp)) => {
+                let reconciled = reconcile_content(&tp.tspans, &self.content);
                 let mut new_tp = tp.clone();
-                new_tp.tspans = reconcile_content(&tp.tspans, &self.content);
+                new_tp.tspans = self.apply_pending_to(reconciled);
                 Element::TextPath(new_tp)
             }
             _ => return None,
         };
         Some(doc.replace_element(&self.path, new_elem))
+    }
+
+    /// Apply the pending next-typed-character override to the range
+    /// `[pending_char_start, insertion)` of `tspans`, then merge.
+    /// Passthrough when pending is not set or the range is empty.
+    fn apply_pending_to(
+        &self,
+        tspans: Vec<crate::geometry::tspan::Tspan>,
+    ) -> Vec<crate::geometry::tspan::Tspan> {
+        use crate::geometry::tspan::{merge, merge_tspan_overrides, split_range};
+        match (&self.pending_override, self.pending_char_start) {
+            (Some(pending), Some(start)) if start < self.insertion => {
+                let (mut split, first, last) =
+                    split_range(&tspans, start, self.insertion);
+                if let (Some(f), Some(l)) = (first, last) {
+                    for i in f..=l {
+                        merge_tspan_overrides(&mut split[i], pending);
+                    }
+                    merge(&split)
+                } else {
+                    split
+                }
+            }
+            _ => tspans,
+        }
     }
 }
 
@@ -987,5 +1064,179 @@ mod tests {
         // Anchor resolves with Right affinity too.
         assert_eq!(s.anchor_tspan_pos(&tspans), (1, 0));
         assert_eq!(s.insertion_tspan_pos(&tspans), (1, 2));
+    }
+
+    // ── next-typed-character state ─────────────────────────────
+
+    /// A pending-override template carrying only `font_weight = Some("bold")`.
+    fn bold_pending() -> crate::geometry::tspan::Tspan {
+        use crate::geometry::tspan::Tspan;
+        Tspan {
+            font_weight: Some("bold".into()),
+            ..Tspan::default_tspan()
+        }
+    }
+
+    #[test]
+    fn set_pending_override_captures_anchor_at_insertion() {
+        let mut s = session("hello");
+        s.set_insertion(3, false);
+        s.set_pending_override(&bold_pending());
+        assert!(s.has_pending_override());
+        assert_eq!(s.pending_char_start, Some(3));
+    }
+
+    #[test]
+    fn set_pending_override_merges_across_calls() {
+        use crate::geometry::tspan::Tspan;
+        let mut s = session("hello");
+        s.set_pending_override(&bold_pending());
+        let italic = Tspan {
+            font_style: Some("italic".into()),
+            ..Tspan::default_tspan()
+        };
+        s.set_pending_override(&italic);
+        let p = s.pending_override.as_ref().expect("pending");
+        assert_eq!(p.font_weight.as_deref(), Some("bold"));
+        assert_eq!(p.font_style.as_deref(), Some("italic"));
+        // Anchor is not moved by the second call.
+        assert_eq!(s.pending_char_start, Some(0));
+    }
+
+    #[test]
+    fn set_insertion_to_different_position_clears_pending() {
+        let mut s = session("hello");
+        s.set_insertion(3, false);
+        s.set_pending_override(&bold_pending());
+        s.set_insertion(2, false);
+        assert!(!s.has_pending_override());
+    }
+
+    #[test]
+    fn set_insertion_same_position_preserves_pending() {
+        let mut s = session("hello");
+        s.set_insertion(3, false);
+        s.set_pending_override(&bold_pending());
+        s.set_insertion(3, false);
+        assert!(s.has_pending_override());
+    }
+
+    #[test]
+    fn set_insertion_extend_preserves_pending() {
+        let mut s = session("hello");
+        s.set_insertion(3, false);
+        s.set_pending_override(&bold_pending());
+        s.set_insertion(4, true);
+        assert!(s.has_pending_override());
+    }
+
+    #[test]
+    fn undo_clears_pending() {
+        let mut s = session("hello");
+        s.insert("X");
+        s.set_pending_override(&bold_pending());
+        s.undo();
+        assert!(!s.has_pending_override());
+    }
+
+    #[test]
+    fn apply_to_document_writes_override_to_typed_range() {
+        use crate::geometry::tspan::Tspan;
+        // Start with "hello" as a single plain tspan.
+        let original_tspans = vec![Tspan {
+            content: "hello".into(),
+            ..Tspan::default_tspan()
+        }];
+        let mut t = empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        t.tspans = original_tspans;
+        let mut doc = Document::default();
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Text(t)));
+        // User places caret at end, primes Bold, types "X".
+        let mut s = TextEditSession::new(vec![0, 0], EditTarget::Text,
+                                         "hello".into(), 5, 0.0);
+        s.set_pending_override(&bold_pending());
+        s.insert("X");  // content: "helloX", insertion: 6
+        let new_doc = s.apply_to_document(&doc).expect("apply");
+        let Element::Text(t) = new_doc.get_element(&vec![0, 0]).unwrap()
+            else { panic!("expected Text"); };
+        assert_eq!(t.tspans.len(), 2);
+        assert_eq!(t.tspans[0].content, "hello");
+        assert!(t.tspans[0].font_weight.is_none());
+        assert_eq!(t.tspans[1].content, "X");
+        assert_eq!(t.tspans[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn apply_with_no_pending_is_passthrough() {
+        // Existing apply behavior unchanged when nothing is pending.
+        use crate::geometry::tspan::Tspan;
+        let original = vec![Tspan {
+            content: "hello".into(),
+            ..Tspan::default_tspan()
+        }];
+        let mut t = empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        t.tspans = original;
+        let mut doc = Document::default();
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Text(t)));
+        let mut s = TextEditSession::new(vec![0, 0], EditTarget::Text,
+                                         "hello".into(), 5, 0.0);
+        s.insert("X");
+        let new_doc = s.apply_to_document(&doc).expect("apply");
+        let Element::Text(t) = new_doc.get_element(&vec![0, 0]).unwrap()
+            else { panic!("expected Text"); };
+        assert_eq!(t.tspans.len(), 1);
+        assert_eq!(t.tspans[0].content, "helloX");
+        assert!(t.tspans[0].font_weight.is_none());
+    }
+
+    #[test]
+    fn pending_applies_to_multi_char_run() {
+        // User primes Bold, types "abc" in one run — all three bold.
+        use crate::geometry::tspan::Tspan;
+        let original = vec![Tspan {
+            content: "hi".into(),
+            ..Tspan::default_tspan()
+        }];
+        let mut t = empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        t.tspans = original;
+        let mut doc = Document::default();
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Text(t)));
+        let mut s = TextEditSession::new(vec![0, 0], EditTarget::Text,
+                                         "hi".into(), 2, 0.0);
+        s.set_pending_override(&bold_pending());
+        s.insert("a");
+        s.insert("b");
+        s.insert("c");
+        let new_doc = s.apply_to_document(&doc).expect("apply");
+        let Element::Text(t) = new_doc.get_element(&vec![0, 0]).unwrap()
+            else { panic!("expected Text"); };
+        // Expect "hi" + "abc"(bold).
+        assert_eq!(t.tspans.len(), 2);
+        assert_eq!(t.tspans[0].content, "hi");
+        assert_eq!(t.tspans[1].content, "abc");
+        assert_eq!(t.tspans[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn merge_tspan_overrides_copies_only_some_fields() {
+        use crate::geometry::tspan::{merge_tspan_overrides, Tspan};
+        let mut target = Tspan {
+            content: "hi".into(),
+            font_weight: Some("normal".into()),  // should be overwritten
+            font_style: Some("italic".into()),   // should survive
+            ..Tspan::default_tspan()
+        };
+        let source = Tspan {
+            font_weight: Some("bold".into()),
+            // font_style is None → don't touch target's
+            ..Tspan::default_tspan()
+        };
+        merge_tspan_overrides(&mut target, &source);
+        assert_eq!(target.content, "hi");  // content untouched
+        assert_eq!(target.font_weight.as_deref(), Some("bold"));
+        assert_eq!(target.font_style.as_deref(), Some("italic"));
     }
 }
