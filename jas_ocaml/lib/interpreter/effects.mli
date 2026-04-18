@@ -92,6 +92,19 @@ val apply_character_attrs_to_elem :
 val build_panel_pending_template :
   (string * Yojson.Safe.t) list -> Element.element -> Element.tspan option
 
+(** Build a [tspan] override template with every panel-scoped field
+    forced to a concrete [Some _] value. Used by the per-range
+    Character-panel write path. *)
+val build_panel_full_overrides :
+  (string * Yojson.Safe.t) list -> Element.tspan
+
+(** Apply [overrides] to the tspans covering the character range
+    [[char_start, char_end)]. Runs [split_range] +
+    [merge_tspan_overrides] + [merge]. Passthrough when the range
+    is empty. *)
+val apply_overrides_to_tspan_range :
+  Element.tspan array -> int -> int -> Element.tspan -> Element.tspan array
+
 (** Push the Character-panel state to every selected Text / Text_path.
     Mirrors Rust's [apply_character_panel_to_selection]. No-op when
     the selection is empty or contains no text elements. When an

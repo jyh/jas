@@ -6,6 +6,7 @@
     state. See [lib/tools/text_edit.ml] for the concrete session. *)
 type edit_session_ref = <
   has_selection : bool;
+  selection_range : int * int;
   path : int list;
   set_pending_override : Element.tspan -> unit;
   clear_pending_override : unit -> unit

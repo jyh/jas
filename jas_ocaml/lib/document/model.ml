@@ -11,6 +11,7 @@
     (tools may see Document/Model, but not the other way round). *)
 type edit_session_ref = <
   has_selection : bool;
+  selection_range : int * int;
   path : int list;
   set_pending_override : Element.tspan -> unit;
   clear_pending_override : unit -> unit

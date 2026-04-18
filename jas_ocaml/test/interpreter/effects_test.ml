@@ -462,6 +462,68 @@ let phase3_pending_tests = [
       | _ -> assert false in
     assert (build_panel_pending_template (_aligned_panel ()) elem = None));
 
+  Alcotest.test_case "full_overrides_sets_every_scope_field" `Quick (fun () ->
+    let panel = [
+      ("font_family", `String "sans-serif");
+      ("font_size", `Float 12.0);
+      ("style_name", `String "Bold");
+      ("all_caps", `Bool true);
+      ("small_caps", `Bool false);
+      ("underline", `Bool true);
+      ("strikethrough", `Bool false);
+      ("language", `String "");
+      ("character_rotation", `Float 0.0);
+    ] in
+    let t = build_panel_full_overrides panel in
+    assert (t.font_family = Some "sans-serif");
+    assert (t.font_size = Some 12.0);
+    assert (t.font_weight = Some "bold");
+    assert (t.font_style = Some "normal");
+    assert (t.text_transform = Some "uppercase");
+    assert (t.text_decoration = Some ["underline"]));
+
+  Alcotest.test_case "full_overrides_regular_forces_normal" `Quick (fun () ->
+    let panel = [
+      ("style_name", `String "Regular");
+      ("font_family", `String "sans-serif");
+      ("font_size", `Float 12.0);
+      ("all_caps", `Bool false);
+      ("small_caps", `Bool false);
+      ("underline", `Bool false);
+      ("strikethrough", `Bool false);
+      ("language", `String "");
+      ("character_rotation", `Float 0.0);
+    ] in
+    let t = build_panel_full_overrides panel in
+    assert (t.font_weight = Some "normal");
+    assert (t.font_style = Some "normal"));
+
+  Alcotest.test_case "apply_overrides_to_range_bolds_partial_word" `Quick (fun () ->
+    let open Jas in
+    let base = [| { (Tspan.default_tspan ()) with content = "hello" } |] in
+    let overrides = { (Tspan.default_tspan ()) with
+                      font_weight = Some "bold" } in
+    let out = apply_overrides_to_tspan_range base 1 4 overrides in
+    assert (Array.length out = 3);
+    assert (out.(0).content = "h");
+    assert (out.(1).content = "ell");
+    assert (out.(1).font_weight = Some "bold");
+    assert (out.(2).content = "o");
+    assert (out.(2).font_weight <> Some "bold"));
+
+  Alcotest.test_case "apply_overrides_merges_adjacent_equal" `Quick (fun () ->
+    let open Jas in
+    let base = [|
+      { (Tspan.default_tspan ()) with content = "foo" };
+      { (Tspan.default_tspan ()) with id = 1; content = "bar" };
+    |] in
+    let overrides = { (Tspan.default_tspan ()) with
+                      font_weight = Some "bold" } in
+    let out = apply_overrides_to_tspan_range base 0 6 overrides in
+    assert (Array.length out = 1);
+    assert (out.(0).content = "foobar");
+    assert (out.(0).font_weight = Some "bold"));
+
   Alcotest.test_case "panel_write_with_bare_caret_sets_pending" `Quick (fun () ->
     (* Build a document with a Text element, set up an active session
        with a bare caret on model, then apply panel Bold → pending
