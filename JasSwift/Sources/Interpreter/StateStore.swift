@@ -21,6 +21,11 @@ public class StateStore {
     private var dialogId: String?
     private var dialogParams: [String: Any]?
     private var dialogProps: [String: [String: Any]] = [:]  // {key: {"get": expr, "set": expr}}
+    /// Captured original values of state keys named in the open dialog's
+    /// preview_targets. Restored on closeDialog (via the close_dialog
+    /// effect) unless first cleared by the clear_dialog_snapshot effect
+    /// (used by OK actions).
+    private var dialogSnapshot: [String: Any]?
 
     // MARK: - Init
 
@@ -151,6 +156,33 @@ public class StateStore {
         dialog = [:]
         dialogParams = nil
         dialogProps = [:]
+    }
+
+    /// Capture the current value of every state key referenced by a
+    /// dialog's preview_targets. Phase 0 supports only top-level state
+    /// keys (no dots in the path); deep paths are silently skipped and
+    /// will land alongside their first real consumer in Phase 8/9.
+    /// `targets` maps `dialog_state_key` → `state_key`.
+    public func captureDialogSnapshot(_ targets: [String: String]) {
+        var snap: [String: Any] = [:]
+        for stateKey in targets.values {
+            if !stateKey.contains(".") {
+                snap[stateKey] = state[stateKey] as Any
+            }
+        }
+        dialogSnapshot = snap
+    }
+
+    public func getDialogSnapshot() -> [String: Any]? {
+        dialogSnapshot
+    }
+
+    public func clearDialogSnapshot() {
+        dialogSnapshot = nil
+    }
+
+    public func hasDialogSnapshot() -> Bool {
+        dialogSnapshot != nil
     }
 
     // MARK: - List operations

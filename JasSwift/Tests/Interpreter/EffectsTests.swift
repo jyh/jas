@@ -159,6 +159,88 @@ import Testing
     #expect(store.getDialog("x") == nil)
 }
 
+// MARK: - Preview snapshot/restore (Phase 0)
+
+@Test func openDialogCapturesPreviewSnapshot() {
+    let store = StateStore(defaults: ["left_indent": 12, "right_indent": 0])
+    let dialogs: [String: Any] = [
+        "para_indent": [
+            "summary": "Indents",
+            "state": [
+                "left": ["type": "number", "default": 0],
+                "right": ["type": "number", "default": 0],
+            ] as [String: Any],
+            "preview_targets": [
+                "left": "left_indent",
+                "right": "right_indent",
+            ] as [String: Any],
+            "content": ["type": "container"],
+        ] as [String: Any]
+    ]
+    runEffects([["open_dialog": ["id": "para_indent"]]],
+               ctx: [:], store: store, dialogs: dialogs)
+    let snap = store.getDialogSnapshot()
+    #expect(snap?["left_indent"] as? Int == 12)
+    #expect(snap?["right_indent"] as? Int == 0)
+}
+
+@Test func openDialogWithoutPreviewTargetsNoSnapshot() {
+    let store = StateStore()
+    let dialogs: [String: Any] = [
+        "plain": [
+            "summary": "Plain",
+            "state": ["name": ["type": "string", "default": ""]],
+            "content": ["type": "container"],
+        ] as [String: Any]
+    ]
+    runEffects([["open_dialog": ["id": "plain"]]],
+               ctx: [:], store: store, dialogs: dialogs)
+    #expect(!store.hasDialogSnapshot())
+}
+
+@Test func closeDialogRestoresFromSnapshot() {
+    let store = StateStore(defaults: ["left_indent": 12])
+    let dialogs: [String: Any] = [
+        "para_indent": [
+            "summary": "Indents",
+            "state": ["left": ["type": "number", "default": 0]],
+            "preview_targets": ["left": "left_indent"],
+            "content": ["type": "container"],
+        ] as [String: Any]
+    ]
+    runEffects([["open_dialog": ["id": "para_indent"]]],
+               ctx: [:], store: store, dialogs: dialogs)
+    // Simulate Preview live-applying an edit
+    store.set("left_indent", 99)
+    // Cancel restores
+    runEffects([["close_dialog": nil as Any? as Any]], ctx: [:], store: store)
+    #expect(store.get("left_indent") as? Int == 12)
+    #expect(store.getDialogId() == nil)
+    #expect(!store.hasDialogSnapshot())
+}
+
+@Test func clearDialogSnapshotPreventsRestore() {
+    let store = StateStore(defaults: ["left_indent": 12])
+    let dialogs: [String: Any] = [
+        "para_indent": [
+            "summary": "Indents",
+            "state": ["left": ["type": "number", "default": 0]],
+            "preview_targets": ["left": "left_indent"],
+            "content": ["type": "container"],
+        ] as [String: Any]
+    ]
+    runEffects([["open_dialog": ["id": "para_indent"]]],
+               ctx: [:], store: store, dialogs: dialogs)
+    store.set("left_indent", 99)
+    // OK action equivalent: clear snapshot, then close
+    runEffects([
+        ["clear_dialog_snapshot": nil as Any? as Any],
+        ["close_dialog": nil as Any? as Any],
+    ], ctx: [:], store: store)
+    #expect(store.get("left_indent") as? Int == 99)
+    #expect(store.getDialogId() == nil)
+}
+
 // MARK: - Phase 3: let and foreach effects
 
 @Test func letBindsForSubsequentEffect() {
