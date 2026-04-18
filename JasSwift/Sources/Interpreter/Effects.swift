@@ -626,9 +626,26 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
     let tracking = (p["tracking"] as? NSNumber)?.doubleValue ?? 0.0
     attrs["letter_spacing"] = tracking == 0.0 ? "" : _fmtNum(tracking / 1000.0) + "em"
 
-    // kerning (1/1000 em) → numeric-only for now
-    let kerning = (p["kerning"] as? NSNumber)?.doubleValue ?? 0.0
-    attrs["kerning"] = kerning == 0.0 ? "" : _fmtNum(kerning / 1000.0) + "em"
+    // kerning combo_box: Auto / Optical / Metrics pass through
+    // verbatim; numeric-string entry is 1/1000 em. Empty / "0" /
+    // "Auto" all omit (the element default). Legacy Number bindings
+    // also land here via the NSNumber branch.
+    if let s = p["kerning"] as? String {
+        let trimmed = s.trimmingCharacters(in: .whitespaces)
+        switch trimmed {
+        case "", "0", "Auto": attrs["kerning"] = ""
+        case "Optical", "Metrics": attrs["kerning"] = trimmed
+        default:
+            if let n = Double(trimmed) {
+                attrs["kerning"] = n == 0.0 ? "" : _fmtNum(n / 1000.0) + "em"
+            } else {
+                attrs["kerning"] = ""
+            }
+        }
+    } else {
+        let kerning = (p["kerning"] as? NSNumber)?.doubleValue ?? 0.0
+        attrs["kerning"] = kerning == 0.0 ? "" : _fmtNum(kerning / 1000.0) + "em"
+    }
 
     // character_rotation (degrees)
     let rot = (p["character_rotation"] as? NSNumber)?.doubleValue ?? 0.0
