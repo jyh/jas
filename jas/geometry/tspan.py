@@ -51,6 +51,12 @@ class Tspan:
     jas_fractional_widths: Optional[bool] = None
     jas_kerning_mode: Optional[str] = None
     jas_no_break: Optional[bool] = None
+    # Marks a tspan as a paragraph wrapper when set to "paragraph".
+    # Wrapper tspans implicitly group subsequent content tspans (until
+    # the next wrapper) into one paragraph for the Paragraph panel.
+    # Phase 1a only round-trips this marker; the paragraph attribute
+    # fields and Enter/Backspace edit primitives land in Phase 1b.
+    jas_role: Optional[str] = None
     letter_spacing: Optional[float] = None
     line_height: Optional[float] = None
     rotate: Optional[float] = None
@@ -80,6 +86,7 @@ class Tspan:
                 and self.jas_fractional_widths is None
                 and self.jas_kerning_mode is None
                 and self.jas_no_break is None
+                and self.jas_role is None
                 and self.letter_spacing is None
                 and self.line_height is None
                 and self.rotate is None
@@ -142,6 +149,7 @@ def tspans_to_json_clipboard(tspans: list[Tspan]) -> str:
         if t.jas_fractional_widths is not None: obj["jas_fractional_widths"] = t.jas_fractional_widths
         if t.jas_kerning_mode is not None: obj["jas_kerning_mode"] = t.jas_kerning_mode
         if t.jas_no_break is not None: obj["jas_no_break"] = t.jas_no_break
+        if t.jas_role is not None: obj["jas_role"] = t.jas_role
         if t.letter_spacing is not None: obj["letter_spacing"] = t.letter_spacing
         if t.line_height is not None: obj["line_height"] = t.line_height
         if t.rotate is not None: obj["rotate"] = t.rotate
@@ -189,6 +197,7 @@ def tspans_from_json_clipboard(json_str: str) -> Optional[tuple[Tspan, ...]]:
             jas_fractional_widths=obj.get("jas_fractional_widths"),
             jas_kerning_mode=obj.get("jas_kerning_mode"),
             jas_no_break=obj.get("jas_no_break"),
+            jas_role=obj.get("jas_role"),
             letter_spacing=obj.get("letter_spacing"),
             line_height=obj.get("line_height"),
             rotate=obj.get("rotate"),
@@ -239,6 +248,7 @@ def tspans_to_svg_fragment(tspans: list[Tspan]) -> str:
         if t.jas_kerning_mode is not None: attrs.append(("jas:kerning-mode", t.jas_kerning_mode))
         if t.jas_no_break is not None:
             attrs.append(("jas:no-break", "true" if t.jas_no_break else "false"))
+        if t.jas_role is not None: attrs.append(("jas:role", t.jas_role))
         if t.letter_spacing is not None: attrs.append(("letter-spacing", _fmt_float_clipboard(t.letter_spacing)))
         if t.line_height is not None: attrs.append(("line-height", _fmt_float_clipboard(t.line_height)))
         if t.rotate is not None: attrs.append(("rotate", _fmt_float_clipboard(t.rotate)))
@@ -302,6 +312,7 @@ def tspans_from_svg_fragment(svg_str: str) -> Optional[tuple[Tspan, ...]]:
             elif k == "jas:fractional-widths": kw["jas_fractional_widths"] = (v == "true")
             elif k == "jas:kerning-mode": kw["jas_kerning_mode"] = v
             elif k == "jas:no-break": kw["jas_no_break"] = (v == "true")
+            elif k == "jas:role": kw["jas_role"] = v
             elif k == "letter-spacing":
                 try: kw["letter_spacing"] = float(v)
                 except ValueError: pass
@@ -342,6 +353,7 @@ def merge_tspan_overrides(target: Tspan, source: Tspan) -> Tspan:
         jas_fractional_widths=source.jas_fractional_widths if source.jas_fractional_widths is not None else target.jas_fractional_widths,
         jas_kerning_mode=source.jas_kerning_mode if source.jas_kerning_mode is not None else target.jas_kerning_mode,
         jas_no_break=source.jas_no_break if source.jas_no_break is not None else target.jas_no_break,
+        jas_role=source.jas_role if source.jas_role is not None else target.jas_role,
         letter_spacing=source.letter_spacing if source.letter_spacing is not None else target.letter_spacing,
         line_height=source.line_height if source.line_height is not None else target.line_height,
         rotate=source.rotate if source.rotate is not None else target.rotate,
@@ -520,9 +532,9 @@ def split_range(
 _ATTR_SLOTS = (
     "baseline_shift", "dx", "font_family", "font_size", "font_style",
     "font_variant", "font_weight", "jas_aa_mode", "jas_fractional_widths",
-    "jas_kerning_mode", "jas_no_break", "letter_spacing", "line_height",
-    "rotate", "style_name", "text_decoration", "text_rendering",
-    "text_transform", "transform", "xml_lang",
+    "jas_kerning_mode", "jas_no_break", "jas_role", "letter_spacing",
+    "line_height", "rotate", "style_name", "text_decoration",
+    "text_rendering", "text_transform", "transform", "xml_lang",
 )
 
 

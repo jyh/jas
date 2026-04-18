@@ -107,6 +107,8 @@ def _tspan_svg(t) -> str:
     # by splitting the tspan into one per glyph.
     if t.rotate is not None:
         attrs += f' rotate="{_fmt(t.rotate)}"'
+    if t.jas_role is not None:
+        attrs += f' urn:jas:1:role="{escape(t.jas_role)}"'
     return f"<tspan{attrs}>{escape(t.content)}</tspan>"
 
 
@@ -663,10 +665,11 @@ def _parse_tspan(node) -> list:
                 rotate_vals.append(float(p))
             except ValueError:
                 pass
+    jas_role = node.get("urn:jas:1:role")
     base_kwargs = dict(
         font_family=font_family, font_size=font_size,
         font_style=font_style, font_weight=font_weight,
-        text_decoration=decoration,
+        text_decoration=decoration, jas_role=jas_role,
     )
     if not rotate_vals:
         return [Tspan(id=0, content=content, **base_kwargs)]

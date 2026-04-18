@@ -479,3 +479,33 @@ class TestRichClipboardSvg:
     def test_rejects_missing_text_root(self):
         from geometry.tspan import tspans_from_svg_fragment
         assert tspans_from_svg_fragment("<span>hi</span>") is None
+
+
+class TestJasRolePhase1a:
+    """Paragraph wrapper tspans are tagged with jas:role="paragraph".
+    Phase 1a only persists the role marker through clipboard SVG
+    round-trips; paragraph attribute fields and Enter/Backspace edit
+    primitives land in Phase 1b."""
+
+    def test_default_tspan_has_no_role(self):
+        from geometry.tspan import default_tspan
+        assert default_tspan().jas_role is None
+
+    def test_has_no_overrides_false_when_jas_role_set(self):
+        from geometry.tspan import default_tspan
+        from dataclasses import replace
+        t = replace(default_tspan(), jas_role="paragraph")
+        assert not t.has_no_overrides()
+
+    def test_svg_fragment_jas_role_round_trip(self):
+        from geometry.tspan import (
+            default_tspan, tspans_to_svg_fragment, tspans_from_svg_fragment,
+        )
+        from dataclasses import replace
+        t = replace(default_tspan(), content="", jas_role="paragraph")
+        svg = tspans_to_svg_fragment([t])
+        assert 'jas:role="paragraph"' in svg
+        back = tspans_from_svg_fragment(svg)
+        assert back is not None
+        assert len(back) == 1
+        assert back[0].jas_role == "paragraph"
