@@ -202,6 +202,99 @@ _JOIN_MAP : dict[LineJoin, Qt.PenJoinStyle] = {
 }
 
 
+def _parse_pt(s: str) -> float | None:
+    """Parse a CSS length string in ``pt``. Returns the numeric value,
+    or ``None`` when the string is empty or has an unrecognised unit.
+    Mirrors Rust's ``parse_pt`` helper."""
+    if not s:
+        return None
+    s = s.strip()
+    if s.endswith("pt"):
+        s = s[:-2]
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _parse_em(s: str) -> float | None:
+    """Parse a CSS length string in ``em``. Returns the numeric value,
+    or ``None`` when empty / unparseable."""
+    if not s:
+        return None
+    s = s.strip()
+    if s.endswith("em"):
+        s = s[:-2]
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _parse_scale_percent(s: str) -> float:
+    """Parse a percent scale string (e.g. ``"120"``). Empty returns
+    ``1.0`` (identity); unparseable also returns ``1.0``."""
+    if not s:
+        return 1.0
+    try:
+        return float(s) / 100.0
+    except ValueError:
+        return 1.0
+
+
+def _parse_rotate_deg(s: str) -> float:
+    """Parse a rotation string (degrees). Empty / unparseable → 0."""
+    if not s:
+        return 0.0
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _parse_baseline_shift(s: str, font_size: float) -> tuple[float, float]:
+    """Parse Character-panel ``baseline_shift`` → ``(size_scale, y_shift)``.
+
+    - ``"super"``: shrink to 70% and shift up ~35% of font size.
+    - ``"sub"``: shrink to 70% and shift down ~20% of font size.
+    - ``"Npt"``: shift up by N points with the original size.
+    - Empty: identity.
+    """
+    if s == "super":
+        return (0.7, -font_size * 0.35)
+    if s == "sub":
+        return (0.7, font_size * 0.2)
+    pt = _parse_pt(s)
+    if pt is not None:
+        return (1.0, -pt)
+    return (1.0, 0.0)
+
+
+def _apply_text_capitalization(font, text_transform: str, font_variant: str) -> None:
+    """Apply QFont capitalization for ``text_transform`` and
+    ``font_variant``. ``text_transform: uppercase`` / ``lowercase``
+    map to the matching QFont enums; ``font_variant: small-caps``
+    uses QFont.Capitalization.SmallCaps. No-op when neither is set."""
+    from PySide6.QtGui import QFont
+    Cap = QFont.Capitalization
+    if text_transform == "uppercase":
+        font.setCapitalization(Cap.AllUppercase)
+    elif text_transform == "lowercase":
+        font.setCapitalization(Cap.AllLowercase)
+    elif font_variant == "small-caps":
+        font.setCapitalization(Cap.SmallCaps)
+
+
+def _letter_spacing_px(letter_spacing: str, kerning: str, font_size: float) -> float:
+    """Combined letter-spacing in pixels for QFont. Tracking and
+    numeric kerning both express as ``Nem``; Canvas lacks per-pair
+    kerning, so we accumulate them into a uniform advance (matches
+    Rust's approximation in ``canvas/render.rs``)."""
+    ls_em = _parse_em(letter_spacing) or 0.0
+    k_em = _parse_em(kerning) or 0.0
+    return (ls_em + k_em) * font_size
+
+
 def _apply_stroke(painter: QPainter, stroke: Stroke | None) -> tuple[float, StrokeAlign]:
     """Apply stroke properties to the painter. Returns (opacity, align)."""
     if stroke is not None:
@@ -612,21 +705,35 @@ def _draw_element(painter: QPainter, elem: Element,
                                    stroke.start_arrow_scale, stroke.end_arrow_scale,
                                    stroke.width, _qcolor(stroke.color), center)
 
-        case Text(x=x, y=y, content=content, font_family=ff,
-                  font_size=fs, font_weight=fw, font_style=fst,
-                  text_decoration=td,
-                  width=tw, height=th,
-                  fill=fill, stroke=stroke):
+        case Text() as t:
+            x = t.x; y = t.y; content = t.content
+            ff = t.font_family; fs = t.font_size
+            fw = t.font_weight; fst = t.font_style
+            td = t.text_decoration
+            tw = t.width; th = t.height
+            fill = t.fill; stroke = t.stroke
+            # Baseline-shift: super/sub shrink + offset; numeric "Npt"
+            # shifts up by N pt with full size; empty = identity.
+            size_scale, y_shift = _parse_baseline_shift(t.baseline_shift, fs)
+            effective_fs = fs * size_scale
             from PySide6.QtGui import QFont
-            font = QFont(ff, int(fs))
+            font = QFont(ff, int(effective_fs))
+            font.setPointSizeF(effective_fs)
             if fw == "bold":
                 font.setBold(True)
             if fst == "italic":
                 font.setItalic(True)
-            if td == "underline":
+            if td == "underline" or "underline" in td.split():
                 font.setUnderline(True)
-            elif td == "line-through":
+            if td == "line-through" or "line-through" in td.split():
                 font.setStrikeOut(True)
+            # text_transform / font_variant via QFont capitalization.
+            _apply_text_capitalization(font, t.text_transform, t.font_variant)
+            # letter_spacing = tracking + kerning (both 1/1000 em),
+            # expressed in px for QFont.setLetterSpacing.
+            ls_px = _letter_spacing_px(t.letter_spacing, t.kerning, effective_fs)
+            if ls_px != 0.0:
+                font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, ls_px)
             painter.setFont(font)
             if fill is not None:
                 painter.setPen(_qcolor(fill.color))
@@ -634,31 +741,60 @@ def _draw_element(painter: QPainter, elem: Element,
                 _apply_stroke(painter, stroke)
             else:
                 painter.setPen(QColor("black"))
-            # Use the wrapped layout module so what the user sees matches
-            # what the in-place editor measures.
+            # Wrap the draw in a save/translate/rotate/scale/restore
+            # block when horizontal/vertical scale or rotation depart
+            # from identity. Applies around the element origin.
+            h_scale = _parse_scale_percent(t.horizontal_scale)
+            v_scale = _parse_scale_percent(t.vertical_scale)
+            rot_deg = _parse_rotate_deg(t.rotate)
+            needs_txform = (h_scale != 1.0 or v_scale != 1.0 or rot_deg != 0.0)
+            if needs_txform:
+                painter.save()
+                painter.translate(x, y)
+                if rot_deg != 0.0:
+                    painter.rotate(rot_deg)
+                if h_scale != 1.0 or v_scale != 1.0:
+                    painter.scale(h_scale, v_scale)
+                painter.translate(-x, -y)
+            # Layout: line_height (when non-empty) overrides the
+            # default line stride (which equals font_size).
             from algorithms.text_layout import layout as _layout
             from tools.text_measure import make_measurer
-            measure = make_measurer(ff, fw, fst, fs)
+            measure = make_measurer(ff, fw, fst, effective_fs)
             max_w = tw if (tw > 0 and th > 0) else 0.0
-            lay = _layout(content, max_w, fs, measure)
+            line_h = _parse_pt(t.line_height)
+            layout_fs = line_h if line_h is not None else effective_fs
+            lay = _layout(content, max_w, layout_fs, measure)
             for line in lay.lines:
                 s = content[line.start:line.end].rstrip('\n')
-                painter.drawText(QPointF(x, y + line.baseline_y), s)
+                painter.drawText(QPointF(x, y + line.baseline_y + y_shift), s)
+            if needs_txform:
+                painter.restore()
 
-        case TextPath(d=d, content=content, start_offset=start_offset,
-                      font_family=ff, font_size=fs,
-                      font_weight=fw, font_style=fst, text_decoration=td,
-                      fill=fill, stroke=stroke):
+        case TextPath() as tp:
+            d = tp.d; content = tp.content; start_offset = tp.start_offset
+            ff = tp.font_family; fs = tp.font_size
+            fw = tp.font_weight; fst = tp.font_style
+            td = tp.text_decoration
+            fill = tp.fill; stroke = tp.stroke
             from PySide6.QtGui import QFont, QFontMetricsF
             font = QFont(ff, int(fs))
+            font.setPointSizeF(fs)
             if fw == "bold":
                 font.setBold(True)
             if fst == "italic":
                 font.setItalic(True)
-            if td == "underline":
+            if td == "underline" or "underline" in td.split():
                 font.setUnderline(True)
-            elif td == "line-through":
+            if td == "line-through" or "line-through" in td.split():
                 font.setStrikeOut(True)
+            # text_transform / font_variant on the per-character path
+            # draw: capitalization applies inside the per-char save/
+            # restore block below, same as the point-text case.
+            _apply_text_capitalization(font, tp.text_transform, tp.font_variant)
+            ls_px = _letter_spacing_px(tp.letter_spacing, tp.kerning, fs)
+            if ls_px != 0.0:
+                font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, ls_px)
             painter.setFont(font)
             if fill is not None:
                 painter.setPen(_qcolor(fill.color))
