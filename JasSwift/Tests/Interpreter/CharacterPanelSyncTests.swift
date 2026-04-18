@@ -498,3 +498,42 @@ private func _alignedPanelSwift() -> [String: Any] {
     #expect(t.baselineShift != nil)
     #expect(t.jasAaMode != nil)
 }
+
+// MARK: - identity-omission
+
+@Test func identityOmitClearsFontWeightMatchingElement() {
+    let t = Tspan(id: 0, content: "X", fontWeight: "normal")
+    let elem = Element.text(emptyTextElem(x: 0, y: 0, width: 0, height: 0))
+    // empty_text_elem has fontWeight="normal", so Some("normal") is redundant.
+    let out = identityOmitTspan(t, elem)
+    #expect(out.fontWeight == nil)
+}
+
+@Test func identityOmitKeepsFontWeightDifferingFromElement() {
+    let t = Tspan(id: 0, content: "X", fontWeight: "bold")
+    let elem = Element.text(emptyTextElem(x: 0, y: 0, width: 0, height: 0))
+    let out = identityOmitTspan(t, elem)
+    #expect(out.fontWeight == "bold")
+}
+
+@Test func identityOmitClearsLineHeightMatchingAutoDefault() {
+    // Element's empty line_height = auto = 120% of fontSize.
+    let t = Tspan(id: 0, content: "X", lineHeight: 16.0 * 1.2)
+    let elem = Element.text(emptyTextElem(x: 0, y: 0, width: 0, height: 0))
+    let out = identityOmitTspan(t, elem)
+    #expect(out.lineHeight == nil)
+}
+
+@Test func identityOmitEndToEndPerRangeWrite() {
+    // Applying fontWeight=normal to a bold range where the element
+    // is also normal should collapse all the way to a single plain
+    // tspan via identity-omission + merge.
+    let base = [Tspan(id: 0, content: "foo", fontWeight: "bold")]
+    let overrides = Tspan(id: 0, content: "", fontWeight: "normal")
+    let elem = Element.text(emptyTextElem(x: 0, y: 0, width: 0, height: 0))
+    let out = applyOverridesToTspanRange(
+        base, charStart: 0, charEnd: 3, overrides: overrides, elem: elem)
+    #expect(out.count == 1)
+    #expect(out[0].content == "foo")
+    #expect(out[0].fontWeight == nil)
+}
