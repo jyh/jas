@@ -636,6 +636,97 @@ let phase3_pending_tests = [
     | _ -> assert false);
 ]
 
+(* ── Paragraph panel — text-kind gating (Phase 3a) ──────────
+
+   sync_paragraph_panel_from_selection writes
+   panel.text_selected and panel.area_text_selected based on the
+   current selection's text-kind composition. *)
+
+let _make_text_model ?(text_width = 0.0) ?(text_height = 0.0) () =
+  let text = Jas.Element.make_text ~text_width ~text_height
+    0.0 0.0 "hello" in
+  let layer = Jas.Element.make_layer [| text |] in
+  let selection =
+    Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_all [0; 0])
+  in
+  let doc = Jas.Document.make_document ~selection [| layer |] in
+  Jas.Model.create ~document:doc ()
+
+let _make_text_path_model () =
+  let tp = Jas.Element.make_text_path [] "hi" in
+  let layer = Jas.Element.make_layer [| tp |] in
+  let selection =
+    Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_all [0; 0])
+  in
+  let doc = Jas.Document.make_document ~selection [| layer |] in
+  Jas.Model.create ~document:doc ()
+
+let _make_rect_model () =
+  let rect = Jas.Element.make_rect 0.0 0.0 10.0 10.0 in
+  let layer = Jas.Element.make_layer [| rect |] in
+  let selection =
+    Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_all [0; 0])
+  in
+  let doc = Jas.Document.make_document ~selection [| layer |] in
+  Jas.Model.create ~document:doc ()
+
+let paragraph_text_kind_tests = [
+  Alcotest.test_case "empty_selection_disables_panel" `Quick (fun () ->
+    let layer = Jas.Element.make_layer [||] in
+    let doc = Jas.Document.make_document [| layer |] in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content"
+      [("text_selected", `Bool true); ("area_text_selected", `Bool true)];
+    sync_paragraph_panel_from_selection s ctrl;
+    assert (get_panel s "paragraph_panel_content" "text_selected" = `Bool false);
+    assert (get_panel s "paragraph_panel_content" "area_text_selected" = `Bool false));
+
+  Alcotest.test_case "non_text_selection_disables_panel" `Quick (fun () ->
+    let model = _make_rect_model () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content"
+      [("text_selected", `Bool true); ("area_text_selected", `Bool true)];
+    sync_paragraph_panel_from_selection s ctrl;
+    assert (get_panel s "paragraph_panel_content" "text_selected" = `Bool false);
+    assert (get_panel s "paragraph_panel_content" "area_text_selected" = `Bool false));
+
+  Alcotest.test_case "point_text_enables_universal_only" `Quick (fun () ->
+    let model = _make_text_model () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content"
+      [("text_selected", `Bool true); ("area_text_selected", `Bool true)];
+    sync_paragraph_panel_from_selection s ctrl;
+    assert (get_panel s "paragraph_panel_content" "text_selected" = `Bool true);
+    assert (get_panel s "paragraph_panel_content" "area_text_selected" = `Bool false));
+
+  Alcotest.test_case "area_text_enables_all" `Quick (fun () ->
+    let model = _make_text_model ~text_width:200.0 ~text_height:100.0 () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content"
+      [("text_selected", `Bool true); ("area_text_selected", `Bool true)];
+    sync_paragraph_panel_from_selection s ctrl;
+    assert (get_panel s "paragraph_panel_content" "text_selected" = `Bool true);
+    assert (get_panel s "paragraph_panel_content" "area_text_selected" = `Bool true));
+
+  Alcotest.test_case "text_path_enables_universal_only" `Quick (fun () ->
+    let model = _make_text_path_model () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content"
+      [("text_selected", `Bool true); ("area_text_selected", `Bool true)];
+    sync_paragraph_panel_from_selection s ctrl;
+    assert (get_panel s "paragraph_panel_content" "text_selected" = `Bool true);
+    assert (get_panel s "paragraph_panel_content" "area_text_selected" = `Bool false));
+]
+
 (* ── Preview snapshot/restore (Phase 0) ─────────────────────
 
    open_dialog captures a snapshot of every state key referenced by
@@ -731,5 +822,6 @@ let () =
     "Character apply-to-elem", apply_to_elem_tests;
     "Stroke subscribe", stroke_subscribe_tests;
     "Phase3 pending", phase3_pending_tests;
+    "Paragraph text-kind", paragraph_text_kind_tests;
     "Preview snapshot", preview_snapshot_tests;
   ]
