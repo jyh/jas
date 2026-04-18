@@ -215,6 +215,12 @@ pub struct TextEditSession {
     /// Anchor of the live selection. When `anchor == insertion` there is
     /// no selection (just a caret).
     pub anchor: usize,
+    /// Caret side at a tspan boundary. Defaults to `Left` per
+    /// `TSPAN.md` ("new text inherits attributes of the previous
+    /// character"); `Right` is set by callers that crossed a boundary
+    /// rightward. External char-index APIs keep working unchanged —
+    /// the affinity only matters at joins.
+    pub caret_affinity: crate::geometry::tspan::Affinity,
     /// True while the user is dragging to extend the selection.
     pub drag_active: bool,
     /// Wall-clock timestamp (ms) when the cursor was last reset; used to
@@ -240,11 +246,50 @@ impl TextEditSession {
             content,
             insertion,
             anchor: insertion,
+            caret_affinity: crate::geometry::tspan::Affinity::Left,
             drag_active: false,
             blink_epoch_ms,
             undo: VecDeque::new(),
             redo: VecDeque::new(),
             tspan_clipboard: None,
+        }
+    }
+
+    /// Resolve the caret's `(tspan_idx, offset)` using `caret_affinity`.
+    /// Used by the next-typed-character path and by any consumer that
+    /// needs to know which tspan the caret belongs to at a boundary.
+    pub fn insertion_tspan_pos(
+        &self,
+        element_tspans: &[crate::geometry::tspan::Tspan],
+    ) -> (usize, usize) {
+        crate::geometry::tspan::char_to_tspan_pos(
+            element_tspans, self.insertion, self.caret_affinity)
+    }
+
+    /// Resolve the selection anchor's `(tspan_idx, offset)`. Anchors
+    /// do not have an independent affinity; they track the caret's.
+    pub fn anchor_tspan_pos(
+        &self,
+        element_tspans: &[crate::geometry::tspan::Tspan],
+    ) -> (usize, usize) {
+        crate::geometry::tspan::char_to_tspan_pos(
+            element_tspans, self.anchor, self.caret_affinity)
+    }
+
+    /// Move the insertion point with an explicit affinity. Use this
+    /// when crossing a tspan boundary — arrow-right lands with
+    /// `Right`, arrow-left with `Left`.
+    pub fn set_insertion_with_affinity(
+        &mut self,
+        pos: usize,
+        affinity: crate::geometry::tspan::Affinity,
+        extend: bool,
+    ) {
+        let n = self.content.chars().count();
+        self.insertion = pos.min(n);
+        self.caret_affinity = affinity;
+        if !extend {
+            self.anchor = self.insertion;
         }
     }
 
@@ -887,5 +932,60 @@ mod tests {
                                          "foo".into(), 0, 0.0);
         s.tspan_clipboard = Some(("X".to_string(), vec![]));
         assert!(s.try_paste_tspans(&tspans, "DIFFERENT").is_none());
+    }
+
+    // ── caret affinity ─────────────────────────────────────────
+
+    #[test]
+    fn new_session_caret_has_left_affinity() {
+        use crate::geometry::tspan::Affinity;
+        let s = session("abc");
+        assert_eq!(s.caret_affinity, Affinity::Left);
+    }
+
+    #[test]
+    fn insertion_tspan_pos_left_default_at_boundary() {
+        use crate::geometry::tspan::{Affinity, Tspan};
+        let tspans = vec![
+            Tspan { content: "foo".into(), ..Tspan::default_tspan() },
+            Tspan { id: 1, content: "bar".into(),
+                    font_weight: Some("bold".into()),
+                    ..Tspan::default_tspan() },
+        ];
+        let mut s = session("foobar");
+        s.set_insertion(3, false);
+        // Default Left affinity → end of tspan 0.
+        assert_eq!(s.caret_affinity, Affinity::Left);
+        assert_eq!(s.insertion_tspan_pos(&tspans), (0, 3));
+    }
+
+    #[test]
+    fn set_insertion_with_affinity_right_crosses_boundary() {
+        use crate::geometry::tspan::{Affinity, Tspan};
+        let tspans = vec![
+            Tspan { content: "foo".into(), ..Tspan::default_tspan() },
+            Tspan { id: 1, content: "bar".into(),
+                    font_weight: Some("bold".into()),
+                    ..Tspan::default_tspan() },
+        ];
+        let mut s = session("foobar");
+        s.set_insertion_with_affinity(3, Affinity::Right, false);
+        assert_eq!(s.caret_affinity, Affinity::Right);
+        assert_eq!(s.insertion_tspan_pos(&tspans), (1, 0));
+    }
+
+    #[test]
+    fn anchor_tspan_pos_uses_caret_affinity() {
+        use crate::geometry::tspan::{Affinity, Tspan};
+        let tspans = vec![
+            Tspan { content: "foo".into(), ..Tspan::default_tspan() },
+            Tspan { id: 1, content: "bar".into(), ..Tspan::default_tspan() },
+        ];
+        let mut s = session("foobar");
+        s.set_insertion(3, false);
+        s.set_insertion_with_affinity(5, Affinity::Right, true); // selection [3, 5)
+        // Anchor resolves with Right affinity too.
+        assert_eq!(s.anchor_tspan_pos(&tspans), (1, 0));
+        assert_eq!(s.insertion_tspan_pos(&tspans), (1, 2));
     }
 }
