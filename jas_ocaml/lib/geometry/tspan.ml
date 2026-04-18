@@ -218,6 +218,74 @@ let _is_utf8_boundary (s : string) (byte_offset : int) : bool =
   if byte_offset <= 0 || byte_offset >= String.length s then true
   else (Char.code s.[byte_offset] land 0xC0) <> 0x80
 
+let copy_range (original : tspan array) (char_start : int) (char_end : int) : tspan array =
+  if char_start >= char_end then [||]
+  else begin
+    let total = Array.fold_left (fun acc (t : tspan) ->
+      acc + String.length t.content) 0 original in
+    let s = min char_start total in
+    let e = min char_end total in
+    if s >= e then [||]
+    else begin
+      let out = ref [] in
+      let cursor = ref 0 in
+      Array.iter (fun (t : tspan) ->
+        let len = String.length t.content in
+        let t_start = !cursor in
+        let t_end = t_start + len in
+        let overlap_start = max s t_start in
+        let overlap_end = min e t_end in
+        if overlap_start < overlap_end then begin
+          let local_start = overlap_start - t_start in
+          let local_end = overlap_end - t_start in
+          let sliced = String.sub t.content local_start (local_end - local_start) in
+          out := { t with content = sliced } :: !out
+        end;
+        cursor := t_end
+      ) original;
+      Array.of_list (List.rev !out)
+    end
+  end
+
+let insert_tspans_at (original : tspan array) (char_pos : int)
+    (to_insert : tspan array) : tspan array =
+  let any_nonempty = Array.exists (fun (t : tspan) -> t.content <> "") to_insert in
+  if not any_nonempty then Array.copy original
+  else begin
+    let base_max = Array.fold_left (fun acc (t : tspan) ->
+      if t.id > acc then t.id else acc) (-1) original in
+    let next_id = ref (base_max + 1) in
+    let fresh () = let id = !next_id in incr next_id; id in
+    let reindexed = Array.map (fun (t : tspan) -> { t with id = fresh () }) to_insert in
+    let total = Array.fold_left (fun acc (t : tspan) ->
+      acc + String.length t.content) 0 original in
+    let pos = min char_pos total in
+    let before = ref [] in
+    let after = ref [] in
+    let cursor = ref 0 in
+    Array.iter (fun (t : tspan) ->
+      let len = String.length t.content in
+      let t_end = !cursor + len in
+      if t_end <= pos then
+        before := t :: !before
+      else if !cursor >= pos then
+        after := t :: !after
+      else begin
+        let local = pos - !cursor in
+        let left = { t with content = String.sub t.content 0 local } in
+        let right = { t with id = fresh ();
+                             content = String.sub t.content local (len - local) } in
+        before := left :: !before;
+        after := right :: !after
+      end;
+      cursor := t_end
+    ) original;
+    let parts = List.rev !before
+              @ Array.to_list reindexed
+              @ List.rev !after in
+    merge (Array.of_list parts)
+  end
+
 let reconcile_content (original : tspan array) (new_content : string) : tspan array =
   let old_content = concat_content original in
   if old_content = new_content then original

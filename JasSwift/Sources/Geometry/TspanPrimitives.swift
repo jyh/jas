@@ -192,6 +192,91 @@ private func tspanAttrsEqual(_ a: Tspan, _ b: Tspan) -> Bool {
         && a.xmlLang == b.xmlLang
 }
 
+// MARK: - copy_range / insert_tspans_at
+
+/// Extract the covered slice `[charStart, charEnd)` of the input as
+/// a fresh tspan array. Each returned tspan carries its source
+/// tspan's overrides and id, with `content` truncated to the
+/// overlap. Empty / inverted range → empty array; out-of-range
+/// bounds saturate.
+public func copyTspanRange(_ original: [Tspan], charStart: Int, charEnd: Int) -> [Tspan] {
+    if charStart >= charEnd { return [] }
+    let total = original.reduce(0) { $0 + $1.content.unicodeScalars.count }
+    let start = min(charStart, total)
+    let end = min(charEnd, total)
+    if start >= end { return [] }
+
+    var result: [Tspan] = []
+    var cursor = 0
+    for t in original {
+        let scalars = Array(t.content.unicodeScalars)
+        let tStart = cursor
+        let tEnd = cursor + scalars.count
+        let overlapStart = max(start, tStart)
+        let overlapEnd = min(end, tEnd)
+        if overlapStart < overlapEnd {
+            let localStart = overlapStart - tStart
+            let localEnd = overlapEnd - tStart
+            let sliced = String(String.UnicodeScalarView(scalars[localStart..<localEnd]))
+            result.append(withContent(t, content: sliced))
+        }
+        cursor = tEnd
+    }
+    return result
+}
+
+/// Splice `toInsert` into `original` at character position
+/// `charPos`. Boundary insert slots between neighbours; mid-tspan
+/// insert splits that tspan around the insertion. IDs on `toInsert`
+/// are reassigned above `original`'s max id to avoid collisions.
+/// Final merge pass collapses adjacent-equal tspans.
+public func insertTspansAt(
+    _ original: [Tspan], charPos: Int, _ toInsert: [Tspan]
+) -> [Tspan] {
+    let anyNonEmpty = toInsert.contains { !$0.content.isEmpty }
+    if !anyNonEmpty { return original }
+
+    let baseMax = original.map(\.id).max() ?? 0
+    var nextId = baseMax + 1
+    let reindexed = toInsert.map { t -> Tspan in
+        let out = withId(t, id: nextId)
+        nextId += 1
+        return out
+    }
+
+    let total = original.reduce(0) { $0 + $1.content.unicodeScalars.count }
+    let pos = min(charPos, total)
+    var before: [Tspan] = []
+    var after: [Tspan] = []
+    var cursor = 0
+    for t in original {
+        let scalars = Array(t.content.unicodeScalars)
+        let tEnd = cursor + scalars.count
+        if tEnd <= pos {
+            before.append(t)
+        } else if cursor >= pos {
+            after.append(t)
+        } else {
+            let local = pos - cursor
+            let leftContent = String(String.UnicodeScalarView(scalars[..<local]))
+            let rightContent = String(String.UnicodeScalarView(scalars[local...]))
+            before.append(withContent(t, content: leftContent))
+            // Right half gets a fresh id to avoid colliding with the
+            // left half keeping the original id.
+            let right = withContent(t, content: rightContent, idOverride: nextId)
+            nextId += 1
+            after.append(right)
+        }
+        cursor = tEnd
+    }
+    var result: [Tspan] = []
+    result.reserveCapacity(before.count + reindexed.count + after.count)
+    result.append(contentsOf: before)
+    result.append(contentsOf: reindexed)
+    result.append(contentsOf: after)
+    return mergeTspans(result)
+}
+
 // MARK: - reconcile
 
 /// Reconcile a new flat content string back onto the original tspan

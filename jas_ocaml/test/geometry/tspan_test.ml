@@ -340,6 +340,98 @@ let reconcile_runs_merge_test () =
   assert (Array.length r = 1);
   assert (r.(0).content = "ab")
 
+(* ── copy_range ─────────────────────────────────────────────── *)
+
+let copy_range_empty_test () =
+  let ts = [| _plain "hello" |] in
+  assert (copy_range ts 2 2 = [||]);
+  assert (copy_range ts 3 1 = [||])
+
+let copy_range_inside_single_tspan_test () =
+  let ts = [| _bold "bold text" 0 |] in
+  let r = copy_range ts 5 9 in
+  assert (Array.length r = 1);
+  assert (r.(0).content = "text");
+  assert (r.(0).font_weight = Some "bold")
+
+let copy_range_across_boundary_test () =
+  let ts = [| _plain "foo"; _bold "bar" 1 |] in
+  let r = copy_range ts 1 5 in
+  assert (Array.length r = 2);
+  assert (r.(0).content = "oo");
+  assert (r.(0).font_weight = None);
+  assert (r.(1).content = "ba");
+  assert (r.(1).font_weight = Some "bold")
+
+let copy_range_saturates_test () =
+  let ts = [| _plain "hi" |] in
+  let r = copy_range ts 0 999 in
+  assert (Array.length r = 1);
+  assert (r.(0).content = "hi")
+
+(* ── insert_tspans_at ───────────────────────────────────────── *)
+
+let insert_at_boundary_test () =
+  let base = [| _plain "foo"; _bold "bar" 1 |] in
+  let ins = [| _bold "X" 0 |] in
+  let r = insert_tspans_at base 3 ins in
+  assert (Array.length r = 2);
+  assert (r.(0).content = "foo");
+  assert (r.(1).content = "Xbar");
+  assert (r.(1).font_weight = Some "bold")
+
+let insert_inside_a_tspan_splits_test () =
+  let base = [| _plain "hello" |] in
+  let ins = [| _bold "X" 0 |] in
+  let r = insert_tspans_at base 2 ins in
+  assert (Array.length r = 3);
+  assert (r.(0).content = "he");
+  assert (r.(0).font_weight = None);
+  assert (r.(1).content = "X");
+  assert (r.(1).font_weight = Some "bold");
+  assert (r.(2).content = "llo");
+  assert (r.(2).font_weight = None)
+
+let insert_prepend_at_zero_test () =
+  let base = [| _plain "hello" |] in
+  let ins = [| _bold "Say " 0 |] in
+  let r = insert_tspans_at base 0 ins in
+  assert (Array.length r = 2);
+  assert (r.(0).content = "Say ");
+  assert (r.(0).font_weight = Some "bold");
+  assert (r.(1).content = "hello")
+
+let insert_append_at_end_test () =
+  let base = [| _plain "hello" |] in
+  let ins = [| _bold "!" 0 |] in
+  let r = insert_tspans_at base 5 ins in
+  assert (Array.length r = 2);
+  assert (r.(1).content = "!");
+  assert (r.(1).font_weight = Some "bold")
+
+let insert_reassigns_ids_test () =
+  let base = [| { (default_tspan ()) with id = 0; content = "abc" } |] in
+  let ins = [| { (default_tspan ()) with id = 0; content = "X";
+                                         font_weight = Some "bold" } |] in
+  let r = insert_tspans_at base 1 ins in
+  let ids = Array.map (fun (t : tspan) -> t.id) r |> Array.to_list in
+  let sorted = List.sort compare ids in
+  let dedup = List.sort_uniq compare sorted in
+  assert (List.length dedup = List.length sorted)
+
+let insert_empty_is_noop_test () =
+  let base = [| _plain "hello" |] in
+  assert (insert_tspans_at base 2 [||] = base);
+  assert (insert_tspans_at base 2 [| _plain "" |] = base)
+
+let copy_then_insert_roundtrip_test () =
+  let base = [| _plain "foo"; _bold "bar" 1 |] in
+  let clipboard = copy_range base 3 6 in
+  let r = insert_tspans_at base 0 clipboard in
+  assert (concat_content r = "barfoobar");
+  assert (Array.exists (fun (t : tspan) ->
+    String.length t.content >= 3 && t.font_weight = Some "bold") r)
+
 let () =
   Alcotest.run "Tspan" [
     "fixtures", [
@@ -372,5 +464,20 @@ let () =
       Alcotest.test_case "boundary_replace" `Quick reconcile_boundary_replace_test;
       Alcotest.test_case "preserves_utf8" `Quick reconcile_preserves_utf8_test;
       Alcotest.test_case "runs_merge_cleanup" `Quick reconcile_runs_merge_test;
+    ];
+    "copy_range", [
+      Alcotest.test_case "empty" `Quick copy_range_empty_test;
+      Alcotest.test_case "inside_single_tspan" `Quick copy_range_inside_single_tspan_test;
+      Alcotest.test_case "across_boundary" `Quick copy_range_across_boundary_test;
+      Alcotest.test_case "saturates" `Quick copy_range_saturates_test;
+    ];
+    "insert_tspans_at", [
+      Alcotest.test_case "at_boundary" `Quick insert_at_boundary_test;
+      Alcotest.test_case "inside_a_tspan_splits" `Quick insert_inside_a_tspan_splits_test;
+      Alcotest.test_case "prepend_at_zero" `Quick insert_prepend_at_zero_test;
+      Alcotest.test_case "append_at_end" `Quick insert_append_at_end_test;
+      Alcotest.test_case "reassigns_ids" `Quick insert_reassigns_ids_test;
+      Alcotest.test_case "empty_is_noop" `Quick insert_empty_is_noop_test;
+      Alcotest.test_case "copy_then_insert_roundtrip" `Quick copy_then_insert_roundtrip_test;
     ];
   ]

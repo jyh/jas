@@ -305,3 +305,105 @@ private func plainTspan(_ s: String, id: UInt32 = 0) -> Tspan {
     #expect(r.count == 1)
     #expect(r[0].content == "ab")
 }
+
+// MARK: - copyTspanRange
+
+@Test func copyRangeEmptyReturnsEmpty() {
+    let ts = [plainTspan("hello")]
+    #expect(copyTspanRange(ts, charStart: 2, charEnd: 2).isEmpty)
+    #expect(copyTspanRange(ts, charStart: 3, charEnd: 1).isEmpty)
+}
+
+@Test func copyRangeInsideSingleTspanPreservesOverrides() {
+    let ts = [boldTspan("bold text")]
+    let r = copyTspanRange(ts, charStart: 5, charEnd: 9)
+    #expect(r.count == 1)
+    #expect(r[0].content == "text")
+    #expect(r[0].fontWeight == "bold")
+}
+
+@Test func copyRangeAcrossBoundaryReturnsPartialTspans() {
+    let ts = [plainTspan("foo"), boldTspan("bar", id: 1)]
+    let r = copyTspanRange(ts, charStart: 1, charEnd: 5)
+    #expect(r.count == 2)
+    #expect(r[0].content == "oo")
+    #expect(r[0].fontWeight == nil)
+    #expect(r[1].content == "ba")
+    #expect(r[1].fontWeight == "bold")
+}
+
+@Test func copyRangeSaturatesToTotal() {
+    let ts = [plainTspan("hi")]
+    let r = copyTspanRange(ts, charStart: 0, charEnd: 999)
+    #expect(r.count == 1)
+    #expect(r[0].content == "hi")
+}
+
+// MARK: - insertTspansAt
+
+@Test func insertTspansAtBoundaryBetweenTspans() {
+    let base = [plainTspan("foo"), boldTspan("bar", id: 1)]
+    let ins = [boldTspan("X")]
+    let r = insertTspansAt(base, charPos: 3, ins)
+    #expect(r.count == 2)
+    #expect(r[0].content == "foo")
+    #expect(r[1].content == "Xbar")
+    #expect(r[1].fontWeight == "bold")
+}
+
+@Test func insertTspansAtInsideATspanSplits() {
+    let base = [plainTspan("hello")]
+    let ins = [boldTspan("X")]
+    let r = insertTspansAt(base, charPos: 2, ins)
+    #expect(r.count == 3)
+    #expect(r[0].content == "he")
+    #expect(r[0].fontWeight == nil)
+    #expect(r[1].content == "X")
+    #expect(r[1].fontWeight == "bold")
+    #expect(r[2].content == "llo")
+    #expect(r[2].fontWeight == nil)
+}
+
+@Test func insertTspansAtPrependAtZero() {
+    let base = [plainTspan("hello")]
+    let ins = [boldTspan("Say ")]
+    let r = insertTspansAt(base, charPos: 0, ins)
+    #expect(r.count == 2)
+    #expect(r[0].content == "Say ")
+    #expect(r[0].fontWeight == "bold")
+    #expect(r[1].content == "hello")
+}
+
+@Test func insertTspansAtAppendAtEnd() {
+    let base = [plainTspan("hello")]
+    let ins = [boldTspan("!")]
+    let r = insertTspansAt(base, charPos: 5, ins)
+    #expect(r.count == 2)
+    #expect(r[1].content == "!")
+    #expect(r[1].fontWeight == "bold")
+}
+
+@Test func insertTspansAtReassignsIds() {
+    let base = [Tspan(id: 0, content: "abc")]
+    let ins = [Tspan(id: 0, content: "X", fontWeight: "bold")]
+    let r = insertTspansAt(base, charPos: 1, ins)
+    var ids = r.map(\.id)
+    ids.sort()
+    // All ids must be distinct.
+    #expect(Set(ids).count == ids.count)
+}
+
+@Test func insertEmptyIsNoop() {
+    let base = [plainTspan("hello")]
+    #expect(insertTspansAt(base, charPos: 2, []) == base)
+    #expect(insertTspansAt(base, charPos: 2, [plainTspan("")]) == base)
+}
+
+@Test func copyThenInsertRoundtripPreservesOverrides() {
+    let base = [plainTspan("foo"), boldTspan("bar", id: 1)]
+    let clipboard = copyTspanRange(base, charStart: 3, charEnd: 6)
+    let r = insertTspansAt(base, charPos: 0, clipboard)
+    #expect(concatTspanContent(r) == "barfoobar")
+    // Original bold "bar" + clipboard bold "bar" both present.
+    #expect(r.contains { $0.content.contains("bar") && $0.fontWeight == "bold" })
+}
