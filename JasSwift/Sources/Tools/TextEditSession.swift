@@ -279,11 +279,11 @@ public final class TextEditSession {
         switch (target, elem) {
         case (.text, .text(let t)):
             let reconciled = reconcileTspanContent(t.tspans, content)
-            let newTspans = applyPendingTo(reconciled)
+            let newTspans = applyPendingTo(reconciled, elem: elem)
             return doc.replaceElement(path, with: .text(t.withTspans(newTspans)))
         case (.textPath, .textPath(let tp)):
             let reconciled = reconcileTspanContent(tp.tspans, content)
-            let newTspans = applyPendingTo(reconciled)
+            let newTspans = applyPendingTo(reconciled, elem: elem)
             return doc.replaceElement(path, with: .textPath(tp.withTspans(newTspans)))
         default:
             return nil
@@ -293,7 +293,11 @@ public final class TextEditSession {
     /// Apply the pending next-typed-character override to the range
     /// `[pendingCharStart, insertion)` of `tspans`, then merge.
     /// Passthrough when pending is nil or the range is empty.
-    private func applyPendingTo(_ tspans: [Tspan]) -> [Tspan] {
+    /// Runs identity-omission (TSPAN.md step 3) when `elem` is
+    /// supplied so override fields that match the parent's effective
+    /// value get dropped.
+    private func applyPendingTo(_ tspans: [Tspan],
+                                 elem: Element? = nil) -> [Tspan] {
         guard let pending = pendingOverride,
               let start = pendingCharStart,
               start < insertion
@@ -304,7 +308,11 @@ public final class TextEditSession {
         guard let f = first, let l = last else { return split }
         var out = split
         for i in f...l {
-            out[i] = mergeTspanOverrides(out[i], pending)
+            var merged = mergeTspanOverrides(out[i], pending)
+            if let e = elem {
+                merged = identityOmitTspan(merged, e)
+            }
+            out[i] = merged
         }
         return mergeTspans(out)
     }

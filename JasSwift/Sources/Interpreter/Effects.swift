@@ -631,13 +631,111 @@ func buildPanelFullOverrides(_ panel: [String: Any]) -> Tspan {
         xmlLang: lang)
 }
 
+/// Drop any tspan override field that matches the parent element's
+/// effective value (TSPAN.md "Character attribute writes (from
+/// panels)" step 3). After this pass, the tspan only retains
+/// overrides whose stored value differs from what the element would
+/// render on its own; mergeTspans can then collapse same-override
+/// neighbours more aggressively.
+func identityOmitTspan(_ t: Tspan, _ elem: Element) -> Tspan {
+    let (ff, fs, fw, fst, td, tt, fv, xl, rot, lh, ls, bs, aa):
+        (String, Double, String, String, String, String, String, String,
+         String, String, String, String, String)
+    switch elem {
+    case .text(let te):
+        (ff, fs, fw, fst, td, tt, fv, xl, rot, lh, ls, bs, aa) =
+            (te.fontFamily, te.fontSize, te.fontWeight, te.fontStyle,
+             te.textDecoration, te.textTransform, te.fontVariant,
+             te.xmlLang, te.rotate, te.lineHeight, te.letterSpacing,
+             te.baselineShift, te.aaMode)
+    case .textPath(let tp):
+        (ff, fs, fw, fst, td, tt, fv, xl, rot, lh, ls, bs, aa) =
+            (tp.fontFamily, tp.fontSize, tp.fontWeight, tp.fontStyle,
+             tp.textDecoration, tp.textTransform, tp.fontVariant,
+             tp.xmlLang, tp.rotate, tp.lineHeight, tp.letterSpacing,
+             tp.baselineShift, tp.aaMode)
+    default:
+        return t
+    }
+    var fontFamily = t.fontFamily
+    if fontFamily == ff { fontFamily = nil }
+    var fontSize = t.fontSize
+    if let v = fontSize, abs(v - fs) < 1e-6 { fontSize = nil }
+    var fontWeight = t.fontWeight
+    if fontWeight == fw { fontWeight = nil }
+    var fontStyle = t.fontStyle
+    if fontStyle == fst { fontStyle = nil }
+    // text-decoration: compare sorted parsed sets so "none" and ""
+    // collapse, and token order doesn't matter.
+    var textDecoration = t.textDecoration
+    if let tokens = textDecoration {
+        let a = tokens.sorted()
+        let b = td.split(separator: " ")
+            .map(String.init)
+            .filter { $0 != "none" && !$0.isEmpty }
+            .sorted()
+        if a == b { textDecoration = nil }
+    }
+    var textTransform = t.textTransform
+    if textTransform == tt { textTransform = nil }
+    var fontVariant = t.fontVariant
+    if fontVariant == fv { fontVariant = nil }
+    var xmlLang = t.xmlLang
+    if xmlLang == xl { xmlLang = nil }
+    var rotate = t.rotate
+    if let v = rotate {
+        let elemRot = Double(rot) ?? 0.0
+        if abs(v - elemRot) < 1e-6 { rotate = nil }
+    }
+    var lineHeight = t.lineHeight
+    if let v = lineHeight {
+        // Empty element line_height = Auto = 120% of font_size.
+        let elemLh = _parsePtValue(lh) ?? (fs * 1.2)
+        if abs(v - elemLh) < 1e-6 { lineHeight = nil }
+    }
+    var letterSpacing = t.letterSpacing
+    if let v = letterSpacing {
+        let elemLs = _parseEmValue(ls) ?? 0.0
+        if abs(v - elemLs) < 1e-6 { letterSpacing = nil }
+    }
+    var baselineShift = t.baselineShift
+    if let v = baselineShift {
+        if let elemBs = _parsePtValue(bs) {
+            if abs(v - elemBs) < 1e-6 { baselineShift = nil }
+        } else if bs.isEmpty && v == 0.0 {
+            baselineShift = nil
+        }
+    }
+    var jasAaMode = t.jasAaMode
+    if let v = jasAaMode {
+        let elemAa = aa == "Sharp" ? "" : aa
+        if v == elemAa { jasAaMode = nil }
+    }
+    return Tspan(
+        id: t.id, content: t.content,
+        baselineShift: baselineShift, dx: t.dx,
+        fontFamily: fontFamily, fontSize: fontSize,
+        fontStyle: fontStyle, fontVariant: fontVariant,
+        fontWeight: fontWeight,
+        jasAaMode: jasAaMode, jasFractionalWidths: t.jasFractionalWidths,
+        jasKerningMode: t.jasKerningMode, jasNoBreak: t.jasNoBreak,
+        letterSpacing: letterSpacing, lineHeight: lineHeight,
+        rotate: rotate, styleName: t.styleName,
+        textDecoration: textDecoration, textRendering: t.textRendering,
+        textTransform: textTransform, transform: t.transform,
+        xmlLang: xmlLang)
+}
+
 /// Apply `overrides` to every tspan covered by `[charStart, charEnd)`
 /// of `tspans`. Runs TSPAN.md's per-range algorithm: splitTspanRange
 /// to isolate the targeted tspans, mergeTspanOverrides to copy the
 /// override fields onto each one, mergeTspans to collapse adjacent-
-/// equal tspans.
+/// equal tspans. If `elem` is supplied, runs identity-omission
+/// (TSPAN.md step 3) between the merge-overrides and merge steps so
+/// fields matching the parent's effective value get dropped.
 func applyOverridesToTspanRange(
-    _ tspans: [Tspan], charStart: Int, charEnd: Int, overrides: Tspan
+    _ tspans: [Tspan], charStart: Int, charEnd: Int, overrides: Tspan,
+    elem: Element? = nil
 ) -> [Tspan] {
     guard charStart < charEnd else { return tspans }
     let (split, first, last) = splitTspanRange(tspans,
@@ -646,7 +744,11 @@ func applyOverridesToTspanRange(
     guard let f = first, let l = last else { return split }
     var out = split
     for i in f...l {
-        out[i] = mergeTspanOverrides(out[i], overrides)
+        var merged = mergeTspanOverrides(out[i], overrides)
+        if let e = elem {
+            merged = identityOmitTspan(merged, e)
+        }
+        out[i] = merged
     }
     return mergeTspans(out)
 }
@@ -854,11 +956,13 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
             switch elem {
             case .text(let t):
                 let newTspans = applyOverridesToTspanRange(
-                    t.tspans, charStart: lo, charEnd: hi, overrides: overrides)
+                    t.tspans, charStart: lo, charEnd: hi,
+                    overrides: overrides, elem: elem)
                 newElem = .text(t.withTspans(newTspans))
             case .textPath(let tp):
                 let newTspans = applyOverridesToTspanRange(
-                    tp.tspans, charStart: lo, charEnd: hi, overrides: overrides)
+                    tp.tspans, charStart: lo, charEnd: hi,
+                    overrides: overrides, elem: elem)
                 newElem = .textPath(tp.withTspans(newTspans))
             default:
                 newElem = nil
