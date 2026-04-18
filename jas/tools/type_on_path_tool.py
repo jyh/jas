@@ -161,6 +161,7 @@ class TypeOnPathTool(CanvasTool):
             content=elem.content, insertion=cursor,
             blink_epoch_ms=_now_ms(),
         )
+        ctx.model.current_edit_session = self.session
         self._did_snapshot = False
         ctx.controller.select_element(path)
 
@@ -176,6 +177,7 @@ class TypeOnPathTool(CanvasTool):
             path=path, target=EditTarget.TEXT_PATH, content="",
             insertion=0, blink_epoch_ms=_now_ms(),
         )
+        ctx.model.current_edit_session = self.session
 
     def _begin_session_new_curve(self, ctx: ToolContext, d: tuple) -> None:
         ctx.snapshot()
@@ -191,13 +193,16 @@ class TypeOnPathTool(CanvasTool):
             path=path, target=EditTarget.TEXT_PATH, content="",
             insertion=0, blink_epoch_ms=_now_ms(),
         )
+        ctx.model.current_edit_session = self.session
 
-    def _end_session(self) -> None:
+    def _end_session(self, ctx: ToolContext | None = None) -> None:
         self.session = None
         self._did_snapshot = False
         self._drag_start = None
         self._drag_end = None
         self._control = None
+        if ctx is not None:
+            ctx.model.current_edit_session = None
 
     def _find_offset_handle(self, ctx: ToolContext, x: float, y: float
                              ) -> tuple[tuple, float] | None:
@@ -229,7 +234,7 @@ class TypeOnPathTool(CanvasTool):
                 self.session.blink_epoch_ms = _now_ms()
                 ctx.request_update()
                 return
-            self._end_session()
+            self._end_session(ctx)
 
         handle_hit = self._find_offset_handle(ctx, x, y)
         if handle_hit is not None:
@@ -382,7 +387,7 @@ class TypeOnPathTool(CanvasTool):
                 return True
 
         if key == "Escape":
-            self._end_session()
+            self._end_session(ctx)
             ctx.request_update()
             return True
         if key == "Enter":
@@ -468,7 +473,7 @@ class TypeOnPathTool(CanvasTool):
         return True
 
     def deactivate(self, ctx: ToolContext) -> None:
-        self._end_session()
+        self._end_session(ctx)
 
     def draw_overlay(self, ctx: ToolContext, painter: "QPainter") -> None:
         from PySide6.QtCore import QPointF, QRectF, Qt

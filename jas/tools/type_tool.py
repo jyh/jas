@@ -200,6 +200,7 @@ class TypeTool(CanvasTool):
             content=elem.content, insertion=cursor,
             blink_epoch_ms=_now_ms(),
         )
+        ctx.model.current_edit_session = self.session
         self._did_snapshot = False
         ctx.controller.select_element(path)
 
@@ -218,11 +219,14 @@ class TypeTool(CanvasTool):
             path=path, target=EditTarget.TEXT, content="",
             insertion=0, blink_epoch_ms=_now_ms(),
         )
+        ctx.model.current_edit_session = self.session
 
-    def _end_session(self) -> None:
+    def _end_session(self, ctx: ToolContext | None = None) -> None:
         self.session = None
         self._did_snapshot = False
         self._drag = None
+        if ctx is not None:
+            ctx.model.current_edit_session = None
 
     # ---- CanvasTool API ----
 
@@ -244,7 +248,7 @@ class TypeTool(CanvasTool):
                 self.session.blink_epoch_ms = _now_ms()
                 ctx.request_update()
                 return
-            self._end_session()
+            self._end_session(ctx)
 
         hit = self._hit_test_text(ctx, x, y)
         if hit is not None:
@@ -345,7 +349,7 @@ class TypeTool(CanvasTool):
                 return True
 
         if key == "Escape":
-            self._end_session()
+            self._end_session(ctx)
             ctx.request_update()
             return True
         if key == "Enter":
@@ -459,7 +463,7 @@ class TypeTool(CanvasTool):
         return True
 
     def deactivate(self, ctx: ToolContext) -> None:
-        self._end_session()
+        self._end_session(ctx)
 
     def draw_overlay(self, ctx: ToolContext, painter: "QPainter") -> None:
         from PySide6.QtCore import QPointF, QRectF, Qt

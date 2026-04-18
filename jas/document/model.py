@@ -38,6 +38,14 @@ class Model:
         self.default_stroke: Stroke | None = Stroke(color=RgbColor(0, 0, 0))
         self.fill_on_top: bool = True
         self.recent_colors: list[str] = []
+        # Live reference to the active in-place text-editing session,
+        # if any. TypeTool / TypeOnPathTool publish their session here
+        # while editing so the Character-panel pipeline can reach it.
+        # Cleared when the session ends. Type is
+        # ``tools.text_edit.TextEditSession | None`` but we avoid the
+        # import at module top to keep document/ free of tools/
+        # dependencies.
+        self.current_edit_session = None
 
     @property
     def filename(self) -> str:
