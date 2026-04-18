@@ -42,3 +42,14 @@ val split_range : tspan array -> int -> int -> tspan array * int option * int op
     drop empty-content tspans. Preserves the "at least one tspan"
     invariant: an all-empty input collapses to [[| default_tspan () |]]. *)
 val merge : tspan array -> tspan array
+
+(** Reconcile a new flat content string back onto the original
+    tspan structure, preserving per-range overrides where possible.
+
+    Common prefix and suffix (byte-level, snapped to UTF-8 scalar
+    boundaries) keep their original tspan assignments. The changed
+    middle region is absorbed into the first overlapping tspan, with
+    adjacent-equal tspans collapsed by a final [merge] pass.
+
+    Mirrors the Rust / Swift [reconcile_content]. *)
+val reconcile_content : tspan array -> string -> tspan array

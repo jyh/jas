@@ -214,3 +214,94 @@ private func optInt(_ v: Any?) -> Int? {
     #expect(got[0].id == 0)
     #expect(got[0].hasNoOverrides)
 }
+
+// MARK: - reconcileTspanContent
+
+private func boldTspan(_ s: String, id: UInt32 = 0) -> Tspan {
+    Tspan(id: id, content: s, fontWeight: "bold")
+}
+private func plainTspan(_ s: String, id: UInt32 = 0) -> Tspan {
+    Tspan(id: id, content: s)
+}
+
+@Test func reconcileIdentityPassesThrough() {
+    let ts = [plainTspan("Hello "), boldTspan("world", id: 1)]
+    #expect(reconcileTspanContent(ts, "Hello world") == ts)
+}
+
+@Test func reconcileAppendExtendsLastTspan() {
+    let ts = [plainTspan("Hello "), boldTspan("world", id: 1)]
+    let r = reconcileTspanContent(ts, "Hello world!")
+    #expect(r.count == 2)
+    #expect(r[0].content == "Hello ")
+    #expect(r[1].content == "world!")
+    #expect(r[1].fontWeight == "bold")
+}
+
+@Test func reconcilePrependExtendsFirstTspan() {
+    let ts = [plainTspan("Hello "), boldTspan("world", id: 1)]
+    let r = reconcileTspanContent(ts, "Say Hello world")
+    #expect(r.count == 2)
+    #expect(r[0].content == "Say Hello ")
+    #expect(r[1].content == "world")
+    #expect(r[1].fontWeight == "bold")
+}
+
+@Test func reconcileEditInsidePreservesNeighbour() {
+    let ts = [plainTspan("Hello "), boldTspan("world", id: 1)]
+    let r = reconcileTspanContent(ts, "Hellooo world")
+    #expect(r.count == 2)
+    #expect(r[0].content == "Hellooo ")
+    #expect(r[0].fontWeight == nil)
+    #expect(r[1].content == "world")
+    #expect(r[1].fontWeight == "bold")
+}
+
+@Test func reconcileDeleteInside() {
+    let ts = [plainTspan("Hello "), boldTspan("world", id: 1)]
+    let r = reconcileTspanContent(ts, "Helo world")
+    #expect(r.count == 2)
+    #expect(r[0].content == "Helo ")
+    #expect(r[1].content == "world")
+}
+
+@Test func reconcileBoundaryReplaceAbsorbsIntoFirstOverlapping() {
+    let ts = [plainTspan("Hello "), boldTspan("world", id: 1)]
+    let r = reconcileTspanContent(ts, "HelloXXworld")
+    #expect(r.count == 2)
+    #expect(r[0].content == "HelloXX")
+    #expect(r[0].fontWeight == nil)
+    #expect(r[1].content == "world")
+    #expect(r[1].fontWeight == "bold")
+}
+
+@Test func reconcileDeleteAllYieldsSingleDefault() {
+    let ts = [plainTspan("Hello "), boldTspan("world", id: 1)]
+    let r = reconcileTspanContent(ts, "")
+    #expect(r.count == 1)
+    #expect(r[0].content == "")
+    #expect(r[0].hasNoOverrides)
+}
+
+@Test func reconcileFullReplacementCollapses() {
+    let ts = [plainTspan("abc"), boldTspan("def", id: 1)]
+    let r = reconcileTspanContent(ts, "xyz")
+    #expect(r.count == 1)
+    #expect(r[0].content == "xyz")
+}
+
+@Test func reconcilePreservesUtf8Boundaries() {
+    let ts = [plainTspan("café "), boldTspan("naïve", id: 1)]
+    let r = reconcileTspanContent(ts, "café plus naïve")
+    #expect(r.count == 2)
+    #expect(r[0].content == "café plus ")
+    #expect(r[1].content == "naïve")
+    #expect(r[1].fontWeight == "bold")
+}
+
+@Test func reconcileRunsMergeCleanup() {
+    let ts = [plainTspan("a"), plainTspan("b", id: 1), boldTspan("C", id: 2)]
+    let r = reconcileTspanContent(ts, "ab")
+    #expect(r.count == 1)
+    #expect(r[0].content == "ab")
+}

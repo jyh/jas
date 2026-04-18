@@ -156,32 +156,23 @@ public final class TextEditSession {
         return String(content[from..<to])
     }
 
-    /// Build a new Document with this session's content applied to `path`.
-    /// Returns nil if the path no longer points at a compatible element.
-    ///
-    /// Tspan preservation rule: when the session flat content matches
-    /// the current concatenation of the element's tspans, the
-    /// original tspan structure (and per-range overrides) is
-    /// preserved. Any content change falls back to collapsing into a
-    /// single default tspan via `with(content:)`. Mirrors the Rust
-    /// first-pass tspan-preserving behaviour — full tspan-aware
-    /// editing lands later.
+    /// Tspan-aware commit: reconcile the session's flat content against
+    /// the element's current tspan structure via `reconcileTspanContent`.
+    /// Unchanged prefix and suffix regions keep their original tspan
+    /// assignments (and all per-range overrides); the changed middle
+    /// is absorbed into the first overlapping tspan, with adjacent-
+    /// equal tspans collapsed by the merge pass.
     public func applyToDocument(_ doc: Document) -> Document? {
         // Defensive: avoid out-of-range crashes if the path is stale.
         guard pathIsValid(doc, path) else { return nil }
         let elem = doc.getElement(path)
         switch (target, elem) {
         case (.text, .text(let t)):
-            if concatTspanContent(t.tspans) == content {
-                // No content change — keep the original tspans.
-                return doc
-            }
-            return doc.replaceElement(path, with: .text(t.with(content: content)))
+            let newTspans = reconcileTspanContent(t.tspans, content)
+            return doc.replaceElement(path, with: .text(t.withTspans(newTspans)))
         case (.textPath, .textPath(let tp)):
-            if concatTspanContent(tp.tspans) == content {
-                return doc
-            }
-            return doc.replaceElement(path, with: .textPath(tp.with(content: content)))
+            let newTspans = reconcileTspanContent(tp.tspans, content)
+            return doc.replaceElement(path, with: .textPath(tp.withTspans(newTspans)))
         default:
             return nil
         }

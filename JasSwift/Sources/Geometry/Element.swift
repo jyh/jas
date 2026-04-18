@@ -1718,6 +1718,25 @@ public struct Text: Equatable {
              opacity: opacity, transform: transform, locked: locked)
     }
 
+    /// Return a copy with the tspans list replaced. Preserves every
+    /// other field. Used by `TextEditSession.applyToDocument` after
+    /// reconciling content so per-range overrides survive.
+    public func withTspans(_ tspans: [Tspan]) -> Text {
+        Text(x: x, y: y, tspans: tspans,
+             fontFamily: fontFamily, fontSize: fontSize,
+             fontWeight: fontWeight, fontStyle: fontStyle,
+             textDecoration: textDecoration,
+             textTransform: textTransform, fontVariant: fontVariant,
+             baselineShift: baselineShift, lineHeight: lineHeight,
+             letterSpacing: letterSpacing, xmlLang: xmlLang,
+             aaMode: aaMode, rotate: rotate,
+             horizontalScale: horizontalScale, verticalScale: verticalScale,
+             kerning: kerning,
+             width: width, height: height,
+             fill: fill, stroke: stroke,
+             opacity: opacity, transform: transform, locked: locked)
+    }
+
     public var bounds: BBox {
         if isAreaText {
             return (x, y, width, height)
@@ -1842,6 +1861,22 @@ public struct TextPath: Equatable {
     /// Return a copy of this TextPath with `content` replaced.
     public func with(content: String) -> TextPath {
         TextPath(d: d, content: content, startOffset: startOffset,
+                 fontFamily: fontFamily, fontSize: fontSize,
+                 fontWeight: fontWeight, fontStyle: fontStyle,
+                 textDecoration: textDecoration,
+                 textTransform: textTransform, fontVariant: fontVariant,
+                 baselineShift: baselineShift, lineHeight: lineHeight,
+                 letterSpacing: letterSpacing, xmlLang: xmlLang,
+                 aaMode: aaMode, rotate: rotate,
+                 horizontalScale: horizontalScale, verticalScale: verticalScale,
+                 kerning: kerning,
+                 fill: fill, stroke: stroke,
+                 opacity: opacity, transform: transform, locked: locked)
+    }
+
+    /// Return a copy with the tspans list replaced.
+    public func withTspans(_ tspans: [Tspan]) -> TextPath {
+        TextPath(d: d, tspans: tspans, startOffset: startOffset,
                  fontFamily: fontFamily, fontSize: fontSize,
                  fontWeight: fontWeight, fontStyle: fontStyle,
                  textDecoration: textDecoration,

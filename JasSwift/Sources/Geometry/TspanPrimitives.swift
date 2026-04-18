@@ -192,6 +192,139 @@ private func tspanAttrsEqual(_ a: Tspan, _ b: Tspan) -> Bool {
         && a.xmlLang == b.xmlLang
 }
 
+// MARK: - reconcile
+
+/// Reconcile a new flat content string back onto the original tspan
+/// structure, preserving per-range overrides where possible.
+///
+/// Unchanged common prefix and suffix (byte-level, snapped to UTF-8
+/// boundaries) keep their original tspan assignments. The changed
+/// middle region is absorbed into the first overlapping tspan, with
+/// adjacent-equal tspans collapsed by `mergeTspans`.
+///
+/// Mirrors Rust's `reconcile_content`. Used by
+/// `TextEditSession.applyToDocument` so an edit inside one tspan
+/// doesn't wipe out every other tspan's overrides.
+public func reconcileTspanContent(_ original: [Tspan], _ newContent: String) -> [Tspan] {
+    let oldContent = concatTspanContent(original)
+    if oldContent == newContent { return original }
+    if original.isEmpty {
+        return [Tspan(id: 0, content: newContent)]
+    }
+
+    // Work with utf8 byte views for LCP/LCS; String.Index values are
+    // byte offsets in utf8.
+    let oldU8 = Array(oldContent.utf8)
+    let newU8 = Array(newContent.utf8)
+
+    let maxPrefix = min(oldU8.count, newU8.count)
+    var prefixLen = 0
+    while prefixLen < maxPrefix && oldU8[prefixLen] == newU8[prefixLen] {
+        prefixLen += 1
+    }
+    // Back off to the nearest Unicode scalar boundary so we don't
+    // split a multibyte codepoint.
+    while prefixLen > 0 && !isUtf8Boundary(oldContent, byteOffset: prefixLen) {
+        prefixLen -= 1
+    }
+
+    let maxSuffix = min(oldU8.count - prefixLen, newU8.count - prefixLen)
+    var suffixLen = 0
+    while suffixLen < maxSuffix
+        && oldU8[oldU8.count - 1 - suffixLen] == newU8[newU8.count - 1 - suffixLen] {
+        suffixLen += 1
+    }
+    while suffixLen > 0 && !isUtf8Boundary(oldContent, byteOffset: oldU8.count - suffixLen) {
+        suffixLen -= 1
+    }
+
+    let oldMidStart = prefixLen
+    let oldMidEnd = oldU8.count - suffixLen
+    let newMiddleStart = prefixLen
+    let newMiddleEnd = newU8.count - suffixLen
+    let newMiddle = String(decoding: Array(newU8[newMiddleStart..<newMiddleEnd]), as: UTF8.self)
+
+    // Pure insertion at a boundary: splice newMiddle into the tspan
+    // containing oldMidStart; everything else pass-through.
+    if oldMidStart == oldMidEnd {
+        var result = original
+        var pos = oldMidStart
+        var absorbed = false
+        for i in 0..<result.count {
+            let tLen = result[i].content.utf8.count
+            if pos <= tLen {
+                let content = result[i].content
+                let beforeEnd = content.utf8.index(content.startIndex, offsetBy: pos)
+                let before = String(content[..<beforeEnd])
+                let after = String(content[beforeEnd...])
+                result[i] = withContent(result[i], content: before + newMiddle + after)
+                absorbed = true
+                break
+            }
+            pos -= tLen
+        }
+        if !absorbed {
+            if let last = result.last {
+                result[result.count - 1] = withContent(last, content: last.content + newMiddle)
+            } else {
+                result.append(Tspan(id: 0, content: newMiddle))
+            }
+        }
+        return mergeTspans(result)
+    }
+
+    // Replacement (including pure deletion): walk tspans and absorb
+    // newMiddle into the first overlapping tspan.
+    var result: [Tspan] = []
+    result.reserveCapacity(original.count + 1)
+    var cursor = 0
+    var middleConsumed = false
+
+    for tspan in original {
+        let tLen = tspan.content.utf8.count
+        let tStart = cursor
+        let tEnd = cursor + tLen
+
+        if tEnd <= oldMidStart {
+            result.append(tspan)
+        } else if tStart >= oldMidEnd {
+            result.append(tspan)
+        } else {
+            let beforeLen = max(0, oldMidStart - tStart)
+            let afterOff = min(tLen, max(0, oldMidEnd - tStart))
+            let content = tspan.content
+            let beforeEnd = content.utf8.index(content.startIndex, offsetBy: beforeLen)
+            let afterStart = content.utf8.index(content.startIndex, offsetBy: afterOff)
+            let before = String(content[..<beforeEnd])
+            let after = (tEnd > oldMidEnd) ? String(content[afterStart...]) : ""
+
+            var newContentStr = before
+            if !middleConsumed {
+                newContentStr += newMiddle
+                middleConsumed = true
+            }
+            newContentStr += after
+            if !newContentStr.isEmpty {
+                result.append(withContent(tspan, content: newContentStr))
+            }
+        }
+        cursor = tEnd
+    }
+
+    if result.isEmpty {
+        result.append(Tspan.defaultTspan())
+    }
+    return mergeTspans(result)
+}
+
+/// Whether `byteOffset` is a valid UTF-8 scalar boundary in `s`.
+private func isUtf8Boundary(_ s: String, byteOffset: Int) -> Bool {
+    if byteOffset <= 0 || byteOffset >= s.utf8.count { return true }
+    // UTF-8 continuation bytes have the high bits 10xxxxxx.
+    let byte = Array(s.utf8)[byteOffset]
+    return (byte & 0xC0) != 0x80
+}
+
 // MARK: - rebuild helpers
 
 /// Return a copy of `t` with a new content string (and optionally a

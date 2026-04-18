@@ -146,34 +146,24 @@ class TextEditSession:
         return self.content[lo:hi]
 
     def apply_to_document(self, doc):
-        """Build a new Document with this session's content applied to
-        ``self.path``. Returns None if the path no longer points at a
-        compatible element.
-
-        Tspan preservation rule: when the session flat content matches
-        the current concatenation of the element's tspans, the
-        original tspans pass through unchanged. Any content change
-        collapses the tspans into a single default tspan derived from
-        the new content. Mirrors the Rust / Swift / OCaml first pass —
-        full tspan-aware editing (caret split, merge on paste) is a
-        follow-up.
+        """Tspan-aware commit: reconcile the session's flat content
+        against the element's current tspan structure. Unchanged
+        prefix and suffix regions keep their original tspan
+        assignments (and all per-range overrides); the changed middle
+        is absorbed into the first overlapping tspan, with adjacent-
+        equal tspans collapsed by the merge pass. Returns None if the
+        path no longer points at a compatible element.
         """
-        from geometry.tspan import concat_content, tspans_from_content
+        from geometry.tspan import reconcile_content
         elem = doc.get_element(self.path)
         if self.target == EditTarget.TEXT and isinstance(elem, Text):
-            if concat_content(list(elem.tspans)) == self.content:
-                return doc  # no-op edit: preserve original tspans
+            new_tspans = tuple(reconcile_content(list(elem.tspans), self.content))
             new_elem = dataclasses.replace(
-                elem,
-                content=self.content,
-                tspans=tspans_from_content(self.content))
+                elem, content=self.content, tspans=new_tspans)
         elif self.target == EditTarget.TEXT_PATH and isinstance(elem, TextPath):
-            if concat_content(list(elem.tspans)) == self.content:
-                return doc
+            new_tspans = tuple(reconcile_content(list(elem.tspans), self.content))
             new_elem = dataclasses.replace(
-                elem,
-                content=self.content,
-                tspans=tspans_from_content(self.content))
+                elem, content=self.content, tspans=new_tspans)
         else:
             return None
         return doc.replace_element(self.path, new_elem)

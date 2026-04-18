@@ -252,6 +252,114 @@ def _attrs_equal(a: Tspan, b: Tspan) -> bool:
     return all(getattr(a, s) == getattr(b, s) for s in _ATTR_SLOTS)
 
 
+def _is_utf8_boundary(s: str, byte_offset: int) -> bool:
+    """True when ``byte_offset`` is a valid UTF-8 scalar boundary.
+    Continuation bytes start with bit pattern 10xxxxxx."""
+    data = s.encode("utf-8")
+    if byte_offset <= 0 or byte_offset >= len(data):
+        return True
+    return (data[byte_offset] & 0xC0) != 0x80
+
+
+def reconcile_content(original: list[Tspan], new_content: str) -> list[Tspan]:
+    """Reconcile a new flat content string back onto the original
+    tspan structure, preserving per-range overrides where possible.
+
+    Common prefix and suffix (byte-level, snapped to UTF-8 scalar
+    boundaries) keep their original tspan assignments. The changed
+    middle region is absorbed into the first overlapping tspan, with
+    adjacent-equal tspans collapsed by a final ``merge`` pass.
+
+    Mirrors the Rust / Swift / OCaml ``reconcile_content``.
+    """
+    old_content = concat_content(original)
+    if old_content == new_content:
+        return list(original)
+    if not original:
+        return [Tspan(id=0, content=new_content)]
+
+    old_bytes = old_content.encode("utf-8")
+    new_bytes = new_content.encode("utf-8")
+
+    max_prefix = min(len(old_bytes), len(new_bytes))
+    prefix_len = 0
+    while prefix_len < max_prefix and old_bytes[prefix_len] == new_bytes[prefix_len]:
+        prefix_len += 1
+    while prefix_len > 0 and not _is_utf8_boundary(old_content, prefix_len):
+        prefix_len -= 1
+
+    max_suffix = min(len(old_bytes) - prefix_len, len(new_bytes) - prefix_len)
+    suffix_len = 0
+    while (suffix_len < max_suffix
+           and old_bytes[len(old_bytes) - 1 - suffix_len]
+               == new_bytes[len(new_bytes) - 1 - suffix_len]):
+        suffix_len += 1
+    while suffix_len > 0 and not _is_utf8_boundary(old_content, len(old_bytes) - suffix_len):
+        suffix_len -= 1
+
+    old_mid_start = prefix_len
+    old_mid_end = len(old_bytes) - suffix_len
+    new_middle = new_bytes[prefix_len:len(new_bytes) - suffix_len].decode("utf-8")
+
+    def _tspan_byte_len(t: Tspan) -> int:
+        return len(t.content.encode("utf-8"))
+
+    # Pure insertion at a boundary: splice new_middle into the tspan
+    # containing old_mid_start. Every other tspan passes through.
+    if old_mid_start == old_mid_end:
+        result = list(original)
+        pos = old_mid_start
+        absorbed = False
+        for i, t in enumerate(result):
+            t_len = _tspan_byte_len(t)
+            if pos <= t_len:
+                t_bytes = t.content.encode("utf-8")
+                before = t_bytes[:pos].decode("utf-8")
+                after = t_bytes[pos:].decode("utf-8")
+                result[i] = replace(t, content=before + new_middle + after)
+                absorbed = True
+                break
+            pos -= t_len
+        if not absorbed and result:
+            last = result[-1]
+            result[-1] = replace(last, content=last.content + new_middle)
+        return merge(result)
+
+    # Replacement (including pure deletion): walk tspans and absorb
+    # new_middle into the first overlapping tspan.
+    result: list[Tspan] = []
+    cursor = 0
+    middle_consumed = False
+    for tspan in original:
+        t_len = _tspan_byte_len(tspan)
+        t_start = cursor
+        t_end = cursor + t_len
+        if t_end <= old_mid_start:
+            result.append(tspan)
+        elif t_start >= old_mid_end:
+            result.append(tspan)
+        else:
+            before_len = max(0, old_mid_start - t_start)
+            if t_end > old_mid_end:
+                after_off = old_mid_end - t_start
+            else:
+                after_off = t_len
+            t_bytes = tspan.content.encode("utf-8")
+            before = t_bytes[:before_len].decode("utf-8")
+            after = t_bytes[after_off:].decode("utf-8") if t_end > old_mid_end else ""
+            mid = "" if middle_consumed else new_middle
+            if not middle_consumed:
+                middle_consumed = True
+            new_content_str = before + mid + after
+            if new_content_str:
+                result.append(replace(tspan, content=new_content_str))
+        cursor = t_end
+
+    if not result:
+        result.append(default_tspan())
+    return merge(result)
+
+
 def merge(tspans: list[Tspan]) -> list[Tspan]:
     """Merge adjacent tspans with identical resolved override sets,
     drop empty-content tspans unconditionally. The surviving (left)
