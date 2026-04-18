@@ -760,6 +760,13 @@ class Text(Element):
     ``horizontal_scale``, ``vertical_scale``, ``kerning``) mirror the
     Rust ``TextElem`` shape. Empty string means "omit / inherit
     default" per CHARACTER.md's identity-omission rule.
+
+    Carries an ordered, non-empty ``tspans`` tuple per TSPAN.md.
+    Invariant at construction time: ``concat_content(tspans) ==
+    content``; ``__post_init__`` derives a single-tspan tuple from
+    ``content`` when the caller omits the field. Record-updates that
+    only change ``content`` currently leave ``tspans`` stale — call
+    ``sync_tspans_from_content`` when consistency is required.
     """
     x: float
     y: float
@@ -788,6 +795,15 @@ class Text(Element):
     transform: Transform | None = None
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
+    # Sentinel default: an empty tuple means "derive from content in
+    # __post_init__". Late-import avoids the geometry.element <->
+    # geometry.tspan circular dep.
+    tspans: tuple = ()
+
+    def __post_init__(self):
+        if not self.tspans:
+            from geometry.tspan import tspans_from_content
+            object.__setattr__(self, "tspans", tspans_from_content(self.content))
 
     @property
     def is_area_text(self) -> bool:
@@ -823,7 +839,8 @@ class Text(Element):
 class TextPath(Element):
     """SVG <text><textPath> element — text rendered along a path.
 
-    See ``Text`` for the 11 Character-panel attribute fields.
+    See ``Text`` for the 11 Character-panel attribute fields and the
+    ``tspans`` invariant.
     """
     d: tuple[MoveTo | LineTo | CurveTo | QuadTo | SmoothCurveTo
              | SmoothQuadTo | ArcTo | ClosePath, ...] = ()
@@ -851,6 +868,12 @@ class TextPath(Element):
     transform: Transform | None = None
     locked: bool = False
     visibility: Visibility = Visibility.PREVIEW
+    tspans: tuple = ()
+
+    def __post_init__(self):
+        if not self.tspans:
+            from geometry.tspan import tspans_from_content
+            object.__setattr__(self, "tspans", tspans_from_content(self.content))
 
     def bounds(self) -> tuple[float, float, float, float]:
         # Approximate from path bounds
@@ -881,6 +904,18 @@ class Group(Element):
 class Layer(Group):
     """A named group (layer) of elements."""
     name: str = "Layer"
+
+
+def sync_tspans_from_content(element: Element) -> Element:
+    """Rebuild a Text / TextPath element's ``tspans`` field from its
+    ``content`` field. The resulting tuple has a single entry with
+    empty overrides (the plain-text base case). Non-Text elements
+    pass through unchanged. Mirrors the OCaml / Rust / Swift helpers.
+    """
+    if not isinstance(element, (Text, TextPath)):
+        return element
+    from geometry.tspan import tspans_from_content
+    return dataclasses.replace(element, tspans=tspans_from_content(element.content))
 
 
 def with_fill(element: Element, fill: Fill | None) -> Element:

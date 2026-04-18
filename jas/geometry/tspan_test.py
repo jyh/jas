@@ -13,9 +13,10 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from geometry.element import Text, TextPath, Rect, sync_tspans_from_content
 from geometry.tspan import (
     Tspan, concat_content, default_tspan, merge, resolve_id,
-    split, split_range,
+    split, split_range, tspans_from_content,
 )
 
 
@@ -208,3 +209,46 @@ class TestHandWritten:
         updated = replace(t, content="bye")
         assert updated.content == "bye"
         assert t.content == "hi"  # original unchanged
+
+
+# ── Text / TextPath tspans field integration ────────────────────
+
+class TestTextTspansField:
+    def test_text_populates_tspans_from_content(self):
+        t = Text(0.0, 0.0, "Hello")
+        assert len(t.tspans) == 1
+        assert t.tspans[0].content == "Hello"
+        assert t.tspans[0].id == 0
+        assert t.tspans[0].has_no_overrides()
+        assert concat_content(list(t.tspans)) == t.content
+
+    def test_text_path_populates_tspans_from_content(self):
+        tp = TextPath(d=(), content="path text")
+        assert len(tp.tspans) == 1
+        assert tp.tspans[0].content == "path text"
+        assert tp.tspans[0].has_no_overrides()
+        assert concat_content(list(tp.tspans)) == tp.content
+
+    def test_text_accepts_explicit_tspans(self):
+        # Caller-supplied tspans override the derive-from-content default.
+        explicit = tspans_from_content("Explicit")
+        t = Text(0.0, 0.0, "Content", tspans=explicit)
+        assert t.tspans == explicit
+        # content and tspans can diverge when the caller supplies
+        # tspans explicitly; sync_tspans_from_content rebuilds from
+        # content if the caller later wants them to agree.
+        assert t.content == "Content"
+
+    def test_sync_tspans_from_content_rebuilds(self):
+        # replace(text, content="new") leaves tspans stale; the helper
+        # rebuilds a fresh single-tspan tuple from the current content.
+        t = Text(0.0, 0.0, "old")
+        updated = replace(t, content="new")
+        synced = sync_tspans_from_content(updated)
+        assert synced.content == "new"
+        assert len(synced.tspans) == 1
+        assert synced.tspans[0].content == "new"
+
+    def test_sync_tspans_on_non_text_is_noop(self):
+        r = Rect(0.0, 0.0, 10.0, 10.0)
+        assert sync_tspans_from_content(r) is r
