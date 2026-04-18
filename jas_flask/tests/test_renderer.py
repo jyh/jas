@@ -257,6 +257,55 @@ class TestRenderDialogs:
         assert "Confirm" in html
         assert "OK" in html
 
+    def test_preview_targets_emitted(self, theme, state):
+        """Dialog with preview_targets emits a data-dialog-preview-targets
+        JSON attribute carrying the dialog-state-field → document-target
+        mapping. The JS snapshot/restore harness consumes this on dialog
+        open to capture the document attributes that Preview-mode edits
+        will live-apply to."""
+        import json
+        from renderer import render_dialogs
+        dialogs = {
+            "test_preview": {
+                "summary": "Test Preview",
+                "modal": True,
+                "state": {"preview": {"type": "bool", "default": True}},
+                "preview_targets": {
+                    "left_indent": "selection.paragraph.jas:left-indent",
+                    "right_indent": "selection.paragraph.jas:right-indent",
+                },
+                "content": {"type": "text", "content": "hi"},
+            }
+        }
+        html = render_dialogs(dialogs, theme, state)
+        assert "data-dialog-preview-targets" in html
+        # extract and parse the JSON value
+        import re
+        m = re.search(r"data-dialog-preview-targets=\"([^\"]*)\"", html)
+        assert m, "preview_targets attribute not found on modal"
+        # HTML-unescape: the renderer uses markupsafe.escape, which encodes
+        # quotes inside the JSON as &quot;.
+        decoded = m.group(1).replace("&quot;", '"').replace("&#34;", '"')
+        targets = json.loads(decoded)
+        assert targets == {
+            "left_indent": "selection.paragraph.jas:left-indent",
+            "right_indent": "selection.paragraph.jas:right-indent",
+        }
+
+    def test_preview_targets_absent_when_not_declared(self, theme, state):
+        """A dialog without preview_targets does not emit the attribute,
+        keeping the existing dialog HTML clean for non-Preview dialogs."""
+        from renderer import render_dialogs
+        dialogs = {
+            "no_preview": {
+                "summary": "No Preview",
+                "modal": True,
+                "content": {"type": "text", "content": "hi"},
+            }
+        }
+        html = render_dialogs(dialogs, theme, state)
+        assert "data-dialog-preview-targets" not in html
+
 
 class TestWireframeMode:
     def test_wireframe_element_has_class(self, theme, state):

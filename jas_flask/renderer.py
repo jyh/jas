@@ -107,6 +107,8 @@ def render_dialogs(dialogs: dict, theme: dict, state: dict, brand: dict | None =
             data_attrs += f' data-dialog-state="{escape(json.dumps(dialog["state"]))}"'
         if "init" in dialog:
             data_attrs += f' data-dialog-init="{escape(json.dumps(dialog["init"]))}"'
+        if "preview_targets" in dialog:
+            data_attrs += f' data-dialog-preview-targets="{escape(json.dumps(dialog["preview_targets"]))}"'
         # Extract get/set property definitions for JS
         props = {}
         for sk, sv in dialog.get("state", {}).items():

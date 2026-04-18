@@ -236,3 +236,32 @@ Anticipated amendments:
 
 Amendments happen on this branch and ride in with the phase that
 surfaces them.
+
+## Spec → YAML translation conventions
+
+`PARAGRAPH.md` (and other spec docs) use a compact bootstrap-style
+notation. The flask YAML interpreter does not understand this
+notation directly; the panel/dialog YAMLs that get generated in
+Phase 2 use the verbose `type:` form. The fixed translations are:
+
+| Spec notation | Generated YAML | Source |
+|---|---|---|
+| `.row: …` | `{ type: row, children: [...] }` | existing |
+| `.col-N: X` | `{ type: col, col: N, children: [X] }` | existing |
+| `.hr` | `{ type: separator }` | existing renderer entry |
+| `.footer: …` | `{ type: container, layout: row, style: { gap: 8, alignment: center, justify: end }, children: [...] }` (the bottom Preview / Cancel / OK row of a dialog) | convention only — no new primitive |
+| `enabled-when: X` (on a control) | `bind: { disabled: "not X" }` | existing `bind.disabled` mechanism (`app.js:469-473`) |
+| `Preview` checkbox in dialog | `state.preview: { type: bool, default: false }` plus dialog-level `preview_targets:` mapping `dialog.<key>` to document state path | `preview_targets` lands in Phase 0; live-apply lands in Phase 8/9 |
+
+`preview_targets` is the only YAML schema slot added in Phase 0.
+The interpreter emits it as `data-dialog-preview-targets` on the
+modal element (`renderer.py:render_dialogs`); JS captures the
+snapshot of each target on dialog open and restores on
+`close_dialog` unless first cleared by the `clear_dialog_snapshot`
+effect (used by OK actions in later phases).
+
+The Preview checkbox itself is just a normal `state.preview`
+boolean. Phase 8/9 adds the per-edit "if `dialog.preview` is on,
+write live to the target" binding pattern at the per-control level
+(via `behavior` blocks); Phase 0 only establishes the snapshot
+plumbing.

@@ -42,6 +42,9 @@
   var dialogState = null;         // non-null only while a dialog with state is open
   var dialogParams = null;        // params passed to open_dialog
   var dialogProps = null;         // {key: {get: expr, set: expr}} from YAML state defs
+  var dialogSnapshot = null;      // {target_path: original_value} captured on open
+                                  // when YAML declares preview_targets; restored on
+                                  // close_dialog unless first cleared by an OK action.
 
   // ── Dialog property evaluation ─────────────────────────────
   // Evaluates get expressions against dialogState using colorFunctions.
@@ -1009,6 +1012,27 @@
             }
           } catch (ex) { console.warn("[open_dialog] state init error:", ex); }
         }
+        // Preview snapshot: if the dialog declares preview_targets, capture
+        // the current value of every target path. close_dialog will restore
+        // these unless the snapshot is cleared first (typically by an OK
+        // action via the clear_dialog_snapshot effect).
+        dialogSnapshot = null;
+        var dlgPreviewTargets = modalEl.getAttribute("data-dialog-preview-targets");
+        if (dlgPreviewTargets) {
+          try {
+            var ptMap = JSON.parse(dlgPreviewTargets);
+            dialogSnapshot = {};
+            for (var ptKey in ptMap) {
+              if (ptMap.hasOwnProperty(ptKey)) {
+                var tpath = ptMap[ptKey];
+                dialogSnapshot[tpath] = resolve(tpath, { params: dlgParams });
+              }
+            }
+          } catch (snapEx) {
+            console.warn("[open_dialog] preview snapshot error:", snapEx);
+            dialogSnapshot = null;
+          }
+        }
         if (typeof bootstrap !== "undefined") {
           var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
           modal.show();
@@ -1030,9 +1054,33 @@
         var bsModal = bootstrap.Modal.getInstance(modalToClose);
         if (bsModal) bsModal.hide();
       }
+      // Preview restore: if a snapshot survived (i.e., no OK action cleared
+      // it), revert each target to its captured original value. For Phase 0
+      // we only handle simple top-level state keys; deep paths land in
+      // Phase 8/9 alongside the actual paragraph dialogs.
+      if (dialogSnapshot) {
+        for (var rpath in dialogSnapshot) {
+          if (dialogSnapshot.hasOwnProperty(rpath)) {
+            if (rpath.indexOf(".") === -1) {
+              setState(rpath, dialogSnapshot[rpath]);
+            } else {
+              console.warn("[close_dialog] deep-path restore not yet implemented:", rpath);
+            }
+          }
+        }
+      }
       dialogState = null;
       dialogParams = null;
       dialogProps = null;
+      dialogSnapshot = null;
+      return;
+    }
+
+    // clear_dialog_snapshot: drop the preview snapshot so close_dialog
+    // does not restore. OK actions use this before close_dialog to commit
+    // (see Phase 8/9 paragraph dialogs).
+    if (effect.clear_dialog_snapshot !== undefined) {
+      dialogSnapshot = null;
       return;
     }
 
