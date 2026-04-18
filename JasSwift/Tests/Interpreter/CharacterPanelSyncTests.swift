@@ -196,3 +196,138 @@ import Testing
     #expect(t.textTransform == "uppercase")
     #expect(t.textDecoration == "underline")
 }
+
+// MARK: - Phase 3: Character panel → pending override routing
+
+@Test func templateEmptyWhenPanelMatchesElement() {
+    let text = Element.text(Text(
+        x: 0, y: 0, content: "",
+        fontFamily: "sans-serif", fontSize: 16,
+        fontWeight: "normal", fontStyle: "normal",
+        textDecoration: "", textTransform: "", fontVariant: "",
+        xmlLang: "", rotate: ""))
+    let panel: [String: Any] = [
+        "font_family": "sans-serif",
+        "font_size": 16.0,
+        "style_name": "Regular",
+        "all_caps": false, "small_caps": false,
+        "superscript": false, "subscript": false,
+        "underline": false, "strikethrough": false,
+        "language": "",
+        "character_rotation": 0.0,
+    ]
+    #expect(buildPanelPendingTemplate(panel, text) == nil)
+}
+
+@Test func templateBoldSetsFontWeightOnly() {
+    let text = Element.text(Text(
+        x: 0, y: 0, content: "",
+        fontFamily: "sans-serif", fontSize: 16,
+        fontWeight: "normal", fontStyle: "normal",
+        textDecoration: "", textTransform: "", fontVariant: "",
+        xmlLang: "", rotate: ""))
+    let panel: [String: Any] = [
+        "font_family": "sans-serif",
+        "font_size": 16.0,
+        "style_name": "Bold",
+        "all_caps": false, "small_caps": false,
+        "superscript": false, "subscript": false,
+        "underline": false, "strikethrough": false,
+        "language": "",
+        "character_rotation": 0.0,
+    ]
+    let tpl = buildPanelPendingTemplate(panel, text)
+    #expect(tpl != nil)
+    #expect(tpl?.fontWeight == "bold")
+    #expect(tpl?.fontStyle == nil)
+    #expect(tpl?.fontSize == nil)
+    #expect(tpl?.fontFamily == nil)
+}
+
+@Test func templateTextDecorationNormalizesNoneToEmpty() {
+    // Element stores "none" (CSS default). Panel has both flags off.
+    // These represent the same state — template should be nil.
+    let text = Element.text(Text(
+        x: 0, y: 0, content: "",
+        fontFamily: "sans-serif", fontSize: 16,
+        textDecoration: "none"))
+    let panel: [String: Any] = [
+        "font_family": "sans-serif",
+        "font_size": 16.0,
+        "style_name": "Regular",
+        "all_caps": false, "small_caps": false,
+        "superscript": false, "subscript": false,
+        "underline": false, "strikethrough": false,
+        "language": "",
+        "character_rotation": 0.0,
+    ]
+    #expect(buildPanelPendingTemplate(panel, text) == nil)
+}
+
+@Test func panelWriteWithBareCaretSetsPendingOnSession() {
+    let model = Model()
+    let text = Element.text(Text(
+        x: 0, y: 0, content: "hello",
+        fontFamily: "sans-serif", fontSize: 16,
+        fontWeight: "normal", fontStyle: "normal"))
+    model.document = Document(layers: [Layer(children: [text])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    // Install an active session with a bare caret at char 3.
+    let session = TextEditSession(path: [0, 0], target: .text,
+                                   content: "hello", insertion: 3)
+    model.currentEditSession = session
+
+    model.stateStore.initPanel("character_panel", defaults: [
+        "font_family": "sans-serif",
+        "font_size": 16.0,
+        "style_name": "Bold",
+        "all_caps": false, "small_caps": false,
+        "superscript": false, "subscript": false,
+        "underline": false, "strikethrough": false,
+        "language": "",
+        "character_rotation": 0.0,
+    ])
+    applyCharacterPanelToSelection(store: model.stateStore,
+                                    controller: Controller(model: model))
+    // Session picked up pending; element untouched.
+    #expect(session.hasPendingOverride)
+    #expect(session.pendingCharStart == 3)
+    #expect(session.pendingOverride?.fontWeight == "bold")
+    if case .text(let t) = model.document.getElement([0, 0]) {
+        #expect(t.fontWeight == "normal")  // unchanged
+    }
+}
+
+@Test func panelWriteWithRangeSelectionStillWritesToElement() {
+    let model = Model()
+    let text = Element.text(Text(
+        x: 0, y: 0, content: "hello",
+        fontFamily: "sans-serif", fontSize: 16,
+        fontWeight: "normal", fontStyle: "normal"))
+    model.document = Document(layers: [Layer(children: [text])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    let session = TextEditSession(path: [0, 0], target: .text,
+                                   content: "hello", insertion: 0)
+    session.setInsertion(5, extend: true)  // selection [0, 5)
+    model.currentEditSession = session
+
+    model.stateStore.initPanel("character_panel", defaults: [
+        "font_family": "sans-serif",
+        "font_size": 16.0,
+        "style_name": "Bold",
+        "all_caps": false, "small_caps": false,
+        "superscript": false, "subscript": false,
+        "underline": false, "strikethrough": false,
+        "language": "",
+        "character_rotation": 0.0,
+    ])
+    applyCharacterPanelToSelection(store: model.stateStore,
+                                    controller: Controller(model: model))
+    // Non-bare-caret case: legacy path took the write.
+    #expect(!session.hasPendingOverride)
+    if case .text(let t) = model.document.getElement([0, 0]) {
+        #expect(t.fontWeight == "bold")
+    }
+}

@@ -129,6 +129,7 @@ class TypeTool: CanvasTool {
         let s = TextEditSession(path: path, target: .text, content: content, insertion: cursor)
         s.blinkEpochMs = nowMs()
         session = s
+        ctx.model.currentEditSession = s
         didSnapshot = false
         ctx.controller.selectElement(path)
     }
@@ -146,12 +147,14 @@ class TypeTool: CanvasTool {
         let s = TextEditSession(path: path, target: .text, content: "", insertion: 0)
         s.blinkEpochMs = nowMs()
         session = s
+        ctx.model.currentEditSession = s
     }
 
-    private func endSession() {
+    private func endSession(_ ctx: ToolContext? = nil) {
         session = nil
         didSnapshot = false
         state = .idle
+        ctx?.model.currentEditSession = nil
     }
 
     func onPress(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
@@ -168,7 +171,7 @@ class TypeTool: CanvasTool {
                     return
                 }
             }
-            endSession()
+            endSession(ctx)
         }
         if let (path, elem) = hitTestText(ctx.document, x, y) {
             beginSessionExisting(ctx, path: path, elem: elem, cursor: 0)
@@ -326,7 +329,7 @@ class TypeTool: CanvasTool {
         }
         switch key {
         case "Escape":
-            endSession(); ctx.requestUpdate(); return true
+            endSession(ctx); ctx.requestUpdate(); return true
         case "Enter":
             ensureSnapshot(ctx); s.insert("\n")
             bump(); syncToModel(ctx); ctx.requestUpdate(); return true
