@@ -270,3 +270,48 @@ private func session(_ content: String) -> TextEditSession {
     s.tspanClipboard = (flat: "X", tspans: [])
     #expect(s.tryPasteTspans(elementTspans, text: "DIFFERENT") == nil)
 }
+
+// MARK: - caret affinity
+
+@Test func newSessionCaretHasLeftAffinity() {
+    let s = session("abc")
+    #expect(s.caretAffinity == .left)
+}
+
+@Test func insertionTspanPosLeftDefaultAtBoundary() {
+    let tspans = [
+        Tspan(id: 0, content: "foo"),
+        Tspan(id: 1, content: "bar", fontWeight: "bold"),
+    ]
+    let s = session("foobar")
+    s.setInsertion(3, extend: false)
+    #expect(s.caretAffinity == .left)
+    let pos = s.insertionTspanPos(tspans)
+    #expect(pos.tspanIdx == 0 && pos.offset == 3)
+}
+
+@Test func setInsertionWithAffinityRightCrossesBoundary() {
+    let tspans = [
+        Tspan(id: 0, content: "foo"),
+        Tspan(id: 1, content: "bar", fontWeight: "bold"),
+    ]
+    let s = session("foobar")
+    s.setInsertion(3, affinity: .right, extend: false)
+    #expect(s.caretAffinity == .right)
+    let pos = s.insertionTspanPos(tspans)
+    #expect(pos.tspanIdx == 1 && pos.offset == 0)
+}
+
+@Test func anchorTspanPosUsesCaretAffinity() {
+    let tspans = [
+        Tspan(id: 0, content: "foo"),
+        Tspan(id: 1, content: "bar"),
+    ]
+    let s = session("foobar")
+    s.setInsertion(3, extend: false)
+    s.setInsertion(5, affinity: .right, extend: true)
+    let anchor = s.anchorTspanPos(tspans)
+    #expect(anchor.tspanIdx == 1 && anchor.offset == 0)
+    let caret = s.insertionTspanPos(tspans)
+    #expect(caret.tspanIdx == 1 && caret.offset == 2)
+}

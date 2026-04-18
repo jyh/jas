@@ -407,3 +407,50 @@ private func plainTspan(_ s: String, id: UInt32 = 0) -> Tspan {
     // Original bold "bar" + clipboard bold "bar" both present.
     #expect(r.contains { $0.content.contains("bar") && $0.fontWeight == "bold" })
 }
+
+// MARK: - charToTspanPos / Affinity
+
+@Test func charToTspanPosMidFirstTspan() {
+    let base = [plainTspan("foo"), boldTspan("bar", id: 1)]
+    #expect(charToTspanPos(base, 1, .left) == (0, 1))
+    #expect(charToTspanPos(base, 1, .right) == (0, 1))
+}
+
+@Test func charToTspanPosMidLaterTspan() {
+    let base = [plainTspan("foo"), boldTspan("bar", id: 1)]
+    // char index 4 → (1, 1) — inside "bar"
+    #expect(charToTspanPos(base, 4, .left) == (1, 1))
+}
+
+@Test func charToTspanPosBoundaryLeftAffinity() {
+    let base = [plainTspan("foo"), boldTspan("bar", id: 1)]
+    #expect(charToTspanPos(base, 3, .left) == (0, 3))
+}
+
+@Test func charToTspanPosBoundaryRightAffinity() {
+    let base = [plainTspan("foo"), boldTspan("bar", id: 1)]
+    #expect(charToTspanPos(base, 3, .right) == (1, 0))
+}
+
+@Test func charToTspanPosFinalBoundaryAlwaysEnd() {
+    let base = [plainTspan("foo"), boldTspan("bar", id: 1)]
+    #expect(charToTspanPos(base, 6, .left) == (1, 3))
+    #expect(charToTspanPos(base, 6, .right) == (1, 3))
+}
+
+@Test func charToTspanPosBeyondEndClamps() {
+    let base = [plainTspan("foo"), boldTspan("bar", id: 1)]
+    #expect(charToTspanPos(base, 999, .left) == (1, 3))
+}
+
+@Test func charToTspanPosEmptyList() {
+    let empty: [Tspan] = []
+    #expect(charToTspanPos(empty, 0, .left) == (0, 0))
+    #expect(charToTspanPos(empty, 5, .left) == (0, 0))
+}
+
+@Test func charToTspanPosSkipsEmptyTspans() {
+    let base = [plainTspan("fo"), plainTspan("", id: 1), boldTspan("bar", id: 2)]
+    #expect(charToTspanPos(base, 2, .left) == (0, 2))
+    #expect(charToTspanPos(base, 2, .right) == (1, 0))
+}
