@@ -209,6 +209,15 @@ public struct PanelGroupView: View {
            let overrides = characterPanelLiveOverrides(model: m) {
             for (k, v) in overrides { panelMap[k] = v }
         }
+        // Paragraph panel — Phase 3a text-kind gating. Always emits
+        // text_selected / area_text_selected (even false / false for
+        // an empty selection) so the bind.disabled expressions in
+        // paragraph.yaml resolve to the live values rather than the
+        // YAML defaults of true.
+        if contentId == "paragraph_panel_content", let m = model {
+            let overrides = paragraphPanelLiveOverrides(model: m)
+            for (k, v) in overrides { panelMap[k] = v }
+        }
         return [
             "state": stateMap,
             "panel": panelMap,
