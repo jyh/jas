@@ -1590,6 +1590,17 @@ actions:
     category: paragraph
     effects:
       - open_dialog: { id: paragraph_justification }
+  paragraph_justification_confirm:
+    description: >
+      OK handler for the Justification dialog. Clears the preview
+      snapshot so close_dialog will not restore (commits the user's
+      edits). Phase 2 stub — Phase 8 wires the actual write of jas:*
+      attributes to the selection's paragraph wrapper tspans.
+    category: paragraph
+    effects:
+      - log: "paragraph_justification_confirm (Phase 8 wiring pending)"
+      - clear_dialog_snapshot: null
+      - close_dialog: null
   open_paragraph_hyphenation:
     description: >
       Open the Hyphenation dialog from the Paragraph panel menu.
