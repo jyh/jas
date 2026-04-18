@@ -61,6 +61,17 @@ val get_dialog_id : t -> string option
 val get_dialog_params : t -> (string * Yojson.Safe.t) list option
 val close_dialog : t -> unit
 
+(** Capture the current value of every state key referenced by a
+    dialog's [preview_targets]. Phase 0 supports only top-level
+    state keys; deep paths (containing a dot) are silently skipped
+    and will land alongside their first real consumer in Phase 8/9.
+    [targets] maps [(dialog_state_key, state_key)]. *)
+val capture_dialog_snapshot : t -> (string * string) list -> unit
+
+val get_dialog_snapshot : t -> (string * Yojson.Safe.t) list option
+val clear_dialog_snapshot : t -> unit
+val has_dialog_snapshot : t -> bool
+
 (* ── Evaluation context ──────────────────────────────────── *)
 
 (** Build a [`Assoc] context suitable for [Expr_eval.evaluate].

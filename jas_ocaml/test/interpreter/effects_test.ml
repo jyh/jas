@@ -636,6 +636,84 @@ let phase3_pending_tests = [
     | _ -> assert false);
 ]
 
+(* ── Preview snapshot/restore (Phase 0) ─────────────────────
+
+   open_dialog captures a snapshot of every state key referenced by
+   a dialog's preview_targets. close_dialog restores from the
+   snapshot unless first cleared by clear_dialog_snapshot (which OK
+   actions emit in Phase 8/9). Phase 0 supports only top-level
+   state keys; deep paths are silently skipped. *)
+
+let preview_snapshot_tests = [
+  Alcotest.test_case "open_dialog_captures_preview_snapshot" `Quick (fun () ->
+    let s = create ~defaults:[("left_indent", `Int 12); ("right_indent", `Int 0)] () in
+    let dialogs = `Assoc [
+      ("para_indent", `Assoc [
+        ("summary", `String "Indents");
+        ("state", `Assoc [
+          ("left", `Assoc [("type", `String "number"); ("default", `Int 0)]);
+          ("right", `Assoc [("type", `String "number"); ("default", `Int 0)])]);
+        ("preview_targets", `Assoc [
+          ("left", `String "left_indent");
+          ("right", `String "right_indent")]);
+        ("content", `Assoc [("type", `String "container")])])
+    ] in
+    run_effects [`Assoc [("open_dialog", `Assoc [("id", `String "para_indent")])]] [] s ~dialogs;
+    (match get_dialog_snapshot s with
+     | Some snap ->
+       assert (List.assoc "left_indent" snap = `Int 12);
+       assert (List.assoc "right_indent" snap = `Int 0)
+     | None -> assert false));
+
+  Alcotest.test_case "open_dialog_without_preview_targets_no_snapshot" `Quick (fun () ->
+    let s = create () in
+    let dialogs = `Assoc [
+      ("plain", `Assoc [
+        ("summary", `String "Plain");
+        ("state", `Assoc [("name", `Assoc [("type", `String "string"); ("default", `String "")])]);
+        ("content", `Assoc [("type", `String "container")])])
+    ] in
+    run_effects [`Assoc [("open_dialog", `Assoc [("id", `String "plain")])]] [] s ~dialogs;
+    assert (not (has_dialog_snapshot s)));
+
+  Alcotest.test_case "close_dialog_restores_from_snapshot" `Quick (fun () ->
+    let s = create ~defaults:[("left_indent", `Int 12)] () in
+    let dialogs = `Assoc [
+      ("para_indent", `Assoc [
+        ("summary", `String "Indents");
+        ("state", `Assoc [("left", `Assoc [("type", `String "number"); ("default", `Int 0)])]);
+        ("preview_targets", `Assoc [("left", `String "left_indent")]);
+        ("content", `Assoc [("type", `String "container")])])
+    ] in
+    run_effects [`Assoc [("open_dialog", `Assoc [("id", `String "para_indent")])]] [] s ~dialogs;
+    (* Simulate Preview live-applying an edit *)
+    set s "left_indent" (`Int 99);
+    (* Cancel restores *)
+    run_effects [`Assoc [("close_dialog", `Null)]] [] s;
+    assert (get s "left_indent" = `Int 12);
+    assert (get_dialog_id s = None);
+    assert (not (has_dialog_snapshot s)));
+
+  Alcotest.test_case "clear_dialog_snapshot_prevents_restore" `Quick (fun () ->
+    let s = create ~defaults:[("left_indent", `Int 12)] () in
+    let dialogs = `Assoc [
+      ("para_indent", `Assoc [
+        ("summary", `String "Indents");
+        ("state", `Assoc [("left", `Assoc [("type", `String "number"); ("default", `Int 0)])]);
+        ("preview_targets", `Assoc [("left", `String "left_indent")]);
+        ("content", `Assoc [("type", `String "container")])])
+    ] in
+    run_effects [`Assoc [("open_dialog", `Assoc [("id", `String "para_indent")])]] [] s ~dialogs;
+    set s "left_indent" (`Int 99);
+    (* OK action equivalent: clear snapshot, then close *)
+    run_effects [
+      `Assoc [("clear_dialog_snapshot", `Null)];
+      `Assoc [("close_dialog", `Null)]
+    ] [] s;
+    assert (get s "left_indent" = `Int 99);
+    assert (get_dialog_id s = None));
+]
+
 let () =
   Alcotest.run "Effects" [
     "Set", set_tests;
@@ -653,4 +731,5 @@ let () =
     "Character apply-to-elem", apply_to_elem_tests;
     "Stroke subscribe", stroke_subscribe_tests;
     "Phase3 pending", phase3_pending_tests;
+    "Preview snapshot", preview_snapshot_tests;
   ]

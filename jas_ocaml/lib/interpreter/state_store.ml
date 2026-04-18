@@ -22,6 +22,11 @@ type t = {
   mutable dialog_id : string option;
   mutable dialog_params : (string * Yojson.Safe.t) list option;
   mutable dialog_props : (string * prop_def) list;
+  (** Captured original values of state keys named in the open
+      dialog's preview_targets. Restored on close_dialog (via the
+      close_dialog effect) unless first cleared by the
+      clear_dialog_snapshot effect (used by OK actions). *)
+  mutable dialog_snapshot : (string * Yojson.Safe.t) list option;
   mutable panel_subscribers : (string * panel_subscriber list) list;
   mutable global_subscribers : global_subscriber list;
 }
@@ -34,6 +39,7 @@ let create ?(defaults = []) () : t =
     dialog_id = None;
     dialog_params = None;
     dialog_props = [];
+    dialog_snapshot = None;
     panel_subscribers = [];
     global_subscribers = [] }
 
@@ -168,6 +174,28 @@ let close_dialog (store : t) : unit =
   store.dialog <- [];
   store.dialog_params <- None;
   store.dialog_props <- []
+
+(** Capture the current value of every state key referenced by a
+    dialog's preview_targets. Phase 0 supports only top-level state
+    keys (no dots in the path); deep paths are silently skipped and
+    will land alongside their first real consumer in Phase 8/9.
+    [targets] is a list of [(dialog_state_key, state_key)] pairs. *)
+let capture_dialog_snapshot (store : t)
+    (targets : (string * string) list) : unit =
+  let snap = List.filter_map (fun (_dlg_key, state_key) ->
+    if String.contains state_key '.' then None
+    else Some (state_key, get store state_key)
+  ) targets in
+  store.dialog_snapshot <- Some snap
+
+let get_dialog_snapshot (store : t) : (string * Yojson.Safe.t) list option =
+  store.dialog_snapshot
+
+let clear_dialog_snapshot (store : t) : unit =
+  store.dialog_snapshot <- None
+
+let has_dialog_snapshot (store : t) : bool =
+  store.dialog_snapshot <> None
 
 (* ── Context for expression evaluation ────────────────── *)
 

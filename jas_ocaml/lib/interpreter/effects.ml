@@ -332,6 +332,16 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
                let value = eval_expr expr store ctx in
                State_store.set_dialog store key (value_to_json value)
              ) (List.rev !deferred)
+           | _ -> ());
+          (* Capture preview snapshot if the dialog declares
+             preview_targets. Restored on close_dialog unless first
+             cleared by an OK action via clear_dialog_snapshot. *)
+          (match List.assoc_opt "preview_targets" dlg_def with
+           | Some (`Assoc targets_obj) ->
+             let targets = List.filter_map (fun (k, v) ->
+               match v with `String s -> Some (k, s) | _ -> None
+             ) targets_obj in
+             State_store.capture_dialog_snapshot store targets
            | _ -> ())
         | _ -> ())
      | _ -> ())
@@ -339,7 +349,25 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
 
   (* close_dialog: null or dialog_id *)
   match mem "close_dialog" with
-  | Some _ -> State_store.close_dialog store
+  | Some _ ->
+    (* Preview restore: if a snapshot survived (i.e., no OK action
+       cleared it), revert each target to its captured original
+       value. Phase 0 handles only top-level state keys. *)
+    (match State_store.get_dialog_snapshot store with
+     | Some snapshot ->
+       List.iter (fun (key, value) ->
+         if not (String.contains key '.') then
+           State_store.set store key value
+       ) snapshot;
+       State_store.clear_dialog_snapshot store
+     | None -> ());
+    State_store.close_dialog store
+  | None ->
+
+  (* clear_dialog_snapshot: drop the preview snapshot so close_dialog
+     does not restore. OK actions emit this before close_dialog to commit. *)
+  match mem "clear_dialog_snapshot" with
+  | Some _ -> State_store.clear_dialog_snapshot store
   | None ->
 
   (* start_timer: { id, delay_ms, effects } *)
