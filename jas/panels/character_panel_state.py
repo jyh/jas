@@ -161,6 +161,21 @@ def build_panel_full_overrides(panel: dict) -> Tspan:
     lang_raw = panel.get("language")
     lang = str(lang_raw) if lang_raw is not None else ""
     rot = float(panel.get("character_rotation") or 0.0)
+    # Leading → line_height (pt). Always emitted.
+    leading_raw = panel.get("leading")
+    leading = float(leading_raw) if leading_raw is not None else (fs * 1.2)
+    # Tracking → letter_spacing (em). Panel unit: 1/1000 em.
+    tracking = float(panel.get("tracking") or 0.0)
+    letter_spacing = tracking / 1000.0
+    # Baseline shift numeric (pt), skipped when super / sub is on.
+    super_on = bool(panel.get("superscript"))
+    sub_on = bool(panel.get("subscript"))
+    bs_num = float(panel.get("baseline_shift") or 0.0)
+    baseline_shift = None if (super_on or sub_on) else bs_num
+    # Anti-aliasing → jas_aa_mode.
+    aa_raw = panel.get("anti_aliasing")
+    aa_raw = str(aa_raw) if aa_raw is not None else "Sharp"
+    aa_mode = "" if aa_raw in ("Sharp", "") else aa_raw
     return Tspan(
         font_family=ff,
         font_size=fs,
@@ -171,6 +186,10 @@ def build_panel_full_overrides(panel: dict) -> Tspan:
         font_variant=fv,
         xml_lang=lang,
         rotate=rot,
+        line_height=leading,
+        letter_spacing=letter_spacing,
+        baseline_shift=baseline_shift,
+        jas_aa_mode=aa_mode,
     )
 
 
@@ -257,9 +276,62 @@ def build_panel_pending_template(panel: dict, elem: Element) -> Tspan | None:
     rot_str = "" if rot == 0.0 else _fmt_num(rot)
     if rot_str != elem.rotate and rot != 0.0:
         kwargs["rotate"] = rot
+    # Leading → line_height (pt). Element stores as CSS length
+    # string; empty round-trips to auto (120% of font_size).
+    leading_raw = panel.get("leading")
+    if leading_raw is not None:
+        leading = float(leading_raw)
+        elem_lh = _parse_pt(elem.line_height)
+        if elem_lh is None:
+            elem_lh = elem.font_size * 1.2
+        if abs(leading - elem_lh) > 1e-6:
+            kwargs["line_height"] = leading
+    # Tracking → letter_spacing (em). Panel unit: 1/1000 em.
+    tracking = float(panel.get("tracking") or 0.0)
+    elem_tracking = (_parse_em(elem.letter_spacing) or 0.0) * 1000.0
+    if abs(tracking - elem_tracking) > 1e-6:
+        kwargs["letter_spacing"] = tracking / 1000.0
+    # Baseline shift numeric, skipped when super / sub is on.
+    if not bool(panel.get("superscript")) and not bool(panel.get("subscript")):
+        bs = float(panel.get("baseline_shift") or 0.0)
+        elem_bs = _parse_pt(elem.baseline_shift) or 0.0
+        if abs(bs - elem_bs) > 1e-6:
+            kwargs["baseline_shift"] = bs
+    # Anti-aliasing → jas_aa_mode.
+    aa_raw = panel.get("anti_aliasing")
+    aa_raw = str(aa_raw) if aa_raw is not None else "Sharp"
+    aa_mode = "" if aa_raw in ("Sharp", "") else aa_raw
+    if aa_mode != elem.aa_mode:
+        kwargs["jas_aa_mode"] = aa_mode
     if not kwargs:
         return None
     return Tspan(**kwargs)
+
+
+def _parse_pt(s: str) -> float | None:
+    """Parse a CSS pt-length (``"5pt"`` or bare ``"5"``). Empty → None."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    if s.endswith("pt"):
+        s = s[:-2]
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _parse_em(s: str) -> float | None:
+    """Parse a CSS em-length (``"0.025em"``). Empty → None."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    if s.endswith("em"):
+        s = s[:-2]
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
 
 def _attrs_from_panel(panel: dict) -> dict[str, Any]:

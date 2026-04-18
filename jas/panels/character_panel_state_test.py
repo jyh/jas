@@ -384,6 +384,79 @@ class TestBuildPanelFullOverrides:
         assert t.font_style == "normal"
 
 
+class TestPendingTemplateComplexAttrs:
+    """Phase 3 complex attributes: leading, tracking, baseline-shift
+    numeric, anti-aliasing."""
+
+    def _elem(self):
+        from geometry.element import Text
+        return Text(x=0, y=0, content="",
+                    font_family="sans-serif", font_size=16,
+                    font_weight="normal", font_style="normal",
+                    text_decoration="", text_transform="", font_variant="",
+                    baseline_shift="", line_height="", letter_spacing="",
+                    xml_lang="", aa_mode="", rotate="")
+
+    def _aligned(self, **overrides):
+        base = {
+            **_aligned_panel(),
+            "leading": 16.0 * 1.2,
+            "tracking": 0.0,
+            "baseline_shift": 0.0,
+            "anti_aliasing": "Sharp",
+        }
+        base.update(overrides)
+        return base
+
+    def test_leading_differs_from_auto(self):
+        from panels.character_panel_state import build_panel_pending_template
+        tpl = build_panel_pending_template(self._aligned(leading=32.0), self._elem())
+        assert tpl is not None
+        assert tpl.line_height == 32.0
+
+    def test_tracking_differs_from_zero(self):
+        from panels.character_panel_state import build_panel_pending_template
+        tpl = build_panel_pending_template(self._aligned(tracking=50.0), self._elem())
+        assert tpl is not None
+        assert abs(tpl.letter_spacing - 0.05) < 1e-9
+
+    def test_baseline_shift_numeric(self):
+        from panels.character_panel_state import build_panel_pending_template
+        tpl = build_panel_pending_template(self._aligned(baseline_shift=3.0), self._elem())
+        assert tpl is not None
+        assert tpl.baseline_shift == 3.0
+
+    def test_baseline_shift_skipped_when_super(self):
+        from panels.character_panel_state import build_panel_pending_template
+        tpl = build_panel_pending_template(
+            self._aligned(superscript=True, baseline_shift=3.0),
+            self._elem())
+        if tpl is not None:
+            assert tpl.baseline_shift is None
+
+    def test_anti_aliasing_differs_from_sharp(self):
+        from panels.character_panel_state import build_panel_pending_template
+        tpl = build_panel_pending_template(self._aligned(anti_aliasing="Smooth"),
+                                            self._elem())
+        assert tpl is not None
+        assert tpl.jas_aa_mode == "Smooth"
+
+
+class TestFullOverridesComplexAttrs:
+    def test_includes_all_complex_attrs(self):
+        from panels.character_panel_state import build_panel_full_overrides
+        t = build_panel_full_overrides({**_aligned_panel(),
+                                          "leading": 16.0 * 1.2,
+                                          "tracking": 0.0,
+                                          "baseline_shift": 0.0,
+                                          "anti_aliasing": "Sharp"})
+        # Full builder always emits these fields.
+        assert t.line_height is not None
+        assert t.letter_spacing is not None
+        assert t.baseline_shift is not None
+        assert t.jas_aa_mode is not None
+
+
 class TestApplyOverridesToTspanRange:
     def test_bolds_partial_word(self):
         from geometry.tspan import Tspan
