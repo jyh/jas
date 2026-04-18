@@ -295,6 +295,75 @@ def _letter_spacing_px(letter_spacing: str, kerning: str, font_size: float) -> f
     return (ls_em + k_em) * font_size
 
 
+def _draw_segmented_text(painter: QPainter, t) -> None:
+    """Draw a Text element's tspans in sequence on a shared baseline,
+    each using its effective font (override or parent fallback) and
+    effective text-decoration. Mirrors Rust's ``draw_segmented_text``,
+    Swift's ``drawSegmentedText``, and OCaml's ``_draw_segmented_text``.
+
+    Covers TSPAN.md's rendering "minimum subset": font + decoration
+    per tspan on one line. Omits per-tspan baseline-shift / transform
+    / rotate / dx and multi-line wrapping — those collapse to the
+    element-wide defaults for now.
+    """
+    from PySide6.QtGui import QFont
+    from PySide6.QtCore import QPointF
+
+    parent_bold = t.font_weight == "bold"
+    parent_italic = t.font_style == "italic"
+    parent_decor_tokens = [
+        tok for tok in t.text_decoration.split()
+        if tok and tok != "none"
+    ]
+
+    fill = t.fill
+    if fill is not None:
+        painter.setPen(_qcolor(fill.color))
+    else:
+        painter.setPen(QColor("black"))
+
+    # Baseline sits at the first visual line: element y + 0.8 *
+    # font_size. Segmented rendering is one-line only for now.
+    baseline = t.y + t.font_size * 0.8
+    cx = t.x
+
+    for span in t.tspans:
+        if not span.content:
+            continue
+        eff_family = span.font_family if span.font_family is not None else t.font_family
+        eff_size = span.font_size if span.font_size is not None else t.font_size
+        eff_bold = (span.font_weight == "bold") if span.font_weight is not None else parent_bold
+        eff_italic = (span.font_style == "italic") if span.font_style is not None else parent_italic
+
+        font = QFont(eff_family, int(eff_size))
+        font.setPointSizeF(eff_size)
+        if eff_bold:
+            font.setBold(True)
+        if eff_italic:
+            font.setItalic(True)
+
+        # Effective decoration: Some(tuple) overrides (empty tuple =
+        # explicit no-decoration); None inherits parent tokens.
+        if span.text_decoration is not None:
+            members = span.text_decoration
+            has_u = "underline" in members
+            has_s = "line-through" in members
+        else:
+            has_u = "underline" in parent_decor_tokens
+            has_s = "line-through" in parent_decor_tokens
+        if has_u:
+            font.setUnderline(True)
+        if has_s:
+            font.setStrikeOut(True)
+
+        painter.setFont(font)
+        painter.drawText(QPointF(cx, baseline), span.content)
+
+        from PySide6.QtGui import QFontMetricsF
+        fm = QFontMetricsF(font)
+        cx += fm.horizontalAdvance(span.content)
+
+
 def _apply_stroke(painter: QPainter, stroke: Stroke | None) -> tuple[float, StrokeAlign]:
     """Apply stroke properties to the painter. Returns (opacity, align)."""
     if stroke is not None:
@@ -706,6 +775,15 @@ def _draw_element(painter: QPainter, elem: Element,
                                    stroke.width, _qcolor(stroke.color), center)
 
         case Text() as t:
+            # Multi-tspan Text renders each tspan with its effective
+            # font + decoration on a shared baseline. Single no-
+            # override tspan falls through to the flat path below.
+            # First pass mirrors the Rust / Swift / OCaml canvas —
+            # per-tspan baseline-shift / rotate / transform / dx and
+            # wrapping are follow-ups.
+            if len(t.tspans) != 1 or not t.tspans[0].has_no_overrides():
+                _draw_segmented_text(painter, t)
+                return
             x = t.x; y = t.y; content = t.content
             ff = t.font_family; fs = t.font_size
             fw = t.font_weight; fst = t.font_style
