@@ -459,10 +459,40 @@ private func drawSegmentedText(_ ctx: CGContext, _ v: Text) {
         if hasUnderline { attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue }
         if hasStrike { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
 
+        // Per-tspan positioning:
+        //   dx (em): leading-edge horizontal nudge scaled by effSize
+        //   baselineShift (pt, + is up): shifts baseline for this tspan
+        //     (NSView is flipped, so + up means smaller y).
+        //   rotate (deg) / transform (SVG matrix): wrap the tspan draw
+        //     around its starting baseline point.
+        let dxPx = (t.dx ?? 0.0) * effSize
+        cx += dxPx
+        let bShift = t.baselineShift ?? 0.0
+        let tspanBaseline = baselineY - bShift
+        let rotDeg = t.rotate ?? 0.0
+        let rotRad = rotDeg * .pi / 180.0
+        let hasRotate = rotRad != 0.0
+        let hasTransform = t.transform != nil
+
         let line = NSAttributedString(string: t.content, attributes: attrs)
         let ctLine = CTLineCreateWithAttributedString(line)
-        ctx.textPosition = CGPoint(x: cx, y: baselineY)
-        CTLineDraw(ctLine, ctx)
+        if hasRotate || hasTransform {
+            ctx.saveGState()
+            ctx.translateBy(x: cx, y: tspanBaseline)
+            if let tr = t.transform {
+                ctx.concatenate(CGAffineTransform(a: tr.a, b: tr.b, c: tr.c,
+                                                    d: tr.d, tx: tr.e, ty: tr.f))
+            }
+            if hasRotate {
+                ctx.rotate(by: rotRad)
+            }
+            ctx.textPosition = .zero
+            CTLineDraw(ctLine, ctx)
+            ctx.restoreGState()
+        } else {
+            ctx.textPosition = CGPoint(x: cx, y: tspanBaseline)
+            CTLineDraw(ctLine, ctx)
+        }
         cx += Double(CTLineGetTypographicBounds(ctLine, nil, nil, nil))
     }
 }
