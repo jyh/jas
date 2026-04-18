@@ -181,6 +181,16 @@ private func runOne(
                 store.set(key, valueToAny(value))
             }
         }
+        // Fire the panel-write hook if any `panel.X` key was touched.
+        // The schema-driven writer resolves `panel.X` against the
+        // active panel; non-schema writes don't touch panel scope.
+        // Silent no-op when the host hasn't registered the effect.
+        let wrotePanel = pairs.keys.contains { $0.hasPrefix("panel.") }
+        if wrotePanel,
+           let panelId = store.getActivePanelId(),
+           let hook = platformEffects["notify_panel_state_changed"] {
+            _ = hook(panelId, ctx, store)
+        }
         return
     }
 
@@ -260,10 +270,22 @@ private func runOne(
     if let sps = effect["set_panel_state"] as? [String: Any] {
         let key = sps["key"] as? String ?? ""
         let value = evalExpr(sps["value"], store: store, ctx: ctx)
+        let writtenPanel: String?
         if let panelId = sps["panel"] as? String {
             store.setPanel(panelId, key, valueToAny(value))
+            writtenPanel = panelId
         } else if let activeId = store.getActivePanelId() {
             store.setPanel(activeId, key, valueToAny(value))
+            writtenPanel = activeId
+        } else {
+            writtenPanel = nil
+        }
+        // Fire the panel-write hook so the host can re-sync any
+        // derived state (e.g. Character / Stroke panels pushing their
+        // attributes onto the selected element). Silent no-op if
+        // the host hasn't registered the effect.
+        if let name = writtenPanel, let hook = platformEffects["notify_panel_state_changed"] {
+            _ = hook(name, ctx, store)
         }
         return
     }
