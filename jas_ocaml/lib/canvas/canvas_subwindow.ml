@@ -37,6 +37,27 @@ let _parse_rotate_deg (s : string) : float =
   if s = "" then 0.0
   else try float_of_string s with Failure _ -> 0.0
 
+(** Parse a CSS length in ``em``. Empty / unparseable -> [None]. Used
+    for letter_spacing / kerning, which are both expressed in em. *)
+let _parse_em (s : string) : float option =
+  if s = "" then None
+  else
+    let s = String.trim s in
+    let s = if String.length s >= 2
+            && String.sub s (String.length s - 2) 2 = "em"
+            then String.sub s 0 (String.length s - 2) else s in
+    try Some (float_of_string s) with Failure _ -> None
+
+(** Combined letter-spacing in pixels: tracking + numeric kerning, both
+    in em, accumulate into one uniform inter-glyph advance. Named
+    kerning modes (``Auto`` / ``Optical`` / ``Metrics``) parse as zero,
+    matching Rust / Swift / Python.  *)
+let _letter_spacing_px (letter_spacing : string) (kerning : string)
+                       (font_size : float) : float =
+  let ls = match _parse_em letter_spacing with Some v -> v | None -> 0.0 in
+  let k  = match _parse_em kerning        with Some v -> v | None -> 0.0 in
+  (ls +. k) *. font_size
+
 (** Parse ``baseline_shift`` → ``(size_scale, y_shift)``. See the
     Python helper for the semantics. *)
 let _parse_baseline_shift (s : string) (font_size : float) : float * float =
@@ -273,6 +294,7 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
            fill; opacity; transform;
            text_transform; font_variant; baseline_shift; line_height;
            text_decoration; rotate; horizontal_scale; vertical_scale;
+           letter_spacing; kerning;
            _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
@@ -314,11 +336,40 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
        uses when we pass [effective_fs]). *)
     let layout_fs = match _parse_pt line_height with
       | Some lh -> lh | None -> effective_fs in
+    (* Cairo's [show_text] does not accept a per-glyph kern attribute,
+       so when letter_spacing / numeric kerning resolves to a non-zero
+       advance we draw character-by-character and add [ls_px] between
+       chars. Zero keeps the fast single-call path.  Layout measurement
+       must include the same extra advance, otherwise area-text
+       wrapping would disagree with the visible width. *)
+    let ls_px = _letter_spacing_px letter_spacing kerning effective_fs in
+    let segment_width seg =
+      let w = (Cairo.text_extents cr seg).Cairo.x_advance in
+      let n = String.length seg in
+      if ls_px = 0.0 || n < 2 then w
+      else w +. float_of_int (n - 1) *. ls_px
+    in
+    let show_with_spacing seg base_y =
+      if ls_px = 0.0 then begin
+        Cairo.move_to cr x base_y;
+        Cairo.show_text cr seg
+      end else begin
+        let len = String.length seg in
+        let pos = ref x in
+        for i = 0 to len - 1 do
+          let ch = String.make 1 seg.[i] in
+          Cairo.move_to cr !pos base_y;
+          Cairo.show_text cr ch;
+          let cw = (Cairo.text_extents cr ch).Cairo.x_advance in
+          pos := !pos +. cw +. ls_px
+        done
+      end
+    in
     let has_underline = List.mem "underline" (String.split_on_char ' ' text_decoration) in
     let has_strike = List.mem "line-through" (String.split_on_char ' ' text_decoration) in
     let draw_line_decorations seg base_y =
       if has_underline || has_strike then begin
-        let w = (Cairo.text_extents cr seg).Cairo.x_advance in
+        let w = segment_width seg in
         let thickness = Float.max 1.0 (effective_fs *. 0.07) in
         Cairo.save cr;
         Cairo.set_line_width cr thickness;
@@ -338,25 +389,21 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
       end
     in
     if text_width > 0.0 && text_height > 0.0 then begin
-      let measure s =
-        if s = "" then 0.0 else (Cairo.text_extents cr s).Cairo.x_advance
-      in
+      let measure = segment_width in
       let lay = Text_layout.layout content text_width layout_fs measure in
       Array.iter (fun (line : Text_layout.line_info) ->
         let seg = String.sub content line.start (line.end_ - line.start) in
         let seg = if String.length seg > 0 && seg.[String.length seg - 1] = '\n'
                   then String.sub seg 0 (String.length seg - 1) else seg in
         let base_y = y +. line.baseline_y +. y_shift in
-        Cairo.move_to cr x base_y;
-        Cairo.show_text cr seg;
+        show_with_spacing seg base_y;
         draw_line_decorations seg base_y
       ) lay.lines
     end else begin
       let lines = String.split_on_char '\n' content in
       List.iteri (fun i line ->
         let line_y = y +. ascent +. float_of_int i *. layout_fs +. y_shift in
-        Cairo.move_to cr x line_y;
-        Cairo.show_text cr line;
+        show_with_spacing line line_y;
         draw_line_decorations line line_y
       ) lines
     end;
@@ -364,7 +411,8 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; fill; opacity; transform; _ } ->
+  | Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; fill; opacity; transform;
+                letter_spacing; kerning; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     begin match fill with
@@ -427,6 +475,10 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
       done;
       let total_len = dists.(n - 1) in
       if total_len > 0.0 then begin
+        (* letter_spacing + numeric kerning: add per-char advance to
+           the arc-length offset so consecutive glyphs are spaced out
+           along the path. Named kerning modes parse as 0. *)
+        let ls_px = _letter_spacing_px letter_spacing kerning font_size in
         let offset = ref (start_offset *. total_len) in
         let len = String.length content in
         let j = ref 0 in
@@ -452,7 +504,7 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
             Cairo.move_to cr (-. cw /. 2.0) (font_size /. 3.0);
             Cairo.show_text cr ch;
             Cairo.restore cr;
-            offset := !offset +. cw
+            offset := !offset +. cw +. ls_px
           end;
           incr j
         done
