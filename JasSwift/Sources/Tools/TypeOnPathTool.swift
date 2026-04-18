@@ -279,12 +279,44 @@ class TypeOnPathTool: CanvasTool {
 
     func pasteText(_ ctx: ToolContext, _ text: String) -> Bool {
         guard let s = session else { return false }
+        let elemTspans = currentElementTspans(ctx)
+        if let newTspans = s.tryPasteTspans(elemTspans, text: text) {
+            ensureSnapshot(ctx)
+            replaceElementTspans(ctx, path: s.path, tspans: newTspans)
+            s.setContent(concatTspanContent(newTspans),
+                         insertion: s.insertion + text.count,
+                         anchor: s.insertion + text.count)
+            s.blinkEpochMs = nowMs()
+            ctx.requestUpdate()
+            return true
+        }
         ensureSnapshot(ctx)
         s.insert(text)
         s.blinkEpochMs = nowMs()
         syncToModel(ctx)
         ctx.requestUpdate()
         return true
+    }
+
+    private func currentElementTspans(_ ctx: ToolContext) -> [Tspan] {
+        guard let s = session else { return [] }
+        let elem = ctx.model.document.getElement(s.path)
+        switch elem {
+        case .text(let t): return t.tspans
+        case .textPath(let tp): return tp.tspans
+        default: return []
+        }
+    }
+
+    private func replaceElementTspans(_ ctx: ToolContext, path: ElementPath, tspans: [Tspan]) {
+        let elem = ctx.model.document.getElement(path)
+        let newElem: Element
+        switch elem {
+        case .text(let t): newElem = .text(t.withTspans(tspans))
+        case .textPath(let tp): newElem = .textPath(tp.withTspans(tspans))
+        default: return
+        }
+        ctx.model.document = ctx.model.document.replaceElement(path, with: newElem)
     }
 
     func onKeyEvent(_ ctx: ToolContext, _ key: String, _ mods: KeyMods) -> Bool {
@@ -301,11 +333,11 @@ class TypeOnPathTool: CanvasTool {
             bump(); syncToModel(ctx); ctx.requestUpdate(); return true
         }
         if cmd && lower == "c" {
-            _ = s.copySelection()
+            _ = s.copySelectionWithTspans(currentElementTspans(ctx))
             return true
         }
         if cmd && lower == "x" {
-            if s.copySelection() != nil {
+            if s.copySelectionWithTspans(currentElementTspans(ctx)) != nil {
                 ensureSnapshot(ctx)
                 s.backspace()
                 bump(); syncToModel(ctx); ctx.requestUpdate()

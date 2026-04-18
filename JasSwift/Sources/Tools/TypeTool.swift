@@ -247,12 +247,50 @@ class TypeTool: CanvasTool {
 
     func pasteText(_ ctx: ToolContext, _ text: String) -> Bool {
         guard let s = session else { return false }
+        // Tspan-aware paste: when the session clipboard's flat text
+        // still matches, splice the captured tspan overrides back
+        // in at the caret. Otherwise fall through to flat insert.
+        let elemTspans = currentElementTspans(ctx)
+        if let newTspans = s.tryPasteTspans(elemTspans, text: text) {
+            ensureSnapshot(ctx)
+            replaceElementTspans(ctx, path: s.path, tspans: newTspans)
+            s.setContent(concatTspanContent(newTspans),
+                         insertion: s.insertion + text.count,
+                         anchor: s.insertion + text.count)
+            s.blinkEpochMs = nowMs()
+            ctx.requestUpdate()
+            return true
+        }
         ensureSnapshot(ctx)
         s.insert(text)
         s.blinkEpochMs = nowMs()
         syncToModel(ctx)
         ctx.requestUpdate()
         return true
+    }
+
+    /// Read the current element's tspans from the doc for cut/copy/paste.
+    private func currentElementTspans(_ ctx: ToolContext) -> [Tspan] {
+        guard let s = session else { return [] }
+        let elem = ctx.model.document.getElement(s.path)
+        switch elem {
+        case .text(let t): return t.tspans
+        case .textPath(let tp): return tp.tspans
+        default: return []
+        }
+    }
+
+    /// Replace the tspans on the element at `path` in the model's
+    /// document. Used by the tspan-aware paste path.
+    private func replaceElementTspans(_ ctx: ToolContext, path: ElementPath, tspans: [Tspan]) {
+        let elem = ctx.model.document.getElement(path)
+        let newElem: Element
+        switch elem {
+        case .text(let t): newElem = .text(t.withTspans(tspans))
+        case .textPath(let tp): newElem = .textPath(tp.withTspans(tspans))
+        default: return
+        }
+        ctx.model.document = ctx.model.document.replaceElement(path, with: newElem)
     }
 
     func onKeyEvent(_ ctx: ToolContext, _ key: String, _ mods: KeyMods) -> Bool {
@@ -269,11 +307,17 @@ class TypeTool: CanvasTool {
             bump(); syncToModel(ctx); ctx.requestUpdate(); return true
         }
         if cmd && lower == "c" {
-            _ = s.copySelection()
+            // Capture the selection's tspan overrides from the
+            // current element so a later paste within the same
+            // session can splice them back in. The flat string
+            // still goes to the system clipboard via the usual
+            // platform copy wiring (handled by the caller when it
+            // sees `true`).
+            _ = s.copySelectionWithTspans(currentElementTspans(ctx))
             return true
         }
         if cmd && lower == "x" {
-            if s.copySelection() != nil {
+            if s.copySelectionWithTspans(currentElementTspans(ctx)) != nil {
                 ensureSnapshot(ctx)
                 s.backspace()
                 bump(); syncToModel(ctx); ctx.requestUpdate()

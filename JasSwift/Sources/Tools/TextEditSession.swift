@@ -43,6 +43,11 @@ public final class TextEditSession {
     public private(set) var anchor: Int
     public var dragActive: Bool = false
     public var blinkEpochMs: Double = 0.0
+    /// Session-scoped tspan clipboard. Captured on cut/copy from the
+    /// current element's tspan structure; consumed on paste when the
+    /// system-clipboard flat text matches. Preserves per-range
+    /// overrides across cut/paste within a single edit session.
+    public var tspanClipboard: (flat: String, tspans: [Tspan])? = nil
 
     private var undoStack: [EditSnapshot] = []
     private var redoStack: [EditSnapshot] = []
@@ -154,6 +159,43 @@ public final class TextEditSession {
         let from = content.index(content.startIndex, offsetBy: lo)
         let to = content.index(content.startIndex, offsetBy: hi)
         return String(content[from..<to])
+    }
+
+    /// Capture the current selection's flat text *and* its tspan
+    /// structure (from `elementTspans`) into the session clipboard.
+    /// Returns the flat text for the system clipboard. `nil` when
+    /// there is no selection.
+    public func copySelectionWithTspans(_ elementTspans: [Tspan]) -> String? {
+        guard hasSelection else { return nil }
+        let (lo, hi) = selectionRange
+        let from = content.index(content.startIndex, offsetBy: lo)
+        let to = content.index(content.startIndex, offsetBy: hi)
+        let flat = String(content[from..<to])
+        let tspans = copyTspanRange(elementTspans, charStart: lo, charEnd: hi)
+        tspanClipboard = (flat: flat, tspans: tspans)
+        return flat
+    }
+
+    /// Try a tspan-aware paste: if the clipboard's flat text equals
+    /// `text`, splice the captured tspans into `elementTspans` at
+    /// the caret via `insertTspansAt`. Returns `nil` when the
+    /// clipboard is absent or stale; the caller falls back to the
+    /// flat `insert` path.
+    public func tryPasteTspans(_ elementTspans: [Tspan], text: String) -> [Tspan]? {
+        guard let (flat, payload) = tspanClipboard, flat == text else {
+            return nil
+        }
+        return insertTspansAt(elementTspans, charPos: insertion, payload)
+    }
+
+    /// Set content / insertion / anchor atomically after an external
+    /// tspan-aware edit (paste) rewrote the element. Keeps the
+    /// session's flat view in sync with the document.
+    public func setContent(_ newContent: String, insertion: Int, anchor: Int) {
+        self.content = newContent
+        let n = newContent.count
+        self.insertion = max(0, min(insertion, n))
+        self.anchor = max(0, min(anchor, n))
     }
 
     /// Tspan-aware commit: reconcile the session's flat content against
