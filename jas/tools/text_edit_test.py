@@ -1,7 +1,7 @@
 """Tests for TextEditSession."""
 
 from geometry.element import RgbColor, Fill, Text
-from geometry.tspan import Tspan
+from geometry.tspan import Affinity, Tspan, char_to_tspan_pos
 from tools.text_edit import EditTarget, TextEditSession
 
 
@@ -190,3 +190,85 @@ def test_try_paste_tspans_returns_none_when_text_doesnt_match():
                         content="foo", insertion=0)
     s.tspan_clipboard = ("X", ())
     assert s.try_paste_tspans(element_tspans, "DIFFERENT") is None
+
+
+# Caret affinity — mirrors Rust/Swift/OCaml coverage.
+
+
+def test_char_to_tspan_pos_mid_first_tspan():
+    base = [Tspan(id=0, content="foo"), Tspan(id=1, content="bar", font_weight="bold")]
+    assert char_to_tspan_pos(base, 1, Affinity.LEFT) == (0, 1)
+    assert char_to_tspan_pos(base, 1, Affinity.RIGHT) == (0, 1)
+
+
+def test_char_to_tspan_pos_mid_later_tspan():
+    base = [Tspan(id=0, content="foo"), Tspan(id=1, content="bar")]
+    assert char_to_tspan_pos(base, 4, Affinity.LEFT) == (1, 1)
+
+
+def test_char_to_tspan_pos_boundary_left_affinity():
+    base = [Tspan(id=0, content="foo"), Tspan(id=1, content="bar")]
+    assert char_to_tspan_pos(base, 3, Affinity.LEFT) == (0, 3)
+
+
+def test_char_to_tspan_pos_boundary_right_affinity():
+    base = [Tspan(id=0, content="foo"), Tspan(id=1, content="bar")]
+    assert char_to_tspan_pos(base, 3, Affinity.RIGHT) == (1, 0)
+
+
+def test_char_to_tspan_pos_final_boundary_always_end():
+    base = [Tspan(id=0, content="foo"), Tspan(id=1, content="bar")]
+    assert char_to_tspan_pos(base, 6, Affinity.LEFT) == (1, 3)
+    assert char_to_tspan_pos(base, 6, Affinity.RIGHT) == (1, 3)
+
+
+def test_char_to_tspan_pos_beyond_end_clamps():
+    base = [Tspan(id=0, content="foo"), Tspan(id=1, content="bar")]
+    assert char_to_tspan_pos(base, 999, Affinity.LEFT) == (1, 3)
+
+
+def test_char_to_tspan_pos_empty_list():
+    assert char_to_tspan_pos([], 0, Affinity.LEFT) == (0, 0)
+    assert char_to_tspan_pos([], 5, Affinity.LEFT) == (0, 0)
+
+
+def test_char_to_tspan_pos_skips_empty_tspans():
+    base = [Tspan(id=0, content="fo"), Tspan(id=1, content=""), Tspan(id=2, content="bar")]
+    assert char_to_tspan_pos(base, 2, Affinity.LEFT) == (0, 2)
+    assert char_to_tspan_pos(base, 2, Affinity.RIGHT) == (1, 0)
+
+
+def test_new_session_caret_has_left_affinity():
+    s = session("abc")
+    assert s.caret_affinity == Affinity.LEFT
+
+
+def test_insertion_tspan_pos_left_default_at_boundary():
+    tspans = (
+        Tspan(id=0, content="foo"),
+        Tspan(id=1, content="bar", font_weight="bold"),
+    )
+    s = session("foobar")
+    s.set_insertion(3, False)
+    assert s.caret_affinity == Affinity.LEFT
+    assert s.insertion_tspan_pos(tspans) == (0, 3)
+
+
+def test_set_insertion_with_affinity_right_crosses_boundary():
+    tspans = (
+        Tspan(id=0, content="foo"),
+        Tspan(id=1, content="bar", font_weight="bold"),
+    )
+    s = session("foobar")
+    s.set_insertion_with_affinity(3, Affinity.RIGHT, False)
+    assert s.caret_affinity == Affinity.RIGHT
+    assert s.insertion_tspan_pos(tspans) == (1, 0)
+
+
+def test_anchor_tspan_pos_uses_caret_affinity():
+    tspans = (Tspan(id=0, content="foo"), Tspan(id=1, content="bar"))
+    s = session("foobar")
+    s.set_insertion(3, False)
+    s.set_insertion_with_affinity(5, Affinity.RIGHT, True)  # selection [3, 5)
+    assert s.anchor_tspan_pos(tspans) == (1, 0)
+    assert s.insertion_tspan_pos(tspans) == (1, 2)
