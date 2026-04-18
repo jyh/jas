@@ -63,6 +63,30 @@ fn vuint(n: usize) -> Value { Value::Integer((n as i64).into()) }
 fn vf64(f: f64) -> Value { Value::F64(f) }
 fn vbool(b: bool) -> Value { Value::Boolean(b) }
 fn vstr(s: &str) -> Value { Value::String(s.into()) }
+fn vnil() -> Value { Value::Nil }
+
+// Optional typed packers: `None` packs as `nil`; `Some(v)` as the
+// inner value. Used for tspan override fields where an absent
+// override is semantically distinct from a zero / empty override.
+fn opt_f64(o: Option<f64>) -> Value {
+    match o { Some(f) => vf64(f), None => vnil() }
+}
+fn opt_str(o: Option<&String>) -> Value {
+    match o { Some(s) => vstr(s), None => vnil() }
+}
+fn opt_bool(o: Option<bool>) -> Value {
+    match o { Some(b) => vbool(b), None => vnil() }
+}
+
+fn as_opt_f64(v: &Value) -> Option<f64> {
+    if v.is_nil() { None } else { Some(as_f64(v)) }
+}
+fn as_opt_str(v: &Value) -> Option<String> {
+    if v.is_nil() { None } else { Some(as_str(v).to_string()) }
+}
+fn as_opt_bool(v: &Value) -> Option<bool> {
+    if v.is_nil() { None } else { v.as_bool() }
+}
 
 // -- Pack (Document -> Value) ------------------------------------------------
 
@@ -159,6 +183,99 @@ fn pack_path_command(cmd: &PathCommand) -> Value {
     }
 }
 
+/// Pack a single Tspan as a compact msgpack array. Field order is
+/// stable and documented: id, content, baseline_shift, dx,
+/// font_family, font_size, font_style, font_variant, font_weight,
+/// jas_aa_mode, jas_fractional_widths, jas_kerning_mode, jas_no_break,
+/// letter_spacing, line_height, rotate, style_name, text_decoration,
+/// text_rendering, text_transform, transform, xml_lang. Each override
+/// field is either its typed value or `nil` when unset.
+fn pack_tspan(t: &crate::geometry::tspan::Tspan) -> Value {
+    let decor = match &t.text_decoration {
+        Some(members) => {
+            let arr: Vec<Value> = members.iter().map(|s| vstr(s)).collect();
+            Value::Array(arr)
+        }
+        None => vnil(),
+    };
+    let transform = match &t.transform {
+        Some(tr) => Value::Array(vec![
+            vf64(tr.a), vf64(tr.b), vf64(tr.c),
+            vf64(tr.d), vf64(tr.e), vf64(tr.f),
+        ]),
+        None => vnil(),
+    };
+    Value::Array(vec![
+        vuint(t.id as usize),
+        vstr(&t.content),
+        opt_f64(t.baseline_shift),
+        opt_f64(t.dx),
+        opt_str(t.font_family.as_ref()),
+        opt_f64(t.font_size),
+        opt_str(t.font_style.as_ref()),
+        opt_str(t.font_variant.as_ref()),
+        opt_str(t.font_weight.as_ref()),
+        opt_str(t.jas_aa_mode.as_ref()),
+        opt_bool(t.jas_fractional_widths),
+        opt_str(t.jas_kerning_mode.as_ref()),
+        opt_bool(t.jas_no_break),
+        opt_f64(t.letter_spacing),
+        opt_f64(t.line_height),
+        opt_f64(t.rotate),
+        opt_str(t.style_name.as_ref()),
+        decor,
+        opt_str(t.text_rendering.as_ref()),
+        opt_str(t.text_transform.as_ref()),
+        transform,
+        opt_str(t.xml_lang.as_ref()),
+    ])
+}
+
+/// Inverse of `pack_tspan`. Tolerant of trailing field additions:
+/// any field not present in the blob falls back to the tspan default.
+fn unpack_tspan(v: &Value) -> crate::geometry::tspan::Tspan {
+    use crate::geometry::tspan::Tspan;
+    let arr = as_array(v);
+    let get = |i: usize| arr.get(i).unwrap_or(&Value::Nil);
+    let id = if arr.len() > 0 { as_i64(&arr[0]) as u32 } else { 0 };
+    let content = if arr.len() > 1 { as_str(&arr[1]).to_string() } else { String::new() };
+    let decor = match get(17) {
+        Value::Array(xs) => Some(xs.iter().map(|x| as_str(x).to_string()).collect()),
+        _ => None,
+    };
+    let transform = match get(20) {
+        Value::Array(xs) if xs.len() >= 6 => Some(crate::geometry::element::Transform {
+            a: as_f64(&xs[0]), b: as_f64(&xs[1]), c: as_f64(&xs[2]),
+            d: as_f64(&xs[3]), e: as_f64(&xs[4]), f: as_f64(&xs[5]),
+        }),
+        _ => None,
+    };
+    Tspan {
+        id,
+        content,
+        baseline_shift: as_opt_f64(get(2)),
+        dx: as_opt_f64(get(3)),
+        font_family: as_opt_str(get(4)),
+        font_size: as_opt_f64(get(5)),
+        font_style: as_opt_str(get(6)),
+        font_variant: as_opt_str(get(7)),
+        font_weight: as_opt_str(get(8)),
+        jas_aa_mode: as_opt_str(get(9)),
+        jas_fractional_widths: as_opt_bool(get(10)),
+        jas_kerning_mode: as_opt_str(get(11)),
+        jas_no_break: as_opt_bool(get(12)),
+        letter_spacing: as_opt_f64(get(13)),
+        line_height: as_opt_f64(get(14)),
+        rotate: as_opt_f64(get(15)),
+        style_name: as_opt_str(get(16)),
+        text_decoration: decor,
+        text_rendering: as_opt_str(get(18)),
+        text_transform: as_opt_str(get(19)),
+        transform,
+        xml_lang: as_opt_str(get(21)),
+    }
+}
+
 fn pack_common(c: &CommonProps) -> (Value, Value, Value, Value) {
     let vis = match c.visibility {
         Visibility::Invisible => 0,
@@ -230,23 +347,32 @@ fn pack_element(elem: &Element) -> Value {
         }
         Element::Text(e) => {
             let (locked, opacity, vis, xform) = pack_common(&e.common);
+            // The tspans field goes at the end so pre-tspan-codec
+            // readers can still decode the first N fields. Writers
+            // always emit tspans — round-trip of a multi-tspan Text
+            // depends on it. Single no-override tspan blobs are still
+            // decodable by old readers via the derived `content`.
+            let tspans: Vec<Value> = e.tspans.iter().map(pack_tspan).collect();
             Value::Array(vec![vint(TAG_TEXT), locked, opacity, vis, xform,
                               vf64(e.x), vf64(e.y), vstr(&e.content()),
                               vstr(&e.font_family), vf64(e.font_size),
                               vstr(&e.font_weight), vstr(&e.font_style),
                               vstr(&e.text_decoration),
                               vf64(e.width), vf64(e.height),
-                              pack_fill(&e.fill), pack_stroke(&e.stroke)])
+                              pack_fill(&e.fill), pack_stroke(&e.stroke),
+                              Value::Array(tspans)])
         }
         Element::TextPath(e) => {
             let (locked, opacity, vis, xform) = pack_common(&e.common);
             let cmds: Vec<Value> = e.d.iter().map(pack_path_command).collect();
+            let tspans: Vec<Value> = e.tspans.iter().map(pack_tspan).collect();
             Value::Array(vec![vint(TAG_TEXT_PATH), locked, opacity, vis, xform,
                               Value::Array(cmds), vstr(&e.content()), vf64(e.start_offset),
                               vstr(&e.font_family), vf64(e.font_size),
                               vstr(&e.font_weight), vstr(&e.font_style),
                               vstr(&e.text_decoration),
-                              pack_fill(&e.fill), pack_stroke(&e.stroke)])
+                              pack_fill(&e.fill), pack_stroke(&e.stroke),
+                              Value::Array(tspans)])
         }
     }
 }
@@ -534,22 +660,35 @@ fn unpack_element(v: &Value) -> Element {
                 common,
             })
         }
-        TAG_TEXT => Element::Text(TextElem::from_string(
-            as_f64(&arr[5]), as_f64(&arr[6]),
-            as_str(&arr[7]),
-            as_str(&arr[8]),
-            as_f64(&arr[9]),
-            as_str(&arr[10]),
-            as_str(&arr[11]),
-            as_str(&arr[12]),
-            as_f64(&arr[13]), as_f64(&arr[14]),
-            unpack_fill(&arr[15]), unpack_stroke(&arr[16]),
-            common,
-        )),
+        TAG_TEXT => {
+            let mut t = TextElem::from_string(
+                as_f64(&arr[5]), as_f64(&arr[6]),
+                as_str(&arr[7]),
+                as_str(&arr[8]),
+                as_f64(&arr[9]),
+                as_str(&arr[10]),
+                as_str(&arr[11]),
+                as_str(&arr[12]),
+                as_f64(&arr[13]), as_f64(&arr[14]),
+                unpack_fill(&arr[15]), unpack_stroke(&arr[16]),
+                common,
+            );
+            // Trailing tspans field overrides the single-default-tspan
+            // seeded by from_string. Absent when the blob predates the
+            // tspan codec extension (backward compatibility).
+            if let Some(tspans_val) = arr.get(17) {
+                if let Value::Array(xs) = tspans_val {
+                    if !xs.is_empty() {
+                        t.tspans = xs.iter().map(unpack_tspan).collect();
+                    }
+                }
+            }
+            Element::Text(t)
+        }
         TAG_TEXT_PATH => {
             let cmds: Vec<PathCommand> = as_array(&arr[5]).iter()
                 .map(unpack_path_command).collect();
-            Element::TextPath(TextPathElem::from_string(
+            let mut tp = TextPathElem::from_string(
                 cmds,
                 as_str(&arr[6]),
                 as_f64(&arr[7]),
@@ -560,7 +699,15 @@ fn unpack_element(v: &Value) -> Element {
                 as_str(&arr[12]),
                 unpack_fill(&arr[13]), unpack_stroke(&arr[14]),
                 common,
-            ))
+            );
+            if let Some(tspans_val) = arr.get(15) {
+                if let Value::Array(xs) = tspans_val {
+                    if !xs.is_empty() {
+                        tp.tspans = xs.iter().map(unpack_tspan).collect();
+                    }
+                }
+            }
+            Element::TextPath(tp)
         }
         _ => panic!("unknown element tag: {}", tag),
     }
