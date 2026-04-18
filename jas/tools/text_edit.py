@@ -56,6 +56,12 @@ class TextEditSession:
     blink_epoch_ms: float = 0.0
     _undo: list[_Snapshot] = field(default_factory=list)
     _redo: list[_Snapshot] = field(default_factory=list)
+    # Session-scoped tspan clipboard. Captured on cut/copy from the
+    # current element's tspan structure; consumed on paste when the
+    # system-clipboard flat text matches. Preserves per-range overrides
+    # across cut/paste within a single edit session. Shape is a
+    # ``(flat_text, tspans_tuple)`` pair or ``None`` when empty.
+    tspan_clipboard: tuple | None = None
 
     def __post_init__(self):
         n = len(self.content)
@@ -144,6 +150,44 @@ class TextEditSession:
             return None
         lo, hi = self.selection_range()
         return self.content[lo:hi]
+
+    def copy_selection_with_tspans(self, element_tspans) -> str | None:
+        """Capture the selection's flat text and tspan structure (from
+        ``element_tspans``) into the session clipboard. Returns the flat
+        text for the system clipboard, or ``None`` if there is no
+        selection. Mirrors Rust's ``copy_selection_with_tspans``.
+        """
+        if not self.has_selection():
+            return None
+        from geometry.tspan import copy_range
+        lo, hi = self.selection_range()
+        flat = self.content[lo:hi]
+        payload = tuple(copy_range(list(element_tspans), lo, hi))
+        self.tspan_clipboard = (flat, payload)
+        return flat
+
+    def try_paste_tspans(self, element_tspans, text: str):
+        """When the session clipboard's flat text matches ``text``,
+        splice the captured tspans into ``element_tspans`` at the caret
+        and return the resulting tspan tuple. Otherwise ``None`` —
+        caller falls back to :meth:`insert`.
+        """
+        if self.tspan_clipboard is None:
+            return None
+        flat, payload = self.tspan_clipboard
+        if flat != text:
+            return None
+        from geometry.tspan import insert_tspans_at
+        return tuple(insert_tspans_at(list(element_tspans), self.insertion, list(payload)))
+
+    def set_content(self, new_content: str, insertion: int, anchor: int) -> None:
+        """Atomic content / caret update after an external tspan-aware
+        paste rewrote the underlying element.
+        """
+        self.content = new_content
+        n = len(new_content)
+        self.insertion = max(0, min(insertion, n))
+        self.anchor = max(0, min(anchor, n))
 
     def apply_to_document(self, doc):
         """Tspan-aware commit: reconcile the session's flat content

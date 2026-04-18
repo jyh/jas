@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from geometry.element import (
     Color, RgbColor, CurveTo, Element, Fill, Group, Layer, LineTo, MoveTo,
-    Path, TextPath,
+    Path, Text, TextPath,
     path_closest_offset, path_distance_to_point, path_point_at_offset,
 )
 from algorithms.path_text_layout import layout_path_text, PathTextLayout
@@ -126,6 +126,33 @@ class TypeOnPathTool(CanvasTool):
         new_doc = self.session.apply_to_document(ctx.document)
         if new_doc is not None:
             ctx.controller.set_document(new_doc)
+
+    def _current_element_tspans(self, ctx: ToolContext) -> tuple:
+        if self.session is None:
+            return ()
+        try:
+            elem = ctx.document.get_element(self.session.path)
+        except Exception:
+            return ()
+        if isinstance(elem, Text):
+            return tuple(elem.tspans)
+        if isinstance(elem, TextPath):
+            return tuple(elem.tspans)
+        return ()
+
+    def _replace_element_tspans(self, ctx: ToolContext, path: tuple,
+                                 new_tspans) -> None:
+        try:
+            elem = ctx.document.get_element(path)
+        except Exception:
+            return
+        if isinstance(elem, Text):
+            new_elem = dataclasses.replace(elem, tspans=tuple(new_tspans))
+        elif isinstance(elem, TextPath):
+            new_elem = dataclasses.replace(elem, tspans=tuple(new_tspans))
+        else:
+            return
+        ctx.controller.set_document(ctx.document.replace_element(path, new_elem))
 
     def _begin_session_existing(self, ctx: ToolContext, path: tuple,
                                  elem: TextPath, cursor: int) -> None:
@@ -337,12 +364,14 @@ class TypeOnPathTool(CanvasTool):
                 ctx.request_update()
                 return True
             if key in ("c", "C"):
-                text = self.session.copy_selection()
+                elem_tspans = self._current_element_tspans(ctx)
+                text = self.session.copy_selection_with_tspans(elem_tspans)
                 if text is not None:
                     _clipboard_write(text)
                 return True
             if key in ("x", "X"):
-                text = self.session.copy_selection()
+                elem_tspans = self._current_element_tspans(ctx)
+                text = self.session.copy_selection_with_tspans(elem_tspans)
                 if text is not None:
                     _clipboard_write(text)
                     self._ensure_snapshot(ctx)
@@ -419,6 +448,18 @@ class TypeOnPathTool(CanvasTool):
     def paste_text(self, ctx: ToolContext, text: str) -> bool:
         if self.session is None:
             return False
+        elem_tspans = self._current_element_tspans(ctx)
+        new_tspans = self.session.try_paste_tspans(elem_tspans, text)
+        if new_tspans is not None:
+            from geometry.tspan import concat_content
+            self._ensure_snapshot(ctx)
+            self._replace_element_tspans(ctx, self.session.path, new_tspans)
+            caret = self.session.insertion + len(text)
+            self.session.set_content(concat_content(list(new_tspans)),
+                                     insertion=caret, anchor=caret)
+            self.session.blink_epoch_ms = _now_ms()
+            ctx.request_update()
+            return True
         self._ensure_snapshot(ctx)
         self.session.insert(text)
         self.session.blink_epoch_ms = _now_ms()
