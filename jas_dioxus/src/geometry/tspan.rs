@@ -106,6 +106,226 @@ pub fn resolve_id(tspans: &[Tspan], id: TspanId) -> Option<usize> {
     tspans.iter().position(|t| t.id == id)
 }
 
+/// Serialize `tspans` as the rich-clipboard JSON payload described
+/// in `TSPAN.md` (Cut/copy section) — a JSON object
+/// `{"tspans": [...]}` with each tspan carrying its override fields
+/// in snake_case. Ids are stripped (they are per-element internal
+/// state); `null` override fields are omitted for compactness.
+pub fn tspans_to_json_clipboard(tspans: &[Tspan]) -> String {
+    let arr: Vec<serde_json::Value> = tspans.iter().map(|t| {
+        let v = serde_json::to_value(t).unwrap();
+        if let serde_json::Value::Object(obj) = v {
+            let filtered: serde_json::Map<_, _> = obj
+                .into_iter()
+                .filter(|(k, v)| k != "id" && !v.is_null())
+                .collect();
+            serde_json::Value::Object(filtered)
+        } else {
+            v
+        }
+    }).collect();
+    serde_json::to_string(&serde_json::json!({ "tspans": arr })).unwrap()
+}
+
+/// Parse a rich-clipboard JSON payload back into a tspan list. Ids
+/// are assigned fresh (0, 1, 2, …) — the caller should reassign
+/// above the target element's max id when splicing. Returns `None`
+/// when the payload shape doesn't match.
+pub fn tspans_from_json_clipboard(json_str: &str) -> Option<Vec<Tspan>> {
+    let root: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    let arr = root.get("tspans")?.as_array()?;
+    let mut out = Vec::with_capacity(arr.len());
+    for (i, v) in arr.iter().enumerate() {
+        let mut obj = v.as_object()?.clone();
+        // Drop any accidental id, we always assign fresh.
+        obj.remove("id");
+        obj.insert("id".into(), serde_json::Value::from(i as u32));
+        let tspan: Tspan = serde_json::from_value(serde_json::Value::Object(obj)).ok()?;
+        out.push(tspan);
+    }
+    Some(out)
+}
+
+/// Serialize `tspans` as an SVG fragment suitable for the
+/// `image/svg+xml` clipboard format. Wraps the tspans in a single
+/// `<text>` element with the standard SVG namespace. See TSPAN.md.
+/// Parent-element attributes (fill, font-family, etc.) are left to
+/// the default since the receiver decides how to apply them.
+pub fn tspans_to_svg_fragment(tspans: &[Tspan]) -> String {
+    let mut out = String::new();
+    out.push_str(r#"<text xmlns="http://www.w3.org/2000/svg">"#);
+    for t in tspans {
+        out.push_str("<tspan");
+        // Writers sort attributes alphabetically for stable output.
+        let mut attrs: Vec<(&str, String)> = Vec::new();
+        if let Some(v) = &t.baseline_shift { attrs.push(("baseline-shift", fmt_f64(*v))); }
+        if let Some(v) = &t.dx { attrs.push(("dx", fmt_f64(*v))); }
+        if let Some(v) = &t.font_family { attrs.push(("font-family", v.clone())); }
+        if let Some(v) = t.font_size { attrs.push(("font-size", fmt_f64(v))); }
+        if let Some(v) = &t.font_style { attrs.push(("font-style", v.clone())); }
+        if let Some(v) = &t.font_variant { attrs.push(("font-variant", v.clone())); }
+        if let Some(v) = &t.font_weight { attrs.push(("font-weight", v.clone())); }
+        if let Some(v) = &t.jas_aa_mode { attrs.push(("jas:aa-mode", v.clone())); }
+        if let Some(v) = t.jas_fractional_widths { attrs.push(("jas:fractional-widths", v.to_string())); }
+        if let Some(v) = &t.jas_kerning_mode { attrs.push(("jas:kerning-mode", v.clone())); }
+        if let Some(v) = t.jas_no_break { attrs.push(("jas:no-break", v.to_string())); }
+        if let Some(v) = t.letter_spacing { attrs.push(("letter-spacing", fmt_f64(v))); }
+        if let Some(v) = t.line_height { attrs.push(("line-height", fmt_f64(v))); }
+        if let Some(v) = t.rotate { attrs.push(("rotate", fmt_f64(v))); }
+        if let Some(v) = &t.style_name { attrs.push(("jas:style-name", v.clone())); }
+        if let Some(v) = &t.text_decoration {
+            if !v.is_empty() {
+                attrs.push(("text-decoration", v.join(" ")));
+            }
+        }
+        if let Some(v) = &t.text_rendering { attrs.push(("text-rendering", v.clone())); }
+        if let Some(v) = &t.text_transform { attrs.push(("text-transform", v.clone())); }
+        if let Some(v) = &t.xml_lang { attrs.push(("xml:lang", v.clone())); }
+        attrs.sort_by(|a, b| a.0.cmp(b.0));
+        for (k, v) in attrs {
+            out.push(' ');
+            out.push_str(k);
+            out.push_str("=\"");
+            out.push_str(&xml_escape(&v));
+            out.push('"');
+        }
+        out.push('>');
+        out.push_str(&xml_escape(&t.content));
+        out.push_str("</tspan>");
+    }
+    out.push_str("</text>");
+    out
+}
+
+fn fmt_f64(v: f64) -> String {
+    if v == v.trunc() { format!("{}", v as i64) } else { format!("{}", v) }
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// Parse an SVG fragment that came from a `image/svg+xml` clipboard
+/// payload. Expects a `<text>` root containing one or more `<tspan>`
+/// children; returns their flattened tspan list (fresh ids, parse
+/// errors yield `None`). Attributes map from CSS / SVG form to the
+/// snake_case tspan fields.
+pub fn tspans_from_svg_fragment(svg_str: &str) -> Option<Vec<Tspan>> {
+    // Minimal XML tokenizer — enough for the shape our writer emits
+    // and the shape other SVG apps typically produce. Handles
+    // nested tspans by flattening (spec says parsers may flatten).
+    let s = svg_str.trim();
+    let pos = s.find("<text")?;
+    let rest = &s[pos..];
+    let mut out = Vec::new();
+    let mut next_id: TspanId = 0;
+    let mut i = 0;
+    while let Some(open) = rest[i..].find("<tspan") {
+        let i_open = i + open;
+        let gt = rest[i_open..].find('>')?;
+        let attrs_str = &rest[i_open + "<tspan".len()..i_open + gt];
+        let close_tag = "</tspan>";
+        let close_pos = rest[i_open + gt + 1..].find(close_tag)?;
+        let content_raw = &rest[i_open + gt + 1..i_open + gt + 1 + close_pos];
+        // Drop any nested <tspan>...</tspan> markup inside the
+        // content; we only care about the flattened text.
+        let content = xml_unescape(&strip_tags(content_raw));
+        let mut t = Tspan::default_tspan();
+        t.id = next_id;
+        t.content = content;
+        next_id += 1;
+        for (k, v) in parse_xml_attrs(attrs_str) {
+            match k.as_str() {
+                "baseline-shift" => t.baseline_shift = v.parse().ok(),
+                "dx" => t.dx = v.parse().ok(),
+                "font-family" => t.font_family = Some(v),
+                "font-size" => t.font_size = v.parse().ok(),
+                "font-style" => t.font_style = Some(v),
+                "font-variant" => t.font_variant = Some(v),
+                "font-weight" => t.font_weight = Some(v),
+                "jas:aa-mode" => t.jas_aa_mode = Some(v),
+                "jas:fractional-widths" => t.jas_fractional_widths = Some(v == "true"),
+                "jas:kerning-mode" => t.jas_kerning_mode = Some(v),
+                "jas:no-break" => t.jas_no_break = Some(v == "true"),
+                "letter-spacing" => t.letter_spacing = v.parse().ok(),
+                "line-height" => t.line_height = v.parse().ok(),
+                "rotate" => t.rotate = v.parse().ok(),
+                "jas:style-name" => t.style_name = Some(v),
+                "text-decoration" => {
+                    let parts: Vec<String> = v
+                        .split_whitespace()
+                        .filter(|p| *p != "none")
+                        .map(String::from)
+                        .collect();
+                    t.text_decoration = Some(parts);
+                }
+                "text-rendering" => t.text_rendering = Some(v),
+                "text-transform" => t.text_transform = Some(v),
+                "xml:lang" => t.xml_lang = Some(v),
+                _ => {}
+            }
+        }
+        out.push(t);
+        i = i_open + gt + 1 + close_pos + close_tag.len();
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
+fn xml_unescape(s: &str) -> String {
+    s.replace("&quot;", "\"")
+        .replace("&gt;", ">")
+        .replace("&lt;", "<")
+        .replace("&amp;", "&")
+}
+
+fn strip_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn parse_xml_attrs(s: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        // Skip whitespace
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() { i += 1; }
+        if i >= bytes.len() { break; }
+        // Read name
+        let name_start = i;
+        while i < bytes.len() && bytes[i] != b'=' && !bytes[i].is_ascii_whitespace() { i += 1; }
+        let name = std::str::from_utf8(&bytes[name_start..i]).unwrap_or("").to_string();
+        if name.is_empty() { break; }
+        // Skip to '='
+        while i < bytes.len() && bytes[i] != b'=' { i += 1; }
+        if i >= bytes.len() { break; }
+        i += 1;
+        // Skip to quote
+        while i < bytes.len() && bytes[i] != b'"' && bytes[i] != b'\'' { i += 1; }
+        if i >= bytes.len() { break; }
+        let quote = bytes[i];
+        i += 1;
+        let val_start = i;
+        while i < bytes.len() && bytes[i] != quote { i += 1; }
+        let val = std::str::from_utf8(&bytes[val_start..i]).unwrap_or("").to_string();
+        if i < bytes.len() { i += 1; }
+        out.push((name, xml_unescape(&val)));
+    }
+    out
+}
+
 /// Copy every non-`None` override field from `source` into `target`.
 /// Does not touch `id` or `content`. Used by the next-typed-character
 /// state (the "pending override" template) when applying captured
@@ -1121,6 +1341,97 @@ mod tests {
         assert_eq!(concat_content(&r), "barfoobar");
         // Original bold "bar" preserved; new prefix "bar" also bold via clipboard.
         assert!(r.iter().any(|t| t.content.contains("bar") && t.font_weight.as_deref() == Some("bold")));
+    }
+
+    // ── rich clipboard: JSON + SVG formats ─────────────────────────
+
+    #[test]
+    fn json_clipboard_roundtrip_preserves_content_and_overrides() {
+        let src = vec![
+            plain("foo"),
+            bold("bar"),
+        ];
+        let json = tspans_to_json_clipboard(&src);
+        let back = tspans_from_json_clipboard(&json).expect("parse");
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0].content, "foo");
+        assert!(back[0].font_weight.is_none());
+        assert_eq!(back[1].content, "bar");
+        assert_eq!(back[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn json_clipboard_strips_id() {
+        let src = vec![Tspan { id: 42, content: "x".into(),
+                               ..Tspan::default_tspan() }];
+        let json = tspans_to_json_clipboard(&src);
+        // Payload must not leak the source id.
+        assert!(!json.contains("\"id\":42"));
+        assert!(!json.contains("\"id\": 42"));
+    }
+
+    #[test]
+    fn json_clipboard_strips_null_overrides() {
+        let src = vec![plain("foo")];
+        let json = tspans_to_json_clipboard(&src);
+        // None fields should be absent from the JSON body, not ": null".
+        assert!(!json.contains("null"));
+    }
+
+    #[test]
+    fn json_clipboard_from_assigns_fresh_ids() {
+        let json = r#"{"tspans":[{"content":"a"},{"content":"b"}]}"#;
+        let back = tspans_from_json_clipboard(json).unwrap();
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0].id, 0);
+        assert_eq!(back[1].id, 1);
+    }
+
+    #[test]
+    fn json_clipboard_from_rejects_bad_payload() {
+        assert!(tspans_from_json_clipboard("not json").is_none());
+        assert!(tspans_from_json_clipboard(r#"{"not_tspans":[]}"#).is_none());
+    }
+
+    #[test]
+    fn svg_fragment_roundtrip_preserves_content_and_weight() {
+        let src = vec![plain("hello "), bold("world")];
+        let svg = tspans_to_svg_fragment(&src);
+        assert!(svg.contains(r#"<text xmlns="http://www.w3.org/2000/svg">"#));
+        assert!(svg.contains("<tspan>hello </tspan>"));
+        assert!(svg.contains(r#"<tspan font-weight="bold">world</tspan>"#));
+        let back = tspans_from_svg_fragment(&svg).unwrap();
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0].content, "hello ");
+        assert!(back[0].font_weight.is_none());
+        assert_eq!(back[1].content, "world");
+        assert_eq!(back[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn svg_fragment_escapes_and_unescapes_special_chars() {
+        let src = vec![plain("< & >")];
+        let svg = tspans_to_svg_fragment(&src);
+        assert!(svg.contains("&lt; &amp; &gt;"));
+        let back = tspans_from_svg_fragment(&svg).unwrap();
+        assert_eq!(back[0].content, "< & >");
+    }
+
+    #[test]
+    fn svg_fragment_from_rejects_missing_text_root() {
+        assert!(tspans_from_svg_fragment("<span>hi</span>").is_none());
+    }
+
+    #[test]
+    fn svg_fragment_text_decoration_round_trip() {
+        let mut t = Tspan::default_tspan();
+        t.content = "x".into();
+        t.text_decoration = Some(vec!["underline".into(), "line-through".into()]);
+        let svg = tspans_to_svg_fragment(&[t]);
+        let back = tspans_from_svg_fragment(&svg).unwrap();
+        let td = back[0].text_decoration.as_ref().unwrap();
+        assert!(td.contains(&"underline".to_string()));
+        assert!(td.contains(&"line-through".to_string()));
     }
 
     // ── char_to_tspan_pos / Affinity ────────────────────────────────

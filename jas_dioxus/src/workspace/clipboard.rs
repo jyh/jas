@@ -2,6 +2,25 @@
 //!
 //! These are free functions that take `Rc<RefCell<AppState>>` and `Signal<u64>`
 //! as parameters; they do not use Dioxus context.
+//!
+//! # Rich clipboard
+//!
+//! The browser's async clipboard API reliably supports only `text/plain`
+//! for cross-app transfer; writing custom MIME types (such as
+//! `application/x-jas-tspans`) requires user activation plus browser-
+//! specific permission flows and often fails silently. To still deliver
+//! cross-element rich paste within one tab, we keep an app-global
+//! [`RICH_CLIPBOARD`] cache (the flat text plus the source tspan list)
+//! alongside the OS clipboard's plain text. Paste flow:
+//!
+//! 1. System clipboard supplies the flat text string.
+//! 2. If the cache's flat text matches, paste the cached tspans.
+//! 3. Otherwise fall back to flat insert.
+//!
+//! Cross-tab / cross-app paste stays plain text; the serializers in
+//! `geometry::tspan` (`tspans_to_json_clipboard` / `tspans_to_svg_fragment`)
+//! are kept ready for the follow-up that wires the Web Clipboard API's
+//! multi-format write once the feature-flag churn is worth it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -16,6 +35,93 @@ use crate::document::document::ElementSelection;
 use crate::document::model::Model;
 use crate::geometry::element::{translate_element, CommonProps, LayerElem, Element as GeoElement};
 use crate::geometry::svg::{document_to_svg, svg_to_document};
+use crate::geometry::tspan::Tspan;
+
+thread_local! {
+    /// App-global cache of the last rich-copied selection. Key is the
+    /// flat text of the copy; value is the tspan list with all
+    /// per-range overrides preserved. Consumed on paste when the OS
+    /// clipboard's flat text still matches. Unlike the session-scoped
+    /// tspan clipboard on `TextEditSession`, this one survives
+    /// session boundaries — copy from one Text element, end the
+    /// session, click into another element, paste still preserves
+    /// overrides.
+    static RICH_CLIPBOARD: RefCell<Option<(String, Vec<Tspan>)>> = RefCell::new(None);
+}
+
+/// Publish a rich-clipboard payload: the flat text (mirrored to the
+/// OS clipboard) plus the source tspan list. Callers cut/copy from
+/// the type tool. Cross-app paste will see only the flat text; same-
+/// app paste can reconstruct the tspans.
+pub(crate) fn rich_clipboard_write(flat: String, tspans: Vec<Tspan>) {
+    RICH_CLIPBOARD.with(|c| *c.borrow_mut() = Some((flat, tspans)));
+}
+
+/// Try to retrieve a rich-clipboard tspan list matching `flat`. Used
+/// by the paste pipeline: when the OS clipboard's plain-text content
+/// matches the most recent rich copy, we splice the cached tspans
+/// instead of flat-inserting. Returns `None` on any mismatch.
+pub(crate) fn rich_clipboard_read_matching(flat: &str) -> Option<Vec<Tspan>> {
+    RICH_CLIPBOARD.with(|c| {
+        c.borrow().as_ref().and_then(|(f, t)| {
+            if f == flat { Some(t.clone()) } else { None }
+        })
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn _clear_rich_clipboard_for_test() {
+    RICH_CLIPBOARD.with(|c| *c.borrow_mut() = None);
+}
+
+#[cfg(test)]
+mod rich_clipboard_tests {
+    use super::*;
+    use crate::geometry::tspan::Tspan;
+
+    fn bold(s: &str) -> Tspan {
+        Tspan {
+            content: s.into(),
+            font_weight: Some("bold".into()),
+            ..Tspan::default_tspan()
+        }
+    }
+
+    #[test]
+    fn write_then_read_matching_returns_tspans() {
+        _clear_rich_clipboard_for_test();
+        let tspans = vec![bold("X")];
+        rich_clipboard_write("X".into(), tspans.clone());
+        let back = rich_clipboard_read_matching("X").expect("hit");
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn read_matching_none_for_mismatched_text() {
+        _clear_rich_clipboard_for_test();
+        rich_clipboard_write("foo".into(), vec![bold("foo")]);
+        assert!(rich_clipboard_read_matching("bar").is_none());
+    }
+
+    #[test]
+    fn read_matching_none_when_empty() {
+        _clear_rich_clipboard_for_test();
+        assert!(rich_clipboard_read_matching("anything").is_none());
+    }
+
+    #[test]
+    fn later_write_replaces_earlier() {
+        _clear_rich_clipboard_for_test();
+        rich_clipboard_write("a".into(), vec![bold("a")]);
+        rich_clipboard_write("b".into(), vec![bold("b")]);
+        assert!(rich_clipboard_read_matching("a").is_none());
+        assert_eq!(
+            rich_clipboard_read_matching("b").unwrap()[0].content,
+            "b"
+        );
+    }
+}
 
 /// Write text to the system clipboard (fire-and-forget async).
 pub(crate) fn clipboard_write(text: String) {

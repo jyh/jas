@@ -226,8 +226,16 @@ impl TypeOnPathTool {
                 Element::Text(t) => Some(t.tspans.clone()),
                 _ => None,
             });
+        // Rich-paste preference: session-scoped clipboard first, then
+        // app-global rich clipboard, then flat insert.
         let tspan_result = elem_tspans.as_ref()
-            .and_then(|tsp| session.try_paste_tspans(tsp, text));
+            .and_then(|tsp| session.try_paste_tspans(tsp, text))
+            .or_else(|| {
+                let tsp = elem_tspans.as_ref()?;
+                let payload = crate::workspace::clipboard::rich_clipboard_read_matching(text)?;
+                Some(crate::geometry::tspan::insert_tspans_at(
+                    tsp, session.insertion, &payload))
+            });
         self.ensure_snapshot(model);
         if let Some(new_tspans) = tspan_result {
             let mut doc = model.document().clone();
@@ -550,6 +558,12 @@ impl CanvasTool for TypeOnPathTool {
                     if let Some(text) = self.session.as_mut().unwrap()
                         .copy_selection_with_tspans(&elem_tspans)
                     {
+                        if let Some((_, payload)) =
+                            self.session.as_ref().unwrap().tspan_clipboard.clone()
+                        {
+                            crate::workspace::clipboard::rich_clipboard_write(
+                                text.clone(), payload);
+                        }
                         clipboard_write(text);
                     }
                     return true;
@@ -567,6 +581,12 @@ impl CanvasTool for TypeOnPathTool {
                     if let Some(text) = self.session.as_mut().unwrap()
                         .copy_selection_with_tspans(&elem_tspans)
                     {
+                        if let Some((_, payload)) =
+                            self.session.as_ref().unwrap().tspan_clipboard.clone()
+                        {
+                            crate::workspace::clipboard::rich_clipboard_write(
+                                text.clone(), payload);
+                        }
                         clipboard_write(text);
                         self.ensure_snapshot(model);
                         self.session.as_mut().unwrap().backspace();
