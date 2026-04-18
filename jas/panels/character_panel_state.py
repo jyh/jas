@@ -86,7 +86,7 @@ def apply_character_panel_to_selection(store, model) -> None:
             lo, hi = session.selection_range()
             overrides = build_panel_full_overrides(panel)
             new_tspans = tuple(apply_overrides_to_tspan_range(
-                list(elem.tspans), lo, hi, overrides))
+                list(elem.tspans), lo, hi, overrides, elem=elem))
             new_elem = replace(elem, tspans=new_tspans)
             model.snapshot()
             model.document = doc.replace_element(session.path, new_elem)
@@ -193,13 +193,83 @@ def build_panel_full_overrides(panel: dict) -> Tspan:
     )
 
 
+def identity_omit_tspan(t: Tspan, elem: Element) -> Tspan:
+    """Drop any tspan override field that matches the parent
+    element's effective value (TSPAN.md "Character attribute writes
+    (from panels)" step 3). After this pass the tspan retains only
+    overrides whose stored value differs from what the element
+    renders on its own; ``merge`` can then collapse same-override
+    neighbours freely. Non-Text / TextPath elements pass through.
+    """
+    from dataclasses import replace
+    if not isinstance(elem, (Text, TextPath)):
+        return t
+
+    def str_eq_opt(a, b):
+        return a is not None and a == b
+
+    updates: dict[str, Any] = {}
+    if str_eq_opt(t.font_family, elem.font_family):
+        updates["font_family"] = None
+    if t.font_size is not None and abs(t.font_size - elem.font_size) < 1e-6:
+        updates["font_size"] = None
+    if str_eq_opt(t.font_weight, elem.font_weight):
+        updates["font_weight"] = None
+    if str_eq_opt(t.font_style, elem.font_style):
+        updates["font_style"] = None
+    if t.text_decoration is not None:
+        a = sorted(t.text_decoration)
+        b = sorted(tok for tok in elem.text_decoration.split()
+                    if tok and tok != "none")
+        if a == b:
+            updates["text_decoration"] = None
+    if str_eq_opt(t.text_transform, elem.text_transform):
+        updates["text_transform"] = None
+    if str_eq_opt(t.font_variant, elem.font_variant):
+        updates["font_variant"] = None
+    if str_eq_opt(t.xml_lang, elem.xml_lang):
+        updates["xml_lang"] = None
+    if t.rotate is not None:
+        try:
+            elem_rot = float(elem.rotate) if elem.rotate else 0.0
+        except ValueError:
+            elem_rot = 0.0
+        if abs(t.rotate - elem_rot) < 1e-6:
+            updates["rotate"] = None
+    if t.line_height is not None:
+        elem_lh = _parse_pt(elem.line_height)
+        if elem_lh is None:
+            elem_lh = elem.font_size * 1.2
+        if abs(t.line_height - elem_lh) < 1e-6:
+            updates["line_height"] = None
+    if t.letter_spacing is not None:
+        elem_ls = _parse_em(elem.letter_spacing) or 0.0
+        if abs(t.letter_spacing - elem_ls) < 1e-6:
+            updates["letter_spacing"] = None
+    if t.baseline_shift is not None:
+        elem_bs = _parse_pt(elem.baseline_shift)
+        if elem_bs is not None:
+            if abs(t.baseline_shift - elem_bs) < 1e-6:
+                updates["baseline_shift"] = None
+        elif elem.baseline_shift == "" and t.baseline_shift == 0.0:
+            updates["baseline_shift"] = None
+    if t.jas_aa_mode is not None:
+        elem_aa = "" if elem.aa_mode == "Sharp" else elem.aa_mode
+        if t.jas_aa_mode == elem_aa:
+            updates["jas_aa_mode"] = None
+    return replace(t, **updates) if updates else t
+
+
 def apply_overrides_to_tspan_range(
-    tspans, char_start: int, char_end: int, overrides: Tspan
+    tspans, char_start: int, char_end: int, overrides: Tspan,
+    elem: Element | None = None,
 ):
     """Apply ``overrides`` to every tspan covered by
     ``[char_start, char_end)`` of ``tspans``. Returns a list produced
     by TSPAN.md's per-range pipeline: ``split_range`` +
-    ``merge_tspan_overrides`` + ``merge``.
+    ``merge_tspan_overrides`` + ``merge``. When ``elem`` is supplied,
+    runs identity-omission (TSPAN.md step 3) between the override-
+    merge and final merge steps so redundant overrides get cleared.
     """
     if char_start >= char_end:
         return list(tspans)
@@ -209,7 +279,10 @@ def apply_overrides_to_tspan_range(
         return split
     out = list(split)
     for i in range(first, last + 1):
-        out[i] = merge_tspan_overrides(out[i], overrides)
+        merged = merge_tspan_overrides(out[i], overrides)
+        if elem is not None:
+            merged = identity_omit_tspan(merged, elem)
+        out[i] = merged
     return merge(out)
 
 
