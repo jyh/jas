@@ -93,6 +93,33 @@ class type_on_path_tool = object (_self)
       | Some new_doc -> ctx.controller#set_document new_doc
       | None -> ()
 
+  method private current_element_tspans (ctx : Canvas_tool.tool_context) =
+    match session with
+    | None -> [||]
+    | Some s ->
+      try
+        match Document.get_element ctx.model#document (Text_edit.path s) with
+        | Element.Text { tspans; _ } -> tspans
+        | Element.Text_path { tspans; _ } -> tspans
+        | _ -> [||]
+      with _ -> [||]
+
+  method private replace_element_tspans
+      (ctx : Canvas_tool.tool_context) path new_tspans =
+    try
+      let elem = Document.get_element ctx.model#document path in
+      let new_elem = match elem with
+        | Element.Text r -> Some (Element.Text { r with tspans = new_tspans })
+        | Element.Text_path r -> Some (Element.Text_path { r with tspans = new_tspans })
+        | _ -> None
+      in
+      match new_elem with
+      | Some e ->
+        let new_doc = Document.replace_element ctx.model#document path e in
+        ctx.controller#set_document new_doc
+      | None -> ()
+    with _ -> ()
+
   method private begin_session_existing
       (ctx : Canvas_tool.tool_context) path elem cursor =
     let content = match elem with
@@ -325,12 +352,24 @@ class type_on_path_tool = object (_self)
     match session with
     | None -> false
     | Some s ->
-      _self#ensure_snapshot ctx;
-      Text_edit.insert s text;
-      Text_edit.set_blink_epoch_ms s (now_ms ());
-      _self#sync_to_model ctx;
-      ctx.request_update ();
-      true
+      let elem_tspans = _self#current_element_tspans ctx in
+      (match Text_edit.try_paste_tspans s elem_tspans text with
+       | Some new_tspans ->
+         _self#ensure_snapshot ctx;
+         _self#replace_element_tspans ctx (Text_edit.path s) new_tspans;
+         let new_content = Tspan.concat_content new_tspans in
+         let caret = Text_edit.insertion s + Text_layout.utf8_char_count text in
+         Text_edit.set_content s new_content ~insertion:caret ~anchor:caret;
+         Text_edit.set_blink_epoch_ms s (now_ms ());
+         ctx.request_update ();
+         true
+       | None ->
+         _self#ensure_snapshot ctx;
+         Text_edit.insert s text;
+         Text_edit.set_blink_epoch_ms s (now_ms ());
+         _self#sync_to_model ctx;
+         ctx.request_update ();
+         true)
 
   method! on_key_event (ctx : Canvas_tool.tool_context) key (mods : Canvas_tool.key_mods) =
     match session with
@@ -344,9 +383,12 @@ class type_on_path_tool = object (_self)
         if mods.shift then Text_edit.redo s else Text_edit.undo s;
         bump (); _self#sync_to_model ctx; ctx.request_update (); true
       end else if cmd && (key = "c" || key = "C") then begin
-        ignore (Text_edit.copy_selection s); true
+        let elem_tspans = _self#current_element_tspans ctx in
+        ignore (Text_edit.copy_selection_with_tspans s elem_tspans);
+        true
       end else if cmd && (key = "x" || key = "X") then begin
-        (match Text_edit.copy_selection s with
+        let elem_tspans = _self#current_element_tspans ctx in
+        (match Text_edit.copy_selection_with_tspans s elem_tspans with
          | Some _ ->
            _self#ensure_snapshot ctx;
            Text_edit.backspace s;

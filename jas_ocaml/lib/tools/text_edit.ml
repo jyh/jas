@@ -18,6 +18,11 @@ type t = {
   mutable blink_epoch_ms : float;
   mutable undo_stack : snapshot list;
   mutable redo_stack : snapshot list;
+  (* Session-scoped tspan clipboard. Captured on cut/copy from the
+     current element's tspan structure; consumed on paste when the
+     system-clipboard flat text matches. Preserves per-range overrides
+     across cut/paste within a single edit session. *)
+  mutable tspan_clipboard : (string * Element.tspan array) option;
 }
 
 let create ~path ~target ~content ~insertion =
@@ -28,6 +33,7 @@ let create ~path ~target ~content ~insertion =
     insertion = ins; anchor = ins;
     drag_active = false; blink_epoch_ms = 0.0;
     undo_stack = []; redo_stack = [];
+    tspan_clipboard = None;
   }
 
 let path t = t.path
@@ -129,6 +135,38 @@ let copy_selection t =
   else
     let (lo, hi) = selection_range t in
     Some (Text_layout.utf8_sub t.content lo (hi - lo))
+
+(** Capture the current selection's flat text and tspan structure
+    (from [element_tspans]) into the session clipboard. Returns the
+    flat text for the system clipboard. [None] if there is no
+    selection. *)
+let copy_selection_with_tspans t (element_tspans : Element.tspan array) =
+  if not (has_selection t) then None
+  else
+    let (lo, hi) = selection_range t in
+    let flat = Text_layout.utf8_sub t.content lo (hi - lo) in
+    let tspans = Tspan.copy_range element_tspans lo hi in
+    t.tspan_clipboard <- Some (flat, tspans);
+    Some flat
+
+(** Try a tspan-aware paste: when the session clipboard's flat text
+    matches [text], splice the captured tspans into [element_tspans]
+    at the caret via [insert_tspans_at]. Returns [None] when the
+    clipboard is absent or stale; the caller falls back to the flat
+    [insert] path. *)
+let try_paste_tspans t (element_tspans : Element.tspan array) (text : string) =
+  match t.tspan_clipboard with
+  | Some (flat, payload) when flat = text ->
+    Some (Tspan.insert_tspans_at element_tspans t.insertion payload)
+  | _ -> None
+
+(** Set content / insertion / anchor atomically after an external
+    tspan-aware edit (paste) rewrote the element. *)
+let set_content t new_content ~insertion ~anchor =
+  t.content <- new_content;
+  let n = Text_layout.utf8_char_count new_content in
+  t.insertion <- max 0 (min insertion n);
+  t.anchor <- max 0 (min anchor n)
 
 let apply_to_document t doc =
   (* Tspan-aware commit: reconcile the session's flat content against
