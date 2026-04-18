@@ -38,9 +38,13 @@ state:
       (120% of font size, 14.4 for 12pt). Full spec uses a
       parens-wrapped display for the Auto case.
   kerning:
-    type: number
-    default: 0
-    description: "Kerning in 1/1000 em. Full spec adds Auto / Optical / Metrics named modes."
+    type: string
+    default: "Auto"
+    description: >
+      Kerning. Named modes Auto / Optical / Metrics pass through to the
+      element's kerning attribute verbatim. Numeric values are entered
+      in 1/1000 em and serialise to the element as "{N}em". Empty, "0",
+      or "Auto" round-trip to an empty element attribute (the default).
   tracking:
     type: number
     default: 0
@@ -263,10 +267,23 @@ content:
           col: 4
           children:
             - id: ch_kerning
-              type: number_input
+              type: combo_box
               summary: "Kerning"
-              description: "Kerning between characters in 1/1000 em."
+              description: >
+                Kerning between characters. Named modes (Auto, Optical,
+                Metrics) pass through to the element's kerning
+                attribute verbatim. Free numeric entry is treated as
+                1/1000 em and serialises to "{N}em". Named-mode text
+                is preserved in the panel and on the element.
               style: { width: "100%" }
+              options:
+                - { value: "Auto", label: "Auto" }
+                - { value: "Optical", label: "Optical" }
+                - { value: "Metrics", label: "Metrics" }
+                - { value: "0", label: "0" }
+                - { value: "25", label: "25" }
+                - { value: "50", label: "50" }
+                - { value: "100", label: "100" }
               bind:
                 value: "panel.kerning"
         - type: container

@@ -253,20 +253,24 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
         // V/H scale: parse percent; empty → 100 (identity).
         let h_scale = a.horizontal_scale.parse::<f64>().unwrap_or(100.0);
         let v_scale = a.vertical_scale.parse::<f64>().unwrap_or(100.0);
-        // Kerning: parse "{N}em" → N*1000. Empty or named mode → 0.
-        let kerning_val = if a.kerning.is_empty()
-            || a.kerning == "Auto" || a.kerning == "Optical" || a.kerning == "Metrics"
-        {
-            0.0
-        } else {
-            super::app_state::parse_em_as_thousandths(&a.kerning).unwrap_or(0.0)
+        // Kerning: named modes pass through to the panel combo_box
+        // verbatim; numeric "{N}em" converts to a plain "{N*1000}"
+        // string (1/1000 em is the panel's numeric unit). Empty
+        // element attribute shows as "Auto" — the spec default.
+        let kerning_display = match a.kerning.as_str() {
+            "" | "Auto" => "Auto".to_string(),
+            "Optical" | "Metrics" => a.kerning.clone(),
+            other => match super::app_state::parse_em_as_thousandths(other) {
+                Some(n) => super::app_state::fmt_num(n),
+                None => a.kerning.clone(),
+            }
         };
         m.insert("language".into(), J::String(a.xml_lang));
         m.insert("anti_aliasing".into(), J::String(aa_mode_display));
         m.insert("character_rotation".into(), serde_json::json!(rotation));
         m.insert("horizontal_scale".into(), serde_json::json!(h_scale));
         m.insert("vertical_scale".into(), serde_json::json!(v_scale));
-        m.insert("kerning".into(), serde_json::json!(kerning_val));
+        m.insert("kerning".into(), J::String(kerning_display));
     } else {
         m.insert("font_family".into(), J::String(cp.font_family.clone()));
         m.insert("font_size".into(), serde_json::json!(cp.font_size));
@@ -285,7 +289,13 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
         m.insert("character_rotation".into(), serde_json::json!(cp.character_rotation));
         m.insert("horizontal_scale".into(), serde_json::json!(cp.horizontal_scale));
         m.insert("vertical_scale".into(), serde_json::json!(cp.vertical_scale));
-        m.insert("kerning".into(), serde_json::json!(cp.kerning));
+        // No selection: show the stored panel value (default "Auto").
+        let kerning_display = if cp.kerning.is_empty() {
+            "Auto".to_string()
+        } else {
+            cp.kerning.clone()
+        };
+        m.insert("kerning".into(), J::String(kerning_display));
     }
 
     m

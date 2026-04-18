@@ -210,7 +210,12 @@ pub(crate) struct CharacterPanelState {
     pub style_name: String,
     pub font_size: f64,
     pub leading: f64,
-    pub kerning: f64,
+    /// Kerning — accepts named modes `Auto` / `Optical` / `Metrics`
+    /// (stored verbatim, pass through to the element attribute), or a
+    /// numeric string in 1/1000 em (e.g. `"25"`). Empty / `"0"` /
+    /// `"Auto"` all round-trip to an empty element attribute, matching
+    /// the identity-omission rule.
+    pub kerning: String,
     pub tracking: f64,
     pub vertical_scale: f64,
     pub horizontal_scale: f64,
@@ -240,7 +245,7 @@ impl Default for CharacterPanelState {
             style_name: "Regular".into(),
             font_size: 12.0,
             leading: 14.4,
-            kerning: 0.0,
+            kerning: String::new(),
             tracking: 0.0,
             vertical_scale: 100.0,
             horizontal_scale: 100.0,
@@ -901,14 +906,21 @@ impl AppState {
         } else {
             fmt_num(cp.vertical_scale)
         };
-        // Kerning: numeric 1/1000 em → "{em}em". 0 omits (the default
-        // "Auto" behaviour). Named modes (Auto / Optical / Metrics)
-        // land here verbatim once the panel exposes them as a
-        // combo_box; for now the Character panel only emits numerics.
-        let kerning = if cp.kerning == 0.0 {
-            String::new()
-        } else {
-            format!("{}em", fmt_num(cp.kerning / 1000.0))
+        // Kerning combo_box: accepts Auto / Optical / Metrics (named
+        // modes, passed through verbatim) or a numeric string in
+        // 1/1000 em (converted to "{em}em"). Empty / "0" / "Auto" all
+        // omit since Auto is the element default.
+        let kerning = {
+            let raw = cp.kerning.trim();
+            match raw {
+                "" | "0" | "Auto" => String::new(),
+                "Optical" | "Metrics" => raw.to_string(),
+                other => match other.parse::<f64>() {
+                    Ok(n) if n == 0.0 => String::new(),
+                    Ok(n) => format!("{}em", fmt_num(n / 1000.0)),
+                    Err(_) => String::new(),
+                }
+            }
         };
         let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
         let target_paths: Vec<Vec<usize>> = {
