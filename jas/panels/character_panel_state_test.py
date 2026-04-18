@@ -287,3 +287,162 @@ class TestApplyEndToEnd:
         # panel's write-back to the selected element.
         store.set_panel("character_panel", "font_family", "Courier New")
         assert model.document.get_element((0, 0)).font_family == "Courier New"
+
+
+# ── Phase 3: Character panel → pending override routing ──────────────
+
+def _default_text():
+    from geometry.element import Text
+    return Text(x=0, y=0, content="",
+                font_family="sans-serif", font_size=16,
+                font_weight="normal", font_style="normal",
+                text_decoration="", text_transform="", font_variant="",
+                xml_lang="", rotate="")
+
+
+def _aligned_panel():
+    return {
+        "font_family": "sans-serif",
+        "font_size": 16.0,
+        "style_name": "Regular",
+        "all_caps": False, "small_caps": False,
+        "superscript": False, "subscript": False,
+        "underline": False, "strikethrough": False,
+        "language": "",
+        "character_rotation": 0.0,
+    }
+
+
+class TestBuildPanelPendingTemplate:
+    def test_template_empty_when_panel_matches_element(self):
+        from panels.character_panel_state import build_panel_pending_template
+        assert build_panel_pending_template(_aligned_panel(), _default_text()) is None
+
+    def test_template_bold_sets_font_weight_only(self):
+        from panels.character_panel_state import build_panel_pending_template
+        panel = {**_aligned_panel(), "style_name": "Bold"}
+        tpl = build_panel_pending_template(panel, _default_text())
+        assert tpl is not None
+        assert tpl.font_weight == "bold"
+        # Bold parses to ("bold", "normal"); element is "normal" — no font_style diff.
+        assert tpl.font_style is None
+        assert tpl.font_family is None
+        assert tpl.font_size is None
+
+    def test_template_text_decoration_normalizes_none_to_empty(self):
+        from geometry.element import Text
+        from panels.character_panel_state import build_panel_pending_template
+        # Element stores "none" (CSS default); panel has both flags off.
+        t = Text(x=0, y=0, content="", font_family="sans-serif", font_size=16,
+                 font_weight="normal", font_style="normal",
+                 text_decoration="none", text_transform="", font_variant="",
+                 xml_lang="", rotate="")
+        assert build_panel_pending_template(_aligned_panel(), t) is None
+
+    def test_template_font_size_differs(self):
+        from panels.character_panel_state import build_panel_pending_template
+        panel = {**_aligned_panel(), "font_size": 24.0}
+        tpl = build_panel_pending_template(panel, _default_text())
+        assert tpl is not None
+        assert tpl.font_size == 24.0
+
+    def test_template_underline_flag(self):
+        from panels.character_panel_state import build_panel_pending_template
+        panel = {**_aligned_panel(), "underline": True}
+        tpl = build_panel_pending_template(panel, _default_text())
+        assert tpl is not None
+        assert tpl.text_decoration == ("underline",)
+
+    def test_template_all_caps_sets_text_transform(self):
+        from panels.character_panel_state import build_panel_pending_template
+        panel = {**_aligned_panel(), "all_caps": True}
+        tpl = build_panel_pending_template(panel, _default_text())
+        assert tpl is not None
+        assert tpl.text_transform == "uppercase"
+
+
+class TestPendingRouting:
+    def _make_model_with_session(self, text_elem, caret: int,
+                                   has_range: bool = False):
+        """Minimal scaffolding: model with a single Text element and
+        an active session at the given caret (optionally with a
+        range)."""
+        from tools.text_edit import EditTarget, TextEditSession
+
+        class _Doc:
+            def __init__(self, elem):
+                self.layers = []
+                self.selection = []
+                self._elem = elem
+
+            def get_element(self, path):
+                if tuple(path) == (0, 0):
+                    return self._elem
+                raise KeyError(path)
+
+            def replace_element(self, path, new_elem):
+                if tuple(path) == (0, 0):
+                    return _Doc(new_elem)
+                return self
+
+        class _Model:
+            def __init__(self):
+                self.document = _Doc(text_elem)
+                self.current_edit_session = None
+                self.snapshots = 0
+
+            def snapshot(self):
+                self.snapshots += 1
+
+        model = _Model()
+        session = TextEditSession(
+            path=(0, 0), target=EditTarget.TEXT,
+            content=text_elem.content, insertion=caret,
+        )
+        if has_range:
+            session.set_insertion(caret + 2, extend=True)
+        model.current_edit_session = session
+        return model, session
+
+    def test_panel_write_with_bare_caret_sets_pending(self):
+        from geometry.element import Text
+        from panels.character_panel_state import apply_character_panel_to_selection
+        class _Store:
+            def __init__(self, state):
+                self._state = state
+            def get_panel_state(self, _pid):
+                return self._state
+
+        text = Text(x=0, y=0, content="hello",
+                    font_family="sans-serif", font_size=16,
+                    font_weight="normal", font_style="normal",
+                    text_decoration="", text_transform="", font_variant="",
+                    xml_lang="", rotate="")
+        model, session = self._make_model_with_session(text, caret=3)
+        assert not session.has_selection()  # sanity
+        store = _Store({**_aligned_panel(), "style_name": "Bold"})
+        apply_character_panel_to_selection(store, model)
+        assert session.has_pending_override()
+        assert session.pending_char_start == 3
+        assert session.pending_override.font_weight == "bold"
+
+    def test_panel_write_with_range_selection_writes_to_element(self):
+        # Range-selected session → legacy path (not pending).
+        from geometry.element import Text
+        from panels.character_panel_state import apply_character_panel_to_selection
+        class _Store:
+            def __init__(self, state):
+                self._state = state
+            def get_panel_state(self, _pid):
+                return self._state
+        # Text with actual content so a range-extend selection sticks.
+        text = Text(x=0, y=0, content="hello",
+                    font_family="sans-serif", font_size=16,
+                    font_weight="normal", font_style="normal",
+                    text_decoration="", text_transform="", font_variant="",
+                    xml_lang="", rotate="")
+        model, session = self._make_model_with_session(text, caret=0, has_range=True)
+        assert session.has_selection()  # sanity
+        store = _Store({**_aligned_panel(), "style_name": "Bold"})
+        apply_character_panel_to_selection(store, model)
+        assert not session.has_pending_override()
