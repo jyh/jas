@@ -149,6 +149,9 @@ private func tspanSvg(_ t: Tspan) -> String {
     if let v = t.rotate {
         attrs += " rotate=\"\(fmt(v))\""
     }
+    if let v = t.jasRole {
+        attrs += " urn:jas:1:role=\"\(escapeXml(v))\""
+    }
     return "<tspan\(attrs)>\(escapeXml(t.content))</tspan>"
 }
 
@@ -416,6 +419,7 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             raw.split(whereSeparator: { $0.isWhitespace })
                 .compactMap { Double($0) }
         } ?? []
+    let jasRole = node.attribute(forName: "urn:jas:1:role")?.stringValue
     let chars = Array(content)
 
     // Fast paths: no rotate, or single-value rotate, or single char.
@@ -424,6 +428,7 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             id: 0, content: content,
             fontFamily: fontFamily, fontSize: fontSize,
             fontStyle: fontStyle, fontWeight: fontWeight,
+            jasRole: jasRole,
             textDecoration: decoration)]
     }
     if rotateVals.count == 1 || chars.count <= 1 {
@@ -431,6 +436,7 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             id: 0, content: content,
             fontFamily: fontFamily, fontSize: fontSize,
             fontStyle: fontStyle, fontWeight: fontWeight,
+            jasRole: jasRole,
             rotate: rotateVals[0],
             textDecoration: decoration)]
     }
@@ -444,6 +450,7 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             id: 0, content: String(c),
             fontFamily: fontFamily, fontSize: fontSize,
             fontStyle: fontStyle, fontWeight: fontWeight,
+            jasRole: jasRole,
             rotate: i < rotateVals.count ? rotateVals[i] : lastAngle,
             textDecoration: decoration)
     }
@@ -473,6 +480,7 @@ private func collectTspanChildren(_ elem: XMLElement) -> [Tspan] {
             fontWeight: t.fontWeight,
             jasAaMode: t.jasAaMode, jasFractionalWidths: t.jasFractionalWidths,
             jasKerningMode: t.jasKerningMode, jasNoBreak: t.jasNoBreak,
+            jasRole: t.jasRole,
             letterSpacing: t.letterSpacing, lineHeight: t.lineHeight,
             rotate: t.rotate, styleName: t.styleName,
             textDecoration: t.textDecoration, textRendering: t.textRendering,

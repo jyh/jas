@@ -39,6 +39,7 @@ public func tspansToJsonClipboard(_ tspans: [Tspan]) -> String {
         if let v = t.jasFractionalWidths { obj["jas_fractional_widths"] = v }
         if let v = t.jasKerningMode { obj["jas_kerning_mode"] = v }
         if let v = t.jasNoBreak { obj["jas_no_break"] = v }
+        if let v = t.jasRole { obj["jas_role"] = v }
         if let v = t.letterSpacing { obj["letter_spacing"] = v }
         if let v = t.lineHeight { obj["line_height"] = v }
         if let v = t.rotate { obj["rotate"] = v }
@@ -78,6 +79,7 @@ public func tspansFromJsonClipboard(_ jsonStr: String) -> [Tspan]? {
             jasFractionalWidths: (obj["jas_fractional_widths"] as? NSNumber)?.boolValue,
             jasKerningMode: obj["jas_kerning_mode"] as? String,
             jasNoBreak: (obj["jas_no_break"] as? NSNumber)?.boolValue,
+            jasRole: obj["jas_role"] as? String,
             letterSpacing: (obj["letter_spacing"] as? NSNumber)?.doubleValue,
             lineHeight: (obj["line_height"] as? NSNumber)?.doubleValue,
             rotate: (obj["rotate"] as? NSNumber)?.doubleValue,
@@ -112,6 +114,7 @@ public func tspansToSvgFragment(_ tspans: [Tspan]) -> String {
         if let v = t.jasFractionalWidths { attrs.append(("jas:fractional-widths", v ? "true" : "false")) }
         if let v = t.jasKerningMode { attrs.append(("jas:kerning-mode", v)) }
         if let v = t.jasNoBreak { attrs.append(("jas:no-break", v ? "true" : "false")) }
+        if let v = t.jasRole { attrs.append(("jas:role", v)) }
         if let v = t.letterSpacing { attrs.append(("letter-spacing", _fmtDouble(v))) }
         if let v = t.lineHeight { attrs.append(("line-height", _fmtDouble(v))) }
         if let v = t.rotate { attrs.append(("rotate", _fmtDouble(v))) }
@@ -183,6 +186,7 @@ public func tspansFromSvgFragment(_ svgStr: String) -> [Tspan]? {
             case "jas:fractional-widths": t = mergeFields(t, jasFractionalWidths: v == "true")
             case "jas:kerning-mode": t = mergeFields(t, jasKerningMode: v)
             case "jas:no-break": t = mergeFields(t, jasNoBreak: v == "true")
+            case "jas:role": t = mergeFields(t, jasRole: v)
             case "letter-spacing": t = mergeFields(t, letterSpacing: Double(v))
             case "line-height": t = mergeFields(t, lineHeight: Double(v))
             case "rotate": t = mergeFields(t, rotate: Double(v))
@@ -217,6 +221,7 @@ private func mergeFields(_ t: Tspan,
                          jasFractionalWidths: Bool?? = .some(nil),
                          jasKerningMode: String?? = .some(nil),
                          jasNoBreak: Bool?? = .some(nil),
+                         jasRole: String?? = .some(nil),
                          letterSpacing: Double?? = .some(nil),
                          lineHeight: Double?? = .some(nil),
                          rotate: Double?? = .some(nil),
@@ -249,6 +254,7 @@ private func mergeFields(_ t: Tspan,
         jasFractionalWidths: pick(jasFractionalWidths, t.jasFractionalWidths),
         jasKerningMode: pick(jasKerningMode, t.jasKerningMode),
         jasNoBreak: pick(jasNoBreak, t.jasNoBreak),
+        jasRole: pick(jasRole, t.jasRole),
         letterSpacing: pick(letterSpacing, t.letterSpacing),
         lineHeight: pick(lineHeight, t.lineHeight),
         rotate: pick(rotate, t.rotate),
@@ -320,6 +326,7 @@ public func mergeTspanOverrides(_ target: Tspan, _ source: Tspan) -> Tspan {
         jasFractionalWidths: source.jasFractionalWidths ?? target.jasFractionalWidths,
         jasKerningMode: source.jasKerningMode ?? target.jasKerningMode,
         jasNoBreak: source.jasNoBreak ?? target.jasNoBreak,
+        jasRole: source.jasRole ?? target.jasRole,
         letterSpacing: source.letterSpacing ?? target.letterSpacing,
         lineHeight: source.lineHeight ?? target.lineHeight,
         rotate: source.rotate ?? target.rotate,

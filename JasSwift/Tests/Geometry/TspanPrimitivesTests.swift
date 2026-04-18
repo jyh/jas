@@ -518,3 +518,28 @@ private func plainTspan(_ s: String, id: UInt32 = 0) -> Tspan {
 @Test func svgFragmentRejectsMissingTextRoot() {
     #expect(tspansFromSvgFragment("<span>hi</span>") == nil)
 }
+
+// MARK: - jas:role wrapper tspan (Phase 1a)
+//
+// Paragraph wrapper tspans are tagged with jas:role="paragraph".
+// Phase 1a only persists the role marker through clipboard SVG
+// round-trips; paragraph attribute fields and Enter/Backspace edit
+// primitives land in Phase 1b.
+
+@Test func defaultTspanHasNoRole() {
+    #expect(Tspan.defaultTspan().jasRole == nil)
+}
+
+@Test func hasNoOverridesFalseWhenJasRoleSet() {
+    let t = Tspan(jasRole: "paragraph")
+    #expect(!t.hasNoOverrides)
+}
+
+@Test func svgFragmentJasRoleRoundTrip() {
+    let t = Tspan(content: "", jasRole: "paragraph")
+    let svg = tspansToSvgFragment([t])
+    #expect(svg.contains(#"jas:role="paragraph""#))
+    let back = tspansFromSvgFragment(svg)!
+    #expect(back.count == 1)
+    #expect(back[0].jasRole == "paragraph")
+}
