@@ -625,17 +625,28 @@ fn tspan_svg(t: &crate::geometry::tspan::Tspan) -> String {
             escape_xml(&joined)
         ));
     }
+    // Per-tspan rotation. Our model stores a single f64 per tspan, so
+    // per-glyph varying rotations require each glyph to live in its
+    // own tspan (enforced by the Touch Type tool). SVG's multi-value
+    // `rotate="a1 a2 …"` form is handled on the parse side by
+    // splitting the tspan into one per glyph — see [`parse_tspan`].
+    if let Some(v) = t.rotate {
+        attrs.push_str(&format!(" rotate=\"{}\"", fmt(v)));
+    }
     format!("<tspan{}>{}</tspan>", attrs, escape_xml(&t.content))
 }
 
-/// Parse an SVG `<tspan>` child node into a Tspan.
+/// Parse an SVG `<tspan>` child node into one or more Tspans.
 ///
-/// Only attributes present on the node become Some overrides; absent
-/// attributes remain None (tspan inherits from the parent element).
-fn parse_tspan(node: &XmlNode, id: u32) -> crate::geometry::tspan::Tspan {
+/// Returns a `Vec` so SVG's multi-value `rotate="a b c …"` syntax can
+/// be expanded into one tspan per glyph (each carrying its own rotate
+/// angle). The single-value case returns a one-element vec. Ids are
+/// left at `0`; the caller assigns fresh sequential ids across the
+/// whole tspan list.
+fn parse_tspan(node: &XmlNode) -> Vec<crate::geometry::tspan::Tspan> {
     use crate::geometry::tspan::Tspan;
-    Tspan {
-        id,
+    let base = Tspan {
+        id: 0,
         content: node.text.clone(),
         font_family: node.attrs.get("font-family").cloned(),
         font_size: node
@@ -655,6 +666,51 @@ fn parse_tspan(node: &XmlNode, id: u32) -> crate::geometry::tspan::Tspan {
             parts
         }),
         ..Tspan::default_tspan()
+    };
+    // Multi-value rotate: SVG allows `rotate="a1 a2 a3 …"` on a tspan,
+    // where each angle applies to the corresponding glyph. Our model
+    // represents this by splitting the tspan into one per glyph.
+    let rotate_vals: Vec<f64> = node
+        .attrs
+        .get("rotate")
+        .map(|s| {
+            s.split_whitespace()
+                .filter_map(|x| x.parse::<f64>().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let chars: Vec<char> = base.content.chars().collect();
+    match rotate_vals.len() {
+        0 => vec![base],
+        1 => {
+            let mut t = base;
+            t.rotate = Some(rotate_vals[0]);
+            vec![t]
+        }
+        _ if chars.len() <= 1 => {
+            // Multi-value but content is at most one char — first
+            // angle applies; extras are harmless.
+            let mut t = base;
+            t.rotate = Some(rotate_vals[0]);
+            vec![t]
+        }
+        _ => {
+            // Split the tspan into one per glyph. Each inherits
+            // the base's override fields and gets the matching
+            // rotate angle; the last angle is reused for any
+            // trailing glyphs past the end of the list (per SVG).
+            let last_angle = *rotate_vals.last().unwrap();
+            chars
+                .into_iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    let mut t = base.clone();
+                    t.content = c.to_string();
+                    t.rotate = Some(*rotate_vals.get(i).unwrap_or(&last_angle));
+                    t
+                })
+                .collect()
+        }
     }
 }
 
@@ -1217,7 +1273,9 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                         tp_tspan_children
                             .iter()
                             .enumerate()
-                            .map(|(idx, c)| parse_tspan(c, idx as u32))
+                            .flat_map(|(_, c)| parse_tspan(c))
+                            .enumerate()
+                            .map(|(idx, mut t)| { t.id = idx as u32; t })
                             .collect()
                     };
                     return Some(Element::TextPath(TextPathElem {
@@ -1263,8 +1321,9 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             } else {
                 text_tspan_children
                     .iter()
+                    .flat_map(|c| parse_tspan(c))
                     .enumerate()
-                    .map(|(idx, c)| parse_tspan(c, idx as u32))
+                    .map(|(idx, mut t)| { t.id = idx as u32; t })
                     .collect()
             };
             let content: String = tspans.iter().map(|t| t.content.as_str()).collect();
@@ -1911,5 +1970,96 @@ mod tests {
         } else {
             panic!("expected Rect");
         }
+    }
+
+    // ── tspan rotate roundtrip ───────────────────────────────────────
+
+    /// Build a minimal SVG string of the form produced by our writer,
+    /// wrapping a single `<text>` with the given tspan children.
+    fn tspan_svg_doc(tspan_markup: &str) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><text x="0" y="20" font-size="12">{}</text></svg>"#,
+            tspan_markup
+        )
+    }
+
+    #[test]
+    fn tspan_svg_emits_rotate_attribute() {
+        use crate::geometry::tspan::Tspan;
+        let t = Tspan { content: "X".into(), rotate: Some(45.0),
+                        ..Tspan::default_tspan() };
+        let svg = tspan_svg(&t);
+        assert!(svg.contains(r#"rotate="45""#), "got: {}", svg);
+    }
+
+    #[test]
+    fn svg_single_value_rotate_roundtrips() {
+        let svg = tspan_svg_doc(r#"<tspan rotate="30">abc</tspan>"#);
+        let doc = svg_to_document(&svg);
+        let children = doc.layers[0].children().unwrap();
+        let Element::Text(t) = &*children[0] else { panic!("expected Text"); };
+        assert_eq!(t.tspans.len(), 1);
+        assert_eq!(t.tspans[0].content, "abc");
+        assert_eq!(t.tspans[0].rotate, Some(30.0));
+    }
+
+    #[test]
+    fn svg_multi_value_rotate_splits_into_per_glyph_tspans() {
+        // rotate="a b c" on a 3-char tspan → three tspans, each
+        // carrying one glyph and its own rotate angle.
+        let svg = tspan_svg_doc(r#"<tspan rotate="45 90 0">abc</tspan>"#);
+        let doc = svg_to_document(&svg);
+        let children = doc.layers[0].children().unwrap();
+        let Element::Text(t) = &*children[0] else { panic!("expected Text"); };
+        assert_eq!(t.tspans.len(), 3);
+        assert_eq!(t.tspans[0].content, "a");
+        assert_eq!(t.tspans[0].rotate, Some(45.0));
+        assert_eq!(t.tspans[1].content, "b");
+        assert_eq!(t.tspans[1].rotate, Some(90.0));
+        assert_eq!(t.tspans[2].content, "c");
+        assert_eq!(t.tspans[2].rotate, Some(0.0));
+    }
+
+    #[test]
+    fn svg_multi_value_rotate_reuses_last_for_extra_glyphs() {
+        // SVG spec: "rotate" with fewer values than glyphs reuses
+        // the last value for the remainder.
+        let svg = tspan_svg_doc(r#"<tspan rotate="45 90">abcd</tspan>"#);
+        let doc = svg_to_document(&svg);
+        let children = doc.layers[0].children().unwrap();
+        let Element::Text(t) = &*children[0] else { panic!("expected Text"); };
+        assert_eq!(t.tspans.len(), 4);
+        assert_eq!(t.tspans[0].rotate, Some(45.0));
+        assert_eq!(t.tspans[1].rotate, Some(90.0));
+        assert_eq!(t.tspans[2].rotate, Some(90.0));
+        assert_eq!(t.tspans[3].rotate, Some(90.0));
+    }
+
+    #[test]
+    fn svg_per_glyph_tspan_rotate_roundtrip() {
+        // Build a doc with three per-glyph tspans and verify the
+        // emitted SVG preserves each rotate value (emits separate
+        // <tspan rotate="N">x</tspan> elements).
+        let mut doc = Document::default();
+        let mut t = crate::tools::text_edit::empty_text_elem(10.0, 20.0, 0.0, 0.0);
+        use crate::geometry::tspan::Tspan;
+        t.tspans = vec![
+            Tspan { id: 0, content: "a".into(), rotate: Some(45.0),
+                    ..Tspan::default_tspan() },
+            Tspan { id: 1, content: "b".into(), rotate: Some(90.0),
+                    ..Tspan::default_tspan() },
+            Tspan { id: 2, content: "c".into(), rotate: Some(0.0),
+                    ..Tspan::default_tspan() },
+        ];
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Text(t)));
+        let svg = document_to_svg(&doc);
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        let Element::Text(t) = &*children[0] else { panic!("expected Text"); };
+        assert_eq!(t.tspans.len(), 3);
+        assert_eq!(t.tspans[0].rotate, Some(45.0));
+        assert_eq!(t.tspans[1].rotate, Some(90.0));
+        assert_eq!(t.tspans[2].rotate, Some(0.0));
     }
 }
