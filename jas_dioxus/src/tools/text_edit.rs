@@ -377,23 +377,41 @@ impl TextEditSession {
     /// Build a new Document with the session's current content applied to
     /// the element at `self.path`. Returns None if the path no longer points
     /// at a compatible element.
+    ///
+    /// Tspan preservation rule: when the session content matches the
+    /// current concatenation of the element's tspans, the existing
+    /// tspan structure (and its per-range overrides) is preserved
+    /// unchanged. This lets a user click into a multi-tspan Text and
+    /// click away without losing overrides. Any content change
+    /// (insert, delete, paste) falls back to collapsing into a single
+    /// default tspan — full tspan-aware editing (caret split, merge
+    /// on paste) is a later pass.
     pub fn apply_to_document(&self, doc: &Document) -> Option<Document> {
+        use crate::geometry::tspan::{concat_content, Tspan};
         let elem = doc.get_element(&self.path)?;
         let new_elem = match (self.target, elem) {
             (EditTarget::Text, Element::Text(t)) => {
                 let mut new_t = t.clone();
-                new_t.tspans = vec![crate::geometry::tspan::Tspan {
-                    content: self.content.clone(),
-                    ..crate::geometry::tspan::Tspan::default_tspan()
-                }];
+                if concat_content(&t.tspans) == self.content {
+                    // No content change — keep the original tspans.
+                } else {
+                    new_t.tspans = vec![Tspan {
+                        content: self.content.clone(),
+                        ..Tspan::default_tspan()
+                    }];
+                }
                 Element::Text(new_t)
             }
             (EditTarget::TextPath, Element::TextPath(tp)) => {
                 let mut new_tp = tp.clone();
-                new_tp.tspans = vec![crate::geometry::tspan::Tspan {
-                    content: self.content.clone(),
-                    ..crate::geometry::tspan::Tspan::default_tspan()
-                }];
+                if concat_content(&tp.tspans) == self.content {
+                    // No content change — keep the original tspans.
+                } else {
+                    new_tp.tspans = vec![Tspan {
+                        content: self.content.clone(),
+                        ..Tspan::default_tspan()
+                    }];
+                }
                 Element::TextPath(new_tp)
             }
             _ => return None,
@@ -685,5 +703,61 @@ mod tests {
         s.set_insertion(2, false);
         s.insert("X");
         assert_eq!(s.content, "aéXb");
+    }
+
+    // ── apply_to_document tspan preservation ────────────────────
+
+    /// Build a Document with a single Text element whose tspans have
+    /// been replaced with the given list. Content is derived from the
+    /// concatenation at rendering time — TextElem.content is a method.
+    fn doc_with_tspans(tspans: Vec<crate::geometry::tspan::Tspan>) -> Document {
+        let mut t = empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        t.tspans = tspans;
+        let mut doc = Document::default();
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Text(t)));
+        doc
+    }
+
+    #[test]
+    fn apply_preserves_tspans_when_content_matches() {
+        use crate::geometry::tspan::Tspan;
+        let original_tspans = vec![
+            Tspan { content: "Hello ".into(), ..Tspan::default_tspan() },
+            Tspan { id: 1, content: "world".into(),
+                    font_weight: Some("bold".into()),
+                    ..Tspan::default_tspan() },
+        ];
+        let doc = doc_with_tspans(original_tspans);
+        let s = TextEditSession::new(vec![0, 0], EditTarget::Text,
+                                     "Hello world".into(), 0, 0.0);
+        let new_doc = s.apply_to_document(&doc).expect("apply");
+        let Element::Text(t) = new_doc.get_element(&vec![0, 0]).unwrap()
+            else { panic!("expected Text"); };
+        assert_eq!(t.tspans.len(), 2);
+        assert_eq!(t.tspans[0].content, "Hello ");
+        assert_eq!(t.tspans[1].content, "world");
+        assert_eq!(t.tspans[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn apply_collapses_tspans_when_content_differs() {
+        use crate::geometry::tspan::Tspan;
+        let original_tspans = vec![
+            Tspan { content: "Hello ".into(), ..Tspan::default_tspan() },
+            Tspan { id: 1, content: "world".into(),
+                    font_weight: Some("bold".into()),
+                    ..Tspan::default_tspan() },
+        ];
+        let doc = doc_with_tspans(original_tspans);
+        let s = TextEditSession::new(vec![0, 0], EditTarget::Text,
+                                     "Hello changed".into(), 0, 0.0);
+        let new_doc = s.apply_to_document(&doc).expect("apply");
+        let Element::Text(t) = new_doc.get_element(&vec![0, 0]).unwrap()
+            else { panic!("expected Text"); };
+        // Content change collapses to a single default tspan.
+        assert_eq!(t.tspans.len(), 1);
+        assert_eq!(t.tspans[0].content, "Hello changed");
+        assert!(t.tspans[0].has_no_overrides());
     }
 }
