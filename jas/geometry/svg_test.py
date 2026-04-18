@@ -1,12 +1,26 @@
 from absl.testing import absltest
 
 from document.document import Document
+from dataclasses import replace
+
+# Text.bounds() uses QFontMetricsF for accurate widths; it requires
+# a QGuiApplication. Instantiate one at import time so the svg tests
+# don't depend on another test module having done it first.
+try:
+    from PySide6.QtWidgets import QApplication
+    if QApplication.instance() is None:
+        _qapp_for_svg_tests = QApplication([])
+except ImportError:
+    pass
+
 from geometry.element import (
     ArcTo, Circle, ClosePath, RgbColor, CurveTo, Ellipse, Fill, Group, Layer,
     Line, LineCap, LineJoin, LineTo, MoveTo, Path, Polygon, Polyline,
-    QuadTo, Rect, SmoothCurveTo, SmoothQuadTo, Stroke, Text, Transform,
+    QuadTo, Rect, SmoothCurveTo, SmoothQuadTo, Stroke, Text, TextPath,
+    Transform,
 )
 from geometry.svg import document_to_svg, svg_to_document
+from geometry.tspan import Tspan
 
 
 # 1 pt = 96/72 px = 4/3 px
@@ -145,6 +159,65 @@ class SvgTest(absltest.TestCase):
         t2 = doc2.layers[0].children[0]
         self.assertAlmostEqual(t2.y, 20.0, places=3)
         self.assertAlmostEqual(t2.x, 10.0, places=3)
+
+    def test_flat_text_has_no_tspan_wrapper(self):
+        """A Text with a single no-override tspan round-trips as flat
+        SVG — no <tspan> wrapper, no xml:space="preserve"."""
+        layer = Layer(children=(Text(x=0, y=0, content="Hello"),))
+        svg = document_to_svg(Document(layers=(layer,)))
+        self.assertNotIn("<tspan", svg)
+        self.assertNotIn("xml:space", svg)
+        self.assertIn(">Hello</text>", svg)
+
+    def test_multi_tspan_text_emits_tspan_children(self):
+        """Two tspans with distinct overrides round-trip as <tspan>
+        children + xml:space="preserve" on the parent <text>."""
+        t = Text(x=0, y=0, content="Hello world")
+        t = replace(t, tspans=(
+            Tspan(id=0, content="Hello "),
+            Tspan(id=1, content="world", font_weight="bold"),
+        ))
+        svg = document_to_svg(Document(layers=(Layer(children=(t,)),)))
+        self.assertIn('xml:space="preserve"', svg)
+        self.assertIn("<tspan>Hello </tspan>", svg)
+        self.assertIn('<tspan font-weight="bold">world</tspan>', svg)
+
+    def test_tspan_round_trip_preserves_overrides(self):
+        """Round-trip a two-tspan text: content, override attributes,
+        and tspan count survive."""
+        t = Text(x=0, y=0, content="AB")
+        t = replace(t, tspans=(
+            Tspan(id=0, content="A"),
+            Tspan(id=1, content="B", font_family="Courier",
+                  font_weight="bold",
+                  text_decoration=("line-through", "underline")),
+        ))
+        doc = Document(layers=(Layer(children=(t,)),))
+        doc2 = svg_to_document(document_to_svg(doc))
+        t2 = doc2.layers[0].children[0]
+        self.assertEqual(len(t2.tspans), 2)
+        self.assertEqual(t2.tspans[0].content, "A")
+        self.assertTrue(t2.tspans[0].has_no_overrides())
+        self.assertEqual(t2.tspans[1].content, "B")
+        self.assertEqual(t2.tspans[1].font_family, "Courier")
+        self.assertEqual(t2.tspans[1].font_weight, "bold")
+        self.assertEqual(t2.tspans[1].text_decoration,
+                         ("line-through", "underline"))
+
+    def test_text_path_tspan_round_trip(self):
+        tp = TextPath(d=(MoveTo(0, 0), LineTo(100, 0)), content="foo bar")
+        tp = replace(tp, tspans=(
+            Tspan(id=0, content="foo "),
+            Tspan(id=1, content="bar", font_style="italic"),
+        ))
+        doc = Document(layers=(Layer(children=(tp,)),))
+        svg = document_to_svg(doc)
+        self.assertIn("<tspan>foo </tspan>", svg)
+        self.assertIn('<tspan font-style="italic">bar</tspan>', svg)
+        doc2 = svg_to_document(svg)
+        tp2 = doc2.layers[0].children[0]
+        self.assertEqual(len(tp2.tspans), 2)
+        self.assertEqual(tp2.tspans[1].font_style, "italic")
 
     def test_text_escaping(self):
         layer = Layer(children=(
