@@ -7,7 +7,7 @@ import Foundation
 
 /// Manages global state, panel-scoped state, dialog-scoped state, and
 /// builds evaluation contexts for the expression evaluator.
-class StateStore {
+public class StateStore {
 
     // MARK: - Global state
 
@@ -24,56 +24,60 @@ class StateStore {
 
     // MARK: - Init
 
-    init(defaults: [String: Any]? = nil) {
+    public init(defaults: [String: Any]? = nil) {
         self.state = defaults ?? [:]
     }
 
     // MARK: - Global state accessors
 
-    func get(_ key: String) -> Any? {
+    public func get(_ key: String) -> Any? {
         state[key]
     }
 
-    func set(_ key: String, _ value: Any?) {
+    public func set(_ key: String, _ value: Any?) {
         state[key] = value
     }
 
-    func getAll() -> [String: Any] {
+    public func getAll() -> [String: Any] {
         state
     }
 
     // MARK: - Panel state
 
-    func initPanel(_ panelId: String, defaults: [String: Any]) {
+    public func initPanel(_ panelId: String, defaults: [String: Any]) {
         panels[panelId] = defaults
     }
 
-    func getPanel(_ panelId: String, _ key: String) -> Any? {
+    public func hasPanel(_ panelId: String) -> Bool {
+        panels[panelId] != nil
+    }
+
+    public func getPanel(_ panelId: String, _ key: String) -> Any? {
         panels[panelId]?[key]
     }
 
-    func setPanel(_ panelId: String, _ key: String, _ value: Any?) {
+    public func setPanel(_ panelId: String, _ key: String, _ value: Any?) {
         panels[panelId]?[key] = value
     }
 
-    func getPanelState(_ panelId: String) -> [String: Any] {
+    public func getPanelState(_ panelId: String) -> [String: Any] {
         panels[panelId] ?? [:]
     }
 
-    func setActivePanel(_ panelId: String?) {
+    public func setActivePanel(_ panelId: String?) {
         activePanel = panelId
     }
 
-    func getActivePanelId() -> String? {
+    public func getActivePanelId() -> String? {
         activePanel
     }
 
-    func getActivePanelState() -> [String: Any] {
+    public func getActivePanelState() -> [String: Any] {
         guard let pid = activePanel else { return [:] }
         return panels[pid] ?? [:]
     }
 
-    func destroyPanel(_ panelId: String) {
+    public func destroyPanel(_ panelId: String) {
         panels.removeValue(forKey: panelId)
         if activePanel == panelId {
             activePanel = nil
@@ -82,16 +86,16 @@ class StateStore {
 
     // MARK: - Dialog state
 
-    func initDialog(_ dialogId: String, defaults: [String: Any],
-                    params: [String: Any]? = nil,
-                    props: [String: [String: Any]]? = nil) {
+    public func initDialog(_ dialogId: String, defaults: [String: Any],
+                           params: [String: Any]? = nil,
+                           props: [String: [String: Any]]? = nil) {
         self.dialogId = dialogId
         self.dialog = defaults
         self.dialogParams = params
         self.dialogProps = props ?? [:]
     }
 
-    func getDialog(_ key: String) -> Any? {
+    public func getDialog(_ key: String) -> Any? {
         guard dialogId != nil else { return nil }
         if let prop = dialogProps[key], let getExpr = prop["get"] as? String {
             // Evaluate getter against sibling dialog state as bare names
@@ -102,7 +106,7 @@ class StateStore {
         return dialog[key]
     }
 
-    func setDialog(_ key: String, _ value: Any?) {
+    public func setDialog(_ key: String, _ value: Any?) {
         guard dialogId != nil else { return }
         if let prop = dialogProps[key] {
             if let setExpr = prop["set"] as? String {
@@ -130,19 +134,19 @@ class StateStore {
         dialog[key] = value
     }
 
-    func getDialogState() -> [String: Any] {
+    public func getDialogState() -> [String: Any] {
         dialog
     }
 
-    func getDialogId() -> String? {
+    public func getDialogId() -> String? {
         dialogId
     }
 
-    func getDialogParams() -> [String: Any]? {
+    public func getDialogParams() -> [String: Any]? {
         dialogParams
     }
 
-    func closeDialog() {
+    public func closeDialog() {
         dialogId = nil
         dialog = [:]
         dialogParams = nil
@@ -151,8 +155,8 @@ class StateStore {
 
     // MARK: - List operations
 
-    func listPush(_ panelId: String, _ key: String, _ value: Any,
-                   unique: Bool = false, maxLength: Int? = nil) {
+    public func listPush(_ panelId: String, _ key: String, _ value: Any,
+                         unique: Bool = false, maxLength: Int? = nil) {
         guard panels[panelId] != nil else { return }
         var lst = (panels[panelId]?[key] as? [Any]) ?? []
         if unique {
@@ -172,7 +176,7 @@ class StateStore {
     /// Build an evaluation context dict for the expression evaluator.
     /// Returns ["state": [...], "panel": [...], ...].
     /// When a dialog is open, also includes "dialog" and "param" keys.
-    func evalContext(extra: [String: Any]? = nil) -> [String: Any] {
+    public func evalContext(extra: [String: Any]? = nil) -> [String: Any] {
         var ctx: [String: Any] = ["state": state]
 
         if let pid = activePanel, let scope = panels[pid] {

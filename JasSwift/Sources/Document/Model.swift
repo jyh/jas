@@ -23,6 +23,13 @@ public class Model: ObservableObject {
     @Published public var fillOnTop: Bool = true
     /// Per-document list of recently committed colors (hex strings, no #), newest first. Max 10.
     @Published public var recentColors: [String] = []
+    /// Shared StateStore for panel-scoped state. Panels call
+    /// `initPanel` on first render and `setPanel` on every widget
+    /// write; the store survives across re-renders so edits persist.
+    /// A panel-state mutation bumps `panelStateVersion` so SwiftUI
+    /// re-renders the bound views.
+    public let stateStore: StateStore = StateStore()
+    @Published public var panelStateVersion: Int = 0
     /// Stack of isolated container paths for the Layers panel. Each entry
     /// is a top-level path [Int]. Written by enter/exit_isolation_mode
     /// actions via YAML dispatch (see LayersPanel.dispatchYamlAction).
