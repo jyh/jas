@@ -15,8 +15,9 @@ from typing import Any
 
 from geometry.element import Text, TextPath, Rect, sync_tspans_from_content
 from geometry.tspan import (
-    Tspan, concat_content, default_tspan, merge, reconcile_content, resolve_id,
-    split, split_range, tspans_from_content,
+    Tspan, concat_content, copy_range, default_tspan, insert_tspans_at,
+    merge, reconcile_content, resolve_id, split, split_range,
+    tspans_from_content,
 )
 
 
@@ -320,3 +321,90 @@ class TestReconcileContent:
         r = reconcile_content(ts, "ab")
         assert len(r) == 1
         assert r[0].content == "ab"
+
+
+class TestCopyRange:
+    def test_empty_returns_empty(self):
+        ts = [_plain("hello")]
+        assert copy_range(ts, 2, 2) == []
+        assert copy_range(ts, 3, 1) == []
+
+    def test_inside_single_tspan_preserves_overrides(self):
+        ts = [_bold("bold text")]
+        r = copy_range(ts, 5, 9)
+        assert len(r) == 1
+        assert r[0].content == "text"
+        assert r[0].font_weight == "bold"
+
+    def test_across_boundary_returns_partial_tspans(self):
+        ts = [_plain("foo"), _bold("bar", tspan_id=1)]
+        r = copy_range(ts, 1, 5)
+        assert len(r) == 2
+        assert r[0].content == "oo"
+        assert r[0].font_weight is None
+        assert r[1].content == "ba"
+        assert r[1].font_weight == "bold"
+
+    def test_saturates_to_total(self):
+        ts = [_plain("hi")]
+        r = copy_range(ts, 0, 999)
+        assert len(r) == 1
+        assert r[0].content == "hi"
+
+
+class TestInsertTspansAt:
+    def test_at_boundary_between_tspans(self):
+        base = [_plain("foo"), _bold("bar", tspan_id=1)]
+        ins = [_bold("X")]
+        r = insert_tspans_at(base, 3, ins)
+        assert len(r) == 2
+        assert r[0].content == "foo"
+        assert r[1].content == "Xbar"
+        assert r[1].font_weight == "bold"
+
+    def test_inside_a_tspan_splits(self):
+        base = [_plain("hello")]
+        ins = [_bold("X")]
+        r = insert_tspans_at(base, 2, ins)
+        assert len(r) == 3
+        assert r[0].content == "he"
+        assert r[0].font_weight is None
+        assert r[1].content == "X"
+        assert r[1].font_weight == "bold"
+        assert r[2].content == "llo"
+        assert r[2].font_weight is None
+
+    def test_prepend_at_zero(self):
+        base = [_plain("hello")]
+        ins = [_bold("Say ")]
+        r = insert_tspans_at(base, 0, ins)
+        assert len(r) == 2
+        assert r[0].content == "Say "
+        assert r[0].font_weight == "bold"
+
+    def test_append_at_end(self):
+        base = [_plain("hello")]
+        ins = [_bold("!")]
+        r = insert_tspans_at(base, 5, ins)
+        assert len(r) == 2
+        assert r[1].content == "!"
+        assert r[1].font_weight == "bold"
+
+    def test_reassigns_ids(self):
+        base = [Tspan(id=0, content="abc")]
+        ins = [Tspan(id=0, content="X", font_weight="bold")]
+        r = insert_tspans_at(base, 1, ins)
+        ids = [t.id for t in r]
+        assert len(set(ids)) == len(ids)
+
+    def test_empty_is_noop(self):
+        base = [_plain("hello")]
+        assert insert_tspans_at(base, 2, []) == base
+        assert insert_tspans_at(base, 2, [_plain("")]) == base
+
+    def test_copy_then_insert_roundtrip(self):
+        base = [_plain("foo"), _bold("bar", tspan_id=1)]
+        clipboard = copy_range(base, 3, 6)
+        r = insert_tspans_at(base, 0, clipboard)
+        assert concat_content(r) == "barfoobar"
+        assert any(len(t.content) >= 3 and t.font_weight == "bold" for t in r)

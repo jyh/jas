@@ -43,6 +43,20 @@ val split_range : tspan array -> int -> int -> tspan array * int option * int op
     invariant: an all-empty input collapses to [[| default_tspan () |]]. *)
 val merge : tspan array -> tspan array
 
+(** Extract the covered slice [[char_start, char_end)] as a fresh
+    tspan array. Each returned tspan carries its source tspan's
+    overrides and id, with [content] truncated to the overlap.
+    Empty / inverted range returns [[||]]; out-of-range bounds
+    saturate. Building block for tspan-aware clipboard. *)
+val copy_range : tspan array -> int -> int -> tspan array
+
+(** Splice [to_insert] into [original] at character position
+    [char_pos]. Boundary insert slots between neighbours; mid-tspan
+    insert splits that tspan around the insertion. Ids on
+    [to_insert] are reassigned above [original]'s max id to avoid
+    collisions. Final [merge] pass collapses adjacent-equal tspans. *)
+val insert_tspans_at : tspan array -> int -> tspan array -> tspan array
+
 (** Reconcile a new flat content string back onto the original
     tspan structure, preserving per-range overrides where possible.
 

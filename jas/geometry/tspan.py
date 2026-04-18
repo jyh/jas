@@ -252,6 +252,76 @@ def _attrs_equal(a: Tspan, b: Tspan) -> bool:
     return all(getattr(a, s) == getattr(b, s) for s in _ATTR_SLOTS)
 
 
+def copy_range(original: list[Tspan], char_start: int, char_end: int) -> list[Tspan]:
+    """Extract the covered slice ``[char_start, char_end)`` of
+    ``original`` as a fresh tspan list. Each returned tspan carries
+    its source tspan's overrides and id, with ``content`` truncated
+    to the overlap. Empty / inverted range → ``[]``; out-of-range
+    bounds saturate. Building block for tspan-aware clipboard.
+    """
+    if char_start >= char_end:
+        return []
+    total = sum(len(t.content) for t in original)
+    s = min(char_start, total)
+    e = min(char_end, total)
+    if s >= e:
+        return []
+    result: list[Tspan] = []
+    cursor = 0
+    for t in original:
+        t_len = len(t.content)
+        t_start = cursor
+        t_end = t_start + t_len
+        overlap_start = max(s, t_start)
+        overlap_end = min(e, t_end)
+        if overlap_start < overlap_end:
+            local_start = overlap_start - t_start
+            local_end = overlap_end - t_start
+            result.append(replace(t, content=t.content[local_start:local_end]))
+        cursor = t_end
+    return result
+
+
+def insert_tspans_at(original: list[Tspan], char_pos: int,
+                     to_insert: list[Tspan]) -> list[Tspan]:
+    """Splice ``to_insert`` into ``original`` at character position
+    ``char_pos``. Boundary insert slots between neighbours; mid-tspan
+    insert splits that tspan around the insertion. Ids on
+    ``to_insert`` are reassigned above ``original``'s max id to
+    avoid collisions. Final ``merge`` pass collapses adjacent-equal
+    tspans.
+    """
+    if not any(t.content for t in to_insert):
+        return list(original)
+    base_max = max((t.id for t in original), default=-1)
+    next_id = base_max + 1
+    reindexed: list[Tspan] = []
+    for t in to_insert:
+        reindexed.append(replace(t, id=next_id))
+        next_id += 1
+    total = sum(len(t.content) for t in original)
+    pos = min(char_pos, total)
+    before: list[Tspan] = []
+    after: list[Tspan] = []
+    cursor = 0
+    for t in original:
+        t_len = len(t.content)
+        t_end = cursor + t_len
+        if t_end <= pos:
+            before.append(t)
+        elif cursor >= pos:
+            after.append(t)
+        else:
+            local = pos - cursor
+            before.append(replace(t, content=t.content[:local]))
+            # Right half gets a fresh id to avoid colliding with the
+            # left half keeping the original id.
+            after.append(replace(t, id=next_id, content=t.content[local:]))
+            next_id += 1
+        cursor = t_end
+    return merge(before + reindexed + after)
+
+
 def _is_utf8_boundary(s: str, byte_offset: int) -> bool:
     """True when ``byte_offset`` is a valid UTF-8 scalar boundary.
     Continuation bytes start with bit pattern 10xxxxxx."""
