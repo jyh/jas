@@ -201,6 +201,54 @@ def _default_tspan_json(content: str) -> str:
     return o.build()
 
 
+def _tspan_json(t) -> str:
+    """Emit a full Tspan as a canonical JSON object. Override fields
+    that are ``None`` serialize as ``null``. ``text_decoration`` is
+    a sorted array of CSS tokens when present."""
+    o = _JsonObj()
+    o._entries.append(("baseline_shift",
+        _null_or_num(t.baseline_shift)))
+    o.str("content", t.content)
+    o._entries.append(("dx", _null_or_num(t.dx)))
+    o._entries.append(("font_family", _null_or_str(t.font_family)))
+    o._entries.append(("font_size", _null_or_num(t.font_size)))
+    o._entries.append(("font_style", _null_or_str(t.font_style)))
+    o._entries.append(("font_variant", _null_or_str(t.font_variant)))
+    o._entries.append(("font_weight", _null_or_str(t.font_weight)))
+    o._entries.append(("id", str(int(t.id))))
+    o._entries.append(("jas_aa_mode", _null_or_str(t.jas_aa_mode)))
+    o._entries.append(("jas_fractional_widths", _null_or_bool(t.jas_fractional_widths)))
+    o._entries.append(("jas_kerning_mode", _null_or_str(t.jas_kerning_mode)))
+    o._entries.append(("jas_no_break", _null_or_bool(t.jas_no_break)))
+    o._entries.append(("letter_spacing", _null_or_num(t.letter_spacing)))
+    o._entries.append(("line_height", _null_or_num(t.line_height)))
+    o._entries.append(("rotate", _null_or_num(t.rotate)))
+    o._entries.append(("style_name", _null_or_str(t.style_name)))
+    if t.text_decoration is None:
+        o.null("text_decoration")
+    else:
+        members = sorted(t.text_decoration)
+        o._entries.append(("text_decoration",
+            "[" + ",".join(f'"{m}"' for m in members) + "]"))
+    o._entries.append(("text_rendering", _null_or_str(t.text_rendering)))
+    o._entries.append(("text_transform", _null_or_str(t.text_transform)))
+    o.null("transform")  # transform on tspan omitted for now
+    o._entries.append(("xml_lang", _null_or_str(t.xml_lang)))
+    return o.build()
+
+
+def _null_or_num(v):
+    return "null" if v is None else _fmt(v)
+
+
+def _null_or_str(v):
+    return "null" if v is None else f'"{v}"'
+
+
+def _null_or_bool(v):
+    return "null" if v is None else ("true" if v else "false")
+
+
 def _path_command_json(cmd) -> str:
     o = _JsonObj()
     if isinstance(cmd, MoveTo):
@@ -355,7 +403,7 @@ def _element_json(elem: Element) -> str:
         o.raw("text_decoration", _text_decoration_array_json(elem.text_decoration))
         o.null("text_rendering")
         o.empty_as_null("text_transform", elem.text_transform)
-        o.raw("tspans", _json_array([_default_tspan_json(elem.content)]))
+        o.raw("tspans", _json_array([_tspan_json(t) for t in elem.tspans]))
         o.empty_as_null("vertical_scale", elem.vertical_scale)
         o.num("width", elem.width)
         o.num("x", elem.x)
@@ -388,7 +436,7 @@ def _element_json(elem: Element) -> str:
         o.raw("text_decoration", _text_decoration_array_json(elem.text_decoration))
         o.null("text_rendering")
         o.empty_as_null("text_transform", elem.text_transform)
-        o.raw("tspans", _json_array([_default_tspan_json(elem.content)]))
+        o.raw("tspans", _json_array([_tspan_json(t) for t in elem.tspans]))
         o.empty_as_null("vertical_scale", elem.vertical_scale)
         o.empty_as_null("xml_lang", elem.xml_lang)
     return o.build()
@@ -530,6 +578,58 @@ def _parse_content_or_tspans(d: dict) -> str:
     return d.get("content", "")
 
 
+def _parse_tspan(d: dict):
+    """Parse a single tspan dict from canonical JSON. Every override
+    field is optional; missing / null values stay as None so the
+    tspan inherits from the parent Text."""
+    from geometry.tspan import Tspan
+    from geometry.element import Transform as TransformT
+    decor_raw = d.get("text_decoration")
+    decor = tuple(decor_raw) if isinstance(decor_raw, list) else None
+    tr_raw = d.get("transform")
+    if isinstance(tr_raw, dict):
+        transform = TransformT(
+            a=tr_raw.get("a", 1.0), b=tr_raw.get("b", 0.0),
+            c=tr_raw.get("c", 0.0), d=tr_raw.get("d", 1.0),
+            e=tr_raw.get("e", 0.0), f=tr_raw.get("f", 0.0))
+    else:
+        transform = None
+    return Tspan(
+        id=int(d.get("id", 0)),
+        content=d.get("content", ""),
+        baseline_shift=d.get("baseline_shift"),
+        dx=d.get("dx"),
+        font_family=d.get("font_family"),
+        font_size=d.get("font_size"),
+        font_style=d.get("font_style"),
+        font_variant=d.get("font_variant"),
+        font_weight=d.get("font_weight"),
+        jas_aa_mode=d.get("jas_aa_mode"),
+        jas_fractional_widths=d.get("jas_fractional_widths"),
+        jas_kerning_mode=d.get("jas_kerning_mode"),
+        jas_no_break=d.get("jas_no_break"),
+        letter_spacing=d.get("letter_spacing"),
+        line_height=d.get("line_height"),
+        rotate=d.get("rotate"),
+        style_name=d.get("style_name"),
+        text_decoration=decor,
+        text_rendering=d.get("text_rendering"),
+        text_transform=d.get("text_transform"),
+        transform=transform,
+        xml_lang=d.get("xml_lang"),
+    )
+
+
+def _parse_tspans_field(d: dict):
+    """Return a tuple of parsed Tspans when the JSON has a ``tspans``
+    array, else ``None`` so the caller can let ``Text.__post_init__``
+    derive a single-tspan default from content."""
+    tspans = d.get("tspans")
+    if tspans is None:
+        return None
+    return tuple(_parse_tspan(t) for t in tspans)
+
+
 def _parse_text_decoration_field(v) -> str:
     """Accept the canonical text_decoration shape (a sorted array of
     CSS tokens) or the legacy CSS string. Returns the space-separated
@@ -586,6 +686,8 @@ def _parse_element(d: dict) -> Element:
                     fill=_parse_fill(d["fill"]),
                     stroke=_parse_stroke(d["stroke"]), **common)
     elif typ == "text":
+        tspans = _parse_tspans_field(d)
+        tspans_kw = {"tspans": tspans} if tspans is not None else {}
         return Text(x=d["x"], y=d["y"],
                     content=_parse_content_or_tspans(d),
                     font_family=d["font_family"], font_size=d["font_size"],
@@ -604,9 +706,11 @@ def _parse_element(d: dict) -> Element:
                     kerning=d.get("jas_kerning_mode") or "",
                     width=d["width"], height=d["height"],
                     fill=_parse_fill(d["fill"]),
-                    stroke=_parse_stroke(d["stroke"]), **common)
+                    stroke=_parse_stroke(d["stroke"]), **tspans_kw, **common)
     elif typ == "text_path":
         cmds = tuple(_parse_path_command(c) for c in d["d"])
+        tspans = _parse_tspans_field(d)
+        tspans_kw = {"tspans": tspans} if tspans is not None else {}
         return TextPath(d=cmds,
                         content=_parse_content_or_tspans(d),
                         start_offset=d["start_offset"],
@@ -627,7 +731,8 @@ def _parse_element(d: dict) -> Element:
                         vertical_scale=d.get("vertical_scale") or "",
                         kerning=d.get("jas_kerning_mode") or "",
                         fill=_parse_fill(d["fill"]),
-                        stroke=_parse_stroke(d["stroke"]), **common)
+                        stroke=_parse_stroke(d["stroke"]),
+                        **tspans_kw, **common)
     raise ValueError(f"Unknown element type: {typ}")
 
 

@@ -110,6 +110,7 @@ class CrossLanguageTest(absltest.TestCase):
             "circle_basic", "ellipse_basic",
             "polyline_basic", "polygon_basic", "path_all_commands",
             "text_basic", "text_path_basic",
+            "text_with_tspans", "text_path_with_tspans",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document",
         ]

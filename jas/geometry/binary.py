@@ -159,6 +159,85 @@ def _pack_path_command(cmd) -> list:
     raise ValueError(f"Unknown path command: {type(cmd)}")
 
 
+def _pack_tspan(t) -> list:
+    """Pack a single Tspan as a compact 22-element list. Mirrors
+    Rust's ``pack_tspan`` / Swift's ``packTspan`` / OCaml's
+    ``pack_tspan``. Each override field is its typed value or
+    ``None`` when unset; text_decoration is a list (or None);
+    transform is a 6-float list (or None)."""
+    decor = list(t.text_decoration) if t.text_decoration is not None else None
+    if t.transform is not None:
+        tr = t.transform
+        transform = [tr.a, tr.b, tr.c, tr.d, tr.e, tr.f]
+    else:
+        transform = None
+    return [
+        t.id,
+        t.content,
+        t.baseline_shift,
+        t.dx,
+        t.font_family,
+        t.font_size,
+        t.font_style,
+        t.font_variant,
+        t.font_weight,
+        t.jas_aa_mode,
+        t.jas_fractional_widths,
+        t.jas_kerning_mode,
+        t.jas_no_break,
+        t.letter_spacing,
+        t.line_height,
+        t.rotate,
+        t.style_name,
+        decor,
+        t.text_rendering,
+        t.text_transform,
+        transform,
+        t.xml_lang,
+    ]
+
+
+def _unpack_tspan(v):
+    """Inverse of ``_pack_tspan``. Tolerant of trailing field
+    additions — missing indices fall back to None (default)."""
+    from geometry.tspan import Tspan
+    from geometry.element import Transform as TransformT
+    def get(i):
+        return v[i] if i < len(v) else None
+    decor_raw = get(17)
+    decor = tuple(decor_raw) if isinstance(decor_raw, list) else None
+    tr_raw = get(20)
+    if isinstance(tr_raw, list) and len(tr_raw) >= 6:
+        transform = TransformT(a=tr_raw[0], b=tr_raw[1], c=tr_raw[2],
+                               d=tr_raw[3], e=tr_raw[4], f=tr_raw[5])
+    else:
+        transform = None
+    return Tspan(
+        id=int(get(0) or 0),
+        content=get(1) or "",
+        baseline_shift=get(2),
+        dx=get(3),
+        font_family=get(4),
+        font_size=get(5),
+        font_style=get(6),
+        font_variant=get(7),
+        font_weight=get(8),
+        jas_aa_mode=get(9),
+        jas_fractional_widths=get(10),
+        jas_kerning_mode=get(11),
+        jas_no_break=get(12),
+        letter_spacing=get(13),
+        line_height=get(14),
+        rotate=get(15),
+        style_name=get(16),
+        text_decoration=decor,
+        text_rendering=get(18),
+        text_transform=get(19),
+        transform=transform,
+        xml_lang=get(21),
+    )
+
+
 def _pack_element(elem: Element) -> list:
     locked = elem.locked
     opacity = elem.opacity
@@ -202,19 +281,23 @@ def _pack_element(elem: Element) -> list:
                 cmds, _pack_fill(elem.fill), _pack_stroke(elem.stroke),
                 _pack_width_points(elem.width_points)]
     elif isinstance(elem, Text):
+        tspans = [_pack_tspan(t) for t in elem.tspans]
         return [_TAG_TEXT, locked, opacity, vis, xform,
                 elem.x, elem.y, elem.content,
                 elem.font_family, elem.font_size,
                 elem.font_weight, elem.font_style, elem.text_decoration,
                 elem.width, elem.height,
-                _pack_fill(elem.fill), _pack_stroke(elem.stroke)]
+                _pack_fill(elem.fill), _pack_stroke(elem.stroke),
+                tspans]
     elif isinstance(elem, TextPath):
         cmds = [_pack_path_command(c) for c in elem.d]
+        tspans = [_pack_tspan(t) for t in elem.tspans]
         return [_TAG_TEXT_PATH, locked, opacity, vis, xform,
                 cmds, elem.content, elem.start_offset,
                 elem.font_family, elem.font_size,
                 elem.font_weight, elem.font_style, elem.text_decoration,
-                _pack_fill(elem.fill), _pack_stroke(elem.stroke)]
+                _pack_fill(elem.fill), _pack_stroke(elem.stroke),
+                tspans]
     raise ValueError(f"Unknown element type: {type(elem)}")
 
 
@@ -370,21 +453,34 @@ def _unpack_element(arr: list) -> Element:
                     stroke=_unpack_stroke(arr[7]),
                     width_points=wp, **common)
     elif tag == _TAG_TEXT:
+        # Prefer the trailing tspans field when present; otherwise
+        # fall back to the single-default-tspan derived from content
+        # in __post_init__ (blobs predating the tspan codec extension).
+        tspans_raw = arr[17] if len(arr) > 17 else None
+        tspans_kw = {}
+        if isinstance(tspans_raw, list) and tspans_raw:
+            tspans_kw["tspans"] = tuple(_unpack_tspan(t) for t in tspans_raw)
         return Text(x=arr[5], y=arr[6], content=arr[7],
                     font_family=arr[8], font_size=arr[9],
                     font_weight=arr[10], font_style=arr[11],
                     text_decoration=arr[12],
                     width=arr[13], height=arr[14],
                     fill=_unpack_fill(arr[15]),
-                    stroke=_unpack_stroke(arr[16]), **common)
+                    stroke=_unpack_stroke(arr[16]),
+                    **tspans_kw, **common)
     elif tag == _TAG_TEXT_PATH:
         cmds = tuple(_unpack_path_command(c) for c in arr[5])
+        tspans_raw = arr[15] if len(arr) > 15 else None
+        tspans_kw = {}
+        if isinstance(tspans_raw, list) and tspans_raw:
+            tspans_kw["tspans"] = tuple(_unpack_tspan(t) for t in tspans_raw)
         return TextPath(d=cmds, content=arr[6], start_offset=arr[7],
                         font_family=arr[8], font_size=arr[9],
                         font_weight=arr[10], font_style=arr[11],
                         text_decoration=arr[12],
                         fill=_unpack_fill(arr[13]),
-                        stroke=_unpack_stroke(arr[14]), **common)
+                        stroke=_unpack_stroke(arr[14]),
+                        **tspans_kw, **common)
     raise ValueError(f"Unknown element tag: {tag}")
 
 
