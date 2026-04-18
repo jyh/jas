@@ -249,6 +249,82 @@ let () =
         assert (Text_edit.insertion_tspan_pos s tspans = (1, 2)));
     ];
 
+    "next-typed-character state", [
+      (* Helper: a pending template with font_weight = Some "bold". *)
+      Alcotest.test_case "set_pending_override captures anchor at insertion" `Quick (fun () ->
+        let open Jas in
+        let bold = { (Tspan.default_tspan ()) with font_weight = Some "bold" } in
+        let s = Text_edit.create
+          ~path:[0; 0] ~target:Text_edit.Edit_text
+          ~content:"hello" ~insertion:0 in
+        Text_edit.set_insertion s 3 ~extend:false;
+        Text_edit.set_pending_override s bold;
+        assert (Text_edit.has_pending_override s);
+        assert (Text_edit.pending_char_start s = Some 3));
+
+      Alcotest.test_case "set_pending_override merges across calls" `Quick (fun () ->
+        let open Jas in
+        let bold = { (Tspan.default_tspan ()) with font_weight = Some "bold" } in
+        let italic = { (Tspan.default_tspan ()) with font_style = Some "italic" } in
+        let s = Text_edit.create
+          ~path:[0; 0] ~target:Text_edit.Edit_text
+          ~content:"hello" ~insertion:0 in
+        Text_edit.set_pending_override s bold;
+        Text_edit.set_pending_override s italic;
+        let p = match Text_edit.pending_override s with
+          | Some p -> p | None -> assert false in
+        assert (p.font_weight = Some "bold");
+        assert (p.font_style = Some "italic");
+        (* Anchor not moved by second call. *)
+        assert (Text_edit.pending_char_start s = Some 0));
+
+      Alcotest.test_case "set_insertion to different position clears pending" `Quick (fun () ->
+        let open Jas in
+        let bold = { (Tspan.default_tspan ()) with font_weight = Some "bold" } in
+        let s = Text_edit.create
+          ~path:[0; 0] ~target:Text_edit.Edit_text
+          ~content:"hello" ~insertion:0 in
+        Text_edit.set_insertion s 3 ~extend:false;
+        Text_edit.set_pending_override s bold;
+        Text_edit.set_insertion s 2 ~extend:false;
+        assert (not (Text_edit.has_pending_override s)));
+
+      Alcotest.test_case "set_insertion extend preserves pending" `Quick (fun () ->
+        let open Jas in
+        let bold = { (Tspan.default_tspan ()) with font_weight = Some "bold" } in
+        let s = Text_edit.create
+          ~path:[0; 0] ~target:Text_edit.Edit_text
+          ~content:"hello" ~insertion:0 in
+        Text_edit.set_insertion s 3 ~extend:false;
+        Text_edit.set_pending_override s bold;
+        Text_edit.set_insertion s 4 ~extend:true;
+        assert (Text_edit.has_pending_override s));
+
+      Alcotest.test_case "undo clears pending" `Quick (fun () ->
+        let open Jas in
+        let bold = { (Tspan.default_tspan ()) with font_weight = Some "bold" } in
+        let s = Text_edit.create
+          ~path:[0; 0] ~target:Text_edit.Edit_text
+          ~content:"hello" ~insertion:0 in
+        Text_edit.insert s "X";
+        Text_edit.set_pending_override s bold;
+        Text_edit.undo s;
+        assert (not (Text_edit.has_pending_override s)));
+
+      Alcotest.test_case "merge_tspan_overrides copies only Some fields" `Quick (fun () ->
+        let open Jas in
+        let target = { (Tspan.default_tspan ()) with
+                       content = "hi";
+                       font_style = Some "italic";
+                       font_weight = Some "normal" } in
+        let source = { (Tspan.default_tspan ()) with
+                       font_weight = Some "bold" } in
+        let merged = Tspan.merge_tspan_overrides target source in
+        assert (merged.content = "hi");
+        assert (merged.font_weight = Some "bold");
+        assert (merged.font_style = Some "italic"));
+    ];
+
     "UTF-8 multibyte", [
       (* UTF-8 multibyte handling. 'é' is 2 bytes in UTF-8 but a single
          Unicode scalar; the editor must speak in chars throughout. *)

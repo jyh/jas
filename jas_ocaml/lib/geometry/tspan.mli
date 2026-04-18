@@ -27,6 +27,11 @@ val concat_content : tspan array -> string
     no such tspan exists (e.g. dropped by [merge]). O(n). *)
 val resolve_id : tspan array -> tspan_id -> int option
 
+(** Copy every [Some _] override field from [source] into [target],
+    leaving [id] and [content] untouched. Used by the next-typed-
+    character state (the "pending override" template). *)
+val merge_tspan_overrides : tspan -> tspan -> tspan
+
 (** Caret side at a tspan boundary. See TSPAN.md Text-edit session
     integration — when a character index lands exactly on the join
     between two tspans, the affinity decides which side "wins".
