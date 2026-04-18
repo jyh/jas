@@ -2184,6 +2184,46 @@
           "log": "scroll_to_selected"
         }
       ]
+    },
+    "toggle_hanging_punctuation": {
+      "description": "Toggle the Hanging Punctuation flag on the current paragraph selection. Phase 2 stub \u2014 real toggle of panel.hanging_punctuation and the jas:hanging-punctuation attribute on the wrapper tspan lands in Phase 4 alongside the panel-state mutation primitives.\n",
+      "category": "paragraph",
+      "effects": [
+        {
+          "log": "toggle_hanging_punctuation (Phase 4 wiring pending)"
+        }
+      ]
+    },
+    "open_paragraph_justification": {
+      "description": "Open the Justification dialog from the Paragraph panel menu. Dialog content lives in workspace/dialogs/paragraph_justification.yaml.\n",
+      "category": "paragraph",
+      "effects": [
+        {
+          "open_dialog": {
+            "id": "paragraph_justification"
+          }
+        }
+      ]
+    },
+    "open_paragraph_hyphenation": {
+      "description": "Open the Hyphenation dialog from the Paragraph panel menu. Dialog content lives in workspace/dialogs/paragraph_hyphenation.yaml.\n",
+      "category": "paragraph",
+      "effects": [
+        {
+          "open_dialog": {
+            "id": "paragraph_hyphenation"
+          }
+        }
+      ]
+    },
+    "reset_paragraph_panel": {
+      "description": "Reset every Paragraph panel control to its default per PARAGRAPH.md \u00a7Reset Panel. Phase 2 stub \u2014 Phase 4 wires the real reset (panel-local state plus jas:* attrs on the selection's paragraph wrapper tspans).\n",
+      "category": "paragraph",
+      "effects": [
+        {
+          "log": "reset_paragraph_panel (Phase 4 wiring pending)"
+        }
+      ]
     }
   },
   "version": 1,
@@ -8158,9 +8198,9 @@
           "description": "Leading (line height) in points. Default is the Auto value (120% of font size, 14.4 for 12pt). Full spec uses a parens-wrapped display for the Auto case.\n"
         },
         "kerning": {
-          "type": "number",
-          "default": 0,
-          "description": "Kerning in 1/1000 em. Full spec adds Auto / Optical / Metrics named modes."
+          "type": "string",
+          "default": "Auto",
+          "description": "Kerning. Named modes Auto / Optical / Metrics pass through to the element's kerning attribute verbatim. Numeric values are entered in 1/1000 em and serialise to the element as \"{N}em\". Empty, \"0\", or \"Auto\" round-trip to an empty element attribute (the default).\n"
         },
         "tracking": {
           "type": "number",
@@ -8513,12 +8553,42 @@
                 "children": [
                   {
                     "id": "ch_kerning",
-                    "type": "number_input",
+                    "type": "combo_box",
                     "summary": "Kerning",
-                    "description": "Kerning between characters in 1/1000 em.",
+                    "description": "Kerning between characters. Named modes (Auto, Optical, Metrics) pass through to the element's kerning attribute verbatim. Free numeric entry is treated as 1/1000 em and serialises to \"{N}em\". Named-mode text is preserved in the panel and on the element.\n",
                     "style": {
                       "width": "100%"
                     },
+                    "options": [
+                      {
+                        "value": "Auto",
+                        "label": "Auto"
+                      },
+                      {
+                        "value": "Optical",
+                        "label": "Optical"
+                      },
+                      {
+                        "value": "Metrics",
+                        "label": "Metrics"
+                      },
+                      {
+                        "value": "0",
+                        "label": "0"
+                      },
+                      {
+                        "value": "25",
+                        "label": "25"
+                      },
+                      {
+                        "value": "50",
+                        "label": "50"
+                      },
+                      {
+                        "value": "100",
+                        "label": "100"
+                      }
+                    ],
                     "bind": {
                       "value": "panel.kerning"
                     }
@@ -11411,49 +11481,109 @@
       "id": "paragraph_panel_content",
       "type": "panel",
       "summary": "Paragraph",
-      "description": "Paragraph formatting panel \u2014 initial placeholder implementation. Provides alignment + justification toggles, indent and spacing fields, and a hyphenation toggle, bound to panel-local state per PARAGRAPH.md. Not yet wired to actual paragraph attributes on the selected text; real editing arrives with the tspan-aware editing plumbing and paragraph-level support.\n",
+      "description": "Paragraph formatting panel per PARAGRAPH.md (Phase 2 \u2014 static UI). Provides the alignment radio group (7 icon toggles), bullets and numbered-list dropdowns, indent and space-before/after combos, and the hyphenate checkbox. Panel menu opens the Justification and Hyphenation dialogs; Hanging Punctuation is a menu-only checkmark toggle. Bound to panel-local state only; selection-driven wiring lands in Phase 3, paragraph attribute writes in Phase 4.\nLayout follows PARAGRAPH.md \u00a7Layout \u2014 bootstrap-style grid with intentional right-padding on three rows (alignment: 5-col padding; first-line indent: 6-col padding; hyphenate: 9-col padding).\n",
       "state": {
-        "alignment": {
+        "align_left": {
+          "type": "bool",
+          "default": true,
+          "description": "ALIGN_LEFT_BUTTON state. Default for LTR text."
+        },
+        "align_center": {
+          "type": "bool",
+          "default": false,
+          "description": "ALIGN_CENTER_BUTTON state."
+        },
+        "align_right": {
+          "type": "bool",
+          "default": false,
+          "description": "ALIGN_RIGHT_BUTTON state."
+        },
+        "justify_left": {
+          "type": "bool",
+          "default": false,
+          "description": "JUSTIFY_LEFT_BUTTON \u2014 justify body, last line left."
+        },
+        "justify_center": {
+          "type": "bool",
+          "default": false,
+          "description": "JUSTIFY_CENTER_BUTTON \u2014 justify body, last line centred."
+        },
+        "justify_right": {
+          "type": "bool",
+          "default": false,
+          "description": "JUSTIFY_RIGHT_BUTTON \u2014 justify body, last line right."
+        },
+        "justify_all": {
+          "type": "bool",
+          "default": false,
+          "description": "JUSTIFY_ALL_BUTTON \u2014 every line justified, including the last."
+        },
+        "bullets": {
           "type": "string",
-          "default": "left",
-          "description": "Alignment / justification mode. Values: left, center, right, justify_left, justify_center, justify_right, justify_all. Mutually exclusive in the full spec; not enforced in this placeholder.\n"
+          "default": "",
+          "description": "Bullet style. One of: bullet-disc, bullet-open-circle, bullet-square, bullet-open-square, bullet-dash, bullet-check; empty = None.\n"
+        },
+        "numbered_list": {
+          "type": "string",
+          "default": "",
+          "description": "Numbered-list style. One of: num-decimal, num-lower-alpha, num-upper-alpha, num-lower-roman, num-upper-roman; empty = None.\n"
         },
         "left_indent": {
           "type": "number",
           "default": 0,
-          "description": "Left indent in points; applies to every line of the paragraph."
+          "description": "LEFT_INDENT_DROPDOWN. Unsigned, pt; range 0\u20131296."
         },
         "right_indent": {
           "type": "number",
           "default": 0,
-          "description": "Right indent in points."
+          "description": "RIGHT_INDENT_DROPDOWN. Unsigned, pt; range 0\u20131296."
         },
         "first_line_indent": {
           "type": "number",
           "default": 0,
-          "description": "Additional indent on the first line of each paragraph, in points."
+          "description": "FIRST_LINE_INDENT_DROPDOWN. **Signed**, pt; range \u22121296 to +1296. Negative values produce hanging indents.\n"
         },
         "space_before": {
           "type": "number",
           "default": 0,
-          "description": "Vertical spacing before each paragraph (except the first), in points."
+          "description": "SPACE_BEFORE_DROPDOWN. Unsigned, pt; range 0\u20131296."
         },
         "space_after": {
           "type": "number",
           "default": 0,
-          "description": "Vertical spacing after each paragraph, in points."
+          "description": "SPACE_AFTER_DROPDOWN. Unsigned, pt; range 0\u20131296."
         },
         "hyphenate": {
           "type": "bool",
           "default": false,
-          "description": "Whether line breaking is allowed to use hyphenation."
+          "description": "HYPHENATE_CHECKBOX (master). Mirrored by HYPHENATE_MASTER_CHECKBOX inside the Hyphenation dialog \u2014 both surfaces write panel.hyphenate.\n"
+        },
+        "hanging_punctuation": {
+          "type": "bool",
+          "default": false,
+          "description": "Hanging Punctuation menu-item checkmark state. Toggling the menu entry writes this flag; rendering picks up jas:hanging-punctuation on the paragraph wrapper tspan in Phase 4.\n"
         }
       },
       "init": {},
       "menu": [
         {
-          "label": "Close Paragraph",
-          "action": "close_panel"
+          "label": "Hanging Punctuation",
+          "action": "toggle_hanging_punctuation",
+          "checked": "panel.hanging_punctuation"
+        },
+        "separator",
+        {
+          "label": "Justification\u2026",
+          "action": "open_paragraph_justification"
+        },
+        {
+          "label": "Hyphenation\u2026",
+          "action": "open_paragraph_hyphenation"
+        },
+        "separator",
+        {
+          "label": "Reset Panel",
+          "action": "reset_paragraph_panel"
         }
       ],
       "content": {
@@ -11466,248 +11596,489 @@
         },
         "children": [
           {
-            "type": "container",
-            "layout": "row",
-            "style": {
-              "gap": 4,
-              "alignment": "center"
-            },
+            "type": "row",
             "children": [
               {
-                "type": "text",
-                "content": "Align",
+                "type": "container",
+                "col": 1,
                 "style": {
-                  "width": 60,
-                  "font_size": 10
-                }
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "id": "pg_align_left",
+                    "type": "checkbox",
+                    "icon": "para_align_left",
+                    "summary": "Align Left",
+                    "description": "Align each line to the left boundary; right is ragged.",
+                    "style": {
+                      "width": 24,
+                      "height": 22
+                    },
+                    "bind": {
+                      "value": "panel.align_left"
+                    }
+                  }
+                ]
               },
               {
-                "id": "pg_alignment",
-                "type": "text_input",
-                "summary": "Alignment",
-                "description": "One of: left, center, right, justify_left, justify_center, justify_right, justify_all. Real spec uses seven mutually exclusive icon toggle buttons.\n",
+                "type": "container",
+                "col": 1,
                 "style": {
-                  "flex": 1
+                  "alignment": "center"
                 },
-                "bind": {
-                  "value": "panel.alignment"
-                }
+                "children": [
+                  {
+                    "id": "pg_align_center",
+                    "type": "checkbox",
+                    "icon": "para_align_center",
+                    "summary": "Align Center",
+                    "description": "Centre each line; both edges are ragged.",
+                    "style": {
+                      "width": 24,
+                      "height": 22
+                    },
+                    "bind": {
+                      "value": "panel.align_center"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "col": 1,
+                "style": {
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "id": "pg_align_right",
+                    "type": "checkbox",
+                    "icon": "para_align_right",
+                    "summary": "Align Right",
+                    "description": "Align each line to the right boundary; left is ragged.",
+                    "style": {
+                      "width": 24,
+                      "height": 22
+                    },
+                    "bind": {
+                      "value": "panel.align_right"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "col": 1,
+                "style": {
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "id": "pg_justify_left",
+                    "type": "checkbox",
+                    "icon": "para_justify_left",
+                    "summary": "Justify Left",
+                    "description": "Justify the body of the paragraph; last line aligned left.",
+                    "style": {
+                      "width": 24,
+                      "height": 22
+                    },
+                    "bind": {
+                      "value": "panel.justify_left"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "col": 1,
+                "style": {
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "id": "pg_justify_center",
+                    "type": "checkbox",
+                    "icon": "para_justify_center",
+                    "summary": "Justify Center",
+                    "description": "Justify the body; last line centred.",
+                    "style": {
+                      "width": 24,
+                      "height": 22
+                    },
+                    "bind": {
+                      "value": "panel.justify_center"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "col": 1,
+                "style": {
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "id": "pg_justify_right",
+                    "type": "checkbox",
+                    "icon": "para_justify_right",
+                    "summary": "Justify Right",
+                    "description": "Justify the body; last line aligned right.",
+                    "style": {
+                      "width": 24,
+                      "height": 22
+                    },
+                    "bind": {
+                      "value": "panel.justify_right"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "col": 1,
+                "style": {
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "id": "pg_justify_all",
+                    "type": "checkbox",
+                    "icon": "para_justify_all",
+                    "summary": "Justify All",
+                    "description": "Force every line \u2014 including the last \u2014 to justify to both margins.",
+                    "style": {
+                      "width": 24,
+                      "height": 22
+                    },
+                    "bind": {
+                      "value": "panel.justify_all"
+                    }
+                  }
+                ]
               }
             ]
           },
           {
-            "type": "separator"
-          },
-          {
-            "type": "container",
-            "layout": "row",
-            "style": {
-              "gap": 4,
-              "alignment": "center"
-            },
+            "type": "row",
             "children": [
               {
-                "type": "text",
-                "content": "L Indent",
-                "style": {
-                  "width": 60,
-                  "font_size": 10
-                }
+                "type": "container",
+                "col": 6,
+                "children": [
+                  {
+                    "id": "pg_bullets",
+                    "type": "select",
+                    "summary": "Bullets",
+                    "description": "Bullet marker for each paragraph. Mutually exclusive with Numbered List via shared jas:list-style attribute.\n",
+                    "style": {
+                      "width": "100%"
+                    },
+                    "options": [
+                      {
+                        "value": "",
+                        "label": "None"
+                      },
+                      {
+                        "value": "bullet-disc",
+                        "label": "\u2022   Disc"
+                      },
+                      {
+                        "value": "bullet-open-circle",
+                        "label": "\u25cb   Open Circle"
+                      },
+                      {
+                        "value": "bullet-square",
+                        "label": "\u25a0   Square"
+                      },
+                      {
+                        "value": "bullet-open-square",
+                        "label": "\u25a1   Open Square"
+                      },
+                      {
+                        "value": "bullet-dash",
+                        "label": "\u2013   Dash"
+                      },
+                      {
+                        "value": "bullet-check",
+                        "label": "\u2713   Check"
+                      }
+                    ],
+                    "bind": {
+                      "value": "panel.bullets"
+                    }
+                  }
+                ]
               },
               {
-                "id": "pg_left_indent",
-                "type": "number_input",
-                "summary": "Left indent",
-                "description": "Left indent in points.",
-                "style": {
-                  "flex": 1
-                },
-                "bind": {
-                  "value": "panel.left_indent"
-                }
-              },
-              {
-                "type": "text",
-                "content": "pt",
-                "style": {
-                  "font_size": 10
-                }
+                "type": "container",
+                "col": 6,
+                "children": [
+                  {
+                    "id": "pg_numbered_list",
+                    "type": "select",
+                    "summary": "Numbered List",
+                    "description": "Numbering style. Counter resets when a paragraph with a different (or absent) jas:list-style breaks the run.\n",
+                    "style": {
+                      "width": "100%"
+                    },
+                    "options": [
+                      {
+                        "value": "",
+                        "label": "None"
+                      },
+                      {
+                        "value": "num-decimal",
+                        "label": "1.   Decimal"
+                      },
+                      {
+                        "value": "num-lower-alpha",
+                        "label": "a.   Lower Alpha"
+                      },
+                      {
+                        "value": "num-upper-alpha",
+                        "label": "A.   Upper Alpha"
+                      },
+                      {
+                        "value": "num-lower-roman",
+                        "label": "i.   Lower Roman"
+                      },
+                      {
+                        "value": "num-upper-roman",
+                        "label": "I.   Upper Roman"
+                      }
+                    ],
+                    "bind": {
+                      "value": "panel.numbered_list"
+                    }
+                  }
+                ]
               }
             ]
           },
           {
-            "type": "container",
-            "layout": "row",
-            "style": {
-              "gap": 4,
-              "alignment": "center"
-            },
+            "type": "row",
             "children": [
               {
-                "type": "text",
-                "content": "R Indent",
+                "type": "container",
+                "col": 1,
                 "style": {
-                  "width": 60,
-                  "font_size": 10
-                }
-              },
-              {
-                "id": "pg_right_indent",
-                "type": "number_input",
-                "summary": "Right indent",
-                "description": "Right indent in points.",
-                "style": {
-                  "flex": 1
+                  "alignment": "center"
                 },
-                "bind": {
-                  "value": "panel.right_indent"
-                }
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "para_left_indent",
+                    "style": {
+                      "width": 20,
+                      "height": 20
+                    }
+                  }
+                ]
               },
               {
-                "type": "text",
-                "content": "pt",
+                "type": "container",
+                "col": 5,
+                "children": [
+                  {
+                    "id": "pg_left_indent",
+                    "type": "number_input",
+                    "summary": "Left indent",
+                    "description": "Left indent in points; range 0\u20131296.",
+                    "min": 0,
+                    "max": 1296,
+                    "style": {
+                      "width": "100%"
+                    },
+                    "bind": {
+                      "value": "panel.left_indent"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "col": 1,
                 "style": {
-                  "font_size": 10
-                }
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "para_right_indent",
+                    "style": {
+                      "width": 20,
+                      "height": 20
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "col": 5,
+                "children": [
+                  {
+                    "id": "pg_right_indent",
+                    "type": "number_input",
+                    "summary": "Right indent",
+                    "description": "Right indent in points; range 0\u20131296.",
+                    "min": 0,
+                    "max": 1296,
+                    "style": {
+                      "width": "100%"
+                    },
+                    "bind": {
+                      "value": "panel.right_indent"
+                    }
+                  }
+                ]
               }
             ]
           },
           {
-            "type": "container",
-            "layout": "row",
-            "style": {
-              "gap": 4,
-              "alignment": "center"
-            },
+            "type": "row",
             "children": [
               {
-                "type": "text",
-                "content": "First",
+                "type": "container",
+                "col": 1,
                 "style": {
-                  "width": 60,
-                  "font_size": 10
-                }
-              },
-              {
-                "id": "pg_first_line_indent",
-                "type": "number_input",
-                "summary": "First-line indent",
-                "description": "Additional indent on the first line of each paragraph, in points.",
-                "style": {
-                  "flex": 1
+                  "alignment": "center"
                 },
-                "bind": {
-                  "value": "panel.first_line_indent"
-                }
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "para_first_line_indent",
+                    "style": {
+                      "width": 20,
+                      "height": 20
+                    }
+                  }
+                ]
               },
               {
-                "type": "text",
-                "content": "pt",
-                "style": {
-                  "font_size": 10
-                }
+                "type": "container",
+                "col": 5,
+                "children": [
+                  {
+                    "id": "pg_first_line_indent",
+                    "type": "number_input",
+                    "summary": "First-line indent",
+                    "description": "First-line indent in points; signed (negative produces hanging indent). Range \u22121296 to +1296.\n",
+                    "min": -1296,
+                    "max": 1296,
+                    "style": {
+                      "width": "100%"
+                    },
+                    "bind": {
+                      "value": "panel.first_line_indent"
+                    }
+                  }
+                ]
               }
             ]
           },
           {
-            "type": "separator"
-          },
-          {
-            "type": "container",
-            "layout": "row",
-            "style": {
-              "gap": 4,
-              "alignment": "center"
-            },
+            "type": "row",
             "children": [
               {
-                "type": "text",
-                "content": "Before",
+                "type": "container",
+                "col": 1,
                 "style": {
-                  "width": 60,
-                  "font_size": 10
-                }
-              },
-              {
-                "id": "pg_space_before",
-                "type": "number_input",
-                "summary": "Space before",
-                "description": "Vertical spacing before each paragraph (except the first), in points.",
-                "min": 0,
-                "style": {
-                  "flex": 1
+                  "alignment": "center"
                 },
-                "bind": {
-                  "value": "panel.space_before"
-                }
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "para_space_before",
+                    "style": {
+                      "width": 20,
+                      "height": 20
+                    }
+                  }
+                ]
               },
               {
-                "type": "text",
-                "content": "pt",
+                "type": "container",
+                "col": 5,
+                "children": [
+                  {
+                    "id": "pg_space_before",
+                    "type": "number_input",
+                    "summary": "Space before",
+                    "description": "Vertical space above each paragraph (omitted before the first paragraph in a text element). Points; range 0\u20131296.\n",
+                    "min": 0,
+                    "max": 1296,
+                    "style": {
+                      "width": "100%"
+                    },
+                    "bind": {
+                      "value": "panel.space_before"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "col": 1,
                 "style": {
-                  "font_size": 10
-                }
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "para_space_after",
+                    "style": {
+                      "width": 20,
+                      "height": 20
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "container",
+                "col": 5,
+                "children": [
+                  {
+                    "id": "pg_space_after",
+                    "type": "number_input",
+                    "summary": "Space after",
+                    "description": "Vertical space below each paragraph in points; range 0\u20131296.",
+                    "min": 0,
+                    "max": 1296,
+                    "style": {
+                      "width": "100%"
+                    },
+                    "bind": {
+                      "value": "panel.space_after"
+                    }
+                  }
+                ]
               }
             ]
           },
           {
-            "type": "container",
-            "layout": "row",
-            "style": {
-              "gap": 4,
-              "alignment": "center"
-            },
+            "type": "row",
             "children": [
               {
-                "type": "text",
-                "content": "After",
+                "type": "container",
+                "col": 3,
                 "style": {
-                  "width": 60,
-                  "font_size": 10
-                }
-              },
-              {
-                "id": "pg_space_after",
-                "type": "number_input",
-                "summary": "Space after",
-                "description": "Vertical spacing after each paragraph, in points.",
-                "min": 0,
-                "style": {
-                  "flex": 1
+                  "alignment": "center"
                 },
-                "bind": {
-                  "value": "panel.space_after"
-                }
-              },
-              {
-                "type": "text",
-                "content": "pt",
-                "style": {
-                  "font_size": 10
-                }
-              }
-            ]
-          },
-          {
-            "type": "separator"
-          },
-          {
-            "type": "container",
-            "layout": "row",
-            "style": {
-              "gap": 6,
-              "alignment": "center"
-            },
-            "children": [
-              {
-                "id": "pg_hyphenate",
-                "type": "checkbox",
-                "label": "Hyphenate",
-                "summary": "Hyphenate",
-                "description": "When on, line breaking is allowed to use hyphenation.",
-                "bind": {
-                  "value": "panel.hyphenate"
-                }
+                "children": [
+                  {
+                    "id": "pg_hyphenate",
+                    "type": "checkbox",
+                    "label": "Hyphenate",
+                    "summary": "Hyphenate",
+                    "description": "Master switch \u2014 when on, line breaking may use hyphenation. Hyphenation language is inherited from the character-level xml:lang. Fine-grained parameters live in the Hyphenation dialog (panel menu \u2192 Hyphenation\u2026).\n",
+                    "bind": {
+                      "value": "panel.hyphenate"
+                    }
+                  }
+                ]
               }
             ]
           }

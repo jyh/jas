@@ -1572,3 +1572,37 @@ actions:
     tier: 3
     effects:
       - log: "scroll_to_selected"
+
+  # ── Paragraph panel ───────────────────────────────────────
+  toggle_hanging_punctuation:
+    description: >
+      Toggle the Hanging Punctuation flag on the current paragraph
+      selection. Phase 2 stub — real toggle of panel.hanging_punctuation
+      and the jas:hanging-punctuation attribute on the wrapper tspan
+      lands in Phase 4 alongside the panel-state mutation primitives.
+    category: paragraph
+    effects:
+      - log: "toggle_hanging_punctuation (Phase 4 wiring pending)"
+  open_paragraph_justification:
+    description: >
+      Open the Justification dialog from the Paragraph panel menu.
+      Dialog content lives in workspace/dialogs/paragraph_justification.yaml.
+    category: paragraph
+    effects:
+      - open_dialog: { id: paragraph_justification }
+  open_paragraph_hyphenation:
+    description: >
+      Open the Hyphenation dialog from the Paragraph panel menu.
+      Dialog content lives in workspace/dialogs/paragraph_hyphenation.yaml.
+    category: paragraph
+    effects:
+      - open_dialog: { id: paragraph_hyphenation }
+  reset_paragraph_panel:
+    description: >
+      Reset every Paragraph panel control to its default per
+      PARAGRAPH.md §Reset Panel. Phase 2 stub — Phase 4 wires the real
+      reset (panel-local state plus jas:* attrs on the selection's
+      paragraph wrapper tspans).
+    category: paragraph
+    effects:
+      - log: "reset_paragraph_panel (Phase 4 wiring pending)"
