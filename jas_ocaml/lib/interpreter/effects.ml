@@ -806,3 +806,12 @@ let subscribe_character_panel (store : State_store.t)
     (ctrl_getter : unit -> Controller.controller) : unit =
   State_store.subscribe_panel store "character_panel" (fun _key _value ->
     apply_character_panel_to_selection store (ctrl_getter ()))
+
+(** Subscribe [apply_stroke_panel_to_selection] to global writes on
+    stroke keys. Filters via [is_stroke_render_key] so non-stroke
+    writes don't fire the pipeline. *)
+let subscribe_stroke_panel (store : State_store.t)
+    (ctrl_getter : unit -> Controller.controller) : unit =
+  State_store.subscribe_global store (fun key _value ->
+    if is_stroke_render_key key then
+      apply_stroke_panel_to_selection store (ctrl_getter ()))
