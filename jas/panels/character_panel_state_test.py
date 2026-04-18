@@ -361,6 +361,62 @@ class TestBuildPanelPendingTemplate:
         assert tpl.text_transform == "uppercase"
 
 
+class TestBuildPanelFullOverrides:
+    def test_sets_every_scope_field(self):
+        from panels.character_panel_state import build_panel_full_overrides
+        panel = {**_aligned_panel(),
+                 "style_name": "Bold",
+                 "all_caps": True,
+                 "underline": True}
+        t = build_panel_full_overrides(panel)
+        assert t.font_family == "sans-serif"
+        assert t.font_size == 16.0
+        assert t.font_weight == "bold"
+        assert t.font_style == "normal"
+        assert t.text_transform == "uppercase"
+        assert t.text_decoration == ("underline",)
+
+    def test_regular_style_forces_normal(self):
+        from panels.character_panel_state import build_panel_full_overrides
+        t = build_panel_full_overrides({**_aligned_panel(),
+                                         "style_name": "Regular"})
+        assert t.font_weight == "normal"
+        assert t.font_style == "normal"
+
+
+class TestApplyOverridesToTspanRange:
+    def test_bolds_partial_word(self):
+        from geometry.tspan import Tspan
+        from panels.character_panel_state import apply_overrides_to_tspan_range
+        base = (Tspan(id=0, content="hello"),)
+        overrides = Tspan(font_weight="bold")
+        out = apply_overrides_to_tspan_range(base, 1, 4, overrides)
+        assert len(out) == 3
+        assert out[0].content == "h"
+        assert out[1].content == "ell"
+        assert out[1].font_weight == "bold"
+        assert out[2].content == "o"
+        assert out[2].font_weight != "bold"
+
+    def test_empty_range_is_passthrough(self):
+        from geometry.tspan import Tspan
+        from panels.character_panel_state import apply_overrides_to_tspan_range
+        base = [Tspan(id=0, content="hello")]
+        overrides = Tspan(font_weight="bold")
+        out = apply_overrides_to_tspan_range(base, 2, 2, overrides)
+        assert list(out) == base
+
+    def test_merges_adjacent_equal(self):
+        from geometry.tspan import Tspan
+        from panels.character_panel_state import apply_overrides_to_tspan_range
+        base = [Tspan(id=0, content="foo"), Tspan(id=1, content="bar")]
+        overrides = Tspan(font_weight="bold")
+        out = apply_overrides_to_tspan_range(base, 0, 6, overrides)
+        assert len(out) == 1
+        assert out[0].content == "foobar"
+        assert out[0].font_weight == "bold"
+
+
 class TestPendingRouting:
     def _make_model_with_session(self, text_elem, caret: int,
                                    has_range: bool = False):
@@ -426,8 +482,8 @@ class TestPendingRouting:
         assert session.pending_char_start == 3
         assert session.pending_override.font_weight == "bold"
 
-    def test_panel_write_with_range_selection_writes_to_element(self):
-        # Range-selected session → legacy path (not pending).
+    def test_panel_write_with_range_selection_writes_to_range(self):
+        # Range-selected session → per-range tspan write.
         from geometry.element import Text
         from panels.character_panel_state import apply_character_panel_to_selection
         class _Store:
@@ -435,14 +491,26 @@ class TestPendingRouting:
                 self._state = state
             def get_panel_state(self, _pid):
                 return self._state
-        # Text with actual content so a range-extend selection sticks.
         text = Text(x=0, y=0, content="hello",
                     font_family="sans-serif", font_size=16,
                     font_weight="normal", font_style="normal",
                     text_decoration="", text_transform="", font_variant="",
                     xml_lang="", rotate="")
-        model, session = self._make_model_with_session(text, caret=0, has_range=True)
-        assert session.has_selection()  # sanity
+        model, session = self._make_model_with_session(text, caret=1)
+        session.set_insertion(4, extend=True)  # select [1, 4) → "ell"
+        assert session.has_selection()
         store = _Store({**_aligned_panel(), "style_name": "Bold"})
         apply_character_panel_to_selection(store, model)
+        # Pending stays unset; the write went to the range's tspans.
         assert not session.has_pending_override()
+        elem = model.document.get_element((0, 0))
+        # Element-level weight unchanged.
+        assert elem.font_weight == "normal"
+        # Three tspans: "h" plain, "ell" bold, "o" plain.
+        assert len(elem.tspans) == 3
+        assert elem.tspans[0].content == "h"
+        assert elem.tspans[0].font_weight != "bold"
+        assert elem.tspans[1].content == "ell"
+        assert elem.tspans[1].font_weight == "bold"
+        assert elem.tspans[2].content == "o"
+        assert elem.tspans[2].font_weight != "bold"

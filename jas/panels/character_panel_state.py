@@ -72,6 +72,26 @@ def apply_character_panel_to_selection(store, model) -> None:
                 session.set_pending_override(template)
             return
 
+    # Per-range write: when the active session has a range selection,
+    # apply the panel state to that range only via split_range +
+    # merge_tspan_overrides + merge. The rest of the edited element
+    # is left untouched (per TSPAN.md's "Character attribute writes
+    # (from panels)" algorithm).
+    if session is not None and session.has_selection():
+        try:
+            elem = doc.get_element(session.path)
+        except Exception:
+            elem = None
+        if isinstance(elem, (Text, TextPath)):
+            lo, hi = session.selection_range()
+            overrides = build_panel_full_overrides(panel)
+            new_tspans = tuple(apply_overrides_to_tspan_range(
+                list(elem.tspans), lo, hi, overrides))
+            new_elem = replace(elem, tspans=new_tspans)
+            model.snapshot()
+            model.document = doc.replace_element(session.path, new_elem)
+            return
+
     selection = getattr(doc, "selection", None) or []
     if not selection:
         return
@@ -103,6 +123,75 @@ def apply_character_panel_to_selection(store, model) -> None:
             continue
         doc = doc.replace_element(path, new_elem)
     model.document = doc
+
+
+def build_panel_full_overrides(panel: dict) -> Tspan:
+    """Build a ``Tspan`` override template with every panel-scoped
+    field forced to a concrete value (not diffed against the
+    element). Used by the per-range Character-panel write path.
+
+    Unlike :func:`build_panel_pending_template`, this emits
+    ``"normal"`` etc. for Regular so the range's bold override gets
+    cleared, not skipped.
+    """
+    fam = panel.get("font_family")
+    ff = str(fam) if fam is not None else "sans-serif"
+    fs_raw = panel.get("font_size")
+    fs = float(fs_raw) if fs_raw is not None else 12.0
+    style = panel.get("style_name") or ""
+    style = style.strip() if isinstance(style, str) else ""
+    style_map = {
+        "Regular": ("normal", "normal"),
+        "Italic": ("normal", "italic"),
+        "Bold": ("bold", "normal"),
+        "Bold Italic": ("bold", "italic"),
+        "Italic Bold": ("bold", "italic"),
+    }
+    fw, fst = style_map.get(style, (None, None))
+    underline = bool(panel.get("underline"))
+    strikethrough = bool(panel.get("strikethrough"))
+    td = tuple(sorted([
+        t for t in ("line-through" if strikethrough else None,
+                    "underline" if underline else None) if t
+    ]))
+    all_caps = bool(panel.get("all_caps"))
+    tt = "uppercase" if all_caps else ""
+    small_caps = bool(panel.get("small_caps"))
+    fv = "small-caps" if (small_caps and not all_caps) else ""
+    lang_raw = panel.get("language")
+    lang = str(lang_raw) if lang_raw is not None else ""
+    rot = float(panel.get("character_rotation") or 0.0)
+    return Tspan(
+        font_family=ff,
+        font_size=fs,
+        font_weight=fw,
+        font_style=fst,
+        text_decoration=td,
+        text_transform=tt,
+        font_variant=fv,
+        xml_lang=lang,
+        rotate=rot,
+    )
+
+
+def apply_overrides_to_tspan_range(
+    tspans, char_start: int, char_end: int, overrides: Tspan
+):
+    """Apply ``overrides`` to every tspan covered by
+    ``[char_start, char_end)`` of ``tspans``. Returns a list produced
+    by TSPAN.md's per-range pipeline: ``split_range`` +
+    ``merge_tspan_overrides`` + ``merge``.
+    """
+    if char_start >= char_end:
+        return list(tspans)
+    from geometry.tspan import split_range, merge, merge_tspan_overrides
+    split, first, last = split_range(list(tspans), char_start, char_end)
+    if first is None or last is None:
+        return split
+    out = list(split)
+    for i in range(first, last + 1):
+        out[i] = merge_tspan_overrides(out[i], overrides)
+    return merge(out)
 
 
 def build_panel_pending_template(panel: dict, elem: Element) -> Tspan | None:
