@@ -299,8 +299,9 @@ import Testing
     }
 }
 
-@Test func panelWriteWithRangeSelectionStillWritesToElement() {
+@Test func panelWriteWithRangeSelectionWritesToRange() {
     let model = Model()
+    // Text with three plain tspans' worth of content (single tspan).
     let text = Element.text(Text(
         x: 0, y: 0, content: "hello",
         fontFamily: "sans-serif", fontSize: 16,
@@ -309,8 +310,8 @@ import Testing
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])])
     let session = TextEditSession(path: [0, 0], target: .text,
-                                   content: "hello", insertion: 0)
-    session.setInsertion(5, extend: true)  // selection [0, 5)
+                                   content: "hello", insertion: 1)
+    session.setInsertion(4, extend: true)  // selection [1, 4) → "ell"
     model.currentEditSession = session
 
     model.stateStore.initPanel("character_panel", defaults: [
@@ -325,9 +326,95 @@ import Testing
     ])
     applyCharacterPanelToSelection(store: model.stateStore,
                                     controller: Controller(model: model))
-    // Non-bare-caret case: legacy path took the write.
+    // Bare caret pending stays empty.
     #expect(!session.hasPendingOverride)
-    if case .text(let t) = model.document.getElement([0, 0]) {
-        #expect(t.fontWeight == "bold")
+    // Element-level weight is unchanged; the range picks up bold via
+    // a tspan override.
+    guard case .text(let t) = model.document.getElement([0, 0]) else {
+        Issue.record("expected Text"); return
     }
+    #expect(t.fontWeight == "normal")
+    // Three tspans now: "h" plain, "ell" bold, "o" plain.
+    #expect(t.tspans.count == 3)
+    #expect(t.tspans[0].content == "h")
+    #expect(t.tspans[0].fontWeight != "bold")
+    #expect(t.tspans[1].content == "ell")
+    #expect(t.tspans[1].fontWeight == "bold")
+    #expect(t.tspans[2].content == "o")
+    #expect(t.tspans[2].fontWeight != "bold")
+}
+
+// MARK: - full-overrides builder and range applier
+
+@Test func fullOverridesSetsEveryScopeField() {
+    let panel: [String: Any] = [
+        "font_family": "sans-serif",
+        "font_size": 12.0,
+        "style_name": "Bold",
+        "all_caps": true,
+        "small_caps": false,
+        "superscript": false,
+        "subscript": false,
+        "underline": true,
+        "strikethrough": false,
+        "language": "",
+        "character_rotation": 0.0,
+    ]
+    let t = buildPanelFullOverrides(panel)
+    #expect(t.fontFamily == "sans-serif")
+    #expect(t.fontSize == 12.0)
+    #expect(t.fontWeight == "bold")
+    #expect(t.fontStyle == "normal")
+    #expect(t.textTransform == "uppercase")
+    #expect(t.textDecoration == ["underline"])
+}
+
+@Test func fullOverridesRegularStyleForcesNormalNotNil() {
+    let panel: [String: Any] = [
+        "style_name": "Regular",
+        "font_family": "sans-serif",
+        "font_size": 12.0,
+        "all_caps": false, "small_caps": false,
+        "superscript": false, "subscript": false,
+        "underline": false, "strikethrough": false,
+        "language": "",
+        "character_rotation": 0.0,
+    ]
+    let t = buildPanelFullOverrides(panel)
+    #expect(t.fontWeight == "normal")
+    #expect(t.fontStyle == "normal")
+}
+
+@Test func applyOverridesToRangeBoldsPartialWord() {
+    let base = [Tspan(id: 0, content: "hello")]
+    let overrides = Tspan(id: 0, content: "", fontWeight: "bold")
+    let out = applyOverridesToTspanRange(base, charStart: 1, charEnd: 4,
+                                          overrides: overrides)
+    #expect(out.count == 3)
+    #expect(out[0].content == "h")
+    #expect(out[1].content == "ell")
+    #expect(out[1].fontWeight == "bold")
+    #expect(out[2].content == "o")
+    #expect(out[2].fontWeight != "bold")
+}
+
+@Test func applyOverridesToEmptyRangeIsPassthrough() {
+    let base = [Tspan(id: 0, content: "hello")]
+    let overrides = Tspan(id: 0, content: "", fontWeight: "bold")
+    let out = applyOverridesToTspanRange(base, charStart: 2, charEnd: 2,
+                                          overrides: overrides)
+    #expect(out == base)
+}
+
+@Test func applyOverridesMergesAdjacentEqual() {
+    let base = [
+        Tspan(id: 0, content: "foo"),
+        Tspan(id: 1, content: "bar"),
+    ]
+    let overrides = Tspan(id: 0, content: "", fontWeight: "bold")
+    let out = applyOverridesToTspanRange(base, charStart: 0, charEnd: 6,
+                                          overrides: overrides)
+    #expect(out.count == 1)
+    #expect(out[0].content == "foobar")
+    #expect(out[0].fontWeight == "bold")
 }

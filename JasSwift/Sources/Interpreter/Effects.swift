@@ -566,6 +566,75 @@ private let characterPanelKeys: Set<String> = [
 /// surfaces (in-panel controls and the selected element) stay in
 /// sync.
 /// Build a `Tspan` override template from the Character panel state
+/// that forces every panel-scoped field onto the targeted tspans
+/// regardless of the element-level defaults. Used by the per-range
+/// Character-panel write path. Scope matches
+/// `buildPanelPendingTemplate`: font-family, font-size, font-weight,
+/// font-style, text-decoration, text-transform, font-variant,
+/// xml-lang, rotate.
+///
+/// Unlike the pending template, this builder does NOT diff against
+/// element values — clicking Regular with a bold range should clear
+/// the bold explicitly, which requires emitting `"normal"`, not
+/// "nothing changed".
+func buildPanelFullOverrides(_ panel: [String: Any]) -> Tspan {
+    let fontFamily = (panel["font_family"] as? String) ?? "sans-serif"
+    let fontSize = (panel["font_size"] as? NSNumber)?.doubleValue ?? 12.0
+    var fw: String? = nil
+    var fst: String? = nil
+    if let style = panel["style_name"] as? String {
+        switch style.trimmingCharacters(in: .whitespaces) {
+        case "Regular":       fw = "normal"; fst = "normal"
+        case "Italic":        fw = "normal"; fst = "italic"
+        case "Bold":          fw = "bold";   fst = "normal"
+        case "Bold Italic", "Italic Bold": fw = "bold"; fst = "italic"
+        default: break
+        }
+    }
+    let underline = panel["underline"] as? Bool ?? false
+    let strikethrough = panel["strikethrough"] as? Bool ?? false
+    let td: [String] = [
+        strikethrough ? "line-through" : nil,
+        underline ? "underline" : nil,
+    ].compactMap { $0 }
+    let allCaps = panel["all_caps"] as? Bool ?? false
+    let smallCaps = panel["small_caps"] as? Bool ?? false
+    let tt = allCaps ? "uppercase" : ""
+    let fv = (smallCaps && !allCaps) ? "small-caps" : ""
+    let lang = panel["language"] as? String ?? ""
+    let rot = (panel["character_rotation"] as? NSNumber)?.doubleValue ?? 0.0
+    return Tspan(
+        id: 0, content: "",
+        fontFamily: fontFamily, fontSize: fontSize,
+        fontStyle: fst, fontVariant: fv,
+        fontWeight: fw,
+        rotate: rot,
+        textDecoration: td,
+        textTransform: tt,
+        xmlLang: lang)
+}
+
+/// Apply `overrides` to every tspan covered by `[charStart, charEnd)`
+/// of `tspans`. Runs TSPAN.md's per-range algorithm: splitTspanRange
+/// to isolate the targeted tspans, mergeTspanOverrides to copy the
+/// override fields onto each one, mergeTspans to collapse adjacent-
+/// equal tspans.
+func applyOverridesToTspanRange(
+    _ tspans: [Tspan], charStart: Int, charEnd: Int, overrides: Tspan
+) -> [Tspan] {
+    guard charStart < charEnd else { return tspans }
+    let (split, first, last) = splitTspanRange(tspans,
+                                                 charStart: charStart,
+                                                 charEnd: charEnd)
+    guard let f = first, let l = last else { return split }
+    var out = split
+    for i in f...l {
+        out[i] = mergeTspanOverrides(out[i], overrides)
+    }
+    return mergeTspans(out)
+}
+
+/// Build a `Tspan` override template from the Character panel state
 /// that contains only the fields where the panel differs from the
 /// currently-edited element. Returns `nil` when everything matches.
 /// Scope (Phase 3 MVP, mirrors Rust 390513e): font-family, font-size,
@@ -687,6 +756,39 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
             session.clearPendingOverride()
             if let tpl = template {
                 session.setPendingOverride(tpl)
+            }
+            return
+        }
+    }
+
+    // Per-range write: when the active edit session has a range
+    // selection, apply the panel state to that range only via
+    // splitTspanRange + mergeTspanOverrides + mergeTspans. The
+    // rest of the edited element is left untouched.
+    if let session = controller.model.currentEditSession,
+       session.hasSelection {
+        let p = store.getPanelState("character_panel")
+        let doc = controller.model.document
+        if pathIsValid(doc, session.path) {
+            let elem = doc.getElement(session.path)
+            let (lo, hi) = session.selectionRange
+            let overrides = buildPanelFullOverrides(p)
+            let newElem: Element?
+            switch elem {
+            case .text(let t):
+                let newTspans = applyOverridesToTspanRange(
+                    t.tspans, charStart: lo, charEnd: hi, overrides: overrides)
+                newElem = .text(t.withTspans(newTspans))
+            case .textPath(let tp):
+                let newTspans = applyOverridesToTspanRange(
+                    tp.tspans, charStart: lo, charEnd: hi, overrides: overrides)
+                newElem = .textPath(tp.withTspans(newTspans))
+            default:
+                newElem = nil
+            }
+            if let ne = newElem {
+                controller.model.snapshot()
+                controller.setDocument(doc.replaceElement(session.path, with: ne))
             }
             return
         }
