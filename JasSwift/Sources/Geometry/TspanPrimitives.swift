@@ -18,6 +18,39 @@ public func resolveTspanId(_ tspans: [Tspan], id: UInt32) -> Int? {
     tspans.firstIndex { $0.id == id }
 }
 
+// MARK: - merge overrides
+
+/// Copy every non-`nil` override field from `source` into `target`.
+/// Does not touch `id` or `content`. Used by the next-typed-character
+/// state (the "pending override" template) when applying captured
+/// overrides to newly-typed tspans.
+public func mergeTspanOverrides(_ target: Tspan, _ source: Tspan) -> Tspan {
+    Tspan(
+        id: target.id,
+        content: target.content,
+        baselineShift: source.baselineShift ?? target.baselineShift,
+        dx: source.dx ?? target.dx,
+        fontFamily: source.fontFamily ?? target.fontFamily,
+        fontSize: source.fontSize ?? target.fontSize,
+        fontStyle: source.fontStyle ?? target.fontStyle,
+        fontVariant: source.fontVariant ?? target.fontVariant,
+        fontWeight: source.fontWeight ?? target.fontWeight,
+        jasAaMode: source.jasAaMode ?? target.jasAaMode,
+        jasFractionalWidths: source.jasFractionalWidths ?? target.jasFractionalWidths,
+        jasKerningMode: source.jasKerningMode ?? target.jasKerningMode,
+        jasNoBreak: source.jasNoBreak ?? target.jasNoBreak,
+        letterSpacing: source.letterSpacing ?? target.letterSpacing,
+        lineHeight: source.lineHeight ?? target.lineHeight,
+        rotate: source.rotate ?? target.rotate,
+        styleName: source.styleName ?? target.styleName,
+        textDecoration: source.textDecoration ?? target.textDecoration,
+        textRendering: source.textRendering ?? target.textRendering,
+        textTransform: source.textTransform ?? target.textTransform,
+        transform: source.transform ?? target.transform,
+        xmlLang: source.xmlLang ?? target.xmlLang
+    )
+}
+
 // MARK: - caret affinity
 
 /// Caret side at a tspan boundary. See TSPAN.md Text-edit session
