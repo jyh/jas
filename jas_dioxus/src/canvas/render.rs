@@ -449,6 +449,17 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
         Element::Text(e) => {
             let fill_op = apply_fill(ctx, e.fill.as_ref());
             ctx.set_global_alpha(base_alpha * fill_op);
+            // Multi-tspan text renders each tspan with its own
+            // effective font (family / size / weight / style) and
+            // text-decoration on a shared baseline. Single no-override
+            // tspan falls through to the flat fast path below. First
+            // pass covers the visible subset — font + decoration
+            // overrides per tspan; per-tspan baseline-shift / rotate /
+            // transform / dx / wrapping come in follow-ups.
+            let is_flat = e.tspans.len() == 1 && e.tspans[0].has_no_overrides();
+            if !is_flat {
+                draw_segmented_text(ctx, e);
+            } else {
             // Baseline-shift: super/sub render at a smaller size and
             // offset from the baseline.
             let (size_scale, y_shift) = match e.baseline_shift.as_str() {
@@ -581,6 +592,7 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
             if needs_scale {
                 ctx.restore();
             }
+            } // end else (is_flat)
         }
         Element::TextPath(e) => {
             // Draw the path as a faint guide line
@@ -664,6 +676,75 @@ fn draw_element(ctx: &CanvasRenderingContext2d, elem: &Element, ancestor_vis: Vi
 /// ~5% of the font size below the baseline, strike-through at roughly
 /// the x-height (about 35% above the baseline). Line thickness is a
 /// fixed fraction of the font size so it scales with the text.
+/// Draw a Text element's tspans in sequence on a shared baseline,
+/// each using its effective font (override || parent-element fallback)
+/// and its effective text-decoration. Wraps the minimum subset of
+/// TSPAN.md's "Rendering" section: different fonts and decorations
+/// across spans in the same Text. Omits per-tspan baseline-shift,
+/// transform, rotate, dx, small-caps, and multi-line wrapping —
+/// those still collapse to the element-wide defaults for now.
+fn draw_segmented_text(
+    ctx: &CanvasRenderingContext2d,
+    e: &crate::geometry::element::TextElem,
+) {
+    // Parent fallbacks for each tspan field.
+    let parent_bold = e.font_weight == "bold";
+    let parent_italic = e.font_style == "italic" || e.font_style == "oblique";
+    // Parent decoration tokens — used when the tspan doesn't override.
+    let parent_decor: Vec<&str> = e.text_decoration
+        .split_whitespace()
+        .filter(|t| !t.is_empty() && *t != "none")
+        .collect();
+
+    // The baseline sits at the first visual line: element y + 0.8 *
+    // font_size. Segmented rendering is one-line only for now.
+    let baseline = e.y + e.font_size * 0.8;
+    let mut cx = e.x;
+
+    for t in &e.tspans {
+        if t.content.is_empty() {
+            continue;
+        }
+        let eff_family = t.font_family.as_deref().unwrap_or(&e.font_family);
+        let eff_size = t.font_size.unwrap_or(e.font_size);
+        let eff_weight = match t.font_weight.as_deref() {
+            Some(w) => w,
+            None => if parent_bold { "bold" } else { "normal" },
+        };
+        let eff_style = match t.font_style.as_deref() {
+            Some(s) => s,
+            None => if parent_italic { "italic" } else { "normal" },
+        };
+        let font = format!("{} {} {}px {}",
+            eff_style, eff_weight, eff_size, eff_family);
+        ctx.set_font(&font);
+
+        ctx.fill_text(&t.content, cx, baseline).ok();
+
+        // Effective decoration: Some([..]) overrides parent (empty
+        // list = explicit no-decoration); None inherits parent tokens.
+        let (has_underline, has_strike) = match t.text_decoration.as_deref() {
+            Some(members) => (
+                members.iter().any(|m| m == "underline"),
+                members.iter().any(|m| m == "line-through"),
+            ),
+            None => (
+                parent_decor.iter().any(|m| *m == "underline"),
+                parent_decor.iter().any(|m| *m == "line-through"),
+            ),
+        };
+        let measure = crate::tools::text_measure::make_measurer(&font, eff_size);
+        let w = measure(&t.content);
+        if has_underline || has_strike {
+            draw_text_decorations(
+                ctx, cx, baseline, w, eff_size,
+                has_underline, has_strike, e.fill.as_ref(),
+            );
+        }
+        cx += w;
+    }
+}
+
 fn draw_text_decorations(
     ctx: &CanvasRenderingContext2d,
     x: f64,
