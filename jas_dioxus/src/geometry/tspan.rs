@@ -106,6 +106,25 @@ pub fn resolve_id(tspans: &[Tspan], id: TspanId) -> Option<usize> {
     tspans.iter().position(|t| t.id == id)
 }
 
+/// Copy every non-`None` override field from `source` into `target`.
+/// Does not touch `id` or `content`. Used by the next-typed-character
+/// state (the "pending override" template) when applying captured
+/// overrides to newly-typed tspans.
+pub fn merge_tspan_overrides(target: &mut Tspan, source: &Tspan) {
+    macro_rules! copy_if_some {
+        ($($f:ident),+) => { $(
+            if source.$f.is_some() { target.$f = source.$f.clone(); }
+        )+ };
+    }
+    copy_if_some!(
+        baseline_shift, dx, font_family, font_size, font_style,
+        font_variant, font_weight, jas_aa_mode, jas_fractional_widths,
+        jas_kerning_mode, jas_no_break, letter_spacing, line_height,
+        rotate, style_name, text_decoration, text_rendering,
+        text_transform, transform, xml_lang
+    );
+}
+
 /// Caret side at a tspan boundary. See `TSPAN.md` Text-edit session
 /// integration — when a character index lands exactly on the join
 /// between two tspans, the affinity decides which side "wins".
