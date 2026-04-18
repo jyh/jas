@@ -41,6 +41,12 @@ public final class TextEditSession {
     public private(set) var content: String
     public private(set) var insertion: Int
     public private(set) var anchor: Int
+    /// Caret side at a tspan boundary. Defaults to `.left` per
+    /// `TSPAN.md` ("new text inherits attributes of the previous
+    /// character"); `.right` is set by callers that crossed a boundary
+    /// rightward. External char-index APIs keep working unchanged —
+    /// the affinity only matters at joins.
+    public var caretAffinity: Affinity = .left
     public var dragActive: Bool = false
     public var blinkEpochMs: Double = 0.0
     /// Session-scoped tspan clipboard. Captured on cut/copy from the
@@ -146,6 +152,29 @@ public final class TextEditSession {
         let n = content.count
         insertion = max(0, min(pos, n))
         if !extend { anchor = insertion }
+    }
+
+    /// Move the caret with an explicit affinity. Use this when
+    /// crossing a tspan boundary — arrow-right lands with `.right`,
+    /// arrow-left with `.left`.
+    public func setInsertion(_ pos: Int, affinity: Affinity, extend: Bool) {
+        let n = content.count
+        insertion = max(0, min(pos, n))
+        caretAffinity = affinity
+        if !extend { anchor = insertion }
+    }
+
+    /// Resolve the caret's `(tspanIdx, offset)` using `caretAffinity`.
+    /// Used by the next-typed-character path and by any consumer that
+    /// needs to know which tspan the caret belongs to at a boundary.
+    public func insertionTspanPos(_ elementTspans: [Tspan]) -> (tspanIdx: Int, offset: Int) {
+        charToTspanPos(elementTspans, insertion, caretAffinity)
+    }
+
+    /// Resolve the selection anchor's `(tspanIdx, offset)`. Anchors
+    /// do not have an independent affinity; they track the caret's.
+    public func anchorTspanPos(_ elementTspans: [Tspan]) -> (tspanIdx: Int, offset: Int) {
+        charToTspanPos(elementTspans, anchor, caretAffinity)
     }
 
     public func selectAll() {

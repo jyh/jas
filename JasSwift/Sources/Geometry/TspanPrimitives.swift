@@ -18,6 +18,56 @@ public func resolveTspanId(_ tspans: [Tspan], id: UInt32) -> Int? {
     tspans.firstIndex { $0.id == id }
 }
 
+// MARK: - caret affinity
+
+/// Caret side at a tspan boundary. See TSPAN.md Text-edit session
+/// integration — when a character index lands exactly on the join
+/// between two tspans, the affinity decides which side "wins".
+///
+/// `.left` corresponds to the spec's default: "new text inherits the
+/// attributes of the previous character". `.right` is used by callers
+/// that explicitly want the caret on the leading edge of the next
+/// tspan.
+public enum Affinity: Sendable {
+    case left
+    case right
+}
+
+/// Resolve a flat character index to a concrete `(tspanIdx, offset)`
+/// position given the tspan list and a caret affinity.
+///
+/// - Mid-tspan: returns `(i, charIdx - prefixChars)`.
+/// - Boundary between tspans `i` and `i+1`: `.left` returns the end
+///   of tspan `i`; `.right` returns the start of tspan `i+1`. The
+///   very last boundary (end of the final tspan) always returns the
+///   end of that tspan regardless of affinity.
+/// - Beyond the last tspan: clamps to the end.
+/// - Empty tspan list: returns `(0, 0)`.
+public func charToTspanPos(
+    _ tspans: [Tspan], _ charIdx: Int, _ affinity: Affinity
+) -> (tspanIdx: Int, offset: Int) {
+    if tspans.isEmpty { return (0, 0) }
+    var acc = 0
+    for (i, t) in tspans.enumerated() {
+        let n = t.content.count
+        if charIdx < acc + n {
+            return (i, charIdx - acc)
+        }
+        if charIdx == acc + n {
+            if i + 1 == tspans.count {
+                return (i, n)
+            }
+            switch affinity {
+            case .left:  return (i, n)
+            case .right: return (i + 1, 0)
+            }
+        }
+        acc += n
+    }
+    let last = tspans.count - 1
+    return (last, tspans[last].content.count)
+}
+
 // MARK: - split
 
 /// Split `tspans[tspanIdx]` at character `offset`.
