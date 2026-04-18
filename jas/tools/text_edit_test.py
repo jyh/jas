@@ -1,7 +1,8 @@
 """Tests for TextEditSession."""
 
 from geometry.element import RgbColor, Fill, Text
-from geometry.tspan import Affinity, Tspan, char_to_tspan_pos
+from geometry.tspan import (Affinity, Tspan, char_to_tspan_pos,
+                              merge_tspan_overrides)
 from tools.text_edit import EditTarget, TextEditSession
 
 
@@ -272,3 +273,70 @@ def test_anchor_tspan_pos_uses_caret_affinity():
     s.set_insertion_with_affinity(5, Affinity.RIGHT, True)  # selection [3, 5)
     assert s.anchor_tspan_pos(tspans) == (1, 0)
     assert s.insertion_tspan_pos(tspans) == (1, 2)
+
+
+# Next-typed-character state — mirrors Rust/Swift/OCaml coverage.
+
+
+def _bold_pending() -> Tspan:
+    return Tspan(font_weight="bold")
+
+
+def test_set_pending_override_captures_anchor_at_insertion():
+    s = session("hello")
+    s.set_insertion(3, False)
+    s.set_pending_override(_bold_pending())
+    assert s.has_pending_override()
+    assert s.pending_char_start == 3
+
+
+def test_set_pending_override_merges_across_calls():
+    s = session("hello")
+    s.set_pending_override(_bold_pending())
+    s.set_pending_override(Tspan(font_style="italic"))
+    p = s.pending_override
+    assert p.font_weight == "bold"
+    assert p.font_style == "italic"
+    # Anchor not moved by second call.
+    assert s.pending_char_start == 0
+
+
+def test_set_insertion_to_different_position_clears_pending():
+    s = session("hello")
+    s.set_insertion(3, False)
+    s.set_pending_override(_bold_pending())
+    s.set_insertion(2, False)
+    assert not s.has_pending_override()
+
+
+def test_set_insertion_same_position_preserves_pending():
+    s = session("hello")
+    s.set_insertion(3, False)
+    s.set_pending_override(_bold_pending())
+    s.set_insertion(3, False)
+    assert s.has_pending_override()
+
+
+def test_set_insertion_extend_preserves_pending():
+    s = session("hello")
+    s.set_insertion(3, False)
+    s.set_pending_override(_bold_pending())
+    s.set_insertion(4, True)
+    assert s.has_pending_override()
+
+
+def test_undo_clears_pending():
+    s = session("hello")
+    s.insert("X")
+    s.set_pending_override(_bold_pending())
+    s.undo()
+    assert not s.has_pending_override()
+
+
+def test_merge_tspan_overrides_copies_only_some_fields():
+    target = Tspan(content="hi", font_style="italic", font_weight="normal")
+    source = Tspan(font_weight="bold")
+    merged = merge_tspan_overrides(target, source)
+    assert merged.content == "hi"
+    assert merged.font_weight == "bold"
+    assert merged.font_style == "italic"
