@@ -408,3 +408,74 @@ class TestInsertTspansAt:
         r = insert_tspans_at(base, 0, clipboard)
         assert concat_content(r) == "barfoobar"
         assert any(len(t.content) >= 3 and t.font_weight == "bold" for t in r)
+
+
+# ── rich clipboard: JSON + SVG formats ───────────────────────────────
+
+
+class TestRichClipboardJson:
+    def test_roundtrip_preserves_content_and_overrides(self):
+        from geometry.tspan import tspans_to_json_clipboard, tspans_from_json_clipboard
+        src = [_plain("foo"), _bold("bar", tspan_id=1)]
+        json_str = tspans_to_json_clipboard(src)
+        back = tspans_from_json_clipboard(json_str)
+        assert back is not None
+        assert len(back) == 2
+        assert back[0].content == "foo"
+        assert back[0].font_weight is None
+        assert back[1].content == "bar"
+        assert back[1].font_weight == "bold"
+
+    def test_strips_id(self):
+        from geometry.tspan import tspans_to_json_clipboard
+        src = [Tspan(id=42, content="x")]
+        json_str = tspans_to_json_clipboard(src)
+        assert '"id":42' not in json_str
+        assert '"id": 42' not in json_str
+
+    def test_strips_null_overrides(self):
+        from geometry.tspan import tspans_to_json_clipboard
+        src = [_plain("foo")]
+        json_str = tspans_to_json_clipboard(src)
+        assert "null" not in json_str
+
+    def test_from_assigns_fresh_ids(self):
+        from geometry.tspan import tspans_from_json_clipboard
+        back = tspans_from_json_clipboard(
+            '{"tspans":[{"content":"a"},{"content":"b"}]}')
+        assert back is not None
+        assert back[0].id == 0
+        assert back[1].id == 1
+
+    def test_rejects_bad_payload(self):
+        from geometry.tspan import tspans_from_json_clipboard
+        assert tspans_from_json_clipboard("not json") is None
+        assert tspans_from_json_clipboard('{"not_tspans":[]}') is None
+
+
+class TestRichClipboardSvg:
+    def test_roundtrip(self):
+        from geometry.tspan import tspans_to_svg_fragment, tspans_from_svg_fragment
+        src = [_plain("hello "), _bold("world", tspan_id=1)]
+        svg = tspans_to_svg_fragment(src)
+        assert '<text xmlns="http://www.w3.org/2000/svg">' in svg
+        assert "<tspan>hello </tspan>" in svg
+        assert '<tspan font-weight="bold">world</tspan>' in svg
+        back = tspans_from_svg_fragment(svg)
+        assert back is not None
+        assert back[0].content == "hello "
+        assert back[1].content == "world"
+        assert back[1].font_weight == "bold"
+
+    def test_escapes_special_chars(self):
+        from geometry.tspan import tspans_to_svg_fragment, tspans_from_svg_fragment
+        src = [_plain("< & >")]
+        svg = tspans_to_svg_fragment(src)
+        assert "&lt; &amp; &gt;" in svg
+        back = tspans_from_svg_fragment(svg)
+        assert back is not None
+        assert back[0].content == "< & >"
+
+    def test_rejects_missing_text_root(self):
+        from geometry.tspan import tspans_from_svg_fragment
+        assert tspans_from_svg_fragment("<span>hi</span>") is None

@@ -369,16 +369,25 @@ class TypeOnPathTool(CanvasTool):
                 ctx.request_update()
                 return True
             if key in ("c", "C"):
+                from tools.rich_clipboard import rich_clipboard_write
                 elem_tspans = self._current_element_tspans(ctx)
                 text = self.session.copy_selection_with_tspans(elem_tspans)
-                if text is not None:
+                if text is not None and self.session.tspan_clipboard is not None:
+                    _, payload = self.session.tspan_clipboard
+                    rich_clipboard_write(text, list(payload))
+                elif text is not None:
                     _clipboard_write(text)
                 return True
             if key in ("x", "X"):
+                from tools.rich_clipboard import rich_clipboard_write
                 elem_tspans = self._current_element_tspans(ctx)
                 text = self.session.copy_selection_with_tspans(elem_tspans)
                 if text is not None:
-                    _clipboard_write(text)
+                    if self.session.tspan_clipboard is not None:
+                        _, payload = self.session.tspan_clipboard
+                        rich_clipboard_write(text, list(payload))
+                    else:
+                        _clipboard_write(text)
                     self._ensure_snapshot(ctx)
                     self.session.backspace()
                     self.session.blink_epoch_ms = _now_ms()
@@ -454,7 +463,16 @@ class TypeOnPathTool(CanvasTool):
         if self.session is None:
             return False
         elem_tspans = self._current_element_tspans(ctx)
+        # Rich-paste preference: session-scoped clipboard, then
+        # multi-format OS clipboard, then flat insert.
         new_tspans = self.session.try_paste_tspans(elem_tspans, text)
+        if new_tspans is None:
+            from tools.rich_clipboard import rich_clipboard_read_tspans
+            payload = rich_clipboard_read_tspans()
+            if payload is not None:
+                from geometry.tspan import insert_tspans_at
+                new_tspans = tuple(insert_tspans_at(
+                    list(elem_tspans), self.session.insertion, list(payload)))
         if new_tspans is not None:
             from geometry.tspan import concat_content
             self._ensure_snapshot(ctx)

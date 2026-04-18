@@ -327,20 +327,30 @@ class TypeTool(CanvasTool):
                 ctx.request_update()
                 return True
             if key in ("c", "C"):
-                # Capture the selection's tspan overrides from the
-                # current element so a later paste within this session
-                # can splice them back in. The flat string still goes to
-                # the system clipboard.
+                # Capture the selection's tspan overrides for both
+                # the session-scoped fast path and the multi-format
+                # OS clipboard. Flat text is written as .string; the
+                # tspan list rides on application/x-jas-tspans and
+                # image/svg+xml for cross-element / cross-app paste.
+                from tools.rich_clipboard import rich_clipboard_write
                 elem_tspans = self._current_element_tspans(ctx)
                 text = self.session.copy_selection_with_tspans(elem_tspans)
-                if text is not None:
+                if text is not None and self.session.tspan_clipboard is not None:
+                    _, payload = self.session.tspan_clipboard
+                    rich_clipboard_write(text, list(payload))
+                elif text is not None:
                     _clipboard_write(text)
                 return True
             if key in ("x", "X"):
+                from tools.rich_clipboard import rich_clipboard_write
                 elem_tspans = self._current_element_tspans(ctx)
                 text = self.session.copy_selection_with_tspans(elem_tspans)
                 if text is not None:
-                    _clipboard_write(text)
+                    if self.session.tspan_clipboard is not None:
+                        _, payload = self.session.tspan_clipboard
+                        rich_clipboard_write(text, list(payload))
+                    else:
+                        _clipboard_write(text)
                     self._ensure_snapshot(ctx)
                     self.session.backspace()
                     self.session.blink_epoch_ms = _now_ms()
@@ -440,11 +450,18 @@ class TypeTool(CanvasTool):
     def paste_text(self, ctx: ToolContext, text: str) -> bool:
         if self.session is None:
             return False
-        # Tspan-aware paste: when the session clipboard's flat text
-        # still matches, splice the captured tspan overrides back in at
-        # the caret. Otherwise fall through to flat insert.
+        # Rich-paste preference: session-scoped clipboard, then
+        # multi-format OS clipboard (application/x-jas-tspans, then
+        # image/svg+xml), then flat insert.
         elem_tspans = self._current_element_tspans(ctx)
         new_tspans = self.session.try_paste_tspans(elem_tspans, text)
+        if new_tspans is None:
+            from tools.rich_clipboard import rich_clipboard_read_tspans
+            payload = rich_clipboard_read_tspans()
+            if payload is not None:
+                from geometry.tspan import insert_tspans_at
+                new_tspans = tuple(insert_tspans_at(
+                    list(elem_tspans), self.session.insertion, list(payload)))
         if new_tspans is not None:
             from geometry.tspan import concat_content
             self._ensure_snapshot(ctx)
