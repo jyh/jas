@@ -554,3 +554,255 @@ let sync_stroke_panel_from_selection (store : State_store.t)
 (** Check if a state key is a rendering-affecting stroke key. *)
 let is_stroke_render_key key =
   List.mem key stroke_render_keys
+
+(* ── Character panel apply-to-selection pipeline (Layer B) ─── *)
+
+(** Format a number for CSS length / value output: integers have no
+    decimal, fractions drop trailing zeros. Matches Rust's
+    [fmt_num] / Python's [_fmt_num]. *)
+let _fmt_num (n : float) : string =
+  if Float.equal n (Float.of_int (Int.of_float n)) then
+    string_of_int (Int.of_float n)
+  else
+    let s = Printf.sprintf "%.4f" n in
+    (* Trim trailing zeros, then any trailing decimal point. *)
+    let rec trim_zeros s =
+      let len = String.length s in
+      if len > 0 && s.[len - 1] = '0' then trim_zeros (String.sub s 0 (len - 1))
+      else s in
+    let s = trim_zeros s in
+    let len = String.length s in
+    if len > 0 && s.[len - 1] = '.' then String.sub s 0 (len - 1) else s
+
+(** Convenience accessor: panel field as float with default. *)
+let _panel_f (panel : (string * Yojson.Safe.t) list) (key : string) (default : float) : float =
+  match List.assoc_opt key panel with
+  | Some (`Int n) -> Float.of_int n
+  | Some (`Float n) -> n
+  | _ -> default
+
+(** Convenience accessor: panel field as bool (default false). *)
+let _panel_b (panel : (string * Yojson.Safe.t) list) (key : string) : bool =
+  match List.assoc_opt key panel with
+  | Some (`Bool b) -> b
+  | _ -> false
+
+(** Convenience accessor: panel field as string (default ""). *)
+let _panel_s (panel : (string * Yojson.Safe.t) list) (key : string) : string =
+  match List.assoc_opt key panel with
+  | Some (`String s) -> s
+  | _ -> ""
+
+(** Translate the Character-panel state dict into the element-attribute
+    dict that [apply_character_panel_to_selection] will write onto each
+    selected Text / Text_path. Pure function — extracted for testability.
+
+    Mapping rules mirror CHARACTER.md's SVG-attribute table and the
+    Rust / Python implementations:
+    - underline + strikethrough combine into text_decoration (alphabetical).
+    - all_caps -> text_transform: uppercase; small_caps (when All Caps is
+      off) -> font_variant: small-caps.
+    - super / sub -> baseline_shift: super / sub; numeric pt loses.
+    - style_name parses into font_weight + font_style.
+    - leading -> line_height ("Npt", empty at the 120% Auto default).
+    - tracking / kerning (1/1000 em) -> letter_spacing / kerning ("Nem").
+    - character_rotation -> rotate (degrees, empty at 0).
+    - horizontal_scale / vertical_scale -> percent, empty at 100%.
+    - language -> xml_lang; anti_aliasing -> aa_mode (Sharp default empties). *)
+type character_attrs = {
+  font_family : string option;
+  font_size : float option;
+  font_weight : string option;
+  font_style : string option;
+  text_decoration : string;
+  text_transform : string;
+  font_variant : string;
+  baseline_shift : string;
+  line_height : string;
+  letter_spacing : string;
+  xml_lang : string option;
+  aa_mode : string;
+  rotate : string;
+  horizontal_scale : string;
+  vertical_scale : string;
+  kerning : string;
+}
+
+let attrs_from_character_panel (panel : (string * Yojson.Safe.t) list) : character_attrs =
+  let font_family = match List.assoc_opt "font_family" panel with
+    | Some (`String s) -> Some s | _ -> None in
+  let font_size = match List.assoc_opt "font_size" panel with
+    | Some (`Int n) -> Some (Float.of_int n)
+    | Some (`Float n) -> Some n
+    | _ -> None in
+  (* style_name -> font_weight + font_style (unknown names leave them None). *)
+  let style = String.trim (_panel_s panel "style_name") in
+  let (font_weight, font_style) = match style with
+    | "Regular" -> (Some "normal", Some "normal")
+    | "Italic" -> (Some "normal", Some "italic")
+    | "Bold" -> (Some "bold", Some "normal")
+    | "Bold Italic" | "Italic Bold" -> (Some "bold", Some "italic")
+    | _ -> (None, None) in
+  (* underline + strikethrough -> text_decoration (alphabetical tokens). *)
+  let underline = _panel_b panel "underline" in
+  let strikethrough = _panel_b panel "strikethrough" in
+  let text_decoration = String.concat " " (List.filter_map (fun x -> x) [
+    if strikethrough then Some "line-through" else None;
+    if underline then Some "underline" else None;
+  ]) in
+  (* all_caps / small_caps mutual exclusion. *)
+  let all_caps = _panel_b panel "all_caps" in
+  let small_caps = _panel_b panel "small_caps" in
+  let text_transform = if all_caps then "uppercase" else "" in
+  let font_variant = if small_caps && not all_caps then "small-caps" else "" in
+  (* super / sub mutual exclusion + numeric fallback. *)
+  let superscript = _panel_b panel "superscript" in
+  let subscript = _panel_b panel "subscript" in
+  let bs_num = _panel_f panel "baseline_shift" 0.0 in
+  let baseline_shift =
+    if superscript then "super"
+    else if subscript then "sub"
+    else if Float.equal bs_num 0.0 then ""
+    else _fmt_num bs_num ^ "pt" in
+  (* leading -> line_height (empty at 120% Auto default). *)
+  let fs_num = _panel_f panel "font_size" 12.0 in
+  let leading = _panel_f panel "leading" (fs_num *. 1.2) in
+  let line_height =
+    if Float.abs (leading -. fs_num *. 1.2) < 1e-6 then ""
+    else _fmt_num leading ^ "pt" in
+  (* tracking (1/1000 em) -> letter_spacing. *)
+  let tracking = _panel_f panel "tracking" 0.0 in
+  let letter_spacing =
+    if Float.equal tracking 0.0 then ""
+    else _fmt_num (tracking /. 1000.0) ^ "em" in
+  (* kerning (1/1000 em, numeric only for now). *)
+  let kerning_num = _panel_f panel "kerning" 0.0 in
+  let kerning =
+    if Float.equal kerning_num 0.0 then ""
+    else _fmt_num (kerning_num /. 1000.0) ^ "em" in
+  (* character_rotation (degrees). *)
+  let rot = _panel_f panel "character_rotation" 0.0 in
+  let rotate = if Float.equal rot 0.0 then "" else _fmt_num rot in
+  (* vertical / horizontal scale (percent, identity = empty). *)
+  let v_scale = _panel_f panel "vertical_scale" 100.0 in
+  let h_scale = _panel_f panel "horizontal_scale" 100.0 in
+  let vertical_scale = if Float.equal v_scale 100.0 then "" else _fmt_num v_scale in
+  let horizontal_scale = if Float.equal h_scale 100.0 then "" else _fmt_num h_scale in
+  (* language / anti_aliasing. Sharp default empties. *)
+  let xml_lang = match List.assoc_opt "language" panel with
+    | Some (`String s) -> Some s | _ -> None in
+  let aa_raw = _panel_s panel "anti_aliasing" in
+  let aa_mode = if aa_raw = "Sharp" || aa_raw = "" then "" else aa_raw in
+  { font_family; font_size; font_weight; font_style;
+    text_decoration; text_transform; font_variant; baseline_shift;
+    line_height; letter_spacing; xml_lang; aa_mode;
+    rotate; horizontal_scale; vertical_scale; kerning }
+
+(** Apply a computed attribute dict to a single Text / Text_path
+    element, returning a new element. Fields outside the
+    character_attrs surface are preserved. *)
+let apply_character_attrs_to_elem (elem : Element.element) (a : character_attrs)
+  : Element.element =
+  let (<|>) v def = match v with Some x -> x | None -> def in
+  match elem with
+  | Element.Text t ->
+    Element.Text {
+      t with
+      font_family = a.font_family <|> t.font_family;
+      font_size = a.font_size <|> t.font_size;
+      font_weight = a.font_weight <|> t.font_weight;
+      font_style = a.font_style <|> t.font_style;
+      text_decoration = a.text_decoration;
+      text_transform = a.text_transform;
+      font_variant = a.font_variant;
+      baseline_shift = a.baseline_shift;
+      line_height = a.line_height;
+      letter_spacing = a.letter_spacing;
+      xml_lang = a.xml_lang <|> t.xml_lang;
+      aa_mode = a.aa_mode;
+      rotate = a.rotate;
+      horizontal_scale = a.horizontal_scale;
+      vertical_scale = a.vertical_scale;
+      kerning = a.kerning;
+    }
+  | Element.Text_path tp ->
+    Element.Text_path {
+      tp with
+      font_family = a.font_family <|> tp.font_family;
+      font_size = a.font_size <|> tp.font_size;
+      font_weight = a.font_weight <|> tp.font_weight;
+      font_style = a.font_style <|> tp.font_style;
+      text_decoration = a.text_decoration;
+      text_transform = a.text_transform;
+      font_variant = a.font_variant;
+      baseline_shift = a.baseline_shift;
+      line_height = a.line_height;
+      letter_spacing = a.letter_spacing;
+      xml_lang = a.xml_lang <|> tp.xml_lang;
+      aa_mode = a.aa_mode;
+      rotate = a.rotate;
+      horizontal_scale = a.horizontal_scale;
+      vertical_scale = a.vertical_scale;
+      kerning = a.kerning;
+    }
+  | other -> other
+
+(** Push the Character-panel state to every selected Text / Text_path.
+    No-op when the selection is empty or contains no text elements.
+    Mirrors Rust [apply_character_panel_to_selection] / Python's
+    [apply_character_panel_to_selection]. *)
+let apply_character_panel_to_selection (store : State_store.t)
+    (ctrl : Controller.controller) : unit =
+  let doc = ctrl#document in
+  if Document.PathMap.is_empty doc.Document.selection then ()
+  else begin
+    let panel = match List.assoc_opt "character_panel" (State_store.get_all store) with
+      | _ -> () |> fun () ->
+        (* Use raw panels access via get_active_panel_state when the
+           character panel is active; fall back to empty for the
+           subscription-driven call where the caller triggers this
+           after a set_panel on "character_panel" regardless of
+           which panel is currently "active". *)
+        match State_store.get_panel store "character_panel" "font_family" with
+        | `Null ->
+          (* Panel not initialised — read nothing, apply nothing. *)
+          []
+        | _ ->
+          (* Walk all keys via get_panel-style reads. We reconstruct
+             the panel dict by pulling the known character-panel
+             keys; this matches Rust's CharacterPanelState shape. *)
+          let read k = (k, State_store.get_panel store "character_panel" k) in
+          List.map read [
+            "font_family"; "style_name"; "font_size";
+            "leading"; "kerning"; "tracking";
+            "vertical_scale"; "horizontal_scale";
+            "baseline_shift"; "character_rotation";
+            "all_caps"; "small_caps"; "superscript"; "subscript";
+            "underline"; "strikethrough";
+            "language"; "anti_aliasing";
+          ]
+    in
+    let attrs = attrs_from_character_panel panel in
+    let new_doc = Document.PathMap.fold (fun path _ acc ->
+      let elem = Document.get_element acc path in
+      match elem with
+      | Element.Text _ | Element.Text_path _ ->
+        Document.replace_element acc path (apply_character_attrs_to_elem elem attrs)
+      | _ -> acc
+    ) doc.Document.selection doc in
+    (* Only snapshot + commit when any text element was actually found
+       (otherwise no-op preserves the undo history). *)
+    if not (new_doc == doc) then begin
+      ctrl#model#snapshot;
+      ctrl#model#set_document new_doc
+    end
+  end
+
+(** Subscribe [apply_character_panel_to_selection] to panel-state writes
+    on the "character_panel" scope of [store]. Once registered, any
+    widget write on the Character panel flows through to the selected
+    Text / Text_path element automatically. *)
+let subscribe_character_panel (store : State_store.t)
+    (ctrl_getter : unit -> Controller.controller) : unit =
+  State_store.subscribe_panel store "character_panel" (fun _key _value ->
+    apply_character_panel_to_selection store (ctrl_getter ()))

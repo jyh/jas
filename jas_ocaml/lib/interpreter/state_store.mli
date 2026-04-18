@@ -28,6 +28,14 @@ val get_active_panel_id : t -> string option
 val get_active_panel_state : t -> (string * Yojson.Safe.t) list
 val destroy_panel : t -> string -> unit
 
+(** Callback invoked on a panel-state write: (key, new_value). *)
+type panel_subscriber = string -> Yojson.Safe.t -> unit
+
+(** Subscribe to panel state changes on [panel_id]. Callbacks fire
+    after every [set_panel] on that panel. Mirrors Python's
+    [StateStore.subscribe_panel]. *)
+val subscribe_panel : t -> string -> panel_subscriber -> unit
+
 (* ── Dialog-scoped state ─────────────────────────────────── *)
 
 val init_dialog :

@@ -8,6 +8,9 @@ type prop_def = {
   prop_set : string option;   (** setter expression (should evaluate to a lambda) *)
 }
 
+(** Callback invoked on a panel-state write: (key, new_value). *)
+type panel_subscriber = string -> Yojson.Safe.t -> unit
+
 type t = {
   mutable state : (string * Yojson.Safe.t) list;
   mutable panels : (string * (string * Yojson.Safe.t) list) list;
@@ -16,6 +19,7 @@ type t = {
   mutable dialog_id : string option;
   mutable dialog_params : (string * Yojson.Safe.t) list option;
   mutable dialog_props : (string * prop_def) list;
+  mutable panel_subscribers : (string * panel_subscriber list) list;
 }
 
 let create ?(defaults = []) () : t =
@@ -25,7 +29,8 @@ let create ?(defaults = []) () : t =
     dialog = [];
     dialog_id = None;
     dialog_params = None;
-    dialog_props = [] }
+    dialog_props = [];
+    panel_subscribers = [] }
 
 (* ── Global state ─────────────────────────────────────── *)
 
@@ -50,12 +55,29 @@ let get_panel (store : t) (panel_id : string) (key : string) : Yojson.Safe.t =
   | Some scope -> (match List.assoc_opt key scope with Some v -> v | None -> `Null)
   | None -> `Null
 
+let _notify_panel (store : t) (panel_id : string) (key : string) (value : Yojson.Safe.t) : unit =
+  match List.assoc_opt panel_id store.panel_subscribers with
+  | Some subs -> List.iter (fun sub -> sub key value) subs
+  | None -> ()
+
 let set_panel (store : t) (panel_id : string) (key : string) (value : Yojson.Safe.t) : unit =
   match List.assoc_opt panel_id store.panels with
   | Some scope ->
     let new_scope = (key, value) :: List.filter (fun (k, _) -> k <> key) scope in
-    store.panels <- (panel_id, new_scope) :: List.filter (fun (k, _) -> k <> panel_id) store.panels
+    store.panels <- (panel_id, new_scope) :: List.filter (fun (k, _) -> k <> panel_id) store.panels;
+    _notify_panel store panel_id key value
   | None -> ()
+
+(** Subscribe to panel state changes. The callback receives the
+    (key, new_value) pair after every successful [set_panel] on
+    [panel_id]. Mirrors Python's [StateStore.subscribe_panel]. *)
+let subscribe_panel (store : t) (panel_id : string) (callback : panel_subscriber) : unit =
+  let existing = match List.assoc_opt panel_id store.panel_subscribers with
+    | Some subs -> subs
+    | None -> [] in
+  store.panel_subscribers <-
+    (panel_id, callback :: existing)
+    :: List.filter (fun (k, _) -> k <> panel_id) store.panel_subscribers
 
 let set_active_panel (store : t) (panel_id : string option) : unit =
   store.active_panel <- panel_id

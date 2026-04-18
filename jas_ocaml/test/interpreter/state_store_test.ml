@@ -166,10 +166,53 @@ let ctx_tests = [
      | _ -> assert false));
 ]
 
+let subscription_tests = [
+  Alcotest.test_case "subscribe_panel_fires_on_set" `Quick (fun () ->
+    let s = create () in
+    init_panel s "character_panel" [("font_family", `String "sans-serif")];
+    let received = ref [] in
+    subscribe_panel s "character_panel" (fun k v -> received := (k, v) :: !received);
+    set_panel s "character_panel" "font_family" (`String "Arial");
+    assert (!received = [("font_family", `String "Arial")]));
+
+  Alcotest.test_case "subscribe_panel_multiple_subscribers" `Quick (fun () ->
+    let s = create () in
+    init_panel s "character_panel" [];
+    let a = ref 0 in
+    let b = ref 0 in
+    subscribe_panel s "character_panel" (fun _ _ -> incr a);
+    subscribe_panel s "character_panel" (fun _ _ -> incr b);
+    set_panel s "character_panel" "x" (`Int 1);
+    assert (!a = 1);
+    assert (!b = 1));
+
+  Alcotest.test_case "subscribe_panel_scoped_to_panel" `Quick (fun () ->
+    let s = create () in
+    init_panel s "character_panel" [];
+    init_panel s "stroke_panel" [];
+    let char_fires = ref 0 in
+    subscribe_panel s "character_panel" (fun _ _ -> incr char_fires);
+    (* Writes to a different panel should not fire character_panel subs. *)
+    set_panel s "stroke_panel" "cap" (`String "round");
+    assert (!char_fires = 0);
+    set_panel s "character_panel" "x" (`Int 1);
+    assert (!char_fires = 1));
+
+  Alcotest.test_case "subscribe_panel_ignored_when_panel_unset" `Quick (fun () ->
+    let s = create () in
+    (* set_panel is a no-op when init_panel wasn't called first; verify
+       that subscribers don't fire spuriously in that case. *)
+    let fires = ref 0 in
+    subscribe_panel s "character_panel" (fun _ _ -> incr fires);
+    set_panel s "character_panel" "x" (`Int 1);
+    assert (!fires = 0));
+]
+
 let () =
   Alcotest.run "State store" [
     "Global", global_tests;
     "Panel", panel_tests;
     "Dialog", dialog_tests;
     "Context", ctx_tests;
+    "Subscriptions", subscription_tests;
   ]

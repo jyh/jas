@@ -227,6 +227,126 @@ let foreach_tests = [
     assert (get s "touched" = `Bool false));
 ]
 
+(* ── Character panel attrs-from-panel (Layer B) ─────────────── *)
+
+let character_attrs_tests = [
+  Alcotest.test_case "text_decoration_neither" `Quick (fun () ->
+    let a = attrs_from_character_panel [] in
+    assert (a.text_decoration = ""));
+
+  Alcotest.test_case "text_decoration_underline" `Quick (fun () ->
+    let a = attrs_from_character_panel [("underline", `Bool true)] in
+    assert (a.text_decoration = "underline"));
+
+  Alcotest.test_case "text_decoration_strikethrough" `Quick (fun () ->
+    let a = attrs_from_character_panel [("strikethrough", `Bool true)] in
+    assert (a.text_decoration = "line-through"));
+
+  Alcotest.test_case "text_decoration_both_alphabetical" `Quick (fun () ->
+    let a = attrs_from_character_panel [("underline", `Bool true);
+                                         ("strikethrough", `Bool true)] in
+    assert (a.text_decoration = "line-through underline"));
+
+  Alcotest.test_case "all_caps_wins_over_small_caps" `Quick (fun () ->
+    let a = attrs_from_character_panel [("all_caps", `Bool true);
+                                         ("small_caps", `Bool true)] in
+    assert (a.text_transform = "uppercase");
+    assert (a.font_variant = ""));
+
+  Alcotest.test_case "small_caps_when_all_caps_off" `Quick (fun () ->
+    let a = attrs_from_character_panel [("small_caps", `Bool true)] in
+    assert (a.text_transform = "");
+    assert (a.font_variant = "small-caps"));
+
+  Alcotest.test_case "super_wins_over_numeric" `Quick (fun () ->
+    let a = attrs_from_character_panel [("superscript", `Bool true);
+                                         ("baseline_shift", `Int 5)] in
+    assert (a.baseline_shift = "super"));
+
+  Alcotest.test_case "sub_when_super_off" `Quick (fun () ->
+    let a = attrs_from_character_panel [("subscript", `Bool true)] in
+    assert (a.baseline_shift = "sub"));
+
+  Alcotest.test_case "numeric_baseline_shift" `Quick (fun () ->
+    let a = attrs_from_character_panel [("baseline_shift", `Int 3)] in
+    assert (a.baseline_shift = "3pt"));
+
+  Alcotest.test_case "style_name_regular" `Quick (fun () ->
+    let a = attrs_from_character_panel [("style_name", `String "Regular")] in
+    assert (a.font_weight = Some "normal");
+    assert (a.font_style = Some "normal"));
+
+  Alcotest.test_case "style_name_bold_italic" `Quick (fun () ->
+    let a = attrs_from_character_panel [("style_name", `String "Bold Italic")] in
+    assert (a.font_weight = Some "bold");
+    assert (a.font_style = Some "italic"));
+
+  Alcotest.test_case "style_name_unknown_leaves_untouched" `Quick (fun () ->
+    let a = attrs_from_character_panel [("style_name", `String "Something Weird")] in
+    assert (a.font_weight = None);
+    assert (a.font_style = None));
+
+  Alcotest.test_case "leading_at_auto_empties" `Quick (fun () ->
+    let a = attrs_from_character_panel [("font_size", `Int 12);
+                                         ("leading", `Float 14.4)] in
+    assert (a.line_height = ""));
+
+  Alcotest.test_case "leading_off_auto" `Quick (fun () ->
+    let a = attrs_from_character_panel [("font_size", `Int 12);
+                                         ("leading", `Int 20)] in
+    assert (a.line_height = "20pt"));
+
+  Alcotest.test_case "tracking_positive" `Quick (fun () ->
+    let a = attrs_from_character_panel [("tracking", `Int 25)] in
+    assert (a.letter_spacing = "0.025em"));
+
+  Alcotest.test_case "kerning_positive" `Quick (fun () ->
+    let a = attrs_from_character_panel [("kerning", `Int 50)] in
+    assert (a.kerning = "0.05em"));
+
+  Alcotest.test_case "rotation_nonzero" `Quick (fun () ->
+    let a = attrs_from_character_panel [("character_rotation", `Int 15)] in
+    assert (a.rotate = "15"));
+
+  Alcotest.test_case "scale_identity_empties" `Quick (fun () ->
+    let a = attrs_from_character_panel [("horizontal_scale", `Int 100);
+                                         ("vertical_scale", `Int 100)] in
+    assert (a.horizontal_scale = "");
+    assert (a.vertical_scale = ""));
+
+  Alcotest.test_case "sharp_aa_empties" `Quick (fun () ->
+    let a = attrs_from_character_panel [("anti_aliasing", `String "Sharp")] in
+    assert (a.aa_mode = ""));
+
+  Alcotest.test_case "non_default_aa" `Quick (fun () ->
+    let a = attrs_from_character_panel [("anti_aliasing", `String "Crisp")] in
+    assert (a.aa_mode = "Crisp"));
+]
+
+(* ── apply_character_attrs_to_elem ──────────────────────────── *)
+
+let apply_to_elem_tests = [
+  Alcotest.test_case "writes_font_family_onto_text" `Quick (fun () ->
+    let t = Jas.Element.make_text ~font_family:"serif" ~font_size:12.0 0.0 0.0 "hi" in
+    let attrs = attrs_from_character_panel [("font_family", `String "Arial")] in
+    match apply_character_attrs_to_elem t attrs with
+    | Jas.Element.Text { font_family; _ } -> assert (font_family = "Arial")
+    | _ -> assert false);
+
+  Alcotest.test_case "underline_flows_to_text_decoration" `Quick (fun () ->
+    let t = Jas.Element.make_text ~font_family:"serif" ~font_size:12.0 0.0 0.0 "hi" in
+    let attrs = attrs_from_character_panel [("underline", `Bool true)] in
+    match apply_character_attrs_to_elem t attrs with
+    | Jas.Element.Text { text_decoration; _ } -> assert (text_decoration = "underline")
+    | _ -> assert false);
+
+  Alcotest.test_case "non_text_passes_through" `Quick (fun () ->
+    let r = Jas.Element.make_rect 0.0 0.0 10.0 10.0 in
+    let attrs = attrs_from_character_panel [("font_family", `String "Arial")] in
+    let r' = apply_character_attrs_to_elem r attrs in
+    assert (r = r'));
+]
+
 let () =
   Alcotest.run "Effects" [
     "Set", set_tests;
@@ -240,4 +360,6 @@ let () =
     "Phase3 Let", let_tests;
     "Phase3 Foreach", foreach_tests;
     "Phase3 PlatformEffects", platform_effects_tests;
+    "Character attrs", character_attrs_tests;
+    "Character apply-to-elem", apply_to_elem_tests;
   ]
