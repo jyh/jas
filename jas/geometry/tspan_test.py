@@ -15,7 +15,7 @@ from typing import Any
 
 from geometry.element import Text, TextPath, Rect, sync_tspans_from_content
 from geometry.tspan import (
-    Tspan, concat_content, default_tspan, merge, resolve_id,
+    Tspan, concat_content, default_tspan, merge, reconcile_content, resolve_id,
     split, split_range, tspans_from_content,
 )
 
@@ -252,3 +252,71 @@ class TestTextTspansField:
     def test_sync_tspans_on_non_text_is_noop(self):
         r = Rect(0.0, 0.0, 10.0, 10.0)
         assert sync_tspans_from_content(r) is r
+
+
+# ── reconcile_content ───────────────────────────────────────────
+
+def _plain(s: str, tspan_id: int = 0) -> Tspan:
+    return Tspan(id=tspan_id, content=s)
+
+def _bold(s: str, tspan_id: int = 0) -> Tspan:
+    return Tspan(id=tspan_id, content=s, font_weight="bold")
+
+
+class TestReconcileContent:
+    def test_identity_passes_through(self):
+        ts = [_plain("Hello "), _bold("world", tspan_id=1)]
+        assert reconcile_content(ts, "Hello world") == ts
+
+    def test_append_extends_last_tspan(self):
+        ts = [_plain("Hello "), _bold("world", tspan_id=1)]
+        r = reconcile_content(ts, "Hello world!")
+        assert len(r) == 2
+        assert r[1].content == "world!"
+        assert r[1].font_weight == "bold"
+
+    def test_prepend_extends_first_tspan(self):
+        ts = [_plain("Hello "), _bold("world", tspan_id=1)]
+        r = reconcile_content(ts, "Say Hello world")
+        assert len(r) == 2
+        assert r[0].content == "Say Hello "
+        assert r[1].font_weight == "bold"
+
+    def test_insert_inside_preserves_neighbour(self):
+        ts = [_plain("Hello "), _bold("world", tspan_id=1)]
+        r = reconcile_content(ts, "Hellooo world")
+        assert len(r) == 2
+        assert r[0].content == "Hellooo "
+        assert r[0].font_weight is None
+        assert r[1].content == "world"
+        assert r[1].font_weight == "bold"
+
+    def test_delete_all_yields_single_default(self):
+        ts = [_plain("Hello "), _bold("world", tspan_id=1)]
+        r = reconcile_content(ts, "")
+        assert len(r) == 1
+        assert r[0].content == ""
+        assert r[0].has_no_overrides()
+
+    def test_boundary_replace_absorbs_into_first_overlapping(self):
+        ts = [_plain("Hello "), _bold("world", tspan_id=1)]
+        r = reconcile_content(ts, "HelloXXworld")
+        assert len(r) == 2
+        assert r[0].content == "HelloXX"
+        assert r[0].font_weight is None
+        assert r[1].content == "world"
+        assert r[1].font_weight == "bold"
+
+    def test_preserves_utf8_boundaries(self):
+        ts = [_plain("café "), _bold("naïve", tspan_id=1)]
+        r = reconcile_content(ts, "café plus naïve")
+        assert len(r) == 2
+        assert r[0].content == "café plus "
+        assert r[1].content == "naïve"
+        assert r[1].font_weight == "bold"
+
+    def test_runs_merge_cleanup(self):
+        ts = [_plain("a"), _plain("b", tspan_id=1), _bold("C", tspan_id=2)]
+        r = reconcile_content(ts, "ab")
+        assert len(r) == 1
+        assert r[0].content == "ab"

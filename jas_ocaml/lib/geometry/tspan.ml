@@ -211,3 +211,115 @@ let merge (tspans : tspan array) : tspan array =
         out := t :: !out
     ) rest;
     Array.of_list (List.rev !out)
+
+(** True when [byte_offset] is at a UTF-8 scalar boundary in [s].
+    Continuation bytes start with the bit pattern [10xxxxxx]. *)
+let _is_utf8_boundary (s : string) (byte_offset : int) : bool =
+  if byte_offset <= 0 || byte_offset >= String.length s then true
+  else (Char.code s.[byte_offset] land 0xC0) <> 0x80
+
+let reconcile_content (original : tspan array) (new_content : string) : tspan array =
+  let old_content = concat_content original in
+  if old_content = new_content then original
+  else if Array.length original = 0 then
+    [| { (default_tspan ()) with content = new_content } |]
+  else begin
+    let old_len = String.length old_content in
+    let new_len = String.length new_content in
+    (* Longest common prefix (byte-level), snapped to a UTF-8 boundary. *)
+    let max_prefix = min old_len new_len in
+    let prefix_len = ref 0 in
+    while !prefix_len < max_prefix
+          && old_content.[!prefix_len] = new_content.[!prefix_len] do
+      incr prefix_len
+    done;
+    while !prefix_len > 0 && not (_is_utf8_boundary old_content !prefix_len) do
+      decr prefix_len
+    done;
+    (* Longest common suffix, bounded so it doesn't overlap the prefix. *)
+    let max_suffix = min (old_len - !prefix_len) (new_len - !prefix_len) in
+    let suffix_len = ref 0 in
+    while !suffix_len < max_suffix
+          && old_content.[old_len - 1 - !suffix_len]
+             = new_content.[new_len - 1 - !suffix_len] do
+      incr suffix_len
+    done;
+    while !suffix_len > 0
+          && not (_is_utf8_boundary old_content (old_len - !suffix_len)) do
+      decr suffix_len
+    done;
+
+    let old_mid_start = !prefix_len in
+    let old_mid_end = old_len - !suffix_len in
+    let new_middle = String.sub new_content !prefix_len
+      (new_len - !suffix_len - !prefix_len) in
+
+    (* Pure insertion at a boundary: splice new_middle into the
+       tspan containing old_mid_start. Everything else passes
+       through unchanged. *)
+    if old_mid_start = old_mid_end then begin
+      let result = Array.copy original in
+      let pos = ref old_mid_start in
+      let absorbed = ref false in
+      let i = ref 0 in
+      while not !absorbed && !i < Array.length result do
+        let t = result.(!i) in
+        let t_len = String.length t.content in
+        if !pos <= t_len then begin
+          let before = String.sub t.content 0 !pos in
+          let after = String.sub t.content !pos (t_len - !pos) in
+          result.(!i) <- { t with content = before ^ new_middle ^ after };
+          absorbed := true
+        end else begin
+          pos := !pos - t_len;
+          incr i
+        end
+      done;
+      if not !absorbed then begin
+        let last_idx = Array.length result - 1 in
+        if last_idx >= 0 then begin
+          let last = result.(last_idx) in
+          result.(last_idx) <- { last with content = last.content ^ new_middle }
+        end
+      end;
+      merge result
+    end else begin
+      (* Replacement (including pure deletion): walk tspans and absorb
+         new_middle into the first overlapping tspan. *)
+      let out = ref [] in
+      let cursor = ref 0 in
+      let middle_consumed = ref false in
+      Array.iter (fun (t : tspan) ->
+        let t_start = !cursor in
+        let t_end = !cursor + String.length t.content in
+        if t_end <= old_mid_start then
+          out := t :: !out
+        else if t_start >= old_mid_end then
+          out := t :: !out
+        else begin
+          let before_len = max 0 (old_mid_start - t_start) in
+          let after_off =
+            if t_end > old_mid_end then old_mid_end - t_start
+            else String.length t.content in
+          let before = String.sub t.content 0 before_len in
+          let after =
+            if t_end > old_mid_end then
+              String.sub t.content after_off (String.length t.content - after_off)
+            else "" in
+          let mid = if !middle_consumed then "" else begin
+            middle_consumed := true;
+            new_middle
+          end in
+          let new_content_str = before ^ mid ^ after in
+          if new_content_str <> "" then
+            out := { t with content = new_content_str } :: !out
+        end;
+        cursor := t_end
+      ) original;
+      let result = match List.rev !out with
+        | [] -> [| default_tspan () |]
+        | lst -> Array.of_list lst
+      in
+      merge result
+    end
+  end

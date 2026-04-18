@@ -277,6 +277,69 @@ let sync_tspans_on_non_text_is_noop_test () =
   let rect = Jas.Element.make_rect 0.0 0.0 10.0 10.0 in
   assert (Jas.Element.sync_tspans_from_content rect = rect)
 
+(* ── reconcile_content ──────────────────────────────────────── *)
+
+let _plain s = { (default_tspan ()) with content = s }
+let _bold s id = { (default_tspan ()) with id; content = s;
+                                           font_weight = Some "bold" }
+
+let reconcile_identity_test () =
+  let ts = [| _plain "Hello "; _bold "world" 1 |] in
+  assert (reconcile_content ts "Hello world" = ts)
+
+let reconcile_append_extends_last_test () =
+  let ts = [| _plain "Hello "; _bold "world" 1 |] in
+  let r = reconcile_content ts "Hello world!" in
+  assert (Array.length r = 2);
+  assert (r.(1).content = "world!");
+  assert (r.(1).font_weight = Some "bold")
+
+let reconcile_prepend_extends_first_test () =
+  let ts = [| _plain "Hello "; _bold "world" 1 |] in
+  let r = reconcile_content ts "Say Hello world" in
+  assert (Array.length r = 2);
+  assert (r.(0).content = "Say Hello ");
+  assert (r.(1).font_weight = Some "bold")
+
+let reconcile_insert_inside_preserves_neighbour_test () =
+  let ts = [| _plain "Hello "; _bold "world" 1 |] in
+  let r = reconcile_content ts "Hellooo world" in
+  assert (Array.length r = 2);
+  assert (r.(0).content = "Hellooo ");
+  assert (r.(0).font_weight = None);
+  assert (r.(1).content = "world");
+  assert (r.(1).font_weight = Some "bold")
+
+let reconcile_delete_all_test () =
+  let ts = [| _plain "Hello "; _bold "world" 1 |] in
+  let r = reconcile_content ts "" in
+  assert (Array.length r = 1);
+  assert (r.(0).content = "");
+  assert (has_no_overrides r.(0))
+
+let reconcile_boundary_replace_test () =
+  let ts = [| _plain "Hello "; _bold "world" 1 |] in
+  let r = reconcile_content ts "HelloXXworld" in
+  assert (Array.length r = 2);
+  assert (r.(0).content = "HelloXX");
+  assert (r.(0).font_weight = None);
+  assert (r.(1).content = "world");
+  assert (r.(1).font_weight = Some "bold")
+
+let reconcile_preserves_utf8_test () =
+  let ts = [| _plain "café "; _bold "naïve" 1 |] in
+  let r = reconcile_content ts "café plus naïve" in
+  assert (Array.length r = 2);
+  assert (r.(0).content = "café plus ");
+  assert (r.(1).content = "naïve");
+  assert (r.(1).font_weight = Some "bold")
+
+let reconcile_runs_merge_test () =
+  let ts = [| _plain "a"; _plain "b"; _bold "C" 2 |] in
+  let r = reconcile_content ts "ab" in
+  assert (Array.length r = 1);
+  assert (r.(0).content = "ab")
+
 let () =
   Alcotest.run "Tspan" [
     "fixtures", [
@@ -299,5 +362,15 @@ let () =
       Alcotest.test_case "make_text_path_populates_tspans" `Quick make_text_path_populates_tspans_test;
       Alcotest.test_case "sync_tspans_from_content" `Quick sync_tspans_from_content_test;
       Alcotest.test_case "sync_tspans_on_non_text_is_noop" `Quick sync_tspans_on_non_text_is_noop_test;
+    ];
+    "reconcile", [
+      Alcotest.test_case "identity" `Quick reconcile_identity_test;
+      Alcotest.test_case "append_extends_last" `Quick reconcile_append_extends_last_test;
+      Alcotest.test_case "prepend_extends_first" `Quick reconcile_prepend_extends_first_test;
+      Alcotest.test_case "insert_inside_preserves_neighbour" `Quick reconcile_insert_inside_preserves_neighbour_test;
+      Alcotest.test_case "delete_all" `Quick reconcile_delete_all_test;
+      Alcotest.test_case "boundary_replace" `Quick reconcile_boundary_replace_test;
+      Alcotest.test_case "preserves_utf8" `Quick reconcile_preserves_utf8_test;
+      Alcotest.test_case "runs_merge_cleanup" `Quick reconcile_runs_merge_test;
     ];
   ]
