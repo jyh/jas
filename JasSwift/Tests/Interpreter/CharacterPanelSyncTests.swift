@@ -53,7 +53,8 @@ import Testing
     #expect((o["baseline_shift"] as? Double) == 0.0)
     // tracking = 0.05em → 50 thousandths.
     #expect((o["tracking"] as? Double) == 50.0)
-    #expect((o["kerning"] as? Double) == 20.0)
+    // kerning combo_box display: numeric "0.02em" → "20" (1/1000 em).
+    #expect(o["kerning"] as? String == "20")
     #expect((o["character_rotation"] as? Double) == 15.0)
     #expect((o["horizontal_scale"] as? Double) == 120.0)
     #expect((o["vertical_scale"] as? Double) == 110.0)
@@ -104,6 +105,60 @@ import Testing
         #expect(t.fontFamily == "Arial")
     } else {
         #expect(Bool(false), "expected Text element")
+    }
+}
+
+@Test func characterPanelLiveOverridesKerningNamedMode() {
+    // Element kerning "Optical" passes through verbatim to the panel.
+    let model = Model()
+    let text = Element.text(Text(x: 0, y: 0, content: "hi",
+                                  fontSize: 12, kerning: "Optical"))
+    model.document = Document(layers: [Layer(children: [text])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    let o = characterPanelLiveOverrides(model: model)!
+    #expect(o["kerning"] as? String == "Optical")
+}
+
+@Test func characterPanelLiveOverridesKerningEmptyShowsAuto() {
+    // Empty element attribute → "Auto" in the panel (spec default).
+    let model = Model()
+    let text = Element.text(Text(x: 0, y: 0, content: "hi", fontSize: 12, kerning: ""))
+    model.document = Document(layers: [Layer(children: [text])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    let o = characterPanelLiveOverrides(model: model)!
+    #expect(o["kerning"] as? String == "Auto")
+}
+
+@Test func applyCharacterPanelKerningNamedModesPassThrough() {
+    let model = Model()
+    let text = Element.text(Text(x: 0, y: 0, content: "hi"))
+    model.document = Document(layers: [Layer(children: [text])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    // Auto / "" / "0" all produce an empty element attribute.
+    for mode in ["Auto", "", "0"] {
+        model.stateStore.initPanel("character_panel", defaults: ["kerning": mode])
+        applyCharacterPanelToSelection(store: model.stateStore,
+                                        controller: Controller(model: model))
+        if case .text(let t) = model.document.getElement([0, 0]) {
+            #expect(t.kerning == "", "mode \(mode) should clear kerning")
+        }
+    }
+    // Named mode passes through verbatim.
+    model.stateStore.initPanel("character_panel", defaults: ["kerning": "Optical"])
+    applyCharacterPanelToSelection(store: model.stateStore,
+                                    controller: Controller(model: model))
+    if case .text(let t) = model.document.getElement([0, 0]) {
+        #expect(t.kerning == "Optical")
+    }
+    // Numeric string converts to "{N}em".
+    model.stateStore.initPanel("character_panel", defaults: ["kerning": "25"])
+    applyCharacterPanelToSelection(store: model.stateStore,
+                                    controller: Controller(model: model))
+    if case .text(let t) = model.document.getElement([0, 0]) {
+        #expect(t.kerning == "0.025em")
     }
 }
 

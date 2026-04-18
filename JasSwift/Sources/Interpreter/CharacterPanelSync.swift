@@ -60,12 +60,19 @@ public func characterPanelLiveOverrides(model: Model) -> [String: Any]? {
     let tracking = a.letterSpacing.isEmpty
         ? 0.0
         : (parseEmAsThousandths(a.letterSpacing) ?? 0.0)
-    // Kerning: parse "Nem" → N*1000. Empty or named mode → 0.
-    let kerning: Double
-    if a.kerning.isEmpty || a.kerning == "Auto" || a.kerning == "Optical" || a.kerning == "Metrics" {
-        kerning = 0.0
-    } else {
-        kerning = parseEmAsThousandths(a.kerning) ?? 0.0
+    // Kerning combo_box display: named modes pass through verbatim;
+    // numeric "Nem" converts to a plain "{N*1000}" decimal string.
+    // Empty element attribute → "Auto" (spec default).
+    let kerningDisplay: String
+    switch a.kerning {
+    case "": kerningDisplay = "Auto"
+    case "Auto", "Optical", "Metrics": kerningDisplay = a.kerning
+    default:
+        if let n = parseEmAsThousandths(a.kerning) {
+            kerningDisplay = fmtNum(n)
+        } else {
+            kerningDisplay = a.kerning
+        }
     }
     let styleName = formatStyleName(weight: a.fontWeight, style: a.fontStyle)
     // Anti-aliasing: empty element field → panel default "Sharp".
@@ -90,7 +97,7 @@ public func characterPanelLiveOverrides(model: Model) -> [String: Any]? {
         "character_rotation": rotation,
         "horizontal_scale": hScale,
         "vertical_scale": vScale,
-        "kerning": kerning,
+        "kerning": kerningDisplay,
         "language": a.xmlLang,
         "anti_aliasing": aaDisplay,
     ]
@@ -132,6 +139,16 @@ private func parseEmAsThousandths(_ s: String) -> Double? {
     let t = s.trimmingCharacters(in: .whitespaces)
     let rest = t.hasSuffix("em") ? String(t.dropLast(2)) : t
     return Double(rest).map { $0 * 1000.0 }
+}
+
+/// Trim trailing zeros from a decimal render — integers have no
+/// decimal point. Mirrors Rust's `fmt_num`.
+private func fmtNum(_ n: Double) -> String {
+    if n == n.rounded(.towardZero) { return String(Int(n)) }
+    var s = String(format: "%.4f", n)
+    while s.hasSuffix("0") { s.removeLast() }
+    if s.hasSuffix(".") { s.removeLast() }
+    return s
 }
 
 /// "Npt" / "N" → N. nil when unparseable (caller chooses a default).
