@@ -329,6 +329,112 @@ private func vint(_ n: Int) -> MsgValue { .int(n) }
 private func vf64(_ f: Double) -> MsgValue { .float64(f) }
 private func vbool(_ b: Bool) -> MsgValue { .bool(b) }
 private func vstr(_ s: String) -> MsgValue { .string(s) }
+private func vnil() -> MsgValue { .nil }
+
+// Optional-aware packers: `nil` → msgpack nil, `Some(v)` → typed value.
+private func optF64(_ o: Double?) -> MsgValue { o.map(vf64) ?? .nil }
+private func optStr(_ o: String?) -> MsgValue { o.map(vstr) ?? .nil }
+private func optBool(_ o: Bool?) -> MsgValue { o.map(vbool) ?? .nil }
+
+private func asOptF64(_ v: MsgValue) -> Double? {
+    if case .nil = v { return nil }
+    return asF64(v)
+}
+private func asOptStr(_ v: MsgValue) -> String? {
+    if case .nil = v { return nil }
+    return asStr(v)
+}
+private func asOptBool(_ v: MsgValue) -> Bool? {
+    if case .nil = v { return nil }
+    return asBool(v)
+}
+
+/// Pack a single Tspan as a compact msgpack array. Mirrors Rust's
+/// `pack_tspan` — 22 fields in the same order.
+private func packTspan(_ t: Tspan) -> MsgValue {
+    let decor: MsgValue
+    if let members = t.textDecoration {
+        decor = .array(members.map { vstr($0) })
+    } else {
+        decor = .nil
+    }
+    let transform: MsgValue
+    if let tr = t.transform {
+        transform = .array([
+            vf64(tr.a), vf64(tr.b), vf64(tr.c),
+            vf64(tr.d), vf64(tr.e), vf64(tr.f),
+        ])
+    } else {
+        transform = .nil
+    }
+    return .array([
+        vint(Int(t.id)),
+        vstr(t.content),
+        optF64(t.baselineShift),
+        optF64(t.dx),
+        optStr(t.fontFamily),
+        optF64(t.fontSize),
+        optStr(t.fontStyle),
+        optStr(t.fontVariant),
+        optStr(t.fontWeight),
+        optStr(t.jasAaMode),
+        optBool(t.jasFractionalWidths),
+        optStr(t.jasKerningMode),
+        optBool(t.jasNoBreak),
+        optF64(t.letterSpacing),
+        optF64(t.lineHeight),
+        optF64(t.rotate),
+        optStr(t.styleName),
+        decor,
+        optStr(t.textRendering),
+        optStr(t.textTransform),
+        transform,
+        optStr(t.xmlLang),
+    ])
+}
+
+private func unpackTspan(_ v: MsgValue) -> Tspan {
+    let arr = asArray(v)
+    func get(_ i: Int) -> MsgValue { i < arr.count ? arr[i] : .nil }
+    let id = arr.count > 0 ? UInt32(asInt(arr[0])) : 0
+    let content = arr.count > 1 ? asStr(arr[1]) : ""
+    let decor: [String]?
+    if case .array(let xs) = get(17) {
+        decor = xs.map { asStr($0) }
+    } else {
+        decor = nil
+    }
+    let transform: Transform?
+    if case .array(let xs) = get(20), xs.count >= 6 {
+        transform = Transform(
+            a: asF64(xs[0]), b: asF64(xs[1]), c: asF64(xs[2]),
+            d: asF64(xs[3]), e: asF64(xs[4]), f: asF64(xs[5]))
+    } else {
+        transform = nil
+    }
+    return Tspan(
+        id: id, content: content,
+        baselineShift: asOptF64(get(2)),
+        dx: asOptF64(get(3)),
+        fontFamily: asOptStr(get(4)),
+        fontSize: asOptF64(get(5)),
+        fontStyle: asOptStr(get(6)),
+        fontVariant: asOptStr(get(7)),
+        fontWeight: asOptStr(get(8)),
+        jasAaMode: asOptStr(get(9)),
+        jasFractionalWidths: asOptBool(get(10)),
+        jasKerningMode: asOptStr(get(11)),
+        jasNoBreak: asOptBool(get(12)),
+        letterSpacing: asOptF64(get(13)),
+        lineHeight: asOptF64(get(14)),
+        rotate: asOptF64(get(15)),
+        styleName: asOptStr(get(16)),
+        textDecoration: decor,
+        textRendering: asOptStr(get(18)),
+        textTransform: asOptStr(get(19)),
+        transform: transform,
+        xmlLang: asOptStr(get(21)))
+}
 
 // MARK: - Unpack helpers
 
@@ -477,21 +583,28 @@ private func packElement(_ elem: Element) -> MsgValue {
                        .array(cmds), packFill(e.fill), packStroke(e.stroke),
                        packWidthPoints(e.widthPoints)])
     case .text(let e):
+        // Trailing tspans array — multi-tspan / override-bearing
+        // documents round-trip through binary. Old blobs without
+        // this field decode via the backward-compat path below.
+        let tspans: [MsgValue] = e.tspans.map { packTspan($0) }
         return .array([vint(tagText), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
                        packTransform(e.transform),
                        vf64(e.x), vf64(e.y), vstr(e.content),
                        vstr(e.fontFamily), vf64(e.fontSize),
                        vstr(e.fontWeight), vstr(e.fontStyle), vstr(e.textDecoration),
                        vf64(e.width), vf64(e.height),
-                       packFill(e.fill), packStroke(e.stroke)])
+                       packFill(e.fill), packStroke(e.stroke),
+                       .array(tspans)])
     case .textPath(let e):
         let cmds: [MsgValue] = e.d.map { packPathCommand($0) }
+        let tspans: [MsgValue] = e.tspans.map { packTspan($0) }
         return .array([vint(tagTextPath), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
                        packTransform(e.transform),
                        .array(cmds), vstr(e.content), vf64(e.startOffset),
                        vstr(e.fontFamily), vf64(e.fontSize),
                        vstr(e.fontWeight), vstr(e.fontStyle), vstr(e.textDecoration),
-                       packFill(e.fill), packStroke(e.stroke)])
+                       packFill(e.fill), packStroke(e.stroke),
+                       .array(tspans)])
     }
 }
 
@@ -654,21 +767,32 @@ private func unpackElement(_ v: MsgValue) -> Element {
                           widthPoints: wp,
                           opacity: opacity, transform: xform, locked: locked, visibility: vis))
     case tagText:
-        return .text(Text(x: asF64(arr[5]), y: asF64(arr[6]), content: asStr(arr[7]),
-                          fontFamily: asStr(arr[8]), fontSize: asF64(arr[9]),
-                          fontWeight: asStr(arr[10]), fontStyle: asStr(arr[11]),
-                          textDecoration: asStr(arr[12]),
-                          width: asF64(arr[13]), height: asF64(arr[14]),
-                          fill: unpackFill(arr[15]), stroke: unpackStroke(arr[16]),
-                          opacity: opacity, transform: xform, locked: locked, visibility: vis))
+        // Prefer the trailing tspans field when present; otherwise
+        // fall back to the single-default-tspan seeded from content
+        // (pre-tspan-codec blobs).
+        let baseT = Text(x: asF64(arr[5]), y: asF64(arr[6]), content: asStr(arr[7]),
+                         fontFamily: asStr(arr[8]), fontSize: asF64(arr[9]),
+                         fontWeight: asStr(arr[10]), fontStyle: asStr(arr[11]),
+                         textDecoration: asStr(arr[12]),
+                         width: asF64(arr[13]), height: asF64(arr[14]),
+                         fill: unpackFill(arr[15]), stroke: unpackStroke(arr[16]),
+                         opacity: opacity, transform: xform, locked: locked, visibility: vis)
+        if arr.count > 17, case .array(let ts) = arr[17], !ts.isEmpty {
+            return .text(baseT.withTspans(ts.map { unpackTspan($0) }))
+        }
+        return .text(baseT)
     case tagTextPath:
         let cmds = asArray(arr[5]).map { unpackPathCommand($0) }
-        return .textPath(TextPath(d: cmds, content: asStr(arr[6]), startOffset: asF64(arr[7]),
-                                  fontFamily: asStr(arr[8]), fontSize: asF64(arr[9]),
-                                  fontWeight: asStr(arr[10]), fontStyle: asStr(arr[11]),
-                                  textDecoration: asStr(arr[12]),
-                                  fill: unpackFill(arr[13]), stroke: unpackStroke(arr[14]),
-                                  opacity: opacity, transform: xform, locked: locked, visibility: vis))
+        let baseTp = TextPath(d: cmds, content: asStr(arr[6]), startOffset: asF64(arr[7]),
+                              fontFamily: asStr(arr[8]), fontSize: asF64(arr[9]),
+                              fontWeight: asStr(arr[10]), fontStyle: asStr(arr[11]),
+                              textDecoration: asStr(arr[12]),
+                              fill: unpackFill(arr[13]), stroke: unpackStroke(arr[14]),
+                              opacity: opacity, transform: xform, locked: locked, visibility: vis)
+        if arr.count > 15, case .array(let ts) = arr[15], !ts.isEmpty {
+            return .textPath(baseTp.withTspans(ts.map { unpackTspan($0) }))
+        }
+        return .textPath(baseTp)
     default: fatalError("unknown element tag: \(tag)")
     }
 }

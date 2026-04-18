@@ -78,6 +78,17 @@ let as_list = function
 
 let is_nil = function Msgpck.Nil -> true | _ -> false
 
+let vnil = Msgpck.Nil
+
+(* Optional-aware packers: [None] packs as msgpack nil. *)
+let opt_f64 = function Some f -> vf64 f | None -> vnil
+let opt_str = function Some s -> vstr s | None -> vnil
+let opt_bool = function Some b -> vbool b | None -> vnil
+
+let as_opt_f64 = function Msgpck.Nil -> None | v -> Some (as_f64 v)
+let as_opt_str = function Msgpck.Nil -> None | v -> Some (as_str v)
+let as_opt_bool = function Msgpck.Nil -> None | v -> Some (as_bool v)
+
 (* -- Pack ---------------------------------------------------------------- *)
 
 let pack_color c =
@@ -122,6 +133,82 @@ let pack_transform = function
 
 let pack_vis = function
   | Invisible -> vint 0 | Outline -> vint 1 | Preview -> vint 2
+
+(** Pack a single Tspan as a compact msgpack list, 22 elements in
+    the same order Rust / Swift use. *)
+let pack_tspan (t : Element.tspan) : Msgpck.t =
+  let decor = match t.text_decoration with
+    | Some members -> vlist (List.map vstr members)
+    | None -> vnil
+  in
+  let transform = match t.transform with
+    | Some tr -> vlist [vf64 tr.a; vf64 tr.b; vf64 tr.c;
+                        vf64 tr.d; vf64 tr.e; vf64 tr.f]
+    | None -> vnil
+  in
+  vlist [
+    vint t.id;
+    vstr t.content;
+    opt_f64 t.baseline_shift;
+    opt_f64 t.dx;
+    opt_str t.font_family;
+    opt_f64 t.font_size;
+    opt_str t.font_style;
+    opt_str t.font_variant;
+    opt_str t.font_weight;
+    opt_str t.jas_aa_mode;
+    opt_bool t.jas_fractional_widths;
+    opt_str t.jas_kerning_mode;
+    opt_bool t.jas_no_break;
+    opt_f64 t.letter_spacing;
+    opt_f64 t.line_height;
+    opt_f64 t.rotate;
+    opt_str t.style_name;
+    decor;
+    opt_str t.text_rendering;
+    opt_str t.text_transform;
+    transform;
+    opt_str t.xml_lang;
+  ]
+
+(** Inverse of [pack_tspan]. Tolerant of trailing field additions —
+    missing indices fall back to the [default_tspan] value. *)
+let unpack_tspan v : Element.tspan =
+  let arr = as_list v in
+  let n = List.length arr in
+  let get i = if i < n then List.nth arr i else Msgpck.Nil in
+  let id = if n > 0 then as_int (List.nth arr 0) else 0 in
+  let content = if n > 1 then as_str (List.nth arr 1) else "" in
+  let decor = match get 17 with
+    | Msgpck.List xs -> Some (List.map as_str xs)
+    | _ -> None in
+  let transform = match get 20 with
+    | Msgpck.List xs when List.length xs >= 6 ->
+      let f i = as_f64 (List.nth xs i) in
+      Some { Element.a = f 0; b = f 1; c = f 2; d = f 3; e = f 4; f = f 5 }
+    | _ -> None in
+  { id; content;
+    baseline_shift = as_opt_f64 (get 2);
+    dx = as_opt_f64 (get 3);
+    font_family = as_opt_str (get 4);
+    font_size = as_opt_f64 (get 5);
+    font_style = as_opt_str (get 6);
+    font_variant = as_opt_str (get 7);
+    font_weight = as_opt_str (get 8);
+    jas_aa_mode = as_opt_str (get 9);
+    jas_fractional_widths = as_opt_bool (get 10);
+    jas_kerning_mode = as_opt_str (get 11);
+    jas_no_break = as_opt_bool (get 12);
+    letter_spacing = as_opt_f64 (get 13);
+    line_height = as_opt_f64 (get 14);
+    rotate = as_opt_f64 (get 15);
+    style_name = as_opt_str (get 16);
+    text_decoration = decor;
+    text_rendering = as_opt_str (get 18);
+    text_transform = as_opt_str (get 19);
+    transform;
+    xml_lang = as_opt_str (get 21);
+  }
 
 let pack_path_command = function
   | MoveTo (x, y) -> vlist [vint cmd_move_to; vf64 x; vf64 y]
@@ -185,24 +272,28 @@ let rec pack_element = function
            pack_width_points width_points]
   | Text { x; y; content; font_family; font_size; font_weight; font_style;
            text_decoration; text_width; text_height; fill; stroke;
-           opacity; transform; locked; visibility; _ } ->
+           opacity; transform; locked; visibility; tspans; _ } ->
+    let tspans_list = Array.to_list (Array.map pack_tspan tspans) in
     vlist [vint tag_text; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
            vf64 x; vf64 y; vstr content;
            vstr font_family; vf64 font_size;
            vstr font_weight; vstr font_style; vstr text_decoration;
            vf64 text_width; vf64 text_height;
-           pack_fill fill; pack_stroke stroke]
+           pack_fill fill; pack_stroke stroke;
+           vlist tspans_list]
   | Text_path { d; content; start_offset; font_family; font_size; font_weight;
                 font_style; text_decoration; fill; stroke;
-                opacity; transform; locked; visibility; _ } ->
+                opacity; transform; locked; visibility; tspans; _ } ->
     let cmds = List.map pack_path_command d in
+    let tspans_list = Array.to_list (Array.map pack_tspan tspans) in
     vlist [vint tag_text_path; vbool locked; vf64 opacity; pack_vis visibility;
            pack_transform transform;
            vlist cmds; vstr content; vf64 start_offset;
            vstr font_family; vf64 font_size;
            vstr font_weight; vstr font_style; vstr text_decoration;
-           pack_fill fill; pack_stroke stroke]
+           pack_fill fill; pack_stroke stroke;
+           vlist tspans_list]
 
 let pack_selection sel =
   let entries = PathMap.fold (fun _path es acc ->
@@ -394,6 +485,16 @@ let rec unpack_element v =
            opacity; transform; locked; visibility }
   else if tag = tag_text then
     let content = as_str (List.nth arr 7) in
+    (* Prefer the trailing tspans field when present; otherwise fall
+       back to the single-default-tspan seeded from content (blobs
+       predating the tspan codec extension). *)
+    let tspans = if List.length arr > 17 then
+      (match List.nth arr 17 with
+       | Msgpck.List xs when xs <> [] ->
+         Array.of_list (List.map unpack_tspan xs)
+       | _ -> tspans_from_content content)
+    else tspans_from_content content
+    in
     Text { x = as_f64 (List.nth arr 5); y = as_f64 (List.nth arr 6);
            content;
            font_family = as_str (List.nth arr 8);
@@ -412,11 +513,17 @@ let rec unpack_element v =
            text_height = as_f64 (List.nth arr 14);
            fill = unpack_fill (List.nth arr 15);
            stroke = unpack_stroke (List.nth arr 16);
-           opacity; transform; locked; visibility;
-           tspans = tspans_from_content content }
+           opacity; transform; locked; visibility; tspans }
   else if tag = tag_text_path then
     let cmds = List.map unpack_path_command (as_list (List.nth arr 5)) in
     let content = as_str (List.nth arr 6) in
+    let tspans = if List.length arr > 15 then
+      (match List.nth arr 15 with
+       | Msgpck.List xs when xs <> [] ->
+         Array.of_list (List.map unpack_tspan xs)
+       | _ -> tspans_from_content content)
+    else tspans_from_content content
+    in
     Text_path { d = cmds; content;
                 start_offset = as_f64 (List.nth arr 7);
                 font_family = as_str (List.nth arr 8);
@@ -430,8 +537,7 @@ let rec unpack_element v =
                 vertical_scale = ""; kerning = "";
                 fill = unpack_fill (List.nth arr 13);
                 stroke = unpack_stroke (List.nth arr 14);
-                opacity; transform; locked; visibility;
-                tspans = tspans_from_content content }
+                opacity; transform; locked; visibility; tspans }
   else failwith (Printf.sprintf "unknown element tag: %d" tag)
 
 let unpack_selection v =
