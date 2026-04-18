@@ -258,8 +258,19 @@ impl TypeTool {
                 Element::TextPath(tp) => Some(tp.tspans.clone()),
                 _ => None,
             });
+        // Rich-paste preference order:
+        //   1. Session-scoped tspan clipboard (fastest path, within-
+        //      session cut/paste of an unchanged selection).
+        //   2. App-global rich clipboard (cross-session, same-app).
+        //   3. Flat insert (cross-app or mismatched flat text).
         let tspan_result = elem_tspans.as_ref()
-            .and_then(|tsp| session.try_paste_tspans(tsp, text));
+            .and_then(|tsp| session.try_paste_tspans(tsp, text))
+            .or_else(|| {
+                let tsp = elem_tspans.as_ref()?;
+                let payload = crate::workspace::clipboard::rich_clipboard_read_matching(text)?;
+                Some(crate::geometry::tspan::insert_tspans_at(
+                    tsp, session.insertion, &payload))
+            });
         self.ensure_snapshot(model);
         if let Some(new_tspans) = tspan_result {
             // Tspan-aware paste: update the element directly.
@@ -549,6 +560,12 @@ impl CanvasTool for TypeTool {
                     if let Some(text) = self.session.as_mut().unwrap()
                         .copy_selection_with_tspans(&elem_tspans)
                     {
+                        if let Some((_, payload)) =
+                            self.session.as_ref().unwrap().tspan_clipboard.clone()
+                        {
+                            crate::workspace::clipboard::rich_clipboard_write(
+                                text.clone(), payload);
+                        }
                         clipboard_write(text);
                     }
                     return true;
@@ -566,6 +583,12 @@ impl CanvasTool for TypeTool {
                     if let Some(text) = self.session.as_mut().unwrap()
                         .copy_selection_with_tspans(&elem_tspans)
                     {
+                        if let Some((_, payload)) =
+                            self.session.as_ref().unwrap().tspan_clipboard.clone()
+                        {
+                            crate::workspace::clipboard::rich_clipboard_write(
+                                text.clone(), payload);
+                        }
                         clipboard_write(text);
                         self.ensure_snapshot(model);
                         self.session.as_mut().unwrap().backspace();
