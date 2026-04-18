@@ -121,6 +121,38 @@ def resolve_id(tspans: list[Tspan], tspan_id: TspanId) -> Optional[int]:
     return None
 
 
+def merge_tspan_overrides(target: Tspan, source: Tspan) -> Tspan:
+    """Return a new ``Tspan`` carrying every non-``None`` override
+    field from ``source`` on top of ``target``. Does not touch ``id``
+    or ``content``. Used by the next-typed-character state (the
+    "pending override" template) when applying captured overrides to
+    newly-typed tspans.
+    """
+    return replace(
+        target,
+        baseline_shift=source.baseline_shift if source.baseline_shift is not None else target.baseline_shift,
+        dx=source.dx if source.dx is not None else target.dx,
+        font_family=source.font_family if source.font_family is not None else target.font_family,
+        font_size=source.font_size if source.font_size is not None else target.font_size,
+        font_style=source.font_style if source.font_style is not None else target.font_style,
+        font_variant=source.font_variant if source.font_variant is not None else target.font_variant,
+        font_weight=source.font_weight if source.font_weight is not None else target.font_weight,
+        jas_aa_mode=source.jas_aa_mode if source.jas_aa_mode is not None else target.jas_aa_mode,
+        jas_fractional_widths=source.jas_fractional_widths if source.jas_fractional_widths is not None else target.jas_fractional_widths,
+        jas_kerning_mode=source.jas_kerning_mode if source.jas_kerning_mode is not None else target.jas_kerning_mode,
+        jas_no_break=source.jas_no_break if source.jas_no_break is not None else target.jas_no_break,
+        letter_spacing=source.letter_spacing if source.letter_spacing is not None else target.letter_spacing,
+        line_height=source.line_height if source.line_height is not None else target.line_height,
+        rotate=source.rotate if source.rotate is not None else target.rotate,
+        style_name=source.style_name if source.style_name is not None else target.style_name,
+        text_decoration=source.text_decoration if source.text_decoration is not None else target.text_decoration,
+        text_rendering=source.text_rendering if source.text_rendering is not None else target.text_rendering,
+        text_transform=source.text_transform if source.text_transform is not None else target.text_transform,
+        transform=source.transform if source.transform is not None else target.transform,
+        xml_lang=source.xml_lang if source.xml_lang is not None else target.xml_lang,
+    )
+
+
 class Affinity(Enum):
     """Caret side at a tspan boundary. See TSPAN.md Text-edit session
     integration — when a character index lands exactly on the join

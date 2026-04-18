@@ -68,6 +68,15 @@ class TextEditSession:
     # External char-index APIs keep working unchanged — the affinity
     # only matters at joins.
     caret_affinity: "Affinity" = None  # type: ignore[assignment]
+    # Next-typed-character override: a ``Tspan`` template whose
+    # non-``None`` fields are applied to characters inserted from
+    # ``pending_char_start`` to the current ``insertion`` at commit
+    # time. Primed by Character-panel writes when there is no
+    # selection (bare caret); cleared by any caret move with no
+    # selection extension and by undo/redo. Not persisted to the
+    # document.
+    pending_override: object | None = None  # Optional[Tspan]
+    pending_char_start: int | None = None
 
     def __post_init__(self):
         from geometry.tspan import Affinity
@@ -97,6 +106,7 @@ class TextEditSession:
         self.content = prev.content
         self.insertion = prev.insertion
         self.anchor = prev.anchor
+        self.clear_pending_override()
 
     def redo(self) -> None:
         if not self._redo:
@@ -106,6 +116,26 @@ class TextEditSession:
         self.content = nxt.content
         self.insertion = nxt.insertion
         self.anchor = nxt.anchor
+        self.clear_pending_override()
+
+    def set_pending_override(self, overrides) -> None:
+        """Prime the next-typed-character state. Non-``None`` fields
+        of ``overrides`` are merged into the existing pending template;
+        the anchor position is captured on the first call.
+        """
+        from geometry.tspan import Tspan, merge_tspan_overrides
+        if self.pending_override is None:
+            self.pending_override = Tspan()
+            self.pending_char_start = self.insertion
+        self.pending_override = merge_tspan_overrides(
+            self.pending_override, overrides)
+
+    def clear_pending_override(self) -> None:
+        self.pending_override = None
+        self.pending_char_start = None
+
+    def has_pending_override(self) -> bool:
+        return self.pending_override is not None
 
     def insert(self, text: str) -> None:
         self._snapshot()
@@ -146,7 +176,12 @@ class TextEditSession:
 
     def set_insertion(self, pos: int, extend: bool) -> None:
         n = len(self.content)
-        self.insertion = max(0, min(pos, n))
+        new_pos = max(0, min(pos, n))
+        # Non-extending caret movement cancels any pending next-typed-
+        # character override.
+        if not extend and new_pos != self.insertion:
+            self.clear_pending_override()
+        self.insertion = new_pos
         if not extend:
             self.anchor = self.insertion
 
@@ -157,7 +192,10 @@ class TextEditSession:
         LEFT per TSPAN.md.
         """
         n = len(self.content)
-        self.insertion = max(0, min(pos, n))
+        new_pos = max(0, min(pos, n))
+        if not extend and new_pos != self.insertion:
+            self.clear_pending_override()
+        self.insertion = new_pos
         self.caret_affinity = affinity
         if not extend:
             self.anchor = self.insertion
@@ -229,8 +267,9 @@ class TextEditSession:
 
     def apply_to_document(self, doc):
         """Tspan-aware commit: reconcile the session's flat content
-        against the element's current tspan structure. Unchanged
-        prefix and suffix regions keep their original tspan
+        against the element's current tspan structure, then apply any
+        pending next-typed-character override to the typed range.
+        Unchanged prefix and suffix regions keep their original tspan
         assignments (and all per-range overrides); the changed middle
         is absorbed into the first overlapping tspan, with adjacent-
         equal tspans collapsed by the merge pass. Returns None if the
@@ -239,16 +278,38 @@ class TextEditSession:
         from geometry.tspan import reconcile_content
         elem = doc.get_element(self.path)
         if self.target == EditTarget.TEXT and isinstance(elem, Text):
-            new_tspans = tuple(reconcile_content(list(elem.tspans), self.content))
+            reconciled = reconcile_content(list(elem.tspans), self.content)
+            new_tspans = tuple(self._apply_pending_to(reconciled))
             new_elem = dataclasses.replace(
                 elem, content=self.content, tspans=new_tspans)
         elif self.target == EditTarget.TEXT_PATH and isinstance(elem, TextPath):
-            new_tspans = tuple(reconcile_content(list(elem.tspans), self.content))
+            reconciled = reconcile_content(list(elem.tspans), self.content)
+            new_tspans = tuple(self._apply_pending_to(reconciled))
             new_elem = dataclasses.replace(
                 elem, content=self.content, tspans=new_tspans)
         else:
             return None
         return doc.replace_element(self.path, new_elem)
+
+    def _apply_pending_to(self, tspans):
+        """Apply the pending next-typed-character override to the
+        range ``[pending_char_start, insertion)`` of ``tspans``, then
+        merge. Passthrough when pending is unset or the range is
+        empty.
+        """
+        if (self.pending_override is None
+                or self.pending_char_start is None
+                or self.pending_char_start >= self.insertion):
+            return list(tspans)
+        from geometry.tspan import split_range, merge, merge_tspan_overrides
+        split, first, last = split_range(
+            list(tspans), self.pending_char_start, self.insertion)
+        if first is None or last is None:
+            return split
+        out = list(split)
+        for i in range(first, last + 1):
+            out[i] = merge_tspan_overrides(out[i], self.pending_override)
+        return merge(out)
 
 
 def empty_text_elem(x: float, y: float, width: float = 0.0, height: float = 0.0) -> Text:
