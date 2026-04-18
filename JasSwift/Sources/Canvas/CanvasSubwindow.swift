@@ -334,6 +334,69 @@ private func fillStrokeOrOutline(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stro
     }
 }
 
+// MARK: - Character-panel attribute parsing (mirrors Rust / OCaml / Python canvas)
+
+/// Parse a CSS length string in "pt". Returns `nil` for empty /
+/// unrecognised unit. Accepts the bare number, too.
+private func parsePt(_ s: String) -> Double? {
+    let t = s.trimmingCharacters(in: .whitespaces)
+    if t.isEmpty { return nil }
+    let n = t.hasSuffix("pt") ? String(t.dropLast(2)) : t
+    return Double(n)
+}
+
+/// Parse a CSS length string in "em". Returns `nil` for empty.
+private func parseEm(_ s: String) -> Double? {
+    let t = s.trimmingCharacters(in: .whitespaces)
+    if t.isEmpty { return nil }
+    let n = t.hasSuffix("em") ? String(t.dropLast(2)) : t
+    return Double(n)
+}
+
+/// Parse a percent scale string (e.g. "120"). Empty / unparseable = 1.0.
+private func parseScalePercent(_ s: String) -> Double {
+    let t = s.trimmingCharacters(in: .whitespaces)
+    if t.isEmpty { return 1.0 }
+    return (Double(t) ?? 100.0) / 100.0
+}
+
+/// Parse a rotation string (degrees). Empty / unparseable = 0.
+private func parseRotateDeg(_ s: String) -> Double {
+    let t = s.trimmingCharacters(in: .whitespaces)
+    if t.isEmpty { return 0.0 }
+    return Double(t) ?? 0.0
+}
+
+/// Parse Character-panel `baseline_shift` → `(sizeScale, yShift)`.
+/// super: shrink 70% + shift up ~35% of fontSize. sub: shrink 70% +
+/// shift down ~20%. "Npt": shift up by N pt with full size. Empty:
+/// identity. yShift is positive-down (flipped NSView coords).
+private func parseBaselineShift(_ s: String, fontSize: Double) -> (Double, Double) {
+    if s == "super" { return (0.7, -fontSize * 0.35) }
+    if s == "sub"   { return (0.7,  fontSize * 0.2)  }
+    if let pt = parsePt(s) { return (1.0, -pt) }
+    return (1.0, 0.0)
+}
+
+/// Uppercase / lowercase `content` per `text_transform`; small-caps
+/// renders as uppercase for now (same placeholder Rust / OCaml use —
+/// real small-caps waits on a shaper).
+private func applyTextTransform(_ tt: String, _ fv: String, _ content: String) -> String {
+    if tt == "uppercase" || fv == "small-caps" { return content.uppercased() }
+    if tt == "lowercase" { return content.lowercased() }
+    return content
+}
+
+/// Combined letter-spacing in points for NSAttributedString.Key.kern.
+/// Both `letterSpacing` and numeric `kerning` are `Nem`; accumulate
+/// into one advance (Canvas lacks per-pair kerning; matches Rust's
+/// approximation).
+private func letterSpacingPx(_ letterSpacing: String, _ kerning: String, fontSize: Double) -> Double {
+    let ls = parseEm(letterSpacing) ?? 0.0
+    let k  = parseEm(kerning) ?? 0.0
+    return (ls + k) * fontSize
+}
+
 private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview) {
     let effective = min(ancestorVis, elem.visibility)
     if effective == .invisible { return }
@@ -477,12 +540,18 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
     case .text(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
-        var fontDesc = NSFontDescriptor(name: v.fontFamily, size: v.fontSize)
+        // Baseline-shift: super/sub shrink the font to 70% and
+        // offset the baseline; numeric "Npt" shifts up by N pt
+        // without resizing. Empty = identity. Mirrors Rust / Python
+        // / OCaml canvas.
+        let (sizeScale, yShift) = parseBaselineShift(v.baselineShift, fontSize: v.fontSize)
+        let effectiveFs = v.fontSize * sizeScale
+        var fontDesc = NSFontDescriptor(name: v.fontFamily, size: effectiveFs)
         var traits: NSFontDescriptor.SymbolicTraits = []
         if v.fontWeight == "bold" { traits.insert(.bold) }
         if v.fontStyle == "italic" || v.fontStyle == "oblique" { traits.insert(.italic) }
         fontDesc = fontDesc.withSymbolicTraits(traits)
-        let font = NSFont(descriptor: fontDesc, size: v.fontSize) ?? NSFont.systemFont(ofSize: v.fontSize)
+        let font = NSFont(descriptor: fontDesc, size: effectiveFs) ?? NSFont.systemFont(ofSize: effectiveFs)
         let color: NSColor
         if let fill = v.fill {
             color = nsColor(fill.color)
@@ -493,30 +562,64 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
             .font: font,
             .foregroundColor: color,
         ]
-        if v.textDecoration == "underline" {
+        // text_decoration: whitespace-split so "line-through underline"
+        // toggles both flags (the exact-string checks only matched
+        // single values before).
+        let tdTokens = v.textDecoration.split(separator: " ").map(String.init)
+        if tdTokens.contains("underline") {
             attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
-        } else if v.textDecoration == "line-through" {
+        }
+        if tdTokens.contains("line-through") {
             attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
         }
+        // letter_spacing (+ numeric kerning): CoreText takes absolute
+        // px via NSAttributedString.Key.kern. Both fields are ``Nem``;
+        // accumulate into a single advance (matches Rust / Python).
+        let kernPx = letterSpacingPx(v.letterSpacing, v.kerning, fontSize: effectiveFs)
+        if kernPx != 0 {
+            attrs[.kern] = kernPx as NSNumber
+        }
         ctx.saveGState()
+        // Horizontal / vertical scale + character rotation wrap the
+        // text draw. They apply around the element's (x, y) origin.
+        let hScale = parseScalePercent(v.horizontalScale)
+        let vScale = parseScalePercent(v.verticalScale)
+        let rotDeg = parseRotateDeg(v.rotate)
+        let needsTransform = (hScale != 1.0 || vScale != 1.0 || rotDeg != 0.0)
+        if needsTransform {
+            ctx.translateBy(x: v.x, y: v.y)
+            if rotDeg != 0.0 {
+                ctx.rotate(by: rotDeg * .pi / 180.0)
+            }
+            if hScale != 1.0 || vScale != 1.0 {
+                ctx.scaleBy(x: hScale, y: vScale)
+            }
+            ctx.translateBy(x: -v.x, y: -v.y)
+        }
         // Both point and area text are rendered as one CTLine per visual
         // line in the NSView's flipped coordinate system. The element's
         // (x, y) is the *top* of the layout box; the baseline is
-        // `y + 0.8 * fontSize` (the same ascent the editor uses). Per-line
-        // y advances by `fontSize`.
+        // `y + 0.8 * fontSize` (the same ascent the editor uses).
         ctx.textMatrix = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
         let measure = makeMeasurer(family: v.fontFamily, weight: v.fontWeight,
-                                   style: v.fontStyle, size: v.fontSize)
+                                   style: v.fontStyle, size: effectiveFs)
         let maxW = v.isAreaText ? v.width : 0.0
-        let lay = layoutText(v.content, maxWidth: maxW,
-                             fontSize: v.fontSize, measure: measure)
-        let chars = Array(v.content)
+        // text_transform / font_variant: uppercase or lowercase the
+        // content before CTLine layout. Small-caps renders as
+        // uppercase for now (same placeholder as Rust / OCaml canvas).
+        let drawContent = applyTextTransform(v.textTransform, v.fontVariant, v.content)
+        // line_height overrides the per-line stride in text_layout when
+        // non-empty; empty = Auto = fontSize.
+        let layoutFs = parsePt(v.lineHeight) ?? effectiveFs
+        let lay = layoutText(drawContent, maxWidth: maxW,
+                             fontSize: layoutFs, measure: measure)
+        let chars = Array(drawContent)
         for line in lay.lines {
             let segChars = chars[line.start..<line.end]
             let segStr = String(segChars)
             let lineStr = NSAttributedString(string: segStr, attributes: attrs)
             let ctLine = CTLineCreateWithAttributedString(lineStr)
-            ctx.textPosition = CGPoint(x: v.x, y: v.y + line.baselineY)
+            ctx.textPosition = CGPoint(x: v.x, y: v.y + line.baselineY + yShift)
             CTLineDraw(ctLine, ctx)
         }
         ctx.restoreGState()
@@ -536,6 +639,13 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
         } else {
             color = .black
         }
+        // Per-character path walk — baseline_shift / rotation / scale
+        // would collide with the path-follow geometry, so they're
+        // intentionally ignored for textPath (same as Rust / OCaml /
+        // Python canvas).
+        let tpContent = applyTextTransform(v.textTransform, v.fontVariant, v.content)
+        let tpTdTokens = v.textDecoration.split(separator: " ").map(String.init)
+        let tpKernPx = letterSpacingPx(v.letterSpacing, v.kerning, fontSize: v.fontSize)
         // Flatten path to polyline
         let cgPath = CGMutablePath()
         buildCGPath(cgPath, v.d)
@@ -583,11 +693,17 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
             dists.append(dists[i-1] + hypot(dx, dy))
         }
         guard let totalLen = dists.last, totalLen > 0 else { break }
-        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        if tpTdTokens.contains("underline") {
+            attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+        }
+        if tpTdTokens.contains("line-through") {
+            attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+        }
         var offset = v.startOffset * totalLen
         ctx.saveGState()
         ctx.textMatrix = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
-        for ch in v.content {
+        for ch in tpContent {
             let chStr = NSAttributedString(string: String(ch), attributes: attrs)
             let line = CTLineCreateWithAttributedString(chStr)
             let cw = CTLineGetTypographicBounds(line, nil, nil, nil)
@@ -608,7 +724,9 @@ private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibil
             ctx.textPosition = CGPoint(x: -cw / 2, y: v.fontSize / 3)
             CTLineDraw(line, ctx)
             ctx.restoreGState()
-            offset += cw
+            // letter_spacing / kerning both express as Nem; add to the
+            // per-char advance between placements.
+            offset += cw + tpKernPx
         }
         ctx.restoreGState()
 
