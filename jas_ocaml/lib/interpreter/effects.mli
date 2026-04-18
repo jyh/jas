@@ -51,3 +51,50 @@ val sync_stroke_panel_from_selection :
 
 (** Check whether a state key is a rendering-affecting stroke key. *)
 val is_stroke_render_key : string -> bool
+
+(** Element-attribute surface that [apply_character_panel_to_selection]
+    pushes onto each selected Text / Text_path. *)
+type character_attrs = {
+  font_family : string option;
+  font_size : float option;
+  font_weight : string option;
+  font_style : string option;
+  text_decoration : string;
+  text_transform : string;
+  font_variant : string;
+  baseline_shift : string;
+  line_height : string;
+  letter_spacing : string;
+  xml_lang : string option;
+  aa_mode : string;
+  rotate : string;
+  horizontal_scale : string;
+  vertical_scale : string;
+  kerning : string;
+}
+
+(** Pure function: translate the Character-panel state dict into the
+    element-attribute surface used by
+    [apply_character_panel_to_selection]. Extracted from the apply
+    pipeline so the mapping rules can be tested in isolation. *)
+val attrs_from_character_panel :
+  (string * Yojson.Safe.t) list -> character_attrs
+
+(** Apply a computed [character_attrs] dict to a single Text /
+    Text_path element, returning a new element. Non-text elements
+    pass through unchanged. *)
+val apply_character_attrs_to_elem :
+  Element.element -> character_attrs -> Element.element
+
+(** Push the Character-panel state to every selected Text / Text_path.
+    Mirrors Rust's [apply_character_panel_to_selection]. No-op when
+    the selection is empty or contains no text elements. *)
+val apply_character_panel_to_selection :
+  State_store.t -> Controller.controller -> unit
+
+(** Subscribe [apply_character_panel_to_selection] to writes on the
+    [character_panel] scope so widget changes flow to the selected
+    element automatically. [ctrl_getter] is a thunk so the
+    subscription follows the active model as the user switches tabs. *)
+val subscribe_character_panel :
+  State_store.t -> (unit -> Controller.controller) -> unit
