@@ -15,6 +15,46 @@ let make_bounding_box ?(x = 0.0) ?(y = 0.0) ?(width = 800.0) ?(height = 600.0) (
 
 let title_bar_height = 24
 
+(** Parse a CSS length in ``pt``; empty / unparseable -> [None].
+    Mirrors Rust's ``parse_pt`` and Python's ``_parse_pt``. *)
+let _parse_pt (s : string) : float option =
+  if s = "" then None
+  else
+    let s = String.trim s in
+    let s = if String.length s >= 2
+            && String.sub s (String.length s - 2) 2 = "pt"
+            then String.sub s 0 (String.length s - 2) else s in
+    try Some (float_of_string s) with Failure _ -> None
+
+(** Parse a percent scale string (e.g. ``"120"``). Empty / unparseable
+    → ``1.0``. *)
+let _parse_scale_percent (s : string) : float =
+  if s = "" then 1.0
+  else try float_of_string s /. 100.0 with Failure _ -> 1.0
+
+(** Parse a rotation string in degrees. Empty / unparseable → ``0``. *)
+let _parse_rotate_deg (s : string) : float =
+  if s = "" then 0.0
+  else try float_of_string s with Failure _ -> 0.0
+
+(** Parse ``baseline_shift`` → ``(size_scale, y_shift)``. See the
+    Python helper for the semantics. *)
+let _parse_baseline_shift (s : string) (font_size : float) : float * float =
+  if s = "super" then (0.7, -. font_size *. 0.35)
+  else if s = "sub" then (0.7, font_size *. 0.2)
+  else match _parse_pt s with
+    | Some pt -> (1.0, -. pt)
+    | None -> (1.0, 0.0)
+
+(** Apply ``text_transform`` and ``font_variant`` to the content
+    string. small-caps is rendered as uppercase for now (placeholder
+    until an OpenType shaper lands — Rust uses the same shortcut). *)
+let _apply_text_transform (tt : string) (fv : string) (content : string)
+  : string =
+  if tt = "uppercase" || fv = "small-caps" then String.uppercase_ascii content
+  else if tt = "lowercase" then String.lowercase_ascii content
+  else content
+
 (** Configure [cr] for an outline-mode draw. The spec says
     "stroke of size 0"; on Cairo, a 0-width stroke renders nothing,
     so we use a 1-pixel width which gives a thin black line at
@@ -228,7 +268,12 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Text { x; y; content; font_family; font_size; font_weight; font_style; text_width; text_height; fill; opacity; transform; _ } ->
+  | Text { x; y; content; font_family; font_size;
+           font_weight; font_style; text_width; text_height;
+           fill; opacity; transform;
+           text_transform; font_variant; baseline_shift; line_height;
+           text_decoration; rotate; horizontal_scale; vertical_scale;
+           _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
     begin match fill with
@@ -237,41 +282,85 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
       Cairo.set_source_rgba cr r g b a
     | None -> Cairo.set_source_rgb cr 0.0 0.0 0.0
     end;
+    (* Baseline-shift: "super"/"sub" shrink + offset; numeric "Npt"
+       shifts up by N points with full size. Mirrors Rust /
+       Python canvas. *)
+    let (size_scale, y_shift) = _parse_baseline_shift baseline_shift font_size in
+    let effective_fs = font_size *. size_scale in
     let slant = if font_style = "italic" || font_style = "oblique" then Cairo.Italic else Cairo.Upright in
     let weight = if font_weight = "bold" then Cairo.Bold else Cairo.Normal in
-    (* Point and area text are both rendered as one Cairo line per
-       laid-out line so they share the same metrics as the in-place
-       editor (which queries Cairo text_extents via the type tool's
-       measurer). For point text we just split on '\n'; for area text we
-       run the editor's TextLayout module to do word-wrap.
-
-       Cairo's show_text treats (x, y) as the *baseline*, so we offset
-       by [font_size *. 0.8] (the layout module's ascent) to keep our
-       (x, y) = top-left convention consistent with the editor's
-       bounding box. *)
+    (* text_transform / font_variant: small-caps is rendered as
+       uppercase for now (same placeholder Rust uses — real OpenType
+       small-caps substitution waits on a shaper). *)
+    let content = _apply_text_transform text_transform font_variant content in
+    (* Horizontal / vertical scale and character rotation wrap the
+       text draw. They apply around the element's (x, y) origin. *)
+    let h_scale = _parse_scale_percent horizontal_scale in
+    let v_scale = _parse_scale_percent vertical_scale in
+    let rot_rad = _parse_rotate_deg rotate *. Float.pi /. 180.0 in
+    let needs_txform = h_scale <> 1.0 || v_scale <> 1.0 || rot_rad <> 0.0 in
+    if needs_txform then begin
+      Cairo.save cr;
+      Cairo.translate cr x y;
+      if rot_rad <> 0.0 then Cairo.rotate cr rot_rad;
+      if h_scale <> 1.0 || v_scale <> 1.0 then Cairo.scale cr h_scale v_scale;
+      Cairo.translate cr (-. x) (-. y)
+    end;
     Cairo.select_font_face cr font_family ~slant ~weight;
-    Cairo.set_font_size cr font_size;
-    let ascent = font_size *. 0.8 in
+    Cairo.set_font_size cr effective_fs;
+    let ascent = effective_fs *. 0.8 in
+    (* line_height: when non-empty, overrides the layout stride.
+       Empty = Auto (120% of font size, which is what text_layout
+       uses when we pass [effective_fs]). *)
+    let layout_fs = match _parse_pt line_height with
+      | Some lh -> lh | None -> effective_fs in
+    let has_underline = List.mem "underline" (String.split_on_char ' ' text_decoration) in
+    let has_strike = List.mem "line-through" (String.split_on_char ' ' text_decoration) in
+    let draw_line_decorations seg base_y =
+      if has_underline || has_strike then begin
+        let w = (Cairo.text_extents cr seg).Cairo.x_advance in
+        let thickness = Float.max 1.0 (effective_fs *. 0.07) in
+        Cairo.save cr;
+        Cairo.set_line_width cr thickness;
+        if has_underline then begin
+          let ly = base_y +. effective_fs *. 0.12 in
+          Cairo.move_to cr x ly;
+          Cairo.line_to cr (x +. w) ly;
+          Cairo.stroke cr
+        end;
+        if has_strike then begin
+          let ly = base_y -. effective_fs *. 0.3 in
+          Cairo.move_to cr x ly;
+          Cairo.line_to cr (x +. w) ly;
+          Cairo.stroke cr
+        end;
+        Cairo.restore cr
+      end
+    in
     if text_width > 0.0 && text_height > 0.0 then begin
       let measure s =
         if s = "" then 0.0 else (Cairo.text_extents cr s).Cairo.x_advance
       in
-      let lay = Text_layout.layout content text_width font_size measure in
+      let lay = Text_layout.layout content text_width layout_fs measure in
       Array.iter (fun (line : Text_layout.line_info) ->
         let seg = String.sub content line.start (line.end_ - line.start) in
         let seg = if String.length seg > 0 && seg.[String.length seg - 1] = '\n'
                   then String.sub seg 0 (String.length seg - 1) else seg in
-        Cairo.move_to cr (x +. 0.0) (y +. line.baseline_y);
-        Cairo.show_text cr seg
+        let base_y = y +. line.baseline_y +. y_shift in
+        Cairo.move_to cr x base_y;
+        Cairo.show_text cr seg;
+        draw_line_decorations seg base_y
       ) lay.lines
     end else begin
       let lines = String.split_on_char '\n' content in
       List.iteri (fun i line ->
-        let line_y = y +. ascent +. float_of_int i *. font_size in
+        let line_y = y +. ascent +. float_of_int i *. layout_fs +. y_shift in
         Cairo.move_to cr x line_y;
-        Cairo.show_text cr line
+        Cairo.show_text cr line;
+        draw_line_decorations line line_y
       ) lines
     end;
+    if needs_txform then Cairo.restore cr;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
