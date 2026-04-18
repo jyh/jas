@@ -328,6 +328,154 @@ fn attrs_equal(a: &Tspan, b: &Tspan) -> bool {
         && a.xml_lang == b.xml_lang
 }
 
+/// Reconcile a new flat content string back onto the original tspan
+/// structure, preserving per-range attribute overrides where possible.
+///
+/// The unchanged common prefix and suffix (measured in bytes, snapped
+/// to UTF-8 char boundaries) keep their original tspan assignments.
+/// The changed middle region is absorbed into the first tspan that
+/// overlaps it — extending that tspan's content — with subsequent
+/// overlapping tspans truncated to their post-middle suffix. The
+/// result is passed through `merge` to drop empty tspans and combine
+/// adjacent ones whose override sets now match.
+///
+/// Used by the text-edit session commit path: if the user's edits
+/// didn't touch a stretch of text that lived in a bold tspan, that
+/// tspan's bold override survives. Any edit that fully replaces a
+/// tspan's content collapses its overrides into the neighbour that
+/// absorbed the change.
+pub fn reconcile_content(original: &[Tspan], new_content: &str) -> Vec<Tspan> {
+    let old_content = concat_content(original);
+    if old_content == new_content {
+        return original.to_vec();
+    }
+    if original.is_empty() {
+        let mut t = Tspan::default_tspan();
+        t.content = new_content.to_string();
+        return vec![t];
+    }
+
+    let old_bytes = old_content.as_bytes();
+    let new_bytes = new_content.as_bytes();
+
+    // Longest common prefix (byte-level), snapped to a UTF-8 boundary.
+    let max_prefix = old_bytes.len().min(new_bytes.len());
+    let mut prefix_len = 0;
+    while prefix_len < max_prefix && old_bytes[prefix_len] == new_bytes[prefix_len] {
+        prefix_len += 1;
+    }
+    while prefix_len > 0 && !old_content.is_char_boundary(prefix_len) {
+        prefix_len -= 1;
+    }
+
+    // Longest common suffix, bounded so it doesn't overlap the prefix.
+    let max_suffix = (old_bytes.len() - prefix_len).min(new_bytes.len() - prefix_len);
+    let mut suffix_len = 0;
+    while suffix_len < max_suffix
+        && old_bytes[old_bytes.len() - 1 - suffix_len]
+            == new_bytes[new_bytes.len() - 1 - suffix_len]
+    {
+        suffix_len += 1;
+    }
+    while suffix_len > 0
+        && !old_content.is_char_boundary(old_bytes.len() - suffix_len)
+    {
+        suffix_len -= 1;
+    }
+
+    // Changed region in bytes: old[prefix..old_len-suffix), new[prefix..new_len-suffix).
+    let old_mid_start = prefix_len;
+    let old_mid_end = old_bytes.len() - suffix_len;
+    let new_middle = &new_content[prefix_len..new_bytes.len() - suffix_len];
+
+    // Pure insertion at a boundary (old middle is empty): find the
+    // tspan containing old_mid_start and splice new_middle into its
+    // content. Keeps all override assignments intact.
+    if old_mid_start == old_mid_end {
+        let mut result = original.to_vec();
+        let mut pos = old_mid_start;
+        let mut absorbed = false;
+        for tspan in result.iter_mut() {
+            let t_len = tspan.content.len();
+            if pos <= t_len {
+                let mut s = String::with_capacity(t_len + new_middle.len());
+                s.push_str(&tspan.content[..pos]);
+                s.push_str(new_middle);
+                s.push_str(&tspan.content[pos..]);
+                tspan.content = s;
+                absorbed = true;
+                break;
+            }
+            pos -= t_len;
+        }
+        if !absorbed {
+            if let Some(last) = result.last_mut() {
+                last.content.push_str(new_middle);
+            } else {
+                let mut t = Tspan::default_tspan();
+                t.content = new_middle.to_string();
+                result.push(t);
+            }
+        }
+        return merge(&result);
+    }
+
+    // Replacement (including pure deletion): walk tspans and absorb
+    // new_middle into the first tspan that overlaps the changed
+    // region. Tspans fully before / after pass through; a tspan
+    // fully inside the middle ends up with empty content and is
+    // dropped by the subsequent merge pass.
+    let mut result: Vec<Tspan> = Vec::with_capacity(original.len() + 1);
+    let mut cursor_bytes = 0usize;
+    let mut middle_consumed = false;
+
+    for tspan in original {
+        let t_start = cursor_bytes;
+        let t_end = cursor_bytes + tspan.content.len();
+
+        if t_end <= old_mid_start {
+            result.push(tspan.clone());
+        } else if t_start >= old_mid_end {
+            result.push(tspan.clone());
+        } else {
+            let before_len = old_mid_start.saturating_sub(t_start);
+            let after_off_in_tspan = if t_end > old_mid_end {
+                old_mid_end - t_start
+            } else {
+                tspan.content.len()
+            };
+            let before = &tspan.content[..before_len];
+            let after = if t_end > old_mid_end {
+                &tspan.content[after_off_in_tspan..]
+            } else {
+                ""
+            };
+
+            let mut new_tspan_content =
+                String::with_capacity(before.len() + after.len() + new_middle.len());
+            new_tspan_content.push_str(before);
+            if !middle_consumed {
+                new_tspan_content.push_str(new_middle);
+                middle_consumed = true;
+            }
+            new_tspan_content.push_str(after);
+
+            if !new_tspan_content.is_empty() {
+                let mut new_tspan = tspan.clone();
+                new_tspan.content = new_tspan_content;
+                result.push(new_tspan);
+            }
+        }
+        cursor_bytes = t_end;
+    }
+
+    if result.is_empty() {
+        result.push(Tspan::default_tspan());
+    }
+
+    merge(&result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -535,5 +683,128 @@ mod tests {
         let merged = merge(&[a, b]);
         assert_eq!(resolve_id(&merged, 0), Some(0));
         assert_eq!(resolve_id(&merged, 3), None);
+    }
+
+    // ── reconcile_content ──────────────────────────────────────
+
+    fn bold(s: &str) -> Tspan {
+        Tspan {
+            content: s.to_string(),
+            font_weight: Some("bold".into()),
+            ..Tspan::default_tspan()
+        }
+    }
+    fn plain(s: &str) -> Tspan {
+        Tspan { content: s.to_string(), ..Tspan::default_tspan() }
+    }
+
+    #[test]
+    fn reconcile_identity_passes_through() {
+        let tspans = vec![plain("Hello "), bold("world")];
+        let r = reconcile_content(&tspans, "Hello world");
+        assert_eq!(r, tspans);
+    }
+
+    #[test]
+    fn reconcile_append_extends_last_tspan() {
+        // "Hello world" → "Hello world!": '!' is pure suffix append.
+        // The trailing bold "world" absorbs the new '!'.
+        let tspans = vec![plain("Hello "), bold("world")];
+        let r = reconcile_content(&tspans, "Hello world!");
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].content, "Hello ");
+        assert_eq!(r[1].content, "world!");
+        assert_eq!(r[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn reconcile_prepend_extends_first_tspan() {
+        let tspans = vec![plain("Hello "), bold("world")];
+        let r = reconcile_content(&tspans, "Say Hello world");
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].content, "Say Hello ");
+        assert_eq!(r[1].content, "world");
+        assert_eq!(r[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn reconcile_edit_inside_a_tspan_preserves_neighbours() {
+        // "Hello world" → "Hellooo world": insert "oo" inside the
+        // plain tspan. Bold "world" preserved untouched.
+        let tspans = vec![plain("Hello "), bold("world")];
+        let r = reconcile_content(&tspans, "Hellooo world");
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].content, "Hellooo ");
+        assert!(r[0].font_weight.is_none());
+        assert_eq!(r[1].content, "world");
+        assert_eq!(r[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn reconcile_delete_inside_a_tspan() {
+        // "Hello world" → "Helo world": drop one 'l' from the plain tspan.
+        let tspans = vec![plain("Hello "), bold("world")];
+        let r = reconcile_content(&tspans, "Helo world");
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].content, "Helo ");
+        assert_eq!(r[1].content, "world");
+        assert_eq!(r[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn reconcile_change_absorbs_into_first_overlapping_tspan() {
+        // "Hello world" → "HelloXXworld": the middle " " vanishes,
+        // "XX" inserted, touching both tspans. First overlapping
+        // (plain "Hello ") absorbs the change.
+        let tspans = vec![plain("Hello "), bold("world")];
+        let r = reconcile_content(&tspans, "HelloXXworld");
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].content, "HelloXX");
+        assert!(r[0].font_weight.is_none());
+        assert_eq!(r[1].content, "world");
+        assert_eq!(r[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn reconcile_delete_all_yields_single_default_tspan() {
+        let tspans = vec![plain("Hello "), bold("world")];
+        let r = reconcile_content(&tspans, "");
+        assert_eq!(r.len(), 1);
+        assert!(r[0].content.is_empty());
+        assert!(r[0].has_no_overrides());
+    }
+
+    #[test]
+    fn reconcile_full_replacement_collapses_to_single_tspan() {
+        // Every char changes → no common prefix / suffix. Middle is
+        // the whole new content, absorbed into the first tspan.
+        let tspans = vec![plain("abc"), bold("def")];
+        let r = reconcile_content(&tspans, "xyz");
+        // After merge: one tspan with "xyz" (plus plain's override set).
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].content, "xyz");
+    }
+
+    #[test]
+    fn reconcile_preserves_utf8_boundaries() {
+        // Multibyte chars on each side of the edit: the back-off
+        // logic must not split a codepoint.
+        let tspans = vec![plain("café "), bold("naïve")];
+        let r = reconcile_content(&tspans, "café plus naïve");
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].content, "café plus ");
+        assert_eq!(r[1].content, "naïve");
+        assert_eq!(r[1].font_weight.as_deref(), Some("bold"));
+    }
+
+    #[test]
+    fn reconcile_runs_merge_cleanup() {
+        // After editing, adjacent tspans with matching overrides
+        // collapse via the merge primitive.
+        let tspans = vec![plain("a"), plain("b"), bold("C")];
+        // Remove the 'C' → merge should collapse "a"+"b" into one tspan.
+        let r = reconcile_content(&tspans, "ab");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].content, "ab");
     }
 }
