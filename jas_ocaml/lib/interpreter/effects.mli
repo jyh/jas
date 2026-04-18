@@ -86,9 +86,18 @@ val attrs_from_character_panel :
 val apply_character_attrs_to_elem :
   Element.element -> character_attrs -> Element.element
 
+(** Build a [tspan] override template from the Character panel state
+    that contains only the fields where the panel differs from the
+    element. Returns [None] when everything matches. *)
+val build_panel_pending_template :
+  (string * Yojson.Safe.t) list -> Element.element -> Element.tspan option
+
 (** Push the Character-panel state to every selected Text / Text_path.
     Mirrors Rust's [apply_character_panel_to_selection]. No-op when
-    the selection is empty or contains no text elements. *)
+    the selection is empty or contains no text elements. When an
+    active edit session is present with a bare caret (Phase 3), the
+    write is rerouted to [Text_edit.set_pending_override] on the
+    session instead of being applied to the element. *)
 val apply_character_panel_to_selection :
   State_store.t -> Controller.controller -> unit
 

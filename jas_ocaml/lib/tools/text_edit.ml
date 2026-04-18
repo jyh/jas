@@ -277,3 +277,14 @@ let empty_text_path_elem d =
   Element.make_text_path
     ~fill:(Some Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }; fill_opacity = 1.0 })
     d ""
+
+(** Wrap [t] as a structurally-typed [Model.edit_session_ref] so the
+    Character-panel pipeline in [Effects] can route writes to this
+    session without the [document] layer having to know about
+    [Text_edit.t]. *)
+let as_session_ref (t : t) : Model.edit_session_ref = object
+  method has_selection = has_selection t
+  method path = t.path
+  method set_pending_override o = set_pending_override t o
+  method clear_pending_override () = clear_pending_override t
+end

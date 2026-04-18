@@ -45,6 +45,12 @@ val has_pending_override : t -> bool
 val pending_override : t -> Element.tspan option
 val pending_char_start : t -> int option
 
+(** Wrap [t] as a [Model.edit_session_ref] so callers in layers
+    above [tools] (notably the Character-panel pipeline in
+    [Effects]) can reach the session without a direct dependency on
+    [Text_edit]. *)
+val as_session_ref : t -> Model.edit_session_ref
+
 (** Resolve the caret's [(tspan_idx, offset)] using [caret_affinity].
     Used by the next-typed-character path. *)
 val insertion_tspan_pos : t -> Element.tspan array -> int * int
