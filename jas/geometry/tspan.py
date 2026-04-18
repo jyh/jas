@@ -96,6 +96,13 @@ def default_tspan() -> Tspan:
     return Tspan()
 
 
+def tspans_from_content(content: str) -> tuple[Tspan, ...]:
+    """One-element tspan tuple mirroring ``content`` with no overrides.
+    Used by ``Text`` / ``TextPath`` constructors to seed the ``tspans``
+    field. Mirrors the Rust / Swift / OCaml helpers."""
+    return (Tspan(id=0, content=content),)
+
+
 def concat_content(tspans: list[Tspan]) -> str:
     """Concatenation of every tspan's content in reading order.
     This is the derived ``Text.content`` value; see TSPAN.md Primitives.
