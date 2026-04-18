@@ -110,6 +110,31 @@ state:
       entry writes this flag; rendering picks up jas:hanging-punctuation
       on the paragraph wrapper tspan in Phase 4.
 
+  # ── Text-kind gating (Phase 3a) ─────────────────────────────
+  # PARAGRAPH.md §Text-kind gating disables the four JUSTIFY_*
+  # buttons, the three indent combos, the hyphenate checkbox, and
+  # the hanging-punctuation menu item when the selection is point
+  # text or text-on-path (they need a wrapping frame). These two
+  # bools are pushed by the native apps' selection-change hooks;
+  # flask defaults them to true so the static demo renders fully
+  # enabled.
+  text_selected:
+    type: bool
+    default: true
+    description: >
+      True when any text or text-on-path element is selected. Drives
+      bind.disabled on universal controls (alignments, space, list
+      style). Native apps overwrite on selection change; flask demo
+      keeps the default.
+  area_text_selected:
+    type: bool
+    default: true
+    description: >
+      True when every selected text element is area text (a wrapping
+      frame, width > 0 and height > 0). Drives bind.disabled on
+      area-only controls (JUSTIFY_*, indents, hyphenate, hanging
+      punctuation). Native apps overwrite on selection change.
+
 init: {}
 
 menu:
@@ -148,6 +173,7 @@ content:
               style: { width: 24, height: 22 }
               bind:
                 value: "panel.align_left"
+                disabled: "not panel.text_selected"
         - type: container
           col: 1
           style: { alignment: center }
@@ -160,6 +186,7 @@ content:
               style: { width: 24, height: 22 }
               bind:
                 value: "panel.align_center"
+                disabled: "not panel.text_selected"
         - type: container
           col: 1
           style: { alignment: center }
@@ -172,6 +199,7 @@ content:
               style: { width: 24, height: 22 }
               bind:
                 value: "panel.align_right"
+                disabled: "not panel.text_selected"
         - type: container
           col: 1
           style: { alignment: center }
@@ -184,6 +212,7 @@ content:
               style: { width: 24, height: 22 }
               bind:
                 value: "panel.justify_left"
+                disabled: "not panel.area_text_selected"
         - type: container
           col: 1
           style: { alignment: center }
@@ -196,6 +225,7 @@ content:
               style: { width: 24, height: 22 }
               bind:
                 value: "panel.justify_center"
+                disabled: "not panel.area_text_selected"
         - type: container
           col: 1
           style: { alignment: center }
@@ -208,6 +238,7 @@ content:
               style: { width: 24, height: 22 }
               bind:
                 value: "panel.justify_right"
+                disabled: "not panel.area_text_selected"
         - type: container
           col: 1
           style: { alignment: center }
@@ -220,6 +251,7 @@ content:
               style: { width: 24, height: 22 }
               bind:
                 value: "panel.justify_all"
+                disabled: "not panel.area_text_selected"
         # 5-column right-padding intentional.
 
     # ── Row 2: Bullets dropdown + Numbered list dropdown ─────
@@ -245,6 +277,7 @@ content:
                 - { value: "bullet-check",      label: "✓   Check" }
               bind:
                 value: "panel.bullets"
+                disabled: "not panel.text_selected"
         - type: container
           col: 6
           children:
@@ -264,6 +297,7 @@ content:
                 - { value: "num-upper-roman", label: "I.   Upper Roman" }
               bind:
                 value: "panel.numbered_list"
+                disabled: "not panel.text_selected"
 
     # ── Row 3: Left indent (col-1 icon + col-5 combo) + Right indent ──
     - type: row
@@ -287,6 +321,7 @@ content:
               style: { width: "100%" }
               bind:
                 value: "panel.left_indent"
+                disabled: "not panel.area_text_selected"
         - type: container
           col: 1
           style: { alignment: center }
@@ -306,6 +341,7 @@ content:
               style: { width: "100%" }
               bind:
                 value: "panel.right_indent"
+                disabled: "not panel.area_text_selected"
 
     # ── Row 4: First-line indent (col-1 icon + col-5 combo) ──
     # 6-column right-padding intentional.
@@ -332,6 +368,7 @@ content:
               style: { width: "100%" }
               bind:
                 value: "panel.first_line_indent"
+                disabled: "not panel.area_text_selected"
 
     # ── Row 5: Space before (col-1 icon + col-5 combo) + Space after ──
     - type: row
@@ -357,6 +394,7 @@ content:
               style: { width: "100%" }
               bind:
                 value: "panel.space_before"
+                disabled: "not panel.text_selected"
         - type: container
           col: 1
           style: { alignment: center }
@@ -376,6 +414,7 @@ content:
               style: { width: "100%" }
               bind:
                 value: "panel.space_after"
+                disabled: "not panel.text_selected"
 
     # ── Row 6: Hyphenate checkbox (col-3, 9-col right padding) ──
     - type: row
@@ -395,3 +434,4 @@ content:
                 dialog (panel menu → Hyphenation…).
               bind:
                 value: "panel.hyphenate"
+                disabled: "not panel.area_text_selected"

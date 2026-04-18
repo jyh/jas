@@ -12549,6 +12549,16 @@
           "type": "bool",
           "default": false,
           "description": "Hanging Punctuation menu-item checkmark state. Toggling the menu entry writes this flag; rendering picks up jas:hanging-punctuation on the paragraph wrapper tspan in Phase 4.\n"
+        },
+        "text_selected": {
+          "type": "bool",
+          "default": true,
+          "description": "True when any text or text-on-path element is selected. Drives bind.disabled on universal controls (alignments, space, list style). Native apps overwrite on selection change; flask demo keeps the default.\n"
+        },
+        "area_text_selected": {
+          "type": "bool",
+          "default": true,
+          "description": "True when every selected text element is area text (a wrapping frame, width > 0 and height > 0). Drives bind.disabled on area-only controls (JUSTIFY_*, indents, hyphenate, hanging punctuation). Native apps overwrite on selection change.\n"
         }
       },
       "init": {},
@@ -12603,7 +12613,8 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.align_left"
+                      "value": "panel.align_left",
+                      "disabled": "not panel.text_selected"
                     }
                   }
                 ]
@@ -12626,7 +12637,8 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.align_center"
+                      "value": "panel.align_center",
+                      "disabled": "not panel.text_selected"
                     }
                   }
                 ]
@@ -12649,7 +12661,8 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.align_right"
+                      "value": "panel.align_right",
+                      "disabled": "not panel.text_selected"
                     }
                   }
                 ]
@@ -12672,7 +12685,8 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.justify_left"
+                      "value": "panel.justify_left",
+                      "disabled": "not panel.area_text_selected"
                     }
                   }
                 ]
@@ -12695,7 +12709,8 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.justify_center"
+                      "value": "panel.justify_center",
+                      "disabled": "not panel.area_text_selected"
                     }
                   }
                 ]
@@ -12718,7 +12733,8 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.justify_right"
+                      "value": "panel.justify_right",
+                      "disabled": "not panel.area_text_selected"
                     }
                   }
                 ]
@@ -12741,7 +12757,8 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.justify_all"
+                      "value": "panel.justify_all",
+                      "disabled": "not panel.area_text_selected"
                     }
                   }
                 ]
@@ -12794,7 +12811,8 @@
                       }
                     ],
                     "bind": {
-                      "value": "panel.bullets"
+                      "value": "panel.bullets",
+                      "disabled": "not panel.text_selected"
                     }
                   }
                 ]
@@ -12838,7 +12856,8 @@
                       }
                     ],
                     "bind": {
-                      "value": "panel.numbered_list"
+                      "value": "panel.numbered_list",
+                      "disabled": "not panel.text_selected"
                     }
                   }
                 ]
@@ -12880,7 +12899,8 @@
                       "width": "100%"
                     },
                     "bind": {
-                      "value": "panel.left_indent"
+                      "value": "panel.left_indent",
+                      "disabled": "not panel.area_text_selected"
                     }
                   }
                 ]
@@ -12917,7 +12937,8 @@
                       "width": "100%"
                     },
                     "bind": {
-                      "value": "panel.right_indent"
+                      "value": "panel.right_indent",
+                      "disabled": "not panel.area_text_selected"
                     }
                   }
                 ]
@@ -12959,7 +12980,8 @@
                       "width": "100%"
                     },
                     "bind": {
-                      "value": "panel.first_line_indent"
+                      "value": "panel.first_line_indent",
+                      "disabled": "not panel.area_text_selected"
                     }
                   }
                 ]
@@ -13001,7 +13023,8 @@
                       "width": "100%"
                     },
                     "bind": {
-                      "value": "panel.space_before"
+                      "value": "panel.space_before",
+                      "disabled": "not panel.text_selected"
                     }
                   }
                 ]
@@ -13038,7 +13061,8 @@
                       "width": "100%"
                     },
                     "bind": {
-                      "value": "panel.space_after"
+                      "value": "panel.space_after",
+                      "disabled": "not panel.text_selected"
                     }
                   }
                 ]
@@ -13062,7 +13086,8 @@
                     "summary": "Hyphenate",
                     "description": "Master switch \u2014 when on, line breaking may use hyphenation. Hyphenation language is inherited from the character-level xml:lang. Fine-grained parameters live in the Hyphenation dialog (panel menu \u2192 Hyphenation\u2026).\n",
                     "bind": {
-                      "value": "panel.hyphenate"
+                      "value": "panel.hyphenate",
+                      "disabled": "not panel.area_text_selected"
                     }
                   }
                 ]
