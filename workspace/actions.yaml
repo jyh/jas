@@ -1608,6 +1608,18 @@ actions:
     category: paragraph
     effects:
       - open_dialog: { id: paragraph_hyphenation }
+  paragraph_hyphenation_confirm:
+    description: >
+      OK handler for the Hyphenation dialog. Clears the preview
+      snapshot so close_dialog will not restore (commits the user's
+      edits). Phase 2 stub — Phase 9 wires the actual write of
+      jas:hyphenate-* attributes to the selection's paragraph wrapper
+      tspans plus the panel.hyphenate mirror.
+    category: paragraph
+    effects:
+      - log: "paragraph_hyphenation_confirm (Phase 9 wiring pending)"
+      - clear_dialog_snapshot: null
+      - close_dialog: null
   reset_paragraph_panel:
     description: >
       Reset every Paragraph panel control to its default per

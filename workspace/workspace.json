@@ -2231,6 +2231,21 @@
         }
       ]
     },
+    "paragraph_hyphenation_confirm": {
+      "description": "OK handler for the Hyphenation dialog. Clears the preview snapshot so close_dialog will not restore (commits the user's edits). Phase 2 stub \u2014 Phase 9 wires the actual write of jas:hyphenate-* attributes to the selection's paragraph wrapper tspans plus the panel.hyphenate mirror.\n",
+      "category": "paragraph",
+      "effects": [
+        {
+          "log": "paragraph_hyphenation_confirm (Phase 9 wiring pending)"
+        },
+        {
+          "clear_dialog_snapshot": null
+        },
+        {
+          "close_dialog": null
+        }
+      ]
+    },
     "reset_paragraph_panel": {
       "description": "Reset every Paragraph panel control to its default per PARAGRAPH.md \u00a7Reset Panel. Phase 2 stub \u2014 Phase 4 wires the real reset (panel-local state plus jas:* attrs on the selection's paragraph wrapper tspans).\n",
       "category": "paragraph",
@@ -6209,6 +6224,453 @@
                   "show": "dialog.show",
                   "preview": "dialog.preview"
                 }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "paragraph_hyphenation": {
+      "summary": "Hyphenation",
+      "description": "Modal dialog for fine-grained hyphenation controls per PARAGRAPH.md \u00a7Hyphenation Dialog. Opened from the Paragraph panel menu (Hyphenation\u2026).\nLayout (top to bottom): - Master checkbox: \"Hyphenation\" (gates the rest of the dialog \u2014\n  when off, all sibling controls render dimmed/non-interactive\n  via bind.disabled = \"not dialog.hyphenate\")\n- 5 numeric input rows: Words Longer Than / After First /\n  Before Last / Hyphen Limit / Hyphenation Zone\n- 7-step discrete slider with endpoint labels (Better Spacing /\n  Fewer Hyphens)\n- Hyphenate Capitalized Words checkbox - Footer: Preview | Cancel | OK\nThe master HYPHENATE_MASTER_CHECKBOX mirrors the Paragraph panel's HYPHENATE_CHECKBOX (both write panel.hyphenate). Phase 2 keeps the dialog field as dialog-local state; Phase 8/9 wires the cross-scope mirror via deep-path preview_targets and proper panel-state synchronisation.\nDefaults match examples/hyphenation.png (Adobe parity): master off, 3 / 1 / 1 letters, 0 hyphens (unlimited), 0 pt zone, bias 0 (Better Spacing), capitalized off.\nThe hyphenation language is inherited from the character-level xml:lang (set via LANGUAGE_DROPDOWN in CHARACTER.md); this dialog has no language control of its own.\n",
+      "modal": true,
+      "width": 460,
+      "state": {
+        "hyphenate": {
+          "type": "bool",
+          "default": false,
+          "description": "HYPHENATE_MASTER_CHECKBOX \u2014 master switch. When off, every other field in the dialog renders dimmed/non-interactive (via bind.disabled). Mirrors panel.hyphenate (Phase 8 wiring).\n"
+        },
+        "hyphenate_min_word": {
+          "type": "number",
+          "default": 3,
+          "min": 2,
+          "max": 25,
+          "description": "Words Longer Than N letters. jas:hyphenate-min-word."
+        },
+        "hyphenate_min_before": {
+          "type": "number",
+          "default": 1,
+          "min": 1,
+          "max": 10,
+          "description": "After First N letters. jas:hyphenate-min-before."
+        },
+        "hyphenate_min_after": {
+          "type": "number",
+          "default": 1,
+          "min": 1,
+          "max": 10,
+          "description": "Before Last N letters. jas:hyphenate-min-after."
+        },
+        "hyphenate_limit": {
+          "type": "number",
+          "default": 0,
+          "min": 0,
+          "max": 25,
+          "description": "Hyphen Limit (0 = unlimited). jas:hyphenate-limit."
+        },
+        "hyphenate_zone": {
+          "type": "number",
+          "default": 0,
+          "min": 0,
+          "max": 1296,
+          "description": "Hyphenation Zone in pt \u2014 distance from the right margin within which hyphenation is considered (non-justified paragraphs only). jas:hyphenate-zone.\n"
+        },
+        "hyphenate_bias": {
+          "type": "number",
+          "default": 0,
+          "min": 0,
+          "max": 6,
+          "description": "Bias slider \u2014 discrete 7-step (0 = Better Spacing / cheap hyphens; 6 = Fewer Hyphens / expensive hyphens). Wires into the every-line composer's hyphen penalty in Phase 10. jas:hyphenate-bias.\n"
+        },
+        "hyphenate_capitalized": {
+          "type": "bool",
+          "default": false,
+          "description": "Hyphenate Capitalized Words. jas:hyphenate-capitalized.\n"
+        },
+        "preview": {
+          "type": "bool",
+          "default": false,
+          "description": "Preview checkbox. When on, every edit live-applies to the selected paragraphs. Cancel always rolls back to the on-open snapshot via the Phase 0 preview snapshot/restore harness.\n"
+        }
+      },
+      "preview_targets": {},
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 8,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 12,
+                "children": [
+                  {
+                    "id": "ph_master",
+                    "type": "toggle",
+                    "label": "Hyphenation",
+                    "bind": {
+                      "checked": "dialog.hyphenate"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 6,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Words Longer Than:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ph_min_word",
+                    "type": "number_input",
+                    "min": 2,
+                    "max": 25,
+                    "style": {
+                      "width": "100%"
+                    },
+                    "bind": {
+                      "value": "dialog.hyphenate_min_word",
+                      "disabled": "not dialog.hyphenate"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "letters",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 6,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "After First:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ph_min_before",
+                    "type": "number_input",
+                    "min": 1,
+                    "max": 10,
+                    "style": {
+                      "width": "100%"
+                    },
+                    "bind": {
+                      "value": "dialog.hyphenate_min_before",
+                      "disabled": "not dialog.hyphenate"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "letters",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 6,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Before Last:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ph_min_after",
+                    "type": "number_input",
+                    "min": 1,
+                    "max": 10,
+                    "style": {
+                      "width": "100%"
+                    },
+                    "bind": {
+                      "value": "dialog.hyphenate_min_after",
+                      "disabled": "not dialog.hyphenate"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "letters",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 6,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Hyphen Limit:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ph_limit",
+                    "type": "number_input",
+                    "min": 0,
+                    "max": 25,
+                    "style": {
+                      "width": "100%"
+                    },
+                    "bind": {
+                      "value": "dialog.hyphenate_limit",
+                      "disabled": "not dialog.hyphenate"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "hyphens",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 6,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Hyphenation Zone:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "id": "ph_zone",
+                    "type": "number_input",
+                    "min": 0,
+                    "max": 1296,
+                    "style": {
+                      "width": "100%"
+                    },
+                    "bind": {
+                      "value": "dialog.hyphenate_zone",
+                      "disabled": "not dialog.hyphenate"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": []
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 12,
+                "children": [
+                  {
+                    "id": "ph_bias",
+                    "type": "slider",
+                    "min": 0,
+                    "max": 6,
+                    "step": 1,
+                    "bind": {
+                      "value": "dialog.hyphenate_bias",
+                      "disabled": "not dialog.hyphenate"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 6,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Better Spacing",
+                    "style": {
+                      "font_size": 10
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 6,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Fewer Hyphens",
+                    "style": {
+                      "font_size": 10,
+                      "alignment": "end"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 12,
+                "children": [
+                  {
+                    "id": "ph_capitalized",
+                    "type": "toggle",
+                    "label": "Hyphenate Capitalized Words",
+                    "bind": {
+                      "checked": "dialog.hyphenate_capitalized",
+                      "disabled": "not dialog.hyphenate"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 8,
+              "alignment": "center",
+              "justify": "end"
+            },
+            "children": [
+              {
+                "id": "ph_preview",
+                "type": "toggle",
+                "label": "Preview",
+                "bind": {
+                  "checked": "dialog.preview"
+                }
+              },
+              {
+                "type": "spacer",
+                "style": {
+                  "flex": 1
+                }
+              },
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "type": "button",
+                "label": "OK",
+                "action": "paragraph_hyphenation_confirm",
+                "variant": "primary"
               }
             ]
           }
