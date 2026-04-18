@@ -32,6 +32,27 @@ val resolve_id : tspan array -> tspan_id -> int option
     character state (the "pending override" template). *)
 val merge_tspan_overrides : tspan -> tspan -> tspan
 
+(** Serialize [tspans] as the rich-clipboard JSON payload described
+    in TSPAN.md — [{"tspans": [...]}] with each tspan's override
+    fields in snake_case. Ids are stripped; [None] overrides are
+    omitted for compactness. *)
+val tspans_to_json_clipboard : tspan array -> string
+
+(** Parse a rich-clipboard JSON payload back into a tspan list with
+    fresh ids. [None] on malformed input. *)
+val tspans_from_json_clipboard : string -> tspan array option
+
+(** Serialize [tspans] as an SVG fragment suitable for the
+    [image/svg+xml] clipboard format — a single [<text>] element
+    wrapping the tspan children with standard CSS-style attribute
+    names, alphabetically sorted. *)
+val tspans_to_svg_fragment : tspan array -> string
+
+(** Parse an SVG fragment produced by [tspans_to_svg_fragment] or a
+    compatible shape into a tspan list with fresh ids. [None] when
+    the root is not a [<text>] element. *)
+val tspans_from_svg_fragment : string -> tspan array option
+
 (** Caret side at a tspan boundary. See TSPAN.md Text-edit session
     integration — when a character index lands exactly on the join
     between two tspans, the affinity decides which side "wins".

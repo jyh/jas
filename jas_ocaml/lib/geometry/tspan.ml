@@ -67,6 +67,261 @@ let resolve_id (tspans : tspan array) (id : tspan_id) : int option =
   ) tspans;
   !result
 
+let _fmt_float v =
+  if Float.equal v (Float.of_int (Float.to_int v))
+  then Printf.sprintf "%d" (Float.to_int v)
+  else Printf.sprintf "%g" v
+
+let _opt_assoc k v = match v with Some x -> [(k, x)] | None -> []
+
+let _tspan_to_json (t : tspan) : Yojson.Safe.t =
+  let fields = ref [] in
+  let add k v = fields := (k, v) :: !fields in
+  add "content" (`String t.content);
+  (match t.baseline_shift with Some v -> add "baseline_shift" (`Float v) | None -> ());
+  (match t.dx with Some v -> add "dx" (`Float v) | None -> ());
+  (match t.font_family with Some v -> add "font_family" (`String v) | None -> ());
+  (match t.font_size with Some v -> add "font_size" (`Float v) | None -> ());
+  (match t.font_style with Some v -> add "font_style" (`String v) | None -> ());
+  (match t.font_variant with Some v -> add "font_variant" (`String v) | None -> ());
+  (match t.font_weight with Some v -> add "font_weight" (`String v) | None -> ());
+  (match t.jas_aa_mode with Some v -> add "jas_aa_mode" (`String v) | None -> ());
+  (match t.jas_fractional_widths with Some v -> add "jas_fractional_widths" (`Bool v) | None -> ());
+  (match t.jas_kerning_mode with Some v -> add "jas_kerning_mode" (`String v) | None -> ());
+  (match t.jas_no_break with Some v -> add "jas_no_break" (`Bool v) | None -> ());
+  (match t.letter_spacing with Some v -> add "letter_spacing" (`Float v) | None -> ());
+  (match t.line_height with Some v -> add "line_height" (`Float v) | None -> ());
+  (match t.rotate with Some v -> add "rotate" (`Float v) | None -> ());
+  (match t.style_name with Some v -> add "style_name" (`String v) | None -> ());
+  (match t.text_decoration with
+   | Some v -> add "text_decoration" (`List (List.map (fun s -> `String s) v))
+   | None -> ());
+  (match t.text_rendering with Some v -> add "text_rendering" (`String v) | None -> ());
+  (match t.text_transform with Some v -> add "text_transform" (`String v) | None -> ());
+  (match t.xml_lang with Some v -> add "xml_lang" (`String v) | None -> ());
+  ignore _opt_assoc;
+  `Assoc (List.rev !fields)
+
+let tspans_to_json_clipboard (tspans : tspan array) : string =
+  let arr = Array.to_list tspans |> List.map _tspan_to_json in
+  Yojson.Safe.to_string (`Assoc [("tspans", `List arr)])
+
+let _tspan_from_json (i : int) (j : Yojson.Safe.t) : tspan =
+  let open Yojson.Safe.Util in
+  let get_str key = try Some (to_string (member key j)) with _ -> None in
+  let get_float key = try Some (to_number (member key j)) with _ -> None in
+  let get_bool key = try Some (to_bool (member key j)) with _ -> None in
+  let get_str_list key =
+    try
+      match member key j with
+      | `List xs -> Some (List.map to_string xs)
+      | _ -> None
+    with _ -> None
+  in
+  let content = match get_str "content" with Some s -> s | None -> "" in
+  {
+    id = i;
+    content;
+    baseline_shift = get_float "baseline_shift";
+    dx = get_float "dx";
+    font_family = get_str "font_family";
+    font_size = get_float "font_size";
+    font_style = get_str "font_style";
+    font_variant = get_str "font_variant";
+    font_weight = get_str "font_weight";
+    jas_aa_mode = get_str "jas_aa_mode";
+    jas_fractional_widths = get_bool "jas_fractional_widths";
+    jas_kerning_mode = get_str "jas_kerning_mode";
+    jas_no_break = get_bool "jas_no_break";
+    letter_spacing = get_float "letter_spacing";
+    line_height = get_float "line_height";
+    rotate = get_float "rotate";
+    style_name = get_str "style_name";
+    text_decoration = get_str_list "text_decoration";
+    text_rendering = get_str "text_rendering";
+    text_transform = get_str "text_transform";
+    transform = None;
+    xml_lang = get_str "xml_lang";
+  }
+
+let tspans_from_json_clipboard (json_str : string) : tspan array option =
+  try
+    let root = Yojson.Safe.from_string json_str in
+    match root with
+    | `Assoc fields ->
+      (match List.assoc_opt "tspans" fields with
+       | Some (`List items) ->
+         let tspans = List.mapi _tspan_from_json items in
+         Some (Array.of_list tspans)
+       | _ -> None)
+    | _ -> None
+  with _ -> None
+
+let _xml_escape s =
+  let buf = Buffer.create (String.length s) in
+  String.iter (fun c ->
+    match c with
+    | '&' -> Buffer.add_string buf "&amp;"
+    | '<' -> Buffer.add_string buf "&lt;"
+    | '>' -> Buffer.add_string buf "&gt;"
+    | '"' -> Buffer.add_string buf "&quot;"
+    | _ -> Buffer.add_char buf c
+  ) s;
+  Buffer.contents buf
+
+let _xml_unescape s =
+  (* Minimal: just the five entities our writer emits. *)
+  let replace a b s = String.concat b (String.split_on_char '\000'
+    (Str.global_replace (Str.regexp_string a) "\000" s)) in
+  s |> replace "&quot;" "\""
+    |> replace "&gt;" ">"
+    |> replace "&lt;" "<"
+    |> replace "&amp;" "&"
+
+let tspans_to_svg_fragment (tspans : tspan array) : string =
+  let buf = Buffer.create 128 in
+  Buffer.add_string buf "<text xmlns=\"http://www.w3.org/2000/svg\">";
+  Array.iter (fun (t : tspan) ->
+    Buffer.add_string buf "<tspan";
+    let attrs = ref [] in
+    let add k v = attrs := (k, v) :: !attrs in
+    (match t.baseline_shift with Some v -> add "baseline-shift" (_fmt_float v) | None -> ());
+    (match t.dx with Some v -> add "dx" (_fmt_float v) | None -> ());
+    (match t.font_family with Some v -> add "font-family" v | None -> ());
+    (match t.font_size with Some v -> add "font-size" (_fmt_float v) | None -> ());
+    (match t.font_style with Some v -> add "font-style" v | None -> ());
+    (match t.font_variant with Some v -> add "font-variant" v | None -> ());
+    (match t.font_weight with Some v -> add "font-weight" v | None -> ());
+    (match t.jas_aa_mode with Some v -> add "jas:aa-mode" v | None -> ());
+    (match t.jas_fractional_widths with Some v -> add "jas:fractional-widths" (string_of_bool v) | None -> ());
+    (match t.jas_kerning_mode with Some v -> add "jas:kerning-mode" v | None -> ());
+    (match t.jas_no_break with Some v -> add "jas:no-break" (string_of_bool v) | None -> ());
+    (match t.letter_spacing with Some v -> add "letter-spacing" (_fmt_float v) | None -> ());
+    (match t.line_height with Some v -> add "line-height" (_fmt_float v) | None -> ());
+    (match t.rotate with Some v -> add "rotate" (_fmt_float v) | None -> ());
+    (match t.style_name with Some v -> add "jas:style-name" v | None -> ());
+    (match t.text_decoration with
+     | Some v when v <> [] -> add "text-decoration" (String.concat " " v)
+     | _ -> ());
+    (match t.text_rendering with Some v -> add "text-rendering" v | None -> ());
+    (match t.text_transform with Some v -> add "text-transform" v | None -> ());
+    (match t.xml_lang with Some v -> add "xml:lang" v | None -> ());
+    let sorted = List.sort (fun (a, _) (b, _) -> compare a b) !attrs in
+    List.iter (fun (k, v) ->
+      Buffer.add_char buf ' ';
+      Buffer.add_string buf k;
+      Buffer.add_string buf "=\"";
+      Buffer.add_string buf (_xml_escape v);
+      Buffer.add_char buf '"'
+    ) sorted;
+    Buffer.add_char buf '>';
+    Buffer.add_string buf (_xml_escape t.content);
+    Buffer.add_string buf "</tspan>"
+  ) tspans;
+  Buffer.add_string buf "</text>";
+  Buffer.contents buf
+
+let _strip_tags s =
+  let buf = Buffer.create (String.length s) in
+  let in_tag = ref false in
+  String.iter (fun c ->
+    if c = '<' then in_tag := true
+    else if c = '>' && !in_tag then in_tag := false
+    else if not !in_tag then Buffer.add_char buf c
+  ) s;
+  Buffer.contents buf
+
+let _parse_xml_attrs s =
+  (* Minimal XML attr parser; handles the shape our writer emits. *)
+  let out = ref [] in
+  let len = String.length s in
+  let i = ref 0 in
+  while !i < len do
+    while !i < len && (s.[!i] = ' ' || s.[!i] = '\t' || s.[!i] = '\n') do incr i done;
+    if !i >= len then ()
+    else begin
+      let name_start = !i in
+      while !i < len && s.[!i] <> '=' && s.[!i] <> ' ' && s.[!i] <> '\t' do incr i done;
+      let name = String.sub s name_start (!i - name_start) in
+      if name = "" then i := len
+      else begin
+        while !i < len && s.[!i] <> '=' do incr i done;
+        if !i < len then incr i;
+        while !i < len && s.[!i] <> '"' && s.[!i] <> '\'' do incr i done;
+        if !i < len then begin
+          let quote = s.[!i] in
+          incr i;
+          let val_start = !i in
+          while !i < len && s.[!i] <> quote do incr i done;
+          let v = String.sub s val_start (!i - val_start) in
+          if !i < len then incr i;
+          out := (name, _xml_unescape v) :: !out
+        end
+      end
+    end
+  done;
+  List.rev !out
+
+let tspans_from_svg_fragment (svg_str : string) : tspan array option =
+  let trimmed = String.trim svg_str in
+  try
+    let text_pos = Str.search_forward (Str.regexp_string "<text") trimmed 0 in
+    let rest = String.sub trimmed text_pos (String.length trimmed - text_pos) in
+    let out = ref [] in
+    let next_id = ref 0 in
+    let pos = ref 0 in
+    let len = String.length rest in
+    (try
+      while !pos < len do
+        let open_pos = Str.search_forward (Str.regexp_string "<tspan") rest !pos in
+        let gt_pos =
+          try String.index_from rest open_pos '>'
+          with Not_found -> raise Exit
+        in
+        let attrs_str = String.sub rest (open_pos + 6) (gt_pos - (open_pos + 6)) in
+        let close_pos =
+          try Str.search_forward (Str.regexp_string "</tspan>") rest (gt_pos + 1)
+          with Not_found -> raise Exit
+        in
+        let content_raw = String.sub rest (gt_pos + 1) (close_pos - (gt_pos + 1)) in
+        let content = _xml_unescape (_strip_tags content_raw) in
+        let t = ref { (default_tspan ()) with id = !next_id; content } in
+        incr next_id;
+        List.iter (fun (k, v) ->
+          let cur : tspan = !t in
+          t := (match k with
+            | "baseline-shift" -> { cur with baseline_shift = float_of_string_opt v }
+            | "dx" -> { cur with dx = float_of_string_opt v }
+            | "font-family" -> { cur with font_family = Some v }
+            | "font-size" -> { cur with font_size = float_of_string_opt v }
+            | "font-style" -> { cur with font_style = Some v }
+            | "font-variant" -> { cur with font_variant = Some v }
+            | "font-weight" -> { cur with font_weight = Some v }
+            | "jas:aa-mode" -> { cur with jas_aa_mode = Some v }
+            | "jas:fractional-widths" -> { cur with jas_fractional_widths = Some (v = "true") }
+            | "jas:kerning-mode" -> { cur with jas_kerning_mode = Some v }
+            | "jas:no-break" -> { cur with jas_no_break = Some (v = "true") }
+            | "letter-spacing" -> { cur with letter_spacing = float_of_string_opt v }
+            | "line-height" -> { cur with line_height = float_of_string_opt v }
+            | "rotate" -> { cur with rotate = float_of_string_opt v }
+            | "jas:style-name" -> { cur with style_name = Some v }
+            | "text-decoration" ->
+              let parts = String.split_on_char ' ' v
+                |> List.filter (fun p -> p <> "" && p <> "none") in
+              { cur with text_decoration = Some parts }
+            | "text-rendering" -> { cur with text_rendering = Some v }
+            | "text-transform" -> { cur with text_transform = Some v }
+            | "xml:lang" -> { cur with xml_lang = Some v }
+            | _ -> cur)
+        ) (_parse_xml_attrs attrs_str);
+        out := !t :: !out;
+        pos := close_pos + 8
+      done
+    with Not_found | Exit -> ());
+    if !out = [] then None
+    else Some (Array.of_list (List.rev !out))
+  with Not_found -> None
+
 let merge_tspan_overrides (target : tspan) (source : tspan) : tspan =
   let or_some a b = match a with Some _ -> a | None -> b in
   {

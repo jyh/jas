@@ -325,6 +325,92 @@ let () =
         assert (merged.font_style = Some "italic"));
     ];
 
+    "rich clipboard formats", [
+      Alcotest.test_case "json clipboard round-trip" `Quick (fun () ->
+        let open Jas in
+        let src = [|
+          { (Tspan.default_tspan ()) with content = "foo" };
+          { (Tspan.default_tspan ()) with id = 1; content = "bar";
+                                          font_weight = Some "bold" };
+        |] in
+        let json = Tspan.tspans_to_json_clipboard src in
+        match Tspan.tspans_from_json_clipboard json with
+        | None -> assert false
+        | Some back ->
+          assert (Array.length back = 2);
+          assert ((back.(0) : Tspan.tspan).content = "foo");
+          assert ((back.(0) : Tspan.tspan).font_weight = None);
+          assert ((back.(1) : Tspan.tspan).content = "bar");
+          assert ((back.(1) : Tspan.tspan).font_weight = Some "bold"));
+
+      Alcotest.test_case "json clipboard strips id and nulls" `Quick (fun () ->
+        let open Jas in
+        let src = [| { (Tspan.default_tspan ()) with id = 42; content = "x" } |] in
+        let json = Tspan.tspans_to_json_clipboard src in
+        (* No literal "id":42 leak. *)
+        assert (not (Str.string_match (Str.regexp ".*\"id\":[[:space:]]*42.*") json 0));
+        (* No null-override noise. *)
+        assert (not (Str.string_match (Str.regexp ".*null.*") json 0)));
+
+      Alcotest.test_case "json clipboard assigns fresh ids" `Quick (fun () ->
+        let open Jas in
+        let json = {|{"tspans":[{"content":"a"},{"content":"b"}]}|} in
+        match Tspan.tspans_from_json_clipboard json with
+        | None -> assert false
+        | Some back ->
+          assert ((back.(0) : Tspan.tspan).id = 0);
+          assert ((back.(1) : Tspan.tspan).id = 1));
+
+      Alcotest.test_case "json clipboard rejects bad payload" `Quick (fun () ->
+        let open Jas in
+        assert (Tspan.tspans_from_json_clipboard "not json" = None);
+        assert (Tspan.tspans_from_json_clipboard {|{"not_tspans":[]}|} = None));
+
+      Alcotest.test_case "svg fragment round-trip" `Quick (fun () ->
+        let open Jas in
+        let src = [|
+          { (Tspan.default_tspan ()) with content = "hello " };
+          { (Tspan.default_tspan ()) with id = 1; content = "world";
+                                          font_weight = Some "bold" };
+        |] in
+        let svg = Tspan.tspans_to_svg_fragment src in
+        assert (String.length svg > 0);
+        (match Tspan.tspans_from_svg_fragment svg with
+         | None -> assert false
+         | Some back ->
+           assert (Array.length back = 2);
+           assert ((back.(0) : Tspan.tspan).content = "hello ");
+           assert ((back.(1) : Tspan.tspan).content = "world");
+           assert ((back.(1) : Tspan.tspan).font_weight = Some "bold")));
+
+      Alcotest.test_case "svg fragment escapes special chars" `Quick (fun () ->
+        let open Jas in
+        let src = [| { (Tspan.default_tspan ()) with content = "< & >" } |] in
+        let svg = Tspan.tspans_to_svg_fragment src in
+        assert (try ignore (Str.search_forward (Str.regexp_string "&lt; &amp; &gt;") svg 0); true
+                with Not_found -> false);
+        (match Tspan.tspans_from_svg_fragment svg with
+         | Some back -> assert ((back.(0) : Tspan.tspan).content = "< & >")
+         | None -> assert false));
+
+      Alcotest.test_case "svg fragment rejects missing text root" `Quick (fun () ->
+        let open Jas in
+        assert (Tspan.tspans_from_svg_fragment "<span>hi</span>" = None));
+
+      Alcotest.test_case "rich clipboard cache round-trip" `Quick (fun () ->
+        let open Jas in
+        let tspans = [| { (Tspan.default_tspan ()) with content = "X";
+                                                        font_weight = Some "bold" } |] in
+        Rich_clipboard.write "X" tspans;
+        (match Rich_clipboard.read_matching "X" with
+         | Some back ->
+           assert (Array.length back = 1);
+           assert ((back.(0) : Tspan.tspan).font_weight = Some "bold")
+         | None -> assert false);
+        (* Mismatched flat text returns None. *)
+        assert (Rich_clipboard.read_matching "Y" = None));
+    ];
+
     "UTF-8 multibyte", [
       (* UTF-8 multibyte handling. 'é' is 2 bytes in UTF-8 but a single
          Unicode scalar; the editor must speak in chars throughout. *)
