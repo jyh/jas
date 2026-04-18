@@ -54,6 +54,17 @@ public final class TextEditSession {
     /// system-clipboard flat text matches. Preserves per-range
     /// overrides across cut/paste within a single edit session.
     public var tspanClipboard: (flat: String, tspans: [Tspan])? = nil
+    /// Next-typed-character override: a `Tspan` template whose
+    /// non-`nil` fields are applied to characters inserted from
+    /// `pendingCharStart` to the current `insertion` at commit time.
+    /// Primed by Character-panel writes when there is no selection
+    /// (bare caret); cleared by any caret move with no selection
+    /// extension and by undo/redo. Not persisted to the document —
+    /// see `TSPAN.md` Text-edit session integration.
+    public var pendingOverride: Tspan? = nil
+    /// Char position where `pendingOverride` was primed. `nil` iff
+    /// `pendingOverride` is `nil`.
+    public var pendingCharStart: Int? = nil
 
     private var undoStack: [EditSnapshot] = []
     private var redoStack: [EditSnapshot] = []
@@ -72,6 +83,25 @@ public final class TextEditSession {
 
     public var selectionRange: (Int, Int) { orderedRange(insertion, anchor) }
 
+    /// Prime the next-typed-character state. Non-`nil` fields of
+    /// `overrides` are merged into the existing pending template;
+    /// the anchor position is captured on the first call (later
+    /// calls layer on more attributes without moving the anchor).
+    public func setPendingOverride(_ overrides: Tspan) {
+        if pendingOverride == nil {
+            pendingOverride = Tspan.defaultTspan()
+            pendingCharStart = insertion
+        }
+        pendingOverride = mergeTspanOverrides(pendingOverride!, overrides)
+    }
+
+    public func clearPendingOverride() {
+        pendingOverride = nil
+        pendingCharStart = nil
+    }
+
+    public var hasPendingOverride: Bool { pendingOverride != nil }
+
     private func snapshot() {
         undoStack.append(EditSnapshot(content: content, insertion: insertion, anchor: anchor))
         redoStack.removeAll()
@@ -87,6 +117,7 @@ public final class TextEditSession {
         content = prev.content
         insertion = prev.insertion
         anchor = prev.anchor
+        clearPendingOverride()
     }
 
     public func redo() {
@@ -95,6 +126,7 @@ public final class TextEditSession {
         content = next.content
         insertion = next.insertion
         anchor = next.anchor
+        clearPendingOverride()
     }
 
     private func deleteSelectionInner() {
@@ -150,7 +182,12 @@ public final class TextEditSession {
     /// Move the caret. If `extend`, the anchor stays put to grow the selection.
     public func setInsertion(_ pos: Int, extend: Bool) {
         let n = content.count
-        insertion = max(0, min(pos, n))
+        let newPos = max(0, min(pos, n))
+        // Non-extending caret movement cancels any pending next-typed-
+        // character override (the user abandoned the position where
+        // the override was primed).
+        if !extend && newPos != insertion { clearPendingOverride() }
+        insertion = newPos
         if !extend { anchor = insertion }
     }
 
@@ -159,7 +196,9 @@ public final class TextEditSession {
     /// arrow-left with `.left`.
     public func setInsertion(_ pos: Int, affinity: Affinity, extend: Bool) {
         let n = content.count
-        insertion = max(0, min(pos, n))
+        let newPos = max(0, min(pos, n))
+        if !extend && newPos != insertion { clearPendingOverride() }
+        insertion = newPos
         caretAffinity = affinity
         if !extend { anchor = insertion }
     }
@@ -239,14 +278,35 @@ public final class TextEditSession {
         let elem = doc.getElement(path)
         switch (target, elem) {
         case (.text, .text(let t)):
-            let newTspans = reconcileTspanContent(t.tspans, content)
+            let reconciled = reconcileTspanContent(t.tspans, content)
+            let newTspans = applyPendingTo(reconciled)
             return doc.replaceElement(path, with: .text(t.withTspans(newTspans)))
         case (.textPath, .textPath(let tp)):
-            let newTspans = reconcileTspanContent(tp.tspans, content)
+            let reconciled = reconcileTspanContent(tp.tspans, content)
+            let newTspans = applyPendingTo(reconciled)
             return doc.replaceElement(path, with: .textPath(tp.withTspans(newTspans)))
         default:
             return nil
         }
+    }
+
+    /// Apply the pending next-typed-character override to the range
+    /// `[pendingCharStart, insertion)` of `tspans`, then merge.
+    /// Passthrough when pending is nil or the range is empty.
+    private func applyPendingTo(_ tspans: [Tspan]) -> [Tspan] {
+        guard let pending = pendingOverride,
+              let start = pendingCharStart,
+              start < insertion
+        else { return tspans }
+        let (split, first, last) = splitTspanRange(tspans,
+                                                   charStart: start,
+                                                   charEnd: insertion)
+        guard let f = first, let l = last else { return split }
+        var out = split
+        for i in f...l {
+            out[i] = mergeTspanOverrides(out[i], pending)
+        }
+        return mergeTspans(out)
     }
 }
 

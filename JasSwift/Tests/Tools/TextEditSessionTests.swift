@@ -315,3 +315,142 @@ private func session(_ content: String) -> TextEditSession {
     let caret = s.insertionTspanPos(tspans)
     #expect(caret.tspanIdx == 1 && caret.offset == 2)
 }
+
+// MARK: - next-typed-character state
+
+private func boldPending() -> Tspan {
+    Tspan(fontWeight: "bold")
+}
+
+@Test func setPendingOverrideCapturesAnchorAtInsertion() {
+    let s = session("hello")
+    s.setInsertion(3, extend: false)
+    s.setPendingOverride(boldPending())
+    #expect(s.hasPendingOverride)
+    #expect(s.pendingCharStart == 3)
+}
+
+@Test func setPendingOverrideMergesAcrossCalls() {
+    let s = session("hello")
+    s.setPendingOverride(boldPending())
+    s.setPendingOverride(Tspan(fontStyle: "italic"))
+    let p = s.pendingOverride!
+    #expect(p.fontWeight == "bold")
+    #expect(p.fontStyle == "italic")
+    // Anchor is not moved by the second call.
+    #expect(s.pendingCharStart == 0)
+}
+
+@Test func setInsertionToDifferentPositionClearsPending() {
+    let s = session("hello")
+    s.setInsertion(3, extend: false)
+    s.setPendingOverride(boldPending())
+    s.setInsertion(2, extend: false)
+    #expect(!s.hasPendingOverride)
+}
+
+@Test func setInsertionSamePositionPreservesPending() {
+    let s = session("hello")
+    s.setInsertion(3, extend: false)
+    s.setPendingOverride(boldPending())
+    s.setInsertion(3, extend: false)
+    #expect(s.hasPendingOverride)
+}
+
+@Test func setInsertionExtendPreservesPending() {
+    let s = session("hello")
+    s.setInsertion(3, extend: false)
+    s.setPendingOverride(boldPending())
+    s.setInsertion(4, extend: true)
+    #expect(s.hasPendingOverride)
+}
+
+@Test func undoClearsPending() {
+    let s = session("hello")
+    s.insert("X")
+    s.setPendingOverride(boldPending())
+    s.undo()
+    #expect(!s.hasPendingOverride)
+}
+
+@Test func applyToDocumentWritesOverrideToTypedRange() {
+    let layer = Layer(name: "L", children: [
+        .text(emptyTextElem(x: 0, y: 0, width: 0, height: 0)),
+    ])
+    // Pre-seed with content "hello" in a single plain tspan.
+    var doc = Document(layers: [layer])
+    if case .text(let t0) = doc.layers[0].children[0] {
+        let t1 = t0.withTspans([Tspan(content: "hello")])
+        doc = doc.replaceElement([0, 0], with: .text(t1))
+    }
+    let s = TextEditSession(path: [0, 0], target: .text,
+                             content: "hello", insertion: 5)
+    s.setPendingOverride(boldPending())
+    s.insert("X")
+    let newDoc = s.applyToDocument(doc)!
+    guard case .text(let t) = newDoc.layers[0].children[0] else {
+        Issue.record("expected Text"); return
+    }
+    #expect(t.tspans.count == 2)
+    #expect(t.tspans[0].content == "hello")
+    #expect(t.tspans[0].fontWeight == nil)
+    #expect(t.tspans[1].content == "X")
+    #expect(t.tspans[1].fontWeight == "bold")
+}
+
+@Test func applyWithNoPendingIsPassthrough() {
+    let layer = Layer(name: "L", children: [
+        .text(emptyTextElem(x: 0, y: 0, width: 0, height: 0)),
+    ])
+    var doc = Document(layers: [layer])
+    if case .text(let t0) = doc.layers[0].children[0] {
+        let t1 = t0.withTspans([Tspan(content: "hello")])
+        doc = doc.replaceElement([0, 0], with: .text(t1))
+    }
+    let s = TextEditSession(path: [0, 0], target: .text,
+                             content: "hello", insertion: 5)
+    s.insert("X")
+    let newDoc = s.applyToDocument(doc)!
+    guard case .text(let t) = newDoc.layers[0].children[0] else {
+        Issue.record("expected Text"); return
+    }
+    #expect(t.tspans.count == 1)
+    #expect(t.tspans[0].content == "helloX")
+    #expect(t.tspans[0].fontWeight == nil)
+}
+
+@Test func pendingAppliesToMultiCharRun() {
+    let layer = Layer(name: "L", children: [
+        .text(emptyTextElem(x: 0, y: 0, width: 0, height: 0)),
+    ])
+    var doc = Document(layers: [layer])
+    if case .text(let t0) = doc.layers[0].children[0] {
+        let t1 = t0.withTspans([Tspan(content: "hi")])
+        doc = doc.replaceElement([0, 0], with: .text(t1))
+    }
+    let s = TextEditSession(path: [0, 0], target: .text,
+                             content: "hi", insertion: 2)
+    s.setPendingOverride(boldPending())
+    s.insert("a")
+    s.insert("b")
+    s.insert("c")
+    let newDoc = s.applyToDocument(doc)!
+    guard case .text(let t) = newDoc.layers[0].children[0] else {
+        Issue.record("expected Text"); return
+    }
+    #expect(t.tspans.count == 2)
+    #expect(t.tspans[0].content == "hi")
+    #expect(t.tspans[1].content == "abc")
+    #expect(t.tspans[1].fontWeight == "bold")
+}
+
+@Test func mergeTspanOverridesCopiesOnlySomeFields() {
+    let target = Tspan(content: "hi",
+                       fontStyle: "italic",   // should survive
+                       fontWeight: "normal")  // should be overwritten
+    let source = Tspan(fontWeight: "bold")
+    let merged = mergeTspanOverrides(target, source)
+    #expect(merged.content == "hi")
+    #expect(merged.fontWeight == "bold")
+    #expect(merged.fontStyle == "italic")
+}
