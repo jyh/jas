@@ -858,8 +858,12 @@ let build_panel_full_overrides
     [[char_start, char_end)]. Runs TSPAN.md's per-range algorithm:
     [split_range] isolates the targeted tspans,
     [merge_tspan_overrides] copies the override fields onto each
-    one, [merge] collapses adjacent-equal tspans. *)
+    one, [merge] collapses adjacent-equal tspans. When [?elem] is
+    supplied, runs identity-omission (TSPAN.md step 3) between the
+    override-merge and the final merge so redundant overrides get
+    cleared. *)
 let apply_overrides_to_tspan_range
+    ?(elem : Element.element option)
     (tspans : Element.tspan array)
     (char_start : int) (char_end : int)
     (overrides : Element.tspan)
@@ -870,7 +874,11 @@ let apply_overrides_to_tspan_range
     match first, last with
     | Some f, Some l ->
       for i = f to l do
-        split.(i) <- Tspan.merge_tspan_overrides split.(i) overrides
+        let merged = Tspan.merge_tspan_overrides split.(i) overrides in
+        let finalized = match elem with
+          | Some e -> Tspan.identity_omit_tspan merged e
+          | None -> merged in
+        split.(i) <- finalized
       done;
       Tspan.merge split
     | _ -> split
@@ -1097,11 +1105,11 @@ let apply_character_panel_to_selection (store : State_store.t)
         let new_elem = match elem with
           | Element.Text r ->
             let new_tspans = apply_overrides_to_tspan_range
-              r.tspans lo hi overrides in
+              ~elem r.tspans lo hi overrides in
             Some (Element.Text { r with tspans = new_tspans })
           | Element.Text_path r ->
             let new_tspans = apply_overrides_to_tspan_range
-              r.tspans lo hi overrides in
+              ~elem r.tspans lo hi overrides in
             Some (Element.Text_path { r with tspans = new_tspans })
           | _ -> None
         in
