@@ -1219,7 +1219,7 @@ current color. The panel has a color mode (Grayscale, RGB, HSB, CMYK, Web Safe R
 - CMYK: display CMYK with 4 sliders
 - Web Safe RGB: display RGB sliders, but lock component values to hex 00, 33,
   66, 99, CC, and FF.
-  
+
 Below the fill/stroke widget is an entry for hex color in hex-6.
 
 At the bottom is a colorbar with height 64px. It shows a color gradient at the
@@ -1334,7 +1334,7 @@ dialog:
     # One row for each slider
     - .row:
 	  - .col-9: SLIDER
-	  - .col-3: VALUE 
+	  - .col-3: VALUE
 - .row:
   - .col-9:
   - .col-3: HEX
@@ -1793,87 +1793,28 @@ panel:
   - .col-3: HYPHENATE_CHECKBOX
 ```
 
-# Character
+# Splitting the TRANSCRIPT.md
 
-The Character Panel allows setting properties of text in the selection. An example is shown in examples/character.png.
+[Note that this point I forked the discussion of each feature into a separate file, e.g. CHARACTER.md,
+to capture the conversation with Claude.]
 
-- The FONT_DROPDOWN contains a list of available fonts, with a checkmark next to the current font.
-- The STYLE_DROPDOWN allows selecting from the available style of the font (e.g. italic, bold, etc)
-- The FONT_SIZE_DROPDOWN gives a selection of font sizes from 6pt to 64pt, and allows direct input of a point size
-- The LEADING_DROPDOWN is like font size, but sets the leading of the text
-- KERNING affects the spacing between characters
-- TRACKING is similar to KERNING
-- VERTICAL_SCALE stretches the vertical size of the text
-- HORIZONTAL_SCALE stretches the horizontal size
-- BASELINE_SHIFT allows shifting the baseline
-- CHARACTER_ROTATION applies a rotation to each character in the text
-- ALL_CAPS produces all capitals, even if the text is written in lowercase
-- SMALL_CAPS produces small captials for text written in lowercase, and regular capitals for character writeen in uppercase
-- SUPERSCRIPT places the selected text n superscript position
-- SUBSCRIPT does the same for subscript position
-- UNDERLINE underlines the selected text
-- STRIKETHROUGH applies strikethrough to the text
+Sequence:
 
-Note that these operations are performed on the selected text, which may be a tspan within a text element.
+- CHARACTER.md
 
-Here is the panel layout in bootstrap style.
+# Testing
 
-```yaml
-panel:
-- .row: FONT_DROPDOWN
-- .row: STYLE_DROPDOWN
-- .row:
-  - .col-2: font size icon
-  - .col-4: FONT_SIZE_DROPDOWN
-  - .col-2: leading icon
-  - .col-4: LEADING_DROPDOWN
-- .row:
-  - .col-2: kerning icon
-  - .col-4: KERNING_DROPDOWN
-  - .col-2: tracking icon
-  - .col-4: TRACKING_DROPDOWN
-- .row:
-  - .col-2: vertical scale icon
-  - .col-4: VERTICAL_SCALE_DROPDOWN
-  - .col-2: horizontal scale icon
-  - .col-4: HORIZONTAL SCALE DROPDOWN
-- .row:
-  - .col-2: baseline shift icon
-  - .col-4: BASELINE_SHIFT_DROPDOWN
-  - .col-2: character rotaton icon
-  - .col-4: CHARACTER_ROTATION_DROPDOWN
-- .row:
-  - .col-2: ALL_CAPS_BUTTON
-  - .col-2: SMALL_CAPS_BUTTON
-  - .col-2: SUPERSCRIPT_BUTTON
-  - .col-2: SUBSCRIPT_BUTTON
-  - .col-2: UNDERLINE_BUTTON
-  - .col-2: STRIKETHROUGH_BUTTON
-```
-
-The menu has the following entries.
-
-- Show Snap to Glyph Options (checkmark if active)
-- ----
-- Show Font Height Options (checkmark if active)
-- ----
-- Standard Vertical Roman Alignment (checkmark if active)
-- ----
-- Touch Type Tool  (checkmark if active)
-- Enable in-menu font previews (checkmark if active)
-- ----
-- All Caps  (checkmark if active)
-- Small Caps  (checkmark if active)
-- Superscript  (checkmark if active)
-- Subscript  (checkmark if active)
-- ----
-- Fractional Widths  (checkmark if active)
-- ----
-- No Break  (checkmark if active)
-- ----
-- Reset Panel
+Many of our tests are automated, which is great, but we also need to perform
+tests where I must exercise the UI manually. These latter are expensive and
+error prone. For the Character Panel, design a test suite for me to thoroughly
+manually exercise the UI and ensure that every feature works and the panel is
+fully operational.  If any of these tests can be automated, do that
+instead. Include only tests that cannot be automated. My time is precious and I
+get easily distracted. Give stable unique identifiers to the manual tasks and
+order them by priority, with the most insightful tests first.  Write them into
+CHARACTER_TESTS.md. We'll keep this file up to date as we investigate.
 
 Please read and understand these requirements. Analyze them for inconsistencies
-and completeness. Make suggestions for improvements, ranking them in priority
+and completeness. Make suggestions for improvements. Rank your responses in priority
 from high to low, and giving each a number. What are the benefits? What are the
 downsides? Be ready for a deep dive into any of the suggestions.
