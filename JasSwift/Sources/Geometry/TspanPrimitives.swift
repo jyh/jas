@@ -18,6 +18,287 @@ public func resolveTspanId(_ tspans: [Tspan], id: UInt32) -> Int? {
     tspans.firstIndex { $0.id == id }
 }
 
+// MARK: - rich-clipboard serializers
+
+/// Serialize `tspans` as the `application/x-jas-tspans` JSON payload
+/// described in TSPAN.md: `{"tspans": [...]}` with each tspan's
+/// override fields in snake_case. Ids are stripped; nil overrides
+/// are omitted.
+public func tspansToJsonClipboard(_ tspans: [Tspan]) -> String {
+    var arr: [[String: Any]] = []
+    for t in tspans {
+        var obj: [String: Any] = ["content": t.content]
+        if let v = t.baselineShift { obj["baseline_shift"] = v }
+        if let v = t.dx { obj["dx"] = v }
+        if let v = t.fontFamily { obj["font_family"] = v }
+        if let v = t.fontSize { obj["font_size"] = v }
+        if let v = t.fontStyle { obj["font_style"] = v }
+        if let v = t.fontVariant { obj["font_variant"] = v }
+        if let v = t.fontWeight { obj["font_weight"] = v }
+        if let v = t.jasAaMode { obj["jas_aa_mode"] = v }
+        if let v = t.jasFractionalWidths { obj["jas_fractional_widths"] = v }
+        if let v = t.jasKerningMode { obj["jas_kerning_mode"] = v }
+        if let v = t.jasNoBreak { obj["jas_no_break"] = v }
+        if let v = t.letterSpacing { obj["letter_spacing"] = v }
+        if let v = t.lineHeight { obj["line_height"] = v }
+        if let v = t.rotate { obj["rotate"] = v }
+        if let v = t.styleName { obj["style_name"] = v }
+        if let v = t.textDecoration { obj["text_decoration"] = v }
+        if let v = t.textRendering { obj["text_rendering"] = v }
+        if let v = t.textTransform { obj["text_transform"] = v }
+        if let v = t.xmlLang { obj["xml_lang"] = v }
+        arr.append(obj)
+    }
+    let root: [String: Any] = ["tspans": arr]
+    let data = (try? JSONSerialization.data(withJSONObject: root,
+                                             options: [.sortedKeys])) ?? Data()
+    return String(data: data, encoding: .utf8) ?? ""
+}
+
+/// Parse a rich-clipboard JSON payload back into a tspan list with
+/// fresh ids (0, 1, 2, …). Returns `nil` if the payload is malformed.
+public func tspansFromJsonClipboard(_ jsonStr: String) -> [Tspan]? {
+    guard let data = jsonStr.data(using: .utf8),
+          let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let arr = root["tspans"] as? [[String: Any]]
+    else { return nil }
+    var out: [Tspan] = []
+    for (i, obj) in arr.enumerated() {
+        let t = Tspan(
+            id: UInt32(i),
+            content: obj["content"] as? String ?? "",
+            baselineShift: (obj["baseline_shift"] as? NSNumber)?.doubleValue,
+            dx: (obj["dx"] as? NSNumber)?.doubleValue,
+            fontFamily: obj["font_family"] as? String,
+            fontSize: (obj["font_size"] as? NSNumber)?.doubleValue,
+            fontStyle: obj["font_style"] as? String,
+            fontVariant: obj["font_variant"] as? String,
+            fontWeight: obj["font_weight"] as? String,
+            jasAaMode: obj["jas_aa_mode"] as? String,
+            jasFractionalWidths: (obj["jas_fractional_widths"] as? NSNumber)?.boolValue,
+            jasKerningMode: obj["jas_kerning_mode"] as? String,
+            jasNoBreak: (obj["jas_no_break"] as? NSNumber)?.boolValue,
+            letterSpacing: (obj["letter_spacing"] as? NSNumber)?.doubleValue,
+            lineHeight: (obj["line_height"] as? NSNumber)?.doubleValue,
+            rotate: (obj["rotate"] as? NSNumber)?.doubleValue,
+            styleName: obj["style_name"] as? String,
+            textDecoration: obj["text_decoration"] as? [String],
+            textRendering: obj["text_rendering"] as? String,
+            textTransform: obj["text_transform"] as? String,
+            transform: nil,  // transform isn't part of the clipboard payload
+            xmlLang: obj["xml_lang"] as? String)
+        out.append(t)
+    }
+    return out
+}
+
+/// Serialize `tspans` as an SVG fragment suitable for the
+/// `image/svg+xml` clipboard format — a single `<text>` element
+/// wrapping the tspan children with standard CSS-style attribute
+/// names, alphabetically sorted.
+public func tspansToSvgFragment(_ tspans: [Tspan]) -> String {
+    var out = #"<text xmlns="http://www.w3.org/2000/svg">"#
+    for t in tspans {
+        out += "<tspan"
+        var attrs: [(String, String)] = []
+        if let v = t.baselineShift { attrs.append(("baseline-shift", _fmtDouble(v))) }
+        if let v = t.dx { attrs.append(("dx", _fmtDouble(v))) }
+        if let v = t.fontFamily { attrs.append(("font-family", v)) }
+        if let v = t.fontSize { attrs.append(("font-size", _fmtDouble(v))) }
+        if let v = t.fontStyle { attrs.append(("font-style", v)) }
+        if let v = t.fontVariant { attrs.append(("font-variant", v)) }
+        if let v = t.fontWeight { attrs.append(("font-weight", v)) }
+        if let v = t.jasAaMode { attrs.append(("jas:aa-mode", v)) }
+        if let v = t.jasFractionalWidths { attrs.append(("jas:fractional-widths", v ? "true" : "false")) }
+        if let v = t.jasKerningMode { attrs.append(("jas:kerning-mode", v)) }
+        if let v = t.jasNoBreak { attrs.append(("jas:no-break", v ? "true" : "false")) }
+        if let v = t.letterSpacing { attrs.append(("letter-spacing", _fmtDouble(v))) }
+        if let v = t.lineHeight { attrs.append(("line-height", _fmtDouble(v))) }
+        if let v = t.rotate { attrs.append(("rotate", _fmtDouble(v))) }
+        if let v = t.styleName { attrs.append(("jas:style-name", v)) }
+        if let v = t.textDecoration, !v.isEmpty { attrs.append(("text-decoration", v.joined(separator: " "))) }
+        if let v = t.textRendering { attrs.append(("text-rendering", v)) }
+        if let v = t.textTransform { attrs.append(("text-transform", v)) }
+        if let v = t.xmlLang { attrs.append(("xml:lang", v)) }
+        attrs.sort { $0.0 < $1.0 }
+        for (k, v) in attrs {
+            out += " \(k)=\"\(_xmlEscape(v))\""
+        }
+        out += ">\(_xmlEscape(t.content))</tspan>"
+    }
+    out += "</text>"
+    return out
+}
+
+private func _fmtDouble(_ v: Double) -> String {
+    v == v.rounded() ? "\(Int(v))" : "\(v)"
+}
+
+private func _xmlEscape(_ s: String) -> String {
+    s.replacingOccurrences(of: "&", with: "&amp;")
+        .replacingOccurrences(of: "<", with: "&lt;")
+        .replacingOccurrences(of: ">", with: "&gt;")
+        .replacingOccurrences(of: "\"", with: "&quot;")
+}
+
+private func _xmlUnescape(_ s: String) -> String {
+    s.replacingOccurrences(of: "&quot;", with: "\"")
+        .replacingOccurrences(of: "&gt;", with: ">")
+        .replacingOccurrences(of: "&lt;", with: "<")
+        .replacingOccurrences(of: "&amp;", with: "&")
+}
+
+/// Parse an SVG fragment of the shape emitted by `tspansToSvgFragment`
+/// (or a compatible shape from another SVG app) into a tspan list
+/// with fresh ids. Returns `nil` when the root is not `<text>`.
+public func tspansFromSvgFragment(_ svgStr: String) -> [Tspan]? {
+    let trimmed = svgStr.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let textRange = trimmed.range(of: "<text") else { return nil }
+    let rest = String(trimmed[textRange.lowerBound...])
+    var out: [Tspan] = []
+    var nextId: UInt32 = 0
+    var searchStart = rest.startIndex
+    while let openRange = rest.range(of: "<tspan", range: searchStart..<rest.endIndex) {
+        // Find end of open tag
+        guard let gtRange = rest.range(of: ">", range: openRange.upperBound..<rest.endIndex)
+        else { break }
+        let attrsStr = String(rest[openRange.upperBound..<gtRange.lowerBound])
+        guard let closeRange = rest.range(of: "</tspan>", range: gtRange.upperBound..<rest.endIndex)
+        else { break }
+        let contentRaw = String(rest[gtRange.upperBound..<closeRange.lowerBound])
+        // Flatten nested tags.
+        let content = _xmlUnescape(_stripTags(contentRaw))
+        var t = Tspan(id: nextId, content: content)
+        nextId += 1
+        for (k, v) in _parseXmlAttrs(attrsStr) {
+            switch k {
+            case "baseline-shift": t = mergeFields(t, baselineShift: Double(v))
+            case "dx": t = mergeFields(t, dx: Double(v))
+            case "font-family": t = mergeFields(t, fontFamily: v)
+            case "font-size": t = mergeFields(t, fontSize: Double(v))
+            case "font-style": t = mergeFields(t, fontStyle: v)
+            case "font-variant": t = mergeFields(t, fontVariant: v)
+            case "font-weight": t = mergeFields(t, fontWeight: v)
+            case "jas:aa-mode": t = mergeFields(t, jasAaMode: v)
+            case "jas:fractional-widths": t = mergeFields(t, jasFractionalWidths: v == "true")
+            case "jas:kerning-mode": t = mergeFields(t, jasKerningMode: v)
+            case "jas:no-break": t = mergeFields(t, jasNoBreak: v == "true")
+            case "letter-spacing": t = mergeFields(t, letterSpacing: Double(v))
+            case "line-height": t = mergeFields(t, lineHeight: Double(v))
+            case "rotate": t = mergeFields(t, rotate: Double(v))
+            case "jas:style-name": t = mergeFields(t, styleName: v)
+            case "text-decoration":
+                let parts = v.split(separator: " ").map(String.init).filter { $0 != "none" }
+                t = mergeFields(t, textDecoration: parts)
+            case "text-rendering": t = mergeFields(t, textRendering: v)
+            case "text-transform": t = mergeFields(t, textTransform: v)
+            case "xml:lang": t = mergeFields(t, xmlLang: v)
+            default: break
+            }
+        }
+        out.append(t)
+        searchStart = closeRange.upperBound
+    }
+    return out.isEmpty ? nil : out
+}
+
+/// Return a new Tspan derived from `t` with the supplied fields
+/// replacing the existing values. Fields default to the current
+/// value, so only the one(s) you name change.
+private func mergeFields(_ t: Tspan,
+                         baselineShift: Double?? = .some(nil),
+                         dx: Double?? = .some(nil),
+                         fontFamily: String?? = .some(nil),
+                         fontSize: Double?? = .some(nil),
+                         fontStyle: String?? = .some(nil),
+                         fontVariant: String?? = .some(nil),
+                         fontWeight: String?? = .some(nil),
+                         jasAaMode: String?? = .some(nil),
+                         jasFractionalWidths: Bool?? = .some(nil),
+                         jasKerningMode: String?? = .some(nil),
+                         jasNoBreak: Bool?? = .some(nil),
+                         letterSpacing: Double?? = .some(nil),
+                         lineHeight: Double?? = .some(nil),
+                         rotate: Double?? = .some(nil),
+                         styleName: String?? = .some(nil),
+                         textDecoration: [String]?? = .some(nil),
+                         textRendering: String?? = .some(nil),
+                         textTransform: String?? = .some(nil),
+                         xmlLang: String?? = .some(nil)) -> Tspan {
+    // Each double-optional parameter has three possible states:
+    //   .some(.some(v)) — explicit new value
+    //   .some(.none)    — caller omitted the argument (default)
+    //   .none           — caller passed nil to clear (unused here)
+    func pick<T>(_ new: T??, _ old: T?) -> T? {
+        switch new {
+        case .some(.some(let v)): return v
+        case .some(.none): return old
+        case .none: return nil
+        }
+    }
+    return Tspan(
+        id: t.id, content: t.content,
+        baselineShift: pick(baselineShift, t.baselineShift),
+        dx: pick(dx, t.dx),
+        fontFamily: pick(fontFamily, t.fontFamily),
+        fontSize: pick(fontSize, t.fontSize),
+        fontStyle: pick(fontStyle, t.fontStyle),
+        fontVariant: pick(fontVariant, t.fontVariant),
+        fontWeight: pick(fontWeight, t.fontWeight),
+        jasAaMode: pick(jasAaMode, t.jasAaMode),
+        jasFractionalWidths: pick(jasFractionalWidths, t.jasFractionalWidths),
+        jasKerningMode: pick(jasKerningMode, t.jasKerningMode),
+        jasNoBreak: pick(jasNoBreak, t.jasNoBreak),
+        letterSpacing: pick(letterSpacing, t.letterSpacing),
+        lineHeight: pick(lineHeight, t.lineHeight),
+        rotate: pick(rotate, t.rotate),
+        styleName: pick(styleName, t.styleName),
+        textDecoration: pick(textDecoration, t.textDecoration),
+        textRendering: pick(textRendering, t.textRendering),
+        textTransform: pick(textTransform, t.textTransform),
+        transform: t.transform,
+        xmlLang: pick(xmlLang, t.xmlLang))
+}
+
+private func _stripTags(_ s: String) -> String {
+    var out = ""
+    var inTag = false
+    for c in s {
+        if c == "<" { inTag = true; continue }
+        if c == ">" && inTag { inTag = false; continue }
+        if !inTag { out.append(c) }
+    }
+    return out
+}
+
+private func _parseXmlAttrs(_ s: String) -> [(String, String)] {
+    var out: [(String, String)] = []
+    let chars = Array(s)
+    var i = 0
+    while i < chars.count {
+        while i < chars.count && chars[i].isWhitespace { i += 1 }
+        if i >= chars.count { break }
+        var nameStart = i
+        while i < chars.count && chars[i] != "=" && !chars[i].isWhitespace { i += 1 }
+        let name = String(chars[nameStart..<i])
+        if name.isEmpty { break }
+        while i < chars.count && chars[i] != "=" { i += 1 }
+        if i >= chars.count { break }
+        i += 1
+        while i < chars.count && chars[i] != "\"" && chars[i] != "'" { i += 1 }
+        if i >= chars.count { break }
+        let quote = chars[i]
+        i += 1
+        let valStart = i
+        while i < chars.count && chars[i] != quote { i += 1 }
+        let val = String(chars[valStart..<i])
+        if i < chars.count { i += 1 }
+        out.append((name, _xmlUnescape(val)))
+        _ = nameStart  // suppress unused warning on some compilers
+    }
+    return out
+}
+
 // MARK: - merge overrides
 
 /// Copy every non-`nil` override field from `source` into `target`.

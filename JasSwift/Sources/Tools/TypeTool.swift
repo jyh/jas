@@ -250,14 +250,20 @@ class TypeTool: CanvasTool {
 
     func pasteText(_ ctx: ToolContext, _ text: String) -> Bool {
         guard let s = session else { return false }
-        // Tspan-aware paste: when the session clipboard's flat text
-        // still matches, splice the captured tspan overrides back
-        // in at the caret. Otherwise fall through to flat insert.
+        // Rich-paste preference:
+        //   1. Session-scoped tspan clipboard (within-session copy/paste).
+        //   2. Rich-format pasteboard (application/x-jas-tspans, then
+        //      image/svg+xml) — survives cross-app paste too.
+        //   3. Flat insert.
         let elemTspans = currentElementTspans(ctx)
-        if let newTspans = s.tryPasteTspans(elemTspans, text: text) {
+        var newTspans: [Tspan]? = s.tryPasteTspans(elemTspans, text: text)
+        if newTspans == nil, let payload = richClipboardReadTspans() {
+            newTspans = insertTspansAt(elemTspans, charPos: s.insertion, payload)
+        }
+        if let new = newTspans {
             ensureSnapshot(ctx)
-            replaceElementTspans(ctx, path: s.path, tspans: newTspans)
-            s.setContent(concatTspanContent(newTspans),
+            replaceElementTspans(ctx, path: s.path, tspans: new)
+            s.setContent(concatTspanContent(new),
                          insertion: s.insertion + text.count,
                          anchor: s.insertion + text.count)
             s.blinkEpochMs = nowMs()
@@ -310,17 +316,25 @@ class TypeTool: CanvasTool {
             bump(); syncToModel(ctx); ctx.requestUpdate(); return true
         }
         if cmd && lower == "c" {
-            // Capture the selection's tspan overrides from the
-            // current element so a later paste within the same
-            // session can splice them back in. The flat string
-            // still goes to the system clipboard via the usual
-            // platform copy wiring (handled by the caller when it
-            // sees `true`).
-            _ = s.copySelectionWithTspans(currentElementTspans(ctx))
+            // Capture the selection's tspan overrides for both the
+            // session-scoped fast path and the multi-format OS
+            // pasteboard. Flat text goes as .string; the tspan list
+            // rides on application/x-jas-tspans and image/svg+xml
+            // for cross-element / cross-app paste.
+            let elem = currentElementTspans(ctx)
+            if let flat = s.copySelectionWithTspans(elem),
+               let (_, payload) = s.tspanClipboard
+            {
+                richClipboardWrite(flat: flat, tspans: payload)
+            }
             return true
         }
         if cmd && lower == "x" {
-            if s.copySelectionWithTspans(currentElementTspans(ctx)) != nil {
+            let elem = currentElementTspans(ctx)
+            if let flat = s.copySelectionWithTspans(elem),
+               let (_, payload) = s.tspanClipboard
+            {
+                richClipboardWrite(flat: flat, tspans: payload)
                 ensureSnapshot(ctx)
                 s.backspace()
                 bump(); syncToModel(ctx); ctx.requestUpdate()
