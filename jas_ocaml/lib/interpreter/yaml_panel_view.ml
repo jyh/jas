@@ -9,6 +9,34 @@ open Workspace_layout
 (** Module-level ref to the model accessor, set by create_panel_body. *)
 let _get_model_ref : (unit -> Model.model option) ref = ref (fun () -> None)
 
+(** Module-level ref to the panel-local state store, set by
+    create_panel_body. Widget renderers read it to register write-back
+    callbacks; None means "no store threaded, skip write-back". *)
+let _current_store : State_store.t option ref = ref None
+
+(** Module-level ref to the active panel id (e.g. "character_panel",
+    "stroke_panel"). Set by create_panel_body alongside
+    [_current_store]. *)
+let _current_panel_id : string option ref = ref None
+
+(** Parse a bind expression like "panel.X" or "state.X" and write
+    [value] into the appropriate scope of [_current_store]. Silent
+    no-op when either ref is unset or the expression doesn't match
+    a recognised scope+key pattern. Used by the widget renderers'
+    change callbacks to flow user edits back to the store (where
+    the subscription fires the apply pipeline). *)
+let _write_back_bind (bind_expr : string) (value : Yojson.Safe.t) : unit =
+  match !_current_store, !_current_panel_id with
+  | Some store, Some panel_id ->
+    let parts = String.split_on_char '.' bind_expr in
+    (match parts with
+     | "panel" :: field :: _ ->
+       State_store.set_panel store panel_id field value
+     | "state" :: field :: _ ->
+       State_store.set store field value
+     | _ -> ())
+  | _ -> ()
+
 (** Module-level set of collapsed element paths in the layers panel. *)
 module PathKey = struct
   type t = int list
@@ -160,24 +188,58 @@ and render_number_input ~packing ~ctx el =
   let open Yojson.Safe.Util in
   let min_val = el |> member "min" |> to_number_option |> Option.value ~default:0.0 in
   let max_val = el |> member "max" |> to_number_option |> Option.value ~default:100.0 in
-  let initial = match el |> member "bind" |> safe_member "value" |> to_string_option with
+  let bind_expr = el |> member "bind" |> safe_member "value" |> to_string_option in
+  let initial = match bind_expr with
     | Some expr ->
       let v = Expr_eval.evaluate expr ctx in
       (match v with Expr_eval.Number n -> n | _ -> min_val)
     | None -> min_val in
   let adj = GData.adjustment ~lower:min_val ~upper:max_val ~step_incr:1.0 ~value:initial () in
-  let _spin = GEdit.spin_button ~adjustment:adj ~digits:0 ~packing () in
-  ()
+  let spin = GEdit.spin_button ~adjustment:adj ~digits:0 ~packing () in
+  (* Write-back: commit on value change so the StateStore, and any
+     subscription on the current panel scope, see the edit. *)
+  (match bind_expr with
+   | Some expr ->
+     ignore (spin#connect#value_changed ~callback:(fun () ->
+       _write_back_bind expr (`Float spin#value)))
+   | None -> ())
 
-and render_text_input ~packing ~ctx:_ el =
+and render_text_input ~packing ~ctx el =
   let open Yojson.Safe.Util in
-  let _placeholder = el |> member "placeholder" |> to_string_option |> Option.value ~default:"" in
-  let _entry = GEdit.entry ~packing () in
-  ()
+  let placeholder = el |> member "placeholder" |> to_string_option |> Option.value ~default:"" in
+  let bind_expr = el |> member "bind" |> safe_member "value" |> to_string_option in
+  let initial = match bind_expr with
+    | Some expr ->
+      (match Expr_eval.evaluate expr ctx with
+       | Expr_eval.Str s -> s
+       | _ -> "")
+    | None -> "" in
+  let entry = GEdit.entry ~packing ~text:initial () in
+  if placeholder <> "" then entry#set_placeholder_text placeholder;
+  (* Write-back on focus-out / Enter (matches number_input's
+     commit-on-change semantics rather than commit-per-keystroke). *)
+  (match bind_expr with
+   | Some expr ->
+     ignore (entry#connect#activate ~callback:(fun () ->
+       _write_back_bind expr (`String entry#text)));
+     ignore (entry#event#connect#focus_out ~callback:(fun _ ->
+       _write_back_bind expr (`String entry#text);
+       false))
+   | None -> ())
 
-and render_select ~packing ~ctx:_ el =
+and render_select ~packing ~ctx el =
   let open Yojson.Safe.Util in
   let options = match el |> member "options" with `List l -> l | _ -> [] in
+  let bind_expr = el |> member "bind" |> safe_member "value" |> to_string_option in
+  (* Value strings parallel to the populated display rows — used to
+     look up the selected row on change. *)
+  let values = List.map (fun opt -> match opt with
+    | `Assoc _ ->
+      (match opt |> member "value" |> to_string_option with
+       | Some v -> v
+       | None -> Option.value ~default:"" (opt |> member "label" |> to_string_option))
+    | `String s -> s
+    | _ -> "") options in
   let (combo, (store, col)) = GEdit.combo_box_text ~packing () in
   List.iter (fun opt ->
     let label = match opt with
@@ -190,16 +252,46 @@ and render_select ~packing ~ctx:_ el =
     let row = store#append () in
     store#set ~row ~column:col label
   ) options;
-  if List.length options > 0 then combo#set_active 0
+  (* Select the option whose value matches the current bound state,
+     falling back to the first entry. *)
+  let current = match bind_expr with
+    | Some expr ->
+      (match Expr_eval.evaluate expr ctx with
+       | Expr_eval.Str s -> s
+       | _ -> "")
+    | None -> "" in
+  let active_idx =
+    match List.mapi (fun i v -> (i, v)) values |> List.find_opt (fun (_, v) -> v = current) with
+    | Some (i, _) -> i
+    | None -> 0 in
+  if List.length options > 0 then combo#set_active active_idx;
+  (* Write-back on selection change. *)
+  (match bind_expr with
+   | Some expr ->
+     ignore (combo#connect#changed ~callback:(fun () ->
+       let idx = combo#active in
+       if idx >= 0 && idx < List.length values then
+         _write_back_bind expr (`String (List.nth values idx))))
+   | None -> ())
 
 and render_toggle ~packing ~ctx el =
   let open Yojson.Safe.Util in
   let label = el |> member "label" |> to_string_option |> Option.value ~default:"" in
-  let checked = match el |> member "bind" |> safe_member "checked" |> to_string_option with
+  (* Accept either bind.value (the panel-bool convention) or the
+     legacy bind.checked. Mirrors the Rust render_toggle dispatch. *)
+  let bind_expr =
+    match el |> member "bind" |> safe_member "value" |> to_string_option with
+    | Some s -> Some s
+    | None -> el |> member "bind" |> safe_member "checked" |> to_string_option in
+  let checked = match bind_expr with
     | Some expr -> Expr_eval.to_bool (Expr_eval.evaluate expr ctx)
     | None -> false in
   let btn = GButton.check_button ~label ~active:checked ~packing () in
-  ignore btn
+  (match bind_expr with
+   | Some expr ->
+     ignore (btn#connect#toggled ~callback:(fun () ->
+       _write_back_bind expr (`Bool btn#active)))
+   | None -> ())
 
 and render_combo_box ~packing ~ctx:_ el =
   let open Yojson.Safe.Util in
@@ -1336,6 +1428,25 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
         ("data", data_obj);
         ("_get_model", `Null)  (* Placeholder; actual model passed via closure *)
       ] in
+      (* Panel-local state store: seeded with the yaml-declared
+         defaults, lives for the life of the panel body. Widget
+         callbacks write into it via [_write_back_bind]; a
+         subscription wired below pushes Character-panel writes
+         through to the selected text element. *)
+      let store = State_store.create () in
+      State_store.init_panel store content_id panel_defaults;
+      _current_store := Some store;
+      _current_panel_id := Some content_id;
       (* Store get_model in a ref accessible from render_tree_view *)
       _get_model_ref := get_model;
+      (* Wire the Character-panel apply pipeline. [get_model] is
+         already a thunk returning the live model; we adapt it to
+         yield a Controller when one is available. *)
+      (if kind = Character then
+         let ctrl_getter () =
+           match get_model () with
+           | Some model -> Controller.create ~model ()
+           | None -> failwith "no model available for character panel apply"
+         in
+         Effects.subscribe_character_panel store ctrl_getter);
       render_element ~packing ~ctx content
