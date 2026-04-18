@@ -21,6 +21,11 @@ class StateStore:
         self._dialog_id: str | None = None
         self._dialog_params: dict | None = None
         self._dialog_props: dict = {}  # {key: {"get": expr, "set": expr}}
+        # Captured original values of state keys named in the open
+        # dialog's preview_targets. Restored on close_dialog (via the
+        # close_dialog effect) unless first cleared by the
+        # clear_dialog_snapshot effect (used by OK actions).
+        self._dialog_snapshot: dict | None = None
         self._subscribers: list[tuple[set | None, Callable]] = []
         self._panel_subscribers: dict[str, list[Callable]] = {}
         # Phase 3: optional document tree for doc.set / snapshot effects.
@@ -160,6 +165,29 @@ class StateStore:
         self._dialog = {}
         self._dialog_params = None
         self._dialog_props = {}
+
+    # ── Dialog preview snapshot/restore (Phase 0) ──────────────
+
+    def capture_dialog_snapshot(self, targets: dict):
+        """Capture the current value of every state key referenced by
+        a dialog's preview_targets. Phase 0 supports only top-level
+        state keys (no dots in the path); deep paths are silently
+        skipped and will land alongside their first real consumer in
+        Phase 8/9. `targets` maps dialog_state_key -> state_key."""
+        snap = {}
+        for state_key in targets.values():
+            if "." not in state_key:
+                snap[state_key] = self._state.get(state_key)
+        self._dialog_snapshot = snap
+
+    def get_dialog_snapshot(self) -> dict | None:
+        return self._dialog_snapshot
+
+    def clear_dialog_snapshot(self):
+        self._dialog_snapshot = None
+
+    def has_dialog_snapshot(self) -> bool:
+        return self._dialog_snapshot is not None
 
     # ── List operations ──────────────────────────────────────
 

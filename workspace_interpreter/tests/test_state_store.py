@@ -243,6 +243,42 @@ class TestDialogState:
         assert store.get_dialog("y") == 2
 
 
+class TestDialogPreviewSnapshot:
+    """capture_dialog_snapshot copies the current value of every state
+    key referenced by a dialog's preview_targets. Phase 0 supports
+    only top-level state keys; deep paths (containing a dot) are
+    silently skipped and will land alongside their first real
+    consumer in Phase 8/9."""
+
+    def test_dialog_snapshot_capture_and_get(self):
+        store = StateStore({"left_indent": 12, "right_indent": 0})
+        store.capture_dialog_snapshot({
+            "dlg_left": "left_indent",
+            "dlg_right": "right_indent",
+        })
+        snap = store.get_dialog_snapshot()
+        assert snap == {"left_indent": 12, "right_indent": 0}
+        assert store.has_dialog_snapshot()
+
+    def test_dialog_snapshot_clear_drops_it(self):
+        store = StateStore({"x": 1})
+        store.capture_dialog_snapshot({"k": "x"})
+        assert store.has_dialog_snapshot()
+        store.clear_dialog_snapshot()
+        assert not store.has_dialog_snapshot()
+        assert store.get_dialog_snapshot() is None
+
+    def test_dialog_snapshot_skips_deep_paths_for_phase0(self):
+        store = StateStore({"flat": 1})
+        store.capture_dialog_snapshot({
+            "a": "flat",
+            "b": "selection.deep.path",
+        })
+        snap = store.get_dialog_snapshot()
+        assert "flat" in snap
+        assert "selection.deep.path" not in snap
+
+
 class TestDialogProperties:
     """Tests for get/set reactive properties on dialog state."""
 
