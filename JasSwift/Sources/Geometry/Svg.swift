@@ -141,6 +141,14 @@ private func tspanSvg(_ t: Tspan) -> String {
     if let members = t.textDecoration, !members.isEmpty {
         attrs += " text-decoration=\"\(escapeXml(members.joined(separator: " ")))\""
     }
+    // Per-tspan rotation. Our model stores a single Double per tspan,
+    // so per-glyph varying rotations require each glyph to live in
+    // its own tspan (enforced by the Touch Type tool). SVG's
+    // multi-value `rotate="a1 a2 …"` form is handled on the parse
+    // side by splitting the tspan into one per glyph — see parseTspan.
+    if let v = t.rotate {
+        attrs += " rotate=\"\(fmt(v))\""
+    }
     return "<tspan\(attrs)>\(escapeXml(t.content))</tspan>"
 }
 
@@ -381,11 +389,16 @@ private func parseColor(_ s: String) -> Color? {
     return nil
 }
 
-/// Parse an SVG `<tspan>` child node into a Tspan. Only attributes
-/// present on the node become `Some` overrides; absent attributes
-/// remain `nil` (tspan inherits from the parent element). Mirrors
-/// the Rust `parse_tspan`.
-private func parseTspan(_ node: XMLElement, id: UInt32) -> Tspan {
+/// Parse an SVG `<tspan>` child node into one or more Tspans. Only
+/// attributes present on the node become non-`nil` overrides; absent
+/// attributes remain `nil` (tspan inherits from the parent element).
+///
+/// Returns an array so SVG's multi-value `rotate="a b c …"` can be
+/// expanded into one tspan per glyph (each carrying its own rotate
+/// angle). The single-value case returns a one-element array. Ids
+/// are left at `0`; the caller assigns fresh sequential ids across
+/// the whole tspan list.
+private func parseTspan(_ node: XMLElement) -> [Tspan] {
     let content = node.stringValue ?? ""
     let fontFamily = node.attribute(forName: "font-family")?.stringValue
     let fontSize = (node.attribute(forName: "font-size")?.stringValue)
@@ -398,11 +411,42 @@ private func parseTspan(_ node: XMLElement, id: UInt32) -> Tspan {
             .filter { $0 != "none" && !$0.isEmpty }
             .sorted()
     }
-    return Tspan(
-        id: id, content: content,
-        fontFamily: fontFamily, fontSize: fontSize,
-        fontStyle: fontStyle, fontWeight: fontWeight,
-        textDecoration: decoration)
+    let rotateVals: [Double] = (node.attribute(forName: "rotate")?.stringValue)
+        .map { raw in
+            raw.split(whereSeparator: { $0.isWhitespace })
+                .compactMap { Double($0) }
+        } ?? []
+    let chars = Array(content)
+
+    // Fast paths: no rotate, or single-value rotate, or single char.
+    if rotateVals.isEmpty {
+        return [Tspan(
+            id: 0, content: content,
+            fontFamily: fontFamily, fontSize: fontSize,
+            fontStyle: fontStyle, fontWeight: fontWeight,
+            textDecoration: decoration)]
+    }
+    if rotateVals.count == 1 || chars.count <= 1 {
+        return [Tspan(
+            id: 0, content: content,
+            fontFamily: fontFamily, fontSize: fontSize,
+            fontStyle: fontStyle, fontWeight: fontWeight,
+            rotate: rotateVals[0],
+            textDecoration: decoration)]
+    }
+    // Multi-value rotate: split the tspan into one per glyph. Each
+    // inherits the other override fields and gets the matching
+    // rotate angle; the last angle is reused for any trailing glyphs
+    // past the end of the list (per SVG spec).
+    let lastAngle = rotateVals.last!
+    return chars.enumerated().map { (i, c) in
+        Tspan(
+            id: 0, content: String(c),
+            fontFamily: fontFamily, fontSize: fontSize,
+            fontStyle: fontStyle, fontWeight: fontWeight,
+            rotate: i < rotateVals.count ? rotateVals[i] : lastAngle,
+            textDecoration: decoration)
+    }
 }
 
 /// Collect `<tspan>` children from an XMLElement and return them as
@@ -412,12 +456,29 @@ private func parseTspan(_ node: XMLElement, id: UInt32) -> Tspan {
 private func collectTspanChildren(_ elem: XMLElement) -> [Tspan] {
     guard let children = elem.children else { return [] }
     var result: [Tspan] = []
-    var nextId: UInt32 = 0
     for child in children {
         if let xml = child as? XMLElement, xml.localName == "tspan" {
-            result.append(parseTspan(xml, id: nextId))
-            nextId += 1
+            result.append(contentsOf: parseTspan(xml))
         }
+    }
+    // Assign fresh sequential ids across the whole list so any
+    // split-on-parse (multi-value rotate) gets consistent ids.
+    for i in 0..<result.count {
+        var t = result[i]
+        t = Tspan(
+            id: UInt32(i), content: t.content,
+            baselineShift: t.baselineShift, dx: t.dx,
+            fontFamily: t.fontFamily, fontSize: t.fontSize,
+            fontStyle: t.fontStyle, fontVariant: t.fontVariant,
+            fontWeight: t.fontWeight,
+            jasAaMode: t.jasAaMode, jasFractionalWidths: t.jasFractionalWidths,
+            jasKerningMode: t.jasKerningMode, jasNoBreak: t.jasNoBreak,
+            letterSpacing: t.letterSpacing, lineHeight: t.lineHeight,
+            rotate: t.rotate, styleName: t.styleName,
+            textDecoration: t.textDecoration, textRendering: t.textRendering,
+            textTransform: t.textTransform, transform: t.transform,
+            xmlLang: t.xmlLang)
+        result[i] = t
     }
     return result
 }
