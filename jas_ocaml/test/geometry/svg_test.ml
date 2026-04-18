@@ -125,6 +125,105 @@ let () =
         assert (try let _ : int = Str.search_forward (Str.regexp_string ">Hello</text>") svg 0 in true
                 with Not_found -> false));
 
+      Alcotest.test_case "flat text has no tspan wrapper" `Quick (fun () ->
+        (* A Text with a single no-override tspan should round-trip as
+           flat SVG — no <tspan> wrapper, no xml:space="preserve". *)
+        let doc = make_document [|make_layer [|
+          make_text 0.0 0.0 "Hello"
+        |]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        assert (not (try let _ : int = Str.search_forward (Str.regexp_string "<tspan") svg 0 in true
+                     with Not_found -> false));
+        assert (not (try let _ : int = Str.search_forward (Str.regexp_string "xml:space") svg 0 in true
+                     with Not_found -> false));
+        assert (try let _ : int = Str.search_forward (Str.regexp_string ">Hello</text>") svg 0 in true
+                with Not_found -> false));
+
+      Alcotest.test_case "multi-tspan text emits tspan children" `Quick (fun () ->
+        (* Two tspans with distinct overrides round-trip as <tspan>
+           children + xml:space="preserve" on the parent <text>. *)
+        let base = make_text 0.0 0.0 "Hello world" in
+        let overriden =
+          match base with
+          | Text r ->
+            let tspans = [|
+              { (Jas.Tspan.default_tspan ()) with content = "Hello " };
+              { (Jas.Tspan.default_tspan ()) with
+                id = 1; content = "world"; font_weight = Some "bold" };
+            |] in
+            Text { r with tspans }
+          | _ -> assert false
+        in
+        let doc = make_document [|make_layer [| overriden |]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        assert (try let _ : int = Str.search_forward (Str.regexp_string "xml:space=\"preserve\"") svg 0 in true
+                with Not_found -> false);
+        assert (try let _ : int = Str.search_forward (Str.regexp_string "<tspan>Hello </tspan>") svg 0 in true
+                with Not_found -> false);
+        assert (try let _ : int = Str.search_forward (Str.regexp_string "<tspan font-weight=\"bold\">world</tspan>") svg 0 in true
+                with Not_found -> false));
+
+      Alcotest.test_case "tspan round-trip preserves overrides" `Quick (fun () ->
+        (* Round-trip a two-tspan text through SVG and back: content,
+           override attributes, and tspan count are preserved. *)
+        let base = make_text 0.0 0.0 "AB" in
+        let input =
+          match base with
+          | Text r ->
+            let tspans = [|
+              { (Jas.Tspan.default_tspan ()) with id = 0; content = "A" };
+              { (Jas.Tspan.default_tspan ()) with
+                id = 1; content = "B"; font_family = Some "Courier";
+                font_weight = Some "bold";
+                text_decoration = Some ["line-through"; "underline"] };
+            |] in
+            Text { r with tspans }
+          | _ -> assert false
+        in
+        let doc = make_document [|make_layer [| input |]|] in
+        let doc2 = roundtrip doc in
+        match doc2.layers.(0) with
+        | Layer { children; _ } ->
+          (match children.(0) with
+           | Text { tspans; _ } ->
+             assert (Array.length tspans = 2);
+             assert (tspans.(0).content = "A");
+             assert (Jas.Tspan.has_no_overrides tspans.(0));
+             assert (tspans.(1).content = "B");
+             assert (tspans.(1).font_family = Some "Courier");
+             assert (tspans.(1).font_weight = Some "bold");
+             assert (tspans.(1).text_decoration =
+                       Some ["line-through"; "underline"])
+           | _ -> assert false)
+        | _ -> assert false);
+
+      Alcotest.test_case "textPath tspan round-trip" `Quick (fun () ->
+        let base = make_text_path [MoveTo (0.0, 0.0); LineTo (100.0, 0.0)] "foo bar" in
+        let input =
+          match base with
+          | Text_path r ->
+            let tspans = [|
+              { (Jas.Tspan.default_tspan ()) with id = 0; content = "foo " };
+              { (Jas.Tspan.default_tspan ()) with
+                id = 1; content = "bar"; font_style = Some "italic" };
+            |] in
+            Text_path { r with tspans }
+          | _ -> assert false
+        in
+        let doc = make_document [|make_layer [| input |]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        assert (try let _ : int = Str.search_forward (Str.regexp_string "<tspan>foo </tspan>") svg 0 in true
+                with Not_found -> false);
+        let doc2 = roundtrip doc in
+        (match doc2.layers.(0) with
+         | Layer { children; _ } ->
+           (match children.(0) with
+            | Text_path { tspans; _ } ->
+              assert (Array.length tspans = 2);
+              assert (tspans.(1).font_style = Some "italic")
+            | _ -> assert false)
+         | _ -> assert false));
+
       Alcotest.test_case "text XML escaping" `Quick (fun () ->
         let doc = make_document [|make_layer [|
           make_text 0.0 0.0 "<b>&</b>"

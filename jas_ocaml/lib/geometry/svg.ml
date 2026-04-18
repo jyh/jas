@@ -118,6 +118,33 @@ let text_extra_attrs tt fv bs lh ls lang aa rot hs vs kern =
     attr "urn:jas:1:kerning-mode" kern;
   ]
 
+(** Emit a single tspan as an SVG [<tspan ...>content</tspan>]. Only
+    overridden attributes are written (inherited values are absent).
+    Matches Rust's [tspan_svg] and Swift's [tspanSvg] — the 5
+    attributes that round-trip natively through SVG: font-family,
+    font-size, font-weight, font-style, text-decoration. *)
+let tspan_svg (t : Element.tspan) : string =
+  let attr_str name = function
+    | Some v -> Printf.sprintf " %s=\"%s\"" name (escape_xml v)
+    | None -> ""
+  in
+  let attr_f name = function
+    | Some v -> Printf.sprintf " %s=\"%s\"" name (fmt (px v))
+    | None -> ""
+  in
+  let decor_attr = match t.text_decoration with
+    | Some ds when ds <> [] ->
+      Printf.sprintf " text-decoration=\"%s\"" (escape_xml (String.concat " " ds))
+    | _ -> ""
+  in
+  Printf.sprintf "<tspan%s%s%s%s%s>%s</tspan>"
+    (attr_str "font-family" t.font_family)
+    (attr_f "font-size" t.font_size)
+    (attr_str "font-weight" t.font_weight)
+    (attr_str "font-style" t.font_style)
+    decor_attr
+    (escape_xml t.content)
+
 let rec element_svg indent (elem : Element.element) =
   let open Element in
   match elem with
@@ -161,7 +188,8 @@ let rec element_svg indent (elem : Element.element) =
   | Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration;
            text_transform; font_variant; baseline_shift; line_height; letter_spacing;
            xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
-           text_width; text_height = _; fill; stroke; opacity; transform; _ } ->
+           text_width; text_height = _; fill; stroke; opacity; transform;
+           tspans; _ } ->
     let area_attrs = if text_width > 0.0 then
       Printf.sprintf " style=\"inline-size: %spx; white-space: pre-wrap;\"" (fmt (px text_width))
     else "" in
@@ -173,15 +201,23 @@ let rec element_svg indent (elem : Element.element) =
        *top* of the layout box, so add the ascent (0.8 *. font_size,
        matching [Text_layout]). *)
     let svg_y = y +. font_size *. 0.8 in
-    Printf.sprintf "%s<text x=\"%s\" y=\"%s\" font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s%s%s%s%s>%s</text>"
+    (* Pre-Tspan-compatible emission: a single no-override tspan
+       round-trips as a flat <text>contents</text>. Multi-tspan or any
+       override carries xml:space="preserve" so inter-tspan whitespace
+       is byte-stable across round-trips (TSPAN.md SVG serialization). *)
+    let is_flat = Array.length tspans = 1 && Tspan.has_no_overrides tspans.(0) in
+    let body = if is_flat then escape_xml content
+               else String.concat "" (Array.to_list (Array.map tspan_svg tspans)) in
+    let space_attr = if is_flat then "" else " xml:space=\"preserve\"" in
+    Printf.sprintf "%s<text x=\"%s\" y=\"%s\" font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s%s%s%s%s%s>%s</text>"
       indent (fmt (px x)) (fmt (px svg_y)) (escape_xml font_family) (fmt (px font_size))
       fw_attr fs_attr td_attr extra
       area_attrs (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
-      (transform_attr transform) (escape_xml content)
+      (transform_attr transform) space_attr body
   | Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration;
                 text_transform; font_variant; baseline_shift; line_height; letter_spacing;
                 xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
-                fill; stroke; opacity; transform; _ } ->
+                fill; stroke; opacity; transform; tspans; _ } ->
     let offset_attr = if start_offset > 0.0 then
       Printf.sprintf " startOffset=\"%s%%\"" (fmt (start_offset *. 100.0))
     else "" in
@@ -189,12 +225,16 @@ let rec element_svg indent (elem : Element.element) =
     let fs_attr = if font_style <> "normal" then Printf.sprintf " font-style=\"%s\"" font_style else "" in
     let td_attr = if text_decoration <> "none" && text_decoration <> "" then Printf.sprintf " text-decoration=\"%s\"" text_decoration else "" in
     let extra = text_extra_attrs text_transform font_variant baseline_shift line_height letter_spacing xml_lang aa_mode rotate horizontal_scale vertical_scale kerning in
-    Printf.sprintf "%s<text%s%s font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s%s><textPath path=\"%s\"%s>%s</textPath></text>"
+    let is_flat = Array.length tspans = 1 && Tspan.has_no_overrides tspans.(0) in
+    let body = if is_flat then escape_xml content
+               else String.concat "" (Array.to_list (Array.map tspan_svg tspans)) in
+    let space_attr = if is_flat then "" else " xml:space=\"preserve\"" in
+    Printf.sprintf "%s<text%s%s font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s%s><textPath path=\"%s\"%s%s>%s</textPath></text>"
       indent (fill_attrs fill) (stroke_attrs stroke)
       (escape_xml font_family) (fmt (px font_size))
       fw_attr fs_attr td_attr extra
       (opacity_attr opacity) (transform_attr transform)
-      (path_data d) offset_attr (escape_xml content)
+      (path_data d) offset_attr space_attr body
   | Group { children; opacity; transform; _ } ->
     let header = Printf.sprintf "%s<g%s%s>"
       indent (opacity_attr opacity) (transform_attr transform) in
@@ -573,15 +613,22 @@ let rec parse_element i =
         let hs = getopt "horizontal-scale" in
         let vs = getopt "vertical-scale" in
         let kerning = getopt "urn:jas:1:kerning-mode" in
-        let (tp_result, content) = collect_text_or_textpath i in
+        let (tp_result, content, tspans_opt) = collect_text_or_textpath i in
         (match tp_result with
-         | Some (tp_d, tp_content, tp_offset) ->
-           Some (Element.make_text_path ~start_offset:tp_offset
+         | Some (tp_d, tp_content, tp_offset, tp_tspans_opt) ->
+           let base = Element.make_text_path ~start_offset:tp_offset
              ~font_family:ff ~font_size:fs ~font_weight:fw ~font_style:fst ~text_decoration:td
              ~text_transform:tt ~font_variant:fv ~baseline_shift:bs
              ~line_height:lh ~letter_spacing:ls ~xml_lang:lang
              ~aa_mode:aa ~rotate ~horizontal_scale:hs ~vertical_scale:vs ~kerning
-             ~fill ~stroke ~opacity ~transform tp_d tp_content)
+             ~fill ~stroke ~opacity ~transform tp_d tp_content in
+           (* Preserve the parsed tspans when the <textPath> body had
+              explicit children; make_text_path seeded tspans from the
+              content string which would drop per-range overrides. *)
+           (match tp_tspans_opt, base with
+            | Some parsed, Element.Text_path r ->
+              Some (Element.Text_path { r with tspans = parsed })
+            | _ -> Some base)
          | None ->
            let tw = match get_attr attrs "style" with
              | Some style ->
@@ -599,14 +646,18 @@ let rec parse_element i =
            (* SVG `y` is the baseline of the first line; convert to the
               layout-box top by subtracting the ascent (0.8 *. fs). *)
            let svg_y = pt (get_attr_f attrs "y" 0.0) in
-           Some (Element.make_text ~font_family:ff ~font_size:fs ~font_weight:fw ~font_style:fst ~text_decoration:td
+           let base = Element.make_text ~font_family:ff ~font_size:fs ~font_weight:fw ~font_style:fst ~text_decoration:td
              ~text_transform:tt ~font_variant:fv ~baseline_shift:bs
              ~line_height:lh ~letter_spacing:ls ~xml_lang:lang
              ~aa_mode:aa ~rotate ~horizontal_scale:hs ~vertical_scale:vs ~kerning
              ~text_width:tw ~text_height:th ~fill ~stroke ~opacity ~transform
              (pt (get_attr_f attrs "x" 0.0))
              (svg_y -. fs *. 0.8)
-             content))
+             content in
+           (match tspans_opt, base with
+            | Some parsed, Element.Text r ->
+              Some (Element.Text { r with tspans = parsed })
+            | _ -> Some base))
       | "g" ->
         let children = parse_children i in
         let label = get_attr attrs "label" in
@@ -626,14 +677,63 @@ let rec parse_element i =
     elem
   | _ -> None
 
+and parse_tspan_body i attrs id : Element.tspan =
+  (* Consume the body of a <tspan> start, returning the parsed tspan
+     with overrides populated from attrs and content from text data
+     children. Called after the start event has been read. *)
+  let a = attrs_of_xmlm_attrs attrs in
+  let content_buf = Buffer.create 16 in
+  let rec loop () =
+    match Xmlm.peek i with
+    | `El_end -> let _ = Xmlm.input i in ()
+    | `Data s -> let _ = Xmlm.input i in Buffer.add_string content_buf s; loop ()
+    | `El_start _ -> skip_element_full i; loop ()
+    | `Dtd _ -> let _ = Xmlm.input i in loop ()
+  in
+  loop ();
+  let font_size = match get_attr a "font-size" with
+    | Some s -> (try Some (pt (float_of_string s)) with _ -> None)
+    | None -> None
+  in
+  let decoration = match get_attr a "text-decoration" with
+    | Some s ->
+      let toks = String.split_on_char ' ' s
+        |> List.filter (fun t -> t <> "" && t <> "none") in
+      let sorted = List.sort compare toks in
+      Some sorted
+    | None -> None
+  in
+  { (Tspan.default_tspan ()) with
+    id;
+    content = Buffer.contents content_buf;
+    font_family = get_attr a "font-family";
+    font_size;
+    font_weight = get_attr a "font-weight";
+    font_style = get_attr a "font-style";
+    text_decoration = decoration;
+  }
+
 and collect_text_or_textpath i =
-  (* Parse <text> children, looking for <textPath>. Returns (textpath_option, plain_text). *)
+  (* Parse <text> children. Returns
+     (textpath_option, plain_text, tspans_option). When any <tspan>
+     children are seen they are returned in tspans_option; callers
+     prefer those over plain_text. textPath's internal <tspan>
+     children are collected inside the textPath path. *)
   let buf = Buffer.create 64 in
+  let tspans_acc : Element.tspan list ref = ref [] in
+  let next_id = ref 0 in
   let tp_result = ref None in
   let rec loop () =
     match Xmlm.peek i with
     | `El_end -> let _ = Xmlm.input i in ()
     | `Data s -> let _ = Xmlm.input i in Buffer.add_string buf s; loop ()
+    | `El_start ((_, tag), attrs) when tag = "tspan" ->
+      let _ = Xmlm.input i in  (* consume the El_start *)
+      let t = parse_tspan_body i attrs !next_id in
+      incr next_id;
+      tspans_acc := t :: !tspans_acc;
+      Buffer.add_string buf t.content;
+      loop ()
     | `El_start ((_, tag), _) when tag = "textPath" ->
       let (_, tp_attrs) = match Xmlm.input i with `El_start (_, a) -> ("", a) | _ -> ("", []) in
       let tp_a = attrs_of_xmlm_attrs tp_attrs in
@@ -641,10 +741,19 @@ and collect_text_or_textpath i =
         match get_attr tp_a "d" with Some s -> s | None -> "" in
       let d = parse_path_d d_str in
       let tp_content = Buffer.create 32 in
+      let tp_tspans_acc : Element.tspan list ref = ref [] in
+      let tp_next_id = ref 0 in
       let rec collect_tp () =
         match Xmlm.peek i with
         | `El_end -> let _ = Xmlm.input i in ()
         | `Data s -> let _ = Xmlm.input i in Buffer.add_string tp_content s; collect_tp ()
+        | `El_start ((_, tag), attrs) when tag = "tspan" ->
+          let _ = Xmlm.input i in
+          let t = parse_tspan_body i attrs !tp_next_id in
+          incr tp_next_id;
+          tp_tspans_acc := t :: !tp_tspans_acc;
+          Buffer.add_string tp_content t.content;
+          collect_tp ()
         | `El_start _ -> skip_element_full i; collect_tp ()
         | `Dtd _ -> let _ = Xmlm.input i in collect_tp ()
       in
@@ -658,13 +767,22 @@ and collect_text_or_textpath i =
         else
           (try float_of_string offset_str with _ -> 0.0)
       in
-      tp_result := Some (d, Buffer.contents tp_content, start_offset);
+      let tp_tspans_opt =
+        match List.rev !tp_tspans_acc with
+        | [] -> None
+        | xs -> Some (Array.of_list xs)
+      in
+      tp_result := Some (d, Buffer.contents tp_content, start_offset, tp_tspans_opt);
       loop ()
     | `El_start _ -> skip_element_full i; loop ()
     | `Dtd _ -> let _ = Xmlm.input i in loop ()
   in
   loop ();
-  (!tp_result, Buffer.contents buf)
+  let tspans_opt = match List.rev !tspans_acc with
+    | [] -> None
+    | xs -> Some (Array.of_list xs)
+  in
+  (!tp_result, Buffer.contents buf, tspans_opt)
 
 and parse_children i =
   let children = ref [] in
