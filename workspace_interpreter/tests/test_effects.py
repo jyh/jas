@@ -320,6 +320,85 @@ class TestCloseDialogEffect:
         assert store.get_dialog_state() == {}
 
 
+class TestDialogPreviewSnapshot:
+    """open_dialog captures a snapshot of every state key referenced by
+    the dialog's preview_targets. close_dialog restores from the
+    snapshot unless first cleared by clear_dialog_snapshot (which OK
+    actions emit in Phase 8/9). Phase 0 supports only top-level state
+    keys; deep paths defer to Phase 8/9."""
+
+    def test_open_dialog_captures_preview_snapshot(self):
+        dialogs = {
+            "para_indent": {
+                "summary": "Indents",
+                "state": {
+                    "left": {"type": "number", "default": 0},
+                    "right": {"type": "number", "default": 0},
+                },
+                "preview_targets": {
+                    "left": "left_indent",
+                    "right": "right_indent",
+                },
+                "content": {"type": "container"},
+            }
+        }
+        store = StateStore({"left_indent": 12, "right_indent": 0})
+        run_effects([{"open_dialog": {"id": "para_indent"}}], {}, store, dialogs=dialogs)
+        snap = store.get_dialog_snapshot()
+        assert snap == {"left_indent": 12, "right_indent": 0}
+
+    def test_open_dialog_without_preview_targets_no_snapshot(self):
+        dialogs = {
+            "plain": {
+                "summary": "Plain",
+                "state": {"name": {"type": "string", "default": ""}},
+                "content": {"type": "container"},
+            }
+        }
+        store = StateStore()
+        run_effects([{"open_dialog": {"id": "plain"}}], {}, store, dialogs=dialogs)
+        assert not store.has_dialog_snapshot()
+
+    def test_close_dialog_restores_from_snapshot(self):
+        dialogs = {
+            "para_indent": {
+                "summary": "Indents",
+                "state": {"left": {"type": "number", "default": 0}},
+                "preview_targets": {"left": "left_indent"},
+                "content": {"type": "container"},
+            }
+        }
+        store = StateStore({"left_indent": 12})
+        run_effects([{"open_dialog": {"id": "para_indent"}}], {}, store, dialogs=dialogs)
+        # Simulate Preview live-applying an edit
+        store.set("left_indent", 99)
+        # Cancel restores
+        run_effects([{"close_dialog": None}], {}, store)
+        assert store.get("left_indent") == 12
+        assert store.get_dialog_id() is None
+        assert not store.has_dialog_snapshot()
+
+    def test_clear_dialog_snapshot_prevents_restore(self):
+        dialogs = {
+            "para_indent": {
+                "summary": "Indents",
+                "state": {"left": {"type": "number", "default": 0}},
+                "preview_targets": {"left": "left_indent"},
+                "content": {"type": "container"},
+            }
+        }
+        store = StateStore({"left_indent": 12})
+        run_effects([{"open_dialog": {"id": "para_indent"}}], {}, store, dialogs=dialogs)
+        store.set("left_indent", 99)
+        # OK action equivalent: clear snapshot, then close
+        run_effects([
+            {"clear_dialog_snapshot": None},
+            {"close_dialog": None},
+        ], {}, store)
+        assert store.get("left_indent") == 99
+        assert store.get_dialog_id() is None
+
+
 class TestDialogWithGlobalEffects:
     """Test that dialog effects work alongside global effects (set, etc.)."""
 

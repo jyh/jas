@@ -649,11 +649,34 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             for key, expr in init_map.items():
                 value = _eval(expr, store, init_ctx)
                 store.set_dialog(key, value)
+        # Capture preview snapshot if the dialog declares preview_targets.
+        # Restored on close_dialog unless first cleared by an OK action via
+        # clear_dialog_snapshot.
+        targets = dlg_def.get("preview_targets")
+        if isinstance(targets, dict):
+            store.capture_dialog_snapshot({
+                k: v for k, v in targets.items() if isinstance(v, str)
+            })
         return
 
     # close_dialog: null or dialog_id
     if "close_dialog" in effect:
+        # Preview restore: if a snapshot survived (i.e., no OK action
+        # cleared it), revert each target to its captured original
+        # value. Phase 0 handles only top-level state keys.
+        snapshot = store.get_dialog_snapshot()
+        if snapshot is not None:
+            for key, value in snapshot.items():
+                if "." not in key:
+                    store.set(key, value)
+            store.clear_dialog_snapshot()
         store.close_dialog()
+        return
+
+    # clear_dialog_snapshot: drop the preview snapshot so close_dialog
+    # does not restore. OK actions emit this before close_dialog to commit.
+    if "clear_dialog_snapshot" in effect:
+        store.clear_dialog_snapshot()
         return
 
     # log: message (no-op in interpreter, just print for debug)
