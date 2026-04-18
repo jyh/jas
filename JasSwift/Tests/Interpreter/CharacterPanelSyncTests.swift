@@ -418,3 +418,83 @@ import Testing
     #expect(out[0].content == "foobar")
     #expect(out[0].fontWeight == "bold")
 }
+
+// MARK: - Phase 3 complex attrs (line-height, tracking, baseline-shift, aa)
+
+private func _defaultElemText() -> Element {
+    .text(Text(x: 0, y: 0, content: "",
+                fontFamily: "sans-serif", fontSize: 16,
+                fontWeight: "normal", fontStyle: "normal",
+                textDecoration: "", textTransform: "", fontVariant: "",
+                baselineShift: "", lineHeight: "", letterSpacing: "",
+                xmlLang: "", aaMode: "", rotate: ""))
+}
+
+private func _alignedPanelSwift() -> [String: Any] {
+    return [
+        "font_family": "sans-serif",
+        "font_size": 16.0,
+        "style_name": "Regular",
+        "all_caps": false, "small_caps": false,
+        "superscript": false, "subscript": false,
+        "underline": false, "strikethrough": false,
+        "language": "",
+        "character_rotation": 0.0,
+        "leading": 16.0 * 1.2,   // auto default
+        "tracking": 0.0,
+        "baseline_shift": 0.0,
+        "anti_aliasing": "Sharp",
+    ]
+}
+
+@Test func templateLeadingDiffersFromAuto() {
+    var panel = _alignedPanelSwift()
+    panel["leading"] = 32.0  // 2× font_size → non-auto
+    let tpl = buildPanelPendingTemplate(panel, _defaultElemText())
+    #expect(tpl != nil)
+    #expect(tpl?.lineHeight == 32.0)
+}
+
+@Test func templateTrackingDiffersFromZero() {
+    var panel = _alignedPanelSwift()
+    panel["tracking"] = 50.0
+    let tpl = buildPanelPendingTemplate(panel, _defaultElemText())
+    #expect(tpl != nil)
+    #expect(abs((tpl?.letterSpacing ?? 0) - 0.05) < 1e-9)
+}
+
+@Test func templateBaselineShiftNumeric() {
+    var panel = _alignedPanelSwift()
+    panel["baseline_shift"] = 3.0
+    let tpl = buildPanelPendingTemplate(panel, _defaultElemText())
+    #expect(tpl != nil)
+    #expect(tpl?.baselineShift == 3.0)
+}
+
+@Test func templateBaselineShiftSkippedWhenSuperOn() {
+    var panel = _alignedPanelSwift()
+    panel["superscript"] = true
+    panel["baseline_shift"] = 3.0  // should be ignored
+    let tpl = buildPanelPendingTemplate(panel, _defaultElemText())
+    if let t = tpl {
+        #expect(t.baselineShift == nil)
+    }
+}
+
+@Test func templateAntiAliasingDiffersFromSharp() {
+    var panel = _alignedPanelSwift()
+    panel["anti_aliasing"] = "Smooth"
+    let tpl = buildPanelPendingTemplate(panel, _defaultElemText())
+    #expect(tpl != nil)
+    #expect(tpl?.jasAaMode == "Smooth")
+}
+
+@Test func fullOverridesIncludesComplexAttrs() {
+    let panel = _alignedPanelSwift()
+    let t = buildPanelFullOverrides(panel)
+    // Full builder always writes these fields.
+    #expect(t.lineHeight != nil)
+    #expect(t.letterSpacing != nil)
+    #expect(t.baselineShift != nil)
+    #expect(t.jasAaMode != nil)
+}

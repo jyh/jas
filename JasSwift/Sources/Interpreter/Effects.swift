@@ -603,11 +603,28 @@ func buildPanelFullOverrides(_ panel: [String: Any]) -> Tspan {
     let fv = (smallCaps && !allCaps) ? "small-caps" : ""
     let lang = panel["language"] as? String ?? ""
     let rot = (panel["character_rotation"] as? NSNumber)?.doubleValue ?? 0.0
+    // Leading → line_height (pt). Always emitted; identity-omission TBD.
+    let leading = (panel["leading"] as? NSNumber)?.doubleValue ?? (fontSize * 1.2)
+    // Tracking → letter_spacing (em). Panel unit is 1/1000 em.
+    let tracking = (panel["tracking"] as? NSNumber)?.doubleValue ?? 0.0
+    let letterSpacing = tracking / 1000.0
+    // Baseline shift numeric (pt), skipped when super / sub is on.
+    let superOn = panel["superscript"] as? Bool ?? false
+    let subOn = panel["subscript"] as? Bool ?? false
+    let bsNum = (panel["baseline_shift"] as? NSNumber)?.doubleValue ?? 0.0
+    let baselineShift: Double? = (superOn || subOn) ? nil : bsNum
+    // Anti-aliasing → jas_aa_mode. "Sharp" / empty are the defaults.
+    let aaRaw = (panel["anti_aliasing"] as? String) ?? "Sharp"
+    let aaMode = (aaRaw == "Sharp" || aaRaw.isEmpty) ? "" : aaRaw
     return Tspan(
         id: 0, content: "",
+        baselineShift: baselineShift,
         fontFamily: fontFamily, fontSize: fontSize,
         fontStyle: fst, fontVariant: fv,
         fontWeight: fw,
+        jasAaMode: aaMode,
+        letterSpacing: letterSpacing,
+        lineHeight: leading,
         rotate: rot,
         textDecoration: td,
         textTransform: tt,
@@ -643,19 +660,25 @@ func applyOverridesToTspanRange(
 /// with super/sub, kerning modes, scales, line-height) aren't yet
 /// supported as pending overrides and are left out of the template.
 func buildPanelPendingTemplate(_ panel: [String: Any], _ elem: Element) -> Tspan? {
-    let (elemFF, elemFS, elemFW, elemFSt, elemTD, elemTT, elemFV, elemXL, elemRot):
-        (String, Double, String, String, String, String, String, String, String)
+    let (elemFF, elemFS, elemFW, elemFSt, elemTD, elemTT, elemFV, elemXL,
+         elemRot, elemLH, elemLS, elemBS, elemAA):
+        (String, Double, String, String, String, String, String, String,
+         String, String, String, String, String)
     switch elem {
     case .text(let t):
-        (elemFF, elemFS, elemFW, elemFSt, elemTD, elemTT, elemFV, elemXL, elemRot) =
+        (elemFF, elemFS, elemFW, elemFSt, elemTD, elemTT, elemFV, elemXL,
+         elemRot, elemLH, elemLS, elemBS, elemAA) =
             (t.fontFamily, t.fontSize, t.fontWeight, t.fontStyle,
              t.textDecoration, t.textTransform, t.fontVariant,
-             t.xmlLang, t.rotate)
+             t.xmlLang, t.rotate, t.lineHeight, t.letterSpacing,
+             t.baselineShift, t.aaMode)
     case .textPath(let tp):
-        (elemFF, elemFS, elemFW, elemFSt, elemTD, elemTT, elemFV, elemXL, elemRot) =
+        (elemFF, elemFS, elemFW, elemFSt, elemTD, elemTT, elemFV, elemXL,
+         elemRot, elemLH, elemLS, elemBS, elemAA) =
             (tp.fontFamily, tp.fontSize, tp.fontWeight, tp.fontStyle,
              tp.textDecoration, tp.textTransform, tp.fontVariant,
-             tp.xmlLang, tp.rotate)
+             tp.xmlLang, tp.rotate, tp.lineHeight, tp.letterSpacing,
+             tp.baselineShift, tp.aaMode)
     default:
         return nil
     }
@@ -669,6 +692,10 @@ func buildPanelPendingTemplate(_ panel: [String: Any], _ elem: Element) -> Tspan
     var fontVariant: String? = nil
     var xmlLang: String? = nil
     var rotate: Double? = nil
+    var lineHeight: Double? = nil
+    var letterSpacing: Double? = nil
+    var baselineShift: Double? = nil
+    var jasAaMode: String? = nil
 
     if let v = panel["font_family"] as? String, v != elemFF {
         fontFamily = v; any = true
@@ -724,21 +751,71 @@ func buildPanelPendingTemplate(_ panel: [String: Any], _ elem: Element) -> Tspan
         rotate = rot == 0.0 ? nil : rot
         if rotate != nil { any = true }
     }
+    // Leading → line_height (pt). Element stores as CSS length
+    // string; empty round-trips to auto (120% of font_size).
+    let leading = (panel["leading"] as? NSNumber)?.doubleValue
+    let elemLhVal = _parsePtValue(elemLH) ?? (elemFS * 1.2)
+    if let leading = leading, abs(leading - elemLhVal) > 1e-6 {
+        lineHeight = leading; any = true
+    }
+    // Tracking → letter_spacing (em). Panel unit is 1/1000 em.
+    let tracking = (panel["tracking"] as? NSNumber)?.doubleValue ?? 0.0
+    let elemTracking = (_parseEmValue(elemLS) ?? 0.0) * 1000.0
+    if abs(tracking - elemTracking) > 1e-6 {
+        letterSpacing = tracking / 1000.0; any = true
+    }
+    // Baseline shift numeric: skipped when super / sub is on.
+    let superOn = panel["superscript"] as? Bool ?? false
+    let subOn = panel["subscript"] as? Bool ?? false
+    if !superOn && !subOn {
+        let bs = (panel["baseline_shift"] as? NSNumber)?.doubleValue ?? 0.0
+        let elemBsVal = _parsePtValue(elemBS) ?? 0.0
+        if abs(bs - elemBsVal) > 1e-6 {
+            baselineShift = bs; any = true
+        }
+    }
+    // Anti-aliasing → jas_aa_mode.
+    let aaRaw = (panel["anti_aliasing"] as? String) ?? "Sharp"
+    let aaMode = (aaRaw == "Sharp" || aaRaw.isEmpty) ? "" : aaRaw
+    if aaMode != elemAA {
+        jasAaMode = aaMode; any = true
+    }
 
     if !any { return nil }
-    // Parameter order must match the declared init — fontVariant
-    // precedes fontWeight in Tspan.swift; textDecoration / textTransform
-    // follow rotate.
     return Tspan(
         id: 0, content: "",
+        baselineShift: baselineShift,
         fontFamily: fontFamily, fontSize: fontSize,
         fontStyle: fontStyle, fontVariant: fontVariant,
         fontWeight: fontWeight,
+        jasAaMode: jasAaMode,
+        letterSpacing: letterSpacing,
+        lineHeight: lineHeight,
         rotate: rotate,
         textDecoration: textDecoration,
         textTransform: textTransform,
         xmlLang: xmlLang
     )
+}
+
+/// Parse a CSS pt-length ("5pt") into a Double. Empty → nil.
+private func _parsePtValue(_ s: String) -> Double? {
+    let trimmed = s.trimmingCharacters(in: .whitespaces)
+    if trimmed.isEmpty { return nil }
+    if trimmed.hasSuffix("pt") {
+        return Double(trimmed.dropLast(2))
+    }
+    return Double(trimmed)
+}
+
+/// Parse a CSS em-length ("0.025em") into a Double. Empty → nil.
+private func _parseEmValue(_ s: String) -> Double? {
+    let trimmed = s.trimmingCharacters(in: .whitespaces)
+    if trimmed.isEmpty { return nil }
+    if trimmed.hasSuffix("em") {
+        return Double(trimmed.dropLast(2))
+    }
+    return Double(trimmed)
 }
 
 func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
