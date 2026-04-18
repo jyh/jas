@@ -431,6 +431,8 @@ let _aligned_panel () =
     ("character_rotation", `Float 0.0);
   ]
 
+let _panel_with kv = kv @ _aligned_panel ()
+
 let phase3_pending_tests = [
   Alcotest.test_case "template_empty_when_panel_matches_element" `Quick (fun () ->
     let elem = _default_text_elem () in
@@ -523,6 +525,44 @@ let phase3_pending_tests = [
     assert (Array.length out = 1);
     assert (out.(0).content = "foobar");
     assert (out.(0).font_weight = Some "bold"));
+
+  Alcotest.test_case "template_leading_differs_from_auto" `Quick (fun () ->
+    let elem = _default_text_elem () in
+    let panel = _panel_with [("leading", `Float 32.0)] in
+    match build_panel_pending_template panel elem with
+    | None -> assert false
+    | Some tpl -> assert (tpl.line_height = Some 32.0));
+
+  Alcotest.test_case "template_tracking_differs_from_zero" `Quick (fun () ->
+    let elem = _default_text_elem () in
+    let panel = _panel_with [("tracking", `Float 50.0)] in
+    match build_panel_pending_template panel elem with
+    | None -> assert false
+    | Some tpl ->
+      let ls = match tpl.letter_spacing with Some v -> v | None -> assert false in
+      assert (abs_float (ls -. 0.05) < 1e-9));
+
+  Alcotest.test_case "template_baseline_shift_numeric" `Quick (fun () ->
+    let elem = _default_text_elem () in
+    let panel = _panel_with [("baseline_shift", `Float 3.0)] in
+    match build_panel_pending_template panel elem with
+    | None -> assert false
+    | Some tpl -> assert (tpl.baseline_shift = Some 3.0));
+
+  Alcotest.test_case "template_baseline_shift_skipped_when_super" `Quick (fun () ->
+    let elem = _default_text_elem () in
+    let panel = _panel_with
+      [("superscript", `Bool true); ("baseline_shift", `Float 3.0)] in
+    match build_panel_pending_template panel elem with
+    | Some tpl -> assert (tpl.baseline_shift = None)
+    | None -> ());
+
+  Alcotest.test_case "template_anti_aliasing_differs_from_sharp" `Quick (fun () ->
+    let elem = _default_text_elem () in
+    let panel = _panel_with [("anti_aliasing", `String "Smooth")] in
+    match build_panel_pending_template panel elem with
+    | None -> assert false
+    | Some tpl -> assert (tpl.jas_aa_mode = Some "Smooth"));
 
   Alcotest.test_case "panel_write_with_bare_caret_sets_pending" `Quick (fun () ->
     (* Build a document with a Text element, set up an active session
