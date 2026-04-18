@@ -33,18 +33,44 @@ and a master checkbox with `enabled-when` gates its siblings.
 
 ### Phase 1 — Paragraph wrapper tspan model
 
-**Scope**
+Split into two halves so the foundation lands quickly and the
+mechanical attribute work defers until it has a real consumer.
 
-- Read/write `<tspan jas:role="paragraph">` in SVG parse / serialise.
-- In-memory paragraph node with typed attribute set.
-- Enter creates a new paragraph inheriting parent attrs.
-- Backspace at paragraph start merges into previous, discarding own
+**Phase 1a** — `jas_role` round-trip only (foundation).
+
+- Add `jas_role: Option<String>` to the Tspan struct (or equivalent
+  per language) — values: `None` for content tspans, `Some("paragraph")`
+  for wrappers.
+- SVG parser recognises `jas:role` attribute on `<tspan>`.
+- SVG serialiser emits `jas:role` when set.
+- Round-trip test: `<tspan jas:role="paragraph">` parses and
+  serialises back unchanged.
+
+Wrapper tspans live in the existing flat tspan list (Option A++
+from the design discussion); subsequent content tspans implicitly
+group under the most recent wrapper. No paragraph attribute fields
+are added in 1a; round-trip preserves the role marker only.
+
+**Phase 1b** — full paragraph attributes + edit primitives
+(deferred to the Phase 4 timeframe, when the panel actually writes
+these values).
+
+- Add the ~30 paragraph-level Optional fields (alignment, indents,
+  space-before/after, list-style, hyphenate, hanging-punctuation,
+  Justification dialog attrs, Hyphenation dialog attrs).
+- SVG parse/serialise the new attributes with the identity-value
+  rule.
+- Enter creates a new paragraph wrapper inheriting parent attrs.
+- Backspace at paragraph start removes the wrapper, discarding its
   attrs (per §Selection rule 6 of `PARAGRAPH.md`).
 
-**Apps:** all 5.
+**Apps:** 4 native (`jas_dioxus`, `JasSwift`, `jas_ocaml`, `jas`).
+`jas_flask` is skipped — per `project_flask_tspan_deferred.md`,
+flask has no canvas / SVG document model and does not parse or
+serialise text elements.
 
-**Deliverable:** SVGs with paragraph wrappers round-trip; editing
-preserves paragraph structure.
+**Deliverable (1a):** SVGs with `jas:role="paragraph"` wrapper
+tspans round-trip across all four native apps.
 
 ### Phase 2 — Static panel + dialog UI
 
