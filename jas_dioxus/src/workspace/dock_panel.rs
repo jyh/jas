@@ -298,6 +298,37 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
         m.insert("kerning".into(), J::String(kerning_display));
     }
 
+    // ── Paragraph panel — text-kind gating (Phase 3a) ──────
+    // PARAGRAPH.md §Text-kind gating disables JUSTIFY_*, indents,
+    // hyphenate, and hanging punctuation when any selected text
+    // element is non-area (point text or text-on-path). The bare
+    // alignments, space-before/after, and list dropdowns gate on
+    // text_selected only.
+    let mut any_text = false;
+    let mut all_area = true;
+    if let Some(tab) = st.tab() {
+        let doc = tab.model.document();
+        for es in doc.selection.iter() {
+            if let Some(el) = doc.get_element(&es.path) {
+                match el {
+                    crate::geometry::element::Element::Text(t) => {
+                        any_text = true;
+                        if !(t.width > 0.0 && t.height > 0.0) {
+                            all_area = false;
+                        }
+                    }
+                    crate::geometry::element::Element::TextPath(_) => {
+                        any_text = true;
+                        all_area = false;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    m.insert("text_selected".into(), J::Bool(any_text));
+    m.insert("area_text_selected".into(), J::Bool(any_text && all_area));
+
     m
 }
 
