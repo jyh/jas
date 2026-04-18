@@ -824,6 +824,34 @@ let build_panel_full_overrides
     | Some (`Float n) -> n
     | _ -> 0.0 in
   set_opt (fun x -> { x with rotate = Some rot });
+  (* Leading → line_height (pt). *)
+  let leading = match List.assoc_opt "leading" panel with
+    | Some (`Int n) -> Float.of_int n
+    | Some (`Float n) -> n
+    | _ -> font_size *. 1.2 in
+  set_opt (fun x -> { x with line_height = Some leading });
+  (* Tracking → letter_spacing (em). Panel unit is 1/1000 em. *)
+  let tracking = match List.assoc_opt "tracking" panel with
+    | Some (`Int n) -> Float.of_int n
+    | Some (`Float n) -> n
+    | _ -> 0.0 in
+  set_opt (fun x -> { x with letter_spacing = Some (tracking /. 1000.0) });
+  (* Baseline shift numeric (pt), skipped when super / sub is on. *)
+  let superscript = match List.assoc_opt "superscript" panel with
+    | Some (`Bool b) -> b | _ -> false in
+  let subscript = match List.assoc_opt "subscript" panel with
+    | Some (`Bool b) -> b | _ -> false in
+  let bs_num = match List.assoc_opt "baseline_shift" panel with
+    | Some (`Int n) -> Float.of_int n
+    | Some (`Float n) -> n
+    | _ -> 0.0 in
+  if not (superscript || subscript) then
+    set_opt (fun x -> { x with baseline_shift = Some bs_num });
+  (* Anti-aliasing → jas_aa_mode. "Sharp" / empty → empty override. *)
+  let aa_raw = match List.assoc_opt "anti_aliasing" panel with
+    | Some (`String s) -> s | _ -> "Sharp" in
+  let aa_mode = if aa_raw = "Sharp" || aa_raw = "" then "" else aa_raw in
+  set_opt (fun x -> { x with jas_aa_mode = Some aa_mode });
   !t
 
 (** Apply [overrides] to the tspans covering the character range
@@ -861,15 +889,18 @@ let build_panel_pending_template
     (elem : Element.element)
   : Element.tspan option =
   let (elem_ff, elem_fs, elem_fw, elem_fst, elem_td, elem_tt, elem_fv,
-       elem_xl, elem_rot) = match elem with
+       elem_xl, elem_rot, elem_lh_str, elem_ls_str, elem_bs_str,
+       elem_aa_str) = match elem with
     | Element.Text r ->
       (r.font_family, r.font_size, r.font_weight, r.font_style,
        r.text_decoration, r.text_transform, r.font_variant,
-       r.xml_lang, r.rotate)
+       r.xml_lang, r.rotate,
+       r.line_height, r.letter_spacing, r.baseline_shift, r.aa_mode)
     | Element.Text_path r ->
       (r.font_family, r.font_size, r.font_weight, r.font_style,
        r.text_decoration, r.text_transform, r.font_variant,
-       r.xml_lang, r.rotate)
+       r.xml_lang, r.rotate,
+       r.line_height, r.letter_spacing, r.baseline_shift, r.aa_mode)
     | _ -> raise Exit in
   let tpl = ref (Tspan.default_tspan ()) in
   let any = ref false in
@@ -951,6 +982,73 @@ let build_panel_pending_template
   if rot_str <> elem_rot then begin
     tpl := { !tpl with rotate = if rot = 0.0 then None else Some rot };
     if rot <> 0.0 then any := true
+  end;
+  (* Leading → line_height. Element stores as CSS length string,
+     empty round-trips to auto (120% of font_size). *)
+  let has_suffix ~suffix s =
+    let ls = String.length s in
+    let lsuf = String.length suffix in
+    ls >= lsuf && String.sub s (ls - lsuf) lsuf = suffix
+  in
+  let parse_pt s =
+    let s = String.trim s in
+    if s = "" then None
+    else
+      let rest = if has_suffix ~suffix:"pt" s
+        then String.sub s 0 (String.length s - 2) else s in
+      try Some (float_of_string rest) with _ -> None
+  in
+  let parse_em s =
+    let s = String.trim s in
+    if s = "" then None
+    else
+      let rest = if has_suffix ~suffix:"em" s
+        then String.sub s 0 (String.length s - 2) else s in
+      try Some (float_of_string rest) with _ -> None
+  in
+  let leading = match List.assoc_opt "leading" panel with
+    | Some (`Int n) -> Some (Float.of_int n)
+    | Some (`Float n) -> Some n
+    | _ -> None in
+  let elem_lh_val = match parse_pt elem_lh_str with
+    | Some v -> v | None -> elem_fs *. 1.2 in
+  (match leading with
+   | Some v when abs_float (v -. elem_lh_val) > 1e-6 ->
+     tpl := { !tpl with line_height = Some v }; any := true
+   | _ -> ());
+  (* Tracking → letter_spacing (em). Panel unit: 1/1000 em. *)
+  let tracking = match List.assoc_opt "tracking" panel with
+    | Some (`Int n) -> Float.of_int n
+    | Some (`Float n) -> n
+    | _ -> 0.0 in
+  let elem_tracking = (match parse_em elem_ls_str with
+    | Some v -> v *. 1000.0 | None -> 0.0) in
+  if abs_float (tracking -. elem_tracking) > 1e-6 then begin
+    tpl := { !tpl with letter_spacing = Some (tracking /. 1000.0) };
+    any := true
+  end;
+  (* Baseline shift numeric (pt), skipped when super / sub is on. *)
+  let superscript = match List.assoc_opt "superscript" panel with
+    | Some (`Bool b) -> b | _ -> false in
+  let subscript = match List.assoc_opt "subscript" panel with
+    | Some (`Bool b) -> b | _ -> false in
+  if not (superscript || subscript) then begin
+    let bs = match List.assoc_opt "baseline_shift" panel with
+      | Some (`Int n) -> Float.of_int n
+      | Some (`Float n) -> n
+      | _ -> 0.0 in
+    let elem_bs_val = match parse_pt elem_bs_str with
+      | Some v -> v | None -> 0.0 in
+    if abs_float (bs -. elem_bs_val) > 1e-6 then begin
+      tpl := { !tpl with baseline_shift = Some bs }; any := true
+    end
+  end;
+  (* Anti-aliasing → jas_aa_mode. *)
+  let aa_raw = match List.assoc_opt "anti_aliasing" panel with
+    | Some (`String s) -> s | _ -> "Sharp" in
+  let aa_mode = if aa_raw = "Sharp" || aa_raw = "" then "" else aa_raw in
+  if aa_mode <> elem_aa_str then begin
+    tpl := { !tpl with jas_aa_mode = Some aa_mode }; any := true
   end;
   if !any then Some !tpl else None
 
