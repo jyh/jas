@@ -67,6 +67,37 @@ let resolve_id (tspans : tspan array) (id : tspan_id) : int option =
   ) tspans;
   !result
 
+type affinity = Left | Right
+
+let char_to_tspan_pos (tspans : tspan array) (char_idx : int) (aff : affinity) : int * int =
+  let n_tspans = Array.length tspans in
+  if n_tspans = 0 then (0, 0)
+  else begin
+    let result = ref None in
+    let acc = ref 0 in
+    let i = ref 0 in
+    while !result = None && !i < n_tspans do
+      let t : tspan = tspans.(!i) in
+      let n = String.length t.content in
+      if char_idx < !acc + n then
+        result := Some (!i, char_idx - !acc)
+      else if char_idx = !acc + n then begin
+        if !i + 1 = n_tspans then
+          result := Some (!i, n)
+        else match aff with
+          | Left -> result := Some (!i, n)
+          | Right -> result := Some (!i + 1, 0)
+      end;
+      acc := !acc + n;
+      incr i
+    done;
+    match !result with
+    | Some r -> r
+    | None ->
+      let last = n_tspans - 1 in
+      (last, String.length tspans.(last).content)
+  end
+
 (** Max id in the list; [-1] when empty (caller adds [+ 1] to get
     the next fresh id, yielding [0] for an empty list). *)
 let _max_id (tspans : tspan array) : tspan_id =

@@ -24,6 +24,24 @@ val insert : t -> string -> unit
 val backspace : t -> unit
 val delete_forward : t -> unit
 val set_insertion : t -> int -> extend:bool -> unit
+
+(** Move the caret with an explicit affinity. Use when crossing a
+    tspan boundary — arrow-right lands with [Right], arrow-left with
+    [Left]. The char-indexed overload [set_insertion] keeps defaulting
+    to [Left] per TSPAN.md. *)
+val set_insertion_with_affinity :
+  t -> int -> affinity:Tspan.affinity -> extend:bool -> unit
+
+val caret_affinity : t -> Tspan.affinity
+
+(** Resolve the caret's [(tspan_idx, offset)] using [caret_affinity].
+    Used by the next-typed-character path. *)
+val insertion_tspan_pos : t -> Element.tspan array -> int * int
+
+(** Resolve the selection anchor's [(tspan_idx, offset)]. Anchors do
+    not have an independent affinity; they track the caret's. *)
+val anchor_tspan_pos : t -> Element.tspan array -> int * int
+
 val select_all : t -> unit
 val copy_selection : t -> string option
 

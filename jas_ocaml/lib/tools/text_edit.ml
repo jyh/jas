@@ -14,6 +14,12 @@ type t = {
   mutable content : string;
   mutable insertion : int;
   mutable anchor : int;
+  (* Caret side at a tspan boundary. Defaults to [Left] per TSPAN.md
+     ("new text inherits attributes of the previous character"); [Right]
+     is set by callers that crossed a boundary rightward. External
+     char-index APIs keep working unchanged — the affinity only matters
+     at joins. *)
+  mutable caret_affinity : Tspan.affinity;
   mutable drag_active : bool;
   mutable blink_epoch_ms : float;
   mutable undo_stack : snapshot list;
@@ -31,6 +37,7 @@ let create ~path ~target ~content ~insertion =
   {
     path; target; content;
     insertion = ins; anchor = ins;
+    caret_affinity = Tspan.Left;
     drag_active = false; blink_epoch_ms = 0.0;
     undo_stack = []; redo_stack = [];
     tspan_clipboard = None;
@@ -125,6 +132,20 @@ let set_insertion t pos ~extend =
   let n = char_count t in
   t.insertion <- max 0 (min pos n);
   if not extend then t.anchor <- t.insertion
+
+let set_insertion_with_affinity t pos ~affinity ~extend =
+  let n = char_count t in
+  t.insertion <- max 0 (min pos n);
+  t.caret_affinity <- affinity;
+  if not extend then t.anchor <- t.insertion
+
+let caret_affinity t = t.caret_affinity
+
+let insertion_tspan_pos t element_tspans =
+  Tspan.char_to_tspan_pos element_tspans t.insertion t.caret_affinity
+
+let anchor_tspan_pos t element_tspans =
+  Tspan.char_to_tspan_pos element_tspans t.anchor t.caret_affinity
 
 let select_all t =
   t.anchor <- 0;

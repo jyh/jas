@@ -27,6 +27,25 @@ val concat_content : tspan array -> string
     no such tspan exists (e.g. dropped by [merge]). O(n). *)
 val resolve_id : tspan array -> tspan_id -> int option
 
+(** Caret side at a tspan boundary. See TSPAN.md Text-edit session
+    integration — when a character index lands exactly on the join
+    between two tspans, the affinity decides which side "wins".
+    [Left] is the spec's default: new text inherits from the previous
+    character. [Right] is set by callers that crossed a boundary
+    rightward (e.g. ArrowRight over a join). *)
+type affinity = Left | Right
+
+(** Resolve a flat character index to a concrete [(tspan_idx, offset)]
+    position given the tspan list and a caret affinity.
+
+    Mid-tspan: returns [(i, char_idx - prefix_chars)]. At a boundary
+    between tspans [i] and [i+1], [Left] returns the end of [i] and
+    [Right] returns the start of [i+1]; the final boundary (end of
+    last tspan) always returns the end regardless of affinity.
+    Out-of-range saturates to the end; an empty list returns
+    [(0, 0)]. *)
+val char_to_tspan_pos : tspan array -> int -> affinity -> int * int
+
 (** Split the tspan at [tspan_idx] at byte [offset]. See TSPAN.md
     Primitives > Split at offset. Raises [Invalid_argument] on
     out-of-range indices. *)

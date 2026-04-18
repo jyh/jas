@@ -185,6 +185,70 @@ let () =
         assert (Text_edit.try_paste_tspans s element_tspans "X" = None));
     ];
 
+    "caret affinity", [
+      Alcotest.test_case "new session caret has Left affinity" `Quick (fun () ->
+        let open Jas in
+        let s = Text_edit.create
+          ~path:[0; 0] ~target:Text_edit.Edit_text
+          ~content:"abc" ~insertion:0 in
+        assert (Text_edit.caret_affinity s = Tspan.Left));
+
+      Alcotest.test_case "char_to_tspan_pos boundary affinities" `Quick (fun () ->
+        let open Jas in
+        let base = [|
+          { (Tspan.default_tspan ()) with id = 0; content = "foo" };
+          { (Tspan.default_tspan ()) with id = 1; content = "bar";
+                                          font_weight = Some "bold" };
+        |] in
+        assert (Tspan.char_to_tspan_pos base 1 Tspan.Left = (0, 1));
+        assert (Tspan.char_to_tspan_pos base 3 Tspan.Left = (0, 3));
+        assert (Tspan.char_to_tspan_pos base 3 Tspan.Right = (1, 0));
+        assert (Tspan.char_to_tspan_pos base 6 Tspan.Left = (1, 3));
+        assert (Tspan.char_to_tspan_pos base 6 Tspan.Right = (1, 3));
+        assert (Tspan.char_to_tspan_pos base 999 Tspan.Left = (1, 3));
+        assert (Tspan.char_to_tspan_pos [||] 0 Tspan.Left = (0, 0)));
+
+      Alcotest.test_case "insertion_tspan_pos left default at boundary" `Quick (fun () ->
+        let open Jas in
+        let tspans = [|
+          { (Tspan.default_tspan ()) with id = 0; content = "foo" };
+          { (Tspan.default_tspan ()) with id = 1; content = "bar" };
+        |] in
+        let s = Text_edit.create
+          ~path:[0; 0] ~target:Text_edit.Edit_text
+          ~content:"foobar" ~insertion:0 in
+        Text_edit.set_insertion s 3 ~extend:false;
+        assert (Text_edit.caret_affinity s = Tspan.Left);
+        assert (Text_edit.insertion_tspan_pos s tspans = (0, 3)));
+
+      Alcotest.test_case "set_insertion_with_affinity Right crosses boundary" `Quick (fun () ->
+        let open Jas in
+        let tspans = [|
+          { (Tspan.default_tspan ()) with id = 0; content = "foo" };
+          { (Tspan.default_tspan ()) with id = 1; content = "bar" };
+        |] in
+        let s = Text_edit.create
+          ~path:[0; 0] ~target:Text_edit.Edit_text
+          ~content:"foobar" ~insertion:0 in
+        Text_edit.set_insertion_with_affinity s 3 ~affinity:Tspan.Right ~extend:false;
+        assert (Text_edit.caret_affinity s = Tspan.Right);
+        assert (Text_edit.insertion_tspan_pos s tspans = (1, 0)));
+
+      Alcotest.test_case "anchor_tspan_pos uses caret affinity" `Quick (fun () ->
+        let open Jas in
+        let tspans = [|
+          { (Tspan.default_tspan ()) with id = 0; content = "foo" };
+          { (Tspan.default_tspan ()) with id = 1; content = "bar" };
+        |] in
+        let s = Text_edit.create
+          ~path:[0; 0] ~target:Text_edit.Edit_text
+          ~content:"foobar" ~insertion:0 in
+        Text_edit.set_insertion s 3 ~extend:false;
+        Text_edit.set_insertion_with_affinity s 5 ~affinity:Tspan.Right ~extend:true;
+        assert (Text_edit.anchor_tspan_pos s tspans = (1, 0));
+        assert (Text_edit.insertion_tspan_pos s tspans = (1, 2)));
+    ];
+
     "UTF-8 multibyte", [
       (* UTF-8 multibyte handling. 'é' is 2 bytes in UTF-8 but a single
          Unicode scalar; the editor must speak in chars throughout. *)
