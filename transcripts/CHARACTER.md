@@ -470,11 +470,7 @@ directly when rendering text (see the SVG attribute mapping above).
 
 Remaining polish:
 
-1. **Kerning combo_box named modes** (Rust). The yaml declares
-   `Auto / Optical / Metrics / <numeric>` but the Rust widget still
-   only accepts a numeric value. Swift / OCaml / Python treat the
-   named modes as 0 via the same fallback.
-2. **Per-glyph rotate** (Rust). The current `rotate` attribute
+1. **Per-glyph rotate** (Rust). The current `rotate` attribute
    applies a single rotation around the element origin. The spec
    calls for per-glyph rotations, which requires a tspan split
    per-glyph at serialization time (a B.3-sequence follow-up).
