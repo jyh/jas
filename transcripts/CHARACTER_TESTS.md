@@ -1,7 +1,7 @@
 # Character Panel — Manual Test Suite
 
 Follows the procedure in `MANUAL_TESTING.md`. Spec source: `workspace/panels/character.yaml`.
-Design doc: `transcripts/CHARACTER.md`. Holistic reference image: `examples/character.png`.
+Design doc: `transcripts/CHARACTER.md`.
 
 Primary platform for manual runs: **Rust (jas_dioxus)**. Other platforms covered in
 Session I parity sweep.
@@ -117,11 +117,6 @@ If any P0 here fails, stop and flag. Downstream sessions will only produce noise
               icons. No overlapping controls, no truncated labels.
       — last: 2026-04-18
 
-- [x] **CHR-003** [placeholder] Layout matches `examples/character.png`.
-      Do: Compare panel to `examples/character.png` at default appearance (Dark).
-      Expect: Holistic match — groupings, spacing, icon positions align with
-              the reference.
-      — last: 2026-04-18
 
 - [x] **CHR-004** [placeholder] Panel closes via menu.
       Do: Open panel menu; select "Close Character".
@@ -681,7 +676,11 @@ Inactive tests. Categories: `[wontfix: <reason>]`, `[duplicate: <canonical-ID>]`
 
 ### Retired
 
-(None.)
+- **CHR-003** [retired: references a scratch image (examples/character.png)
+  that isn't durable reference material]
+      Layout matches examples/character.png.
+      (Was passing; retired 2026-04-18. Holistic visual check supplanted by
+      prose-driven expectations in CHR-002 and later per-area tests.)
 
 ---
 
