@@ -592,7 +592,12 @@ fn set_character_field(
         "style_name"           => { if let Some(s) = val.as_str() { cp.style_name = s.into(); } }
         "font_size"            => { if let Some(n) = val.as_f64() { cp.font_size = n; } }
         "leading"              => { if let Some(n) = val.as_f64() { cp.leading = n; } }
-        "kerning"              => { if let Some(n) = val.as_f64() { cp.kerning = n; } }
+        "kerning"              => {
+            // Accept either a string (named mode or numeric literal) or
+            // a raw number (from the legacy number_input code path).
+            if let Some(s) = val.as_str() { cp.kerning = s.into(); }
+            else if let Some(n) = val.as_f64() { cp.kerning = n.to_string(); }
+        }
         "tracking"             => { if let Some(n) = val.as_f64() { cp.tracking = n; } }
         "vertical_scale"       => { if let Some(n) = val.as_f64() { cp.vertical_scale = n; } }
         "horizontal_scale"     => { if let Some(n) = val.as_f64() { cp.horizontal_scale = n; } }
@@ -2590,6 +2595,7 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let mut dialog_signal = rctx.dialog_ctx.0;
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
+    let panel_kind = rctx.panel_kind;
 
     rsx! {
         span {
@@ -2616,13 +2622,29 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             let app = app.clone();
                             spawn(async move {
                                 let mut st = app.borrow_mut();
-                                // Parse as number if possible (for scale percentages)
+                                // Parse as number when possible (for
+                                // scale percentages, stroke-arrowhead
+                                // preset selections). Named values
+                                // stay as strings (kerning Auto /
+                                // Optical / Metrics).
                                 let json_val = if let Ok(n) = v.parse::<f64>() {
                                     serde_json::json!(n)
                                 } else {
                                     serde_json::json!(v)
                                 };
-                                set_stroke_field(&mut st.stroke_panel, &f, &json_val);
+                                match panel_kind {
+                                    Some(PanelKind::Character) => {
+                                        set_character_field(&mut st.character_panel, &f, &json_val);
+                                        st.apply_character_panel_to_selection();
+                                    }
+                                    Some(PanelKind::Stroke) | None => {
+                                        set_stroke_field(&mut st.stroke_panel, &f, &json_val);
+                                        st.apply_stroke_panel_to_selection();
+                                    }
+                                    // Other panels: no-op until their
+                                    // per-panel state structs land.
+                                    _ => {}
+                                }
                             });
                         }
                         BindTarget::None => { return; }
