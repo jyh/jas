@@ -52,6 +52,18 @@ val sync_stroke_panel_from_selection :
 (** Check whether a state key is a rendering-affecting stroke key. *)
 val is_stroke_render_key : string -> bool
 
+(** Compute [text_selected] / [area_text_selected] from the current
+    selection and write them to the [paragraph_panel_content] panel
+    scope so PARAGRAPH.md §Text-kind gating disables JUSTIFY_*,
+    indents, hyphenate, and hanging-punctuation when any selected
+    text element is non-area (point text or text-on-path).
+
+    Currently unwired in OCaml (no selection-change observer pumps
+    it) — Phase 4 hooks it in alongside the panel→selection write
+    pipeline. *)
+val sync_paragraph_panel_from_selection :
+  State_store.t -> Controller.controller -> unit
+
 (** Element-attribute surface that [apply_character_panel_to_selection]
     pushes onto each selected Text / Text_path. *)
 type character_attrs = {

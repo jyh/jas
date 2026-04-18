@@ -583,6 +583,42 @@ let sync_stroke_panel_from_selection (store : State_store.t)
 let is_stroke_render_key key =
   List.mem key stroke_render_keys
 
+(* ── Paragraph panel — text-kind gating (Phase 3a) ──────────── *)
+
+(** Compute [text_selected] / [area_text_selected] from the current
+    selection and write them to the [paragraph_panel_content] panel
+    scope so PARAGRAPH.md §Text-kind gating bind.disabled expressions
+    resolve to the live values rather than the YAML defaults of true.
+
+    Mirrors the paragraph-panel block in the Rust dock_panel.rs
+    [build_live_panel_overrides] and the Swift
+    [paragraphPanelLiveOverrides]. Like
+    [sync_stroke_panel_from_selection], this is currently unwired in
+    OCaml (no selection-change observer pumps it) — Phase 4 hooks it
+    in alongside the panel→selection write pipeline. *)
+let sync_paragraph_panel_from_selection (store : State_store.t)
+    (ctrl : Controller.controller) : unit =
+  let doc = ctrl#document in
+  let any_text = ref false in
+  let all_area = ref true in
+  Document.PathMap.iter (fun path _ ->
+    let elem = Document.get_element doc path in
+    match elem with
+    | Element.Text { text_width; text_height; _ } ->
+      any_text := true;
+      if not (text_width > 0.0 && text_height > 0.0) then all_area := false
+    | Element.Text_path _ ->
+      any_text := true;
+      all_area := false
+    | _ -> ()
+  ) doc.Document.selection;
+  let text_selected = !any_text in
+  let area_text_selected = !any_text && !all_area in
+  State_store.set_panel store "paragraph_panel_content"
+    "text_selected" (`Bool text_selected);
+  State_store.set_panel store "paragraph_panel_content"
+    "area_text_selected" (`Bool area_text_selected)
+
 (* ── Character panel apply-to-selection pipeline (Layer B) ─── *)
 
 (** Format a number for CSS length / value output: integers have no
