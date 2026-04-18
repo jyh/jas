@@ -15,6 +15,7 @@ Mirrors ``jas_dioxus/src/geometry/tspan.rs``,
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Optional
 
 from geometry.element import Transform
@@ -118,6 +119,51 @@ def resolve_id(tspans: list[Tspan], tspan_id: TspanId) -> Optional[int]:
         if t.id == tspan_id:
             return i
     return None
+
+
+class Affinity(Enum):
+    """Caret side at a tspan boundary. See TSPAN.md Text-edit session
+    integration — when a character index lands exactly on the join
+    between two tspans, the affinity decides which side "wins".
+
+    ``LEFT`` corresponds to the spec's default: "new text inherits the
+    attributes of the previous character". ``RIGHT`` is used by callers
+    that explicitly want the caret on the leading edge of the next
+    tspan (e.g. the user just moved the caret rightward across a
+    boundary).
+    """
+    LEFT = "left"
+    RIGHT = "right"
+
+
+def char_to_tspan_pos(
+    tspans: list[Tspan], char_idx: int, affinity: Affinity
+) -> tuple[int, int]:
+    """Resolve a flat character index to a concrete ``(tspan_idx,
+    offset)`` position given the tspan list and a caret affinity.
+
+    - Mid-tspan: returns ``(i, char_idx - prefix_chars)``.
+    - Boundary between tspans ``i`` and ``i+1``: ``LEFT`` returns the
+      end of tspan ``i``; ``RIGHT`` returns the start of tspan ``i+1``.
+      The very last boundary (end of the final tspan) always returns
+      the end of that tspan regardless of affinity.
+    - Beyond the last tspan: clamps to the end.
+    - Empty tspan list: returns ``(0, 0)``.
+    """
+    if not tspans:
+        return (0, 0)
+    acc = 0
+    for i, t in enumerate(tspans):
+        n = len(t.content)
+        if char_idx < acc + n:
+            return (i, char_idx - acc)
+        if char_idx == acc + n:
+            if i + 1 == len(tspans):
+                return (i, n)
+            return (i, n) if affinity == Affinity.LEFT else (i + 1, 0)
+        acc += n
+    last = len(tspans) - 1
+    return (last, len(tspans[last].content))
 
 
 def split(

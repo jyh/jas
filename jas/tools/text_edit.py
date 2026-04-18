@@ -62,11 +62,20 @@ class TextEditSession:
     # across cut/paste within a single edit session. Shape is a
     # ``(flat_text, tspans_tuple)`` pair or ``None`` when empty.
     tspan_clipboard: tuple | None = None
+    # Caret side at a tspan boundary. Defaults to ``LEFT`` per TSPAN.md
+    # ("new text inherits attributes of the previous character");
+    # ``RIGHT`` is set by callers that crossed a boundary rightward.
+    # External char-index APIs keep working unchanged — the affinity
+    # only matters at joins.
+    caret_affinity: "Affinity" = None  # type: ignore[assignment]
 
     def __post_init__(self):
+        from geometry.tspan import Affinity
         n = len(self.content)
         self.insertion = min(self.insertion, n)
         self.anchor = self.insertion
+        if self.caret_affinity is None:
+            self.caret_affinity = Affinity.LEFT
 
     def has_selection(self) -> bool:
         return self.insertion != self.anchor
@@ -140,6 +149,35 @@ class TextEditSession:
         self.insertion = max(0, min(pos, n))
         if not extend:
             self.anchor = self.insertion
+
+    def set_insertion_with_affinity(self, pos: int, affinity, extend: bool) -> None:
+        """Move the caret with an explicit affinity. Use when crossing
+        a tspan boundary — arrow-right lands with RIGHT, arrow-left
+        with LEFT. The plain ``set_insertion`` keeps defaulting to
+        LEFT per TSPAN.md.
+        """
+        n = len(self.content)
+        self.insertion = max(0, min(pos, n))
+        self.caret_affinity = affinity
+        if not extend:
+            self.anchor = self.insertion
+
+    def insertion_tspan_pos(self, element_tspans) -> tuple[int, int]:
+        """Resolve the caret's ``(tspan_idx, offset)`` using
+        ``caret_affinity``. Used by the next-typed-character path.
+        """
+        from geometry.tspan import char_to_tspan_pos
+        return char_to_tspan_pos(list(element_tspans), self.insertion,
+                                  self.caret_affinity)
+
+    def anchor_tspan_pos(self, element_tspans) -> tuple[int, int]:
+        """Resolve the selection anchor's ``(tspan_idx, offset)``.
+        Anchors do not have an independent affinity; they track the
+        caret's.
+        """
+        from geometry.tspan import char_to_tspan_pos
+        return char_to_tspan_pos(list(element_tspans), self.anchor,
+                                  self.caret_affinity)
 
     def select_all(self) -> None:
         self.anchor = 0
