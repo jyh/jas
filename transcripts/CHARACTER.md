@@ -478,7 +478,3 @@ Remaining polish:
    applies a single rotation around the element origin. The spec
    calls for per-glyph rotations, which requires a tspan split
    per-glyph at serialization time (a B.3-sequence follow-up).
-3. **OCaml letter-spacing draw loop.** Cairo has no single-pass
-   per-string kern advance, so `letter_spacing != 0` text in the
-   OCaml canvas currently draws without the extra advance — a
-   per-char loop is the intended fix.
