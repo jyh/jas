@@ -121,6 +121,207 @@ def resolve_id(tspans: list[Tspan], tspan_id: TspanId) -> Optional[int]:
     return None
 
 
+def tspans_to_json_clipboard(tspans: list[Tspan]) -> str:
+    """Serialize ``tspans`` as the rich-clipboard JSON payload per
+    TSPAN.md — ``{"tspans": [...]}`` with each tspan's override
+    fields in snake_case. Ids are stripped; ``None`` overrides are
+    omitted for compactness.
+    """
+    import json as _json
+
+    def tspan_obj(t: Tspan) -> dict:
+        obj: dict = {"content": t.content}
+        if t.baseline_shift is not None: obj["baseline_shift"] = t.baseline_shift
+        if t.dx is not None: obj["dx"] = t.dx
+        if t.font_family is not None: obj["font_family"] = t.font_family
+        if t.font_size is not None: obj["font_size"] = t.font_size
+        if t.font_style is not None: obj["font_style"] = t.font_style
+        if t.font_variant is not None: obj["font_variant"] = t.font_variant
+        if t.font_weight is not None: obj["font_weight"] = t.font_weight
+        if t.jas_aa_mode is not None: obj["jas_aa_mode"] = t.jas_aa_mode
+        if t.jas_fractional_widths is not None: obj["jas_fractional_widths"] = t.jas_fractional_widths
+        if t.jas_kerning_mode is not None: obj["jas_kerning_mode"] = t.jas_kerning_mode
+        if t.jas_no_break is not None: obj["jas_no_break"] = t.jas_no_break
+        if t.letter_spacing is not None: obj["letter_spacing"] = t.letter_spacing
+        if t.line_height is not None: obj["line_height"] = t.line_height
+        if t.rotate is not None: obj["rotate"] = t.rotate
+        if t.style_name is not None: obj["style_name"] = t.style_name
+        if t.text_decoration is not None: obj["text_decoration"] = list(t.text_decoration)
+        if t.text_rendering is not None: obj["text_rendering"] = t.text_rendering
+        if t.text_transform is not None: obj["text_transform"] = t.text_transform
+        if t.xml_lang is not None: obj["xml_lang"] = t.xml_lang
+        return obj
+
+    return _json.dumps({"tspans": [tspan_obj(t) for t in tspans]})
+
+
+def tspans_from_json_clipboard(json_str: str) -> Optional[tuple[Tspan, ...]]:
+    """Parse a rich-clipboard JSON payload back into a tspan tuple
+    with fresh ids. Returns ``None`` if the payload is malformed."""
+    import json as _json
+    try:
+        root = _json.loads(json_str)
+    except Exception:
+        return None
+    if not isinstance(root, dict):
+        return None
+    arr = root.get("tspans")
+    if not isinstance(arr, list):
+        return None
+    out: list[Tspan] = []
+    for i, obj in enumerate(arr):
+        if not isinstance(obj, dict):
+            return None
+        td = obj.get("text_decoration")
+        if td is not None and not isinstance(td, list):
+            td = None
+        out.append(Tspan(
+            id=i,
+            content=obj.get("content") or "",
+            baseline_shift=obj.get("baseline_shift"),
+            dx=obj.get("dx"),
+            font_family=obj.get("font_family"),
+            font_size=obj.get("font_size"),
+            font_style=obj.get("font_style"),
+            font_variant=obj.get("font_variant"),
+            font_weight=obj.get("font_weight"),
+            jas_aa_mode=obj.get("jas_aa_mode"),
+            jas_fractional_widths=obj.get("jas_fractional_widths"),
+            jas_kerning_mode=obj.get("jas_kerning_mode"),
+            jas_no_break=obj.get("jas_no_break"),
+            letter_spacing=obj.get("letter_spacing"),
+            line_height=obj.get("line_height"),
+            rotate=obj.get("rotate"),
+            style_name=obj.get("style_name"),
+            text_decoration=tuple(td) if td is not None else None,
+            text_rendering=obj.get("text_rendering"),
+            text_transform=obj.get("text_transform"),
+            transform=None,
+            xml_lang=obj.get("xml_lang"),
+        ))
+    return tuple(out)
+
+
+def _fmt_float_clipboard(v: float) -> str:
+    return str(int(v)) if v == int(v) else str(v)
+
+
+def _xml_escape(s: str) -> str:
+    return (s.replace("&", "&amp;").replace("<", "&lt;")
+             .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _xml_unescape(s: str) -> str:
+    return (s.replace("&quot;", '"').replace("&gt;", ">")
+             .replace("&lt;", "<").replace("&amp;", "&"))
+
+
+def tspans_to_svg_fragment(tspans: list[Tspan]) -> str:
+    """Serialize ``tspans`` as an SVG fragment suitable for the
+    ``image/svg+xml`` clipboard format — one ``<text>`` element
+    wrapping tspan children with CSS-style attribute names,
+    alphabetically sorted.
+    """
+    out = ['<text xmlns="http://www.w3.org/2000/svg">']
+    for t in tspans:
+        out.append("<tspan")
+        attrs: list[tuple[str, str]] = []
+        if t.baseline_shift is not None: attrs.append(("baseline-shift", _fmt_float_clipboard(t.baseline_shift)))
+        if t.dx is not None: attrs.append(("dx", _fmt_float_clipboard(t.dx)))
+        if t.font_family is not None: attrs.append(("font-family", t.font_family))
+        if t.font_size is not None: attrs.append(("font-size", _fmt_float_clipboard(t.font_size)))
+        if t.font_style is not None: attrs.append(("font-style", t.font_style))
+        if t.font_variant is not None: attrs.append(("font-variant", t.font_variant))
+        if t.font_weight is not None: attrs.append(("font-weight", t.font_weight))
+        if t.jas_aa_mode is not None: attrs.append(("jas:aa-mode", t.jas_aa_mode))
+        if t.jas_fractional_widths is not None:
+            attrs.append(("jas:fractional-widths", "true" if t.jas_fractional_widths else "false"))
+        if t.jas_kerning_mode is not None: attrs.append(("jas:kerning-mode", t.jas_kerning_mode))
+        if t.jas_no_break is not None:
+            attrs.append(("jas:no-break", "true" if t.jas_no_break else "false"))
+        if t.letter_spacing is not None: attrs.append(("letter-spacing", _fmt_float_clipboard(t.letter_spacing)))
+        if t.line_height is not None: attrs.append(("line-height", _fmt_float_clipboard(t.line_height)))
+        if t.rotate is not None: attrs.append(("rotate", _fmt_float_clipboard(t.rotate)))
+        if t.style_name is not None: attrs.append(("jas:style-name", t.style_name))
+        if t.text_decoration is not None and len(t.text_decoration) > 0:
+            attrs.append(("text-decoration", " ".join(t.text_decoration)))
+        if t.text_rendering is not None: attrs.append(("text-rendering", t.text_rendering))
+        if t.text_transform is not None: attrs.append(("text-transform", t.text_transform))
+        if t.xml_lang is not None: attrs.append(("xml:lang", t.xml_lang))
+        attrs.sort(key=lambda kv: kv[0])
+        for k, v in attrs:
+            out.append(f' {k}="{_xml_escape(v)}"')
+        out.append(">")
+        out.append(_xml_escape(t.content))
+        out.append("</tspan>")
+    out.append("</text>")
+    return "".join(out)
+
+
+_TSPAN_ATTR_RE = None
+
+
+def tspans_from_svg_fragment(svg_str: str) -> Optional[tuple[Tspan, ...]]:
+    """Parse an SVG fragment of the shape emitted by
+    ``tspans_to_svg_fragment`` into a tspan tuple with fresh ids.
+    Returns ``None`` when the root is not ``<text>``."""
+    import re
+    s = svg_str.strip()
+    text_pos = s.find("<text")
+    if text_pos < 0:
+        return None
+    rest = s[text_pos:]
+    # Find every <tspan ...>...</tspan> pair.
+    pat = re.compile(r"<tspan([^>]*)>(.*?)</tspan>", re.DOTALL)
+    results = []
+    for i, m in enumerate(pat.finditer(rest)):
+        attrs_str = m.group(1)
+        content_raw = m.group(2)
+        # Strip any nested tags.
+        content = _xml_unescape(re.sub(r"<[^>]*>", "", content_raw))
+        kw: dict = {"id": i, "content": content}
+        # Parse attributes: name="value" or name='value'.
+        attr_pat = re.compile(r"""\s*([A-Za-z:_][A-Za-z0-9:_\-]*)\s*=\s*(['"])([^'"]*)\2""")
+        for am in attr_pat.finditer(attrs_str):
+            k = am.group(1)
+            v = _xml_unescape(am.group(3))
+            if k == "baseline-shift":
+                try: kw["baseline_shift"] = float(v)
+                except ValueError: pass
+            elif k == "dx":
+                try: kw["dx"] = float(v)
+                except ValueError: pass
+            elif k == "font-family": kw["font_family"] = v
+            elif k == "font-size":
+                try: kw["font_size"] = float(v)
+                except ValueError: pass
+            elif k == "font-style": kw["font_style"] = v
+            elif k == "font-variant": kw["font_variant"] = v
+            elif k == "font-weight": kw["font_weight"] = v
+            elif k == "jas:aa-mode": kw["jas_aa_mode"] = v
+            elif k == "jas:fractional-widths": kw["jas_fractional_widths"] = (v == "true")
+            elif k == "jas:kerning-mode": kw["jas_kerning_mode"] = v
+            elif k == "jas:no-break": kw["jas_no_break"] = (v == "true")
+            elif k == "letter-spacing":
+                try: kw["letter_spacing"] = float(v)
+                except ValueError: pass
+            elif k == "line-height":
+                try: kw["line_height"] = float(v)
+                except ValueError: pass
+            elif k == "rotate":
+                try: kw["rotate"] = float(v)
+                except ValueError: pass
+            elif k == "jas:style-name": kw["style_name"] = v
+            elif k == "text-decoration":
+                parts = tuple(p for p in v.split() if p and p != "none")
+                kw["text_decoration"] = parts
+            elif k == "text-rendering": kw["text_rendering"] = v
+            elif k == "text-transform": kw["text_transform"] = v
+            elif k == "xml:lang": kw["xml_lang"] = v
+        results.append(Tspan(**kw))
+    return tuple(results) if results else None
+
+
 def merge_tspan_overrides(target: Tspan, source: Tspan) -> Tspan:
     """Return a new ``Tspan`` carrying every non-``None`` override
     field from ``source`` on top of ``target``. Does not touch ``id``
