@@ -76,6 +76,73 @@ let _apply_text_transform (tt : string) (fv : string) (content : string)
   else if tt = "lowercase" then String.lowercase_ascii content
   else content
 
+(** Draw a Text element's tspans in sequence on a shared baseline,
+    each using its effective font (override || parent fallback) and
+    effective text-decoration. Mirrors Rust's [draw_segmented_text]
+    and Swift's [drawSegmentedText]. Covers TSPAN.md's rendering
+    "minimum subset": font + decoration per tspan on one line. Omits
+    per-tspan baseline-shift / transform / rotate / dx and multi-line
+    wrapping — those collapse to element defaults for now. *)
+let _draw_segmented_text cr ~x ~y ~fontsize ~fontfamily ~fontweight
+    ~fontstyle ~textdecoration (tspans : Element.tspan array) : unit =
+  let parent_bold = fontweight = "bold" in
+  let parent_italic = fontstyle = "italic" || fontstyle = "oblique" in
+  let parent_decor_tokens =
+    String.split_on_char ' ' textdecoration
+    |> List.filter (fun t -> t <> "" && t <> "none")
+  in
+  (* Baseline sits at the first visual line: element y + 0.8 *
+     font_size. Segmented rendering is one-line only for now. *)
+  let baseline = y +. fontsize *. 0.8 in
+  let cx = ref x in
+  Array.iter (fun (t : Element.tspan) ->
+    if t.content = "" then () else begin
+      let eff_family = match t.font_family with
+        | Some f -> f | None -> fontfamily in
+      let eff_size = match t.font_size with
+        | Some n -> n | None -> fontsize in
+      let eff_bold = match t.font_weight with
+        | Some w -> w = "bold" | None -> parent_bold in
+      let eff_italic = match t.font_style with
+        | Some s -> s = "italic" || s = "oblique" | None -> parent_italic in
+      let slant = if eff_italic then Cairo.Italic else Cairo.Upright in
+      let weight = if eff_bold then Cairo.Bold else Cairo.Normal in
+      Cairo.select_font_face cr eff_family ~slant ~weight;
+      Cairo.set_font_size cr eff_size;
+      Cairo.move_to cr !cx baseline;
+      Cairo.show_text cr t.content;
+      let w = (Cairo.text_extents cr t.content).Cairo.x_advance in
+      (* Effective decoration: [Some []] overrides to no decoration;
+         [None] inherits parent tokens. *)
+      let has_u, has_s = match t.text_decoration with
+        | Some members ->
+          (List.mem "underline" members, List.mem "line-through" members)
+        | None ->
+          (List.mem "underline" parent_decor_tokens,
+           List.mem "line-through" parent_decor_tokens)
+      in
+      if has_u || has_s then begin
+        let thickness = Float.max 1.0 (eff_size *. 0.07) in
+        Cairo.save cr;
+        Cairo.set_line_width cr thickness;
+        if has_u then begin
+          let ly = baseline +. eff_size *. 0.12 in
+          Cairo.move_to cr !cx ly;
+          Cairo.line_to cr (!cx +. w) ly;
+          Cairo.stroke cr
+        end;
+        if has_s then begin
+          let ly = baseline -. eff_size *. 0.3 in
+          Cairo.move_to cr !cx ly;
+          Cairo.line_to cr (!cx +. w) ly;
+          Cairo.stroke cr
+        end;
+        Cairo.restore cr
+      end;
+      cx := !cx +. w
+    end
+  ) tspans
+
 (** Configure [cr] for an outline-mode draw. The spec says
     "stroke of size 0"; on Cairo, a 0-width stroke renders nothing,
     so we use a 1-pixel width which gives a thin black line at
@@ -294,7 +361,7 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
            fill; opacity; transform;
            text_transform; font_variant; baseline_shift; line_height;
            text_decoration; rotate; horizontal_scale; vertical_scale;
-           letter_spacing; kerning;
+           letter_spacing; kerning; tspans;
            _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
@@ -304,6 +371,20 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
       Cairo.set_source_rgba cr r g b a
     | None -> Cairo.set_source_rgb cr 0.0 0.0 0.0
     end;
+    (* Multi-tspan Text renders each tspan with its own effective
+       font + decoration on a shared baseline. Single no-override
+       tspan falls through to the flat path below. First pass covers
+       font + decoration per tspan; per-tspan baseline-shift / rotate
+       / transform / dx and wrapping are follow-ups. *)
+    let is_flat = Array.length tspans = 1 && Tspan.has_no_overrides tspans.(0) in
+    if not is_flat then begin
+      _draw_segmented_text cr ~x ~y ~fontsize:font_size
+        ~fontfamily:font_family ~fontweight:font_weight
+        ~fontstyle:font_style ~textdecoration:text_decoration
+        tspans;
+      Cairo.Group.pop_to_source cr;
+      Cairo.paint cr ~alpha:opacity
+    end else begin
     (* Baseline-shift: "super"/"sub" shrink + offset; numeric "Npt"
        shifts up by N points with full size. Mirrors Rust /
        Python canvas. *)
@@ -426,6 +507,7 @@ let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.elemen
     if needs_scale then Cairo.restore cr;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
+    end
 
   | Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; fill; opacity; transform;
                 letter_spacing; kerning; _ } ->
