@@ -357,11 +357,41 @@ def _draw_segmented_text(painter: QPainter, t) -> None:
             font.setStrikeOut(True)
 
         painter.setFont(font)
-        painter.drawText(QPointF(cx, baseline), span.content)
 
-        from PySide6.QtGui import QFontMetricsF
+        # Per-tspan positioning:
+        #   dx (em): leading-edge horizontal nudge, scaled by eff_size.
+        #   baseline_shift (pt, + is up): subtracted from the shared
+        #     baseline (Qt y grows downward, same convention as CSS).
+        #   rotate (deg) / transform (SVG matrix): wrap the tspan draw
+        #     around its starting baseline point.
+        dx_px = (span.dx or 0.0) * eff_size
+        cx += dx_px
+        b_shift = span.baseline_shift or 0.0
+        tspan_baseline = baseline - b_shift
+        rot_deg = span.rotate or 0.0
+        has_rotate = rot_deg != 0.0
+        has_transform = span.transform is not None
+
+        from PySide6.QtGui import QFontMetricsF, QTransform
         fm = QFontMetricsF(font)
-        cx += fm.horizontalAdvance(span.content)
+        w = fm.horizontalAdvance(span.content)
+
+        if has_rotate or has_transform:
+            painter.save()
+            painter.translate(cx, tspan_baseline)
+            if has_transform:
+                tr = span.transform
+                painter.setTransform(
+                    QTransform(tr.a, tr.b, tr.c, tr.d, tr.e, tr.f),
+                    combine=True,
+                )
+            if has_rotate:
+                painter.rotate(rot_deg)
+            painter.drawText(QPointF(0, 0), span.content)
+            painter.restore()
+        else:
+            painter.drawText(QPointF(cx, tspan_baseline), span.content)
+        cx += w
 
 
 def _apply_stroke(painter: QPainter, stroke: Stroke | None) -> tuple[float, StrokeAlign]:
